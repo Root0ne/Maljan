@@ -30,6 +30,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 import pytest
+from pydantic import BaseModel
 
 from maljan.core.config import Settings
 
@@ -216,6 +217,10 @@ def _socket_count() -> int:
 # The providers
 
 
+class _Section(BaseModel):
+    summary: str
+
+
 def _anthropic(httpd: ThreadingHTTPServer) -> Any:
     from maljan.llm.anthropic_provider import AnthropicProvider
 
@@ -244,6 +249,26 @@ class TestTheAnthropicModel:
 
         async def call() -> str:
             return str((await model.ainvoke("hello")).content)
+
+        assert _on_both(agent_loop, call) == ["answered"] * 3
+
+    def test_a_streamed_answer_is_read_on_two_running_loops(
+        self, server: ThreadingHTTPServer, agent_loop: _LoopThread
+    ) -> None:
+        model = _anthropic(server)
+
+        async def call() -> str:
+            return "".join([str(chunk.content) async for chunk in model.astream("hello")])
+
+        assert _on_both(agent_loop, call) == ["answered"] * 3
+
+    def test_a_structured_answer_is_read_on_two_running_loops(
+        self, server: ThreadingHTTPServer, agent_loop: _LoopThread
+    ) -> None:
+        structured = _anthropic(server).with_structured_output(_Section)
+
+        async def call() -> str:
+            return str((await structured.ainvoke("hello")).summary)
 
         assert _on_both(agent_loop, call) == ["answered"] * 3
 
@@ -402,19 +427,20 @@ class TestTheOllamaModel:
 
 
 class TestTheGeminiModel:
-    def test_one_model_reaches_its_server_from_two_running_loops(
+    def test_one_model_answers_on_two_running_loops(
         self, server: ThreadingHTTPServer, agent_loop: _LoopThread
     ) -> None:
         from maljan.llm.gemini_provider import GeminiProvider
 
         settings = Settings(_env_file=None, llm={"gemini": {"api_key": "test-value"}})
         model = GeminiProvider(settings).build_model("gemini-test", 0.0, base_url=_url(server))
-        client = model.client._api_client._async_httpx_client
 
-        async def call() -> int:
-            return (await client.request("POST", f"{_url(server)}/v1beta/x", json={})).status_code
+        async def call() -> str:
+            return str((await model.ainvoke("hello")).content)
 
-        assert _on_both(agent_loop, call) == [200] * 3
+        assert _on_both(agent_loop, call) == ["answered"] * 3
+        # The provider retries; a crossed loop would show as a request sent twice.
+        assert server.requests == 3  # type: ignore[attr-defined]
 
 
 def test_the_stub_server_keeps_its_connections_alive(server: ThreadingHTTPServer) -> None:
