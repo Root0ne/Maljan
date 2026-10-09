@@ -355,14 +355,15 @@ class TestATransientProviderAnswerIsRetried:
 
 class TestTheCallSitesActuallyUseIt:
     """A helper nobody calls is not a fix. These assert the wiring, because the
-    previous policy failed exactly by being written down and not applied."""
+    previous policy failed exactly by being written down and not applied.
+
+    The judge's and the mediator's calls are retried by their model
+    (``llm.transient``) and carry no wrapper of their own
+    (``test_the_judge_retries_through_its_model_once``)."""
 
     @pytest.mark.parametrize(
         ("module", "needle"),
         [
-            ("maljan.agents.judge_agent", "Mediator fast path"),
-            ("maljan.agents.judge_agent", "Judge verdict"),
-            ("maljan.agents.judge_agent", "Judge no-tools path"),
             ("maljan.reporting.composer", "ReportComposer structured"),
             ("maljan.reporting.composer", "ReportComposer raw"),
             ("maljan.reporting.narrative_agent", "NarrativeAgent structured"),
