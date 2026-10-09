@@ -27,6 +27,7 @@ from app.worker.analysis_worker import (
     STOP_CANCEL,
     STOP_SHUTDOWN,
     STOP_TIMEOUT,
+    STOP_UNEXPLAINED,
     WorkerSettings,
     build_job_settings,
     hold_queue_claim,
@@ -99,6 +100,10 @@ class TestTheClock:
         )
         assert stop_note(STOP_SHUTDOWN, seconds=5, where=where).startswith(
             "Stopped because the worker running it shut down 5 s into the run"
+        )
+        assert stop_note(STOP_UNEXPLAINED, seconds=5, where=where).startswith(
+            "Stopped by a cancellation inside the pipeline that neither the operator, the job "
+            "timeout nor a worker shutdown made 5 s into the run"
         )
         for note in (timeout, stop_note(STOP_CANCEL, seconds=5, where=where)):
             assert note.endswith(

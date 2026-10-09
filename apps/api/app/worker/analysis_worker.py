@@ -1656,9 +1656,12 @@ async def keep_the_built_report(
 STOP_TIMEOUT = "timeout"
 STOP_CANCEL = "cancel"
 STOP_SHUTDOWN = "shutdown"
+# A cancellation that reached the pipeline while nobody stopped the job: no
+# timeout, no cancel flag, and the job's own task not being cancelled.
+STOP_UNEXPLAINED = "unexplained"
 
-# The clock a job's timeout is measured on, from the moment its pipeline
-# starts. A name rather than a call written inline, so a test can move it hours
+# The clock a job's timeout is measured on, from the moment the job starts. A
+# name rather than a call written inline, so a test can move it hours
 # ahead without waiting for them.
 job_clock: Callable[[], float] = time.monotonic
 
@@ -1682,8 +1685,13 @@ def stop_note(kind: str, *, seconds: float, where: str, limit: int | None = None
         why = f"Stopped by the job timeout ({limit} s, core.job_timeout)"
     elif kind == STOP_CANCEL:
         why = "Cancelled by the operator"
-    else:
+    elif kind == STOP_SHUTDOWN:
         why = "Stopped because the worker running it shut down"
+    else:
+        why = (
+            "Stopped by a cancellation inside the pipeline that neither the operator, the "
+            "job timeout nor a worker shutdown made"
+        )
     return (
         f"{why} {seconds:.0f} s into the run, {where}. The report kept is partial: it holds "
         "what the run produced before it stopped, and nothing the run would have done "
@@ -2563,12 +2571,19 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             heartbeat_stop_event.set()
             if not stopped_by_timeout and not cancelled_by_user:
                 cancelled_by_user = await cancel_was_requested(redis_conn, job_id)
+            # A shutdown is this task itself being cancelled, which is what
+            # ``cancelling()`` counts; a cancellation that reached the pipeline
+            # while nobody stopped the job is recorded as that, never as a
+            # shutdown that did not happen.
+            _current = asyncio.current_task()
             if stopped_by_timeout:
                 _kind = STOP_TIMEOUT
             elif cancelled_by_user:
                 _kind = STOP_CANCEL
-            else:
+            elif _current is not None and _current.cancelling():
                 _kind = STOP_SHUTDOWN
+            else:
+                _kind = STOP_UNEXPLAINED
             # Worded from where the pipeline was: a check's own record when
             # one stopped it, otherwise the nodes that were running when the
             # task was cancelled under them.
@@ -2642,8 +2657,8 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                         db_session, job_uuid, reason=_note, error_id=uuid.uuid4().hex
                     )
             # How this job ends depends on who stopped what. The operator's
-            # cancel and the job timeout reach the pipeline task, not this
-            # one: nothing outside is waiting for a ``CancelledError`` here,
+            # cancel, the job timeout and an unexplained cancellation reach the
+            # pipeline task, not this one: nothing outside is waiting for a ``CancelledError`` here,
             # and raising one puts arq on its retry branch — the job goes back
             # in the queue, is popped again and ends with "max retries
             # exceeded", which reads like a failure nobody had. A finished job
@@ -2657,8 +2672,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # job unfinished in its bookkeeping, since it is no ``Exception``
             # either. The ``finally`` below runs on every path, so the feed is
             # flushed and the claim released either way.
-            current = asyncio.current_task()
-            if _kind == STOP_SHUTDOWN or (current is not None and current.cancelling()):
+            if _kind == STOP_SHUTDOWN or (_current is not None and _current.cancelling()):
                 if not isinstance(stop_exc, asyncio.CancelledError):
                     raise asyncio.CancelledError from stop_exc
                 raise
