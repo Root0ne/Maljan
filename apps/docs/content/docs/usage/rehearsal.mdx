@@ -31,11 +31,20 @@ calls to reach the stub:
 - an `auto` setting that would resolve differently against a loopback address
   than against your paid endpoint is pinned to what it resolves to for the paid
   one: `llm.openai.compat` to `standard`, `llm.parallel_analysts` to `true`;
-- nothing may reach a third party: the sandbox becomes the mock, the
-  threat-intel enrichment is switched off, and every tool server that answers
-  from outside this machine (VirusTotal, the threat-intel lookups, any HTTP
-  server not on loopback) is disabled for the rehearsal. Server tokens come
-  back masked and go back masked, which the settings API reads as unchanged.
+- nothing may reach a third party. The sandbox becomes the mock and the
+  threat-intel enrichment is switched off. The threat-intel sidecar stays, but
+  without its reputation keys, so it answers from its own offline data and its
+  tool definitions still ride every request. Every tool server that answers
+  from outside this machine (VirusTotal, any HTTP server not on loopback) is
+  disabled, and its tool definitions are then missing from the rehearsed
+  requests: a paid run's requests are larger by that much. Server tokens come
+  back masked and go back masked, which the settings API reads as unchanged;
+- where no spend ceiling is set, one no rehearsal reaches is set, so the run
+  summary carries the spend the checklist prices the usage against.
+
+Each result's JSON (`gate`) and markdown list every setting changed, before
+and during the rehearsal, every server disabled and every server whose keys
+were withheld.
 
 Your models, efforts, output caps, timeouts, agents and keys stay as you set
 them, and the checklist expects exactly them in force. Your API key is sent to

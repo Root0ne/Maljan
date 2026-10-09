@@ -22,6 +22,7 @@ from scripts.rehearsal.checklist import RunRecord
 from scripts.rehearsal.run import (
     SettingsGuard,
     StackClient,
+    describe_changes,
     gate_changes,
     gate_expected,
     harness_changes,
@@ -120,7 +121,11 @@ class TestTheGateChangesOnlyTheEndpoints:
                 "core.mcp.servers": {
                     "value": {
                         "analysis": {"enabled": True, "transport": "stdio"},
-                        "threatintel": {"enabled": True, "transport": "stdio"},
+                        "threatintel": {
+                            "enabled": True,
+                            "transport": "stdio",
+                            "env_allow": ["VIRUSTOTAL_API_KEY", "ABUSEIPDB_API_KEY"],
+                        },
                         "virustotal": {
                             "enabled": True,
                             "transport": "streamable-http",
@@ -142,9 +147,17 @@ class TestTheGateChangesOnlyTheEndpoints:
         assert changes["api.enrichment_enabled"] is False
         servers = changes["core.mcp.servers"]
         assert servers["analysis"]["enabled"] and servers["local"]["enabled"]
-        assert not servers["threatintel"]["enabled"] and not servers["virustotal"]["enabled"]
+        assert servers["threatintel"]["enabled"] and servers["threatintel"]["env_allow"] == []
+        assert not servers["virustotal"]["enabled"]
         assert servers["virustotal"]["token"] == "**********"
         assert "core.mcp.servers" in gate_changes(values, STUB)
+        described = describe_changes(values, changes)
+        assert described["servers_disabled"] == ["virustotal"]
+        assert described["servers_with_keys_withheld"] == ["threatintel"]
+        assert described["settings"]["core.sandbox.provider"] == {
+            "before": "triage",
+            "rehearsed": "mock",
+        }
 
     def test_the_harness_mode_touches_no_key_and_keeps_the_stack_s_tools(self) -> None:
         changes = harness_changes("openai", STUB)

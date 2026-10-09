@@ -286,11 +286,15 @@ def gate_changes(values: dict[str, dict[str, Any]], stub_root: str) -> dict[str,
 def third_party_off(values: dict[str, dict[str, Any]]) -> dict[str, Any]:
     """What keeps a rehearsal from reaching any third party beside the model.
 
-    The sandbox becomes the mock, the threat-intel enrichment is switched off,
-    and every tool server that answers from outside this machine (VirusTotal,
-    the threat-intel lookups, any HTTP server not on loopback) is disabled for
-    the rehearsal. The server map comes back masked and goes back masked; a
-    masked token in a PATCH means "unchanged", so no token is lost.
+    The sandbox becomes the mock and the threat-intel enrichment is switched
+    off. The threat-intel sidecar stays, with the reputation keys withheld from
+    its environment (it then answers from its own offline data), so its tool
+    definitions still ride every request; it is disabled only where a token is
+    written into its own environment map. Every tool server that answers from
+    outside this machine (VirusTotal, any HTTP server not on loopback) is
+    disabled, and its tool definitions are then missing from the rehearsed
+    requests. The server map comes back masked and goes back masked; a masked
+    token in a PATCH means "unchanged", so no token is lost.
     """
     from maljan.llm.openai_provider import is_local_endpoint
 
@@ -307,12 +311,47 @@ def third_party_off(values: dict[str, dict[str, Any]]) -> dict[str, Any]:
         remote = str(server.get("transport") or "stdio") != "stdio" and not is_local_endpoint(
             server.get("url")
         )
+        if key == "threatintel" and not server.get("env"):
+            if server.get("env_allow"):
+                server["env_allow"] = []
+                moved = True
+            continue
         if key in ("virustotal", "threatintel") or remote:
             server["enabled"] = False
             moved = True
     if moved:
         changes["core.mcp.servers"] = servers
     return changes
+
+
+def describe_changes(values: dict[str, dict[str, Any]], changes: dict[str, Any]) -> dict[str, Any]:
+    """Every setting the rehearsal changed, before and during it, and every server it took away."""
+    servers_before = _value(values, "core.mcp.servers", {}) or {}
+    servers_during = changes.get("core.mcp.servers") or servers_before
+    disabled = sorted(
+        key
+        for key, server in servers_during.items()
+        if isinstance(server, dict)
+        and not server.get("enabled", True)
+        and (servers_before.get(key) or {}).get("enabled", True)
+    )
+    keys_withheld = sorted(
+        key
+        for key, server in servers_during.items()
+        if isinstance(server, dict)
+        and server.get("enabled", True)
+        and (servers_before.get(key) or {}).get("env_allow")
+        and not server.get("env_allow")
+    )
+    return {
+        "settings": {
+            key: {"before": _value(values, key), "rehearsed": value}
+            for key, value in changes.items()
+            if key != "core.mcp.servers"
+        },
+        "servers_disabled": disabled,
+        "servers_with_keys_withheld": keys_withheld,
+    }
 
 
 def gate_expected(values: dict[str, dict[str, Any]], changes: dict[str, Any]) -> dict[str, Any]:
@@ -523,6 +562,7 @@ def record_from_stack(
     api: str = "",
     probe: dict[str, Any] | None = None,
     required_stages: dict[str, list[str]] | None = None,
+    gate: dict[str, Any] | None = None,
 ) -> RunRecord:
     """A run's record, read back from the API the way the console reads it."""
     from scripts.rehearsal.inprocess import claims_from_events, empty_evidence_sections
@@ -558,6 +598,7 @@ def record_from_stack(
         expected=expected,
         empty_evidence_sections=empty,
         required_stages=dict(required_stages or {}),
+        gate=dict(gate or {}),
         probe=dict(probe or {}),
         scenario_params=scenario_params,
         elapsed_s=elapsed,
@@ -618,6 +659,7 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
     guard = SettingsGuard(client, Path(args.out) / SNAPSHOT_NAME)
     records: list[RunRecord] = []
     probe: dict[str, Any] = {}
+    gate: dict[str, Any] = {}
     try:
         client.login(args.email, password)
         values = client.values()
@@ -644,6 +686,7 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
                 server.state.served.extend(
                     str(v) for k, v in expected.items() if k.startswith("model.") and v
                 )
+            gate = describe_changes(values, changes)
             guard.keep(values, list(changes))
             applied = client.save(changes)
             print(f"pointed {len(applied)} setting(s) at the stub: {', '.join(sorted(applied))}")
@@ -679,6 +722,7 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
                     api=api,
                     probe=probe,
                     required_stages=stages,
+                    gate=gate,
                 )
             )
     finally:

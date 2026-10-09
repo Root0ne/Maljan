@@ -150,6 +150,9 @@ class RunRecord:
     empty_evidence_sections: list[str] | None = None
     # The connection test's outcome, where the run asked one.
     probe: dict[str, Any] = field(default_factory=dict)
+    # What a stack rehearsal changed on the stack: each setting before and
+    # during it, and the tool servers it took away or withheld keys from.
+    gate: dict[str, Any] = field(default_factory=dict)
     elapsed_s: float = 0.0
 
 
@@ -721,6 +724,14 @@ def as_markdown(record: RunRecord, checks: list[Check]) -> str:
     lines += ["", "## Report sections", ""]
     for section, status in section_statuses(record).items():
         lines.append(f"- {section}: {status}")
+    if record.gate:
+        lines += ["", "## Changed on the stack for the rehearsal", ""]
+        for key, row in (record.gate.get("settings") or {}).items():
+            lines.append(f"- {key}: {row.get('before')!r} -> {row.get('rehearsed')!r}")
+        for key in record.gate.get("servers_disabled") or []:
+            lines.append(f"- tool server {key}: disabled (its tool definitions were not sent)")
+        for key in record.gate.get("servers_with_keys_withheld") or []:
+            lines.append(f"- tool server {key}: reputation keys withheld (offline answers)")
     lines += ["", "## Observed", ""]
     for key, value in observations(record).items():
         lines.append(f"- {key}: {json.dumps(value, ensure_ascii=False)}")
@@ -773,5 +784,6 @@ def as_json(record: RunRecord, checks: list[Check]) -> dict[str, Any]:
         "checks": [asdict(c) for c in checks],
         "signature": signature(record, checks),
         "observations": observations(record),
+        "gate": record.gate,
         "stub_log": record.stub_log,
     }
