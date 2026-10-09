@@ -44,7 +44,7 @@ import {
   VERDICT_CONFLICT_NOTE,
 } from "@/lib/verdictHeader";
 import { getErrorMessage, isApiStatus } from "@/lib/errors";
-import { jobFailure } from "@/lib/runFailure";
+import { jobFailure, jobFinished, jobStopNote } from "@/lib/runFailure";
 import type { VerdictBucket } from "@/lib/verdict";
 
 /* ── Report Context (shared with child tabs) ─────────── */
@@ -120,7 +120,6 @@ export default function AnalysisLayout({
 
   useEffect(() => {
     let cancelled = false;
-    const TERMINAL = new Set(["completed", "failed"]);
     const POLL_INTERVAL = 3000;
 
     async function refetchReport(terminal = false) {
@@ -151,7 +150,9 @@ export default function AnalysisLayout({
         setApiAvailable(true);
         setApiError(null);
 
-        if (TERMINAL.has(j.status)) {
+        /* A cancelled run has ended as surely as a failed one, and it may
+         * have kept a partial report: polling stops and the report is read. */
+        if (jobFinished(j.status)) {
           await refetchReport(true);
           if (!cancelled) setLoading(false);
           return; // stop polling
@@ -279,6 +280,8 @@ export default function AnalysisLayout({
    * A row carrying neither, and a run that ended any other way, are left to
    * the chip. */
   const failure = jobFailure(job?.status, job?.error_message);
+  /* Why and where a cancelled run stopped, as its row says it. */
+  const stopNote = jobStopNote(job?.status, job?.error_message);
 
   /* The tabs this run earned. A tab is a promise that there is something
    * behind it, so one the run never filled is absent rather than present and
@@ -416,6 +419,12 @@ export default function AnalysisLayout({
               )}
 
               {failure && <FailureNote failure={failure} className="mb-1.5" />}
+
+              {/* A cancel is a stop, not a failure: said as the row says it,
+                  and not twice when the kept report already says the same. */}
+              {stopNote && stopNote !== report?.incomplete_reason && (
+                <p className="mb-1 text-xs text-text-secondary">{stopNote}</p>
+              )}
 
               {/* The sample is the `h1` above. A "Sample:" line under it was
                   the same filename a second time, and for a hash-named sample
