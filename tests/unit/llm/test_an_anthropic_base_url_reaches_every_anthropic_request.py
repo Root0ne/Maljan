@@ -96,6 +96,55 @@ class TestSet:
     def test_a_blank_address_is_none(self) -> None:
         assert _settings(base_url="  ").llm.anthropic.base_url is None
 
+    def test_the_address_is_stored_as_the_client_will_use_it(self) -> None:
+        assert _settings(base_url="HTTP://127.0.0.1:8765/").llm.anthropic.base_url == STUB
+        built = AnthropicProvider(_settings(base_url=STUB + "/")).build_model(MODEL, 0.1)
+        assert built.anthropic_api_url == STUB
+
+
+class TestARefusedAddress:
+    @pytest.mark.parametrize(
+        ("value", "said"),
+        [
+            ("proxy.local:8080", "http:// or https://"),
+            ("ftp://proxy.local", "http:// or https://"),
+            ("https://", "host"),
+            ("http://proxy.example.org", "https"),
+            ("https://user:pw@proxy.example.org", "user name"),
+            ("https://proxy.example.org?x=1", "query"),
+            ("https://proxy.example.org#x", "fragment"),
+            ("https://proxy.example.org/v1", "/v1"),
+            ("http://127.0.0.1:8765/v1/", "/v1"),
+        ],
+    )
+    def test_is_refused_with_the_reason(self, value: str, said: str) -> None:
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match=said.replace("?", r"\?")):
+            _settings(base_url=value)
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "https://proxy.example.org",
+            "https://proxy.example.org/anthropic",
+            "http://127.0.0.1:8765",
+            "http://localhost:8765",
+            "http://[::1]:8765",
+        ],
+    )
+    def test_https_or_a_loopback_address_is_taken(self, value: str) -> None:
+        assert _settings(base_url=value).llm.anthropic.base_url == value
+
+    def test_the_probe_asks_the_address_the_client_uses(self) -> None:
+        from app.services.settings_probes import _completion_request
+
+        settings = _settings(base_url="https://proxy.example.org/anthropic/")
+        where = endpoint_for(settings, "anthropic")
+        url, _headers, _body = _completion_request("anthropic", where, MODEL, "k")
+        built = AnthropicProvider(settings).build_model(MODEL, 0.1)
+        assert url == f"{built.anthropic_api_url}/v1/messages"
+
 
 class TestTheSettingsProbe:
     def test_asks_the_vendor_when_unset(self) -> None:

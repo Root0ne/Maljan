@@ -136,6 +136,18 @@ EFFORT_SETTING_OF_PROVIDER: dict[str, str] = {
 }
 
 
+def _is_loopback_host(host: str) -> bool:
+    """Whether ``host`` names this machine: ``localhost`` or a loopback address."""
+    import ipaddress
+
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host.strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
 class AnthropicConfig(BaseModel):
     """Anthropic-specific model selection."""
 
@@ -161,11 +173,56 @@ class AnthropicConfig(BaseModel):
 
     @field_validator("base_url", mode="before")
     @classmethod
-    def _a_blank_address_is_none(cls, value: Any) -> Any:
-        """A cleared field in the console is no address, not an empty one."""
-        if isinstance(value, str) and not value.strip():
+    def _an_address_the_client_can_use(cls, value: Any) -> Any:
+        """The address as every Anthropic request, probe included, will be sent to it.
+
+        A cleared field is no address. Anything else is refused unless the
+        client can send to it and the key it carries is not sent in clear:
+        ``http`` or ``https`` with a host, ``https`` unless the host is this
+        machine, no user name, query or fragment, and no ``/v1`` ending (the
+        client adds the path, so ``/v1/v1/messages`` would be asked). The
+        scheme and host are folded and a trailing slash dropped, so the probe
+        files its row under the address the job's client uses.
+        """
+        if value is None:
             return None
-        return value
+        if not isinstance(value, str):
+            return value
+        raw = value.strip()
+        if not raw:
+            return None
+        from urllib.parse import urlsplit
+
+        parts = urlsplit(raw)
+        scheme = parts.scheme.lower()
+        if scheme not in ("http", "https"):
+            raise ValueError("the Anthropic base URL must start with http:// or https://")
+        try:
+            host = (parts.hostname or "").lower()
+            port = parts.port
+        except ValueError as exc:
+            raise ValueError(f"the Anthropic base URL has no usable host or port: {exc}") from exc
+        if not host:
+            raise ValueError("the Anthropic base URL names no host")
+        if parts.username or parts.password:
+            raise ValueError("the Anthropic base URL may not carry a user name or password")
+        if parts.query:
+            raise ValueError("the Anthropic base URL may not carry a query")
+        if parts.fragment:
+            raise ValueError("the Anthropic base URL may not carry a fragment")
+        path = parts.path.rstrip("/")
+        if path.lower().endswith("/v1"):
+            raise ValueError(
+                "the Anthropic base URL is written without /v1: the client adds /v1/messages"
+            )
+        if scheme == "http" and not _is_loopback_host(host):
+            raise ValueError(
+                "the Anthropic base URL must use https: the API key is sent to it, and only "
+                "an address on this machine may take it over plain http"
+            )
+        shown_host = f"[{host}]" if ":" in host else host
+        authority = f"{shown_host}:{port}" if port else shown_host
+        return f"{scheme}://{authority}{path}"
 
 
 class OllamaConfig(BaseModel):
