@@ -192,3 +192,72 @@ def test_a_megabyte_of_a_hostile_unit_costs_ten_times_a_tenth(unit: str) -> None
         scrub_keeping_layout(text)
         took.append(time.perf_counter() - started)
     assert took[1] <= max(took[0], 0.01) * 20, took
+
+
+_NAME_FORMS = (
+    "",
+    "hello",
+    "kernel32/USER32/WinINet",
+    "FindFirstFileA/W",
+    "NtQueryInformationProcess/Thread",
+    "0x1a20/0x1a28",
+    "1111/2222",
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
+)
+
+
+@pytest.mark.parametrize("name", _NAME_FORMS)
+@pytest.mark.parametrize("separator", ["", "/", ".", "@"])
+def test_every_key_shape_after_every_kept_name_form_is_masked(name: str, separator: str) -> None:
+    """A kept name in front of a key never covers it, and a dot or an ``@`` before a
+    key does not hide it from the rules (``hello.<key>``)."""
+    for key in _every_key_shape():
+        text = f"{name}{separator}{key}"
+        assert key not in scrub(text), text
+        assert key not in scrub_keeping_layout(text), text
+
+
+def test_a_dotted_name_is_not_read_as_a_token() -> None:
+    """A head that decodes to ``{`` alone is no token: a token's header opens with a quoted key."""
+    for text in (
+        "telemetry_exporter.dataservice.internalzone",
+        "pipeline.exporter_settings.retention_policy",
+    ):
+        assert scrub(text) == text
+
+
+def test_long_number_lists_are_masked_as_before() -> None:
+    """Number pieces are kept up to eight digits; longer ones are read as before."""
+    for text in ("0x1234567890/0x2345678901/0x3456789012", "1234567890/2345678901/3456789012"):
+        assert scrub(f"value {text}") == "value ***", text
+
+
+def test_a_digest_named_file_and_a_hex_behind_an_escape_stay_as_before() -> None:
+    digest = _hex_run(64)
+    assert scrub(f"opened {digest}.exe") == f"opened {digest}.exe"
+    # A cut digest behind a JSON escape's ``n``: hex and one letter, no key body.
+    cut = _hex_run(30)
+    assert cut in scrub(f"path\\\\n{cut}.exe")
+
+
+_SPAN_UNITS = {
+    "dotted header-shaped heads": "exexexexex.",
+    "dotted token headers": "eyJhbGci.",
+    "a token header glued behind a word": "x_eyJhbGciOiJIUzI1NiJ9.",
+    "a word and a dot": "hello.",
+}
+
+
+@pytest.mark.parametrize("unit", list(_SPAN_UNITS.values()), ids=list(_SPAN_UNITS))
+def test_dotted_runs_cost_ten_times_a_tenth(unit: str) -> None:
+    import time
+
+    took = []
+    for size in (100_000, 1_000_000):
+        text = unit * (size // len(unit))
+        started = time.perf_counter()
+        scrub(text)
+        scrub_keeping_layout(text)
+        took.append(time.perf_counter() - started)
+    assert took[1] <= max(took[0], 0.01) * 12, took
