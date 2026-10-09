@@ -431,10 +431,13 @@ function describeProfilesMap(before: unknown, after: unknown): {
 function formatOverride(o: AgentLLMOverride): string {
   let base = `${o.provider}/${o.model}`;
   if (o.base_url) base = `${base} @ ${o.base_url}`;
+  if (o.effort) base = `${base} (effort ${o.effort})`;
   if (o.temperature !== null && o.temperature !== undefined) {
     base = `${base} (temp ${o.temperature})`;
   }
-  const fallbacks = (o.fallbacks ?? []).map((f) => `${f.provider}/${f.model}`);
+  const fallbacks = (o.fallbacks ?? []).map(
+    (f) => `${f.provider}/${f.model}${f.effort ? ` (effort ${f.effort})` : ""}`,
+  );
   return fallbacks.length ? `${base}, then ${fallbacks.join(", then ")}` : base;
 }
 

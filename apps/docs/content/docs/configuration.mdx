@@ -130,8 +130,8 @@ value then falls back to the catalog default and the console shows it as such.
 ### Per-agent model overrides
 
 `llm.agents` holds one optional override per agent key — provider, model,
-temperature and base URL — so the analysts and the judge need not share a
-single model. It is a JSON leaf of its own and is ordinarily edited from the
+temperature, base URL and reasoning effort — so the analysts and the judge need
+not share a single model. It is a JSON leaf of its own and is ordinarily edited from the
 Agents page, one agent at a time.
 
 The base URL is per agent, and applies to the `openai` and `ollama` providers
@@ -302,9 +302,45 @@ shipped value, sends nothing and leaves the endpoint's own default (`high` on
 DeepSeek). A value the endpoint does not know is its own 400, and the `llm`
 connection test asks with the value, so it is found there rather than on a
 job's first call. The setting is global, sent to every `openai`-provider model
-including per-agent entries and fallbacks: a per-agent model entry names a
-provider, a model and an endpoint, and carries none of the provider's request
-settings.
+including per-agent entries and fallbacks that name no effort of their own.
+
+**Per agent.** An entry of `llm.agents` — and each of its fallbacks — may name
+its own `effort`, sent where the global value is sent: Anthropic's
+`output_config.effort` (one of `low`, `medium`, `high`, `xhigh`, `max`; a level
+the Models API says the model does not take refuses the job, naming the field
+it was read from — `llm.agents.<key>.effort`, or
+`llm.agents.<key>.fallbacks[<i>].effort` for a fallback) or the
+OpenAI-compatible `reasoning_effort`, as written. Left empty it inherits `llm.anthropic.effort` or
+`llm.openai.reasoning_effort` — a fallback inherits the global value of its own
+provider, not the entry's effort — so with no per-agent effort every request
+is the one sent before. An `ollama` or `gemini` entry that names one is refused
+on save: neither provider sends a reasoning effort. Nothing sets a level by
+default.
+
+Two model-calling roles have no entry of their own and run on the global
+expert model at the global effort: the negotiation mediator and the function
+summariser. Every other role is set by an entry: each analyst by its own key
+(its revision round runs on the same model), `judge` for the verdict calls and
+`reporter` for the narrative and the composer sections, which run on the judge
+role's global model while `reporter` has no entry (the build line then says
+`role=judge`).
+
+The Agents page offers the field once an entry names a model, with the levels
+the backend serves for that provider and model (`GET
+/api/v1/settings/effort-options`): where the Models API described the model,
+every level it does not refuse, a level it said nothing about marked "not
+described for this model" (the run sends it and the API answers); else the
+setting's own list; and a text box for an OpenAI-compatible endpoint. Each model's build line in the worker log names
+the effort in force and where it came from, e.g. `Building anthropic/claude-haiku-5-5
+(role=judge, temp=0.0, effort=max from llm.anthropic.effort)` or
+`effort=high from llm.agents.reporter.effort`.
+
+Every probe asks each model at the effort its run sends — the agent probe and
+the provider's **Test** alike — and a model whose entry names its own effort is
+filed under that model and that effort. A model with no effort of its own is
+filed and looked up as before, so its earlier results stay valid; changing an
+entry's effort is a change the probe gate asks about, on save and at submit,
+until the model has been probed at the new level.
 
 ### Setup guides
 

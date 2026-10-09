@@ -122,6 +122,20 @@ class OpenAIConfig(BaseModel):
     context_size: Annotated[int, Field(ge=0)] = 0
 
 
+# The levels Anthropic's ``output_config.effort`` takes, in order. The global
+# ``llm.anthropic.effort`` spells them as its ``Literal``; a per-agent
+# ``effort`` on an ``anthropic`` entry is checked against this tuple, and a
+# test holds the two together.
+ANTHROPIC_EFFORT_LEVELS: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max")
+# The providers that send a reasoning effort, each with the global setting a
+# per-agent ``effort`` left unset inherits. A provider absent here has no
+# effort to send, and an entry that sets one against it is refused.
+EFFORT_SETTING_OF_PROVIDER: dict[str, str] = {
+    "anthropic": "llm.anthropic.effort",
+    "openai": "llm.openai.reasoning_effort",
+}
+
+
 class AnthropicConfig(BaseModel):
     """Anthropic-specific model selection."""
 
@@ -185,12 +199,19 @@ class ModelChoice(BaseModel):
                      "openai" and "ollama" providers; the credential stays
                      global, so an "openai" entry pointing at its own endpoint
                      still authenticates with llm.openai.api_key.
+        effort:      Optional reasoning effort for this model alone, sent where
+                     the provider's global one is sent (Anthropic
+                     ``output_config.effort``, OpenAI-compatible
+                     ``reasoning_effort``). ``None`` inherits the global
+                     ``llm.anthropic.effort`` / ``llm.openai.reasoning_effort``.
+                     Only the "anthropic" and "openai" providers send one.
     """
 
     provider: str
     model: str
     temperature: float | None = None
     base_url: str | None = None
+    effort: str | None = None
 
     @model_validator(mode="after")
     def _base_url_belongs_to_an_endpoint_provider(self) -> "ModelChoice":
@@ -206,6 +227,44 @@ class ModelChoice(BaseModel):
             raise ValueError(
                 f"base_url is only supported for the 'openai' and 'ollama' providers, "
                 f"not '{self.provider}'; those providers have no per-agent endpoint."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _effort_belongs_to_a_provider_that_sends_one(self) -> "ModelChoice":
+        """Reject an effort the provider has nowhere to send.
+
+        Ollama and Gemini take no reasoning effort here, so one set against
+        them would be silently dropped at build time. An Anthropic level is
+        one of the levels the API names; an OpenAI-compatible value is kept as
+        written, because each endpoint names its own levels.
+        """
+        if self.effort is not None:
+            self.effort = self.effort.strip() or None
+        if self.effort is None:
+            return self
+        if self.provider not in EFFORT_SETTING_OF_PROVIDER:
+            supported = " and ".join(f"'{p}'" for p in EFFORT_SETTING_OF_PROVIDER)
+            raise ValueError(
+                f"effort is only supported for the {supported} providers, "
+                f"not '{self.provider}'; that provider sends no reasoning effort."
+            )
+        if self.provider == "anthropic" and self.effort not in ANTHROPIC_EFFORT_LEVELS:
+            raise ValueError(
+                f"effort {self.effort!r} is not one of the Anthropic levels "
+                f"({', '.join(ANTHROPIC_EFFORT_LEVELS)})."
+            )
+        # A probe of this model is filed under the model and its effort
+        # together; a spelling wider than the column that holds it could never
+        # be filed, and the gate would call the model unprobed with no reason.
+        from maljan.core.model_assignments import FILED_MODEL_MAX_CHARS, filed_model
+
+        filed = filed_model(self.model, self.effort)
+        if len(filed) > FILED_MODEL_MAX_CHARS:
+            raise ValueError(
+                f"model {self.model!r} with effort {self.effort!r} is {len(filed)} characters "
+                f"as its probe record ({filed!r}); the record holds at most "
+                f"{FILED_MODEL_MAX_CHARS}, so shorten the effort."
             )
         return self
 

@@ -146,6 +146,30 @@ class ContextWindowResponse(BaseModel):
     remedy: str = ""
 
 
+class EffortOptionsResponse(BaseModel):
+    """What a per-agent effort field may offer for one provider and model.
+
+    ``takes_effort`` is false for a provider that sends no reasoning effort,
+    and the field is not drawn. ``levels`` is the list to choose from, or
+    ``None`` where each endpoint names its own levels and the value is typed
+    as the endpoint takes it. ``levels_source`` is ``models_api`` when the
+    Anthropic Models API described the model, ``settings`` when the list is
+    the setting's own, ``none`` otherwise. ``global_key``/``global_value``
+    are the provider-wide setting an unset field inherits.
+    ``undescribed_levels`` are offered levels the Models API's description
+    said nothing about; the run sends them and the API answers.
+    """
+
+    provider: str
+    model: str
+    takes_effort: bool
+    levels: list[str] | None
+    undescribed_levels: list[str] = []
+    levels_source: str
+    global_key: str | None = None
+    global_value: str | None = None
+
+
 class VirustotalRegisterResponse(BaseModel):
     """The VirusTotal server as it stands after a registration.
 

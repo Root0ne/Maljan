@@ -29,6 +29,7 @@ from app.schemas.settings import (
     ConditionValidateRequest,
     ConditionValidateResponse,
     ContextWindowResponse,
+    EffortOptionsResponse,
     ExportResponse,
     GroupDTO,
     ImportRequest,
@@ -148,6 +149,29 @@ async def get_context_window(
     settings = candidate_settings({}, stored)
     await end_read_transaction(db)
     return ContextWindowResponse(**await context_window_facts(settings))
+
+
+@router.get("/effort-options", response_model=EffortOptionsResponse)
+async def get_effort_options(
+    provider: str = Query(..., min_length=1, max_length=64),
+    model: str = Query("", max_length=256),
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> EffortOptionsResponse:
+    """The reasoning-effort levels a per-agent entry may name for one provider and model.
+
+    Read-only and free: the levels come from the settings' own list and, for
+    an Anthropic model the window probe has described, from what the Models
+    API said it takes. No request leaves the process. The console's agent
+    editor draws its effort field from this answer rather than from a list
+    of its own.
+    """
+    from maljan.llm.effort import effort_options
+
+    stored = await SettingsService(db).load_overrides()
+    settings = candidate_settings({}, stored)
+    await end_read_transaction(db)
+    return EffortOptionsResponse(**effort_options(settings, provider, model))
 
 
 async def _agent_warnings(db: AsyncSession) -> dict[str, str]:
@@ -618,6 +642,8 @@ async def _write_down_what_was_reached(db: AsyncSession, pairs: list[dict[str, A
     sentence; a store that could not be written is a reason to log, not a
     reason to give them an error instead of their answer.
     """
+    from maljan.core.model_assignments import filed_model
+
     from app.services.model_probes import record_probe
 
     for pair in pairs:
@@ -625,7 +651,8 @@ async def _write_down_what_was_reached(db: AsyncSession, pairs: list[dict[str, A
             await record_probe(
                 db,
                 endpoint=str(pair.get("endpoint") or ""),
-                model=str(pair.get("model") or ""),
+                # A pair asked at an entry's own effort is filed with it.
+                model=filed_model(str(pair.get("model") or ""), pair.get("effort")),
                 provider=str(pair.get("provider") or ""),
                 ok=bool(pair.get("ok")),
                 detail=str(pair.get("detail") or ""),

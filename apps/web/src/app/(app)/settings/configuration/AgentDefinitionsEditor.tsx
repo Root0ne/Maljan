@@ -6,7 +6,15 @@ import { Bot } from "lucide-react";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import { agentDisplayName, agentKeySuffix } from "./agentNames";
-import { hasEndpoint, moveChoice, storedChoice, type ModelChoice } from "./modelList";
+import {
+  hasEndpoint,
+  moveChoice,
+  storedChoice,
+  mergeEntry,
+  withProvider,
+  type ModelChoice,
+} from "./modelList";
+import EffortField from "./EffortField";
 import {
   BUILTIN_AGENT_KEYS,
   cloneDefinition,
@@ -69,6 +77,9 @@ export interface AgentLLMOverride {
    *  servers. Only the `openai` and `ollama` providers accept one; the
    *  provider's API key stays global. */
   base_url?: string | null;
+  /** This agent's own reasoning effort for its first model; absent inherits
+   *  the provider's global one. The levels come from the backend. */
+  effort?: string | null;
   /** The rest of the agent's ordered model list: tried in order only when
    *  the model before fails as a provider (a refused connection, a timeout,
    *  a 5xx, a model the server does not have) — never on what a model said.
@@ -142,6 +153,8 @@ function FallbackModels({
 }) {
   const put = (index: number, next: Partial<ModelChoice>) =>
     onChange(rows.map((row, i) => (i === index ? { ...row, ...next } : row)));
+  const putProvider = (index: number, provider: string) =>
+    onChange(rows.map((row, i) => (i === index ? withProvider(row, provider) : row)));
   return (
     <div className="mt-2 text-xs">
       <p className="text-text-muted">
@@ -151,13 +164,13 @@ function FallbackModels({
       </p>
       <ol className="space-y-1 mt-1" aria-label={`${agentKey} fallback models`}>
         {rows.map((row, index) => (
-          <li key={index} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_1fr_auto] gap-1">
+          <li key={index} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_1fr_1fr_auto] gap-1">
             {providerChoices !== null ? (
               <select
                 className={inputClass}
                 aria-label={`${agentKey} fallback ${index + 1} provider`}
                 value={row.provider}
-                onChange={(e) => put(index, { provider: e.target.value })}
+                onChange={(e) => putProvider(index, e.target.value)}
               >
                 <option value="">provider</option>
                 {providerChoices.map((p) => (
@@ -172,7 +185,7 @@ function FallbackModels({
                 aria-label={`${agentKey} fallback ${index + 1} provider`}
                 placeholder="provider"
                 value={row.provider}
-                onChange={(e) => put(index, { provider: e.target.value })}
+                onChange={(e) => putProvider(index, e.target.value)}
               />
             )}
             <input
@@ -189,6 +202,18 @@ function FallbackModels({
                 placeholder="base URL (blank = the provider's)"
                 value={row.base_url ?? ""}
                 onChange={(e) => put(index, { base_url: e.target.value })}
+              />
+            ) : (
+              <span />
+            )}
+            {row.provider && row.model ? (
+              <EffortField
+                provider={row.provider}
+                model={row.model}
+                value={row.effort ?? ""}
+                label={`${agentKey} fallback ${index + 1} effort`}
+                inputClass={inputClass}
+                onChange={(effort) => put(index, { effort })}
               />
             ) : (
               <span />
@@ -426,7 +451,9 @@ export function AgentDetail({
    *  blank for the same reason temperature is. */
   const putLlm = (key: string, next: Partial<AgentLLMOverride>) => {
     const base: AgentLLMOverride = llmAgents[key] ?? { provider: "", model: "" };
-    const merged: AgentLLMOverride = { ...base, ...next };
+    // An effort belongs to the provider it was chosen for, which for an
+    // entry with a blank provider is the global one.
+    const merged: AgentLLMOverride = mergeEntry(base, next, llmGlobal.providerValue);
     if (!merged.provider && !merged.model) {
       setLlmError(null);
       const map = { ...llmAgents };
@@ -454,6 +481,7 @@ export function AgentDetail({
     if (merged.base_url && hasEndpoint(provider)) {
       stored.base_url = merged.base_url;
     }
+    if (merged.effort && merged.effort.trim()) stored.effort = merged.effort.trim();
     // The list is carried whole: a row still being typed is kept on screen
     // (`draftFallbacks`) and staged once it names a provider and a model.
     const fallbacks = (merged.fallbacks ?? [])
@@ -870,6 +898,23 @@ export function AgentDetail({
                 }}
               />
             </label>
+            {/* An effort lives on the agent's own entry, so it is offered
+                once the entry names a model; its levels come from the
+                backend for this provider and model, and a provider that
+                sends none draws no field. */}
+            {llmAgents[agentKey]?.model ? (
+              <label className="block">
+                <span className="text-text-muted">Reasoning effort</span>
+                <EffortField
+                  provider={llmAgents[agentKey]?.provider || llmGlobal.providerValue || ""}
+                  model={llmAgents[agentKey]!.model}
+                  value={llmAgents[agentKey]?.effort ?? ""}
+                  label={`${agentKey} llm effort`}
+                  inputClass={input}
+                  onChange={(effort) => putLlm(agentKey, { effort })}
+                />
+              </label>
+            ) : null}
             {/* Only the two providers that speak to a server the operator
                 runs: Anthropic and Gemini are vendor APIs with no per-agent
                 endpoint, and `AgentLLMConfig` rejects one set against them. */}

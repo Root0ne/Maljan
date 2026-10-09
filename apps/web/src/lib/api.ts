@@ -11,6 +11,7 @@ import { ApiError } from "@/lib/errors";
 import { SettingsValidationError } from "@/types/settings";
 import type {
   ContextWindow,
+  EffortOptions,
   ImportRequest,
   MappingPreview,
   PatchResult,
@@ -647,6 +648,13 @@ class ApiClient {
   /** The window the configured models serve. Read-only, and costs no tokens. */
   getContextWindow() {
     return this.request<ContextWindow>("/api/v1/settings/context-window");
+  }
+
+  /** The reasoning-effort levels a per-agent entry may name for one provider
+   *  and model. Read-only, and costs no tokens. */
+  getEffortOptions(provider: string, model: string) {
+    const query = new URLSearchParams({ provider, model });
+    return this.request<EffortOptions>(`/api/v1/settings/effort-options?${query}`);
   }
 
   testSettingsProbe(probe: string, values: Record<string, unknown>) {
