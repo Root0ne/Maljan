@@ -62,6 +62,37 @@ def test_a_key_under_a_hex_field_is_masked_when_it_is_not_hex() -> None:
         assert key not in scrub(f'{{"hex": "{key}"}}'), key
 
 
+def _hex_run(length: int) -> str:
+    """A hex run of ``length`` digits, built at call time."""
+    return "".join("0123456789abcdef"[(index * 7 + 3) % 16] for index in range(length))
+
+
+@pytest.mark.parametrize("length", [30, 48, 50])
+def test_a_hex_run_after_a_label_or_a_credential_word_is_masked(length: int) -> None:
+    run = _hex_run(length)
+    for text in (
+        f"secret hex = {run}",
+        f"key hex: {run}",
+        f"hex: {run}",
+        f"hex={run}",
+        f'{{"api key hex": "{run}"}}',
+        f'{{"token": {{"hex": "{run}"}}}}',
+        f'{{"secret": "x", "hex": "{run}"}}',
+    ):
+        assert run not in scrub(text), text
+        assert run not in scrub_keeping_layout(text), text
+
+
+@pytest.mark.parametrize("length", [30, 48, 50])
+def test_a_tool_s_own_hex_field_is_kept(length: int) -> None:
+    run = _hex_run(length)
+    for text in (
+        f'{{"address": "0x401000", "size": {length // 2}, "hex": "{run}"}}',
+        '{\\"hex\\": \\"' + run + '\\"}',
+    ):
+        assert scrub(text) == text, text
+
+
 def test_a_long_hex_run_with_no_hex_field_is_still_a_key() -> None:
     assert scrub("value " + "d" * 48) == "value ***"
 

@@ -2156,12 +2156,24 @@ by its exact form:
   `uStack_…`, `local_…`, `param_…` followed by hex);
 - a stretch of 24 or more characters of the standard or URL-safe base64
   alphabet itself, the table a decoder is built from;
-- an even-length run of hex digits under a tool's own `hex` field
-  (`"hex": "0011…"`), the bytes a memory or byte-range read returned. A long
-  hex run anywhere else is still read as a key.
+- an even-length run of hex digits that is the value of a JSON `"hex"` key,
+  quoted (`"hex": "0011…"`, or its escaped form inside a JSON string), the
+  bytes a memory or byte-range read returned, when no credential word (`key`,
+  `secret`, `token`, `password`, `credential`, `auth`, `api` and the like)
+  stands in the 48 characters before that key. A prose label (`hex: …`,
+  `secret hex = …`) is no such field, and a long hex run anywhere else is still
+  read as a key.
 
 A piece that is none of these keeps the whole run a key, so a key inside such
 a list is still masked with its stretch.
+
+The events and the stored transcript stay stricter than the report on
+purpose: they mask every credential shape above and every configured value,
+while report text (finding rows and the run record) masks the configured
+values and a URL's credentials only, and keeps a credential-shaped string the
+evidence holds as the evidence wrote it. Some names still read as keys in the
+events (a family-name list with a digit or an all-capitals piece, a long
+identifier no catalogue lists); that is the accepted cost.
 
 A key is still a key:
 

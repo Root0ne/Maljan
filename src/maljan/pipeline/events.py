@@ -943,10 +943,10 @@ _BASE64_ALPHABETS = (
 
 
 def _is_a_written_name(token: str) -> bool:
-    """Whether ``token`` is a name the scrub keeps by its exact form or a catalogue."""
+    """Whether ``token`` is a module name, a decompiler's variable name or a stretch
+    of a base64 alphabet: what the scrub keeps by its exact form beside the catalogue."""
     return bool(
-        _is_a_catalogue_name(token)
-        or token.lower() in _module_names()
+        token.lower() in _module_names()
         or _DECOMPILER_NAME.match(token)
         or (len(token) >= _ALPHABET_SLICE_FLOOR and any(token in a for a in _BASE64_ALPHABETS))
     )
@@ -978,11 +978,16 @@ def _is_api_name(token: str) -> bool:
     a decompiler's variable name, or an abbreviation that completes the name
     before it to a catalogue name (``FindFirstFileA/W``).
     """
-    if _is_a_written_name(token):
+    # The catalogue first, alone and over every piece, as before the exact
+    # forms existed: those are asked only of what the catalogue does not hold.
+    if _is_a_catalogue_name(token):
         return True
     pieces = [piece for piece in _JOINS.split(token) if piece]
     if len(pieces) < 2:
-        return False
+        # Alone, a run shorter than the length floor is no key to begin with.
+        return len(token) >= _ALPHABET_SLICE_FLOOR and _is_a_written_name(token)
+    if all(_is_a_catalogue_name(piece) for piece in pieces):
+        return True
     named = ""
     for piece in pieces:
         if _is_a_catalogue_name(piece):
@@ -1141,9 +1146,7 @@ def _hide_credentials(found: re.Match[str]) -> str:
         found.string[max(0, found.start() - 40) : found.start()]
     ):
         return value
-    if _HEX_FIELD_BEFORE_RE.search(
-        found.string[max(0, found.start() - 12) : found.start()]
-    ) and _HEX_DATA.match(value):
+    if _HEX_DATA.match(value) and _under_a_hex_field(found):
         return value
     if _looks_like_a_credential(value, whole=True):
         return _REDACTED
@@ -1168,8 +1171,27 @@ def _hide_credentials(found: re.Match[str]) -> str:
 
 # Bytes a tool states as hex under its own ``hex`` field (a memory read, a
 # byte range): data the tool read, which the length rule took for a key.
-_HEX_FIELD_BEFORE_RE = re.compile(r"(?i)(?<![A-Za-z0-9_])hex\\?[\"']?\s*[:=]\s*\\?[\"']?\Z")
+# Only the JSON key form, the quotes required: ``"hex": "…"`` (or its escaped
+# form inside a JSON string). A prose label (``secret hex = …``, ``hex: …``) is
+# not a tool's field, and a credential word in front of the field
+# (``{"token": {"hex": "…"}}``) keeps the run a key.
+_HEX_FIELD_BEFORE_RE = re.compile(r"(?<![A-Za-z0-9_])\\?[\"']hex\\?[\"']\s*:\s*\\?[\"']\Z")
 _HEX_DATA = re.compile(r"\A(?:[0-9A-Fa-f]{2})+\Z")
+# The words a credential is named by, anywhere in the stretch before the field.
+_CREDENTIAL_WORD_RE = re.compile(
+    r"(?i)api|auth|bearer|cookie|credential|key|passphrase|passwd|password|pwd|secret"
+    r"|session|token"
+)
+# How far before the field a credential word is looked for.
+_HEX_FIELD_WINDOW = 48
+
+
+def _under_a_hex_field(found: re.Match[str]) -> bool:
+    """Whether the run is the value of a tool's own ``"hex"`` JSON field, with no
+    credential word in front of that field."""
+    before = found.string[max(0, found.start() - _HEX_FIELD_WINDOW) : found.start()]
+    field = _HEX_FIELD_BEFORE_RE.search(before)
+    return field is not None and not _CREDENTIAL_WORD_RE.search(before[: field.start()])
 
 
 def _names_only(stretch: str) -> bool:
