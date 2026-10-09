@@ -2156,18 +2156,23 @@ by its exact form:
   `uStack_…`, `local_…`, `param_…` followed by hex);
 - a stretch of 24 or more characters of the standard or URL-safe base64
   alphabet itself, the table a decoder is built from;
-- an even-length run of hex digits that is the value of a JSON `"hex"` key,
-  quoted (`"hex": "0011…"`, or its escaped form inside a JSON string), the
-  bytes a memory or byte-range read returned, when no credential word stands
-  anywhere in the object that holds the field (from its `{` to its `}`,
-  whatever its length) or in the key of that object or of any object around
-  it. The words are `api`, `auth`, `bearer`, `cookie`, `credential`, `hmac`,
-  `key`, `mnemonic`, `nonce`, `passphrase`, `passwd`, `password`, `priv`,
-  `salt`, `secret`, `seed`, `session`, `signing`, `token`, `iv` and `pwd` as
-  whole words, and the scrub's own `***` (a key name an earlier pass masked).
-  `{"hex": "…", "kind": "api_key"}` and `{"salt": {"hex": "…"}}` are masked. A
-  prose label (`hex: …`, `secret hex = …`) is no such field, and a long hex
-  run anywhere else is still read as a key.
+- an even-length run of hex digits that is the string value of a `"hex"` key
+  in a JSON document, the bytes a memory or byte-range read returned. The text
+  (the whole field the scrub is given) must parse as JSON with Python's own
+  parser, and a JSON document carried as a string value inside it is read the
+  same way; no pattern over the text decides it, so text that only looks like
+  JSON, an escaped fragment, a repeated key or a quote or brace inside a string
+  value never grants it. The object that holds the field must name no
+  credential or key material anywhere in its keys, its string values or
+  anything below it, and no object or list around it may name one in its own
+  keys or string values. The words are `api`, `auth`, `bearer`, `cookie`,
+  `credential`, `hmac`, `key`, `mnemonic`, `nonce`, `passphrase`, `passwd`,
+  `password`, `priv`, `salt`, `secret`, `seed`, `session`, `signing`, `token`,
+  `iv` and `pwd` as whole words, and the scrub's own `***`. Every place the run
+  stands in the text must be such a field: a second copy anywhere else masks it.
+  A configured value is masked by value before this is read. A prose label
+  (`hex: …`, `secret hex = …`) is no such field, and a long hex run anywhere
+  else is still read as a key.
 
 A piece that is none of these keeps the whole run a key, so a key inside such
 a list is still masked with its stretch.

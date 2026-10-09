@@ -10,6 +10,8 @@ and every credential shape is still masked, alone and inside each such list.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from maljan.pipeline import events as ev
@@ -120,9 +122,52 @@ def test_a_tool_s_own_hex_field_is_kept(length: int) -> None:
     run = _hex_run(length)
     for text in (
         f'{{"address": "0x401000", "size": {length // 2}, "hex": "{run}"}}',
-        '{\\"hex\\": \\"' + run + '\\"}',
+        json.dumps({"tool": "read_memory", "output": json.dumps({"hex": run})}),
     ):
         assert scrub(text) == text, text
+        assert scrub_keeping_layout(text) == text, text
+
+
+@pytest.mark.parametrize("length", [30, 48, 50])
+def test_text_that_only_looks_like_a_hex_field_is_masked(length: int) -> None:
+    """The exemption is granted by a JSON parse, never by a pattern over the text."""
+    run = _hex_run(length)
+    for text in (
+        '{\\"hex\\": \\"' + run + '\\"}',
+        f'the answer was {{"hex": "{run}"}} and more',
+        f'{{"hex": "{run}"',
+        f'{{"hex": "{run}", "hex": "00"}}',
+        f'{{"hex": "{run}", "note": "copied {run}"}}',
+        json.dumps({"note": '}{"hex": "' + run + '"', "kind": "x"}),
+        json.dumps({"a": '"hex": "' + run + '"'}),
+        json.dumps({"hex": [run]}),
+        json.dumps({"kind": "api_key", "data": {"hex": run}}),
+        json.dumps({"data": {"hex": run, "list": ["a signing pair"]}}),
+        f'{{"hex": "{run}"}}\n{{"key": "{run}"}}',
+    ):
+        assert run not in scrub(text), text
+        assert run not in scrub_keeping_layout(text), text
+
+
+def test_a_configured_hex_value_under_a_hex_field_is_masked() -> None:
+    run = _hex_run(48)
+    ev.remember_secret_values([run], scope="job")
+    assert run not in scrub(json.dumps({"hex": run}))
+    assert run not in scrub_keeping_layout(json.dumps({"hex": run}))
+
+
+def test_concurrent_scrubs_do_not_read_each_other_s_text() -> None:
+    """No state of one call is read by another: each thread gets its own answer."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    run = _hex_run(48)
+    kept = json.dumps({"address": "0x401000", "hex": run})
+    masked = f'{{"hex": "{run}", "note": "copied {run}"}}'
+    texts = [kept, masked] * 400
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        answers = list(pool.map(scrub, texts))
+    for text, answer in zip(texts, answers, strict=True):
+        assert (answer == text) is (text == kept), (text, answer)
 
 
 def test_a_long_hex_run_with_no_hex_field_is_still_a_key() -> None:

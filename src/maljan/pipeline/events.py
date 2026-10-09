@@ -25,8 +25,9 @@ from __future__ import annotations
 
 import base64
 import binascii
+import json
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from maljan.core.logger import logger
@@ -1116,7 +1117,7 @@ def _is_a_family_name(run: str) -> bool:
     )
 
 
-def _hide_credentials(found: re.Match[str]) -> str:
+def _hide_credentials(found: re.Match[str], hex_fields: Mapping[str, int] | None = None) -> str:
     """One value run, with every key in it masked together with the base64 around it.
 
     In this order:
@@ -1146,7 +1147,7 @@ def _hide_credentials(found: re.Match[str]) -> str:
         found.string[max(0, found.start() - 40) : found.start()]
     ):
         return value
-    if _HEX_DATA.match(value) and _under_a_hex_field(found):
+    if hex_fields and value in hex_fields:
         return value
     if _looks_like_a_credential(value, whole=True):
         return _REDACTED
@@ -1170,108 +1171,97 @@ def _hide_credentials(found: re.Match[str]) -> str:
 
 
 # Bytes a tool states as hex under its own ``hex`` field (a memory read, a
-# byte range): data the tool read, which the length rule took for a key.
-# Only the JSON key form, the quotes required: ``"hex": "…"`` (or its escaped
-# form inside a JSON string). A prose label (``secret hex = …``, ``hex: …``) is
-# not a tool's field, and a credential word anywhere in the object that holds
-# the field, or in the key of that object or of any object around it
-# (``{"token": {"hex": "…"}}``, ``{"hex": "…", "kind": "api_key"}``), keeps the
-# run a key.
-_HEX_FIELD_BEFORE_RE = re.compile(r"(?<![A-Za-z0-9_])\\?[\"']hex\\?[\"']\s*:\s*\\?[\"']\Z")
+# byte range): data the tool read, which the length rule took for a key. Kept
+# only where the text parses as JSON (``json.loads``, nothing read by a pattern)
+# and the run is the string value of a real ``"hex"`` key, in an object with no
+# credential or key-material word in any of its keys or string values and none
+# in the key of any object or list around it (``{"token": {"hex": "…"}}``,
+# ``{"hex": "…", "kind": "api_key"}``). A JSON document carried as a string
+# value of another is read the same way, as part of it. Every place the run
+# stands in the text must be such a field: a run that also stands anywhere else
+# (a second copy in prose, a key repeated with another value) is masked.
 _HEX_DATA = re.compile(r"\A(?:[0-9A-Fa-f]{2})+\Z")
 # The words a credential or key material is named by. ``iv`` and ``pwd`` only as
 # a whole word: as letters inside another word they name nothing. The scrub's
-# own mark counts too: a key name an earlier pass masked named something the
-# scrub read as a credential.
+# own mark counts too: a value an earlier pass masked was read as a credential.
 _CREDENTIAL_WORD_RE = re.compile(
     r"(?i)api|auth|bearer|cookie|credential|hmac|key|mnemonic|nonce|passphrase|passwd"
     r"|password|priv|salt|secret|seed|session|signing|token"
     r"|(?<![a-z])(?:iv|pwd)(?![a-z])|\*\*\*"
 )
-# How far before the value the ``"hex":`` key itself is looked for.
-_HEX_FIELD_WINDOW = 16
-# The text between an object's opening brace and the delimiter before it, read
-# for the key that names the object, at most this long.
-_OBJECT_KEY_WINDOW = 80
-# The braces of one string, read once (``_Braces``) and kept for the next field
-# in the same string: the scrub masks run by run over one text.
-_BRACES_CACHE: list[Any] = [None, None]
+# The key a hex field is read under, as it stands in JSON text, plain or escaped
+# once: a text without it is not parsed at all.
+_HEX_KEYS_IN_TEXT = ('"hex"', '\\"hex\\"')
 
 
-class _Braces:
-    """For every position of a text, the innermost ``{`` around it, and each
-    ``{``'s matching ``}`` and enclosing ``{``. One pass, linear in the text.
+def _hex_fields(text: str) -> dict[str, int]:
+    """The hex runs of ``text`` that are a tool's ``"hex"`` field and nothing else.
 
-    An unclosed brace closes at the end of the text; a stray ``}`` closes
-    nothing. Braces inside a JSON string are counted too, which can only widen
-    the object read for a credential word.
+    ``{run: count}``; empty unless ``text`` is one JSON document. Per call and
+    read only by the call that made it: no state outlives it.
     """
-
-    def __init__(self, text: str) -> None:
-        from array import array
-
-        size = len(text)
-        self.inner = array("i", [-1]) * (size + 1)
-        self.close: dict[int, int] = {}
-        self.parent: dict[int, int] = {}
-        stack: list[int] = []
-        for index, char in enumerate(text):
-            if char == "{":
-                self.parent[index] = stack[-1] if stack else -1
-                stack.append(index)
-                self.inner[index] = stack[-2] if len(stack) > 1 else -1
-                continue
-            if char == "}" and stack:
-                self.close[stack.pop()] = index
-            self.inner[index] = stack[-1] if stack else -1
-        self.inner[size] = stack[-1] if stack else -1
-        for opened in stack:
-            self.close[opened] = size
+    if not any(key in text for key in _HEX_KEYS_IN_TEXT):
+        return {}
+    try:
+        document = json.loads(text)
+    except (ValueError, RecursionError):
+        return {}
+    found: dict[str, int] = {}
+    _collect_hex_fields(document, False, found, depth=0)
+    return {
+        run: count
+        for run, count in found.items()
+        if len(re.findall(rf"(?<![0-9A-Fa-f]){run}(?![0-9A-Fa-f])", text)) == count
+    }
 
 
-def _braces(text: str) -> _Braces:
-    if _BRACES_CACHE[0] is not text:
-        _BRACES_CACHE[0], _BRACES_CACHE[1] = text, _Braces(text)
-    read: _Braces = _BRACES_CACHE[1]
-    return read
+# How deep the reading follows nested objects and JSON documents carried as
+# strings; past it nothing more is kept, which only masks.
+_HEX_FIELD_DEPTH = 64
 
 
-def _object_key(text: str, opened: int) -> str:
-    """The text that names the object opening at ``opened``: back to the delimiter before it."""
-    head = text[max(0, opened - _OBJECT_KEY_WINDOW) : opened]
-    cut = max(head.rfind(mark) for mark in ",{[}")
-    return head[cut + 1 :]
+def _collect_hex_fields(node: Any, named: bool, found: dict[str, int], *, depth: int) -> bool:
+    """Count the clean ``"hex"`` fields under ``node``, and say whether anything under
+    it names a credential.
 
-
-def _under_a_hex_field(found: re.Match[str]) -> bool:
-    """Whether the run is the value of a tool's own ``"hex"`` JSON field, with no
-    credential word in the object that holds it or in the keys of the objects
-    around it.
-
-    The object is read from its ``{`` to its ``}``, whatever its length; with no
-    object around the field, the whole text is read.
+    ``named`` says a key or a string value of an object around ``node`` named
+    one. A ``"hex"`` field counts when neither its object's own keys and string
+    values, nor anything below that object, nor anything ``named`` carries
+    names one. Each node is read once: the object's own field is decided after
+    its children, from what they report.
     """
-    text = found.string
-    before = text[max(0, found.start() - _HEX_FIELD_WINDOW) : found.start()]
-    if _HEX_FIELD_BEFORE_RE.search(before) is None:
+    if depth > _HEX_FIELD_DEPTH:
+        return True
+    if isinstance(node, str):
+        stripped = node.strip()
+        if stripped[:1] in ("{", "["):
+            try:
+                inner = json.loads(stripped)
+            except (ValueError, RecursionError):
+                return bool(_CREDENTIAL_WORD_RE.search(node))
+            return _collect_hex_fields(inner, named, found, depth=depth + 1)
+        return bool(_CREDENTIAL_WORD_RE.search(node))
+    if isinstance(node, list):
+        below = False
+        for item in node:
+            below = _collect_hex_fields(item, named, found, depth=depth + 1) or below
+        return below
+    if not isinstance(node, dict):
         return False
-    braces = _braces(text)
-    opened = braces.inner[found.start()]
-    if opened < 0:
-        return not (
-            _CREDENTIAL_WORD_RE.search(text, 0, found.start())
-            or _CREDENTIAL_WORD_RE.search(text, found.end())
-        )
-    closed = braces.close.get(opened, len(text))
-    if _CREDENTIAL_WORD_RE.search(text, opened, found.start()) or _CREDENTIAL_WORD_RE.search(
-        text, found.end(), closed + 1
-    ):
-        return False
-    while opened >= 0:
-        if _CREDENTIAL_WORD_RE.search(_object_key(text, opened)):
-            return False
-        opened = braces.parent.get(opened, -1)
-    return True
+    own = any(_CREDENTIAL_WORD_RE.search(str(key)) for key in node) or any(
+        isinstance(item, str) and _CREDENTIAL_WORD_RE.search(item)
+        for key, item in node.items()
+        if key != "hex"
+    )
+    below = own
+    for key, item in node.items():
+        if key == "hex" and isinstance(item, str) and _HEX_DATA.match(item):
+            continue
+        below = _collect_hex_fields(item, named or own, found, depth=depth + 1) or below
+    value = node.get("hex")
+    if not (named or below) and isinstance(value, str) and _HEX_DATA.match(value):
+        found[value] = found.get(value, 0) + 1
+    return below
 
 
 def _names_only(stretch: str) -> bool:
@@ -1379,7 +1369,8 @@ def scrub(text: Any) -> str:
     with the key, the URL and the host path all inside it, and a rule anchored
     to the start of a word found none of them.
     """
-    return _scrub_line(" ".join(str(text or "").split()))
+    line = " ".join(str(text or "").split())
+    return _scrub_line(line, _hex_fields(line))
 
 
 def remember_secret_values(values: Iterable[str], *, scope: str = "job") -> None:
@@ -1460,7 +1451,7 @@ def _mask_configured_values(line: str) -> str:
 _SCRUB_PASSES = 4
 
 
-def _scrub_line(line: str) -> str:
+def _scrub_line(line: str, hex_fields: Mapping[str, int] | None = None) -> str:
     """The passes over text that is already one line, repeated until they change nothing.
 
     Once is not always enough: a path cut to its last segment can leave a
@@ -1470,7 +1461,7 @@ def _scrub_line(line: str) -> str:
     producer already scrubbed without changing a character of it.
     """
     for _ in range(_SCRUB_PASSES):
-        scrubbed = _scrub_once(line)
+        scrubbed = _scrub_once(line, hex_fields)
         if scrubbed == line:
             break
         line = scrubbed
@@ -1524,12 +1515,19 @@ def _scheme_and_secret(found: re.Match[str]) -> str:
     return f"{scheme} {_REDACTED}"
 
 
-def _scrub_once(line: str) -> str:
-    """The configured secrets by value, then the four passes, once."""
+def _scrub_once(line: str, hex_fields: Mapping[str, int] | None = None) -> str:
+    """The configured secrets by value, then the four passes, once.
+
+    ``hex_fields`` are the runs of the whole text that are a tool's own hex
+    field (:func:`_hex_fields`), read before any pass changed the text.
+    """
     line = _mask_configured_values(line)
     line = _SCHEME_AND_SECRET.sub(_scheme_and_secret, line)
     line = _URL_RUN.sub(_shorten_url, line)
-    line = _VALUE_RUN.sub(_hide_credentials, line)
+    if hex_fields:
+        line = _VALUE_RUN.sub(lambda found: _hide_credentials(found, hex_fields), line)
+    else:
+        line = _VALUE_RUN.sub(_hide_credentials, line)
     return _PATH_RUN.sub(_shorten_path, line)
 
 
@@ -1693,7 +1691,9 @@ def scrub_keeping_layout(text: Any) -> str:
     and code blocks in it. Every rule is applied to each line on its own,
     which is exactly what ``scrub`` does to the single line it makes.
     """
-    return "\n".join(_scrub_line(line) for line in str(text or "").splitlines())
+    whole = str(text or "")
+    fields = _hex_fields(whole)
+    return "\n".join(_scrub_line(line, fields) for line in whole.splitlines())
 
 
 def describe_exception(exc: BaseException) -> str:
