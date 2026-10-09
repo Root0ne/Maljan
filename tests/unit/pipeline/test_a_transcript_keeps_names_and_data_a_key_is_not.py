@@ -261,3 +261,31 @@ class TestHostileAnswersCostLinearWork:
         run = _hex_run(48)
         for text in (self._nested(100_000), self._near(1_000), '{"hex": "' + run + '"' * 1000):
             assert run not in scrub_keeping_layout(text)
+
+
+# Each a run that drove one of the scrub's patterns to retry every start: a
+# long stretch with no dot-separated token after it (the trailing-stretch
+# search), dotted runs a token search reads (the token scans), and a long run
+# of backslashes (the UNC path marker).
+_REDOS_UNITS = {
+    "stretch then a dot": "a" * 1000 + ".b ",
+    "dot after every letter": "a.",
+    "header-shaped runs with dots": "e" * 50 + ".aaaaaaaa.aaaaaaaa",
+    "header heads with dots": "eyJ.",
+    "backslashes": "\\\\",
+    "hex keys": '{"hex":"00",',
+}
+
+
+@pytest.mark.parametrize("unit", list(_REDOS_UNITS.values()), ids=list(_REDOS_UNITS))
+def test_a_megabyte_of_a_hostile_unit_costs_ten_times_a_tenth(unit: str) -> None:
+    import time
+
+    took = []
+    for size in (100_000, 1_000_000):
+        text = unit * (size // len(unit))
+        started = time.perf_counter()
+        scrub(text)
+        scrub_keeping_layout(text)
+        took.append(time.perf_counter() - started)
+    assert took[1] <= max(took[0], 0.01) * 20, took

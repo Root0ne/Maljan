@@ -667,7 +667,11 @@ _VALUE_RUN = re.compile(r"[^\s\"'`<>;:{}\[\](),=!\\\x80-\U0010ffff]+")
 # The host segment admits ``:`` and ``@`` because a UNC path carries
 # credentials in front of its host exactly as a URL does, and one that did
 # not match the marker was left in the text whole — password included.
-_UNC = r"\\{2,}[A-Za-z0-9._:@-]+\\+."
+# At most eight backslashes in the marker: a JSON escape doubles them, and no
+# UNC path carries more. Unbounded, the marker retried every start inside a long
+# run of backslashes and gave each one back, which is quadratic in the run; a
+# longer run is still read, from its last eight.
+_UNC = r"\\{2,8}[A-Za-z0-9._:@-]+\\+."
 _PATH_RUN = re.compile(
     _AFTER
     + r"(?P<run>(?:/(?!/)|\./|\.\./|~/|[A-Za-z]:(?:\\|/(?!/))|"
@@ -982,15 +986,17 @@ def _is_api_name(token: str) -> bool:
     before it to a catalogue name (``FindFirstFileA/W``).
     """
     # The catalogue first, alone and over every piece, as before the exact
-    # forms existed: those are asked only of what the catalogue does not hold.
+    # forms existed: those are asked only of a run long enough to be read as a
+    # key (no piece of a shorter run is one), and only after the catalogue.
     if _is_a_catalogue_name(token):
         return True
     pieces = [piece for piece in _JOINS.split(token) if piece]
-    if len(pieces) < 2:
-        # Alone, a run shorter than the length floor is no key to begin with.
-        return len(token) >= _ALPHABET_SLICE_FLOOR and _is_a_written_name(token)
-    if all(_is_a_catalogue_name(piece) for piece in pieces):
+    if len(pieces) > 1 and all(_is_a_catalogue_name(piece) for piece in pieces):
         return True
+    if len(token) < _ALPHABET_SLICE_FLOOR:
+        return False
+    if len(pieces) < 2:
+        return _is_a_written_name(token)
     named = ""
     for piece in pieces:
         if _is_a_catalogue_name(piece):
@@ -1154,19 +1160,19 @@ def _hide_credentials(found: re.Match[str], hex_fields: Mapping[str, int] | None
     if _looks_like_a_credential(value, whole=True):
         return _REDACTED
     head = ""
-    tail = _TRAILING_STRETCH.search(value)
+    # Padding first: it is one anchored match, and the stretch is read only
+    # where padding follows the run.
     padding = _PADDING.match(found.string, found.end())
+    tail_start = _stretch_start(value, _BASE64_CHARS) if padding is not None else len(value)
+    tail = value[tail_start:]
     if (
-        tail is not None
+        tail
         and padding is not None
-        and len(tail.group(0)) >= 24
-        and not _names_only(tail.group(0))
-        and (
-            padding.group("end") is not None
-            or (len(tail.group(0)) + len(padding.group("signs"))) % 4 == 0
-        )
+        and len(tail) >= 24
+        and not _names_only(tail)
+        and (padding.group("end") is not None or (len(tail) + len(padding.group("signs"))) % 4 == 0)
     ):
-        head, value = value[: tail.start()], ""
+        head, value = value[:tail_start], ""
     if not value:
         return f"{_hide_in_run(head)}{_REDACTED}" if head else _REDACTED
     return _hide_in_run(value)
@@ -1348,9 +1354,9 @@ def _hide_in_run(value: str) -> str:
         value = value[:start] + _REDACTED + value[end:]
     # A token inside the run: its dots end every stretch, so it is found as
     # itself first and masked with the stretches on either side of it.
-    value = _JWT_INSIDE.sub(
-        lambda token: _REDACTED if _is_a_token(token.group(0)) else token.group(0), value
-    )
+    for start, end in reversed(_dotted_triples(value)):
+        if _is_a_token(value[start:end]):
+            value = value[:start] + _REDACTED + value[end:]
     return _BASE64_STRETCH.sub(
         lambda stretch: _REDACTED if _stretch_holds_a_key(stretch.group(0)) else stretch.group(0),
         value,
@@ -1360,8 +1366,67 @@ def _hide_in_run(value: str) -> str:
 # A stretch of base64 or base64url characters, and one next to the mark a token
 # was masked with.
 _BASE64_STRETCH = re.compile(r"[A-Za-z0-9+/_\-]*\*\*\*[A-Za-z0-9+/_\-]*|[A-Za-z0-9+/_\-]+")
-# The stretch of base64 characters a run ends with.
-_TRAILING_STRETCH = re.compile(r"[A-Za-z0-9+/_\-]+\Z")
+# The characters of base64 and of base64url. A stretch a run ends with is
+# found by a scan from the end (``_stretch_start``): a search for a pattern
+# anchored at the end retries it from every start, which is quadratic in a
+# long run that does not end with the stretch.
+_BASE64_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/_-")
+_URLSAFE_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-")
+
+
+def _stretch_start(text: str, alphabet: frozenset[str]) -> int:
+    """Where the stretch of ``alphabet`` that ``text`` ends with starts; ``len(text)`` for none."""
+    start = len(text)
+    while start > 0 and text[start - 1] in alphabet:
+        start -= 1
+    return start
+
+
+def _stretch_end(text: str, alphabet: frozenset[str]) -> int:
+    """Where the stretch of ``alphabet`` that ``text`` begins with ends."""
+    end = 0
+    while end < len(text) and text[end] in alphabet:
+        end += 1
+    return end
+
+
+def _dotted_triples(run: str) -> list[tuple[int, int]]:
+    """Every place three base64url segments of 8 or more stand joined by dots, in order.
+
+    The first is the stretch a dot-separated part ends with, the second a whole
+    part, the third the stretch the next part begins with (and its ``=``
+    padding): a token's shape. One pass over the parts, linear in ``run``.
+    """
+    if run.count(".") < 2:
+        return []
+    parts = run.split(".")
+    starts = [0]
+    for part in parts[:-1]:
+        starts.append(starts[-1] + len(part) + 1)
+    spans: list[tuple[int, int]] = []
+    index = 0
+    while index + 2 < len(parts):
+        head, middle, tail = parts[index], parts[index + 1], parts[index + 2]
+        head_start = _stretch_start(head, _URLSAFE_CHARS)
+        tail_end = _stretch_end(tail, _URLSAFE_CHARS)
+        if (
+            len(head) - head_start < 8
+            or len(middle) < 8
+            or _stretch_end(middle, _URLSAFE_CHARS) != len(middle)
+            or tail_end < 8
+        ):
+            index += 1
+            continue
+        padded = tail_end
+        while padded < len(tail) and padded - tail_end < 2 and tail[padded] == "=":
+            padded += 1
+        spans.append((starts[index] + head_start, starts[index + 2] + padded))
+        # The third part's own end can start the next token only when the
+        # token did not take the whole of it.
+        index += 2 if padded < len(tail) else 3
+    return spans
+
+
 # Base64 padding after a run: one or two ``=`` that end the value. What may
 # follow them is the end of the text or a character no value starts with:
 # whitespace; a closing quote, bracket or brace, or ``</`` of a closing tag;
@@ -1377,49 +1442,29 @@ _PADDING = re.compile(
     r"(?P<signs>={1,2})(?!=)"
     r"(?P<end>\Z|(?=[\s)\]}>,;:.\/|+&!])|(?=</)|(?=\\?[\"'`](?:\Z|[\s)\]}>,;:.\/|&!])))?"
 )
-# A token's shape anywhere in a run: three base64url segments with dots between.
-_JWT_INSIDE = re.compile(r"[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}")
 # A token glued to other text inside a longer run: three dot-separated
 # base64url segments whose first is the run's trailing stretch from some point
 # on. A JOSE header is a JSON object, and base64url of ``{`` begins with ``e``
 # and one of ``w``-``z``, a digit, ``-`` or ``_``; the first four characters
 # decode to three bytes, and the first being ``{`` is what ``_is_a_token``'s
 # decode would find, so each start is decided from those four alone.
-_URLSAFE_STRETCH_END = re.compile(r"[A-Za-z0-9_\-]+\Z")
-_URLSAFE_SEGMENT = re.compile(r"[A-Za-z0-9_\-]{8,}\Z")
-_URLSAFE_SEGMENT_HEAD = re.compile(r"[A-Za-z0-9_\-]{8,}(?:={1,2})?")
 
 
 def _glued_tokens(run: str) -> list[tuple[int, int]]:
     """Where tokens stand inside ``run`` behind other text, in order. Linear in ``run``."""
-    if run.count(".") < 2:
-        return []
-    parts = run.split(".")
-    starts = [0]
-    for part in parts[:-1]:
-        starts.append(starts[-1] + len(part) + 1)
     spans: list[tuple[int, int]] = []
-    index = 0
-    while index + 2 < len(parts):
-        head = _URLSAFE_STRETCH_END.search(parts[index])
-        tail = _URLSAFE_SEGMENT_HEAD.match(parts[index + 2])
-        if head is None or tail is None or not _URLSAFE_SEGMENT.match(parts[index + 1]):
-            index += 1
-            continue
-        stretch = head.group(0)
+    for start, end in _dotted_triples(run):
+        head_end = run.index(".", start)
         at = next(
             (
                 offset
-                for offset in range(len(stretch) - 7)
-                if stretch[offset] == "e" and _opens_an_object(stretch[offset : offset + 4])
+                for offset in range(start, head_end - 7)
+                if run[offset] == "e" and _opens_an_object(run[offset : offset + 4])
             ),
             None,
         )
-        if at is None:
-            index += 1
-            continue
-        spans.append((starts[index] + head.start() + at, starts[index + 2] + tail.end()))
-        index += 3
+        if at is not None:
+            spans.append((at, end))
     return spans
 
 
