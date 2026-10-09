@@ -800,13 +800,24 @@ async def _publish_event(
     buffer = _EVENT_BUFFERS.get(job_id)
     if buffer is not None:
         await buffer.add(seq, event_type, stamped, ts)
-        if event_type == MODEL_USAGE_EVENT:
-            # A model call's usage is written the moment it arrives, with
-            # whatever is queued before it: the run summary that would carry
-            # it is built only at the end of the run, and a process killed
-            # before then would otherwise take what the run spent with it.
-            # One transaction per model call, which takes seconds anyway.
+    if event_type == MODEL_USAGE_EVENT:
+        # A model call's usage is committed as soon as this publish runs,
+        # with whatever is queued before it: the run summary that would carry
+        # it is built only at the end of the run, and a process killed before
+        # then would otherwise take what the run spent with it. The publish
+        # is scheduled from the call's own thread rather than awaited by it,
+        # so the guarantee is "committed once the loop runs the publish",
+        # normally milliseconds after the call is recorded; a process killed
+        # inside that window loses that one call's row. One transaction per
+        # model call, which takes seconds anyway.
+        #
+        # It is a record, not progress: the console draws nothing from it,
+        # and the live socket and the 1,000-entry replay stream are left to
+        # the events a reader follows. ``job_events`` keeps it, for as long
+        # as it keeps the rest of the feed (``core.events.retention_days``).
+        if buffer is not None:
             await buffer.flush()
+        return
     await redis_conn.publish(f"analysis:{job_id}", message)
     # Persist into the bounded Stream so the live page can replay missed
     # events when it mounts after the worker already started publishing.
@@ -1956,6 +1967,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
     # The task that keeps this job's owner heartbeat alive, cancelled by the
     # ``finally`` below so it cannot outlive the run it speaks for.
     owner_task: asyncio.Task | None = None
+    # The instant this job started, on the clock its timeout is measured on:
+    # the job timeout covers the whole job — the reads, the sample download and
+    # the pipeline — and a stop note's "seconds into the run" is read off the
+    # same clock from the same instant, so the two numbers cannot disagree.
+    job_started = job_clock()
     # Registered here rather than above the session: this is the statement
     # before the ``try`` whose ``finally`` unregisters it, so there is no
     # window in which a raise leaves a buffer in the module-global map for
@@ -1963,11 +1979,6 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
     # status change below — because a feed that starts late starts at the
     # wrong ``seq``.
     _start_event_feed(job_id, db_session)
-    # The instant this job started, on the clock its timeout is measured on:
-    # the job timeout covers the whole job — the reads, the sample download and
-    # the pipeline — and a stop note's "seconds into the run" is read off the
-    # same clock from the same instant, so the two numbers cannot disagree.
-    job_started = job_clock()
     try:
         # ── 1. Load job ──────────────────────────────────────
         from app.models.job import AnalysisJob

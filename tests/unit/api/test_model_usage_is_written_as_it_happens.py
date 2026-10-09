@@ -1,11 +1,14 @@
-"""What every model call spent is written to the job's record the moment it is recorded.
+"""What every model call spent is committed to the job's record as soon as it is published.
 
 The run summary holds a run's token usage, and it is built at the end of the
 run; a worker killed before then (``SIGKILL``, the memory recycler, a host that
 froze) took what the run spent with it. Each call the token ledger records now
 goes on the job's event feed as a ``model_usage`` event, and the worker commits
-it to ``job_events`` at once rather than with its next batch, so the trail is
-on disk before the next call starts and no ``finally`` has to run for it.
+it to ``job_events`` when the publish runs rather than with its next batch, so
+no ``finally`` has to run for it. The publish is scheduled from the call's
+thread, so what is guaranteed is "committed once the loop runs the publish",
+not "before the next call". The event is a record, not progress: it is kept
+off the live socket and the 1,000-entry replay stream.
 """
 
 from __future__ import annotations
@@ -122,6 +125,10 @@ class TestTheWorkerWritesItAtOnce:
             assert [event.type for event in committed] == ["agent_message", MODEL_USAGE]
             assert committed[-1].payload["input_tokens"] == 50
             assert committed[-1].payload["agent"] == "static"
+            # Kept off the socket and the replay stream: only the line went there.
+            assert redis.publish.await_count == 1
+            assert redis.xadd.await_count == 1
+            assert MODEL_USAGE not in str(redis.publish.await_args)
         finally:
             worker_module._EVENT_BUFFERS.pop(job_id, None)
             worker_module._LAST_SEQ.pop(job_id, None)

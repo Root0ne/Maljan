@@ -300,10 +300,11 @@ class TokenLedger:
         self._fallbacks: list[dict[str, str]] = []
         self._unreported: list[dict[str, str]] = []
         # Told of every recorded call as it is recorded, with the call's own
-        # figures (``call_record``): the worker writes each one to the job's
-        # durable event record, so what a run spent is known call by call even
-        # when its process dies before any summary is built. ``None`` where
-        # nothing listens.
+        # figures (``call_record``): the worker commits each one to the job's
+        # event record once its loop runs the publish, so what a run spent is
+        # known call by call even when its process dies before any summary is
+        # built (all but a call recorded in the last moments before the kill).
+        # ``None`` where nothing listens.
         self.on_call: Callable[[dict[str, Any]], None] | None = None
 
     def add(

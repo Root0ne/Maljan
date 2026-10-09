@@ -58,8 +58,9 @@ export type WSEventType =
    * failed as a provider; once per switch, whether or not deltas stream. */
   | "model_fallback"
   /* One model call's usage as the job's token ledger recorded it: agent,
-   * model, call and the figures its provider reported. Written to the job's
-   * event record the moment it is recorded, so what a run spent survives a
+   * model, call and the figures its provider reported. Committed to the
+   * job's stored events (`GET /jobs/{id}/events` replays it), never sent on
+   * the live socket or the replay stream, so what a run spent survives a
    * worker that dies before its run summary. */
   | "model_usage"
   | "completed"

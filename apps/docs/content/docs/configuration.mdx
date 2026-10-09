@@ -1580,10 +1580,22 @@ message is unaffected.
 `events.retention_days` (30) is how long a finished run's feed stays in
 `job_events` before the worker's nightly sweep removes it. The feed is the
 moment-by-moment record of a run, and what a reader wants while a run is
-fresh; a stopped run also keeps a partial report (see "The job timeout"). Each
-model call's usage is in it as a `model_usage` event, written the moment the
-call is recorded rather than with the next batch, so what a run spent is known
-even when its worker was killed before the run summary was built. The transcript, the
+fresh; a stopped run also keeps a partial report (see "The job timeout").
+
+Each model call's usage is in it as a `model_usage` event (agent, model, call
+and the figures the provider reported), so what a run spent is known even when
+its worker was killed before the run summary was built. What is guaranteed:
+the row is committed as soon as the worker's loop runs the publish, normally
+milliseconds after the call is recorded, not with the next batch; a worker
+killed inside that window loses that one call's row. It is a record, not
+progress, so it is kept off the live socket and the 1,000-entry replay stream
+and read back through `GET /jobs/{id}/events`. It lives exactly as long as the
+rest of the feed: `events.retention_days` (30) after the run. The run summary,
+which a completed or stopped run stores with its report, keeps the totals for
+good; the `model_usage` rows matter for a run whose worker died before it
+stored one, and are gone with its feed after that period.
+
+The transcript, the
 agent findings and the evidence ledger are kept by the report and the job and
 are not touched by the sweep, so shortening this does not shorten how long a
 finished analysis is readable.
