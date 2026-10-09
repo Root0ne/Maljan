@@ -370,6 +370,16 @@ class TokenLedger:
             except Exception:  # noqa: BLE001 — recording never raises
                 pass
 
+    def add_retry(self, *, agent: str = "", model: str = "", reason: str = "") -> None:
+        """One retry of a model request after a transient provider failure (``llm.transient``).
+
+        Written when the retry is decided, so a call that is then lost, or
+        handed to the next model of a list, is counted as one that answers is.
+        Not a call: no call count moves.
+        """
+        with self._lock:
+            self._retries.append({"agent": agent, "model": model, "reason": str(reason)})
+
     @property
     def input_tokens(self) -> int:
         return self._total.input_tokens
@@ -439,6 +449,25 @@ def record_response_usage(
             estimated=None if usage is not None else estimated_usage(response),
             retries=retries_of(response),
         )
+    except Exception:  # noqa: BLE001 — telemetry must never break analysis
+        return
+
+
+def record_lost_retries(
+    ledger: TokenLedger | None, exc: BaseException | None, *, agent: str = "", model: str = ""
+) -> None:
+    """The retries a lost call made before it was given up, onto ``ledger``. Never raises.
+
+    Only the ones no recorder of the job took (``llm.transient``): those are
+    rows already, written when each retry was decided.
+    """
+    if ledger is None or exc is None:
+        return
+    try:
+        from maljan.llm.transient import retries_given_up
+
+        for reason in retries_given_up(exc):
+            ledger.add_retry(agent=agent, model=model, reason=reason)
     except Exception:  # noqa: BLE001 — telemetry must never break analysis
         return
 

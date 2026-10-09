@@ -1753,7 +1753,18 @@ class RunSummaryBuilder:
         model counts and the fallbacks come out of the same snapshot, because
         the call that is counted is the call whose model is named.
         """
-        if not snapshot or not snapshot.get("llm_calls"):
+        if not snapshot:
+            return self
+        if not snapshot.get("llm_calls"):
+            # No call answered, and a provider may still have been asked
+            # again: those retries are counted even so.
+            lost: dict[str, Any] = {}
+            for row in snapshot.get("retries") or []:
+                block = lost.setdefault(str(row.get("agent") or ""), {"turns": {}, "fallbacks": []})
+                block.setdefault("retries", []).append(
+                    {"model": str(row.get("model") or ""), "reason": str(row.get("reason") or "")}
+                )
+            self._models = lost or None
             return self
         raw_agents = snapshot.get("agents")
         agents: dict[str, Any] = raw_agents if isinstance(raw_agents, dict) else {}

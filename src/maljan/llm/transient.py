@@ -39,6 +39,8 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from langchain_core.callbacks import BaseCallbackHandler
+
 from maljan.core.logger import logger
 
 # The statuses that mean "not now" rather than "no". A provider answering any
@@ -375,14 +377,105 @@ def retries_of(message: Any) -> list[str]:
     return [str(row) for row in rows] if isinstance(rows, list) else []
 
 
+class RetryRecorder(BaseCallbackHandler):
+    """Where one model's failed attempts are written for the run: the job's token ledger.
+
+    Attached to a model's callbacks where the job builds it
+    (:func:`attach_retry_recorder`), so every retry of that model is a row the
+    moment it is decided — whether the call is then answered, handed to the
+    next model of a list, or lost. It takes no part in the call's own
+    callbacks.
+    """
+
+    ignore_llm = True
+    ignore_chat_model = True
+    ignore_chain = True
+    ignore_agent = True
+    ignore_retriever = True
+    ignore_retry = True
+    ignore_custom_event = True
+
+    def __init__(self, ledger: Any, agent: str, model: str) -> None:
+        super().__init__()
+        self.ledger = ledger
+        self.agent = agent
+        self.model = model
+
+    def retried(self, reason: str) -> None:
+        """One retry, as a row of the run summary's Provider Retries."""
+        add = getattr(self.ledger, "add_retry", None)
+        if callable(add):
+            with contextlib.suppress(Exception):
+                add(agent=self.agent, model=self.model, reason=reason)
+
+
+# Set on an exception the policy gave up on, where no recorder took the rows:
+# the retries made before it, one line each, for whoever records the loss.
+RETRIES_ATTRIBUTE = "maljan_retries"
+
+
+def recorder_of(model: Any) -> RetryRecorder | None:
+    """The recorder attached to ``model``'s callbacks, or ``None``."""
+    callbacks = getattr(model, "callbacks", None)
+    if not isinstance(callbacks, list):
+        return None
+    return next((cb for cb in callbacks if isinstance(cb, RetryRecorder)), None)
+
+
+def attach_retry_recorder(llm: Any, ledger: Any, agent: str) -> Any:
+    """Add a :class:`RetryRecorder` for ``agent`` to ``llm``'s callbacks, once; returns ``llm``.
+
+    A model list gets one per model, each filed under the model it records.
+    Never raises: a model that takes no callbacks keeps its retries on the
+    answers that follow them.
+    """
+    if ledger is None or llm is None:
+        return llm
+    from maljan.llm.generation_rate import _fallback_list, model_name_of
+
+    models = _fallback_list(llm)
+    if models is not None:
+        for inner in models:
+            attach_retry_recorder(inner, ledger, agent)
+        return llm
+    try:
+        existing = list(getattr(llm, "callbacks", None) or [])
+        if any(isinstance(cb, RetryRecorder) for cb in existing):
+            return llm
+        recorder = RetryRecorder(ledger, agent, model_name_of(llm))
+        object.__setattr__(llm, "callbacks", [*existing, recorder])
+    except Exception:  # noqa: BLE001 — recording must never break a model
+        return llm
+    return llm
+
+
+# The recorders of the models a policy around them asked, set while it runs:
+# the policy writes its retries through the model that failed.
+_ASKED: contextvars.ContextVar[list[RetryRecorder] | None] = contextvars.ContextVar(
+    "maljan_transient_asked", default=None
+)
+
+
 class _Attempts:
     """The bookkeeping one retried call shares between its sync and async forms."""
 
-    def __init__(self, attempts: int, what: str, log: Any) -> None:
+    def __init__(
+        self, attempts: int, what: str, log: Any, recorder: RetryRecorder | None = None
+    ) -> None:
         self.attempts = max(1, int(attempts))
         self.what = what
         self.emit = log or logger
+        self.recorder = recorder
+        self.asked: list[RetryRecorder] = []
+        # The retries no recorder took, carried by the answer or the error.
         self.retried: list[str] = []
+
+    def _record(self, line: str) -> None:
+        recorder = self.recorder or (self.asked[-1] if self.asked else None)
+        if recorder is not None:
+            recorder.retried(line)
+        else:
+            self.retried.append(line)
 
     def failed(self, exc: BaseException, attempt: int) -> float | None:
         """The delay before the next attempt, or ``None`` when ``exc`` is to be raised."""
@@ -402,6 +495,9 @@ class _Attempts:
             if self.attempts > 1:
                 with contextlib.suppress(Exception):
                     setattr(exc, RETRIED_ATTRIBUTE, True)
+            if self.retried:
+                with contextlib.suppress(Exception):
+                    setattr(exc, RETRIES_ATTRIBUTE, list(self.retried))
             self.emit.error(
                 "%s: %s after %d attempts: %r" + cause_clause,
                 self.what,
@@ -422,7 +518,7 @@ class _Attempts:
             *cause_args,
             wait,
         )
-        self.retried.append(f"{self.what}: {kind} (attempt {attempt + 1} of {self.attempts})")
+        self._record(f"{self.what}: {kind} (attempt {attempt + 1} of {self.attempts})")
         return wait
 
 
@@ -432,17 +528,21 @@ async def retry_on_connection_error(
     attempts: int = DEFAULT_ATTEMPTS,
     what: str = "LLM call",
     log: Any = None,
+    recorder: RetryRecorder | None = None,
 ) -> Any:
     """Await ``make_awaitable()``, asking again only after a transient provider failure.
 
-    Backoff is 1 s then 2 s with jitter, or the provider's own ``Retry-After``
-    when it sends one that fits inside :data:`MAX_RETRY_AFTER_SECONDS`. Takes a
-    *factory* rather than an awaitable because a coroutine cannot be awaited
-    twice. The answer that followed a retry carries each failed attempt under
-    :data:`RETRIES_KEY`.
+    Backoff is 1 s then 2 s with jitter, or the provider's own wait
+    (:func:`asked_wait`) lengthened a little. Takes a *factory* rather than an
+    awaitable because a coroutine cannot be awaited twice. Each retry is a row
+    of the run summary, written through ``recorder`` or the recorder of the
+    model that failed; where neither exists the answer that followed carries
+    them under :data:`RETRIES_KEY`, and an error given up on under
+    :data:`RETRIES_ATTRIBUTE`.
     """
-    state = _Attempts(attempts, what, log)
+    state = _Attempts(attempts, what, log, recorder)
     token = _INSIDE.set(True)
+    asked = _ASKED.set(state.asked)
     try:
         for attempt in range(state.attempts):
             try:
@@ -453,6 +553,7 @@ async def retry_on_connection_error(
                     raise
                 await asyncio.sleep(wait)
     finally:
+        _ASKED.reset(asked)
         _INSIDE.reset(token)
     raise AssertionError("unreachable")  # pragma: no cover
 
@@ -463,10 +564,12 @@ def retry_on_connection_error_sync(
     attempts: int = DEFAULT_ATTEMPTS,
     what: str = "LLM call",
     log: Any = None,
+    recorder: RetryRecorder | None = None,
 ) -> Any:
     """:func:`retry_on_connection_error` for a blocking call."""
-    state = _Attempts(attempts, what, log)
+    state = _Attempts(attempts, what, log, recorder)
     token = _INSIDE.set(True)
+    asked = _ASKED.set(state.asked)
     try:
         for attempt in range(state.attempts):
             try:
@@ -477,6 +580,7 @@ def retry_on_connection_error_sync(
                     raise
                 time.sleep(wait)
     finally:
+        _ASKED.reset(asked)
         _INSIDE.reset(token)
     raise AssertionError("unreachable")  # pragma: no cover
 
@@ -494,6 +598,16 @@ def _what(model: Any) -> str:
     return f"model call ({name})" if name else "model call"
 
 
+def _failed_once(model: Any, exc: BaseException, prompt: Any) -> None:
+    """One failed request of ``model``, named to a policy around it."""
+    recorder = recorder_of(model)
+    if recorder is None:
+        return
+    asked = _ASKED.get()
+    if asked is not None and recorder not in asked:
+        asked.append(recorder)
+
+
 def with_transient_retries(chat_class: Any) -> Any:
     """``chat_class`` asking again, by :func:`retry_on_connection_error`, after a transient failure.
 
@@ -501,7 +615,8 @@ def with_transient_retries(chat_class: Any) -> Any:
     loop through the bound model, a structured-output chain, a model list
     asking one of its models — so the retry sits there and a whole request is
     made again, never a part of one. A call made inside the policy already is
-    made once. Anything that is not a class is returned as it is.
+    made once.
+    Anything that is not a class is returned as it is.
     """
     if not isinstance(chat_class, type):
         return chat_class
@@ -511,18 +626,28 @@ def with_transient_retries(chat_class: Any) -> Any:
     base: Any = chat_class
 
     async def ainvoke(self: Any, input: Any, config: Any = None, **kwargs: Any) -> Any:  # noqa: A002
+        async def _once() -> Any:
+            try:
+                return await base.ainvoke(self, input, config, **kwargs)
+            except Exception as exc:
+                _failed_once(self, exc, input)
+                raise
+
         if _INSIDE.get():
-            return await base.ainvoke(self, input, config, **kwargs)
-        return await retry_on_connection_error(
-            lambda: base.ainvoke(self, input, config, **kwargs), what=_what(self)
-        )
+            return await _once()
+        return await retry_on_connection_error(_once, what=_what(self), recorder=recorder_of(self))
 
     def invoke(self: Any, input: Any, config: Any = None, **kwargs: Any) -> Any:  # noqa: A002
+        def _once() -> Any:
+            try:
+                return base.invoke(self, input, config, **kwargs)
+            except Exception as exc:
+                _failed_once(self, exc, input)
+                raise
+
         if _INSIDE.get():
-            return base.invoke(self, input, config, **kwargs)
-        return retry_on_connection_error_sync(
-            lambda: base.invoke(self, input, config, **kwargs), what=_what(self)
-        )
+            return _once()
+        return retry_on_connection_error_sync(_once, what=_what(self), recorder=recorder_of(self))
 
     retrying = type(chat_class.__name__, (chat_class,), {"ainvoke": ainvoke, "invoke": invoke})
     # Named where it is made, so a log line or a repr says whose class it is.
@@ -530,3 +655,16 @@ def with_transient_retries(chat_class: Any) -> Any:
     retrying.__qualname__ = chat_class.__qualname__
     _RETRYING_CLASSES[chat_class] = retrying
     return retrying
+
+
+def retries_given_up(exc: BaseException | None) -> list[str]:
+    """The retries an error given up on carries (:data:`RETRIES_ATTRIBUTE`), its causes read too."""
+    seen: set[int] = set()
+    current = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        rows = getattr(current, RETRIES_ATTRIBUTE, None)
+        if isinstance(rows, list) and rows:
+            return [str(row) for row in rows]
+        current = current.__cause__ or current.__context__
+    return []

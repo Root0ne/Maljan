@@ -27,6 +27,7 @@ conversation event and the run summary.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import threading
 import time
 from contextvars import ContextVar
@@ -181,6 +182,22 @@ def _retries_spent(exc: BaseException) -> bool:
     from maljan.llm.transient import RETRIED_ATTRIBUTE
 
     return bool(getattr(exc, RETRIED_ATTRIBUTE, False))
+
+
+def _retries_given_up(exc: BaseException) -> list[str]:
+    from maljan.llm.transient import retries_given_up
+
+    return retries_given_up(exc)
+
+
+def _carry_retries(exc: BaseException, retried: list[str]) -> None:
+    """Every model's given-up retries on the error the list raises at its end."""
+    if not retried:
+        return
+    from maljan.llm.transient import RETRIES_ATTRIBUTE
+
+    with contextlib.suppress(Exception):
+        setattr(exc, RETRIES_ATTRIBUTE, list(retried))
 
 
 def retry_after_seconds(exc: BaseException) -> float | None:
@@ -401,10 +418,18 @@ class FallbackChatModel(BaseChatModel):
         )
         return f"{self._label(index)}: {reason}"
 
-    def _stamp(self, message: Any, index: int, failures: list[str]) -> ChatResult:
+    def _stamp(
+        self, message: Any, index: int, failures: list[str], retried: list[str] | None = None
+    ) -> ChatResult:
         if not isinstance(message, BaseMessage):
             message = AIMessage(content=str(getattr(message, "content", message)))
         metadata = dict(getattr(message, "response_metadata", None) or {})
+        if retried:
+            # The retries a model before this one gave up after, where no
+            # recorder of the job took them: carried by the answer that came.
+            from maljan.llm.transient import RETRIES_KEY
+
+            metadata[RETRIES_KEY] = [*retried, *list(metadata.get(RETRIES_KEY) or [])]
         metadata[MODEL_KEY] = self._label(index) if index < len(self.labels) else ""
         if failures:
             metadata[FALLBACK_KEY] = (
@@ -468,6 +493,7 @@ class FallbackChatModel(BaseChatModel):
     ) -> ChatResult:
         tools, tool_kwargs, call = self._split(kwargs)
         failures: list[str] = []
+        retried: list[str] = []
         index = self.answering
         waited = False
         while index < len(self.models):
@@ -483,11 +509,13 @@ class FallbackChatModel(BaseChatModel):
                     time.sleep(pause)
                     continue
                 failures.append(self._failed(index, exc))
+                retried.extend(_retries_given_up(exc))
                 if index + 1 >= len(self.models):
+                    _carry_retries(exc, retried)
                     raise
                 index, waited = index + 1, False
                 continue
-            return self._stamp(answer, index, failures)
+            return self._stamp(answer, index, failures, retried)
         raise RuntimeError(f"{self.agent or 'agent'} has no model to call")
 
     async def _agenerate(
@@ -499,6 +527,7 @@ class FallbackChatModel(BaseChatModel):
     ) -> ChatResult:
         tools, tool_kwargs, call = self._split(kwargs)
         failures: list[str] = []
+        retried: list[str] = []
         index = self.answering
         waited = False
         while index < len(self.models):
@@ -514,11 +543,13 @@ class FallbackChatModel(BaseChatModel):
                     await asyncio.sleep(pause)
                     continue
                 failures.append(self._failed(index, exc))
+                retried.extend(_retries_given_up(exc))
                 if index + 1 >= len(self.models):
+                    _carry_retries(exc, retried)
                     raise
                 index, waited = index + 1, False
                 continue
-            return self._stamp(answer, index, failures)
+            return self._stamp(answer, index, failures, retried)
         raise RuntimeError(f"{self.agent or 'agent'} has no model to call")
 
 

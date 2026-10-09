@@ -44,7 +44,11 @@ from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError, SampleNotOpened
 from maljan.core.logger import logger
 from maljan.core.spend import LOOP_TURN_CALL, SPEND_CAP, SpendCeilingStop, call_deadline_of
-from maljan.core.token_ledger import TokenLedger, record_response_usage
+from maljan.core.token_ledger import (
+    TokenLedger,
+    record_lost_retries,
+    record_response_usage,
+)
 from maljan.llm.answer_text import answer_text
 from maljan.llm.anthropic_history import (
     RUN_STATE_ATTACHED,
@@ -4920,6 +4924,13 @@ class BaseAnalyst(BudgetMeter, ABC):
                 raise
             except Exception as exc:
                 self._record_turns_taken(latest, len(messages))
+                # The retries the lost call made, where no recorder took them.
+                record_lost_retries(
+                    getattr(self, "token_ledger", None),
+                    exc,
+                    agent=str(getattr(self, "name", "") or ""),
+                    model=self._model_label(),
+                )
                 # A server that refused the request for its length is telling
                 # us the window it serves is not the one we learned; the
                 # learned figure is dropped so the next question is asked.
@@ -6070,6 +6081,13 @@ class BaseAnalyst(BudgetMeter, ABC):
             raise
         except Exception as exc:
             self.logger.error("LLM %s failed: %s (%s)", what, type(exc).__name__, exc)
+            # The retries the lost call made, where no recorder took them.
+            record_lost_retries(
+                getattr(self, "token_ledger", None),
+                exc,
+                agent=str(getattr(self, "name", "") or ""),
+                model=self._model_label(),
+            )
             raise AnalystError(f"{self.name} {what} failed: {exc}") from exc
 
         elapsed = _time.monotonic() - _t0
