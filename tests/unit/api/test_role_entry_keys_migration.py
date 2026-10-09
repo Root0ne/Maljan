@@ -174,6 +174,27 @@ class TestAnOwnAgentUnderARoleKey:
         _run(mod, conn, "downgrade")
         assert set(_rows(conn)["core.llm.agents"]) == {"mediator"}
 
+    def test_the_new_name_is_never_an_entry_that_already_exists(self):
+        conn = _connect()
+        _insert(conn, "core.agents.definitions", {"mediator": {"role": "generic", "prompt": "m"}})
+        _insert(
+            conn,
+            "core.llm.agents",
+            {
+                "mediator": {"provider": "openai", "model": "the-agents"},
+                "mediator_custom": {"provider": "openai", "model": "already-there"},
+            },
+        )
+
+        _run(_module(), conn)
+        rows = _rows(conn)
+
+        assert set(rows["core.agents.definitions"]) == {"mediator_custom_2"}
+        assert rows["core.llm.agents"] == {
+            "mediator_custom_2": {"provider": "openai", "model": "the-agents"},
+            "mediator_custom": {"provider": "openai", "model": "already-there"},
+        }
+
     def test_running_it_twice_changes_nothing_the_second_time(self):
         conn = _connect()
         _own_agents(conn)

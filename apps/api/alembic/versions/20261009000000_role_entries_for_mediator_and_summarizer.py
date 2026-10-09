@@ -79,7 +79,12 @@ def upgrade() -> None:
 
     earlier = _rename_revision()
     definitions = earlier._plain_value(conn, earlier.DEFINITIONS_KEY)
-    agent_renames = earlier._rename_map(definitions, ROLE_KEYS, set())
+    llm_agents = earlier._plain_value(conn, earlier.LLM_AGENTS_KEY)
+    # A new name is never an entry the store already holds: the rewrite of
+    # ``llm.agents`` keeps the last of two entries under one key and drops the
+    # other.
+    entries = set(llm_agents) if isinstance(llm_agents, dict) else set()
+    agent_renames = earlier._rename_map(definitions, ROLE_KEYS, entries)
     if agent_renames:
         earlier._apply(conn, agent_renames, {})
     moved = {f"agent {old}": new for old, new in agent_renames.items()}

@@ -219,8 +219,15 @@ def _rewrite_keys(mapping: Any, renames: dict[str, str]) -> Any:
     return {renames.get(k, k) if isinstance(k, str) else k: v for k, v in mapping.items()}
 
 
-def _rename_agents_document(agents: dict[str, Any]) -> tuple[dict[str, Any], AgentKeyRenames]:
-    """Rename inside ``core.agents`` and rewrite every reference it holds."""
+def _rename_agents_document(
+    agents: dict[str, Any], entries: set[str] | None = None
+) -> tuple[dict[str, Any], AgentKeyRenames]:
+    """Rename inside ``core.agents`` and rewrite every reference it holds.
+
+    ``entries`` are the ``llm.agents`` keys beside it: a new name is never one
+    of them, because the rewrite of that map keeps the last of two entries
+    under one key and drops the other.
+    """
     from maljan.core.config import ROLE_ENTRY_KEYS, _builtin_definitions, _builtin_profiles
 
     out = dict(agents)
@@ -229,7 +236,7 @@ def _rename_agents_document(agents: dict[str, Any]) -> tuple[dict[str, Any], Age
     definitions = out.get("definitions")
     if isinstance(definitions, dict):
         seeds = _builtin_definitions()
-        taken = set(definitions) | set(seeds) | set(ROLE_ENTRY_KEYS)
+        taken = set(definitions) | set(seeds) | set(ROLE_ENTRY_KEYS) | set(entries or ())
         renamed: dict[str, Any] = {}
         for key, entry in definitions.items():
             seed = seeds.get(key) if key in NEWLY_RESERVED_DEFINITIONS else None
@@ -309,7 +316,10 @@ def rename_colliding_agent_keys(document: Any) -> tuple[Any, AgentKeyRenames]:
     if not isinstance(agents, dict):
         return document, AgentKeyRenames()
 
-    renamed_agents, renames = _rename_agents_document(agents)
+    llm = document.get("llm")
+    llm_agents = llm.get("agents") if isinstance(llm, dict) else None
+    entries = {str(k) for k in llm_agents} if isinstance(llm_agents, dict) else set()
+    renamed_agents, renames = _rename_agents_document(agents, entries)
     if not renames:
         return document, renames
 

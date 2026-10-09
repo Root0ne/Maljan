@@ -111,6 +111,21 @@ class TestAStoredAgentUnderARoleKey:
         assert key not in cfg.llm.agents
         assert cfg.llm.agents[f"{key}_custom"].model == "gpt-x"
 
+    def test_the_new_name_is_never_an_entry_that_already_exists(self) -> None:
+        cfg = _settings(
+            agents={"definitions": {"mediator": {"role": "generic", "prompt": "mine"}}},
+            llm={
+                "agents": {
+                    "mediator": {"provider": "openai", "model": "the-agents"},
+                    "mediator_custom": {"provider": "openai", "model": "already-there"},
+                }
+            },
+        )
+
+        assert cfg.agents.definitions["mediator_custom_2"].prompt == "mine"
+        assert cfg.llm.agents["mediator_custom_2"].model == "the-agents"
+        assert cfg.llm.agents["mediator_custom"].model == "already-there"
+
     def test_a_role_entry_with_no_agent_of_that_name_is_the_roles(self) -> None:
         cfg = _settings(llm={"agents": {"mediator": {"provider": "openai", "model": "gpt-x"}}})
 
