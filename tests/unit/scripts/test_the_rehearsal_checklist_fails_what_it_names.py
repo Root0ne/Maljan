@@ -154,7 +154,10 @@ def _record(**changes: Any) -> RunRecord:
             "generation": {
                 "output_caps": {
                     "static": {"tokens": 8192, "derivation": _cap_from(WINDOW, "declared")},
-                    "judge": {"tokens": 9000, "derivation": "9000 tokens — set to 9000"},
+                    "judge": {
+                        "tokens": 9000,
+                        "derivation": "9000 tokens — llm.judge_max_tokens is set to 9000",
+                    },
                 }
             },
             "degradation_reasons": [],
@@ -787,5 +790,50 @@ class TestTheWindowInForce:
             f"judge's output cap of {WINDOW} tokens does not fit inside the {WINDOW}-token "
             f"window the stub serves {MODEL}"
         )
-        record.run_summary["generation"]["output_caps"]["judge"]["tokens"] = WINDOW - 1
+        record.run_summary["generation"]["output_caps"]["judge"] = {
+            "tokens": WINDOW - 1,
+            "derivation": f"{WINDOW - 1} tokens — the model's declared maximum output of "
+            f"{WINDOW - 1}",
+        }
         assert self._detail(record) == ""
+
+    @pytest.mark.parametrize(
+        ("agent", "entry", "said"),
+        [
+            ("static", {"tokens": 8192, "derivation": "8192 tokens — chosen"}, "cannot be read"),
+            (
+                "static",
+                {"tokens": 8192, "derivation": "4096 tokens — the declared maximum output of 4096"},
+                "cannot be read",
+            ),
+            ("static", {"tokens": "8192", "derivation": "8192 tokens"}, "cannot be read"),
+            ("static", "8192", "cannot be read"),
+            (
+                "planner",
+                {"tokens": 8192, "derivation": _cap_from(WINDOW, "declared")},
+                "planner is an agent the window check does not know",
+            ),
+        ],
+    )
+    def test_a_cap_it_cannot_read_fails_with_the_raw_text(
+        self, agent: str, entry: Any, said: str
+    ) -> None:
+        record = _record()
+        record.run_summary["generation"]["output_caps"][agent] = entry
+        detail = self._detail(record)
+        assert said in detail
+        assert repr(entry if not isinstance(entry, dict) else entry["derivation"])[:20] in detail
+
+    def test_an_agent_the_settings_name_a_model_for_is_known(self) -> None:
+        record = _record()
+        record.expected["model.planner"] = MODEL
+        record.run_summary["generation"]["output_caps"]["planner"] = {
+            "tokens": 8192,
+            "derivation": _cap_from(WINDOW, "declared"),
+        }
+        assert self._detail(record) == ""
+
+    def test_no_output_caps_fails(self) -> None:
+        record = _record()
+        record.run_summary["generation"] = {}
+        assert self._detail(record) == "the run summary records no output caps"

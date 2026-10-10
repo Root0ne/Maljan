@@ -730,6 +730,17 @@ _AGENT_GROUP = {
 _FALLBACK_SOURCE = "fallback"
 _WINDOW_SAID = re.compile(r"(\d+)-token context window \((\w+)\)")
 _NO_WINDOW_SAID = "no window was learned"
+# Every way the product states where a cap came from (``context_window.derived_reply``
+# and the reporter's budget): a window, no window, an operator's number, a
+# declared maximum, the hosted fallback. A derivation saying none of them is
+# not read as a pass.
+_CAP_SAID = (
+    "-token context window (",
+    _NO_WINDOW_SAID,
+    " is set to ",
+    "declared maximum output of ",
+    "the documented fallback of ",
+)
 # The operator's own tool-answer cap, under which the product consults no window.
 _OWN_TOOL_CAP = "settings.preprocessing.max_tool_output_chars"
 
@@ -789,35 +800,62 @@ def _check_window(record: RunRecord) -> Check:
                 f"the analysts' window is {tokens} tokens ({source}); the stub serves "
                 f"{analyst} {wanted}"
             )
-    caps = (record.run_summary.get("generation") or {}).get("output_caps") or {}
+    generation = record.run_summary.get("generation")
+    caps = generation.get("output_caps") if isinstance(generation, dict) else None
     unlearned: list[str] = []
-    for agent in sorted(caps):
+    if not isinstance(caps, dict) or not caps:
+        problems.append("the run summary records no output caps")
+        caps = {}
+    for agent in sorted(caps, key=str):
+        entry = caps[agent]
+        # The cap itself is the structured field; only the window it was
+        # derived from is read from the sentence, which names it in no field.
+        cap = entry.get("tokens") if isinstance(entry, dict) else None
+        derivation = entry.get("derivation") if isinstance(entry, dict) else None
+        if not isinstance(cap, int) or isinstance(cap, bool) or not isinstance(derivation, str):
+            problems.append(f"{agent}'s output cap cannot be read: {entry!r}")
+            continue
         group = _AGENT_GROUP.get(str(agent))
-        derivation = str((caps[agent] or {}).get("derivation") or "")
-        cap = (caps[agent] or {}).get("tokens")
-        if group is not None and isinstance(cap, int) and not isinstance(cap, bool):
+        if group is None and record.expected.get(f"model.{agent}"):
+            group = str(agent)
+        if group is None:
+            problems.append(
+                f"{agent} is an agent the window check does not know (its cap: {derivation!r})"
+            )
+            continue
+        capped = model_of(group)
+        if capped not in served:
+            problems.append(
+                f"no window was recorded as served to {capped or 'the model'} of {agent} "
+                f"(its cap: {derivation!r})"
+            )
+            continue
+        if cap >= served[capped]:
             # The cap the model was built with must leave the prompt room in
             # the window the provider serves it.
-            capped = model_of(group)
-            if capped in served and cap >= served[capped]:
-                problems.append(
-                    f"{agent}'s output cap of {cap} tokens does not fit inside the "
-                    f"{served[capped]}-token window the stub serves {capped}"
-                )
+            problems.append(
+                f"{agent}'s output cap of {cap} tokens does not fit inside the "
+                f"{served[capped]}-token window the stub serves {capped}"
+            )
+        # The sentence must state the cap the field holds ("derived: 8192 tokens — …").
+        if not re.search(rf"(?<!\d){cap} tokens\b", derivation) or not any(
+            said in derivation for said in _CAP_SAID
+        ):
+            problems.append(f"{agent}'s output cap derivation cannot be read: {derivation!r}")
+            continue
         if _NO_WINDOW_SAID in derivation:
             unlearned.append(str(agent))
             continue
         found = _WINDOW_SAID.search(derivation)
-        if not found or group is None:
+        if not found:
             continue
-        model = model_of(group)
         tokens, source = int(found.group(1)), found.group(2)
         if source == _FALLBACK_SOURCE:
             unlearned.append(str(agent))
-        elif model in served and tokens != served[model]:
+        elif tokens != served[capped]:
             problems.append(
                 f"{agent}'s output cap was derived from a {tokens}-token window ({source}); "
-                f"the stub serves {model} {served[model]}"
+                f"the stub serves {capped} {served[capped]}"
             )
     if unlearned:
         problems.append(f"output caps derived from no window: {', '.join(unlearned)}")
