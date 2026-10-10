@@ -1673,11 +1673,15 @@ class ServiceContainer:
         sandbox_report: dict[str, Any] | None = None,
         sample_path: str | None = None,
         room: Room | None = None,
+        head_room: Room | None = None,
     ) -> list[TextChunk]:
         """The input text agent ``agent_name`` is handed, as chunks.
 
         Each source is chunked on its own at ``room``, the agent's input room
-        (``None``: the operator's chunk size, or none).
+        (``None``: the operator's chunk size, or the unknown-window size). The
+        source the first chunk comes from is chunked at ``head_room`` where it
+        is given: the room its chunk has once the node adds to it
+        (``binary_chunker.head_room``).
 
         Driven by ``AgentDefinition.data_sources``. An empty list means the
         slice the agent's *role* used to get, which is spelled out in
@@ -1694,13 +1698,19 @@ class ServiceContainer:
         definition = self.config.agents.definitions.get(agent_name)
         sources = list(definition.data_sources) if definition is not None else []
         if not sources:
-            return self._legacy_role_data(agent_name, file_hash, sandbox_report, room)
+            return self._legacy_role_data(agent_name, file_hash, sandbox_report, room, head_room)
 
+        head = head_room if head_room is not None else room
         chunks: list[TextChunk] = []
         for source in sources:
             chunks.extend(
                 self._data_source_chunks(
-                    agent_name, source, file_hash, sandbox_report, sample_path, room
+                    agent_name,
+                    source,
+                    file_hash,
+                    sandbox_report,
+                    sample_path,
+                    room if chunks else head,
                 )
             )
         return chunks
@@ -1776,6 +1786,7 @@ class ServiceContainer:
         file_hash: str,
         sandbox_report: dict[str, Any] | None,
         room: Room | None = None,
+        head_room: Room | None = None,
     ) -> list[TextChunk]:
         """What the agent's role read before ``data_sources`` existed.
 
@@ -1785,8 +1796,9 @@ class ServiceContainer:
         "sample.chunks"]`` would hand a detonated sample both instead of one.
         """
         role = self.agent_role(agent_name)
+        head = head_room if head_room is not None else room
         if role in PROMPT_ROLES:
-            static_context = self.load_chunked(file_hash, agent_name, room=room)
+            static_context = self.load_chunked(file_hash, agent_name, room=head)
             sandbox_chunks: list[TextChunk] = []
             if sandbox_report:
                 sandbox_chunks = self._sandbox_slice(
@@ -1799,8 +1811,8 @@ class ServiceContainer:
                 "network": "sandbox.network",
                 "dynamic": "sandbox.behavior",
             }.get(role, "sandbox.full")
-            return self._sandbox_slice(agent_name, slice_name, sandbox_report, room)
-        return self.load_chunked(file_hash, agent_name, room=room)
+            return self._sandbox_slice(agent_name, slice_name, sandbox_report, head)
+        return self.load_chunked(file_hash, agent_name, room=head)
 
     def _prompt_room_chars(self) -> int | None:
         """What one prompt may carry before the reply room, or ``None`` with no window learned."""

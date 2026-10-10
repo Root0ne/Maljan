@@ -16,6 +16,7 @@ document, without the indentation.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from types import MethodType
 from typing import Any
@@ -25,15 +26,17 @@ import pytest
 from langchain_core.utils.function_calling import convert_to_openai_tool
 
 from maljan.agents.base_agent import INPUT_NOTICE_ROOM, BaseAnalyst
-from maljan.core.config import ChunkingConfig, Settings
+from maljan.core.config import ChunkingConfig, ProfileDefinition, Settings, StageDefinition
 from maljan.core.container import ServiceContainer
 from maljan.llm import context_window as cw
 from maljan.llm.context_window import UNKNOWN_WINDOW_CHUNK_TOKENS, _load_table
 from maljan.loaders.binary_chunker import (
     _CHARS_PER_TOKEN,
+    SHIPPED_CHUNK_CHARS,
     BinaryChunker,
     ChunkStrategy,
     TextChunk,
+    head_room,
     joined_when_it_fits,
 )
 from maljan.pipeline.nodes import agent_input_room, make_stage_agent_node
@@ -301,24 +304,6 @@ class TestTheNode:
         assert head.startswith(block + "\n\n")
         assert head[len(block) + 2 :] + "".join(c.content for c in chunks[1:]) == parsed
 
-    def test_a_static_head_written_out_indented_past_the_room_is_split_whole(self) -> None:
-        # The static head is handed over compact and written out again indented
-        # with the sample path in it; where that passes the room, the target is
-        # chunked again at the room less what was added.
-        target = {f"key_{i:05d}": f"value {i}" for i in range(4_000)}
-        compact = json.dumps(target, separators=(",", ":"))
-        room = len(compact) + 100
-        agent = _agent(room=room)
-        container = _container(agent, role="static", settings=_no_overlap())
-        node = make_stage_agent_node(ANALYSIS_STAGE, "static", container)
-
-        node(_state(sandbox_report={"target": target}))
-
-        agent.safe_analyze_isr.assert_not_called()
-        (chunks,) = agent.safe_analyze_isr_chunked.call_args[0]
-        assert all(c.char_count <= room for c in chunks)
-        assert "".join(c.content for c in chunks) == compact
-
     def test_an_operator_figure_decides_the_split(self) -> None:
         agent = _agent(room=1_000_000)
         settings = Settings(_env_file=None, chunking={"max_tokens_per_chunk": 50})
@@ -330,6 +315,143 @@ class TestTheNode:
 
         agent.safe_analyze_isr.assert_not_called()
         agent.safe_analyze_isr_chunked.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# The head source's room: less what the node adds, never below the shipped size
+# ---------------------------------------------------------------------------
+
+
+class TestTheHeadSourceRoom:
+    def test_the_head_source_is_given_the_room_less_what_is_added(self) -> None:
+        room = head_room(_room(300_000), lambda _text: 20_000)
+        assert room is not None and room("x") == 280_000
+
+    def test_the_head_source_is_never_given_less_than_the_shipped_size(self) -> None:
+        for added in (0, 18_800, 29_500, 29_800, 1_000_000):
+            room = head_room(_room(29_800), lambda _text, n=added: n)
+            assert room is not None and room("x") == SHIPPED_CHUNK_CHARS
+
+    def test_a_room_not_measured_is_passed_on(self) -> None:
+        assert head_room(None, lambda _text: 10) is None
+        for chars in (None, 0):
+            room = head_room(_room(chars), lambda _text: 10)
+            assert room is not None and room("x") == chars
+
+    def test_other_sources_keep_the_whole_room(self) -> None:
+        room = 100_000
+        agent = _agent(room=room)
+        settings = _no_overlap()
+        container = _container(agent, role="generic", settings=settings)
+        report = {"target": {"sha256": "abc123"}, "rows": ["x" * 40] * 6_000}
+        block = "Upstream findings: " + "u" * 30_000
+        node = make_stage_agent_node(ANALYSIS_STAGE, "triage", container)
+
+        with patch("maljan.pipeline.nodes.upstream_findings", lambda *_a: block):
+            node(_state(sandbox_report=report))
+
+        (chunks,) = agent.safe_analyze_isr_chunked.call_args[0]
+        sandbox = json.dumps(report, separators=(",", ":"), default=str)
+        assert [c.char_count for c in chunks[1:]] == [
+            min(room, len(sandbox) - i) for i in range(0, len(sandbox), room)
+        ]
+        assert json.loads(chunks[0].content)["upstream_findings"] == block
+
+
+HOSTILE_ROOM = 29_800
+HOSTILE_INPUT = "".join(f"- 203.0.{i % 250}.{i % 199}:443 flow {i:07d}\n" for i in range(20_000))[
+    :595_000
+]
+
+
+def _hostile_node(
+    parsed: str, block: str | None
+) -> tuple[MagicMock, Any, dict[str, Any], MagicMock]:
+    """A network analyst at a 29,800-character room whose upstream block is ``block``.
+
+    ``None`` builds the block the real way: a stage handed the whole prose of
+    the stage before it, under an operator cap above the room.
+    """
+    agent = _agent(room=HOSTILE_ROOM)
+    container = _container(agent, role="network")
+    container.parser_registry.create.side_effect = None
+    container.parser_registry.create.return_value.parse.return_value = parsed
+    stage = ANALYSIS_STAGE
+    state = _state(sandbox_report={"network": {"hosts": ["203.0.113.9"]}})
+    if block is None:
+        stage = StageDefinition(
+            key="deep",
+            kind="analysis",
+            agents=["network"],
+            depends_on=["triage"],
+            inject_upstream="full",
+        )
+        container.active_profile.return_value = ProfileDefinition(
+            label="test",
+            stages=[
+                StageDefinition(key="triage", kind="analysis", agents=["triage"]),
+                stage,
+                StageDefinition(
+                    key="verdict", kind="verdict", agents=["judge"], depends_on=["deep"]
+                ),
+            ],
+        )
+        container.config.reporting.upstream_findings_max_chars = 2 * HOSTILE_ROOM
+        state["reports"] = {"triage": "prose of the stage before " * 10_000}
+    return agent, make_stage_agent_node(stage, "network", container), state, container
+
+
+def _chunks_shown(agent: MagicMock) -> list[str]:
+    if agent.safe_analyze_isr_chunked.call_args is not None:
+        (chunks,) = agent.safe_analyze_isr_chunked.call_args[0]
+        return [c.content for c in chunks]
+    return [agent.safe_analyze_isr.call_args[0][0]]
+
+
+class TestAnUpstreamBlockNearTheRoomNeverMultipliesTheChunks:
+    """However much is added to the head, the count stays within the shipped split's."""
+
+    DEV = len(
+        BinaryChunker(ChunkingConfig(max_tokens_per_chunk=UNKNOWN_WINDOW_CHUNK_TOKENS)).chunk(
+            "network", HOSTILE_INPUT
+        )
+    )
+
+    @pytest.mark.parametrize("added", [0, 18_800, 29_500, 29_799, 29_800, 29_801, 60_000])
+    def test_a_block_of_any_size_up_to_past_the_room(self, added: int) -> None:
+        block = "U" * (added - 2) if added >= 2 else ""
+        agent, node, state, _container_ = _hostile_node(HOSTILE_INPUT, block)
+        with patch("maljan.pipeline.nodes.upstream_findings", lambda *_a: block):
+            node(state)
+        shown = _chunks_shown(agent)
+        assert 1 < len(shown) <= self.DEV
+        assert all(len(c) <= SHIPPED_CHUNK_CHARS for c in shown[1:])
+        assert shown[0].startswith(block)
+
+    def test_a_real_block_under_an_operator_cap_above_the_room(self) -> None:
+        agent, node, state, _container_ = _hostile_node(HOSTILE_INPUT, None)
+        node(state)
+        shown = _chunks_shown(agent)
+        assert shown[0].startswith("## Upstream findings")
+        assert "[upstream findings truncated]" in shown[0]
+        assert len(shown[0].split("\n\n[upstream findings truncated]")[0]) >= HOSTILE_ROOM
+        assert 1 < len(shown) <= self.DEV
+
+    def test_ten_times_the_input_takes_about_ten_times_as_long(self) -> None:
+        block = "U" * HOSTILE_ROOM
+
+        def timed(parsed: str) -> float:
+            agent, node, state, _container_ = _hostile_node(parsed, block)
+            with patch("maljan.pipeline.nodes.upstream_findings", lambda *_a: block):
+                began = time.perf_counter()
+                node(state)
+                return time.perf_counter() - began
+
+        timed(HOSTILE_INPUT)
+        small = min(timed(HOSTILE_INPUT) for _ in range(2))
+        large = min(timed(HOSTILE_INPUT * 10) for _ in range(2))
+        # Ten times the input in at most about ten times the time (twenty, for noise).
+        assert large < small * 20
 
 
 # ---------------------------------------------------------------------------

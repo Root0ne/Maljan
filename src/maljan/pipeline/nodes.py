@@ -15,7 +15,7 @@ import os
 import re
 import threading
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
@@ -44,7 +44,14 @@ from maljan.core.container import ServiceContainer
 from maljan.core.exceptions import AnalystError, LLMError, SampleNotOpened
 from maljan.core.logger import logger
 from maljan.core.spend import SpendCeilingStop
-from maljan.loaders.binary_chunker import Room, configured_chunk_chars, joined_when_it_fits
+from maljan.loaders.binary_chunker import (
+    SOURCE_SEPARATOR,
+    ChunkStrategy,
+    Room,
+    TextChunk,
+    head_room,
+    joined_when_it_fits,
+)
 from maljan.memory.long_term_memory import build_stored_case
 from maljan.pipeline import triage_pack
 from maljan.pipeline.claim_drops import (
@@ -1984,45 +1991,38 @@ def agent_input_room(container: Any, agent_name: str) -> Room:
     return input_room_of(agent)
 
 
-def _measured(room: Room | None, text: str) -> int | None:
-    """``room``'s answer for ``text`` when it measured one (a positive count), else ``None``."""
-    chars = room(text) if room is not None else None
-    if isinstance(chars, int) and not isinstance(chars, bool) and chars > 0:
-        return chars
-    return None
+def added_to_head(
+    state: AnalysisState, block: str, *, sample_fed: bool, provider_id: str | None
+) -> Callable[[str], int]:
+    """How many characters the node adds to a head chunk of a source's text, asked before chunking.
 
-
-def added_past_room(loaded: list, shown: list, config: Any, room: Room | None) -> int:
-    """Characters the head chunk gained after it was sized, when they took it past the room; else 0.
-
-    ``loaded`` is the loaders' chunks, ``shown`` the same once the node put the
-    sample path and the upstream block into the head. Asked only of a room the
-    analyst measured: an operator's chunk size and the unknown-window size are
-    what they always were.
+    The head is measured as it will be shown: the sample path written in for a
+    role whose tools open the sample (``_augment_static_chunks_with_path``, a
+    JSON head written out again indented), then the upstream block
+    (``_with_upstream``). At least the block and its break, which is what a
+    piece of a split source gains: it is no JSON head and takes the block in
+    front of it.
     """
-    if not loaded or not shown or configured_chunk_chars(config) is not None:
-        return 0
-    head = str(getattr(shown[0], "content", "") or "")
-    chars = _measured(room, head)
-    if chars is None or len(head) <= chars:
-        return 0
-    return max(0, len(head) - len(str(getattr(loaded[0], "content", "") or "")))
+    in_front = len(block) + len(SOURCE_SEPARATOR) if block else 0
 
+    def added(text: str) -> int:
+        shown: list = [
+            TextChunk(
+                index=0,
+                total=1,
+                strategy=ChunkStrategy.SLIDING_WINDOW,
+                content=text,
+                char_count=len(text),
+                token_estimate=len(text) // 4,
+                domain="head",
+            )
+        ]
+        if sample_fed:
+            shown = _augment_static_chunks_with_path(shown, state, provider_id=provider_id)
+        shown = _with_upstream(shown, block)
+        return max(len(str(shown[0].content)) - len(text), in_front)
 
-def room_less(room: Room, chars: int) -> Room:
-    """``room`` less ``chars``: what the loaders may fill when ``chars`` is added after them.
-
-    Where nothing is left, the answer is 0, a prompt with no room for input,
-    which the chunker leaves whole for the prompt to shorten and say so.
-    """
-
-    def smaller(text: str) -> int | None:
-        measured = room(text)
-        if isinstance(measured, int) and not isinstance(measured, bool) and measured > 0:
-            return max(0, measured - chars)
-        return measured
-
-    return smaller
+    return added
 
 
 def _with_upstream(chunks: list, block: str) -> list:
@@ -2802,29 +2802,39 @@ def make_stage_agent_node(
             # A chunk is what this analyst's prompt has room for, measured
             # by the analyst from its own window once the pack is on it.
             room = input_room_of(agent)
+            # What goes into the head chunk after it is sized — the sample
+            # path and the upstream block — is kept out of the head source's
+            # room before it is chunked, never below the shipped size.
+            upstream_block = upstream_findings(stage, state, container)
+            chunks = container.load_data_for_agent(
+                agent_name,
+                file_hash=state["file_hash"],
+                sandbox_report=sandbox_report,
+                sample_path=_absolute_host_sample_path(state) or None,
+                room=room,
+                head_room=head_room(
+                    room,
+                    added_to_head(
+                        state,
+                        upstream_block,
+                        sample_fed=role in SAMPLE_FED_ROLES,
+                        provider_id=(
+                            agent._resolved.static_provider_id if role in SAMPLE_FED_ROLES else None
+                        ),
+                    ),
+                ),
+            )
 
-            def _load_at(at: Room) -> tuple[list, list]:
-                """The loaders' chunks at room ``at``, and the same with the sample path in."""
-                loaded = container.load_data_for_agent(
-                    agent_name,
-                    file_hash=state["file_hash"],
-                    sandbox_report=sandbox_report,
-                    sample_path=_absolute_host_sample_path(state) or None,
-                    room=at,
-                )
-                if role not in SAMPLE_FED_ROLES:
-                    return loaded, loaded
+            if role in SAMPLE_FED_ROLES:
                 # The mirror is looked up by this agent's own static provider
                 # id so two static analysts on two providers each get their own
                 # mirror path, with the absolute host path as the fallback a
                 # provider that mirrors nothing leaves.
-                return loaded, _augment_static_chunks_with_path(
-                    loaded,
+                chunks = _augment_static_chunks_with_path(
+                    chunks,
                     state,
                     provider_id=agent._resolved.static_provider_id,
                 )
-
-            loaded, chunks = _load_at(room)
 
             # The no-data guard runs on what the *loaders* produced. Injecting
             # first would hide a placeholder behind the upstream block, and an
@@ -2893,16 +2903,7 @@ def make_stage_agent_node(
                     }
                 )
 
-            upstream_block = upstream_findings(stage, state, container)
             chunks = _with_upstream(chunks, upstream_block)
-            # The head grew after it was sized (the sample path, the upstream
-            # block, a JSON head written out again indented). Where that took
-            # it past the analyst's room, the input is chunked again at the
-            # room less what was added, so no chunk reaches the model shortened.
-            grown = added_past_room(loaded, chunks, container.config.chunking, room)
-            if grown:
-                loaded, chunks = _load_at(room_less(room, grown))
-                chunks = _with_upstream(chunks, upstream_block)
             # Sources that fit the room together are one chunk, and one loop.
             chunks = joined_when_it_fits(chunks, container.config.chunking, room)
 

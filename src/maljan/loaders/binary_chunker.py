@@ -63,6 +63,10 @@ Room = Callable[[str], "int | None"]
 # put in front of a head chunk with.
 SOURCE_SEPARATOR = "\n\n"
 
+# The chunk size this platform shipped with, in characters: what an input is
+# split at with no window learned, and the least the head source is given.
+SHIPPED_CHUNK_CHARS = UNKNOWN_WINDOW_CHUNK_TOKENS * _CHARS_PER_TOKEN
+
 
 def configured_chunk_chars(config: ChunkingConfig | None) -> int | None:
     """The operator's ``max_tokens_per_chunk`` in characters, or ``None`` where it is unset."""
@@ -89,10 +93,34 @@ def chunk_chars(config: ChunkingConfig, text: str, room: Room | None) -> int | N
         return configured
     chars = room(text) if room is not None else None
     if chars is None:
-        return UNKNOWN_WINDOW_CHUNK_TOKENS * _CHARS_PER_TOKEN
+        return SHIPPED_CHUNK_CHARS
     if isinstance(chars, int) and not isinstance(chars, bool) and chars > 0:
         return chars
     return None
+
+
+def head_room(room: Room | None, added: Callable[[str], int]) -> Room | None:
+    """The room for the source whose first chunk is added to after it is sized.
+
+    The node puts the sample path and the upstream block into the head chunk
+    once the input is chunked; ``added`` says, for the source's text, how many
+    characters that adds. The head source is chunked at ``room`` less that, so
+    its first chunk still fits once they are in; every other source keeps the
+    whole room. Never below :data:`SHIPPED_CHUNK_CHARS`, the head's size before
+    chunks were sized from the window: where the addition leaves less, the head
+    is chunked as it was then, so the chunk count is never above that one's.
+    A room not measured (``None``, or nothing left) is passed on unchanged.
+    """
+    if room is None:
+        return None
+
+    def measured(text: str) -> int | None:
+        chars = room(text)
+        if not isinstance(chars, int) or isinstance(chars, bool) or chars <= 0:
+            return chars
+        return max(chars - max(0, added(text)), SHIPPED_CHUNK_CHARS)
+
+    return measured
 
 
 def joined_when_it_fits(chunks: list, config: ChunkingConfig, room: Room | None) -> list:
