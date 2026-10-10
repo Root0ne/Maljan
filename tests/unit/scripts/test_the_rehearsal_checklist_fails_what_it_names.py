@@ -671,7 +671,8 @@ class TestABrokenStreamIsChargedItsReportedPrompt:
     def test_its_prompt_priced_and_its_output_estimated_passes(self) -> None:
         record = self._broken()
         assert "tokens and spend as the provider reported them" not in _failed(record)
-        # The estimate may be any size: it is the output the client never received.
+        # The estimate may be any size up to the request's cap: it is the output
+        # the client never received.
         record = self._broken(estimated_output=0.004)
         assert "tokens and spend as the provider reported them" not in _failed(record)
 
@@ -681,6 +682,23 @@ class TestABrokenStreamIsChargedItsReportedPrompt:
         data["priced_usd"] += 0.001
         record.run_summary["spend"]["spent_usd"] += 0.001
         assert "beyond its estimate" in self._detail(record)
+
+    def test_an_estimate_beyond_the_request_s_cap_fails(self) -> None:
+        # The broken call asks for at most 9,000 output tokens.
+        cap = stub_cost(
+            _log(0, "analyst", input_tokens=4000, cache_read_tokens=1000, output_tokens=9000),
+            price_rows(),
+        ) - stub_cost(
+            _log(0, "analyst", input_tokens=4000, cache_read_tokens=1000),
+            price_rows(),
+            prompt_only=True,
+        )
+        assert "tokens and spend as the provider reported them" not in _failed(
+            self._broken(estimated_output=cap)
+        )
+        assert "more than its cap of 9000 tokens costs" in self._detail(
+            self._broken(estimated_output=cap * 1.5)
+        )
 
     def test_a_whole_estimate_fails(self) -> None:
         record = self._broken(estimated_part="input and output")

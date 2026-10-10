@@ -441,8 +441,17 @@ def _broken_and_reported(record: RunRecord) -> list[dict[str, Any]]:
     ]
 
 
-def _stub_cost(entry: dict[str, Any], rows: dict[str, Any], *, prompt_only: bool = False) -> float:
-    """What one stub call's reported usage costs at the vendored prices; ``-1`` when unpriced."""
+def _stub_cost(
+    entry: dict[str, Any],
+    rows: dict[str, Any],
+    *,
+    prompt_only: bool = False,
+    output: int | None = None,
+) -> float:
+    """What one stub call's reported usage costs at the vendored prices; ``-1`` when unpriced.
+
+    ``output`` prices that many output tokens in place of the reported ones.
+    """
     price = rows.get(str(entry.get("model") or "").lower())
     if price is None:
         return -1.0
@@ -453,7 +462,11 @@ def _stub_cost(entry: dict[str, Any], rows: dict[str, Any], *, prompt_only: bool
         "cache_write_input_tokens": int(entry.get("cache_write_5m_tokens") or 0)
         + int(entry.get("cache_write_1h_tokens") or 0),
         "cache_write_1h_input_tokens": int(entry.get("cache_write_1h_tokens") or 0),
-        "output_tokens": 0 if prompt_only else int(entry.get("output_tokens") or 0),
+        "output_tokens": 0
+        if prompt_only
+        else int(entry.get("output_tokens") or 0)
+        if output is None
+        else int(output),
     }
     return float(price.at(when).cost(usage))
 
@@ -597,8 +610,20 @@ def _record_problems(record: RunRecord) -> tuple[list[str], float]:
                 f"{label}: estimated part {row.get('estimated_part')!r}, "
                 f"only {ESTIMATED_OUTPUT!r} may be estimated"
             )
+        # The most an output can cost: the request's own cap, at the output rate
+        # of the prompt's tier.
+        cap = int(entry.get("max_tokens") or 0)
+        whole = _stub_cost(entry, rows, output=cap) if cap > 0 else -1.0
+        ceiling = whole - prompt if whole >= 0 and prompt >= 0 else None
         if by_estimate < 0 or by_estimate > charged:
             problems.append(f"{label}: estimated {by_estimate:.8f} of {charged:.8f} USD")
+        elif ceiling is None:
+            problems.append(f"{label}: no output cap to bound its estimated output by")
+        elif by_estimate > ceiling and not _close(by_estimate, ceiling):
+            problems.append(
+                f"{label}: estimated output {by_estimate:.8f} USD, more than its cap of {cap} "
+                f"tokens costs ({ceiling:.8f} USD)"
+            )
         elif prompt >= 0 and not _close(charged - by_estimate, prompt):
             problems.append(
                 f"{label}: charged {charged - by_estimate:.8f} USD beyond its estimate, "
