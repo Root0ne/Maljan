@@ -7,7 +7,7 @@ can purge low-signal LTM entries that pre-date the write-time quality gate).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -23,6 +23,9 @@ from app.deps import optional_current_user, require_admin
 from app.logging_config import get_logger
 from app.models.user import User
 from app.runtime_config import runtime_config
+
+if TYPE_CHECKING:
+    from maljan.memory.long_term_memory import MemoryStore
 
 logger = get_logger("api.system")
 
@@ -228,33 +231,19 @@ class LTMPurgeResponse(BaseModel):
     dry_run: bool
 
 
-async def _build_memory_store(db: AsyncSession) -> object:
-    """Build a MemoryStore the same way the pipeline does.
+async def _build_memory_store(db: AsyncSession) -> MemoryStore:
+    """The configured MemoryStore, built by the factory every caller uses.
 
-    Kept local to avoid coupling the API router to internal container
-    initialisation. Returns whichever backend the operator configured
-    (Qdrant in production; InMemoryStore in tests / local).
+    Built from the UI-configured settings, not the environment's: the worker
+    reads and writes the UI-configured store, and purging another one would be
+    destructive and silent.
     """
     from maljan.core.settings_overrides import build_settings
-    from maljan.memory.in_memory_store import InMemoryStore
+    from maljan.memory.store_factory import build_memory_store
 
     from app.services.settings_service import load_core_overrides
 
-    # The worker reads and writes the UI-configured collection; purging the
-    # environment-configured one would be destructive and silent.
-    cfg = build_settings(await load_core_overrides(db))
-    backend = cfg.memory.backend.lower()
-    if backend == "qdrant":
-        from maljan.memory.qdrant_store import QdrantStore
-
-        return QdrantStore(
-            url=cfg.memory.qdrant_url,
-            collection=cfg.memory.qdrant_collection,
-            api_key=(
-                cfg.memory.qdrant_api_key.get_secret_value() if cfg.memory.qdrant_api_key else None
-            ),
-        )
-    return InMemoryStore()
+    return build_memory_store(build_settings(await load_core_overrides(db)))
 
 
 @router.post("/ltm/purge", response_model=LTMPurgeResponse)
@@ -279,8 +268,8 @@ async def ltm_purge(
             detail=redact_url(f"memory store unavailable: {exc}"),
         ) from exc
 
-    # The settings that name the collection have been read; the purge itself
-    # talks to Qdrant and scrolls the whole collection, which is no reason to
+    # The settings that name the store have been read; the purge itself may
+    # talk to a server and walk the whole store, which is no reason to
     # hold a transaction on Postgres. Outside the block above, so a database
     # that refused the commit is not reported to the operator as a memory
     # store that is unavailable.
@@ -289,70 +278,16 @@ async def ltm_purge(
     backend_name = type(store).__name__
 
     if body.dry_run:
-        # Dry-run is approximated by snapshotting the current count, running
-        # the purge against a transient view, and reporting what would have
-        # been removed. The Qdrant backend implements purge directly; to
-        # avoid actually deleting we instead simulate by checking how many
-        # entries would match. Cheapest path: invoke with max_total_techniques
-        # set to a sentinel that the implementation treats as no-op? Not
-        # available — so we explicitly walk the store via a temporary
-        # in-memory copy for InMemoryStore and a scroll for Qdrant.
-        if backend_name == "QdrantStore":
-            # Reuse the scroll loop directly. Read-only.
-            from qdrant_client.models import Filter  # noqa: F401 (typing only)
-
-            qstore = store  # type: ignore[assignment]
-            removed_estimate = 0
-            offset = None
-            if not getattr(qstore, "_collection_exists", lambda: False)():  # type: ignore[attr-defined]
-                return LTMPurgeResponse(removed=0, backend=backend_name, dry_run=True)
-            while True:
-                try:
-                    points, offset = qstore._client.scroll(  # type: ignore[attr-defined]
-                        collection_name=qstore._collection,  # type: ignore[attr-defined]
-                        limit=256,
-                        offset=offset,
-                        with_payload=True,
-                        with_vectors=False,
-                    )
-                except Exception as exc:
-                    logger.warning("ltm_purge: dry-run scroll failed (%s).", exc)
-                    break
-                for pt in points:
-                    payload = pt.payload or {}
-                    if body.include_analyst_errors and bool(
-                        payload.get("has_analyst_errors", False)
-                    ):
-                        removed_estimate += 1
-                        continue
-                    if body.max_total_techniques < 0:
-                        continue
-                    total = int(payload.get("total_techniques", 0) or 0)
-                    corroborated = int(payload.get("corroborated_count", 0) or 0)
-                    if total > body.max_total_techniques:
-                        continue
-                    if body.require_uncorroborated and corroborated > 0:
-                        continue
-                    removed_estimate += 1
-                if offset is None:
-                    break
-            return LTMPurgeResponse(removed=removed_estimate, backend=backend_name, dry_run=True)
-        # In-memory backend: read-only walk over case list.
-        removed_estimate = 0
-        for case, _vec in getattr(store, "_cases", []):  # type: ignore[attr-defined]
-            if body.include_analyst_errors and case.has_analyst_errors:
-                removed_estimate += 1
-                continue
-            if body.max_total_techniques < 0:
-                continue
-            if case.total_techniques > body.max_total_techniques:
-                continue
-            if body.require_uncorroborated and case.corroborated_count > 0:
-                continue
-            removed_estimate += 1
+        # Read-only: the store counts what the same gate would remove.
+        removed_estimate = store.purge_low_quality(
+            max_total_techniques=body.max_total_techniques,
+            require_uncorroborated=body.require_uncorroborated,
+            include_analyst_errors=body.include_analyst_errors,
+            dry_run=True,
+        )
         return LTMPurgeResponse(removed=removed_estimate, backend=backend_name, dry_run=True)
 
-    removed = store.purge_low_quality(  # type: ignore[attr-defined]
+    removed = store.purge_low_quality(
         max_total_techniques=body.max_total_techniques,
         require_uncorroborated=body.require_uncorroborated,
         include_analyst_errors=body.include_analyst_errors,

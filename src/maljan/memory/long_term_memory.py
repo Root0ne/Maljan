@@ -38,6 +38,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    from maljan.memory.function_hash_store import FunctionMatch
     from maljan.schemas.isr_models import AgentISR
 
 
@@ -91,8 +92,12 @@ class MemoryStore(Protocol):
     """Backend-agnostic interface for long-term case memory.
 
     All concrete implementations (InMemoryStore, QdrantStore) must satisfy
-    this Protocol. The @runtime_checkable decorator enables isinstance()
-    checks in tests and container code.
+    this Protocol, and every caller builds one through
+    ``maljan.memory.store_factory.build_memory_store``. A caller never asks
+    which backend it holds: what a backend cannot do it says through this
+    interface (``function_hash_store`` answering ``None``). The
+    @runtime_checkable decorator enables isinstance() checks in tests and
+    container code.
 
     Implementations:
         InMemoryStore  -- pure-Python cosine similarity (no infra required)
@@ -139,6 +144,7 @@ class MemoryStore(Protocol):
         max_total_techniques: int = 1,
         require_uncorroborated: bool = True,
         include_analyst_errors: bool = True,
+        dry_run: bool = False,
     ) -> int:
         """Delete stored cases that fall below the write-time quality gate.
 
@@ -155,7 +161,49 @@ class MemoryStore(Protocol):
         points with no ``total_techniques`` field are treated as 0 and so are
         considered low-quality by default. Operators can disable that branch
         by passing ``max_total_techniques=-1``.
+
+        ``dry_run`` counts the cases the same gate would remove and removes
+        none of them.
         """
+        ...
+
+    def readiness(self) -> str:
+        """Say what the store reached, or raise ``MemoryStoreError`` when it cannot.
+
+        A store with no server of its own answers without any I/O. The answer
+        is a short phrase for an operator; ``/health`` reports it.
+        """
+        ...
+
+    def function_hash_store(self) -> FunctionHashIndex | None:
+        """The exact-match function-hash store kept beside these cases, or ``None``.
+
+        ``None`` is the backend saying it holds no function hashes; every
+        caller then leaves function-hash attribution out, whichever backend
+        it is.
+        """
+        ...
+
+
+@runtime_checkable
+class FunctionHashIndex(Protocol):
+    """Exact-match store of per-function opcode hashes keyed to a family.
+
+    One entry per (sample, function hash); a re-analysis replaces the
+    sample's entries. Every method degrades to an empty answer on a backend
+    error, so attribution never breaks an analysis.
+    """
+
+    def upsert_sample(self, sample_id: str, family: str, functions: list[tuple[str, str]]) -> int:
+        """Write ``(func_hash, func_name)`` pairs for ``sample_id``; the number written."""
+        ...
+
+    def match(self, hashes: list[str], exclude_sample_id: str | None = None) -> list[FunctionMatch]:
+        """Stored functions whose hash is in ``hashes``, other than ``exclude_sample_id``'s."""
+        ...
+
+    def count(self) -> int:
+        """The number of stored function hashes."""
         ...
 
 

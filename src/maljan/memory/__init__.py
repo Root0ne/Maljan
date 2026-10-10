@@ -9,7 +9,9 @@ Modules:
   Long-Term Memory:
     - long_term_memory: StoredCase dataclass, MemoryStore Protocol, build_stored_case().
     - in_memory_store:  InMemoryStore -- pure-Python cosine similarity, zero dependencies.
-    - qdrant_store:     QdrantStore stub -- production Qdrant backend (requires qdrant-client).
+    - qdrant_store:     QdrantStore -- production Qdrant backend (requires qdrant-client).
+    - store_factory:    build_memory_store() -- the one place every caller builds the
+                        store memory.backend selects; register_memory_backend() adds one.
 """
 
 from maljan.memory.in_memory_store import InMemoryStore

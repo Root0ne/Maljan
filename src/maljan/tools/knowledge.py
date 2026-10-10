@@ -18,10 +18,13 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
 from maljan.core.paths import resolve_data
+
+if TYPE_CHECKING:
+    from maljan.memory.long_term_memory import FunctionHashIndex
 
 # The catalogs the pipeline ships. Passed as explicit arguments everywhere, so
 # an operator with their own catalog hands the tool the path and this module
@@ -630,32 +633,32 @@ def similar_cases(
     }
 
 
+# The answer's ``reason`` when the configured memory backend keeps no
+# function-hash store; it becomes the ledger entry's error.
+NO_FUNCTION_HASH_STORE = "the configured memory backend keeps no function hashes"
+
+
 def function_matches(
     func_hashes: list[str],
-    qdrant_url: str,
-    collection: str = "maljan_function_hashes_v1",
-    api_key: str | None = None,
+    store: FunctionHashIndex | None,
     exclude_sample_id: str = "",
 ) -> dict[str, Any]:
     """Stored samples that share a function hash with this one.
 
     Exact-match attribution: two binaries sharing a compiled function body is
-    a much stronger signal than two binaries scoring alike on prose. Needs
-    Qdrant, and says so instead of raising when it is not reachable.
+    a much stronger signal than two binaries scoring alike on prose. ``store``
+    is the configured memory backend's function-hash store
+    (``maljan.memory.store_factory.build_function_hash_store``); ``None`` is a
+    backend that keeps none, and the answer says so instead of raising, as it
+    does for a store that cannot be reached.
     """
-    from maljan.memory.function_hash_store import (
-        FunctionHashStore,
-        FunctionHashStoreUnavailableError,
-    )
-
     wanted = [str(h).strip() for h in (func_hashes or []) if str(h).strip()]
     if not wanted:
         return {"matches": []}
+    if store is None:
+        return {"matches": [], "reason": NO_FUNCTION_HASH_STORE}
     try:
-        store = FunctionHashStore(url=qdrant_url, collection=collection, api_key=api_key)
         found = store.match(wanted, exclude_sample_id=exclude_sample_id)
-    except FunctionHashStoreUnavailableError as exc:
-        return {"matches": [], "reason": f"qdrant-client is not installed: {exc}"}
     except Exception as exc:  # noqa: BLE001
         return {"matches": [], "reason": f"the function-hash store is unavailable: {exc}"}
     return {

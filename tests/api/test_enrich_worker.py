@@ -448,6 +448,7 @@ class TestTheMemoryStoreReadsOneSetOfSettings:
             "url": "http://qdrant:6333",
             "collection": "maljan_cases_v2",
             "api_key": "s3cr3t",
+            "function_hash_collection": "maljan_function_hashes_v1",
         }
 
     def test_an_unset_key_reaches_the_client_as_no_key(self) -> None:

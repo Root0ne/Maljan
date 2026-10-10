@@ -522,23 +522,22 @@ class TestAFailedIndexBuildIsRetried:
         monkeypatch.setattr(knowledge, "_HYBRID_FAILED_AT", time.monotonic() - 61)
         assert knowledge.warm_index_in_background() is True
 
-    def test_a_qdrant_free_box_reports_the_missing_client_rather_than_no_matches(
-        self, monkeypatch
-    ) -> None:
-        from maljan.memory.function_hash_store import FunctionHashStoreUnavailableError
-
-        def _explode(**kwargs: Any) -> Any:
-            raise FunctionHashStoreUnavailableError("qdrant-client is required")
-
-        monkeypatch.setattr("maljan.memory.function_hash_store.FunctionHashStore", _explode)
-        result = knowledge.function_matches(["deadbeef"], qdrant_url="http://localhost:6333")
+    def test_a_backend_without_function_hashes_says_so_rather_than_no_matches(self) -> None:
+        result = knowledge.function_matches(["deadbeef"], None)
         assert result["matches"] == []
-        assert "qdrant-client" in result["reason"]
+        assert "keeps no function hashes" in result["reason"]
 
-    def test_no_hashes_to_look_up_is_an_empty_answer_without_touching_qdrant(self) -> None:
-        assert knowledge.function_matches([], qdrant_url="http://unreachable:6333") == {
-            "matches": []
-        }
+    def test_a_store_that_cannot_answer_is_reported_not_raised(self) -> None:
+        class _Down:
+            def match(self, hashes: list[str], exclude_sample_id: str | None = None) -> Any:
+                raise ConnectionError("refused")
+
+        result = knowledge.function_matches(["deadbeef"], _Down())
+        assert result["matches"] == []
+        assert "unavailable" in result["reason"]
+
+    def test_no_hashes_to_look_up_is_an_empty_answer_without_touching_the_store(self) -> None:
+        assert knowledge.function_matches([], None) == {"matches": []}
 
 
 class TestTheCitationIsTheSameInEveryProcess:

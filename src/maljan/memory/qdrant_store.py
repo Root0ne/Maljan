@@ -83,7 +83,11 @@ class QdrantStore:
     """
 
     def __init__(
-        self, url: str, collection: str = "maljan_cases_v2", api_key: str | None = None
+        self,
+        url: str,
+        collection: str = "maljan_cases_v2",
+        api_key: str | None = None,
+        function_hash_collection: str | None = None,
     ) -> None:
         try:
             from qdrant_client import QdrantClient
@@ -98,6 +102,7 @@ class QdrantStore:
         self._collection = collection
         self._client: Any = QdrantClient(url=url, api_key=api_key)
         self._collection_ready = False
+        self._function_hash_collection = function_hash_collection
 
         logger.info(
             "QdrantStore initialized (url=%s, collection=%s, embed_dim=%d).",
@@ -260,6 +265,7 @@ class QdrantStore:
         max_total_techniques: int = 1,
         require_uncorroborated: bool = True,
         include_analyst_errors: bool = True,
+        dry_run: bool = False,
     ) -> int:
         """Delete low-quality stored cases from Qdrant.
 
@@ -268,7 +274,8 @@ class QdrantStore:
         for the offending IDs. Older points that pre-date the quality-signal
         payload (no ``total_techniques`` field) are treated as 0 — they are
         purged by default. Operators can disable that branch by passing
-        ``max_total_techniques=-1``.
+        ``max_total_techniques=-1``. ``dry_run`` walks the same pages and
+        returns the count without the ``delete``.
         """
         if not self._collection_exists():
             return 0
@@ -309,7 +316,7 @@ class QdrantStore:
             if offset is None:
                 break
 
-        if to_delete:
+        if to_delete and not dry_run:
             from qdrant_client.models import PointIdsList
 
             self._client.delete(
@@ -322,6 +329,31 @@ class QdrantStore:
                 len(to_delete),
             )
         return len(to_delete)
+
+    def readiness(self) -> str:
+        """Ask the server for its collections; raise ``MemoryStoreError`` when it cannot answer."""
+        try:
+            existing = {c.name for c in self._client.get_collections().collections}
+        except Exception as exc:
+            raise MemoryStoreError(
+                redact_url(f"Qdrant at {self._url} did not answer: {exc}")
+            ) from exc
+        if self._collection in existing:
+            return f"ready; collection {self._collection!r} exists"
+        return f"ready; collection {self._collection!r} is created on first write"
+
+    def function_hash_store(self) -> Any:
+        """The function-hash collection on the same server, through the same client.
+
+        ``None`` when no function-hash collection is configured.
+        """
+        if not self._function_hash_collection:
+            return None
+        from maljan.memory.function_hash_store import FunctionHashStore
+
+        return FunctionHashStore(
+            url=self._url, collection=self._function_hash_collection, client=self._client
+        )
 
     def __repr__(self) -> str:
         return (

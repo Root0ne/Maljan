@@ -64,15 +64,31 @@ async def _probe_minio() -> None:
     await asyncio.to_thread(_check)
 
 
-async def _probe_qdrant() -> None:
-    import httpx
+async def _probe_memory() -> dict[str, Any]:
+    """The configured long-term-memory backend's own readiness answer.
+
+    Built by the factory every caller uses, so ``/health`` probes the store
+    the runs write, whichever backend that is. A backend id the factory does
+    not know is reported as not configured rather than as a failure.
+    """
+    from maljan.memory.store_factory import (
+        MemoryBackendNotConfiguredError,
+        build_memory_store,
+        configured_backend,
+    )
 
     from app.runtime_config import runtime_config
 
-    qdrant_url = (await runtime_config.core()).memory.qdrant_url
-    async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT_SECONDS) as client:
-        resp = await client.get(f"{qdrant_url.rstrip('/')}/readyz")
-        resp.raise_for_status()
+    core = await runtime_config.core()
+    backend = configured_backend(core)
+    try:
+        store = await asyncio.to_thread(build_memory_store, core)
+    except MemoryBackendNotConfiguredError:
+        return {"ok": None, "error": None, "backend": backend, "detail": "not configured"}
+    # The answer names a collection or a path; this endpoint is
+    # unauthenticated, so only the fact that the store answered is published.
+    await asyncio.to_thread(store.readiness)
+    return {"ok": True, "error": None, "backend": backend}
 
 
 async def _probe_components() -> dict[str, dict[str, Any]]:
@@ -80,18 +96,22 @@ async def _probe_components() -> dict[str, dict[str, Any]]:
 
     Each probe reports ``{"ok": bool, "error": str | None}``; a failure is data,
     never an exception, so one dead dependency cannot take the endpoint down.
+    ``ok`` ``None`` is a component that is not configured: reported, never a
+    failure.
     """
     probes: dict[str, Any] = {
         "database": _probe_database,
         "redis": _probe_redis,
         "minio": _probe_minio,
-        "qdrant": _probe_qdrant,
+        "memory": _probe_memory,
     }
 
     async def _run(name: str, fn: Any) -> tuple[str, dict[str, Any]]:
         try:
-            await asyncio.wait_for(fn(), timeout=_PROBE_TIMEOUT_SECONDS)
-            return name, {"ok": True, "error": None}
+            answer = await asyncio.wait_for(fn(), timeout=_PROBE_TIMEOUT_SECONDS)
+            # A probe may answer with its own fields (the memory probe names
+            # its backend); one that answers nothing passed.
+            return name, answer if isinstance(answer, dict) else {"ok": True, "error": None}
         except TimeoutError:
             return name, {"ok": False, "error": f"timeout after {_PROBE_TIMEOUT_SECONDS:g}s"}
         except Exception as exc:  # noqa: BLE001 — a probe failure is a result

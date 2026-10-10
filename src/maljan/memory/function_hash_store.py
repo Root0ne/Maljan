@@ -32,6 +32,7 @@ from typing import Any
 
 from maljan.core.exceptions import MemoryStoreError
 from maljan.core.logger import logger
+from maljan.core.settings_overrides import redact_url
 
 # 1-dim dummy vector: we only ever filter by payload, never search by vector.
 _DUMMY_VECTOR: list[float] = [1.0]
@@ -78,21 +79,27 @@ class FunctionHashStore:
         url: str,
         collection: str = "maljan_function_hashes_v1",
         api_key: str | None = None,
+        client: Any = None,
     ) -> None:
-        try:
-            from qdrant_client import QdrantClient
-        except ImportError as exc:  # pragma: no cover - exercised via integration
-            raise FunctionHashStoreUnavailableError(
-                "qdrant-client is required for FunctionHashStore.\n"
-                "Install with: uv add qdrant-client\n"
-                "Start Qdrant: docker run -p 6333:6333 qdrant/qdrant"
-            ) from exc
+        """``client`` is an open ``QdrantClient`` to share (the case store's own)."""
+        if client is None:
+            try:
+                from qdrant_client import QdrantClient
+            except ImportError as exc:  # pragma: no cover - exercised via integration
+                raise FunctionHashStoreUnavailableError(
+                    "qdrant-client is required for FunctionHashStore.\n"
+                    "Install with: uv add qdrant-client\n"
+                    "Start Qdrant: docker run -p 6333:6333 qdrant/qdrant"
+                ) from exc
+            client = QdrantClient(url=url, api_key=api_key)
 
         self._url = url
         self._collection = collection
-        self._client: Any = QdrantClient(url=url, api_key=api_key)
+        self._client: Any = client
         self._collection_ready = False
-        logger.info("FunctionHashStore initialized (url=%s, collection=%s).", url, collection)
+        logger.info(
+            "FunctionHashStore initialized (url=%s, collection=%s).", redact_url(url), collection
+        )
 
     # ------------------------------------------------------------------
     # Public API

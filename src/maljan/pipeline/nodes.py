@@ -1263,15 +1263,27 @@ def with_verdict_fallback(validation: Any, failure: str) -> dict[str, Any]:
 def _function_matches_step(container: ServiceContainer, state: AnalysisState) -> Any:
     """The pack's exact-match attribution step, or ``None`` when it cannot run.
 
-    Three things have to be there: a Qdrant memory backend, a static provider
-    that can hash functions, and a mirror path for it to read. Without any
-    one of them there is no entry, because there is nothing that could have
-    been asked; with all three the step is the judge's function-hash read,
-    made before the analysts instead of after them.
+    Three things have to be there: a memory backend that keeps function
+    hashes, a static provider that can hash functions, and a mirror path for
+    it to read. Without any one of them there is no entry, because there is
+    nothing that could have been asked; with all three the step is the
+    judge's function-hash read, made before the analysts instead of after
+    them. A backend whose store could not be built still gets its entry,
+    saying why it found nothing.
     """
+    from maljan.memory.store_factory import build_function_hash_store, configured_backend
+
     cfg = container.config
     static_path = state.get("static_sample_path")
-    if str(getattr(cfg.memory, "backend", "")) != "qdrant" or not static_path:
+    if not static_path:
+        return None
+    unavailable = ""
+    try:
+        store = build_function_hash_store(cfg)
+    except Exception as exc:  # noqa: BLE001 — said in the entry, never raised
+        store = None
+        unavailable = f"the function-hash store is unavailable: {exc}"
+    if store is None and not unavailable:
         return None
     try:
         provider = container.get_static_provider()
@@ -1290,20 +1302,12 @@ def _function_matches_step(container: ServiceContainer, state: AnalysisState) ->
         hashes = [h for _name, h in provider.function_hashes(job)]
         args = {
             "func_hashes": hashes,
-            "qdrant_url": cfg.memory.qdrant_url,
-            "collection": cfg.memory.qdrant_function_hash_collection,
+            "backend": configured_backend(cfg),
             "exclude_sample_id": sha256,
         }
-        api_key = (
-            cfg.memory.qdrant_api_key.get_secret_value() if cfg.memory.qdrant_api_key else None
-        )
-        return args, knowledge.function_matches(
-            hashes,
-            cfg.memory.qdrant_url,
-            collection=cfg.memory.qdrant_function_hash_collection,
-            api_key=api_key,
-            exclude_sample_id=sha256,
-        )
+        if unavailable and hashes:
+            return args, {"matches": [], "reason": unavailable}
+        return args, knowledge.function_matches(hashes, store, exclude_sample_id=sha256)
 
     return step
 
@@ -5211,17 +5215,22 @@ def make_judge_node(
                 _cfg = get_settings()
                 _provider = container.get_static_provider()
                 _static_path = state.get("static_sample_path")
+                _fh_store = None
                 if (
                     _cfg.preprocessing.use_function_hash_attribution
                     and _provider.capabilities.provides_function_hashes
-                    and _cfg.memory.backend == "qdrant"
                     and _static_path
                 ):
+                    from maljan.memory.store_factory import build_function_hash_store
+
+                    # ``None``: the configured memory backend keeps no
+                    # function hashes, so there is nothing to read or grow.
+                    _fh_store = build_function_hash_store(_cfg)
+                if _fh_store is not None:
                     from maljan.analysis.function_hash_attribution import (
                         aggregate_matches,
                         to_report_dicts,
                     )
-                    from maljan.memory.function_hash_store import FunctionHashStore
                     from maljan.providers.base import StaticJobContext
 
                     _sample_id = state.get("file_hash", "") or ""
@@ -5229,15 +5238,6 @@ def make_judge_node(
                         StaticJobContext(mirror_sample_path=str(_static_path))
                     )
                     if _funcs:
-                        _fh_store = FunctionHashStore(
-                            url=_cfg.memory.qdrant_url,
-                            collection=_cfg.memory.qdrant_function_hash_collection,
-                            api_key=(
-                                _cfg.memory.qdrant_api_key.get_secret_value()
-                                if _cfg.memory.qdrant_api_key
-                                else None
-                            ),
-                        )
                         # Read side: surface prior family overlap in the report.
                         _func_hash_report = to_report_dicts(
                             aggregate_matches(

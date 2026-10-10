@@ -101,12 +101,13 @@ class InMemoryStore:
         max_total_techniques: int = 1,
         require_uncorroborated: bool = True,
         include_analyst_errors: bool = True,
+        dry_run: bool = False,
     ) -> int:
         """Drop low-quality cases per the write-time quality gate.
 
         See ``MemoryStore.purge_low_quality`` for the contract. The
         in-memory implementation walks the case list and rebuilds it,
-        keeping only entries that pass the gate.
+        keeping only entries that pass the gate; ``dry_run`` only counts.
         """
 
         def _low_quality(case: StoredCase) -> bool:
@@ -120,9 +121,19 @@ class InMemoryStore:
                 return False
             return True
 
+        if dry_run:
+            return sum(1 for c, _v in self._cases if _low_quality(c))
         before = len(self._cases)
         self._cases = [(c, v) for c, v in self._cases if not _low_quality(c)]
         return before - len(self._cases)
+
+    def readiness(self) -> str:
+        """Always ready: the cases live in this process."""
+        return "in process"
+
+    def function_hash_store(self) -> None:
+        """This backend keeps no function hashes."""
+        return None
 
     def __repr__(self) -> str:
         return f"InMemoryStore(count={self.count()})"
