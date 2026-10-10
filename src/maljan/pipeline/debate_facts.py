@@ -27,11 +27,9 @@ size are left out.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
-
-from maljan.schemas.isr_models import claim_summary_line
 
 # A ledger id as the evidence ledger writes it.
 _ENTRY_ID = re.compile(r"\bev_\d+\b")
@@ -79,52 +77,21 @@ def _name_pattern(name: str) -> re.Pattern[str]:
     )
 
 
-def _heading_pattern(name: str) -> re.Pattern[str]:
-    """An analyst named as the platform heads its report: ``STATIC``, ``Static Analyst``.
-
-    The key in capitals, as a token, or its words followed by the word
-    ``analyst`` in any case. A lower-case word that spells a key ("the string
-    is static") is not a name.
-    """
-    parts = [part for part in re.split(r"[_\-\s]+", name) if part]
-    sep = r"[_\-\s]+"
-    upper = sep.join(re.escape(part.upper()) for part in parts)
-    words = sep.join(re.escape(part) for part in parts)
-    return re.compile(
-        r"(?<![0-9A-Za-z_])(?:" + upper + r"|(?i:" + words + sep + r"analyst))(?![0-9A-Za-z_])"
-    )
-
-
-def _mentions(
-    line: str,
-    agent_names: Iterable[str],
-    pattern: Callable[[str], re.Pattern[str]] = _name_pattern,
-) -> list[tuple[str, list[int] | None]]:
-    """``(agent, claim numbers or None)`` for each time the line names an analyst.
-
-    Longer names are read first, so a name inside a longer one is not read
-    again. ``None`` is a mention that cites no claim number right after it.
-    ``pattern`` is how a name is recognised (``_name_pattern`` by default).
-    """
+def _claims_named(line: str, agent_names: Iterable[str]) -> list[tuple[str, list[int]]]:
+    """``(agent, claim numbers)`` for each analyst the line names with claim numbers."""
     names = sorted({str(n) for n in agent_names if str(n).strip()}, key=len, reverse=True)
     taken: list[tuple[int, int]] = []
-    found: list[tuple[str, list[int] | None]] = []
+    found: list[tuple[str, list[int]]] = []
     for name in names:
-        for match in pattern(name).finditer(line):
+        for match in _name_pattern(name).finditer(line):
             span = match.span()
             if any(span[0] < end and start < span[1] for start, end in taken):
                 continue
             taken.append(span)
             numbers = _CLAIM_NUMBERS.match(line, match.end())
-            found.append(
-                (name, [int(n) for n in re.findall(r"\d+", numbers.group(1))] if numbers else None)
-            )
+            if numbers is not None:
+                found.append((name, [int(n) for n in re.findall(r"\d+", numbers.group(1))]))
     return found
-
-
-def _claims_named(line: str, agent_names: Iterable[str]) -> list[tuple[str, list[int]]]:
-    """``(agent, claim numbers)`` for each analyst the line names with claim numbers."""
-    return [(name, numbers) for name, numbers in _mentions(line, agent_names) if numbers]
 
 
 def _claims_of(isr_reports: Mapping[str, Any], name: str) -> list[Any]:
@@ -397,82 +364,69 @@ def contested_input(
     participants: Sequence[str],
     reports: Mapping[str, str],
     isr_reports: Mapping[str, Any],
+    labels: Mapping[str, str] | None = None,
 ) -> tuple[str, dict[str, str]]:
     """``(mediator feedback, peer reports)`` for a named analyst's revision.
 
     The feedback is the mediation's finding with its listed lines cut to the
     blocking lines whose field names ``name``; a finding not laid out as the
-    mediation writes it is passed whole. The peers are the ones those lines
-    name, in the field or by the name their report is headed with, in the
-    participants' order. A peer whose every mention in those lines cites its
-    claims by number is shown those claims as the mediator read them, each
-    found by the number its analyst wrote (``_place_of``); any other peer, and
-    one cited by a number none of its claims holds, is shown its whole answer
-    in force. The lines themselves are kept whole, with every claim number and
-    ledger id they cite.
+    mediation writes it is passed whole. The lines themselves are kept whole,
+    with every claim number and ledger id they cite.
+
+    The peers shown are the ones those lines name in their field, and every
+    peer whose key or label (``labels``) the lines write, in any case or form,
+    in the participants' order: a peer the prose may mean is shown rather than
+    left out. Each is shown whole, as the mediator read its claims
+    (``peer_as_read``); no claim is picked out of it.
     """
     mine = points_naming(name, blocking, participants)
-    # A peer the prose names counts only in its report heading's form.
     head_at = finding.rfind(_LISTED_HEAD)
     tail_at = finding.rfind(_CONFIDENCE_TAIL)
     if 0 <= head_at < tail_at:
         feedback = f"{finding[:head_at]}{_LISTED_HEAD}{'; '.join(mine)}{finding[tail_at:]}"
     else:
         feedback = finding
-    whole: set[str] = set()
-    cited: dict[str, list[int]] = {}
-    mentioned: list[str] = []
+    spellings = {
+        str(p): [
+            _name_pattern(spelling)
+            for spelling in dict.fromkeys([str(p), str((labels or {}).get(str(p)) or "")])
+            if spelling.strip()
+        ]
+        for p in participants
+    }
+    shown: set[str] = set()
     for line in mine:
-        in_field = {
+        shown.update(
             found
-            for w in (read_analysts_field(line) or [])
-            if (found := resolve_analyst(w, participants)) is not None
-        }
-        # The names the line's prose gives, the field itself left out.
-        in_prose: set[str] = set()
-        for peer, numbers in _mentions(
-            _ANALYSTS_FIELD.sub(" ", line), participants, _heading_pattern
-        ):
-            in_prose.add(peer)
-            if peer == name:
-                continue
-            if peer not in mentioned:
-                mentioned.append(peer)
-            if numbers is None:
-                whole.add(peer)
-            else:
-                cited.setdefault(peer, []).extend(numbers)
-        # A peer the field names and the prose does not cites no claim.
-        for peer in in_field - in_prose - {name}:
-            if peer not in mentioned:
-                mentioned.append(peer)
-            whole.add(peer)
-    peers: dict[str, str] = {}
-    for peer in [str(p) for p in participants if str(p) in mentioned]:
-        claims = _claims_of(isr_reports, peer)
-        numbers = list(dict.fromkeys(cited.get(peer, [])))
-        places = [_place_of(claims, n) for n in numbers]
-        if peer in whole or not numbers or any(place is None for place in places):
-            peers[peer] = str(reports.get(peer, ""))
-        else:
-            peers[peer] = "\n".join(
-                claim_summary_line(place + 1, claims[place])
-                for place in places
-                if place is not None
-            )
-    return feedback, peers
+            for written in (read_analysts_field(line) or [])
+            if (found := resolve_analyst(written, participants)) is not None
+        )
+        shown.update(
+            peer for peer, patterns in spellings.items() if any(p.search(line) for p in patterns)
+        )
+    return feedback, {
+        str(p): peer_as_read(str(reports.get(str(p), "")), _isr_of(isr_reports, str(p)))
+        for p in participants
+        if str(p) in shown and str(p) != name
+    }
 
 
-def _place_of(claims: Sequence[Any], number: int) -> int | None:
-    """The place of the one claim whose block number is ``number``, or ``None``.
+def _isr_of(isr_reports: Mapping[str, Any], name: str) -> Any:
+    for key, isr in isr_reports.items():
+        if str(key).lower() == name.lower():
+            return isr
+    return None
 
-    A claim's block number is the number its heading wrote, or its place
-    among the claims where the heading wrote none (``pipeline.retry_merge``).
-    A number no claim holds, or two hold, finds none.
+
+def peer_as_read(report: str, isr: Any) -> str:
+    """A peer as the mediator read its claims: its whole ISR summary, or its report.
+
+    The summary is the mediation prompt's own ``[ISR]`` entry
+    (``AgentISR.to_text_summary``), every claim numbered, marked and
+    evidenced as the mediator saw it, its disputes included. A peer whose ISR
+    holds no claim has no such entry in the mediation prompt and is shown its
+    answer in force whole.
     """
-    found = [
-        place
-        for place, claim in enumerate(claims)
-        if str(getattr(claim, "number", None) or place + 1) == str(number)
-    ]
-    return found[0] if len(found) == 1 else None
+    if isr is None or not getattr(isr, "claims", None):
+        return report
+    return f"[ISR] {isr.to_text_summary()}"

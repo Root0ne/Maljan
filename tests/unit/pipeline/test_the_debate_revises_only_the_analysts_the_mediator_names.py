@@ -11,10 +11,10 @@ The platform reads that field and nothing else of the line's prose:
   debate), a block that was not read, or a sycophancy override asks every
   analyst, as before, and the round's record says why;
 - a named analyst's revision carries the contested points that name it and,
-  of its peers, only the ones those points name (in the field, or by the
-  name their report is headed with): the claims they cite by number, or the
-  peer's whole answer in force where a point names the peer without citing
-  its claims.
+  of its peers, only the ones those points name (in the field, or by key or
+  label in any case or form), each shown whole as the mediator read its
+  claims: its ISR summary (its answer in force where it holds no claim), no
+  claim picked out by its number.
 
 Every value is synthetic.
 """
@@ -314,6 +314,7 @@ def _revision_container() -> tuple[Any, dict[str, Any]]:
     container.analyst_keys.return_value = NAMES
     container.agent_role.side_effect = lambda n: n
     container.config.llm.parallel_analysts = False
+    container.config.agents.definitions = {}
     agents: dict[str, Any] = {}
     for name in NAMES:
         agent = MagicMock()
@@ -415,6 +416,18 @@ class TestOnlyTheNamedRevise:
         assert "asked_all" not in update["revision_rounds"][0]
 
 
+def _whole(name: str, isrs: dict[str, AgentISR] | None = None) -> str:
+    """A peer as the mediator read its claims: its whole ISR summary."""
+    return f"[ISR] {(isrs or IN_FORCE)[name].to_text_summary()}"
+
+
+def _peers(line: str, isrs: dict[str, AgentISR] | None = None, **kw: Any) -> dict[str, str]:
+    _feedback, peers = contested_input(
+        "dynamic", FINDING, [line], NAMES, {n: f"{n} first" for n in NAMES}, isrs or IN_FORCE, **kw
+    )
+    return peers
+
+
 class TestTheNarrowedPrompt:
     def test_a_named_analyst_is_shown_its_points_and_the_peers_they_name(self) -> None:
         _update, agents = _revise(_mediator(revise=["static", "all_tools_static_r2", "dynamic"]))
@@ -422,25 +435,22 @@ class TestTheNarrowedPrompt:
         args, _kw = agents["static"].safe_revise_isr.call_args
         own, peers, feedback = args[1], args[2], args[3]
         assert own == "static first"
-        assert set(peers) == {"dynamic"}
-        assert peers["dynamic"] == "dynamic first"
+        assert peers == {"dynamic": _whole("dynamic")}
         assert LINE_STATIC in feedback
         assert LINE_STATIC_R2 not in feedback
         assert LINE_NOT_BLOCKING not in feedback
         assert feedback.startswith("The reports agree on the loader.")
         assert feedback.endswith("Confidence: 0.60")
 
-    def test_a_peer_cited_by_claim_number_is_shown_those_claims(self) -> None:
+    def test_a_peer_cited_by_claim_number_is_shown_whole(self) -> None:
         _update, agents = _revise(_mediator(revise=["static", "all_tools_static_r2", "dynamic"]))
 
         args, _kw = agents["all_tools_static_r2"].safe_revise_isr.call_args
         peers, feedback = args[2], args[3]
-        # Its one point names only itself, and cites STATIC Claim 1: the
-        # field names whom the line asks, and the claim it cites is shown.
-        assert set(peers) == {"static"}
-        assert peers["static"] == (
-            "Claim 1: Reads the flag at 0x40. | Evidence: [ev_0010] | Confidence: 0.80"
-        )
+        # Its one point names only itself in the field, and cites STATIC
+        # Claim 1: the peer is shown whole, every claim as the mediator read it.
+        assert peers == {"static": _whole("static")}
+        assert "Claim 2: Opens a key." in peers["static"]
         assert "Claim 2" in feedback and "[ev_0007]" in feedback
 
     def test_every_claim_number_and_entry_id_the_points_cite_is_kept(self) -> None:
@@ -460,16 +470,13 @@ class TestTheNarrowedPrompt:
     def test_a_claim_number_past_the_peer_s_claims_shows_its_whole_answer(self) -> None:
         line = "[analysts: dynamic] DYNAMIC differs from STATIC Claim 9. [blocking: x]"
 
-        _feedback, peers = contested_input(
-            "dynamic",
-            FINDING,
-            [line],
-            NAMES,
-            {name: f"{name} first" for name in NAMES},
-            IN_FORCE,
-        )
+        assert _peers(line) == {"static": _whole("static")}
 
-        assert peers == {"static": "static first"}
+    def test_a_peer_with_no_claim_is_shown_its_report_alone(self) -> None:
+        isrs = {**IN_FORCE, "static": AgentISR(agent_id="static", domain="static", claims=[])}
+        line = "[analysts: dynamic] DYNAMIC differs from STATIC. [blocking: x]"
+
+        assert _peers(line, isrs) == {"static": "static first"}
 
     def test_a_finding_in_another_shape_is_passed_whole(self) -> None:
         feedback, _peers = contested_input(
@@ -510,7 +517,7 @@ class TestTheMediatorIsAskedForTheField:
         assert analysts_to_revise(items, NAMES) == (["static", "dynamic"], "")
 
 
-class TestACitedClaimIsShownAsTheMediatorReadIt:
+class TestAPeerIsShownAsTheMediatorReadIt:
     def test_its_technique_marker_heading_note_and_confidence_are_kept(self) -> None:
         claim = ClaimEvidence(
             claim="Writes a startup entry.",
@@ -523,12 +530,11 @@ class TestACitedClaimIsShownAsTheMediatorReadIt:
         isrs = {**IN_FORCE, "static": AgentISR(agent_id="static", domain="static", claims=[claim])}
         line = "[analysts: dynamic] DYNAMIC differs from STATIC Claim 1. [blocking: x]"
 
-        _feedback, peers = contested_input(
-            "dynamic", FINDING, [line], NAMES, {n: f"{n} first" for n in NAMES}, isrs
-        )
+        peers = _peers(line, isrs)
 
         summary_line = isrs["static"].to_text_summary().splitlines()[2].strip()
-        assert peers == {"static": summary_line}
+        assert peers == {"static": _whole("static", isrs)}
+        assert summary_line in peers["static"]
         assert "T1547.001" in summary_line and "(revised)" in summary_line
         assert "Confidence: 0.70" in summary_line
 
@@ -584,61 +590,66 @@ class TestTheFieldMayStandAnywhere:
         assert analysts_to_revise([line], NAMES) == (["static"], "")
 
 
-class TestAPeerIsNamedAsItsReportIsHeaded:
-    def test_plain_words_that_spell_an_analyst_key_name_no_peer(self) -> None:
+class TestAPeerIsShownWhereverALineWritesIt:
+    @pytest.mark.parametrize(
+        "cited",
+        [
+            "Dynamic Claim 2",
+            "dynamic's claim 2",
+            "Dynamic's Claim 2",
+            "DYNAMIC CLAIM 2",
+            "the dynamic analyst's second claim",
+        ],
+    )
+    def test_any_case_or_form_shows_the_peer_whole(self, cited: str) -> None:
+        line = f"[analysts: static] STATIC Claim 1 contradicts {cited}. [blocking: x]"
+
+        _feedback, peers = contested_input(
+            "static", FINDING, [line], NAMES, {n: f"{n} first" for n in NAMES}, IN_FORCE
+        )
+
+        assert peers == {"dynamic": _whole("dynamic")}
+
+    def test_a_plain_word_spelling_a_key_shows_that_peer_rather_than_leave_it_out(self) -> None:
         line = (
             "[analysts: dynamic] DYNAMIC Claim 1 says the string is static, the network "
             "traffic dynamic. [blocking: x]"
         )
 
-        _feedback, peers = contested_input(
-            "dynamic", FINDING, [line], NAMES, {n: f"{n} first" for n in NAMES}, IN_FORCE
-        )
+        assert set(_peers(line)) == {"static", "network"}
 
-        assert peers == {}
+    def test_a_peer_named_by_its_label_is_shown(self) -> None:
+        line = "[analysts: dynamic] DYNAMIC differs from the Packet Watcher. [blocking: x]"
 
-    def test_the_heading_forms_name_a_peer(self) -> None:
-        line = (
-            "[analysts: dynamic] DYNAMIC differs from Static Analyst and from NETWORK. "
-            "[blocking: x]"
-        )
+        assert _peers(line) == {}
+        assert _peers(line, labels={"network": "Packet Watcher"}) == {"network": _whole("network")}
 
-        _feedback, peers = contested_input(
-            "dynamic", FINDING, [line], NAMES, {n: f"{n} first" for n in NAMES}, IN_FORCE
-        )
+    def test_who_revises_still_comes_from_the_field_alone(self) -> None:
+        line = "[analysts: static] STATIC Claim 1 contradicts Dynamic Claim 2. [blocking: x]"
 
-        assert set(peers) == {"static", "network"}
+        assert analysts_to_revise([line], NAMES) == (["static"], "")
 
 
 def _renumbered() -> dict[str, AgentISR]:
-    """A static answer whose claim headings wrote 7 and 9, at places 1 and 2."""
-    first = ClaimEvidence(claim="Reads the flag at 0x40.", evidence_ref="[ev_0010]", confidence=0.8)
-    second = ClaimEvidence(claim="Opens a key.", evidence_ref="[ev_0011]", confidence=0.8)
-    first.note_number("7")
-    second.note_number("9")
-    return {
-        **IN_FORCE,
-        "static": AgentISR(agent_id="static", domain="static", claims=[first, second]),
-    }
+    """A dynamic answer whose claim headings wrote 1, 3 and 4."""
+    claims = []
+    for written, text in (("1", "first"), ("3", "third"), ("4", "fourth")):
+        claim = ClaimEvidence(claim=text, evidence_ref="[ev_0010]", confidence=0.8)
+        claim.note_number(written)
+        claims.append(claim)
+    return {**IN_FORCE, "dynamic": AgentISR(agent_id="dynamic", domain="dynamic", claims=claims)}
 
 
-class TestAClaimIsFoundByTheNumberItsAnalystWrote:
-    def test_the_written_number_finds_the_claim_whatever_its_place(self) -> None:
+class TestNoClaimIsPickedByItsNumber:
+    @pytest.mark.parametrize("cited", ["Claim 3", "Claim 4", "Claim 2", "Claims 3/4"])
+    def test_a_peer_with_differently_numbered_headings_is_shown_whole(self, cited: str) -> None:
         isrs = _renumbered()
-        line = "[analysts: dynamic] DYNAMIC differs from STATIC Claim 9. [blocking: x]"
+        line = f"[analysts: static] STATIC Claim 1 contradicts DYNAMIC {cited}. [blocking: x]"
 
         _feedback, peers = contested_input(
-            "dynamic", FINDING, [line], NAMES, {n: f"{n} first" for n in NAMES}, isrs
+            "static", FINDING, [line], NAMES, {n: f"{n} first" for n in NAMES}, isrs
         )
 
-        assert peers == {"static": isrs["static"].to_text_summary().splitlines()[3].strip()}
-        assert "Opens a key." in peers["static"]
-
-    def test_a_place_no_written_number_holds_shows_the_whole_answer(self) -> None:
-        line = "[analysts: dynamic] DYNAMIC differs from STATIC Claim 2. [blocking: x]"
-
-        _feedback, peers = contested_input(
-            "dynamic", FINDING, [line], NAMES, {n: f"{n} first" for n in NAMES}, _renumbered()
-        )
-
-        assert peers == {"static": "static first"}
+        assert peers == {"dynamic": _whole("dynamic", isrs)}
+        for text in ("first", "third", "fourth"):
+            assert text in peers["dynamic"]

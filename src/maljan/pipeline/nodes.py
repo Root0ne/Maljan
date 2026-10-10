@@ -4017,7 +4017,13 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 # A named analyst is shown the contested points that name it
                 # and the peers those points name, not every peer's answer.
                 feedback, peer_reports = contested_input(
-                    name, mediator_feedback, contested, agent_names, reports_in_force, kept_isrs
+                    name,
+                    mediator_feedback,
+                    contested,
+                    agent_names,
+                    reports_in_force,
+                    kept_isrs,
+                    {n: label_of(container, n) for n in agent_names},
                 )
                 directive = build_revision_directive(False, feedback)
             return await asyncio.to_thread(
