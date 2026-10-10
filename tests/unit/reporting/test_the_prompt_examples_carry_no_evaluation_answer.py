@@ -109,6 +109,9 @@ from maljan.llm.tool_replies import NO_REPLY_RECORDED, NOT_RUN_REPLY
 from maljan.memory.technique_cards import card_lines, load_cards
 from maljan.pipeline import triage_pack
 from maljan.pipeline.debate_facts import (
+    ANALYSTS_FIELD_MISSING_NOTE,
+    BLOCK_NOT_READ_NOTE,
+    analysts_field_unknown_note,
     ledger_count_facts,
     with_ledger_facts,
 )
@@ -123,10 +126,12 @@ from maljan.pipeline.nodes import (
     NO_SANDBOX_DATA_REASON,
     NO_STATIC_FIXTURE_NOTE,
     NOT_ASKED_TO_REVISE,
+    NOT_NAMED_BY_MEDIATOR,
     run_quality_note,
     skipped_analysts_reason,
+    sycophancy_asks_every_analyst,
 )
-from maljan.pipeline.routing import NOT_REVISED
+from maljan.pipeline.routing import NO_CONTESTED_POINT, NOT_REVISED
 from maljan.pipeline.run_state import NO_LIMIT, budget_line
 from maljan.pipeline.validation import (
     _UNPARSED_ANSWER_MESSAGE,
@@ -1507,6 +1512,17 @@ PROMPTS: dict[str, str] = {
         ]
     ),
     "a revision round that made no change": " ".join([NOT_REVISED, NOT_ASKED_TO_REVISE]),
+    "a revision round asking only the analysts the mediator names": " ".join(
+        [
+            NOT_NAMED_BY_MEDIATOR,
+            sycophancy_asks_every_analyst("sycophancy"),
+            sycophancy_asks_every_analyst("no_consensus"),
+            BLOCK_NOT_READ_NOTE,
+            ANALYSTS_FIELD_MISSING_NOTE,
+            analysts_field_unknown_note(["network", "@@@"]),
+            NO_CONTESTED_POINT,
+        ]
+    ),
     "a chunk still cut after its question": chunk_cut_unread_sentence("chunk 1 of 2"),
     "mediator structured extraction and its schema": " ".join(
         [

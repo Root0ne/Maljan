@@ -18,6 +18,10 @@ Decision priority (highest to lowest), in ``debate_route``:
      left unmarked) — judge.
   6. Adaptive termination — statistical confidence convergence, with no
      contradiction standing → judge.
+     No contested point — the mediator's final block was read and lists no
+     blocking line, so it names no analyst to revise, and no sycophancy was
+     detected: judge (``no_contested_point``). A round would ask nobody.
+     With sycophancy detected the devil's-advocate round runs as before.
   7. Default → revision.
 
 The run summary reads its termination reason from the same function, so the
@@ -118,6 +122,9 @@ NOT_APPLICABLE = "not_applicable"
 # No analyst was revised in the round before this mediation: the round made no
 # change, and the answers in force go to the judge.
 NOT_REVISED = "not_revised"
+# The last mediation's final block was read and lists no blocking line: it
+# names no analyst to revise, so no revision round is held.
+NO_CONTESTED_POINT = "no_contested_point"
 # Why a revision round opens.
 SYCOPHANCY = "sycophancy"
 NO_CONSENSUS = "no_consensus"
@@ -265,6 +272,24 @@ def route_within_limit(
     if not standing and is_confidence_stable(confidence_history):
         say("Adaptive termination triggered at round %d (stable confidence).", iteration)
         return "judge", CONVERGENCE
+
+    # The mediator's block was read and names nobody in a contested point
+    # (``AgentArgument.revise == []``): a revision round asks only the analysts
+    # it names, so it would ask nobody. Not read (``None``) is not this, and
+    # neither is a mediation with sycophancy detected: its devil's-advocate
+    # round asks every analyst, as it always did.
+    if (
+        not syco
+        and bool(last)
+        and getattr(last, "agent_name", "") == "Mediator"
+        and getattr(last, "revise", None) == []
+    ):
+        say(
+            "The mediator names no analyst in a contested point at round %d; no revision "
+            "round is held. Routing to judge with the answers in force.",
+            iteration,
+        )
+        return "judge", NO_CONTESTED_POINT
 
     return "revision", NO_CONSENSUS
 

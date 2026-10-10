@@ -235,6 +235,26 @@ class Finding(BaseModel):
     )
 
 
+def claim_summary_line(number: int, claim: ClaimEvidence) -> str:
+    """One claim as an ISR summary shows it to a model (``AgentISR.to_text_summary``).
+
+    The marker travels with the id rather than replacing it. The analyst was
+    told and kept its answer; the judge is entitled to see both the answer and
+    that it does not resolve.
+    """
+    tech = f" ({claim.technique_id})" if claim.technique_id else ""
+    if claim.technique_id and not claim.technique_id_valid:
+        tech = f" ({claim.technique_id} — {UNVERIFIED_TECHNIQUE_MARKER})"
+    elif claim.technique_id and claim.kept_after_absence_question:
+        tech = f" ({claim.technique_id} — {ABSENCE_TECHNIQUE_MARKER})"
+    noted = f" {claim.heading_note}" if claim.heading_note else ""
+    return (
+        f"Claim {number}{noted}: {claim.claim}{tech}"
+        f" | Evidence: {claim.evidence_ref}"
+        f" | Confidence: {claim.confidence:.2f}"
+    )
+
+
 class AgentISR(BaseModel):
     """Full Intermediate Structural Representation from one analyst agent.
 
@@ -416,20 +436,7 @@ class AgentISR(BaseModel):
         ]
 
         for i, claim in enumerate(self.claims, 1):
-            # The marker travels with the id rather than replacing it. The
-            # analyst was told and kept its answer; the judge is entitled to
-            # see both the answer and that it does not resolve.
-            tech = f" ({claim.technique_id})" if claim.technique_id else ""
-            if claim.technique_id and not claim.technique_id_valid:
-                tech = f" ({claim.technique_id} — {UNVERIFIED_TECHNIQUE_MARKER})"
-            elif claim.technique_id and claim.kept_after_absence_question:
-                tech = f" ({claim.technique_id} — {ABSENCE_TECHNIQUE_MARKER})"
-            noted = f" {claim.heading_note}" if claim.heading_note else ""
-            lines.append(
-                f"  Claim {i}{noted}: {claim.claim}{tech}"
-                f" | Evidence: {claim.evidence_ref}"
-                f" | Confidence: {claim.confidence:.2f}"
-            )
+            lines.append(f"  {claim_summary_line(i, claim)}")
 
         if self.dissent_items:
             lines.append("  Disputes:")

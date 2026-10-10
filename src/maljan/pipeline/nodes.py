@@ -66,7 +66,14 @@ from maljan.pipeline.conditions import (
     TriageFacts,
     evaluate,
 )
-from maljan.pipeline.debate_facts import facts_naming, ledger_count_facts, with_ledger_facts
+from maljan.pipeline.debate_facts import (
+    BLOCK_NOT_READ_NOTE,
+    analysts_to_revise,
+    contested_input,
+    facts_naming,
+    ledger_count_facts,
+    with_ledger_facts,
+)
 from maljan.pipeline.events import (
     claims_to_payload,
     describe_exception,
@@ -77,7 +84,11 @@ from maljan.pipeline.events import (
 )
 from maljan.pipeline.evidence_summary import collect as collect_technique_sources
 from maljan.pipeline.evidence_summary import summarise, technique_evidence
-from maljan.pipeline.mediation_models import MEDIATOR_NO_ANSWER, consensus_applies
+from maljan.pipeline.mediation_models import (
+    CONTRADICTIONS_BLOCK_MISSING_NOTE,
+    MEDIATOR_NO_ANSWER,
+    consensus_applies,
+)
 from maljan.pipeline.outcome import (
     VERDICT_READ_FALLBACK,
     corrected_reasons,
@@ -87,7 +98,12 @@ from maljan.pipeline.outcome import (
     verdict_for_run,
     verdict_reading,
 )
-from maljan.pipeline.routing import revised_in, revision_round_before
+from maljan.pipeline.routing import (
+    SYCOPHANCY,
+    revised_in,
+    revision_round_before,
+    route_within_limit,
+)
 from maljan.pipeline.run_state import render_run_state
 from maljan.pipeline.sandbox_status import NOT_RUN as SANDBOX_NOT_RUN
 from maljan.pipeline.sandbox_status import sandbox_status
@@ -3211,12 +3227,16 @@ def _revision_input_is_absent(
     if _sandbox_fed(container.agent_role(agent_name)) and _sandbox_report_is_synthetic(state):
         return True
     sandbox_report = state.get("sandbox_report")
+    # The data is chunked at the agent's own input room, as its first
+    # analysis chunked it.
+    room = agent_input_room(container, agent_name)
     if isinstance(sandbox_report, dict) and sandbox_report:
         try:
             sandbox_chunks = container.load_data_for_agent(
                 agent_name,
                 file_hash=str(state.get("file_hash") or ""),
                 sandbox_report=sandbox_report,
+                room=room,
             )
         except Exception as exc:  # noqa: BLE001 — fails open, same as the loader below
             logger.debug(
@@ -3228,7 +3248,7 @@ def _revision_input_is_absent(
         if sandbox_chunks:
             return False
     try:
-        chunks = container.load_chunked(state.get("file_hash", ""), agent_name)
+        chunks = container.load_chunked(state.get("file_hash", ""), agent_name, room=room)
     except Exception as exc:  # noqa: BLE001
         logger.debug(
             "_revision_input_is_absent: load_chunked failed for '%s' (%s); revising anyway.",
@@ -3254,7 +3274,11 @@ def _build_revision_context(
     file_hash = state.get("file_hash", "")
 
     try:
-        chunks = container.load_chunked(file_hash, agent_name)
+        # Chunked at the agent's own input room, as its first analysis was:
+        # an input that fits that room is one chunk and is revised whole.
+        chunks = container.load_chunked(
+            file_hash, agent_name, room=agent_input_room(container, agent_name)
+        )
     except Exception as exc:
         logger.warning(
             "_build_revision_context: load_chunked failed for '%s/%s' (%s). "
@@ -3716,6 +3740,17 @@ def make_negotiation_node(
             # analysts each line names and on the next mediation's prompt, and
             # a debate that ends here spends nothing on them.
             platform_said = _ledger_counts(state, agent_names, argument)
+            # Who the mediation asks to revise: the analysts its blocking lines
+            # name in their [analysts: ...] field, read and never guessed.
+            if measured and argument.status == "complete":
+                if argument.note == CONTRADICTIONS_BLOCK_MISSING_NOTE:
+                    argument.revise, argument.revise_note = None, BLOCK_NOT_READ_NOTE
+                else:
+                    argument.revise, argument.revise_note = analysts_to_revise(
+                        list(argument.contradictions or []), agent_names
+                    )
+                if argument.revise_note:
+                    logger.info("negotiation: %s", argument.revise_note)
             if platform_said:
                 argument.ledger_facts = list(platform_said)
                 emit_agent_message(
@@ -3856,10 +3891,25 @@ def _home_stage(container: ServiceContainer, name: str) -> Any:
 # Why an analyst's answer in force stood through a revision round it was not
 # asked to revise in.
 NOT_ASKED_TO_REVISE = "not asked: no data to revise"
+NOT_NAMED_BY_MEDIATOR = "not asked: not named by the mediator"
+
+
+def sycophancy_asks_every_analyst(reason: str) -> str:
+    """Why a round the mediator's names would have narrowed asked every analyst.
+
+    ``reason`` is the router's reason for opening the round (``sycophancy``
+    for its override, ``no_consensus`` otherwise).
+    """
+    opened = (
+        "A sycophancy override opened the round"
+        if reason == SYCOPHANCY
+        else f"The round opened on {reason}, with sycophancy detected at the mediation before it"
+    )
+    return f"{opened}; every analyst was asked to revise under the devil's-advocate directive."
 
 
 def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any:
-    """Factory: creates the revision node where all agents revise concurrently."""
+    """Factory: the revision node, where the analysts the mediation names revise."""
 
     async def node_fn(state: AnalysisState) -> dict[str, Any]:
         started = time.monotonic()
@@ -3869,14 +3919,33 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         history = state.get("discussion_history") or []
         mediator_feedback = ""
         ledger_facts: list[str] = []
+        mediation: Any = None
         for arg in reversed(history):
             if arg.agent_name == "Mediator":
                 mediator_feedback = arg.finding
                 ledger_facts = list(getattr(arg, "ledger_facts", None) or [])
+                mediation = arg
                 break
 
         syco_detected = state.get("sycophancy_detected", False)
         revision_directive = build_revision_directive(syco_detected, mediator_feedback)
+
+        # Whom the round asks: the analysts the mediation named in a contested
+        # point (``AgentArgument.revise``). Names not read, or a sycophancy
+        # override (whose directive is for every analyst), ask every analyst,
+        # as before, and the round's record says why.
+        named = getattr(mediation, "revise", None)
+        asked_all = ""
+        if named is not None and syco_detected:
+            # The reason the router opened this round on, read from the same
+            # state and the same rules, quietly.
+            check = bool(getattr(getattr(stage, "debate", None), "sycophancy_check", True))
+            _route, opened_on = route_within_limit(state, sycophancy_check=check, log=False)
+            asked_all, named = sycophancy_asks_every_analyst(opened_on), None
+        elif named is None:
+            asked_all = str(getattr(mediation, "revise_note", "") or "")
+        asked = list(agent_names) if named is None else [n for n in agent_names if n in named]
+        contested = list(getattr(mediation, "contradictions", None) or [])
 
         original_reports = state.get("reports") or {}
         # The answer each analyst has in force before this round: its last
@@ -3951,13 +4020,26 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
             brief_agent(agent, state, container)
             own_report = reports_in_force.get(name, "")
             peer_reports = {k: v for k, v in reports_in_force.items() if k != name}
+            directive = revision_directive
+            if named is not None:
+                # A named analyst is shown the contested points that name it
+                # and the peers those points name, not every peer's answer.
+                feedback, peer_reports = contested_input(
+                    name,
+                    mediator_feedback,
+                    contested,
+                    agent_names,
+                    reports_in_force,
+                    {n: label_of(container, n) for n in [*agent_names, *reports_in_force]},
+                )
+                directive = build_revision_directive(False, feedback)
             return await asyncio.to_thread(
                 agent.safe_revise_isr,
                 data,
                 own_report,
                 peer_reports,
                 # The ledger counts of the lines that name this analyst.
-                with_ledger_facts(revision_directive, facts_naming(name, ledger_facts)),
+                with_ledger_facts(directive, facts_naming(name, ledger_facts)),
                 iteration,
             )
 
@@ -3986,10 +4068,10 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
 
         results: list[Any] = []
         if parallel:
-            tasks = [_revise_one(name) for name in agent_names]
+            tasks = [_revise_one(name) for name in asked]
             results = list(await asyncio.gather(*tasks, return_exceptions=True))
         else:
-            for name in agent_names:
+            for name in asked:
                 try:
                     results.append(await _revise_one(name))
                 except Exception as exc:  # noqa: BLE001 — parity with gather()
@@ -4023,7 +4105,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         not_revised: dict[str, str] = {}
 
         def _keep_the_answer_in_force(
-            name: str, why: str, status: str = "", report: str = ""
+            name: str, why: str, status: str = "", report: str = "", *, was_asked: bool = True
         ) -> None:
             """A revision that was not made leaves the answer in force standing, whole."""
             not_revised[name] = NOT_ASKED_TO_REVISE if name in not_asked else why
@@ -4035,7 +4117,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
             label = label_of(container, name)
             spoken = spoken_name(container, name, _home_stage(container, name))
             source = claims_source(container, name, _home_stage(container, name))
-            logger.warning(
+            (logger.warning if was_asked else logger.info)(
                 "%s: the round-%d revision was not made (%s); its answer in force stands with "
                 "%d claim(s).",
                 name,
@@ -4062,9 +4144,14 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 display_name=label,
             )
 
-        # strict=True: agent_names and results MUST be equal length; mismatch
+        # An analyst the mediation did not name keeps its answer in force.
+        for name in agent_names:
+            if name not in asked:
+                _keep_the_answer_in_force(name, NOT_NAMED_BY_MEDIATOR, was_asked=False)
+
+        # strict=True: asked and results MUST be equal length; mismatch
         # is a programming error and must surface, not be silently truncated.
-        for name, result in zip(agent_names, results, strict=True):
+        for name, result in zip(asked, results, strict=True):
             if isinstance(result, BaseException):
                 logger.error("%s revision failed: %s", name, result)
                 # The class of the failure and nothing else, as the judge and
@@ -4200,6 +4287,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 "identical": bool(made) and identical,
                 "revised": revised_names,
                 "not_revised": not_revised,
+                **({"asked_all": asked_all} if asked_all else {}),
             }
         ]
         if not made:
