@@ -43,7 +43,9 @@ from scripts.rehearsal import wire
 SCENARIOS: dict[str, str] = {
     "normal": "every role answers well-formed, citing the run's own ledger ids",
     "cut_at_cap": "every first call is cut at its output cap with only thinking and no text",
-    "empty_answer": "every first call answers with no text at all",
+    "empty_answer": (
+        "every first call answers with no text at all; a composer section's with whitespace alone"
+    ),
     "schema_break": "every first call answers in a form its reader cannot parse",
     "long_loop": "every analyst calls tools for many steps before answering",
     "slow_model": "every call takes a fixed time before it answers",
@@ -368,7 +370,11 @@ class Brain:
         if fault == "cut_at_cap":
             return wire.Reply(thinking=thinking, stop="max_tokens")
         if fault == "empty_answer":
-            return wire.Reply(text="", stop="end")
+            # A composer section's empty answer is whitespace alone, as a model
+            # that thinks first can end one: an answer with no text that a
+            # retry must neither send back (the Messages API refuses a turn of
+            # whitespace with a 400) nor ask about as broken JSON.
+            return wire.Reply(text="\n\n" if role == "composer" else "", stop="end")
         if fault == "server_error_once":
             return wire.Reply(status=500, error="Internal server error")
         if fault == "rate_limited":

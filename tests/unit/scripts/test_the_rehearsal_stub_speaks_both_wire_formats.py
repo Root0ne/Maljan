@@ -368,6 +368,46 @@ class TestTheAnthropicMessagesApi:
                 },
                 "A maximum of 4 blocks with cache_control",
             ),
+            (
+                {
+                    "messages": [
+                        {"role": "user", "content": "go"},
+                        {
+                            "role": "assistant",
+                            "content": [
+                                {"type": "text", "text": ""},
+                                {"type": "text", "text": "the answer"},
+                            ],
+                        },
+                        {"role": "user", "content": "fix it"},
+                    ]
+                },
+                "messages: text content blocks must be non-empty",
+            ),
+            (
+                {
+                    "messages": [
+                        {"role": "user", "content": "go"},
+                        {"role": "assistant", "content": "\n\n"},
+                        {"role": "user", "content": "fix it"},
+                    ]
+                },
+                "messages: text content blocks must contain non-whitespace text",
+            ),
+            (
+                {
+                    "messages": [
+                        {"role": "user", "content": "go"},
+                        {"role": "assistant", "content": ""},
+                        {"role": "user", "content": "fix it"},
+                    ]
+                },
+                "messages.1: all messages must have non-empty content",
+            ),
+            (
+                {"system": [{"type": "text", "text": ""}]},
+                "system: text content blocks must be non-empty",
+            ),
             ({"temperature": 0.1}, "sampling parameters are not supported"),
             ({"thinking": {"type": "enabled", "budget_tokens": 1024}}, "thinking.type"),
             ({"tool_choice": {"type": "any"}, "tools": [TOOL]}, "tool_choice forces tool use"),

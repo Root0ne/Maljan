@@ -170,6 +170,15 @@ class TestTheScenarios:
         assert brain.answer(dynamic)[2] == "empty_answer"
         assert brain.answer(static)[2] == ""
 
+    def test_a_composer_section_s_empty_answer_is_whitespace_alone(self) -> None:
+        schema = composer.SECTION_SCHEMAS["execution_flow"]
+        request = _section_request(
+            "execution_flow", composer.section_contract("execution_flow", schema)
+        )
+        role, reply, fault = Brain(scenario="empty_answer").answer(request)
+        assert (role, fault) == ("composer", "empty_answer")
+        assert reply.text and not reply.text.strip() and not reply.tool_calls
+
     def test_overloaded_is_529_on_the_anthropic_wire(self) -> None:
         reply = Brain(scenario="overloaded").answer(
             _request(MEDIATOR_SYSTEM_HEAD, "x", api="anthropic")
