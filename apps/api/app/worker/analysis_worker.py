@@ -2401,7 +2401,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # backend can pick the right VM profile from the suffix
             # (``.elf`` → Linux, ``.exe`` → Windows, etc.). Otherwise
             # the bare sha256 would be treated as an unknown blob.
-            _orig_ext = Path(sample_filename).suffix
+            # The suffix only where it is plain (``sample_files.safe_suffix``):
+            # it names every copy a tool is handed.
+            from app.worker.sample_files import safe_suffix
+
+            _orig_ext = safe_suffix(sample_filename)
             # Use the Defender-excluded upload tmp dir instead of the
             # system temp dir. See ``APISettings.upload_temp_dir``.
             # ``.resolve()`` is critical here — an ELF smoke test

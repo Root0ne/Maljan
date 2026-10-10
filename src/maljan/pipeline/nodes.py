@@ -1349,7 +1349,7 @@ def _ghidra_passes_step(container: ServiceContainer, state: AnalysisState) -> An
             sample_notes=getattr(container, "sample_notes", None),
             note_key=server_note_key(ghidra),
         )
-    return GhidraPasses(unavailable=reason)
+    return GhidraPasses(unavailable=reason, note_key=server_note_key(ghidra))
 
 
 def _pack_left_out(entries: list[Any], container: ServiceContainer) -> dict[str, Any] | None:

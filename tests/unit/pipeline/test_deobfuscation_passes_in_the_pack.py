@@ -97,6 +97,7 @@ def _fake_passes(fake: FakeGhidra) -> GhidraPasses:
         base_url="http://ghidra.invalid",
         sample_path="/data/samples/.work/s.exe",
         transport=httpx.MockTransport(fake.handler),
+        note_key="remote http://ghidra.invalid:80",
     )
 
 
@@ -165,7 +166,10 @@ class TestTheConstantLine:
 
 class TestGhidraUnavailable:
     def test_one_entry_says_no_and_why_and_the_run_is_not_degraded(self, tmp_path: Path) -> None:
-        passes = GhidraPasses(unavailable="Ghidra is switched off (core.static.ghidra.enabled)")
+        passes = GhidraPasses(
+            unavailable="Ghidra is switched off (core.static.ghidra.enabled)",
+            note_key="remote http://ghidra.invalid:80",
+        )
         result = _pack(_sample(tmp_path), ghidra=passes)
         ghidra = [e for e in result.entries if e.tool == ANTI_ANALYSIS_TOOL]
         assert len(ghidra) == 1 and ghidra[0].ok is False

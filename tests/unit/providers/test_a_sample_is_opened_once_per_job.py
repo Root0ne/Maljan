@@ -305,13 +305,13 @@ class TestTheHeldPath:
         (tool,) = [t for t in wrapped if t.name == "open_thing"]
         return tool
 
-    def test_a_path_other_than_the_job_s_sample_is_refused_and_nothing_called(self) -> None:
-        from maljan.providers.sample_open import is_refusal
-
+    def test_a_path_other_than_the_job_s_sample_is_forwarded_and_not_noted(self) -> None:
+        """Another file (a carved payload, say) is the server's to open, never noted."""
         server = _Server()
-        said = asyncio.run(self._wrapped(server).ainvoke({"where": "/invented/path"}))
-        assert is_refusal(said) and "not the job's own sample" in said
-        assert server.calls == []
+        tool = self._wrapped(server)
+        asyncio.run(tool.ainvoke({"where": "/invented/path"}))
+        asyncio.run(tool.ainvoke({"where": "/invented/path"}))
+        assert server.calls == [("open_thing", {"where": "/invented/path"})] * 2
 
     def test_a_relative_path_is_read_against_the_held_sample(self) -> None:
         server = _Server()
@@ -350,11 +350,7 @@ class TestOneServerOneNote:
         for handle in (first, second):
             handle._all_tools = server.tools()
             handle.sample_notes = notes
-        assert (
-            first.note_key
-            == second.note_key
-            == "streamable-http http://decompiler.invalid:9000/mcp"
-        )
+        assert first.note_key == second.note_key == "remote http://decompiler.invalid:9000/mcp"
         _open(first)
         _open(second)
         assert server.names() == ["open_thing", "pick", "study", "pick"]
@@ -365,14 +361,45 @@ class TestOneServerOneNote:
         assert first.note_key != second.note_key
         assert first.note_key.startswith("stdio decompiler-mcp --stdio")
 
-    def test_a_second_spelling_of_a_noted_path_is_refused_not_answered(self) -> None:
-        from maljan.providers.sample_open import is_refusal
-
+    def test_a_second_spelling_of_a_noted_path_is_forwarded_not_answered(self) -> None:
         server = _Server()
         handle = _handle(server)
         _open(handle, "/samples/a.bin")
-        assert is_refusal(_open(handle, "/samples//sub/../a.bin"))
-        assert server.names() == ["open_thing", "pick", "study"]
+        _open(handle, "/samples//sub/../a.bin")
+        assert server.names() == ["open_thing", "pick", "study", "open_thing"]
+        assert server.calls[-1] == ("open_thing", {"where": "/samples//sub/../a.bin"})
+
+    def test_loopback_spellings_name_one_server(self) -> None:
+        from maljan.providers.sample_open import server_note_key
+
+        keys = {
+            server_note_key(MCPServerConfig(transport=transport, url=url))
+            for transport, url in (
+                ("http", "http://localhost:8089"),
+                ("streamable-http", "http://127.0.0.1:8089/"),
+                ("sse", "http://[::1]:8089"),
+            )
+        }
+        assert keys == {"remote http://loopback:8089"}
+
+    def test_a_default_port_is_written(self) -> None:
+        from maljan.providers.sample_open import server_note_key
+
+        assert server_note_key(MCPServerConfig(transport="http", url="http://g")) == (
+            server_note_key(MCPServerConfig(transport="http", url="http://g:80"))
+        )
+
+    def test_a_local_process_is_named_by_a_number_never_reused(self) -> None:
+        import gc
+
+        cfg = MCPServerConfig(command="decompiler-mcp", sample_open=SPEC)
+        seen = set()
+        for _ in range(50):
+            handle = ServerHandle("a", cfg)
+            seen.add(handle.note_key)
+            del handle
+            gc.collect()
+        assert len(seen) == 50
 
 
 class TestTheDeclaredToolsHaveNoClientDeadline:

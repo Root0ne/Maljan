@@ -152,6 +152,31 @@ def sample_not_opened(words: str) -> SampleNotOpened:
     return SampleNotOpened(SAMPLE_NOT_OPENED.format(words=_one_line(words)), provider="ghidra")
 
 
+# And when Ghidra loaded the sample but refused to make it the current
+# program right after: nothing about the file or the mount, and not
+# remembered, so the next loop loads it again.
+GHIDRA_DID_NOT_MAKE_IT_CURRENT: str = (
+    "Ghidra loaded the job's sample but refused to make it the current program "
+    "({words}); this loop stops, and the next one loads the sample again"
+)
+
+
+def not_made_current(answer: str) -> SampleNotOpened | None:
+    """The stop for a select the opener says was refused right after a fresh load, or ``None``.
+
+    Read from the opener's own marker (``sample_open.SELECT_REFUSED_AFTER_OPEN``)
+    with its one reader of answers; it names the select's refusal, not the
+    samples mount, and the caller does not remember it.
+    """
+    from maljan.providers.sample_open import SELECT_REFUSED_AFTER_OPEN, answer_object
+
+    payload = answer_object(answer)
+    if payload is None or payload.get("tool_error") != SELECT_REFUSED_AFTER_OPEN:
+        return None
+    words = _one_line(str(payload.get("detail") or ""))
+    return SampleNotOpened(GHIDRA_DID_NOT_MAKE_IT_CURRENT.format(words=words), provider="ghidra")
+
+
 def ghidra_not_answering(address: str, what: str) -> SampleNotOpened:
     """The failure for a load of the job's sample that Ghidra gave no answer to."""
     return SampleNotOpened(
@@ -279,11 +304,15 @@ def prepare_sample(
             file_path,
             getattr(ghidra, "sample_open", None),
             sample_notes_of(provider),
-            key=server_note_key(ghidra, f"provider {id(provider)}"),
+            key=server_note_key(ghidra, str(getattr(provider, "note_instance", "") or "")),
             open_call=lambda tool, arguments: (
                 _load(http, base, tool, arguments, address, logger_).text
             ),
         )
+        refused = not_made_current(answer)
+        if refused is not None:
+            logger_.error("%s", refused)
+            raise refused
         if not program_name_from_load(answer):
             # A failed load answers **200**, so raise_for_status sees nothing
             # wrong. Carrying on would hand the model a Ghidra with no program,
@@ -485,9 +514,11 @@ class GhidraStaticProvider(StaticProvider):
         # The job's note of the paths it opened (``providers.sample_open``);
         # the container puts its own job-wide note here, shared with the
         # deterministic passes.
-        from maljan.providers.sample_open import SampleNotes
+        from maljan.providers.sample_open import SampleNotes, new_instance
 
         self.sample_notes = SampleNotes()
+        # This provider's own process, for a local Ghidra's note key.
+        self.note_instance = new_instance()
         self._toolkit: Any = None
         self._all_tools: list[Any] = []
         self.tools: list[Any] = []
@@ -695,7 +726,9 @@ class GhidraStaticProvider(StaticProvider):
         tools = wrap_open_tool(
             tools,
             tools,
-            server=server_note_key(getattr(self, "_cfg", None), f"provider {id(self)}"),
+            server=server_note_key(
+                getattr(self, "_cfg", None), str(getattr(self, "note_instance", "") or "")
+            ),
             spec=getattr(getattr(self, "_cfg", None), "sample_open", None),
             notes=getattr(self, "sample_notes", None),
             held_path=self._held_path,
@@ -748,6 +781,12 @@ class GhidraStaticProvider(StaticProvider):
                 )
                 kwargs["file"] = pinned
             answer = str(await inner(**kwargs))
+            refused = not_made_current(answer)
+            if refused is not None:
+                # Not remembered: it says nothing about the file.
+                refused.sent_args = dict(kwargs)
+                logger.error("%s", refused)
+                raise refused
             # The job's own sample did not open. Every Ghidra call after this
             # one would answer "No program loaded", or about whichever program
             # is still current, for as long as the model kept asking.
@@ -792,7 +831,7 @@ class GhidraStaticProvider(StaticProvider):
             min_instructions=self._pre.function_hash_min_instructions,
             sample_open=getattr(self._cfg, "sample_open", None),
             sample_notes=getattr(self, "sample_notes", None),
-            note_key=server_note_key(self._cfg, f"provider {id(self)}"),
+            note_key=server_note_key(self._cfg, str(getattr(self, "note_instance", "") or "")),
         )
 
     async def probe(self) -> ProviderProbe:

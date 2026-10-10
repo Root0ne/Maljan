@@ -575,7 +575,9 @@ class GhidraPasses:
     sample_notes: Any = field(default=None, repr=False)
     # The server in the job's note (``sample_open.server_note_key``): Ghidra's
     # address, as the agents' and the load before the loop's own opens name it.
-    note_key: str = ""
+    # Given by every caller: a pass noting under a name of its own would miss
+    # the job's note.
+    note_key: str = field(kw_only=True)
     _http: Any = field(default=None, init=False, repr=False)
     _program: str = field(default="", init=False)
     _image_base: int | None = field(default=None, init=False)

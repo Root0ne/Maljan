@@ -27,7 +27,7 @@ from maljan.providers.static.ghidra import GhidraStaticProvider
 
 HELD = "/data/samples/.work/s.exe"
 # Ghidra in the job's note: its address (``sample_open.server_note_key``).
-KEY = "http http://ghidra.invalid"
+KEY = "remote http://ghidra.invalid:80"
 LOADED = json.dumps({"success": True, "program": "s.exe"})
 SWITCHED = json.dumps({"success": True, "switched_to": "s.exe"})
 ANALYSED = json.dumps({"success": True, "total_functions": 150, "program": "s.exe"})
@@ -162,6 +162,34 @@ class TestTheModelsLoad:
         assert ghidra.paths().count("/load_program") == 2
         assert provider.sample_notes.get(KEY, HELD) is None
 
+    def test_a_switch_refused_after_the_load_stops_with_its_own_sentence_unremembered(
+        self,
+    ) -> None:
+        import pytest
+
+        from maljan.core.exceptions import SampleNotOpened
+
+        ghidra = _Ghidra(switch_program=json.dumps({"error": "Program not found: s.exe"}))
+        provider, load = _provider(ghidra)
+        with pytest.raises(SampleNotOpened) as stopped:
+            _loads(load, 1)
+        said = str(stopped.value)
+        assert "refused to make it the current program" in said
+        assert "Program not found: s.exe" in said
+        assert "GHIDRA_CONTAINER_SAMPLES_PATH" not in said
+        assert provider.sample_failure(HELD) is None
+        assert provider.sample_notes.get(KEY, HELD) is None
+
+    def test_an_odd_held_path_opens_and_is_noted(self) -> None:
+        odd = "/data/samples/.work/s.e%78e"
+        ghidra = _Ghidra()
+        provider, load = _provider(ghidra)
+        provider.pin_sample(odd)
+        assert _loads(load, 2) == [LOADED] * 2
+        assert json.loads(ghidra.requests[0].content) == {"file": odd}
+        assert ghidra.paths().count("/load_program") == 1
+        assert provider.sample_notes.get(KEY, odd) is not None
+
 
 class TestOneNoteForEveryPath:
     def test_the_triage_pass_s_open_answers_the_model_s_load(self) -> None:
@@ -197,6 +225,7 @@ class TestOneNoteForEveryPath:
             transport=httpx.MockTransport(ghidra.handler),
             sample_open=GHIDRA_SAMPLE_OPEN,
             sample_notes=SampleNotes(),
+            note_key=KEY,
         )
         with pytest.raises(GhidraPassFailed):
             passes.open()
@@ -244,6 +273,7 @@ class TestOneNoteForEveryPath:
             min_instructions=1,
             sample_open=GHIDRA_SAMPLE_OPEN,
             sample_notes=SampleNotes(),
+            note_key=KEY,
         )
         assert got == []
         assert "/get_bulk_function_hashes" not in ghidra.paths()

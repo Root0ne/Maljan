@@ -284,6 +284,11 @@ class ServerHandle:
         # handle; a handle built outside one has none and offers its open tool
         # as it is.
         self.sample_notes: Any = None
+        # This handle's own process, for a local server's note key; a number
+        # never reused, unlike an object's id.
+        from maljan.providers.sample_open import new_instance
+
+        self._note_instance = new_instance()
         _LIVE_HANDLES.add(self)
         _register_retirement_hook()
 
@@ -298,7 +303,7 @@ class ServerHandle:
         this handle's own process for a local one."""
         from maljan.providers.sample_open import server_note_key
 
-        return server_note_key(self.config, f"handle {id(self)}")
+        return server_note_key(self.config, self._note_instance)
 
     @property
     def label(self) -> str:

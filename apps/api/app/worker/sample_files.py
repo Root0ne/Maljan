@@ -16,6 +16,7 @@ whose container mount is written against it; r2 gets ``r2-work``, and
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import time
 from pathlib import Path
@@ -37,6 +38,24 @@ R2_WORK_SUBDIR = "r2-work"
 # Every mirror subdirectory the cleanup paths must reach. A provider that
 # introduces another one adds it here, or its copies outlive their job.
 WORK_SUBDIRS = (WORK_SUBDIR, R2_WORK_SUBDIR)
+
+
+# The characters a sample file's suffix keeps in the platform's own copy of it.
+_SAFE_SUFFIX = re.compile(r"\.[A-Za-z0-9._-]+")
+
+
+def safe_suffix(filename: str) -> str:
+    """The suffix of an uploaded ``filename`` the platform's copies keep, or ``""``.
+
+    Every copy of a sample the platform writes (the download, each provider's
+    mirror) is named by its SHA-256 plus the upload's suffix, so a sandbox
+    can pick its profile from ``.elf`` or ``.exe``. The suffix is the
+    uploader's text: one with a percent sign, a backslash, a control character
+    or any other character outside ``[A-Za-z0-9._-]`` is dropped, so every
+    path the platform hands a tool is plain and reads the same everywhere.
+    """
+    suffix = Path(str(filename or "")).suffix
+    return suffix if _SAFE_SUFFIX.fullmatch(suffix) else ""
 
 
 def _private_dir(path: Path) -> Path:

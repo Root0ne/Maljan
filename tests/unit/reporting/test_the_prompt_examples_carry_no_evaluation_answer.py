@@ -748,7 +748,11 @@ def _ghidra_pass_failures() -> str:
                 return httpx.Response(answer)
             return httpx.Response(200, json=answer)
 
-        return GhidraPasses(base_url="http://g.invalid", transport=httpx.MockTransport(handler))
+        return GhidraPasses(
+            base_url="http://g.invalid",
+            transport=httpx.MockTransport(handler),
+            note_key="remote http://g.invalid:80",
+        )
 
     opened = {"/get_current_program_info": {"image_base": "1000"}}
     cases = [

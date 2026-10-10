@@ -71,9 +71,9 @@ def fetch_bulk_function_hashes(
     page_limit: int = 2000,
     max_pages: int = 8,
     timeout: float = 120.0,
+    note_key: str,
     sample_open: Any = None,
     sample_notes: Any = None,
-    note_key: str = "",
 ) -> list[tuple[str, str]]:
     """Return ``(func_name, func_hash)`` for the binary's meaningful functions.
 
