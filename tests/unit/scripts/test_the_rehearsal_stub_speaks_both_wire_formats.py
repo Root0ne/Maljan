@@ -234,6 +234,14 @@ class TestTheAnthropicMessagesApi:
                 anthropic.BadRequestError, match="Expected `thinking` or `redacted_thinking`"
             ):
                 client.messages.create(model=HAIKU, max_tokens=100, tools=[TOOL], messages=stripped)
+            # With thinking off the API takes the turn without its thinking block.
+            client.messages.create(
+                model=HAIKU,
+                max_tokens=100,
+                tools=[TOOL],
+                messages=stripped,
+                thinking={"type": "disabled"},
+            )
         finally:
             server.stop()
 

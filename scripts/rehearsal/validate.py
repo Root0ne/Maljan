@@ -219,9 +219,16 @@ def _check_sampling_and_effort(body: dict[str, Any], facts: ModelFacts) -> None:
         raise ApiError(400, f"thinking.type: {kind!r} is not supported by {facts.id}")
     choice = body.get("tool_choice") or {}
     forced = isinstance(choice, dict) and choice.get("type") in ("any", "tool")
-    thinks = kind in ("enabled", "adaptive") or (not kind and facts.thinking_types.get("adaptive"))
-    if forced and thinks:
+    if forced and thinking_on(body, facts):
         raise ApiError(400, "Thinking may not be enabled when tool_choice forces tool use.")
+
+
+def thinking_on(body: dict[str, Any], facts: ModelFacts) -> bool:
+    """Whether the request thinks: enabled, adaptive, or unset on a model thinking by default."""
+    kind = str((body.get("thinking") or {}).get("type") or "")
+    return kind in ("enabled", "adaptive") or (
+        not kind and bool(facts.thinking_types.get("adaptive"))
+    )
 
 
 def check_anthropic(
@@ -247,7 +254,10 @@ def check_anthropic(
     _check_sampling_and_effort(body, facts)
     messages = list(body.get("messages") or [])
     _check_tool_pairs_anthropic(messages)
-    _check_thinking_kept(messages, signer)
+    if thinking_on(body, facts):
+        # With thinking off, an assistant turn without its thinking block is
+        # what the API expects to be sent.
+        _check_thinking_kept(messages, signer)
     binding = ((body.get("thinking") or {}).get("block_binding") or {}).get(
         "prefix_mismatch_behavior"
     )
