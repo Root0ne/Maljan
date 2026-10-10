@@ -104,10 +104,7 @@ A stack rehearsal's known product defects are rows of
 failing with exactly a row's detail is reported as `KNOWN DEFECT <id>` with the
 defect's description, and does not fail the run; a pinned check that passes asks
 for its row to be struck. A row naming an `api` holds only for that provider's
-configuration, and one naming `settings` only where the stack holds them so. Pinned today: D8, the DeepSeek-shaped gate without
-`core.llm.openai.context_size`, whose window check fails because the product
-sizes every DeepSeek V4 role on the 8,192-token fallback window (the vendored
-table holds no DeepSeek V4 window yet).
+configuration, and one naming `settings` only where the stack holds them so. None is pinned today.
 
 `--configure harness` rehearses the harness's own fixed models and settings
 instead, with the same snapshot and restore; it touches no key. Without
@@ -171,9 +168,10 @@ with no window, and it serves no runtime metadata (no llama.cpp `/props`, no
 API: the Models API's answer, the vendored table, or your own
 `core.llm.openai.context_size`. `--runtime llama` stands for a local llama.cpp
 server instead: `/props` reports the window and the slots, and the model list
-carries each window. The in-process run serves its OpenAI-wire models a
-200,000-token window and declares the same as `llm.openai.context_size`. The stub cuts every answer at the request's
-own `max_tokens`, signs every thinking block, and reports cache reads and
+carries each window. The in-process run's models take their windows from the
+same data.
+
+The stub cuts every answer at the request's own `max_tokens`, signs every thinking block, and reports cache reads and
 writes as the provider would: Anthropic at the request's breakpoints, with the
 write's lifetime, and OpenAI-compatible automatically on a repeated prefix.
 `--chars-per-token 3` counts tokens the way a real tokenizer counts a

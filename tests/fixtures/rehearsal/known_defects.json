@@ -1,18 +1,5 @@
 {
  "_comment": "The checks each scenario fails today (pins), with the exact detail, and the numbers a defect moves (observations), with the exact value; each names its product defect. A fix makes the rehearsal integration test fail and ask to strike the entry.",
- "pins": [
-  {
-   "id": "D8",
-   "scenario": "normal",
-   "wire": "stack",
-   "api": "openai",
-   "settings": {
-    "core.llm.openai.context_size": 0
-   },
-   "check": "window in force as the provider serves it",
-   "detail": "the analysts' window is the 8192-token fallback (no endpoint reported a window and the model is not in the table); the stub serves deepseek-v4-flash {n}; output caps derived from no window: dynamic, judge, mediator, network, static",
-   "defect": "the product cannot learn a DeepSeek V4 model's window: the hosted API reports none and the vendored table holds no DeepSeek V4 window row, so without core.llm.openai.context_size every analyst, the mediator and the judge are sized on the 8,192-token fallback window (tool answers held to 6,000 characters, output caps of 8,192) while the provider serves 1M; fixed on branch fix/reporter-output-budget (DeepSeek window rows in the vendored table)"
-  }
- ],
+ "pins": [],
  "observations": []
 }

@@ -521,8 +521,9 @@ class TestTheStubStandsForAHostedApiOrALocalRuntime:
 
         assert facts_for("claude-haiku-5-5").window_documented
         assert facts_for("deepseek-chat").window_documented
-        assert not facts_for("deepseek-v4-pro").window_documented
-        assert facts_for("deepseek-v4-pro", window=1_000_000).window_documented
+        assert facts_for("deepseek-v4-pro").window_documented
+        assert not facts_for("acme-hosted-pro").window_documented
+        assert facts_for("acme-hosted-pro", window=1_000_000).window_documented
 
 
 class TestTheOpenAiChatCompletionsApi:

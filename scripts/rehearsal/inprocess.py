@@ -57,11 +57,6 @@ MODELS = {
     "openai": {"expert": "deepseek-v4-flash", "judge": "deepseek-v4-pro"},
 }
 JUDGE_EFFORT = {"anthropic": "medium", "openai": "max"}
-# The window each wire's models are served and declared with, where no stored
-# description or table row documents one: the harness's own setting, served
-# by the stub and declared to the product as ``llm.openai.context_size``, as
-# an operator declares the window of a hosted model the table does not name.
-HARNESS_WINDOW: dict[str, int | None] = {"anthropic": None, "openai": 200_000}
 # The deadline ``deadline_hit`` is held to, short enough that it fires.
 DEADLINE_HIT_S = 12.0
 # How long a run stopped at its deadline is given for its in-flight work to see the stop.
@@ -139,7 +134,6 @@ def settings_for(rehearsal: Rehearsal, root: str) -> dict[str, Any]:
                 "llm.openai.base_url": f"{root}/v1",
                 "llm.openai.api_key": API_KEY,
                 "llm.openai.compat": "deepseek",
-                "llm.openai.context_size": HARNESS_WINDOW["openai"],
                 "llm.parallel_analysts": "true",
                 "llm.openai.expert_model": models["expert"],
                 "llm.openai.judge_model": models["expert"],
@@ -306,7 +300,6 @@ async def rehearse(rehearsal: Rehearsal) -> RunRecord:
         pace=Pace(rehearsal.first_token_seconds, rehearsal.tokens_per_second),
         api_key=API_KEY,
         dump_dir=rehearsal.dump_dir,
-        window=HARNESS_WINDOW[rehearsal.provider],
     )
     events: list[dict[str, Any]] = []
     sample_path, sha256 = write_sample(rehearsal.work_dir)

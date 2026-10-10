@@ -37,6 +37,9 @@ JOB = "11111111-1111-1111-1111-111111111111"
 REPORT = "22222222-2222-2222-2222-222222222222"
 STUB = "http://127.0.0.1:41234"
 PROVIDER_WINDOW = 1_000_000
+# Hosted models no stored description or table row documents a window for.
+FLASH_UNDOCUMENTED = "acme-hosted-flash"
+PRO_UNDOCUMENTED = "acme-hosted-pro"
 
 
 def _values(**overrides: Any) -> dict[str, dict[str, Any]]:
@@ -408,8 +411,7 @@ def _args(tmp_path: Path, **extra: Any) -> Any:
         "slow_seconds": None,
         "first_token_seconds": 0.0,
         "tokens_per_second": 0.0,
-        # The provider's window, named: the table documents none for these models.
-        "window": [f"deepseek-v4-flash={PROVIDER_WINDOW}", f"deepseek-v4-pro={PROVIDER_WINDOW}"],
+        "window": [],
         "slots": 1,
         "runtime": "hosted",
         "api": "http://api",
@@ -458,8 +460,20 @@ def test_a_failed_connection_test_changes_nothing(
 def test_the_gate_refuses_to_guess_a_window_nothing_documents(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    api = _Api(_values())
-    with pytest.raises(SystemExit, match="deepseek-v4-flash, deepseek-v4-pro: name the provider"):
+    values = _values(
+        **{
+            "core.llm.openai.expert_model": {"value": FLASH_UNDOCUMENTED, "source": "ui"},
+            "core.llm.openai.judge_model": {"value": FLASH_UNDOCUMENTED, "source": "ui"},
+            "core.llm.agents": {
+                "value": {"judge": {"provider": "openai", "model": PRO_UNDOCUMENTED}},
+                "source": "ui",
+            },
+        }
+    )
+    api = _Api(values)
+    with pytest.raises(
+        SystemExit, match=f"{FLASH_UNDOCUMENTED}, {PRO_UNDOCUMENTED}: name the provider"
+    ):
         _run_with(api, _args(tmp_path, window=[]), monkeypatch)
     assert not any(call.startswith("PATCH") for call in api.seen)
     assert not any(call.startswith("POST /jobs") for call in api.seen)
@@ -470,12 +484,11 @@ def test_a_documented_window_needs_no_window_named() -> None:
     from scripts.rehearsal.run import gate_models
 
     values = _values(**{"core.llm.agents": {"value": {}, "source": "ui"}})
-    assert undocumented_windows(["claude-haiku-5-5", "deepseek-chat"]) == []
-    assert undocumented_windows(["deepseek-v4-pro", "claude-haiku-5-5"]) == ["deepseek-v4-pro"]
-    assert undocumented_windows(["deepseek-v4-pro"], {"deepseek-v4-pro": PROVIDER_WINDOW}) == []
-    assert undocumented_windows(["deepseek-v4-pro"], {"deepseek-v4-flash": PROVIDER_WINDOW}) == [
-        "deepseek-v4-pro"
-    ]
+    assert undocumented_windows(["claude-haiku-5-5", "deepseek-chat", "deepseek-v4-pro"]) == []
+    pro = PRO_UNDOCUMENTED
+    assert undocumented_windows([pro, "claude-haiku-5-5"]) == [pro]
+    assert undocumented_windows([pro], {pro: PROVIDER_WINDOW}) == []
+    assert undocumented_windows([pro], {FLASH_UNDOCUMENTED: PROVIDER_WINDOW}) == [pro]
     expected = {"model.static": "deepseek-v4-flash", "model.judge": "deepseek-v4-flash"}
     assert gate_models(_values(), expected) == ["deepseek-v4-flash", "deepseek-v4-pro"]
     assert gate_models(values, expected) == ["deepseek-v4-flash"]
@@ -485,8 +498,12 @@ class TestTheWindowIsNamedPerModel:
     def test_a_window_the_product_cannot_learn_is_named(self) -> None:
         from scripts.rehearsal.run import windows_the_product_cannot_learn
 
-        windows = {"deepseek-v4-pro": PROVIDER_WINDOW, "deepseek-chat": 65536}
-        assert windows_the_product_cannot_learn(_values(), windows) == ["deepseek-v4-pro"]
+        windows = {
+            PRO_UNDOCUMENTED: PROVIDER_WINDOW,
+            "deepseek-chat": 65536,
+            "deepseek-v4-pro": PROVIDER_WINDOW,
+        }
+        assert windows_the_product_cannot_learn(_values(), windows) == [PRO_UNDOCUMENTED]
         declared = _values(
             **{"core.llm.openai.context_size": {"value": PROVIDER_WINDOW, "source": "ui"}}
         )
@@ -504,15 +521,16 @@ class TestTheWindowIsNamedPerModel:
     def test_a_bare_n_is_taken_only_for_the_one_model_without_a_window(self) -> None:
         from scripts.rehearsal.run import resolve_windows
 
-        # Haiku keeps its documented window; the bare N is DeepSeek's alone.
-        assert resolve_windows(["claude-haiku-5-5", "deepseek-v4-pro"], 5000, {}) == {
-            "deepseek-v4-pro": 5000
+        # Haiku keeps its documented window; the bare N is the undocumented model's alone.
+        assert resolve_windows(["claude-haiku-5-5", PRO_UNDOCUMENTED], 5000, {}) == {
+            PRO_UNDOCUMENTED: 5000
         }
         assert resolve_windows(
-            ["deepseek-v4-flash", "deepseek-v4-pro"], 5000, {"deepseek-v4-flash": 7000}
-        ) == {"deepseek-v4-flash": 7000, "deepseek-v4-pro": 5000}
-        with pytest.raises(SystemExit, match="deepseek-v4-flash, deepseek-v4-pro are undocumented"):
-            resolve_windows(["deepseek-v4-flash", "deepseek-v4-pro"], 5000, {})
+            [FLASH_UNDOCUMENTED, PRO_UNDOCUMENTED], 5000, {FLASH_UNDOCUMENTED: 7000}
+        ) == {FLASH_UNDOCUMENTED: 7000, PRO_UNDOCUMENTED: 5000}
+        both = f"{FLASH_UNDOCUMENTED}, {PRO_UNDOCUMENTED} are undocumented"
+        with pytest.raises(SystemExit, match=both):
+            resolve_windows([FLASH_UNDOCUMENTED, PRO_UNDOCUMENTED], 5000, {})
         with pytest.raises(SystemExit, match="every model's window is documented"):
             resolve_windows(["claude-haiku-5-5"], 5000, {})
 
@@ -681,25 +699,36 @@ def test_a_stack_run_failing_as_a_known_defect_is_reported_as_that_defect(
     assert code == (1 if others else 0)
 
 
-def test_the_one_known_defect_pinned_today_is_d8_on_the_openai_stack() -> None:
-    from scripts.rehearsal.run import KNOWN_DEFECTS_FILE, detail_matches, known_stack_defects
+def test_no_known_defect_is_pinned_today() -> None:
+    from scripts.rehearsal.run import KNOWN_DEFECTS_FILE, pinned_setting_keys
 
     pinned = json.loads(KNOWN_DEFECTS_FILE.read_text())
-    assert pinned["observations"] == []
-    (row,) = pinned["pins"]
-    assert (row["id"], row["wire"], row["api"], row["scenario"]) == (
-        "D8",
-        "stack",
-        "openai",
-        "normal",
+    assert pinned["pins"] == [] and pinned["observations"] == []
+    assert pinned_setting_keys() == []
+
+
+def test_a_stack_pin_holds_only_for_its_provider_and_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.rehearsal import run
+
+    row = {
+        "id": "DX",
+        "scenario": "normal",
+        "wire": "stack",
+        "api": "openai",
+        "settings": {"core.llm.openai.context_size": 0},
+        "check": "window in force as the provider serves it",
+        "detail": "the analysts' window is the 8192-token fallback; the stub serves m {n}",
+        "defect": "a defect described for the test",
+    }
+    pins_file = tmp_path / "known_defects.json"
+    pins_file.write_text(json.dumps({"pins": [row], "observations": []}))
+    monkeypatch.setattr(run, "KNOWN_DEFECTS_FILE", pins_file)
+    assert run.pinned_setting_keys() == ["core.llm.openai.context_size"]
+    assert run.detail_matches(
+        row["detail"], "the analysts' window is the 8192-token fallback; the stub serves m 1048576"
     )
-    seen = (
-        "the analysts' window is the 8192-token fallback (no endpoint reported a window and the "
-        "model is not in the table); the stub serves deepseek-v4-flash 1048576; output caps "
-        "derived from no window: dynamic, judge, mediator, network, static"
-    )
-    assert detail_matches(row["detail"], seen)
-    assert row["settings"] == {"core.llm.openai.context_size": 0}
 
     def record(api: str, context_size: Any) -> RunRecord:
         params = {
@@ -708,16 +737,10 @@ def test_the_one_known_defect_pinned_today_is_d8_on_the_openai_stack() -> None:
         }
         return RunRecord(scenario="normal", job_status="completed", api=api, scenario_params=params)
 
-    assert list(known_stack_defects(record("openai", 0))) == [row["check"]]
-    assert list(known_stack_defects(record("openai", None))) == [row["check"]]
-    assert known_stack_defects(record("openai", 1_048_576)) == {}
-    assert known_stack_defects(record("anthropic", 0)) == {}
-
-
-def test_the_settings_a_pin_names_are_read_from_the_stack() -> None:
-    from scripts.rehearsal.run import pinned_setting_keys
-
-    assert pinned_setting_keys() == ["core.llm.openai.context_size"]
+    assert list(run.known_stack_defects(record("openai", 0))) == [row["check"]]
+    assert list(run.known_stack_defects(record("openai", None))) == [row["check"]]
+    assert run.known_stack_defects(record("openai", 1_048_576)) == {}
+    assert run.known_stack_defects(record("anthropic", 0)) == {}
 
 
 def test_an_in_process_run_never_reads_the_stack_s_known_defects() -> None:

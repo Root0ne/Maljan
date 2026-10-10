@@ -834,12 +834,10 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
                 if server is not None:
                     server.state.windows = windows
             else:
-                from scripts.rehearsal.inprocess import HARNESS_WINDOW, Rehearsal, expected_for
+                from scripts.rehearsal.inprocess import Rehearsal, expected_for
 
                 changes = {**harness_changes(args.provider, stub_root), **third_party_off(values)}
                 expected = {**expected_for(Rehearsal(provider=args.provider)), **expected}
-                if server is not None and not args.window:
-                    server.state.window = HARNESS_WINDOW[args.provider]
             changes.update(deadline_changes(args.scenario, args.job_timeout))
             answer = client.probe_models(changes)
             probe = {"ok": bool(answer.get("ok")), "detail": str(answer.get("detail") or "")}
