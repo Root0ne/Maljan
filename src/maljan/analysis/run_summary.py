@@ -35,6 +35,7 @@ from maljan.analysis.corroboration import (
     published_count,
     technique_label,
 )
+from maljan.core.token_ledger import CALL_PARTS
 from maljan.pipeline.mediation_models import (
     CONTRADICTIONS_BLOCK_MISSING_NOTE,
     CONTRADICTIONS_BLOCK_MIXED_NOTE,
@@ -363,17 +364,9 @@ def spend_blocks(snapshot: dict[str, Any] | None) -> dict[str, Any]:
 
 
 # The figures of a ``model_usage`` record that are the call's usage, as
-# ``TokenLedger.add`` and ``SpendMeter.settle`` take it.
-_USAGE_KEYS: tuple[str, ...] = (
-    "input_tokens",
-    "output_tokens",
-    "cached_input_tokens",
-    "cache_write_input_tokens",
-    "cache_write_1h_input_tokens",
-    "reasoning_tokens",
-    "cost",
-    "sent_at",
-)
+# ``TokenLedger.add`` and ``SpendMeter.settle`` take it: the parts the record
+# was written with, so a part recorded is a part read back.
+_USAGE_KEYS: tuple[str, ...] = CALL_PARTS
 
 
 def _figure(value: Any) -> float | None:

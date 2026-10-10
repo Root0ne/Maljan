@@ -256,7 +256,7 @@ class _Tally:
 # spend meter prices a call by besides — the hour's share of its cache writes
 # and when it was sent — so a total built from the records alone is priced the
 # way the run's own meter priced it.
-_CALL_PARTS: tuple[str, ...] = (
+CALL_PARTS: tuple[str, ...] = (
     "input_tokens",
     "output_tokens",
     "cached_input_tokens",
@@ -288,7 +288,7 @@ def call_record(
     }
     if usage is None:
         return row
-    for part in _CALL_PARTS:
+    for part in CALL_PARTS:
         value = usage.get(part)
         if isinstance(value, int | float) and not isinstance(value, bool):
             row[part] = float(value) if part in _FRACTIONAL_PARTS else int(value)
