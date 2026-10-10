@@ -775,3 +775,17 @@ class TestTheWindowInForce:
         assert "records no window" in self._detail(record)
         record.expected["settings.preprocessing.max_tool_output_chars"] = 6000
         assert self._detail(record) == ""
+
+    def test_an_output_cap_that_does_not_fit_inside_the_served_window_fails(self) -> None:
+        record = _record()
+        record.expected["model.judge"] = MODEL
+        record.run_summary["generation"]["output_caps"]["judge"] = {
+            "tokens": WINDOW,
+            "derivation": f"{WINDOW} tokens — the model's declared maximum output of {WINDOW}",
+        }
+        assert self._detail(record) == (
+            f"judge's output cap of {WINDOW} tokens does not fit inside the {WINDOW}-token "
+            f"window the stub serves {MODEL}"
+        )
+        record.run_summary["generation"]["output_caps"]["judge"]["tokens"] = WINDOW - 1
+        assert self._detail(record) == ""

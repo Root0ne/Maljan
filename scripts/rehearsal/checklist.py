@@ -794,6 +794,16 @@ def _check_window(record: RunRecord) -> Check:
     for agent in sorted(caps):
         group = _AGENT_GROUP.get(str(agent))
         derivation = str((caps[agent] or {}).get("derivation") or "")
+        cap = (caps[agent] or {}).get("tokens")
+        if group is not None and isinstance(cap, int) and not isinstance(cap, bool):
+            # The cap the model was built with must leave the prompt room in
+            # the window the provider serves it.
+            capped = model_of(group)
+            if capped in served and cap >= served[capped]:
+                problems.append(
+                    f"{agent}'s output cap of {cap} tokens does not fit inside the "
+                    f"{served[capped]}-token window the stub serves {capped}"
+                )
         if _NO_WINDOW_SAID in derivation:
             unlearned.append(str(agent))
             continue
