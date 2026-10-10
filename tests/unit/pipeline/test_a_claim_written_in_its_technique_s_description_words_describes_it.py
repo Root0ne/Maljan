@@ -1,14 +1,14 @@
-"""A claim written in the words one phrase of its technique's card describes it with describes it.
+"""A claim written in the words its technique's own texts describe it with describes it.
 
 The does-not-describe question asked most of the claims it was asked of in
 five stored runs about claims that were right: API names found "by a walk of
 each loaded module's export table" under Obfuscated Files or Information, "a
 decode loop over each embedded blob" under Deobfuscate/Decode Files or
-Information. None of them wrote the catalogue name; each wrote words one
-phrase of the technique's card (or the API catalogue's rule) writes together.
-Those words now count: two or more of one phrase, each weighed by how few
-technique families' texts write it, a parent reading its sub-techniques'
-phrases too.
+Information. None of them wrote the catalogue name; each wrote words the
+texts of one technique id (its card and the API catalogue's rule) write.
+Those words now count: two or more that one technique id's texts write, each
+weighed by how few technique families' texts write it, a parent reading each
+of its sub-techniques' texts too, and two words of two ids never together.
 
 Read as a procedure word is read: nothing counts in a sentence that says the
 behaviour was not seen, nor a word the sentence names as absent or writes after
@@ -67,7 +67,7 @@ def _asked(text: str, technique: str) -> bool:
          "T1071.001"),
     ],
 )  # fmt: skip
-def test_a_claim_in_one_phrase_s_words_is_not_asked(text: str, technique: str) -> None:
+def test_a_claim_in_one_technique_s_words_is_not_asked(text: str, technique: str) -> None:
     assert described_by_its_words(text, technique)
     assert not _asked(text, technique)
 
@@ -132,19 +132,24 @@ class TestTheWeights:
         for technique in ("T1027", "T1140", "T1059.003", "T1071.001"):
             assert not set(common) & set(description_weights(technique))
 
-    def test_two_words_of_two_phrases_are_not_one_phrase(self) -> None:
-        phrases = description_phrases("T1140")
-        assert any("embedd" in phrase for phrase in phrases)
-        assert any("byte" in phrase for phrase in phrases)
-        assert not any({"embedd", "byte"} <= set(phrase) for phrase in phrases)
-        assert not described_by_its_words("The embedded bytes sit in the resource.", "T1140")
+    def test_two_words_one_technique_s_texts_write_count_together(self) -> None:
+        # Both are T1140's own words, written in two of its card's phrases.
+        assert described_by_its_words("The embedded bytes are restored at start.", "T1140")
 
-    def test_a_parent_reads_its_sub_techniques_phrases(self) -> None:
+    def test_two_words_of_two_technique_ids_do_not_count_together(self) -> None:
+        # "hard" is the parent's own word, "recompiled" a sub-technique's.
+        sets = description_phrases("T1027")
+        assert any("hard" in words for words in sets)
+        assert any("recompil" in words for words in sets)
+        assert not any({"hard", "recompil"} <= set(words) for words in sets)
+        assert not described_by_its_words("The recompiled routine is hard.", "T1027")
+
+    def test_a_parent_reads_its_sub_techniques_texts(self) -> None:
         # The export-table walk is the dynamic resolution sub-technique's card.
         assert "export" in description_weights("T1027")
         assert "export" in description_weights("T1027.007")
 
-    def test_a_sub_technique_reads_its_parent_s_phrases(self) -> None:
+    def test_a_sub_technique_reads_its_parent_s_texts(self) -> None:
         parent = {frozenset(p) for p in description_phrases("T1027") if "decod" in p}
         assert parent
         assert parent <= {frozenset(p) for p in description_phrases("T1027.007")}
@@ -153,7 +158,7 @@ class TestTheWeights:
         weights = description_weights("T1140")
         own = next(stem for stem, weight in weights.items() if weight == 1)
         assert DESCRIPTION_STEMS_NEEDED == 2
-        assert not described_by_its_words(f"The routine holds {own}.", "T1140")
+        assert not described_by_its_words(f"Only {own}.", "T1140")
 
     def test_a_silent_e_an_inflection_and_a_plural_meet(self) -> None:
         stem = validation._description_stem

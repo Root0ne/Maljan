@@ -1211,6 +1211,12 @@ _NEGATED_PHRASE_RE = re.compile(r"\b(?:without|instead\s+of|not|never)\b[^,;.()]
 # two families or more is what they share. ``procedure_word_families`` gives
 # the measured count of every word; a test pins where the cut falls.
 PROCEDURE_WORD_MAX_FAMILIES = 1
+# The description words' threshold, beside it: a measured heuristic threshold,
+# not a cap on any data. A stem more than six technique families' vendored
+# texts write is the catalogue's shared vocabulary (fourteen families write
+# "data") and weighs nothing as a description word (``described_by_its_words``);
+# a test pins the behaviour, not the number.
+DESCRIPTION_MAX_FAMILIES = 6
 # The spellings of a call a procedure word names: the word, its ANSI and wide
 # forms and its extended ones (``HttpSendRequest`` is written
 # ``HttpSendRequestA``, ``RegQueryValueEx`` ``RegQueryValueExW``).
@@ -1480,21 +1486,19 @@ def name_stem_families() -> dict[str, int]:
 # card's requirements and indicators (``data/attck_technique_cards.json``,
 # written from the ATT&CK definitions) and of the API catalogue's rule for it
 # (``data/api_attck_map_v1.json``), the texts :func:`_procedure_sources` reads,
-# each text one phrase, a part that says what the technique is not left out
-# (``_NEGATED_PHRASE_RE``). A stem weighs one over the number of technique
-# families whose texts write it: a stem one family's texts alone write weighs
-# 1, one that four families write ("string") a quarter, and one more
-# families write than ``DESCRIPTION_MAX_FAMILIES`` nothing ("file", "process",
-# "command"). A sentence describes the technique by these words when it writes
-# at least ``DESCRIPTION_STEMS_NEEDED`` distinct stems of one phrase and their
-# weights add up to ``DESCRIPTION_WEIGHT_NEEDED``: two words the data writes
-# together for the technique, not two words of its whole vocabulary. One word
-# alone is not enough: a card names the objects it acts on (a file's "header"
-# under Masquerade File Type), and a sentence names the same object for
-# another reason. A stem more than six technique families write is the shared
-# vocabulary of the catalogue (fourteen families write "data"), not
-# what one technique is described by.
-DESCRIPTION_MAX_FAMILIES = 6
+# a part that says what the technique is not left out (``_NEGATED_PHRASE_RE``).
+# A stem weighs one over the number of technique families whose texts write
+# it: a stem one family's texts alone write weighs 1, one that four families
+# write ("string") a quarter, and one more families write than
+# ``DESCRIPTION_MAX_FAMILIES`` nothing ("file", "process", "command"). A
+# sentence describes the technique by these words when it writes at least
+# ``DESCRIPTION_STEMS_NEEDED`` distinct stems that the texts of one technique
+# id write (the id's own, its parent's, or one of its sub-techniques') and
+# their weights add up to ``DESCRIPTION_WEIGHT_NEEDED``: two words the data
+# writes for one technique, not two words gathered from several. One word alone
+# is not enough: a card names the objects it acts on (a file's "header" under
+# Masquerade File Type), and a sentence names the same object for another
+# reason.
 DESCRIPTION_STEMS_NEEDED = 2
 DESCRIPTION_WEIGHT_NEEDED = Fraction(1)
 
@@ -1571,14 +1575,20 @@ def _description_stems(text: str) -> set[str]:
 
 @lru_cache(maxsize=1)
 def _description_phrases_by_id() -> tuple[dict[str, tuple[frozenset[str], ...]], dict[str, int]]:
-    """Every technique's phrases as sets of description stems, by id, and how many
-    technique families' texts write each stem. Read once."""
+    """Every technique id's description stems as one set, by id, and how many
+    technique families' texts write each stem. Read once.
+
+    One set per id: the stems of all its texts (its card's requirements and
+    indicators, its API rule), so two words count together when the data
+    writes both for that one technique.
+    """
     phrases_by_id: dict[str, tuple[frozenset[str], ...]] = {}
     families: dict[str, set[str]] = {}
     for technique_id, texts in _procedure_sources().items():
-        phrases = tuple(
-            frozenset(_description_stems(_NEGATED_PHRASE_RE.sub(" ", text))) for text in texts
-        )
+        stems: set[str] = set()
+        for text in texts:
+            stems |= _description_stems(_NEGATED_PHRASE_RE.sub(" ", text))
+        phrases = (frozenset(stems),) if stems else ()
         phrases_by_id[technique_id] = phrases
         for stem in frozenset().union(*phrases):
             families.setdefault(stem, set()).add(_family(technique_id))
@@ -1592,9 +1602,9 @@ def description_stem_families() -> dict[str, int]:
 
 @cache
 def description_phrases(technique_id: str) -> tuple[dict[str, Fraction], ...]:
-    """The phrases a claim may describe ``technique_id`` by: each a map of its
-    weighed stems to their weights, a phrase with fewer than
-    ``DESCRIPTION_STEMS_NEEDED`` of them left out.
+    """The word sets a claim may describe ``technique_id`` by, one per technique
+    id read: each a map of its weighed stems to their weights, a set with fewer
+    than ``DESCRIPTION_STEMS_NEEDED`` of them left out.
 
     The id's own texts and, for a sub-technique, its parent's (as the name check
     reads the parent's name); for a parent, its sub-techniques' too, since a
@@ -1654,8 +1664,9 @@ def _negated_in_its_clause(text: str) -> Callable[[int], bool]:
 
 
 def described_by_its_words(text: str, technique_id: str) -> bool:
-    """Whether ``text`` writes enough of the words one phrase of the vendored data
-    describes ``technique_id`` with, by their number and their weight (see above).
+    """Whether ``text`` writes enough of the words the vendored texts of one
+    technique id describe ``technique_id`` with, by their number and their
+    weight (see above).
 
     Read as a procedure word is read: nothing counts in a sentence that says the
     behaviour was not seen, run or used (``_NOT_SEEN_RE``), and a word named to
