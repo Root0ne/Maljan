@@ -2823,15 +2823,36 @@ is answered from the note with the first open's own answer and logged as such;
 where `select_tool` is named it is sent first, and only a select the server
 refuses (it restarted, the program is gone) opens and analyses the path afresh
 and writes the note again. An open the server refused, or an analysis it did
-not confirm, is not noted, so the next open tries again. A lock per path makes
-two first opens at once import once. The note belongs to one job and is never
-shared with another; a handle a static provider starts beside the registry's
-own session of the same server notes under a name of its own. The select and
-analysis tools are called even when the model is not offered them.
+not confirm, is not noted, so the next open tries again; a select refused right
+after a fresh open is handed on as a failed open, the select's refusal with the
+open's own answer beside it. A lock per path makes two first opens at once
+import once. The select and analysis tools are called even when the model is
+not offered them, and a declaration naming a tool the server does not offer is
+logged and leaves the open tool as it is.
+
+The note belongs to one job and is never shared with another. Within the job it
+is kept per server, not per handle: every handle to a remote server (`http`,
+`streamable-http`, `sse`) names the same address and shares the note, while a
+local (`stdio`) server is a process per handle and keeps its own. A path is
+noted in one spelling, so `/samples//sub/../a.bin` and `/samples/a.bin` are one
+path.
+
+The declared open and analysis tools are held as long-running, exactly as a
+tool the server's own `capabilities` manifest marks `long_running`: an import
+of a large file and its analysis take as long as they take, so they get no
+client deadline unless `mcp.breaker.call_timeout_seconds` is set. A deadline
+would only cut a call the server is still working on, the open would not be
+noted, and every later open would import and analyse again.
+
+**Declared tools must refuse in a structured way.** A refusal is read by the
+platform's one rule for failed tool answers: an MCP `isError` result, a
+`{"error": …}` answer, or an HTTP error. A refusal written as plain text
+("Program not found") reads as success, so a refused select would be answered
+from the note while the server holds nothing.
 
 Ghidra's block ships declaring `load_program` (path argument `file`, name field
 `program`), `switch_program` (argument `program`) and `run_analysis` (argument
-`program`), and its analysis tool's calls wait as long as Ghidra takes. A
+`program`); its client applies the same long-running rule to them. A
 stored Ghidra block that never set `sample_open` carries that declaration; one
 an operator set, empty included, is kept as set. The fields are in the settings
 schema and catalogue now; the server editor's form for them is a follow-up, and
