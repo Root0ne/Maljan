@@ -4477,15 +4477,17 @@ is assembled from what the run gathered rather than recomputed beside it:
   the report. The recommendation's category is the model's own. The Markdown
   prints the host identifiers in §9 under the report model's voice, unpublished,
   and the console draws them in the technical-analysis panel.
-* **The report stage writes up to the model's own maximum.** A section's and
-  the narrative round's output budget follow the report stage's own order
+* **The report stage derives its budget as the judge does.** A section's and
+  the narrative round's output budget
   (`core.container.composer_output_budget`, `report_stage_budget`,
   `llm.context_window.report_output_budget`): the operator's
   `reporting.composer_section_max_tokens` for a section (plus the reporter's
   cap as reasoning room where thinking is left on), else the reporter's
-  `llm.judge_max_tokens`, else the model's declared maximum output, else the
-  analysts' derivation (`derived_reply`: a quarter of the window for a runtime
-  we run, the documented 8,192 for a hosted API that declares nothing). Never
+  `llm.judge_max_tokens`, else the one derivation every role's cap follows
+  (`derived_reply`: the smaller of a quarter of the window and the model's
+  declared maximum output, a quarter of the window for a runtime we run, the
+  documented 8,192 for a hosted API that declares nothing), so the prompt
+  keeps the rest of the window. Never
   more than the model's maximum — its declared maximum output, or its window
   when it declares none — reasoning room included. A section's evidence gets
   what a learned window leaves after the budget, never below zero (a fallback
@@ -4498,8 +4500,9 @@ is assembled from what the run gathered rather than recomputed beside it:
   a section's model writes is kept whole. The derivation is logged per
   section and printed in Appendix B beside the section's wait ("Output budget
   of `composer:section`"). A fixed budget dropped a section of a live report
-  when the model's answer outgrew it, and a quarter of a million-token window
-  held a model that declares 393,216 to 262,144. No section schema and no
+  when the model's answer outgrew it, and a budget sized at the declared
+  maximum alone gave a model whose maximum output reaches its window the
+  whole window, leaving the prompt no room. No section schema and no
   report prompt sets an upper size: the prose fields, the executive summary,
   the key findings and the recommendations keep only their lower bounds. An answer the cap cuts is told so — `composer.cut_at_output_cap`,
   naming the cap, the answer's size (characters, items begun, and — when a

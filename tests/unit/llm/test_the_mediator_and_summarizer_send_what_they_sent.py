@@ -6,7 +6,10 @@ the function summariser built through the container on Anthropic at
 ``llm.anthropic.effort = max`` and on DeepSeek at
 ``llm.openai.reasoning_effort = max``, under settings with an analyst entry and
 a judge entry. The mediator's bodies must be the same key for key, so a judge
-entry does not move it.
+entry does not move it. One figure in them was moved since: the DeepSeek
+mediator's output cap, 8,192 while nothing answered for ``deepseek-flash``'s
+window, is 262,144 (a quarter of the 1,048,576 the vendored table now
+documents for it) under the same derivation.
 
 The summariser's are the same but for two keys. Its model was built with
 ``provider_override`` and ``model_override`` keyword arguments that no

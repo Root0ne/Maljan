@@ -1,12 +1,11 @@
 """A report section's output budget is the model's own room, not a constant.
 
 A fixed 900 tokens dropped a section of a live report when the model reasoned
-past it, and a quarter of the window held a million-token model to a quarter of
-what it may write. The report stage follows, in order: the operator's section
-budget, the reporter's ``llm.judge_max_tokens``, the model's declared maximum
-output, and only then the analysts' derivation — a quarter of the window. It is
-never more than the model's maximum, and the run summary and the worker log say
-how it was reached.
+past it. The report stage follows, in order: the operator's section budget, the
+reporter's ``llm.judge_max_tokens``, and the derivation every role's cap
+follows — the smaller of a quarter of the window and the model's declared
+maximum output. It is never more than the model's maximum, and the run summary
+and the worker log say how it was reached.
 """
 
 from __future__ import annotations
@@ -31,6 +30,8 @@ from maljan.reporting.composer import ReportComposer
 HOSTED_MODEL = "deepseek-flash"
 HOSTED_MAXIMUM = 393216
 MILLION = 1048576
+# A quarter of that window: below the declared maximum, so it is the budget.
+MILLION_QUARTER = MILLION // 4
 
 
 def _composer(
@@ -105,13 +106,15 @@ class TestTheOrder:
 
         assert composer.output_cap == 4096
 
-    def test_a_declared_maximum_is_the_budget_with_no_operator_value(self) -> None:
+    def test_a_declared_maximum_bounds_the_quarter_with_no_operator_value(self) -> None:
         composer, built = _hosted()
 
-        assert composer.output_cap == HOSTED_MAXIMUM
-        assert built == HOSTED_MAXIMUM
-        assert composer.budget_note.startswith(f"{HOSTED_MAXIMUM} tokens — the model's declared")
-        assert "api-docs.deepseek.com" in composer.budget_note
+        assert composer.output_cap == MILLION_QUARTER
+        assert built == MILLION_QUARTER
+        assert composer.budget_note.startswith(
+            f"{MILLION_QUARTER} tokens — the smallest of a quarter ({MILLION_QUARTER})"
+        )
+        assert f"the model's declared maximum output of {HOSTED_MAXIMUM}" in composer.budget_note
 
     def test_nothing_declared_takes_a_quarter_of_the_window(self) -> None:
         composer, _built = _composer(131072, judge_max_tokens=0, expert_max_tokens=0)
@@ -150,10 +153,17 @@ class TestNeverPastTheModelsMaximum:
         assert "held at the model's declared maximum output" in composer.budget_note
 
     def test_the_reasoning_room_does_not_push_past_it(self) -> None:
-        composer, _built = _hosted(section=900, thinking_off=False)
+        composer, _built = _hosted(section=900, thinking_off=False, judge_max_tokens=HOSTED_MAXIMUM)
 
         assert composer.output_cap == HOSTED_MAXIMUM
         assert "plus 393216 for its reasoning" in composer.budget_note
+        assert "held at the model's declared maximum output" in composer.budget_note
+
+    def test_the_derived_reasoning_room_is_the_derived_budget(self) -> None:
+        composer, _built = _hosted(section=900, thinking_off=False)
+
+        assert composer.output_cap == 900 + MILLION_QUARTER
+        assert f"plus {MILLION_QUARTER} for its reasoning" in composer.budget_note
 
     def test_a_served_window_bounds_a_model_that_declares_nothing(self) -> None:
         composer, _built = _composer(16384, judge_max_tokens=40000)
@@ -166,7 +176,7 @@ class TestNeverPastTheModelsMaximum:
 
         composer, _built = _hosted()
 
-        assert composer._room_chars() == (MILLION - HOSTED_MAXIMUM) * CHARS_PER_TOKEN
+        assert composer._room_chars() == (MILLION - MILLION_QUARTER) * CHARS_PER_TOKEN
 
 
 class TestTheReportersModel:
@@ -183,7 +193,7 @@ class TestTheReportersModel:
         with patch("maljan.llm.context_window.learn_window", return_value=fact):
             container.get_reporter_llm()
 
-        assert registry.build_model_for_agent.call_args.kwargs["max_tokens"] == HOSTED_MAXIMUM
+        assert registry.build_model_for_agent.call_args.kwargs["max_tokens"] == MILLION_QUARTER
 
 
 class TestAnOperatorsOwnBudget:
@@ -429,13 +439,14 @@ class TestAWindowTheBudgetFills:
             source="fallback",
         )
 
-        assert composer.output_cap == HOSTED_MAXIMUM
-        assert built == HOSTED_MAXIMUM
+        assert composer.output_cap == 8192
+        assert built == 8192
+        assert "the documented fallback" in composer.budget_note
         assert composer.window_tokens == 0
         assert composer._room_chars() is None
         assert composer._call_bound([HumanMessage(content="x" * 30000)]) is None
 
-    def test_a_gateway_declaring_its_window_as_its_output_leaves_no_debt(self) -> None:
+    def test_a_gateway_declaring_its_window_as_its_output_keeps_room_for_the_prompt(self) -> None:
         from maljan.llm import model_output_limits
 
         model_output_limits.note_from_model_list(
@@ -452,9 +463,11 @@ class TestAWindowTheBudgetFills:
         finally:
             model_output_limits.forget_learned()
 
-        assert composer.output_cap == 131072
-        assert composer._room_chars() == 0
-        assert composer._call_bound([HumanMessage(content="x" * 3000)]) == 131072 - 1000
+        from maljan.llm.context_window import CHARS_PER_TOKEN
+
+        assert composer.output_cap == 32768
+        assert composer._room_chars() == (131072 - 32768) * CHARS_PER_TOKEN
+        assert composer._call_bound([HumanMessage(content="x" * 3000)]) is None
 
     def test_a_local_judge_cap_past_the_window_is_held_per_call(self) -> None:
         composer, _built = _composer(16384, judge_max_tokens=40000)

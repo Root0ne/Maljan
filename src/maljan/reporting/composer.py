@@ -795,6 +795,7 @@ class ReportComposer:
         turn_share: float | None = None,
         budget_note: str = "",
         window_tokens: int = 0,
+        windows_by_model: dict[str, int] | None = None,
     ) -> None:
         self.llm = llm
         self.section_max_tokens = section_max_tokens
@@ -815,6 +816,10 @@ class ReportComposer:
         # and the cap its own provider was given: what "cut" means for the
         # model that answered.
         self.caps_by_model = dict(caps_by_model or {})
+        # Each model of the list, by the same label, and the window it serves
+        # (0 where nothing reported one): with its cap, what that model leaves
+        # for a section's prompt (``_room_pairs``).
+        self.windows_by_model = dict(windows_by_model or {})
         # The job's share of a section's clock a model of the list may take
         # before the next one is asked.
         self.turn_share = turn_share
@@ -1491,20 +1496,45 @@ class ReportComposer:
             return None
         return max(0, (room - int(prompt_chars)) // answers)
 
+    def _model_rooms(self) -> list[tuple[str, int, int]]:
+        """``(label, window, output cap)`` for each model of the list whose window is known.
+
+        Each model is paired with its own window and its own cap, since any of
+        them may be the one that answers; the largest cap of the list beside
+        the smallest window describes no model. A composer given no per-model
+        windows is one model: the window it was given and its output cap.
+        """
+        caps = getattr(self, "caps_by_model", None) or {}
+        windows = getattr(self, "windows_by_model", None) or {}
+        reply = int(getattr(self, "output_cap", 0) or getattr(self, "section_max_tokens", 0) or 0)
+        if windows:
+            return [
+                (str(label), int(window), int(caps.get(label) or reply))
+                for label, window in windows.items()
+                if int(window or 0) > 0
+            ]
+        window = int(getattr(self, "window_tokens", 0) or 0)
+        label = str(getattr(self, "model_label", "") or "")
+        return [(label, window, reply)] if window > 0 else []
+
+    def _room_pairs(self) -> list[tuple[int, int]]:
+        """``(window, output cap)`` for each model of the list whose window is known."""
+        return [(window, cap) for _label, window, cap in self._model_rooms()]
+
     def _room_chars(self) -> int | None:
         """The characters a section's whole prompt may take, or ``None`` with no window known.
 
-        ``(window − output budget) × chars per token``, and never below zero: a
-        budget that takes the whole window leaves no room, not a debt. A window
-        nothing reported is passed as 0 and sizes nothing.
+        ``(window − output budget) × chars per token`` for each model of the
+        list (:meth:`_room_pairs`), the smallest of them, and never below zero:
+        a budget that takes the whole window leaves no room, not a debt. A
+        window nothing reported sizes nothing.
         """
-        window = int(getattr(self, "window_tokens", 0) or 0)
-        if window <= 0:
+        pairs = self._room_pairs()
+        if not pairs:
             return None
         from maljan.llm.context_window import CHARS_PER_TOKEN
 
-        reply = int(getattr(self, "output_cap", 0) or self.section_max_tokens or 0)
-        return max(0, (window - reply) * CHARS_PER_TOKEN)
+        return min(max(0, (window - cap) * CHARS_PER_TOKEN) for window, cap in pairs)
 
     def _call_bound(self, turns: Sequence[BaseMessage]) -> int | None:
         """The ``max_tokens`` one call of this section is held to, or ``None``.
@@ -1531,6 +1561,7 @@ class ReportComposer:
         the spend ceiling does not admit the call.
         """
         from maljan.llm.context_window import (
+            CHARS_PER_TOKEN,
             accepts_output_bound,
             call_output_bound,
             prompt_overflow_sentence,
@@ -1544,9 +1575,28 @@ class ReportComposer:
             self._note_degradation(overflow)
         budget_note = str(getattr(self, "budget_note", "") or "")
         why = f"its output budget of {cap} tokens" + (f" ({budget_note})" if budget_note else "")
-        bound = call_output_bound(cap, window, chars)
-        if bound is not None:
-            why = f"what its {window}-token window leaves after the prompt"
+        # Each model against its own window and cap. One call's cap reaches
+        # whichever model answers, so where any model's cap does not fit
+        # beside the prompt, the call is held to the least any model of the
+        # list may write: never past a model's own cap or its window.
+        rooms = self._model_rooms()
+        # A model whose whole window the prompt already passes cannot answer
+        # it (the overflow is recorded above); it does not hold the call of a
+        # model that can. With none that can, every model still holds it.
+        prompt_tokens = -(-chars // CHARS_PER_TOKEN)
+        rooms = [room for room in rooms if prompt_tokens < room[1]] or rooms
+        bound = None
+        if any(call_output_bound(c, w, chars) is not None for _label, w, c in rooms):
+            # Each model's limit, and the words for it: what its window leaves
+            # where its cap does not fit beside the prompt, else its own cap.
+            limits = []
+            for label, w, c in rooms:
+                left = call_output_bound(c, w, chars)
+                if left is not None:
+                    limits.append((left, f"what its {w}-token window leaves after the prompt"))
+                else:
+                    limits.append((c, f"{label}'s output cap of {c} tokens"))
+            bound, why = min(limits, key=lambda limit: limit[0])
         ledger = getattr(self, "token_ledger", None)
         if preview:
             held = spend_preview(ledger, self.llm, chars, cap)

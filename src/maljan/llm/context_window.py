@@ -1584,34 +1584,30 @@ def report_output_budget(
 ) -> OutputBudget:
     """How long one answer of the report stage may run on one model, and why.
 
-    The report stage writes the report, and a report is as long as its
-    evidence needs; a quarter of the window is the analysts' rule, which keeps
-    room in a conversation that is still gathering. So, in this order:
+    The report stage's answer is one reply like any other role's, written into
+    the window its prompt already fills, so it follows the same rule:
 
     1. ``configured`` above 0 is the operator's value (``configured_said`` says
-       which setting, and what was added to it), used as set;
-    2. else the model's declared maximum output — the endpoint's model list or
-       the vendored table's sourced row;
-    3. else the analysts' derivation (:func:`derived_reply`), with ``setting``
-       named as the cap that was not set.
+       which setting, and what was added to it), used as set, and held at the
+       model's maximum (:func:`model_maximum_output`); a value held at it says so;
+    2. else the one derivation every role's cap follows (:func:`derived_reply`):
+       the smallest of a quarter of the window and the model's declared maximum
+       output, with ``setting`` named as the cap that was not set.
 
-    Never more than the model's maximum (:func:`model_maximum_output`); a value
-    held at it says so. The window is still learned: a section's evidence room
-    is what the window leaves after this budget.
+    Sized at the declared maximum alone, a model whose maximum output reaches
+    its window was given the whole window as its answer and its prompt none.
+    The window is still learned: a section's evidence room is what the window
+    leaves after this budget.
     """
-    from maljan.llm.model_output_limits import declared_output_limit
-
     window = window_for_assignment(settings, assignment, probe=probe)
     model = getattr(assignment, "model", "")
-    maximum, maximum_said = model_maximum_output(window, model)
     configured = int(configured or 0)
     if configured > 0:
+        maximum, maximum_said = model_maximum_output(window, model)
         tokens = min(configured, maximum) if maximum > 0 else configured
         sentence = f"{tokens} tokens — {configured_said}"
         if tokens < configured:
             sentence += f", held at {maximum_said}"
-    elif declared_output_limit(model) > 0:
-        tokens, sentence = maximum, f"{maximum} tokens — {maximum_said}"
     else:
         tokens, sentence = derived_reply(
             window, 0, model, setting, local=serves_locally(assignment, window)

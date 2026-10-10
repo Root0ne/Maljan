@@ -176,9 +176,10 @@ def report_stage_budget(config: Settings, assignment: Any, *, probe: bool = True
     the operator's cap it follows is ``llm.judge_max_tokens`` — the cap
     :meth:`ServiceContainer.get_reporter_llm` has always been built with; the
     analysts' ``llm.expert_max_tokens`` is not the reporter's. Above 0 it is
-    used as set; at 0 the model's declared maximum output; with none declared,
-    the analysts' derivation (``context_window.report_output_budget``). Never
-    more than the model's maximum.
+    used as set; at 0 the derivation every role's cap follows: the smaller of
+    a quarter of the window and the model's declared maximum output
+    (``context_window.report_output_budget``). Never more than the model's
+    maximum.
     """
     from maljan.llm.context_window import report_output_budget
 
@@ -195,9 +196,10 @@ def composer_output_budget(config: Settings, assignment: Any) -> tuple[int, str,
     section budget, plus the reporter's own cap as room for reasoning where the
     provider was not asked to keep reasoning out (:func:`_reporter_reasons`);
     else the operator's ``llm.judge_max_tokens``, the reporter's cap; else the
-    model's declared maximum output; else the analysts' derivation, a quarter
-    of the window. Never more than the model's maximum output, the reasoning
-    room included (``context_window.report_output_budget``). A section was
+    derivation every role's cap follows, the smaller of a quarter of the window
+    and the model's declared maximum output. Never more than the model's
+    maximum output, the reasoning room included
+    (``context_window.report_output_budget``). A section was
     dropped from a live report when its answer outgrew a fixed budget.
 
     Returns the tokens, the sentence that says how they were reached, which
@@ -607,10 +609,10 @@ class ServiceContainer:
     def _report_output_cap(self) -> int:
         """The output cap the reporter's model is built with, its derivation logged and recorded.
 
-        The report stage's own order (:func:`report_stage_budget`): the
-        operator's ``llm.judge_max_tokens``, else the model's declared maximum
-        output, else the analysts' derivation. Over a fallback list, the
-        smallest of its models, as every other agent's cap is.
+        The report stage's budget (:func:`report_stage_budget`): the
+        operator's ``llm.judge_max_tokens``, else the derivation every role's
+        cap follows. Over a fallback list, the smallest of its models, as every
+        other agent's cap is.
         """
         from maljan.core.model_assignments import assignment_chain_for
 
@@ -622,18 +624,14 @@ class ServiceContainer:
                     best = budget
         except Exception as exc:  # noqa: BLE001 — an unreadable assignment takes the derived cap
             logger.warning(
-                "Report stage: the reporter's list could not be budgeted (%s); its model "
-                "takes the analysts' derived cap instead of the report stage's order.",
+                "Report stage: the reporter's list could not be budgeted per model (%s); "
+                "its model takes the judge role's cap (llm.judge_max_tokens, or derived).",
                 exc,
             )
         if best is None:
-            tokens = self._output_cap("judge_max_tokens", REPORTER_AGENT_KEY, role="judge")
-            self._reporter_output_budget = (
-                tokens,
-                f"{tokens} tokens — the analysts' derivation",
-                0,
-            )
-            return tokens
+            cap = self._built_cap("judge_max_tokens", REPORTER_AGENT_KEY, role="judge")
+            self._reporter_output_budget = (int(cap.tokens), cap.sentence, 0)
+            return int(cap.tokens)
         rates = getattr(self, "_generation_rates", None)
         if rates is not None:
             rates.note_output_cap(REPORTER_AGENT_KEY, best.tokens, best.sentence())
@@ -1631,6 +1629,9 @@ class ServiceContainer:
                     turn_share=float(config.llm.fallback_turn_share),
                     budget_note=budget_note,
                     window_tokens=window_tokens,
+                    windows_by_model={
+                        label: window for label, (_tokens, _why, window) in budgets.items()
+                    },
                 )
                 self._report_composer_cache.event_sink = self.event_sink
             return self._report_composer_cache
