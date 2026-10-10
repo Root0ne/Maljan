@@ -3227,12 +3227,16 @@ def _revision_input_is_absent(
     if _sandbox_fed(container.agent_role(agent_name)) and _sandbox_report_is_synthetic(state):
         return True
     sandbox_report = state.get("sandbox_report")
+    # The data is chunked at the agent's own input room, as its first
+    # analysis chunked it.
+    room = agent_input_room(container, agent_name)
     if isinstance(sandbox_report, dict) and sandbox_report:
         try:
             sandbox_chunks = container.load_data_for_agent(
                 agent_name,
                 file_hash=str(state.get("file_hash") or ""),
                 sandbox_report=sandbox_report,
+                room=room,
             )
         except Exception as exc:  # noqa: BLE001 — fails open, same as the loader below
             logger.debug(
@@ -3244,7 +3248,7 @@ def _revision_input_is_absent(
         if sandbox_chunks:
             return False
     try:
-        chunks = container.load_chunked(state.get("file_hash", ""), agent_name)
+        chunks = container.load_chunked(state.get("file_hash", ""), agent_name, room=room)
     except Exception as exc:  # noqa: BLE001
         logger.debug(
             "_revision_input_is_absent: load_chunked failed for '%s' (%s); revising anyway.",
@@ -3270,7 +3274,11 @@ def _build_revision_context(
     file_hash = state.get("file_hash", "")
 
     try:
-        chunks = container.load_chunked(file_hash, agent_name)
+        # Chunked at the agent's own input room, as its first analysis was:
+        # an input that fits that room is one chunk and is revised whole.
+        chunks = container.load_chunked(
+            file_hash, agent_name, room=agent_input_room(container, agent_name)
+        )
     except Exception as exc:
         logger.warning(
             "_build_revision_context: load_chunked failed for '%s/%s' (%s). "
