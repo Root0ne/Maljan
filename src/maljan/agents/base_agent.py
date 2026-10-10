@@ -4190,6 +4190,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         clearing: ToolAnswerClearing | None = None,
         on_clear: Callable[[Clearing], None] | None = None,
         offered: Callable[[], bool] | None = None,
+        ticked: list[int] | None = None,
     ) -> Any:
         """The per-turn hook that regenerates the run-state block's budget line.
 
@@ -4218,12 +4219,14 @@ class BaseAnalyst(BudgetMeter, ABC):
         request is then the conversation as it always was. ``on_clear`` is
         told of each new clear, before the request is measured; ``offered``
         says whether the loop offers ``read_evidence`` yet
-        (:meth:`_cleared_request`).
+        (:meth:`_cleared_request`). ``ticked`` is the meter's last tick, kept by
+        the loop so a graph built again goes on from it rather than ticking twice.
         """
         ledger = budget if budget is not None else LoopBudget(max_steps, timeout, started)
         from maljan.pipeline.events import BUDGET_TICK_EVERY
 
-        ticked: list[int] = [0]
+        if ticked is None:
+            ticked = [0]
 
         def refresh(state: Any) -> list[BaseMessage]:
             messages = state.get("messages") if isinstance(state, dict) else None
@@ -4675,6 +4678,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             on_question=self._count_question,
         )[0]
         graph: dict[str, Any] = {}
+        # The meter's last tick, one for the loop however often its graph is built.
+        ticked: list[int] = [0]
 
         def _executor(model: Any, binding: Any) -> Any:
             return create_react_agent(
@@ -4692,6 +4697,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                     clearing=clearing,
                     on_clear=self._note_clearing,
                     offered=lambda: bool(self._offered_after_clear),
+                    ticked=ticked,
                 ),
             )
 

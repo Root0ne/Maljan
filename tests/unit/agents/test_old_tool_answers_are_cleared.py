@@ -41,6 +41,7 @@ from pydantic import BaseModel
 from maljan.agents import tool_answer_clearing as tac
 from maljan.agents.base_agent import BaseAnalyst, _message_chars, _reported_request
 from maljan.agents.evidence_recorder import EvidenceRecorder
+from maljan.core.exceptions import AnalystError
 from maljan.llm import context_window as cw
 from maljan.pipeline.events import TOOL_ANSWERS_CLEARED
 
@@ -558,8 +559,21 @@ class TestThroughTheLoop:
         assert all(tac.READ_EVIDENCE_TOOL in tools for tools in offered[first:])
 
     def test_a_refusal_with_nothing_to_clear_is_handled_as_today(self) -> None:
-        with pytest.raises(Exception):  # noqa: B017 — the provider's own error, as today
-            _run(_window(1_000_000), refuse_over=10)
+        """Refused before any tool answered: the provider's own error, and nothing cleared."""
+        container = _Container(_window(1_000_000))
+        model = _Thinker(seen=[], refused=[], refuse_over=10)
+        agent = _Analyst(llm=model, name="static")
+        agent.logger = logging.getLogger("test.clearing")
+        agent.run_state_block = "sample: c"
+        agent._container = container
+        agent.tools = [_lookup(6_000)]
+        with (
+            _settings(),
+            pytest.raises(AnalystError, match="maximum context length is 10 tokens") as failed,
+        ):
+            agent.execute_tool_loop([("system", "You are a static analyst."), ("human", TASK)])
+        assert isinstance(failed.value.__cause__, openai.BadRequestError)
+        assert model.refused and not _cleared_events(container)
 
     def test_a_prompt_past_the_agent_s_own_window_is_cleared_before_it_is_sent(self) -> None:
         # The job's window is smaller than the agent's own: only the agent's counts.
@@ -588,6 +602,13 @@ class TestThroughTheLoop:
         ]
         assert carrying and carrying[0] == first
         assert _cleared_events(container)
+        # The graph built again goes on from the meter's last tick: no tick twice.
+        ticks = [
+            e[1]["steps_used"] // 5
+            for e in container.events
+            if e[0] == "budget_tick" and not e[1].get("final")
+        ]
+        assert ticks and len(ticks) == len(set(ticks))
 
     def test_a_tool_that_cannot_be_offered_is_said_and_the_loop_ends_as_today(
         self, caplog: pytest.LogCaptureFixture

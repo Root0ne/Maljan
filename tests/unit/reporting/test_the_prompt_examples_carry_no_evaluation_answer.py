@@ -90,6 +90,7 @@ from maljan.agents.tool_answer_clearing import (
     READ_EVIDENCE_DESCRIPTION,
     UNKNOWN_EVIDENCE_REMEDIATION,
     cleared_reference,
+    read_again_note,
     unknown_evidence_message,
 )
 from maljan.agents.tool_fence import FENCE_STATEMENT as _FENCE_STATEMENT
@@ -1796,6 +1797,7 @@ PROMPTS: dict[str, str] = {
         [
             cleared_reference("ev_0001", 12_345),
             unknown_evidence_message("ev_0002"),
+            read_again_note("ev_0001"),
             READ_EVIDENCE_DESCRIPTION,
             UNKNOWN_EVIDENCE_REMEDIATION,
         ]
