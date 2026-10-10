@@ -1600,9 +1600,12 @@ and read back through `GET /jobs/{id}/events`, which merges it into a page the
 stream answers, in `seq` order, so it is there while the stream lives as well
 as after. `GET /jobs/{id}/usage` totals the job's `model_usage` events: tokens
 in and out, cache reads and writes, reasoning and priced spend, per agent,
-built by the run summary's own code, priced at the current `llm.model_prices`
-over the vendored table (a cost the provider reported first), so cost is
-readable during a run and after a worker that died. It lives exactly as long as the
+built by the run summary's own code. Each record carries what the job's spend
+meter charged it when it was settled (`priced_usd`), failed attempts included,
+and the total sums those, so cost is readable during a run and after a worker
+that died, and a price changed later does not move it; a record from before
+records carried their charge is priced at the current `llm.model_prices` and
+counted in `repriced_calls`. It lives exactly as long as the
 rest of the feed: `events.retention_days` (30) after the run. The run summary,
 which a completed or stopped run stores with its report, keeps the totals for
 good; the `model_usage` rows matter for a run whose worker died before it

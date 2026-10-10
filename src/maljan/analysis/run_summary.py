@@ -376,44 +376,150 @@ _USAGE_KEYS: tuple[str, ...] = (
 )
 
 
+def _figure(value: Any) -> float | None:
+    """``value`` as a number, or ``None`` when it is not one."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value)
+
+
+class _SpendTotal:
+    """What a set of records cost: the charges they carry, and a repricing of those without one.
+
+    A record written since the ledger kept the meter's charge carries
+    ``priced_usd`` — what the job's meter charged when the call was settled,
+    at the prices then in force, a charge by stated estimate included — and
+    that figure is summed as it is. An older record carries none and is
+    priced again by ``meter`` (``SpendMeter.settle``, the code that settles a
+    run) at the prices in force now; it is counted in ``repriced_calls``.
+    """
+
+    def __init__(self, meter: Callable[[], Any]) -> None:
+        self._make = meter
+        self._meter: Any = None
+        self.spent = 0.0
+        self.prices_from: dict[str, set[str]] = {}
+        self.unreported = 0
+        self.unpriced: dict[str, int] = {}
+        self.estimated_calls = 0
+        self.estimated_usd = 0.0
+        self.repriced_calls = 0
+        self.repriced_usd = 0.0
+
+    def add(
+        self,
+        record: dict[str, Any],
+        usage: dict[str, Any] | None,
+        estimated: dict[str, Any] | None,
+    ) -> None:
+        from maljan.core.spend import price_key
+
+        model = str(record.get("model") or "")
+        name = price_key(model)
+        cost = _figure(record.get("priced_usd"))
+        if cost is not None:
+            source = str(record.get("price_source") or "")
+            by_estimate = _figure(record.get("estimated_usd"))
+        else:
+            if self._meter is None:
+                self._meter = self._make()
+            charged = self._meter.settle(
+                usage, model, str(record.get("call") or ""), estimated=estimated
+            )
+            if not isinstance(charged, dict) or _figure(charged.get("priced_usd")) is None:
+                if usage is None and not estimated:
+                    self.unreported += 1
+                else:
+                    self.unpriced[name] = self.unpriced.get(name, 0) + 1
+                return
+            cost = float(charged["priced_usd"])
+            source = str(charged.get("price_source") or "")
+            by_estimate = _figure(charged.get("estimated_usd"))
+            self.repriced_calls += 1
+            self.repriced_usd += cost
+        self.spent += cost
+        self.prices_from.setdefault(name, set()).add(source)
+        if by_estimate is not None:
+            self.estimated_calls += 1
+            self.estimated_usd += by_estimate
+
+    def as_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "spent_usd": round(self.spent, 6),
+            "prices_from": {
+                name: "; ".join(sorted(sources))
+                for name, sources in sorted(self.prices_from.items())
+            },
+            "repriced_calls": self.repriced_calls,
+        }
+        if self.repriced_calls:
+            out["repriced_usd"] = round(self.repriced_usd, 6)
+        if self.estimated_calls:
+            out["estimated_calls"] = self.estimated_calls
+            out["estimated_usd"] = round(self.estimated_usd, 6)
+        if self.unreported:
+            out["unreported_calls"] = self.unreported
+        if self.unpriced:
+            out["unpriced_models"] = dict(sorted(self.unpriced.items()))
+        if self.unreported or self.unpriced:
+            out["spent_is_at_least"] = True
+        return out
+
+
 def usage_totals(calls: Iterable[Any], meter: Callable[[], Any]) -> dict[str, Any]:
     """A job's usage totals from its ``model_usage`` records (``token_ledger.call_record``).
 
-    The records are replayed through a fresh ``TokenLedger`` and the run
-    summary's own ``spend_blocks``, so ``tokens`` is the block a run summary
-    built from the same calls stores, per agent included; and through the
-    spend meters ``meter`` makes (one for the job, one per agent), so
-    ``spend`` is priced by the same code and prices that settle a run.
-    Readable while the run is going and after a worker that died before its
-    summary: the records are committed call by call.
-    """
-    from maljan.core.token_ledger import TokenLedger
+    ``tokens``: the answered calls are replayed through a fresh
+    ``TokenLedger`` and the run summary's own ``spend_blocks``, so it is the
+    block a run summary built from the same calls stores, per agent included.
+    A retry record (a failed attempt a provider was asked again after) and a
+    failed attempt's charge are not calls and move no count there, as in the
+    run's own ledger; they are counted as ``retries`` and ``failed_attempts``.
 
-    total = meter()
-    ledger = TokenLedger(spend=total)
-    agents: dict[str, Any] = {}
-    count = 0
+    ``spend``: the charges the records carry, summed, the job's and each
+    agent's, failed attempts included; a record that carries none is priced
+    again by the meters ``meter`` makes (see ``_SpendTotal``). Readable while
+    the run is going and after a worker that died before its summary: the
+    records are committed call by call.
+    """
+    from maljan.core.token_ledger import RETRY_RECORD, TokenLedger
+    from maljan.llm.transient import FAILED_ATTEMPT_CALL
+
+    ledger = TokenLedger()
+    total = _SpendTotal(meter)
+    agents: dict[str, _SpendTotal] = {}
+    calls_made = retries = failed = 0
     for record in calls:
         if not isinstance(record, dict):
             continue
-        count += 1
-        usage: dict[str, Any] | None = None
-        if record.get("reported"):
-            usage = {
-                key: record[key]
-                for key in _USAGE_KEYS
-                if isinstance(record.get(key), int | float) and not isinstance(record[key], bool)
-            }
         agent = str(record.get("agent") or "")
         model = str(record.get("model") or "")
         call = str(record.get("call") or "")
-        ledger.add(usage, agent=agent, model=model, call=call)
+        if call == RETRY_RECORD:
+            retries += 1
+            ledger.add_retry(agent=agent, model=model, reason=str(record.get("reason") or ""))
+            continue
+        usage: dict[str, Any] | None = None
+        if record.get("reported"):
+            usage = {
+                key: record[key] for key in _USAGE_KEYS if _figure(record.get(key)) is not None
+            }
+        raw_estimate = record.get("estimated")
+        estimated = dict(raw_estimate) if isinstance(raw_estimate, dict) else None
+        if call == FAILED_ATTEMPT_CALL:
+            failed += 1
+        else:
+            calls_made += 1
+            ledger.add(usage, agent=agent, model=model, call=call)
+        total.add(record, usage, estimated)
         if agent:
-            agents.setdefault(agent, meter()).settle(usage, model, call)
-    spend = total.priced()
-    spend["per_agent"] = {name: agents[name].priced() for name in sorted(agents)}
+            agents.setdefault(agent, _SpendTotal(meter)).add(record, usage, estimated)
+    spend = total.as_dict()
+    spend["per_agent"] = {name: agents[name].as_dict() for name in sorted(agents)}
     return {
-        "calls": count,
+        "calls": calls_made,
+        "retries": retries,
+        "failed_attempts": failed,
         "tokens": spend_blocks(ledger.snapshot()).get("tokens", {}),
         "spend": spend,
     }

@@ -298,6 +298,39 @@ def call_record(
 # The ``call`` of a record that is a retry of a model request, not a call.
 RETRY_RECORD = "retry"
 
+# What a record says the job's spend meter charged for it, as the meter
+# settled it: what it cost, where the price came from, and for a charge by
+# stated estimate what the estimate cost.
+CHARGE_PARTS: tuple[str, ...] = ("priced_usd", "price_source", "estimated_usd")
+
+
+def _with_charge(
+    row: dict[str, Any],
+    usage: dict[str, Any] | None,
+    estimated: dict[str, Any] | None,
+    charged: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """``row`` with the stated estimate it was charged at and what the meter charged.
+
+    The charge is the meter's own figure at the moment the call was settled,
+    so a total summed from the records is what the run spent whatever prices
+    are in force when it is read. Absent where nothing was charged.
+    """
+    if usage is None and estimated:
+        row["estimated"] = {
+            "input_tokens": int(estimated.get("input_tokens") or 0),
+            "output_tokens": int(estimated.get("output_tokens") or 0),
+            "source": str(estimated.get("source") or ""),
+        }
+    for part in CHARGE_PARTS:
+        value = (charged or {}).get(part)
+        if part == "price_source":
+            if value is not None:
+                row[part] = str(value)
+        elif isinstance(value, int | float) and not isinstance(value, bool):
+            row[part] = float(value)
+    return row
+
 
 class TokenLedger:
     """Thread-safe tally of what one run's model calls spent, per agent and per model."""
@@ -373,9 +406,25 @@ class TokenLedger:
                 self._fallbacks.append({"agent": agent, "model": model, "reason": fallback})
             for reason in retries:
                 self._retries.append({"agent": agent, "model": model, "reason": str(reason)})
-        if self.spend is not None:
-            self.spend.settle(usage, model, call, estimated=estimated)
-        self._tell(call_record(usage, agent=agent, model=model, call=call))
+        charged = self._settle(usage, model, call, estimated)
+        row = call_record(usage, agent=agent, model=model, call=call)
+        self._tell(_with_charge(row, usage, estimated, charged))
+
+    def _settle(
+        self,
+        usage: dict[str, Any] | None,
+        model: str,
+        call: str,
+        estimated: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """The call settled on the spend meter, and its charge or ``None``. Never raises."""
+        if self.spend is None:
+            return None
+        try:
+            charged = self.spend.settle(usage, model, call, estimated=estimated)
+        except Exception:  # noqa: BLE001 — recording never raises
+            return None
+        return charged if isinstance(charged, dict) else None
 
     def _tell(self, row: dict[str, Any]) -> None:
         """Hand one record to the listener (``on_call``), where one listens. Never raises."""
@@ -423,16 +472,9 @@ class TokenLedger:
         (``estimated``), and goes to the listener so a worker killed
         afterwards keeps what the attempt cost.
         """
-        if self.spend is not None:
-            self.spend.settle(usage, model, call, estimated=estimated)
+        charged = self._settle(usage, model, call, estimated)
         row = call_record(usage, agent=agent, model=model, call=call)
-        if usage is None and estimated:
-            row["estimated"] = {
-                "input_tokens": int(estimated.get("input_tokens") or 0),
-                "output_tokens": int(estimated.get("output_tokens") or 0),
-                "source": str(estimated.get("source") or ""),
-            }
-        self._tell(row)
+        self._tell(_with_charge(row, usage, estimated, charged))
 
     @property
     def input_tokens(self) -> int:

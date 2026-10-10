@@ -479,9 +479,14 @@ async def get_job_usage(
     this answers during a run and after a worker that died before its run
     summary. ``tokens`` is the run summary's own block (input and output,
     cache reads and writes, reasoning, the provider-reported cost, per
-    agent), built by the same code from the same calls; ``spend`` is priced
-    by the run's spend meter code at the current ``llm.model_prices`` over
-    the vendored table, a cost the provider reported first, per agent too.
+    agent), built by the same code from the same calls; ``retries`` and
+    ``failed_attempts`` count the records that are not calls. ``spend`` sums
+    what the job's spend meter charged each call and each failed attempt
+    when it was settled (``priced_usd`` on the record, a charge by stated
+    estimate included), so it is what the run spent whatever prices are in
+    force now; a record written before records carried their charge is
+    priced again by the same meter code at the current ``llm.model_prices``
+    over the vendored table and counted in ``repriced_calls``. Per agent too.
     Owner or admin, checked the way the events endpoint checks it.
     """
     from maljan.analysis.run_summary import usage_totals
@@ -495,8 +500,9 @@ async def get_job_usage(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
 
     core = await effective_core_settings(db)
-    # Prices as ``SpendMeter.from_settings`` reads them, without the ceiling:
-    # a total is not a run, and nothing here is admitted or refused.
+    # For a record that carries no charge: prices as ``SpendMeter.from_settings``
+    # reads them, without the ceiling, since a total is not a run and nothing
+    # here is admitted or refused.
     llm = core.llm
     prices = dict(llm.model_prices or {})
     anthropic = getattr(llm, "anthropic", None)

@@ -619,6 +619,11 @@ def _clean(model: str) -> str:
     return name.rsplit("/", 1)[-1]
 
 
+def price_key(model: str) -> str:
+    """The name the spend block keys a model by (``prices_from``, ``unpriced_models``)."""
+    return _clean(model) or "(unnamed model)"
+
+
 def _untagged(name: str) -> str:
     return name.split(":", 1)[0]
 
@@ -811,11 +816,11 @@ class SpendMeter:
             usage = {**usage, "cache_write_1h_input_tokens": usage["cache_write_input_tokens"]}
         return in_force.cost(usage), in_force.source
 
-    def _cost(self, usage: Mapping[str, Any] | None, model: str) -> float | None:
+    def _cost(self, usage: Mapping[str, Any] | None, model: str) -> tuple[float, str] | None:
         if usage is None:
             self._note_unreported()
             return None
-        name = _clean(model) or "(unnamed model)"
+        name = price_key(model)
         charged = self._charged(usage, model)
         if charged is None:
             self._note_unpriced(name)
@@ -823,7 +828,7 @@ class SpendMeter:
         cost, source = charged
         with self._lock:
             self._priced_from.setdefault(name, set()).add(source)
-        return cost
+        return cost, source
 
     def _measure_locked(self, usage: Mapping[str, Any], name: str, group: str) -> None:
         out = int(usage.get("output_tokens") or 0)
@@ -881,17 +886,21 @@ class SpendMeter:
         call: str = "",
         *,
         estimated: Mapping[str, Any] | None = None,
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """One recorded call, from the token ledger; ``call`` is what the ledger names it.
 
         ``estimated`` is the stated estimate a call that reported no usage
         carried (its prompt priced as uncached input and its generated pieces
         as output). It is charged against the ceiling and counted apart as
         estimated; the call's reported figures stay absent.
+
+        Returns what the call was charged, as its record keeps it
+        (``priced_usd``, ``price_source``, and ``estimated_usd`` for a charge
+        by estimate), or ``None`` where nothing was charged: no usage and no
+        estimate, a model with no price, or a failure here.
         """
         if usage is None and estimated:
-            self._settle_estimate(estimated, model)
-            return
+            return self._settle_estimate(estimated, model)
         try:
             name = _clean(model)
             if usage and name:
@@ -912,16 +921,20 @@ class SpendMeter:
                             self._count_answer_locked(usage, name, f"tail:{tail}")
                         else:
                             self._count_answer_locked(usage, name, "single")
-            cost = self._cost(usage, model)
-            if cost is not None:
-                with self._lock:
-                    self._settled += cost
+            charged = self._cost(usage, model)
+            if charged is None:
+                return None
+            cost, source = charged
+            with self._lock:
+                self._settled += cost
+            return {"priced_usd": cost, "price_source": source}
         except Exception as exc:  # noqa: BLE001 — telemetry never costs a run
             logger.debug("spend not settled (%s).", exc)
+            return None
 
-    def _settle_estimate(self, estimated: Mapping[str, Any], model: str) -> None:
+    def _settle_estimate(self, estimated: Mapping[str, Any], model: str) -> dict[str, Any] | None:
         try:
-            name = _clean(model) or "(unnamed model)"
+            name = price_key(model)
             figures = {
                 "input_tokens": int(estimated.get("input_tokens") or 0),
                 "output_tokens": int(estimated.get("output_tokens") or 0),
@@ -947,7 +960,7 @@ class SpendMeter:
             charged = self._charged(figures, model)
             if charged is None:
                 self._note_unpriced(name)
-                return
+                return None
             cost, source = charged
             with self._lock:
                 self._priced_from.setdefault(name, set()).add(source)
@@ -955,8 +968,10 @@ class SpendMeter:
                 self._estimated_calls += 1
                 self._estimated_usd += cost
                 self._estimated_source = said
+            return {"priced_usd": cost, "price_source": source, "estimated_usd": cost}
         except Exception as exc:  # noqa: BLE001 — telemetry never costs a run
             logger.debug("estimated spend not settled (%s).", exc)
+            return None
 
     def note_loop(self, key: Any, turns: list[Any], model: str = "") -> None:
         """What a running loop's turns so far cost, counted until the ledger has them.
@@ -1796,30 +1811,6 @@ class SpendMeter:
             "gathered; no further negotiation round, chunk, ask or tool loop was started, and "
             "only the verdict and the report ran, tool-free, on what was kept for them."
         )
-
-    def priced(self) -> dict[str, Any]:
-        """What the settled calls cost, ceiling or none: the priced part of :meth:`snapshot`.
-
-        ``spent_usd``, where each model's prices came from, and the calls that
-        could not be priced — those that reported no usage and those of a
-        model with no price — with ``spent_is_at_least`` where either left
-        something out.
-        """
-        with self._lock:
-            out: dict[str, Any] = {
-                "spent_usd": round(self._settled + sum(self._in_flight.values()), 6),
-                "prices_from": {
-                    name: "; ".join(sorted(sources))
-                    for name, sources in sorted(self._priced_from.items())
-                },
-            }
-            if self._unreported:
-                out["unreported_calls"] = self._unreported
-            if self._unpriced:
-                out["unpriced_models"] = dict(sorted(self._unpriced.items()))
-            if self._unreported or self._unpriced:
-                out["spent_is_at_least"] = True
-            return out
 
     def snapshot(self) -> dict[str, Any] | None:
         """The run summary's ``spend`` block, or ``None`` with no ceiling set."""

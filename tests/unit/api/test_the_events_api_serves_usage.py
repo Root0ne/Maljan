@@ -24,6 +24,7 @@ from app.services.job_events import read_events
 from maljan.analysis.run_summary import spend_blocks, usage_totals
 from maljan.core.spend import SpendMeter
 from maljan.core.token_ledger import TokenLedger
+from maljan.llm.transient import FAILED_ATTEMPT_CALL
 from maljan.pipeline.events import MODEL_USAGE
 
 PRICES = {
@@ -299,8 +300,17 @@ class TestAnExpiredStreamIsUnchanged:
         assert len(table.statements) == 1
 
 
+CHARGE_PARTS = ("priced_usd", "price_source", "estimated_usd")
+
+
 def _synthetic_job() -> tuple[TokenLedger, SpendMeter, list[dict[str, Any]]]:
-    """A completed job's ledger and the ``model_usage`` payloads its calls published."""
+    """A completed job's ledger and the ``model_usage`` payloads its calls published.
+
+    Two models, cache reads, hour-long cache writes, a price window, a
+    provider-reported cost, an unreported call, a call charged by stated
+    estimate, an unpriced model, a retry and two failed attempts (one with the
+    usage its error reported, one charged by estimate).
+    """
     noon = datetime(2026, 9, 25, 12, 0, tzinfo=UTC).timestamp()
     evening = datetime(2026, 9, 25, 18, 0, tzinfo=UTC).timestamp()
     meter = SpendMeter(5.0, PRICES)
@@ -320,11 +330,25 @@ def _synthetic_job() -> tuple[TokenLedger, SpendMeter, list[dict[str, Any]]]:
         model="m1",
         call="tool loop turn",
     )
+    ledger.add_retry(agent="static", model="m2", reason="HTTP 529")
+    ledger.charge_failed_attempt(
+        {"input_tokens": 4_000, "output_tokens": 40},
+        agent="static",
+        model="m2",
+        call=FAILED_ATTEMPT_CALL,
+    )
     ledger.add(
         {"input_tokens": 4_000, "output_tokens": 300, "reasoning_tokens": 120, "sent_at": evening},
         agent="static",
         model="m2",
         call="tool loop turn",
+    )
+    ledger.charge_failed_attempt(
+        None,
+        agent="judge",
+        model="m1",
+        call=FAILED_ATTEMPT_CALL,
+        estimated={"input_tokens": 2_000, "output_tokens": 30, "source": "estimated"},
     )
     ledger.add(
         {"input_tokens": 3_000, "output_tokens": 900, "cost": 0.0123},
@@ -333,35 +357,94 @@ def _synthetic_job() -> tuple[TokenLedger, SpendMeter, list[dict[str, Any]]]:
         call="verdict",
     )
     ledger.add(None, agent="judge", model="m1", call="verdict")
+    ledger.add(
+        None,
+        agent="judge",
+        model="m1",
+        call="verdict",
+        estimated={"input_tokens": 1_000, "output_tokens": 200, "source": "estimated"},
+    )
     ledger.add({"input_tokens": 500, "output_tokens": 50}, agent="reporter", model="unpriced-x")
     return ledger, meter, published
+
+
+class TestEachRecordCarriesItsCharge:
+    def test_a_priced_call_carries_what_the_meter_charged(self) -> None:
+        _ledger, _meter, published = _synthetic_job()
+        first = published[0]
+        assert first["priced_usd"] > 0
+        assert first["price_source"] == "llm.model_prices"
+        assert "estimated_usd" not in first
+
+    def test_a_call_charged_by_estimate_says_so(self) -> None:
+        _ledger, _meter, published = _synthetic_job()
+        by_estimate = [p for p in published if "estimated" in p]
+        assert len(by_estimate) == 2
+        assert all(p["estimated_usd"] == p["priced_usd"] > 0 for p in by_estimate)
+
+    def test_an_uncharged_call_carries_no_charge(self) -> None:
+        _ledger, _meter, published = _synthetic_job()
+        unreported = [p for p in published if p["call"] == "verdict" and not p["reported"]]
+        assert not any(part in unreported[0] for part in CHARGE_PARTS)
+        unpriced = [p for p in published if p["model"] == "unpriced-x"]
+        assert not any(part in unpriced[0] for part in CHARGE_PARTS)
 
 
 class TestTheTotalsMatchTheRunSummary:
     def test_the_tokens_are_the_run_summary_s_own(self) -> None:
         ledger, _meter, published = _synthetic_job()
         totals = usage_totals(published, lambda: SpendMeter(None, PRICES))
-        assert totals["calls"] == 5
+        assert totals["calls"] == 6
+        assert totals["retries"] == 1
+        assert totals["failed_attempts"] == 2
         assert totals["tokens"] == spend_blocks(ledger.snapshot())["tokens"]
 
-    def test_the_priced_spend_is_what_the_meter_settled(self) -> None:
+    def test_the_spend_is_what_the_run_s_meter_settled(self) -> None:
         _ledger, meter, published = _synthetic_job()
         totals = usage_totals(published, lambda: SpendMeter(None, PRICES))
         summary_spend = meter.snapshot()
         assert summary_spend is not None
-        assert totals["spend"]["spent_usd"] == summary_spend["spent_usd"]
-        assert totals["spend"]["prices_from"] == summary_spend["prices_from"]
-        assert totals["spend"]["unpriced_models"] == summary_spend["unpriced_models"]
-        assert totals["spend"]["unreported_calls"] == summary_spend["unreported_calls"]
-        assert totals["spend"]["spent_is_at_least"] is True
+        spend = totals["spend"]
+        assert spend["spent_usd"] == summary_spend["spent_usd"]
+        assert spend["prices_from"] == summary_spend["prices_from"]
+        assert spend["unpriced_models"] == summary_spend["unpriced_models"]
+        assert spend["unreported_calls"] == summary_spend["unreported_calls"]
+        assert spend["estimated_calls"] == summary_spend["estimated_calls"]
+        assert spend["estimated_usd"] == summary_spend["estimated_usd"]
+        assert spend["repriced_calls"] == 0
+        assert spend["spent_is_at_least"] is True
+
+    def test_prices_changed_after_the_run_leave_the_total_as_the_run_spent(self) -> None:
+        _ledger, meter, published = _synthetic_job()
+        dearer = {
+            name: {**row, "input_usd_per_mtok": 99.0, "output_usd_per_mtok": 99.0}
+            for name, row in PRICES.items()
+        }
+        for prices in ({}, dearer):
+            totals = usage_totals(published, lambda prices=prices: SpendMeter(None, prices))
+            summary_spend = meter.snapshot()
+            assert summary_spend is not None
+            assert totals["spend"]["spent_usd"] == summary_spend["spent_usd"]
+            assert totals["spend"]["repriced_calls"] == 0
+
+    def test_a_record_without_a_charge_is_repriced_and_counted(self) -> None:
+        _ledger, meter, published = _synthetic_job()
+        older = [{k: v for k, v in p.items() if k not in CHARGE_PARTS} for p in published]
+        totals = usage_totals(older, lambda: SpendMeter(None, PRICES))
+        summary_spend = meter.snapshot()
+        assert summary_spend is not None
+        charged = [p for p in published if "priced_usd" in p]
+        assert totals["spend"]["repriced_calls"] == len(charged)
+        assert totals["spend"]["repriced_usd"] == pytest.approx(summary_spend["spent_usd"])
+        assert totals["spend"]["spent_usd"] == pytest.approx(summary_spend["spent_usd"])
 
     def test_each_agent_s_spend_adds_up_to_the_job_s(self) -> None:
         _ledger, _meter, published = _synthetic_job()
         totals = usage_totals(published, lambda: SpendMeter(None, PRICES))
         agents = totals["spend"]["per_agent"]
         assert set(agents) == {"static", "judge", "reporter"}
-        assert agents["judge"]["spent_usd"] == 0.0123
         assert agents["reporter"]["unpriced_models"] == {"unpriced-x": 1}
+        assert agents["judge"]["estimated_calls"] == 2
         assert sum(row["spent_usd"] for row in agents.values()) == pytest.approx(
             totals["spend"]["spent_usd"]
         )
@@ -402,7 +485,8 @@ class TestTheUsageEndpoint:
         from maljan.core.config import Settings
 
         async def settings_now(db: Any) -> Settings:
-            return Settings(_env_file=None, llm={"model_prices": PRICES})
+            # No price at all now: the recorded charges still give the run's spend.
+            return Settings(_env_file=None)
 
         monkeypatch.setattr("app.services.settings_service.effective_core_settings", settings_now)
         ledger, meter, published = _synthetic_job()
@@ -413,7 +497,7 @@ class TestTheUsageEndpoint:
             job_id=job_id, user=object(), svc=_Service(object()), db=_Table(rows)
         )
         assert body["job_id"] == str(job_id)
-        assert body["calls"] == 5
+        assert body["calls"] == 6
         assert body["tokens"] == spend_blocks(ledger.snapshot())["tokens"]
         snapshot = meter.snapshot()
         assert snapshot is not None
