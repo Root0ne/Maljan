@@ -42,7 +42,7 @@ from maljan.agents.delegation import (
     _what_an_ask_gets_sentence,
 )
 from maljan.agents.evidence_recorder import earlier_chunk_answer, same_function_notice
-from maljan.agents.ghidra_http_client import no_program_as_error
+from maljan.agents.ghidra_http_client import function_named_by_address, no_program_as_error
 from maljan.agents.judge_agent import (
     COMPACT_BUNDLE_RULES,
     CONTRADICTION_DEFINITION,
@@ -485,6 +485,21 @@ def _function_index_text() -> str:
             "callees": ["0x403000", "0x404000"],
             "indirect": {"artefacts": 3, "through": 2},
             **({"names": ["anexport"], "entry_point": True} if i == 0 else {}),
+            # The relations that are no call, in the row of the second function.
+            **(
+                {
+                    "started_as_thread_by": [
+                        {"function": "0x402000", "through": "StartThing", "call": "0x402010"}
+                    ],
+                    "starts_threads": [
+                        {"function": "0x403000", "through": "StartThing", "call": "0x401110"}
+                    ],
+                    "address_taken_by": ["0x404000"],
+                    "takes_address_of": ["0x405000"],
+                }
+                if i == 1
+                else {}
+            ),
         }
         for i in range(3)
     ]
@@ -1875,6 +1890,10 @@ PROMPTS: dict[str, str] = {
     ),
     "a Ghidra answer with no program current": no_program_as_error(
         "No program loaded.", "get_function_count"
+    ),
+    "a Ghidra answer about a function asked by address": " ".join(
+        function_named_by_address(said, ["name", "address"], {"address": "0x401000"})
+        for said in ("No callees found for function: null", "Function not found: null")
     ),
     "static provider sentence when its tools did not attach": absent_provider_fragment("Ghidra")[
         len(STATIC_EVIDENCE_INSTRUCTIONS) :

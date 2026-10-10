@@ -569,7 +569,20 @@ Each row holds, with the entry id that states each cell:
   two callees both hold, or the function and a callee both hold, is counted for
   each. A union across callees would cost a callee's artefacts once per caller,
   which one function holding many artefacts and called from many places makes
-  quadratic; the sum costs one step per call.
+  quadratic; the sum costs one step per call;
+- the functions it starts on a thread and the function that starts it, each
+  with the API and the call site (`starts_threads`, `started_as_thread_by`):
+  a call of a thread-starting API (an import or a slot the hash resolution
+  fills; `CreateThread`, `CreateRemoteThread`, `CreateRemoteThreadEx`,
+  `_beginthreadex`, `_beginthread`, `SHCreateThread`) whose start-routine
+  argument holds a code address (x64: the register a `lea` or a register copy
+  set in the straight-line code before the call; x86: the word pushed). Any
+  other function start an instruction takes as a value is an address taken
+  (`takes_address_of`, `address_taken_by`). Neither is a call: a started
+  function keeps "called by 0", and the row line says the start beside it. The
+  answer lists both relations whole under `thread_starts` and
+  `addresses_taken`; a row stored before these were read has neither and reads
+  as it did.
 
 A place is inside a function when an instruction the decoder read there
 covers it, or else when the exception directory's range holds it. A place no
@@ -713,7 +726,8 @@ no address it answers the whole table in the pack's row form. An address is
 hexadecimal, with or without `0x` (the pack prints hex, so a bare number is
 never decimal); a value at or above the image base is tried first as a virtual
 address, then as an offset. The answer is the row of the function that starts
-at the address or holds it, with its callers and callees, and `address_read`
+at the address or holds it, with its callers and callees and, where the code
+shows one, its thread starts and addresses taken, and `address_read`
 says which reading answered and whether the address is the start or inside;
 an address no function starts at or holds, or text that is not an address, is
 a `no:` sentence. It has no row limit: the MCP tool-output guardrail bounds the
@@ -3080,6 +3094,20 @@ model's own `load_program` does: about a second and a half and one more copy
 of the program in the container's memory for a small binary. Nothing closes
 the superseded copy yet; a large sample that shows memory growth is where
 that would be added.
+
+Every load, the one before the loop and each `load_program` the model makes,
+is followed by the switch to the program it opened and by Ghidra's
+auto-analysis of it (`/run_analysis`, waited for as long as Ghidra takes). A
+load imports the file afresh, in the place of any program of the same name an
+earlier pass analysed, and an import is not analysed: its functions come from
+the file's tables and no call or code reference is recorded, so callers,
+callees and cross-references were empty for every function, which read as
+"nothing calls it". A failed analysis is logged and the load's answer stands.
+A Ghidra tool that takes a function by name or by address is sent only the
+arguments the call set, so a call with an address alone queries the address;
+its one-line answer, which Ghidra ends with the empty name ("No callees found
+for function: null", "Function not found: null"), ends with the address the
+call gave instead.
 
 **A model that fails as a provider.** An agent's entry under `llm.agents` may
 name an ordered list of models (`fallbacks`), held as one model object
