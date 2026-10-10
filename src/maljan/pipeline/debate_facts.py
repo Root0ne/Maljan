@@ -405,9 +405,10 @@ def contested_input(
     mediation writes it is passed whole. The peers are the ones those lines
     name, in the field or by the name their report is headed with, in the
     participants' order. A peer whose every mention in those lines cites its
-    claims by number is shown those claims as the mediator read them; any
-    other peer, and one cited past its claims, is shown its whole answer in
-    force. The lines themselves are kept whole, with every claim number and
+    claims by number is shown those claims as the mediator read them, each
+    found by the number its analyst wrote (``_place_of``); any other peer, and
+    one cited by a number none of its claims holds, is shown its whole answer
+    in force. The lines themselves are kept whole, with every claim number and
     ledger id they cite.
     """
     mine = points_naming(name, blocking, participants)
@@ -450,8 +451,28 @@ def contested_input(
     for peer in [str(p) for p in participants if str(p) in mentioned]:
         claims = _claims_of(isr_reports, peer)
         numbers = list(dict.fromkeys(cited.get(peer, [])))
-        if peer in whole or not numbers or any(not 1 <= n <= len(claims) for n in numbers):
+        places = [_place_of(claims, n) for n in numbers]
+        if peer in whole or not numbers or any(place is None for place in places):
             peers[peer] = str(reports.get(peer, ""))
         else:
-            peers[peer] = "\n".join(claim_summary_line(n, claims[n - 1]) for n in numbers)
+            peers[peer] = "\n".join(
+                claim_summary_line(place + 1, claims[place])
+                for place in places
+                if place is not None
+            )
     return feedback, peers
+
+
+def _place_of(claims: Sequence[Any], number: int) -> int | None:
+    """The place of the one claim whose block number is ``number``, or ``None``.
+
+    A claim's block number is the number its heading wrote, or its place
+    among the claims where the heading wrote none (``pipeline.retry_merge``).
+    A number no claim holds, or two hold, finds none.
+    """
+    found = [
+        place
+        for place, claim in enumerate(claims)
+        if str(getattr(claim, "number", None) or place + 1) == str(number)
+    ]
+    return found[0] if len(found) == 1 else None

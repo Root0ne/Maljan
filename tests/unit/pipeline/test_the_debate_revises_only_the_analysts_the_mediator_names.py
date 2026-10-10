@@ -608,3 +608,37 @@ class TestAPeerIsNamedAsItsReportIsHeaded:
         )
 
         assert set(peers) == {"static", "network"}
+
+
+def _renumbered() -> dict[str, AgentISR]:
+    """A static answer whose claim headings wrote 7 and 9, at places 1 and 2."""
+    first = ClaimEvidence(claim="Reads the flag at 0x40.", evidence_ref="[ev_0010]", confidence=0.8)
+    second = ClaimEvidence(claim="Opens a key.", evidence_ref="[ev_0011]", confidence=0.8)
+    first.note_number("7")
+    second.note_number("9")
+    return {
+        **IN_FORCE,
+        "static": AgentISR(agent_id="static", domain="static", claims=[first, second]),
+    }
+
+
+class TestAClaimIsFoundByTheNumberItsAnalystWrote:
+    def test_the_written_number_finds_the_claim_whatever_its_place(self) -> None:
+        isrs = _renumbered()
+        line = "[analysts: dynamic] DYNAMIC differs from STATIC Claim 9. [blocking: x]"
+
+        _feedback, peers = contested_input(
+            "dynamic", FINDING, [line], NAMES, {n: f"{n} first" for n in NAMES}, isrs
+        )
+
+        assert peers == {"static": isrs["static"].to_text_summary().splitlines()[3].strip()}
+        assert "Opens a key." in peers["static"]
+
+    def test_a_place_no_written_number_holds_shows_the_whole_answer(self) -> None:
+        line = "[analysts: dynamic] DYNAMIC differs from STATIC Claim 2. [blocking: x]"
+
+        _feedback, peers = contested_input(
+            "dynamic", FINDING, [line], NAMES, {n: f"{n} first" for n in NAMES}, _renumbered()
+        )
+
+        assert peers == {"static": "static first"}
