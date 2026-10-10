@@ -194,10 +194,9 @@ def _carry_retries(exc: BaseException, retried: list[str]) -> None:
     """Every model's given-up retries on the error the list raises at its end."""
     if not retried:
         return
-    from maljan.llm.transient import RETRIES_ATTRIBUTE
-
+    # Written by its name (``transient.RETRIES_ATTRIBUTE``), never a computed one.
     with contextlib.suppress(Exception):
-        setattr(exc, RETRIES_ATTRIBUTE, list(retried))
+        exc.maljan_retries = list(retried)  # type: ignore[attr-defined]
 
 
 def retry_after_seconds(exc: BaseException) -> float | None:

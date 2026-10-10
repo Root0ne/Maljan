@@ -587,12 +587,14 @@ class _Attempts:
         if kind == "connection error":
             cause_clause, cause_args = " (caused by %s)", (cause_chain(exc),)
         if attempt >= self.attempts - 1:
+            # Written by their names (``RETRIED_ATTRIBUTE``, ``RETRIES_ATTRIBUTE``),
+            # never computed ones.
             if self.attempts > 1:
                 with contextlib.suppress(Exception):
-                    setattr(exc, RETRIED_ATTRIBUTE, True)
+                    exc.maljan_retries_spent = True  # type: ignore[attr-defined]
             if self.retried:
                 with contextlib.suppress(Exception):
-                    setattr(exc, RETRIES_ATTRIBUTE, list(self.retried))
+                    exc.maljan_retries = list(self.retried)  # type: ignore[attr-defined]
             self.emit.error(
                 "%s: %s after %d attempts: %r" + cause_clause,
                 self.what,
