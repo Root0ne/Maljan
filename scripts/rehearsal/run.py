@@ -310,11 +310,20 @@ def served_windows(
     server: StubServer | None,
     bare: int | None,
     named: dict[str, int],
+    roster: dict[str, list[str]] | None = None,
 ) -> dict[str, int]:
-    """The window the stub serves each model the run names, as the window check reads it."""
+    """The window the stub serves each model the run names, as the window check reads it.
+
+    The models are the settings' own per role and every model of the job's
+    roster (``roster_models``), so an agent with an entry of its own is
+    checked against the window its model is served with.
+    """
     from scripts.rehearsal.models import facts_for
 
-    models = sorted({str(v) for k, v in expected.items() if k.startswith("model.") and v})
+    models = sorted(
+        {str(v) for k, v in expected.items() if k.startswith("model.") and v}
+        | {str(m) for chain in (roster or {}).values() for m in chain if m}
+    )
     if server is not None:
         return {model: server.state.facts(model).window for model in models}
     return {
@@ -546,6 +555,36 @@ def profile_stages(values: dict[str, dict[str, Any]]) -> dict[str, list[str]]:
     it plays no part in the profile.
     """
     from maljan.agents.composition import active_profile
+
+    try:
+        profile = active_profile(_settings_of(values))
+    except Exception:  # noqa: BLE001 — stages nobody can read are not required silently
+        return {}
+    return {str(stage.key): [str(a) for a in stage.agents] for stage in profile.stages}
+
+
+def roster_models(
+    values: dict[str, dict[str, Any]], changes: dict[str, Any] | None = None
+) -> dict[str, list[str]]:
+    """Every agent of the job's roster with its models, read from the settings the job runs with.
+
+    The stack's settings with the rehearsal's ``changes`` over them, built the
+    way the worker builds a job's (``inprocess.agent_models``), so a custom
+    team's agents are named exactly as the built-in ones. Empty when the
+    settings cannot be read: the window check then fails each capped agent
+    for want of its models.
+    """
+    from scripts.rehearsal.inprocess import agent_models
+
+    in_force = {**values, **{key: {"value": value} for key, value in (changes or {}).items()}}
+    try:
+        return agent_models(_settings_of(in_force))
+    except Exception:  # noqa: BLE001 — models nobody can read are not assumed
+        return {}
+
+
+def _settings_of(values: dict[str, dict[str, Any]]) -> Any:
+    """The settings the stack's values build, a masked secret left out."""
     from maljan.core.settings_overrides import build_settings
 
     core = {
@@ -556,11 +595,7 @@ def profile_stages(values: dict[str, dict[str, Any]]) -> dict[str, list[str]]:
         and row.get("value") is not None
         and row.get("value") != "**********"
     }
-    try:
-        profile = active_profile(build_settings(core))
-    except Exception:  # noqa: BLE001 — stages nobody can read are not required silently
-        return {}
-    return {str(stage.key): [str(a) for a in stage.agents] for stage in profile.stages}
+    return build_settings(core)
 
 
 def harness_changes(provider: str, stub_root: str) -> dict[str, Any]:
@@ -691,6 +726,7 @@ def record_from_stack(
     probe: dict[str, Any] | None = None,
     required_stages: dict[str, list[str]] | None = None,
     gate: dict[str, Any] | None = None,
+    agent_models: dict[str, list[str]] | None = None,
 ) -> RunRecord:
     """A run's record, read back from the API the way the console reads it."""
     from scripts.rehearsal.inprocess import claims_from_events, empty_evidence_sections
@@ -726,6 +762,7 @@ def record_from_stack(
         expected=expected,
         empty_evidence_sections=empty,
         required_stages=dict(required_stages or {}),
+        agent_models=dict(agent_models or {}),
         gate=dict(gate or {}),
         probe=dict(probe or {}),
         scenario_params=scenario_params,
@@ -812,6 +849,7 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
     records: list[RunRecord] = []
     probe: dict[str, Any] = {}
     gate: dict[str, Any] = {}
+    changes: dict[str, Any] = {}
     try:
         client.login(args.email, password)
         values = client.values()
@@ -862,8 +900,13 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
         }
         params["mode"] = "stack"
         params["pinned_settings"] = {key: _value(values, key) for key in pinned_setting_keys()}
+        roster = roster_models(values, changes)
         params["served_windows"] = served_windows(
-            expected, server, bare_window if args.configure != "gate" else None, named_windows
+            expected,
+            server,
+            bare_window if args.configure != "gate" else None,
+            named_windows,
+            roster,
         )
         if args.scenario == "deadline_hit":
             params["deadline_by"] = "core.job_timeout"
@@ -897,6 +940,7 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
                     probe=probe,
                     required_stages=stages,
                     gate=gate,
+                    agent_models=roster,
                 )
             )
     finally:

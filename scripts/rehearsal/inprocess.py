@@ -1,6 +1,7 @@
 """One rehearsal run inside this process: the stub model, the real pipeline, no Docker.
 
-The pipeline is ``MaljanApp`` with the default profile, the mock sandbox, the
+The pipeline is ``MaljanApp`` with the profile its settings name (the default
+one unless ``Rehearsal.extra`` names a team of its own), the mock sandbox, the
 repository's own tool sidecars (started as the worker starts them, over
 stdio), and every model call going to the stub on a loopback port through the
 settings a deployment would set: ``llm.openai.base_url`` or
@@ -61,6 +62,9 @@ JUDGE_EFFORT = {"anthropic": "medium", "openai": "max"}
 DEADLINE_HIT_S = 12.0
 # How long a run stopped at its deadline is given for its in-flight work to see the stop.
 STRAGGLER_WAIT_S = 5.0
+# The transcript roles whose claims are an analyst's answer: its own answer
+# and a debate's revision of it (``pipeline.events.emit_agent_message``).
+ANSWER_ROLES = (None, "analyst", "reviser")
 
 
 @dataclass
@@ -181,10 +185,15 @@ def _as_dict(value: Any) -> dict[str, Any]:
 
 
 def claims_from_events(events: list[dict[str, Any]]) -> dict[str, list[str]]:
-    """Each analyst's answer in force: the claims of the last message it said with claims."""
+    """Each analyst's answer in force: the claims of the last message it said with claims.
+
+    A debate's revision (``role`` ``reviser``) replaces the answer in force, or
+    says the one in force stands, so its claims are the ones the report
+    numbers and the body cites by label.
+    """
     out: dict[str, list[str]] = {}
     for event in events:
-        if event.get("type") != "agent_message" or event.get("role") not in (None, "analyst"):
+        if event.get("type") != "agent_message" or event.get("role") not in ANSWER_ROLES:
             continue
         claims = event.get("claims")
         speaker = str(event.get("speaker") or "")
@@ -355,7 +364,8 @@ async def rehearse(rehearsal: Rehearsal) -> RunRecord:
                 )
             except Exception:  # noqa: BLE001 — sections nothing can vouch for are not excused
                 empty = None
-        required = _required_stages()
+        required = _required_stages(settings)
+        roster = agent_models(settings)
     finally:
         kept.restore()
     return RunRecord(
@@ -374,6 +384,7 @@ async def rehearse(rehearsal: Rehearsal) -> RunRecord:
         stub_log=log,
         expected=expected_for(rehearsal),
         required_stages=required,
+        agent_models=roster,
         empty_evidence_sections=empty,
         probe={"ok": probe_ok, "detail": probe_detail, "calls": len(probe_calls)},
         scenario_params={
@@ -392,10 +403,43 @@ async def rehearse(rehearsal: Rehearsal) -> RunRecord:
     )
 
 
-def _required_stages() -> dict[str, list[str]]:
-    """The default profile's stages, each with the agents it names."""
+def _required_stages(settings: Any) -> dict[str, list[str]]:
+    """The stages of the profile the run's settings name, each with the agents it names."""
     from maljan.agents.composition import active_profile
-    from maljan.core.settings_overrides import build_settings
 
-    profile = active_profile(build_settings({}))
+    profile = active_profile(settings)
     return {str(stage.key): [str(a) for a in stage.agents] for stage in profile.stages}
+
+
+def agent_models(settings: Any) -> dict[str, list[str]]:
+    """Every agent of the job's roster with the models it may call, in the order it tries them.
+
+    The roster is what the settings name: every agent definition, every agent
+    of the active profile's analysis stages and the model-calling roles that
+    are no definition (``ROLE_ENTRY_KEYS``). Each agent's models are the
+    product's own reading (``assignment_chain_for``), on the role its output
+    cap is derived for: the judge's for the judge and the reporter
+    (``ServiceContainer._built_cap`` and ``_report_output_cap``), the
+    expert's for every other agent. An agent whose models cannot be read is
+    left out, so the checks that need them fail for that agent.
+    """
+    from maljan.agents.composition import analyst_keys
+    from maljan.core.config import JUDGE_AGENT_KEY, REPORTER_AGENT_KEY, ROLE_ENTRY_KEYS
+    from maljan.core.model_assignments import assignment_chain_for
+
+    roster = [
+        *(str(key) for key in settings.agents.definitions),
+        *analyst_keys(settings),
+        *ROLE_ENTRY_KEYS,
+    ]
+    out: dict[str, list[str]] = {}
+    for agent in dict.fromkeys(roster):
+        role = "judge" if agent in (JUDGE_AGENT_KEY, REPORTER_AGENT_KEY) else "expert"
+        try:
+            chain = assignment_chain_for(settings, agent, role=role)
+        except Exception:  # noqa: BLE001 — an agent nobody can read is a gap the checks name
+            continue
+        models = [str(a.model) for a in chain if str(a.model or "")]
+        if models:
+            out[agent] = models
+    return out

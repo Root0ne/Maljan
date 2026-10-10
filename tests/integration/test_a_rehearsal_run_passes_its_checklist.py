@@ -160,3 +160,50 @@ def test_a_deadline_aimed_at_the_report_stage_lands_there(tmp_path: Path, wire: 
     assert failed == {}
     held = [e for e in record.stub_log if e.get("waiting")]
     assert held and held[-1]["role"] in ("composer", "narrative")
+
+
+# The all-tools team an operator imports (``docs/examples/profiles/all-tools.json``):
+# custom agents beside the built-in ones, a triage analyst and a reverser in
+# stages of their own. The Qu1cksc0pe server it names is not in the
+# repository, so the repository's analysis sidecar answers under its name.
+ALL_TOOLS = Path(__file__).resolve().parents[2] / "docs/examples/profiles/all-tools.json"
+
+
+def _all_tools_team() -> dict[str, object]:
+    from maljan.core.settings_overrides import build_settings
+
+    values = json.loads(ALL_TOOLS.read_text(encoding="utf-8"))["values"]
+    analysis = build_settings({}).mcp.servers["analysis"].model_dump(mode="json")
+    analysis.pop("auth_token", None)
+    return {
+        "agents.definitions": values["core.agents.definitions"],
+        "agents.profiles": values["core.agents.profiles"],
+        "agents.profile": "all_tools",
+        "mcp.servers": {"qu1cksc0pe": analysis},
+    }
+
+
+@pytest.mark.parametrize("wire", WIRES)
+def test_a_custom_team_passes_every_check(tmp_path: Path, wire: str) -> None:
+    """Every check reads the custom team from the job's own roster and passes.
+
+    Three of the team's analysts answer alike, so the debate flags their
+    agreement and runs a later revision round: each revision restates the
+    answer in force, and the report's labels number the claims of that answer.
+    """
+    rehearsal = Rehearsal(
+        scenario="normal",
+        provider=wire,
+        work_dir=tmp_path / "team",
+        job_timeout_s=JOB_DEADLINE_S,
+        extra=_all_tools_team(),
+    )
+    record = asyncio.run(rehearse(rehearsal))
+    failed = {c.name: c.detail for c in check_run(record) if not c.ok}
+    assert failed == {}
+    custom = {"all_tools_static_r2", "all_tools_qu1cksc0pe", "all_tools_reverser_ghidra"}
+    assert custom <= set(record.agent_models)
+    assert custom | {"triage"} <= set(record.claims_in_force)
+    assert custom | {"triage"} <= set(record.run_summary["generation"]["output_caps"])
+    assert record.required_stages["reversing"] == ["all_tools_reverser_ghidra"]
+    assert observations(record)["negotiation_rounds"] > 2

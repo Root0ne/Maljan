@@ -177,6 +177,7 @@ def _record(**changes: Any) -> RunRecord:
         stub_log=log,
         expected={"model.static": MODEL, "effort.static": "high", "max_steps": 40},
         required_stages={"analysis": ["static"], "report": ["reporter"]},
+        agent_models={"static": [MODEL], "judge": [MODEL], "reporter": [MODEL]},
         empty_evidence_sections=[],
         probe={"ok": True, "detail": "answered"},
         scenario_params={"served_windows": {MODEL: WINDOW}},
@@ -811,7 +812,8 @@ class TestTheWindowInForce:
             (
                 "planner",
                 {"tokens": 8192, "derivation": _cap_from(WINDOW, "declared")},
-                "planner is an agent the window check does not know",
+                "no model is recorded for planner: neither the job's roster nor its settings "
+                "name one",
             ),
         ],
     )
@@ -832,6 +834,39 @@ class TestTheWindowInForce:
             "derivation": _cap_from(WINDOW, "declared"),
         }
         assert self._detail(record) == ""
+
+    def test_a_custom_team_s_agents_are_checked_by_the_roster_s_models(self) -> None:
+        record = _record()
+        caps = record.run_summary["generation"]["output_caps"]
+        for agent in ("triage", "all_tools_static_r2", "all_tools_reverser_ghidra"):
+            caps[agent] = {"tokens": 8192, "derivation": _cap_from(WINDOW, "probed")}
+            record.agent_models[agent] = [MODEL]
+        assert self._detail(record) == ""
+        caps["all_tools_static_r2"]["derivation"] = _cap_from(200_000, "probed")
+        assert self._detail(record) == (
+            "all_tools_static_r2's output cap was derived from a 200000-token window (probed); "
+            f"the stub serves {MODEL} {WINDOW}"
+        )
+
+    def test_an_agent_named_in_the_roster_with_an_unserved_model_fails(self) -> None:
+        record = _record()
+        record.run_summary["generation"]["output_caps"]["triage"] = {
+            "tokens": 8192,
+            "derivation": _cap_from(WINDOW, "probed"),
+        }
+        record.agent_models["triage"] = ["acme-unserved"]
+        assert self._detail(record).startswith(
+            "no window was recorded as served to acme-unserved of triage"
+        )
+
+    def test_every_model_an_agent_may_fall_back_to_must_hold_its_cap(self) -> None:
+        record = _record()
+        record.scenario_params["served_windows"]["acme-small"] = 8192
+        record.agent_models["static"] = [MODEL, "acme-small"]
+        assert self._detail(record) == (
+            "static's output cap of 8192 tokens does not fit inside the 8192-token window the "
+            "stub serves acme-small"
+        )
 
     def test_no_output_caps_fails(self) -> None:
         record = _record()

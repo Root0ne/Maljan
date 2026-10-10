@@ -168,6 +168,9 @@ class RunRecord:
     scenario_params: dict[str, Any] = field(default_factory=dict)
     # The profile's stages, each with the agents it names; empty reads the run summary's.
     required_stages: dict[str, list[str]] = field(default_factory=dict)
+    # Every agent of the job's roster, read from the settings the job ran with,
+    # with the models it may call in the order it tries them.
+    agent_models: dict[str, list[str]] = field(default_factory=dict)
     # The sections the product's own bundling finds empty; ``None`` when not known.
     empty_evidence_sections: list[str] | None = None
     # The connection test's outcome, where the run asked one.
@@ -717,15 +720,6 @@ def _totals_problems(record: RunRecord, recorded: float) -> list[str]:
     return problems
 
 
-# The model group whose model each agent of the run summary's output caps runs on.
-_AGENT_GROUP = {
-    "static": "static",
-    "dynamic": "static",
-    "network": "static",
-    "judge": "judge",
-    "mediator": "mediator",
-    "reporter": "reporter",
-}
 # The run summary's word for a window nothing reported (``context_window.FALLBACK``).
 _FALLBACK_SOURCE = "fallback"
 _WINDOW_SAID = re.compile(r"(\d+)-token context window \((\w+)\)")
@@ -745,6 +739,21 @@ _CAP_SAID = (
 _OWN_TOOL_CAP = "settings.preprocessing.max_tool_output_chars"
 
 
+def _models_of(record: RunRecord, agent: str) -> list[str]:
+    """The models ``agent`` may call, as the job's roster records them, in lower case.
+
+    The roster is read from the settings the job ran with, so a custom team's
+    agents are named by the same reading as the built-in ones. A record with
+    no roster row for the agent falls back to a model the settings name for it
+    (``model.<agent>``); with neither, the agent's models are unknown.
+    """
+    chain = record.agent_models.get(agent)
+    if chain:
+        return list(dict.fromkeys(str(m).lower() for m in chain if m))
+    configured = str(record.expected.get(f"model.{agent}") or "").lower()
+    return [configured] if configured else []
+
+
 def _check_window(record: RunRecord) -> Check:
     """The window the product sized each model with is the window the stub serves it.
 
@@ -753,6 +762,10 @@ def _check_window(record: RunRecord) -> Check:
     derivation. A window the product fell back to, or one other than the
     stub's documented or named window, sizes the paid run's prompts and caps
     for a model that does not exist.
+
+    Each capped agent's models come from the job's roster (``agent_models``),
+    so any team the operator configures is checked by the same rule; an agent
+    whose models or served windows were not recorded fails for that reason.
     """
     name = "window in force as the provider serves it"
     served = {
@@ -815,28 +828,28 @@ def _check_window(record: RunRecord) -> Check:
         if not isinstance(cap, int) or isinstance(cap, bool) or not isinstance(derivation, str):
             problems.append(f"{agent}'s output cap cannot be read: {entry!r}")
             continue
-        group = _AGENT_GROUP.get(str(agent))
-        if group is None and record.expected.get(f"model.{agent}"):
-            group = str(agent)
-        if group is None:
+        models = _models_of(record, str(agent))
+        if not models:
             problems.append(
-                f"{agent} is an agent the window check does not know (its cap: {derivation!r})"
+                f"no model is recorded for {agent}: neither the job's roster nor its "
+                f"settings name one (its cap: {derivation!r})"
             )
             continue
-        capped = model_of(group)
-        if capped not in served:
+        unserved = [m for m in models if m not in served]
+        if unserved:
             problems.append(
-                f"no window was recorded as served to {capped or 'the model'} of {agent} "
+                f"no window was recorded as served to {', '.join(unserved)} of {agent} "
                 f"(its cap: {derivation!r})"
             )
             continue
-        if cap >= served[capped]:
-            # The cap the model was built with must leave the prompt room in
-            # the window the provider serves it.
-            problems.append(
-                f"{agent}'s output cap of {cap} tokens does not fit inside the "
-                f"{served[capped]}-token window the stub serves {capped}"
-            )
+        for capped in models:
+            if cap >= served[capped]:
+                # The cap the model was built with must leave the prompt room in
+                # the window the provider serves it.
+                problems.append(
+                    f"{agent}'s output cap of {cap} tokens does not fit inside the "
+                    f"{served[capped]}-token window the stub serves {capped}"
+                )
         # The sentence must state the cap the field holds ("derived: 8192 tokens — …").
         if not re.search(rf"(?<!\d){cap} tokens\b", derivation) or not any(
             said in derivation for said in _CAP_SAID
@@ -852,10 +865,11 @@ def _check_window(record: RunRecord) -> Check:
         tokens, source = int(found.group(1)), found.group(2)
         if source == _FALLBACK_SOURCE:
             unlearned.append(str(agent))
-        elif tokens != served[capped]:
+        elif all(tokens != served[m] for m in models):
+            windows = ", ".join(f"{m} {served[m]}" for m in models)
             problems.append(
                 f"{agent}'s output cap was derived from a {tokens}-token window ({source}); "
-                f"the stub serves {capped} {served[capped]}"
+                f"the stub serves {windows}"
             )
     if unlearned:
         problems.append(f"output caps derived from no window: {', '.join(unlearned)}")

@@ -118,7 +118,8 @@ find in force. A run with nothing to compare fails.
 python scripts/rehearsal/run.py --in-process --scenario normal --repeat 3
 ```
 
-The same pipeline runs inside the runner's process: the default profile, the
+The same pipeline runs inside the runner's process: the default profile (a
+test may name a team of its own), the
 mock sandbox, the tool sidecars over stdio, the product's own connection test
 asked against the stub first. Its setup differs from a paid run on the stack:
 
@@ -242,14 +243,19 @@ closed: what it cannot confirm is a failure.
   plus the stated output estimates.
 - The window in force: the window the product sized each model with (the run
   summary's analysts' window and each output cap's derivation) is the window
-  the stub serves it, never the product's fallback. A gate that names
+  the stub serves it, never the product's fallback. Each capped agent's models
+  are read from the job's own roster (every agent its settings define, every
+  agent of its profile, the mediator and the summariser), so a custom team is
+  checked by the same rule as the built-in one; an agent fails only when its
+  models or the windows served to them were not recorded. A gate that names
   `--window` for a model the product cannot learn a window for (no
   `core.llm.openai.context_size`, no table row) warns before it starts, and
   this check then fails: the paid run would be sized on 8,192 tokens.
 - The STIX bundles and the markdown are rendered.
 - No claim is lost: every claim the model wrote is in an answer in force or
   recorded as dropped, and every claim in force is discussed in the report's
-  body.
+  body. The answer in force is the analyst's last one, a debate's revision
+  included, so its claims are numbered as the report labels them.
 - The settings in force are the ones configured.
 - The judge stated the verdict.
 - The run finished well inside its deadline.
