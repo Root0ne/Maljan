@@ -304,6 +304,30 @@ class TestTheNode:
         assert head.startswith(block + "\n\n")
         assert head[len(block) + 2 :] + "".join(c.content for c in chunks[1:]) == parsed
 
+    @pytest.mark.parametrize("over_compact", [100, 200_000])
+    def test_a_static_head_keeps_its_sample_path_where_written_out_it_passes_the_room(
+        self, over_compact: int
+    ) -> None:
+        # Compact, the target fits the room; written out indented with the sample
+        # path it may not. The head is never cut mid-JSON for that: it goes as
+        # the old split sent it, whole, with the path in it.
+        target = {f"key_{i:05d}": f"value {i}" for i in range(2_000)}
+        compact = json.dumps(target, separators=(",", ":"))
+        assert len(json.dumps(target, indent=2)) <= SHIPPED_CHUNK_CHARS
+        room = len(compact) + over_compact
+        agent = _agent(room=room)
+        container = _container(agent, role="static", settings=_no_overlap())
+        node = make_stage_agent_node(ANALYSIS_STAGE, "static", container)
+
+        node(_state(sandbox_report={"target": target}))
+
+        agent.safe_analyze_isr_chunked.assert_not_called()
+        (shown,) = agent.safe_analyze_isr.call_args[0]
+        assert json.loads(shown) == {**target, "analysis_file_path": "/work/abc123.exe"}
+        assert shown == json.dumps(
+            {**target, "analysis_file_path": "/work/abc123.exe"}, indent=2, default=str
+        )
+
     def test_an_operator_figure_decides_the_split(self) -> None:
         agent = _agent(room=1_000_000)
         settings = Settings(_env_file=None, chunking={"max_tokens_per_chunk": 50})
