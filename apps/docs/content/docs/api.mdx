@@ -79,8 +79,9 @@ records carried their charge is priced again by the meter's code at the current
 `llm.model_prices` over the vendored table and counted in `repriced_calls`
 (`repriced_usd`). `spend` also gives `spent_usd`, `prices_from`,
 `estimated_calls`, `estimated_usd`, `unreported_calls`, `unpriced_models`,
-`spent_is_at_least` where a call could not be priced, and `per_agent`. It answers during a run and after a worker that died before its
-run summary; ownership is checked as for the events endpoint.
+`spent_is_at_least` where a call could not be priced, and `per_agent`. It
+answers during a run and after a worker that died before its run summary. Only the job's owner reads it, as for the events endpoint: another
+account's job is not found, to an admin as to anyone else.
 
 ### The run summary
 

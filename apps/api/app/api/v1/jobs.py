@@ -487,7 +487,8 @@ async def get_job_usage(
     force now; a record written before records carried their charge is
     priced again by the same meter code at the current ``llm.model_prices``
     over the vendored table and counted in ``repriced_calls``. Per agent too.
-    Owner or admin, checked the way the events endpoint checks it.
+    The job's owner only, checked the way the events endpoint checks it: another
+    account's job is not found, to an admin as to anyone else.
     """
     from maljan.analysis.run_summary import usage_totals
     from maljan.core.spend import SpendMeter
