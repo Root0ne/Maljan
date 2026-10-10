@@ -1140,7 +1140,13 @@ PROMPTS: dict[str, str] = {
     "composer question for an answer that is not valid JSON": unreadable_answer_reason(
         '{"text": "a value with a stray " quote"}'
     ),
-    "composer question for an answer holding no JSON object": unreadable_answer_reason("[]"),
+    "composer question for an answer holding no JSON object": " ".join(
+        unreadable_answer_reason(answer)
+        for answer in ("[]", '[{"a": 1}]', "{}", "null", "true", "0", '"text"')
+    ),
+    "composer question naming a raw control character": unreadable_answer_reason(
+        '{"text": "one\ntwo"}'
+    ),
     "composer cut-at-cap question on a repeating answer": section_cut_violation(
         8192, chars=20000, begun=160, distinct=20
     ).message,

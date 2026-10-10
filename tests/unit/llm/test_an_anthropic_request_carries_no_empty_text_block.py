@@ -201,3 +201,63 @@ class TestTheRequestHook:
 
         assert kept[0]["content"][0] == {"type": "text", "text": ""}
         assert turn.content == content
+
+    def test_an_empty_text_block_in_a_tool_result_is_left_out(self) -> None:
+        body = _prepared(
+            [
+                {"role": "user", "content": "q"},
+                {
+                    "role": "assistant",
+                    "content": [{"type": "tool_use", "id": "t1", "name": "pe_info", "input": {}}],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "t1",
+                            "content": [
+                                {"type": "text", "text": ""},
+                                {"type": "text", "text": "r"},
+                            ],
+                        },
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "t2",
+                            "content": [{"type": "text", "text": " "}],
+                        },
+                    ],
+                },
+            ]
+        )
+
+        first, second = body["messages"][2]["content"]
+        assert first["content"] == [{"type": "text", "text": "r"}]
+        assert "content" not in second and second["tool_use_id"] == "t2"
+
+
+class TestNoLaterStepMakesOne:
+    """``_shared_heads`` runs after the filter and splits a turn only where both parts hold text."""
+
+    @staticmethod
+    def _split(text: str, size: int) -> Any:
+        body = prepared(
+            {"model": "claude-haiku-5-5", "messages": [{"role": "user", "content": text}]},
+            Memory(),
+            bound=True,
+            cache_marker=MARK,
+            heads={text: size},
+        )
+        return body["messages"][0]["content"]
+
+    def test_a_head_and_a_rest_that_hold_text_are_split(self) -> None:
+        assert self._split("head\n\nrest", 6) == [
+            {"type": "text", "text": "head\n\n", "cache_control": MARK},
+            {"type": "text", "text": "rest"},
+        ]
+
+    def test_a_rest_of_whitespace_alone_leaves_the_turn_whole(self) -> None:
+        assert self._split("head\n\n", 4) == "head\n\n"
+
+    def test_a_head_of_whitespace_alone_leaves_the_turn_whole(self) -> None:
+        assert self._split("\n\nrest", 2) == "\n\nrest"

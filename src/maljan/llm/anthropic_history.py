@@ -490,7 +490,14 @@ def _shared_heads(messages: list[Any], heads: dict[str, int], marker: dict[str, 
         if isinstance(message, dict) and message.get("role") == "user":
             text = _turn_text(message.get("content"))
             size = heads.get(text, 0) if text is not None else 0
-            if text is not None and 0 < size < len(text):
+            # Split only where both parts hold text: a part of whitespace
+            # alone is a block the API refuses.
+            if (
+                text is not None
+                and 0 < size < len(text)
+                and text[:size].strip()
+                and text[size:].strip()
+            ):
                 message = {
                     **message,
                     "content": [
@@ -527,6 +534,23 @@ def _holds_text(block: Any) -> bool:
     return bool(str(block.get("text") or "").strip())
 
 
+def _with_text_kept(block: Any) -> Any:
+    """``block``, a ``tool_result`` without the empty text blocks of its list content.
+
+    A result whose list held nothing else goes without content, which the API
+    takes as a result with none.
+    """
+    if not isinstance(block, dict) or block.get("type") != "tool_result":
+        return block
+    inner = block.get("content")
+    if not isinstance(inner, list) or all(_holds_text(part) for part in inner):
+        return block
+    kept = [part for part in inner if _holds_text(part)]
+    if kept:
+        return {**block, "content": kept}
+    return {key: value for key, value in block.items() if key != "content"}
+
+
 def _without_empty_text(payload: dict[str, Any], messages: list[Any]) -> list[Any]:
     """``messages`` and ``payload['system']`` without a text block the API refuses as empty.
 
@@ -536,8 +560,11 @@ def _without_empty_text(payload: dict[str, Any], messages: list[Any]) -> list[An
     the empty string the opening chunk carried, and ``ChatAnthropic`` sends
     that string back as an empty text block when the answer is sent again (a
     validation retry, a tool loop's next step). Every such block is left out
-    here, from every turn and from the system prompt; a turn left with nothing
-    is left out whole, and the API takes the turns either side of it as one.
+    here, from every turn, from a ``tool_result``'s list content and from the
+    system prompt; a turn left with nothing is left out whole, and the API
+    takes the turns either side of it as one. ``_shared_heads``, which runs
+    after this, splits a turn only where both parts hold text, so no step of
+    this hook makes such a block again.
     Every other block keeps its place and its bytes, so a thinking block's
     signature still checks. One pass over the request.
     """
@@ -555,10 +582,14 @@ def _without_empty_text(payload: dict[str, Any], messages: list[Any]) -> list[An
             if content.strip():
                 out.append(message)
             continue
-        if isinstance(content, list) and not all(_holds_text(block) for block in content):
-            kept = [block for block in content if _holds_text(block)]
-            if kept:
-                out.append({**message, "content": kept})
+        if isinstance(content, list):
+            kept = [_with_text_kept(block) for block in content if _holds_text(block)]
+            if not kept:
+                continue
+            changed = len(kept) != len(content) or any(
+                a is not b for a, b in zip(kept, content, strict=False)
+            )
+            out.append({**message, "content": kept} if changed else message)
             continue
         out.append(message)
     return out

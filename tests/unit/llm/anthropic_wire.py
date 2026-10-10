@@ -207,7 +207,12 @@ def refusal(body: dict[str, Any], betas: set[str] = frozenset()) -> str:  # type
                 return "system: text content blocks must be non-empty"
     for turn in messages:
         content = turn.get("content")
-        for block in content if isinstance(content, list) else []:
+        blocks = list(content) if isinstance(content, list) else []
+        for block in list(blocks):
+            inner = block.get("content") if isinstance(block, dict) else None
+            if isinstance(inner, list) and block.get("type") == "tool_result":
+                blocks.extend(inner)
+        for block in blocks:
             if isinstance(block, dict) and block.get("type") == "text":
                 if not str(block.get("text") or ""):
                     return "messages: text content blocks must be non-empty"

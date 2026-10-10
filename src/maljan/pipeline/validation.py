@@ -2384,29 +2384,93 @@ def keep_known_keys(model: Any, payload: Any) -> tuple[Any, list[str]]:
     return _walk(model, payload, ""), dropped
 
 
+# Characters of the masked JSON quoted either side of where the decoder stopped.
+DECODE_EXCERPT_AROUND = 40
+
+
 def unreadable_answer_reason(answer: str) -> str:
     """What a model is told when its answer gives the JSON reader nothing.
 
     An answer with no text says so. An answer whose JSON the shared reader
     (``utils.json_cleaner``) cannot decode is told the decoder's complaint,
-    where it is and the text there, with how a double quote and a backslash
-    are written inside a JSON string: the two characters a model most often
-    leaves unescaped in a value it copies from a sample. The text quoted from
-    the answer goes through ``safe_finding_value``, as every finding row's
-    model-written value does. An answer that decodes to something holding no
-    object is told that.
+    the character it stopped at and the text there (:func:`_where_it_stopped`),
+    with how a double quote and a backslash are written inside a JSON string:
+    the two characters a model most often leaves unescaped in a value it
+    copies from a sample. An answer that decodes to something that is not an
+    object with fields is told what it decoded to.
     """
-    from maljan.utils.json_cleaner import json_error
+    from maljan.utils.json_cleaner import json_decode_error
 
     if not str(answer or "").strip():
         return "the answer held no text. Write the JSON object the request asks for."
-    why = json_error(answer)
-    if why:
+    found = json_decode_error(answer)
+    if found is not None:
+        complaint, position, document = found
         return (
-            f"the answer is not valid JSON: {safe_finding_value(why)}. Inside a JSON "
-            "string, write a double "
-            'quote as \\" and a backslash as two backslashes.'
+            f"the answer is not valid JSON: {safe_finding_value(complaint)} at character "
+            f"{int(position + 1)} of the JSON{_where_it_stopped(document, complaint, position)}"
+            '. Inside a JSON string, write a double quote as \\" and a backslash as two '
+            "backslashes."
         )
+    return _what_it_decoded_to(answer)
+
+
+def _where_it_stopped(document: str, complaint: str, position: int) -> str:
+    """``", where it reads: …"`` around the decoder's stop, masked before it is cut, or ``""``.
+
+    Every credential is masked over the whole JSON first (``safe_answer_text``,
+    the masking a stored answer gets), and only then is the window cut, from
+    the masked text at the place the decoder stops in it: a window cut first
+    would keep the tail of a key whose head, the context the masking reads it
+    by, it had cut away. Masking that moves or clears the fault quotes
+    nothing. A character the excerpt cannot show (a raw control character,
+    which is what such a complaint is about) is named by its code point.
+    """
+    masked = safe_answer_text(document)
+    quoted = ""
+    try:
+        json.loads(masked)
+    except json.JSONDecodeError as exc:
+        if exc.msg == complaint:
+            start = max(0, exc.pos - DECODE_EXCERPT_AROUND)
+            quoted = safe_finding_value(masked[start : exc.pos + DECODE_EXCERPT_AROUND])
+    char = document[position] if 0 <= position < len(document) else ""
+    named = (
+        f" (the character there is U+{int(ord(char)):04X})"
+        if char and not char.isprintable()
+        else ""
+    )
+    where = f", where it reads: {quoted}" if quoted else ""
+    return f"{where}{named}"
+
+
+def _what_it_decoded_to(answer: str) -> str:
+    """What an answer that decodes but holds no object with fields is told: what it is."""
+    from maljan.utils.json_cleaner import extract_json
+
+    try:
+        value = json.loads(extract_json(answer))
+    except (ValueError, RecursionError):
+        return "the answer holds no JSON object."
+    if isinstance(value, dict) and not value:
+        return (
+            "the answer is an empty JSON object. Write the object the request asks for, "
+            "with its fields."
+        )
+    if isinstance(value, list):
+        empty = "an empty JSON array" if not value else "a JSON array"
+        return f"the answer is {empty}. Write the object the request asks for, not an array."
+    if not isinstance(value, dict):
+        kind = (
+            "the JSON value null"
+            if value is None
+            else "a JSON boolean"
+            if isinstance(value, bool)
+            else "a JSON number"
+            if isinstance(value, int | float)
+            else "a JSON string"
+        )
+        return f"the answer is {kind}. Write the object the request asks for."
     return "the answer holds no JSON object."
 
 

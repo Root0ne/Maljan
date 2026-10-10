@@ -7580,22 +7580,29 @@ class BaseAnalyst(BudgetMeter, ABC):
             """The analyst's whole corrected answer, asked once after a retry not merged."""
             from langchain_core.messages import AIMessage, HumanMessage
 
+            from maljan.llm.answer_text import answer_text
+            from maljan.pipeline.turns import with_question
             from maljan.pipeline.validation import (
                 _with_feedback,
                 whole_answer_after_retry_question,
             )
 
-            turns = [
-                *_with_feedback(
-                    messages,
-                    first_answer.answer_text or first_answer.to_text_summary(),
-                    shown,
-                    closing=closing,
-                    cards=cards,
-                ),
-                AIMessage(content=raw_answers.get(id(retried), "")),
-                HumanMessage(content=whole_answer_after_retry_question(why)),
-            ]
+            asked = _with_feedback(
+                messages,
+                first_answer.answer_text or first_answer.to_text_summary(),
+                shown,
+                closing=closing,
+                cards=cards,
+            )
+            retried_answer = raw_answers.get(id(retried), "")
+            question = whole_answer_after_retry_question(why)
+            # A retry answer with no text is not sent back (``_with_feedback``'s
+            # rule): the question is asked at the end of the turn before it.
+            turns = (
+                [*asked, AIMessage(content=retried_answer), HumanMessage(content=question)]
+                if answer_text(retried_answer).strip()
+                else with_question(asked, question)
+            )
             self.validation_retries += 1
             try:
                 answer = self._invoke_llm_with_timeout(

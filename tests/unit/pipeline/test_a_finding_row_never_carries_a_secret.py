@@ -332,8 +332,11 @@ CODE_OWNED_CALLS: frozenset[str] = (
     # ``_term_ids_said`` joins the grounding check's own technique ids;
     # ``count_claims_begun`` answers a number of claim headings; ``_catalogue_rejection``
     # answers in the retired set's own words, as ``_retired_note`` does.
+    # ``_where_it_stopped`` answers in this codebase's words and quotes the
+    # answer only through the helper, after masking the whole of it.
     frozenset(
         {
+            "_where_it_stopped",
             "_retired_note",
             "_catalogue_rejection",
             "_object_path",

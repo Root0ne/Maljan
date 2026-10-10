@@ -868,12 +868,22 @@ class NarrativeAgent:
                 spend_release(getattr(self, "token_ledger", None), slot)
             return raw
 
+        # The text the latest answer was read from: an answer that gives the
+        # reader nothing is told why (``schema_violations``' ``answer``).
+        answer_read = [""]
+
+        def _parse(answer: Any) -> dict[str, Any] | None:
+            answer_read[0] = _message_text(answer)
+            return _narrative_payload(answer)
+
         try:
             payload, violations, retries = await retry_with_feedback(
                 _run,
                 list(messages),
                 [
-                    lambda p: schema_violations(NarrativeOutput, p, code="narrative.schema"),
+                    lambda p: schema_violations(
+                        NarrativeOutput, p, code="narrative.schema", answer=answer_read[0]
+                    ),
                     lambda p: narrative_capability_violations(p, grounding),
                     lambda p: key_finding_citation_violations(p, known_ids, self._items),
                     lambda p: citation_violations(
@@ -885,7 +895,7 @@ class NarrativeAgent:
                     lambda p: recommendation_indicator_violations(p, answers),
                     lambda p: recommendation_technique_violations(p, published),
                 ],
-                parse=_narrative_payload,
+                parse=_parse,
                 on_feedback=self.validation_tally.count,
             )
         except SpendCeilingStop as stop:
