@@ -105,7 +105,6 @@ def _settings() -> Iterator[None]:
         cfg.react_agent_max_steps = None
         cfg.react_agent_max_steps_overrides = {}
         cfg.react_agent_tool_call_budget = 100
-        cfg.react_agent_clear_tool_answers_at = None
         cfg.llm.provider = "openai"
         cfg.llm.agents = {}
         cfg.llm.openai.context_size = 0

@@ -1,15 +1,14 @@
-"""A long tool loop clears its oldest tool answers to ledger references, in batches.
+"""A tool loop past its window clears its oldest tool answers to ledger references.
 
-Three things clear: a provider refusing a request as over its window (the turn
-is then sent again), a prompt alone past the agent's own model window, and the
-operator's ``react_agent_clear_tool_answers_at``, off by default. A clear takes
-the oldest answers down to what no clear can take plus half of the room above
-it, and keeps them cleared under the same text, so the request's front is the
-same from one clear to the next. The newest turn's answers, the framing and the
-agent's own turns (its reasoning included) are never cleared; a reference
-names the id the recorder stamped and the tool that reads it again, which the
-loop offers — and names anywhere — from its first clear on. Without a clear the
-loop sends, byte for byte, what ``origin/dev`` sends.
+Two things clear, both only where the request would otherwise end the loop: a
+provider refusing a request as over its window (the turn is then sent again),
+and a prompt alone past the agent's own model window. A clear takes the oldest
+answers down to what no clear can take plus half of the room above it, and
+keeps them cleared under the same text. The newest turn's answers, the framing
+and the agent's own turns (its reasoning included) are never cleared; a
+reference names the id the recorder stamped and the tool that reads it again,
+which exists in the loop's graph only from the request carrying its first
+clear. Without a clear the loop sends, byte for byte, what ``origin/dev`` sends.
 """
 
 from __future__ import annotations
@@ -212,13 +211,12 @@ class TestARefusal:
         assert not tac.ToolAnswerClearing().refused(messages, _message_chars)
 
 
-class TestTheOperatorsPoint:
-    def test_batches_to_half_the_clearable_room_and_the_front_holds_between(self) -> None:
+class TestAfterAClear:
+    def test_the_front_holds_until_the_window_is_passed_again(self) -> None:
         messages = _conversation(8, 2_000)
-        point = _size(messages) - 1
-        clearing = tac.ToolAnswerClearing(window_chars=10 * point, setting_chars=point)
+        clearing = tac.ToolAnswerClearing(window_chars=_size(messages) - 1)
         first = _fit(clearing, messages)
-        assert first.clearing is not None and first.clearing.why == tac.CLEARED_FOR_SETTING
+        assert first.clearing is not None
         sent = [first.messages]
         grown = list(messages)
         clears = 1
@@ -238,44 +236,20 @@ class TestTheOperatorsPoint:
             else:
                 clears += 1
             sent.append(fitted.messages)
+        # Half the clearable room left each time: turns pass between clears.
         assert 1 < clears < 20 // 2
 
-    def test_a_large_fixed_part_still_clears_in_batches(self) -> None:
-        """Most of the request is what no clear can take: clears still come turns apart."""
-        messages = _conversation(8, 2_000, reasoning=3_000)
-        point = _size(messages) - 1
-        clearing = tac.ToolAnswerClearing(setting_chars=point)
-        grown = list(messages)
-        clears = int(_fit(clearing, grown).clearing is not None)
-        turns = 0
-        for turn in range(30):
-            call = {"name": "lookup", "args": {"n": 100 + turn}, "id": f"late{turn}"}
-            grown.append(AIMessage(content="", tool_calls=[call]))
-            grown.append(
-                ToolMessage(
-                    content=f"[ev_{200 + turn:04d}]\n" + "a" * 2_000, tool_call_id=call["id"]
-                )
-            )
-            fitted = _fit(clearing, grown)
-            turns += 1
-            if fitted.clearing is not None:
-                clears += 1
-            elif fitted.setting_unreachable is not None:
-                break
-        assert clears < turns
-
-    def test_a_setting_below_what_no_clear_can_take_does_not_clear_and_says_so_once(
-        self,
-    ) -> None:
-        messages = _conversation(4, 2_000, reasoning=20_000)
-        fixed = _fixed(messages)
-        clearing = tac.ToolAnswerClearing(setting_chars=fixed - 1)
+    def test_a_disabled_clearing_keeps_its_clears_and_makes_no_new_one(self) -> None:
+        messages = _conversation(6, 3_000)
+        clearing = tac.ToolAnswerClearing(window_chars=_size(messages) - 1)
         first = _fit(clearing, messages)
-        assert first.clearing is None
-        assert first.setting_unreachable == (fixed, fixed - 1)
+        assert first.clearing is not None
+        clearing.enabled = False
         again = _fit(clearing, messages)
-        assert again.clearing is None and again.setting_unreachable is None
-        assert _wire(first.messages) == _wire(messages)
+        assert again.clearing is None and _wire(again.messages) == _wire(first.messages)
+        assert not clearing.due(
+            messages, extra_chars=0, measure=_message_chars, reported=_no_report
+        )
 
 
 class TestLinear:
@@ -305,7 +279,7 @@ class TestLinear:
             messages = hostile(ids)
             began = time.perf_counter()
             for _ in range(5):
-                _fit(tac.ToolAnswerClearing(setting_chars=1), messages)
+                _fit(tac.ToolAnswerClearing(window_chars=1), messages)
             return time.perf_counter() - began
 
         timed(2_000)
@@ -472,7 +446,7 @@ class _Analyst(BaseAnalyst):
 
 
 @contextlib.contextmanager
-def _settings(clear_at: int | None) -> Iterator[None]:
+def _settings() -> Iterator[None]:
     with patch("maljan.agents.base_agent.get_settings") as settings:
         cfg = settings.return_value
         cfg.react_agent_timeout = None
@@ -480,7 +454,6 @@ def _settings(clear_at: int | None) -> Iterator[None]:
         cfg.react_agent_max_steps = None
         cfg.react_agent_max_steps_overrides = {}
         cfg.react_agent_tool_call_budget = 100
-        cfg.react_agent_clear_tool_answers_at = clear_at
         cfg.llm.provider = "openai"
         cfg.llm.agents = {}
         cfg.llm.openai.context_size = 0
@@ -495,7 +468,6 @@ def _window(tokens: int, reply: int = 8_192) -> cw.ContextBudget:
 def _run(
     budget: Any,
     *,
-    clear_at: int | None = None,
     calls: int = 12,
     answer_chars: int = 6_000,
     reasoning: int = 1_000,
@@ -516,7 +488,7 @@ def _run(
     agent._container = container
     agent.tools = [_lookup(answer_chars)]
     with contextlib.ExitStack() as stack:
-        stack.enter_context(_settings(clear_at))
+        stack.enter_context(_settings())
         if no_clearing:
             stack.enter_context(
                 patch.object(
@@ -598,21 +570,52 @@ class TestThroughTheLoop:
         cleared = _cleared_events(container)
         assert cleared and all(e["why"] == tac.CLEARED_FOR_WINDOW for e in cleared)
 
-    def test_the_operator_s_point_clears_in_batches_and_the_front_holds(self) -> None:
-        now, container, _, _ = _run(_window(1_000_000), clear_at=15_000, calls=20, reasoning=100)
-        cleared = _cleared_events(container)
-        assert cleared and all(e["why"] == tac.CLEARED_FOR_SETTING for e in cleared)
-        assert 2 <= len(cleared) < len(now.seen) // 3
-        requests = _requests(now)
-        holds = sum(
-            1
-            for earlier, later in zip(requests, requests[1:], strict=False)
-            if later[: len(earlier) - 1] == earlier[:-1]
-        )
-        assert holds >= len(requests) - 1 - len(cleared)
+    def test_the_read_again_tool_comes_with_the_request_carrying_the_first_clear(
+        self,
+    ) -> None:
+        today, _, _, _ = _run(_window(1_000_000), no_clearing=True, reasoning=100)
+        own = max(_size(sent) for sent, _t in today.seen) // cw.CHARS_PER_TOKEN // 2
+        now, container, _, _ = _run(_window(1_000_000), own_window=own, reasoning=100)
+        offered = [tools for _s, tools in now.seen]
+        first = next(i for i, tools in enumerate(offered) if tac.READ_EVIDENCE_TOOL in tools)
+        assert all(tools == ["lookup"] for tools in offered[:first])
+        assert all(tac.READ_EVIDENCE_TOOL in tools for tools in offered[first:])
+        # That very request is the first to carry a cleared answer.
+        carrying = [
+            i
+            for i, (sent, _t) in enumerate(now.seen)
+            if any(isinstance(m, ToolMessage) and "[cleared " in str(m.content) for m in sent)
+        ]
+        assert carrying and carrying[0] == first
+        assert _cleared_events(container)
+
+    def test_a_tool_that_cannot_be_offered_is_said_and_the_loop_ends_as_today(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from maljan.agents import base_agent
+
+        built = base_agent._model_that_closes_off_truncated_calls
+        calls: list[int] = []
+
+        def once(*args: Any, **kwargs: Any) -> Any:
+            calls.append(1)
+            if len(calls) > 1:
+                raise RuntimeError("no second binding")
+            return built(*args, **kwargs)
+
+        limit = 50_000
+        with (
+            patch.object(base_agent, "_model_that_closes_off_truncated_calls", once),
+            caplog.at_level(logging.WARNING),
+        ):
+            now, container, _, _ = _run(_window(1_000_000), refuse_over=limit)
+        assert any("read_evidence could not be offered" in r.message for r in caplog.records)
+        assert not _cleared_events(container)
+        assert all(tools == ["lookup"] for _s, tools in now.seen)
+        assert any("window full" in r.message for r in caplog.records)
 
     def test_every_id_the_loop_was_shown_stays_readable_or_named(self) -> None:
-        now, _, _, _ = _run(_window(1_000_000), clear_at=8_000, reasoning=100)
+        now, _, _, _ = _run(_window(1_000_000), own_window=20_000, reasoning=100)
         last, _tools = now.seen[-1]
         named = {
             tac.stamp_of(str(m.content)) or str(m.content)[len("[cleared ") :].split("]")[0]
@@ -658,7 +661,8 @@ def test_the_model_reads_a_cleared_answer_again_under_its_own_id() -> None:
     agent.logger = logging.getLogger("test.clearing")
     agent._container = _Container(_window(1_000_000))
     agent.tools = [_lookup(6_000)]
-    with _settings(8_000):
+    cw.record_built_window(model, cw.WindowFact(12_000, cw.DECLARED, "test"))
+    with _settings():
         agent.execute_tool_loop([("system", "You are a static analyst."), ("human", TASK)])
     last = next(
         sent
@@ -683,19 +687,17 @@ def test_the_window_point_is_the_agent_s_own_window_never_the_job_s() -> None:
     agent = _Analyst(llm=model, name="static")
     agent._container = _Container(_window(50_000))
     cw.record_built_window(model, cw.WindowFact(100_000, cw.PROBED, "test"))
-    with _settings(None):
+    with _settings():
         clearing = agent._tool_answer_clearing()
     assert clearing.window_chars == 100_000 * cw.CHARS_PER_TOKEN
-    assert clearing.setting_chars is None
 
 
 def test_an_unknown_own_window_gives_no_window_point() -> None:
     agent = _Analyst(llm=_Thinker(seen=[], refused=[]), name="static")
     agent._container = _Container(cw.ContextBudget(cw.unknown_window()))
-    with _settings(50_000), patch.object(BaseAnalyst, "_own_window_tokens", lambda self: None):
+    with _settings(), patch.object(BaseAnalyst, "_own_window_tokens", lambda self: None):
         clearing = agent._tool_answer_clearing()
     assert clearing.window_chars is None
-    assert clearing.setting_chars == 50_000 * cw.CHARS_PER_TOKEN
 
 
 def test_the_reported_count_names_its_turn() -> None:

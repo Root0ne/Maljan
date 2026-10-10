@@ -1196,22 +1196,6 @@ kept to exactly as before. The judge's tool loop reads its budget the same way
 every agent's loop does (`loop_limits("judge")`): the `judge` entries of the
 maps, then the deployment's values.
 
-`core.react_agent_clear_tool_answers_at` (**Clear old tool answers past**) is
-empty by default too. Empty, an analyst's tool loop clears its oldest tool
-answers to one-line evidence-id references only where the provider refuses a
-request as over its window (then it sends the turn again) or where the prompt
-alone is past the model's own window — requests that would otherwise end the
-loop. A number is a prompt size in tokens past which the same clearing starts:
-the oldest answers go in one batch, down to what no clear can take plus half of
-the room above it, and stay cleared. Where what no clear can take is already
-past the number, nothing is cleared and the agent's log says so once.
-**Clearing can cost more than it saves.** The first clear changes the tool list,
-so the provider reads that whole request again uncached; priced on run 7's
-reverser, every setting tried (100,000, 150,000 and 200,000 tokens) cost more on
-Claude Haiku 5.5 and on DeepSeek than not clearing. It also changes what the
-model reads (it reads a cleared answer again with `read_evidence`). See *Old
-answers cleared, in batches* in [Architecture](/architecture/).
-
 A loop with no limit ends when its model answers, or at one of the stops that
 are not a count: the repeat guard (a model re-asking for answers it already
 has), the conversation's room (a tool answer that no longer fits the window),

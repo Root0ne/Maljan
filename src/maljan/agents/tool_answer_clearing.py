@@ -1,33 +1,28 @@
-"""A long tool loop clears its oldest tool answers to ledger references, in batches.
+"""A tool loop past its window clears its oldest tool answers to ledger references.
 
 A tool loop sends its whole conversation on every turn, so every tool answer it
-ever read is read again on every later turn. Three things clear the oldest of
-them, and nothing else does:
+ever read is read again on every later turn. Two things clear the oldest of
+them, and nothing else does; both only where the request would otherwise end
+the loop:
 
-* **A refusal (always).** When the provider refuses a request as over its
-  window (``context_window.window_full_error``), the oldest answers are cleared
-  in one batch and the turn is sent again; again only while each resend is
-  refused and something is still clearable. Without it the loop ends there with
-  what it gathered (``base_agent``'s ``window_full`` path) or, where nothing had
-  answered, fails its agent. So this changes only a run that today loses that
-  agent's loop.
-* **A prompt over the window (always).** A request whose prompt alone is past
-  the window the agent's own model serves is refused by every server, so it is
-  cleared before it is sent. The window is the agent's own (its built window,
-  else its assignment's), never the job's smallest.
-* **The operator (off by default).** ``react_agent_clear_tool_answers_at`` is a
-  prompt size, in tokens, past which the same clearing starts.
+* **A refusal.** When the provider refuses a request as over its window
+  (``context_window.window_full_error``), the oldest answers are cleared in one
+  batch and the turn is sent again; again only while each resend is refused and
+  something is still clearable. Without it the loop ends there with what it
+  gathered (``base_agent``'s ``window_full`` path) or, where nothing had
+  answered, fails its agent.
+* **A prompt past the window.** A request whose prompt alone is past the window
+  the agent's own model serves is refused by every server, so it is cleared
+  before it is sent. The window is the agent's own (its built window, else its
+  assignment's), never the job's smallest.
 
-**Batches, never a sliding window.** A clear takes the oldest answers until the
+**One batch, then the same text.** A clear takes the oldest answers until the
 request weighs the part no clear can take (``fixed``: the framing, the pack, the
 definitions, the agent's own turns and reasoning, the newest answers) plus half
-of what lies between it and the point. The cleared ones stay cleared, each
-under the same reference text, on every later turn, so the request's front is
-the same characters from one clear to the next. Half of the clearable room is
-where the next clear comes only after the conversation has grown again by as
-much as the clear left, so each clear is paid for by as many turns as it frees.
-Where ``fixed`` is already at or past the operator's point, the setting cannot
-be met by clearing and does not clear; the loop says so once.
+of what lies between it and the point (a refusal's point is the refused request
+itself), so the loop has room to go on rather than being back at the edge on
+its next turn. The cleared ones stay cleared, each under the same reference
+text, on every later turn.
 
 **What is never cleared.** Only a tool answer is: the system prompt, the task
 and its pack, the run-state block, the agent's own turns (its text, its CLAIM
@@ -40,8 +35,9 @@ recorder's own stamp, since a reference would have no id to name for it.
 **Read again.** A reference names the id the recorder stamped on the answer
 and the tool that reads it again (``read_evidence``). The read is filed as a
 repeat of that entry and answered under its id, so no second citable id
-exists. The tool is offered — and named anywhere — from the loop's first clear
-on, not before.
+exists. The tool exists in a loop — offered, run or named — only from the
+request that carries its first clear: the loop's graph is built again with it
+before that request (``base_agent``).
 """
 
 from __future__ import annotations
@@ -76,7 +72,6 @@ UNKNOWN_EVIDENCE_REMEDIATION = "pass an id a [cleared …] line names, exactly a
 # Why a clear happened, as the event and the log say it.
 CLEARED_FOR_REFUSAL = "refused"
 CLEARED_FOR_WINDOW = "window"
-CLEARED_FOR_SETTING = "setting"
 
 # The recorder's stamp at the very front of an answer it filed
 # (``evidence_recorder``: ``[ev_0007]`` and a line break, or ``[ev_0007] tool
@@ -132,9 +127,6 @@ class FitResult:
     # that count still holds and the next measure must take off it.
     freed_before_report: int = 0
     clearing: Clearing | None = None
-    # Set once per loop: the operator's point is at or below what no clear can
-    # take, so the setting does not clear. ``(fixed, point)`` in characters.
-    setting_unreachable: tuple[int, int] | None = None
 
 
 def _is_tool_answer(message: Any) -> bool:
@@ -147,23 +139,22 @@ def _is_model_turn(message: Any) -> bool:
 
 @dataclass
 class ToolAnswerClearing:
-    """One tool loop's clears: which answers are cleared, and the points that clear more.
+    """One tool loop's clears: which answers are cleared, and when more are.
 
     ``window_chars`` is the window the agent's own model serves, in the
     budget's characters, or ``None`` where it is not known: a prompt past it is
-    refused by every server. ``setting_chars`` is the operator's point, or
-    ``None``. A refusal clears whatever the two are (:meth:`refused`).
+    refused by every server. A refusal clears whatever it is (:meth:`refused`).
+    ``enabled`` false keeps the clears already made and makes no new one.
     """
 
     window_chars: int | None = None
-    setting_chars: int | None = None
+    enabled: bool = True
     # Each cleared answer's reference, by its tool call id: the same text on
     # every turn, so the front of the request stays what it was.
     _references: dict[str, str] = field(default_factory=dict)
     # Answers found not clearable, by tool call id, so none is read twice.
     _unclearable: set[str] = field(default_factory=set)
     _refused: bool = False
-    _said_unreachable: bool = False
     clears: list[Clearing] = field(default_factory=list)
 
     @property
@@ -223,6 +214,39 @@ class ToolAnswerClearing:
         self._refused = True
         return True
 
+    def _size(
+        self,
+        out: list[Any],
+        sizes: list[int],
+        extra_chars: int,
+        reported: Callable[[list[Any]], tuple[int, int]],
+    ) -> tuple[int, int]:
+        """``(size, index)``: the server's count where there is one, else the measure."""
+        floor, report_at = reported(out)
+        if report_at >= 0 and floor > 0:
+            return floor, report_at
+        return sum(sizes) + max(0, int(extra_chars)), report_at
+
+    def due(
+        self,
+        messages: Sequence[Any],
+        *,
+        extra_chars: int,
+        measure: Callable[[Any], int],
+        reported: Callable[[list[Any]], tuple[int, int]],
+    ) -> bool:
+        """Whether the next :meth:`fit` of ``messages`` would clear; nothing is changed."""
+        if not self.enabled:
+            return False
+        out = self.apply(messages)
+        if not self._refused and self.window_chars is None:
+            return False
+        sizes = [measure(m) for m in out]
+        size, _ = self._size(out, sizes, extra_chars, reported)
+        if not self._refused and size <= int(self.window_chars or 0):
+            return False
+        return bool(self._candidates(out, sizes, measure))
+
     def fit(
         self,
         messages: Sequence[Any],
@@ -241,41 +265,30 @@ class ToolAnswerClearing:
         to the turn at ``index`` weighed, in the budget's characters, plus what
         came after, or ``(0, -1)`` (``base_agent._reported_request``). The
         request is sized by the server's count where there is one, since the
-        points stand for what a server refuses or charges, and by the measure
-        only where nothing was counted yet. One pass over the messages.
+        window stands for what a server refuses, and by the measure only where
+        nothing was counted yet. One pass over the messages.
         """
         out = self.apply(messages)
         refused, self._refused = self._refused, False
-        window, setting = self.window_chars, self.setting_chars
-        if not refused and window is None and setting is None:
+        window = self.window_chars
+        if not self.enabled or (not refused and window is None):
             return FitResult(out)
         sizes = [measure(m) for m in out]
-        measured = sum(sizes) + max(0, int(extra_chars))
-        floor, report_at = reported(out)
-        size = floor if report_at >= 0 and floor > 0 else measured
-        due = refused or (window is not None and size > window)
-        due = due or (setting is not None and size > setting)
-        if not due:
+        size, report_at = self._size(out, sizes, extra_chars, reported)
+        past = window is not None and size > window
+        if not refused and not past:
             return FitResult(out)
         candidates = self._candidates(out, sizes, measure)
+        if not candidates:
+            return FitResult(out)
         fixed = size - sum(candidate[3] for candidate in candidates)
-        # Each reason's target: what no clear can take, plus half of the room
-        # between it and the reason's point.
+        # What no clear can take, plus half of the room between it and the
+        # point: the refused request, or the window.
         targets: list[tuple[int, str, int]] = []
         if refused:
             targets.append((fixed + (size - fixed) // 2, CLEARED_FOR_REFUSAL, size))
-        if window is not None and size > window:
+        if past and window is not None:
             targets.append((fixed + max(0, window - fixed) // 2, CLEARED_FOR_WINDOW, window))
-        unreachable = None
-        if setting is not None and size > setting:
-            if fixed >= setting:
-                if not self._said_unreachable:
-                    self._said_unreachable = True
-                    unreachable = (fixed, setting)
-            else:
-                targets.append((fixed + (setting - fixed) // 2, CLEARED_FOR_SETTING, setting))
-        if not targets or not candidates:
-            return FitResult(out, setting_unreachable=unreachable)
         target, why, point = min(targets)
         before = size
         answers = 0
@@ -299,12 +312,7 @@ class ToolAnswerClearing:
             target_chars=target,
         )
         self.clears.append(clearing)
-        return FitResult(
-            out,
-            freed_before_report=freed_before_report,
-            clearing=clearing,
-            setting_unreachable=unreachable,
-        )
+        return FitResult(out, freed_before_report=freed_before_report, clearing=clearing)
 
 
 def _with_content(message: Any, content: str) -> Any:

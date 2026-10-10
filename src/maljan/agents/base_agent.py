@@ -41,8 +41,6 @@ from maljan.agents.claim_headings import (
 from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT, KEEP_REPLY
 from maljan.agents.tool_answer_clearing import (
     CLEARED_FOR_REFUSAL,
-    CLEARED_FOR_WINDOW,
-    READ_EVIDENCE_TOOL,
     Clearing,
     ToolAnswerClearing,
     read_evidence_tool,
@@ -897,99 +895,14 @@ def _model_that_closes_off_truncated_calls(llm: Any, tools: list, repair: Any) -
     return bound | RunnableLambda(repair)
 
 
-def _bound_tool_list(loop_model: Any) -> list[Any] | None:
-    """The tool definitions a loop's model binding sends with each request, or ``None``.
+class OfferReadAgainFirst(Exception):  # noqa: N818 — a signal, not a failure
+    """Raised by the refresher before the request that would carry a loop's first clear.
 
-    The list itself, so a definition added to it or taken off it is sent or
-    withheld from the next request on (the binding reads its arguments per
-    call, as a turn's held cap relies on).
+    The loop's graph knows nothing of ``read_evidence`` until then; the loop
+    catches this, builds its graph again with the tool, and sends the turn
+    again, so the request that carries the first clear offers the tool that
+    reads a cleared answer.
     """
-    from langchain_core.runnables import RunnableBinding, RunnableSequence
-
-    first = loop_model.first if isinstance(loop_model, RunnableSequence) else loop_model
-    if not isinstance(first, RunnableBinding) or not isinstance(first.kwargs, dict):
-        return None
-    tools = first.kwargs.get("tools")
-    return tools if isinstance(tools, list) and tools else None
-
-
-def _definition_name(definition: Any) -> str:
-    """The name a bound tool definition carries, in the OpenAI or the Anthropic shape."""
-    if not isinstance(definition, dict):
-        return ""
-    function = definition.get("function")
-    if isinstance(function, dict):
-        return str(function.get("name") or "")
-    return str(definition.get("name") or "")
-
-
-class _ReadAgainOffer:
-    """The read-again tool of one loop, held back until its first clear, then offered at once.
-
-    Until :meth:`make` the tool is in nothing the loop sends or names: not in
-    the request's tool list, not in the tool node (so an unknown-tool reply
-    lists the tools it always listed), not in the list the no-tool-call
-    question names. :meth:`make` adds it to all three, and to what the nudge
-    and the salvage bind after the loop (``_offered_after_clear``).
-    """
-
-    def __init__(
-        self,
-        agent: Any,
-        offered: list[Any],
-        definition: dict[str, Any],
-        tool: Any,
-        recorded: list[Any],
-        tool_node: Any,
-    ) -> None:
-        self.agent = agent
-        self.offered = offered
-        self.definition = definition
-        self.tool = tool
-        self.recorded = recorded
-        self.tool_node = tool_node
-        self.made = False
-
-    @classmethod
-    def build(
-        cls, agent: Any, loop_model: Any, tool: Any, recorded: list[Any]
-    ) -> _ReadAgainOffer | None:
-        """The offer for a loop over ``loop_model``, or ``None`` where it could never be made."""
-        offered = _bound_tool_list(loop_model)
-        if offered is None:
-            return None
-        try:
-            from langgraph.prebuilt import ToolNode
-
-            bound = agent.llm.bind_tools([tool])
-            definition = (getattr(bound, "kwargs", {}) or {}).get("tools", [None])[0]
-            tool_node = ToolNode(list(recorded))
-            if not isinstance(getattr(tool_node, "_tools_by_name", None), dict) or not isinstance(
-                getattr(tool_node, "_injected_args", None), dict
-            ):
-                return None
-        except Exception as exc:  # noqa: BLE001 — no offer is today's loop, never a lost one
-            agent.logger.debug("%s: the read-again tool cannot be offered (%s).", agent.name, exc)
-            return None
-        if not isinstance(definition, dict) or _definition_name(definition) != READ_EVIDENCE_TOOL:
-            return None
-        return cls(agent, offered, definition, tool, recorded, tool_node)
-
-    def make(self) -> None:
-        """Offer the tool from the next request on; once."""
-        if self.made:
-            return
-        self.made = True
-        from langgraph.prebuilt.tool_node import _get_all_injected_args
-
-        self.offered.append(self.definition)
-        self.recorded.append(self.tool)
-        self.tool_node._tools_by_name[self.tool.name] = self.tool
-        self.tool_node._injected_args[self.tool.name] = _get_all_injected_args(self.tool)
-        self.agent._tool_definition_chars = self.agent._definitions_sent() + (
-            tool_definition_chars([self.tool])
-        )
-        self.agent._offered_after_clear = [self.tool]
 
 
 def _stored_answer_of(recorder: Any) -> Callable[[str], str | None]:
@@ -4276,6 +4189,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         turn_holds: dict[int, int | None] | None = None,
         clearing: ToolAnswerClearing | None = None,
         on_clear: Callable[[Clearing], None] | None = None,
+        offered: Callable[[], bool] | None = None,
     ) -> Any:
         """The per-turn hook that regenerates the run-state block's budget line.
 
@@ -4302,7 +4216,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         ``clearing`` is the loop's ``ToolAnswerClearing``, or ``None`` where
         neither the window nor the operator gives a point to clear at: the
         request is then the conversation as it always was. ``on_clear`` is
-        told of each new clear, before the request is measured.
+        told of each new clear, before the request is measured; ``offered``
+        says whether the loop offers ``read_evidence`` yet
+        (:meth:`_cleared_request`).
         """
         ledger = budget if budget is not None else LoopBudget(max_steps, timeout, started)
         from maljan.pipeline.events import BUDGET_TICK_EVERY
@@ -4343,7 +4259,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             # the answers already cleared stay cleared, under the same text.
             cleared_chars = 0
             if clearing is not None:
-                sent, cleared_chars = self._cleared_request(clearing, sent, on_clear)
+                sent, cleared_chars = self._cleared_request(clearing, sent, on_clear, offered)
             self._note_conversation(sent, cleared_chars)
             # The spend ceiling's word on the turn about to be sent: held to
             # what the spend it may use pays for, or not sent, and then the
@@ -4421,25 +4337,16 @@ class BaseAnalyst(BudgetMeter, ABC):
         return min(known) if known else None
 
     def _tool_answer_clearing(self) -> ToolAnswerClearing:
-        """This loop's clearing: a refusal always, the agent's own window, the operator's point.
+        """This loop's clearing: after a refusal, and before a prompt past the agent's own window.
 
         A provider's refusal of a request as over its window clears whatever
         else is known. The window point is the window the agent's own model
         serves (:meth:`_own_window_tokens`), in the budget's characters: a
-        prompt past it is refused by every server. The operator's point is
-        ``react_agent_clear_tool_answers_at``, in tokens at the same rate;
-        unset, none.
+        prompt past it is refused by every server.
         """
-        per_token = self._clearing_per_token()
         window = self._own_window_tokens()
-        setting = getattr(get_settings(), "react_agent_clear_tool_answers_at", None)
-        setting_chars = (
-            int(setting) * per_token
-            if isinstance(setting, int) and not isinstance(setting, bool) and setting > 0
-            else None
-        )
         return ToolAnswerClearing(
-            window_chars=window * per_token if window else None, setting_chars=setting_chars
+            window_chars=window * self._clearing_per_token() if window else None
         )
 
     def _cleared_request(
@@ -4447,31 +4354,44 @@ class BaseAnalyst(BudgetMeter, ABC):
         clearing: ToolAnswerClearing,
         sent: list[Any],
         on_clear: Callable[[Clearing], None] | None,
+        offered: Callable[[], bool] | None = None,
     ) -> tuple[list[Any], int]:
-        """``sent`` with the loop's clears in place, and the characters newly cleared; never raises."""
+        """``sent`` with the loop's clears in place, and the characters newly cleared.
+
+        Where a clear is due and the loop does not offer ``read_evidence`` yet
+        (``offered``), raises :class:`OfferReadAgainFirst` instead: the loop
+        builds its graph again with the tool and sends the turn again. Never
+        raises otherwise.
+        """
+        per_token = self._clearing_per_token()
+
+        def reported(messages: list[Any]) -> tuple[int, int]:
+            return _reported_request(messages, per_token)
+
+        extra = self._definitions_sent() + self._replayed_run_state_chars()
         try:
-            per_token = self._clearing_per_token()
+            if offered is not None and not offered():
+                due = clearing.due(
+                    sent, extra_chars=extra, measure=_message_chars, reported=reported
+                )
+            else:
+                due = False
+        except Exception as exc:  # noqa: BLE001 — a clear never costs a turn
+            self.logger.debug("%s: tool answers not cleared (%s).", self.name, exc)
+            return sent, 0
+        if due:
+            raise OfferReadAgainFirst()
+        try:
             fitted = clearing.fit(
                 sent,
-                extra_chars=self._definitions_sent() + self._replayed_run_state_chars(),
+                extra_chars=extra,
                 measure=_message_chars,
-                reported=lambda messages: _reported_request(messages, per_token),
+                reported=reported,
                 turn=sum(1 for m in sent if is_model_turn(m)) + 1,
             )
         except Exception as exc:  # noqa: BLE001 — a clear never costs a turn
             self.logger.debug("%s: tool answers not cleared (%s).", self.name, exc)
             return sent, 0
-        if fitted.setting_unreachable is not None:
-            fixed, point = fitted.setting_unreachable
-            self.logger.info(
-                "%s: react_agent_clear_tool_answers_at (%d characters of context) is at or below "
-                "the %d characters of this loop's request that no clear can take (the prompt, "
-                "the pack, the agent's own turns and its newest answers); the setting does not "
-                "clear this loop.",
-                self.name,
-                point,
-                fixed,
-            )
         if fitted.clearing is not None and on_clear is not None:
             try:
                 on_clear(fitted.clearing)
@@ -4481,10 +4401,11 @@ class BaseAnalyst(BudgetMeter, ABC):
 
     def _note_clearing(self, clearing: Clearing) -> None:
         """Say one clear in the agent's log and as a ``tool_answers_cleared`` event."""
-        why = {
-            CLEARED_FOR_REFUSAL: "the model server refused the request as over its window",
-            CLEARED_FOR_WINDOW: "the request's prompt is past the model's own window",
-        }.get(clearing.why, "the request passed react_agent_clear_tool_answers_at")
+        why = (
+            "the model server refused the request as over its window"
+            if clearing.why == CLEARED_FOR_REFUSAL
+            else "the request's prompt is past the model's own window"
+        )
         self.logger.info(
             "%s: cleared %d old tool answer(s) to ledger references at turn %d, because %s: "
             "the request went from %d to %d characters of context (clearing starts past %d and "
@@ -4739,54 +4660,70 @@ class BaseAnalyst(BudgetMeter, ABC):
         held_binding = _loop_binding(loop_model, self.llm)
         turn_holds: dict[int, int | None] = {}
         # Old tool answers cleared to references (``tool_answer_clearing``),
-        # and the tool that reads one again. Until the loop's first clear the
-        # tool is nowhere: not in the request, not in the tool node, not in
-        # any list a model reads. A model whose bound tool list the loop
-        # cannot reach could never be offered it, and an answer nobody can
-        # read again is not cleared: such a loop runs as it always did.
+        # and the tool that reads one again. Until the request that carries
+        # the loop's first clear, the tool is nowhere: not in the graph, the
+        # request or any list a model reads. Before that request the graph is
+        # built again with it (``_offer_read_again``), from public calls only.
         self._offered_after_clear = []
         clearing: ToolAnswerClearing | None = self._tool_answer_clearing()
-        offer = (
-            _ReadAgainOffer.build(
-                self,
-                loop_model,
-                record_tools(
-                    [read_evidence_tool(_stored_answer_of(recorder), self._answer_sizer())],
-                    recorder,
-                    repeats,
-                    repairs,
-                    self._context_budget(),
-                    on_question=self._count_question,
-                )[0],
+        read_tool = record_tools(
+            [read_evidence_tool(_stored_answer_of(recorder), self._answer_sizer())],
+            recorder,
+            repeats,
+            repairs,
+            self._context_budget(),
+            on_question=self._count_question,
+        )[0]
+        graph: dict[str, Any] = {}
+
+        def _executor(model: Any, binding: Any) -> Any:
+            return create_react_agent(
+                model,
                 recorded,
+                prompt=self._run_state_refresher(
+                    max_steps,
+                    timeout,
+                    budget.started,
+                    budget=budget,
+                    recorder=recorder,
+                    spend_slot=spend_key,
+                    held_binding=binding,
+                    turn_holds=turn_holds,
+                    clearing=clearing,
+                    on_clear=self._note_clearing,
+                    offered=lambda: bool(self._offered_after_clear),
+                ),
             )
-            if clearing is not None
-            else None
-        )
-        if offer is None:
-            clearing = None
 
-        def _on_clear(cleared: Clearing) -> None:
-            if offer is not None:
-                offer.make()
-            self._note_clearing(cleared)
+        def _offer_read_again() -> bool:
+            """Build the loop's graph again with ``read_evidence``; whether it now has it."""
+            if self._offered_after_clear:
+                return True
+            try:
+                offered_tools = [*recorded, read_tool]
+                model = _model_that_closes_off_truncated_calls(
+                    self.llm, offered_tools, _close_off_truncated_calls
+                )
+                recorded.append(read_tool)
+                graph["executor"] = _executor(model, _loop_binding(model, self.llm))
+            except Exception as exc:  # noqa: BLE001 — said, and today's ending follows
+                if recorded and recorded[-1] is read_tool:
+                    recorded.pop()
+                if clearing is not None:
+                    clearing.enabled = False
+                self.logger.warning(
+                    "%s: read_evidence could not be offered (%s: %s); old tool answers are not "
+                    "cleared in this loop.",
+                    self.name,
+                    type(exc).__name__,
+                    exc,
+                )
+                return False
+            self._tool_definition_chars = tool_definition_chars(recorded)
+            self._offered_after_clear = [read_tool]
+            return True
 
-        agent_executor = create_react_agent(
-            loop_model,
-            offer.tool_node if offer is not None else recorded,
-            prompt=self._run_state_refresher(
-                max_steps,
-                timeout,
-                budget.started,
-                budget=budget,
-                recorder=recorder,
-                spend_slot=spend_key,
-                held_binding=held_binding,
-                turn_holds=turn_holds,
-                clearing=clearing,
-                on_clear=_on_clear,
-            ),
-        )
+        graph["executor"] = _executor(loop_model, held_binding)
 
         # Whether the server, rather than the budget, said the window was full.
         window_full = False
@@ -4990,7 +4927,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 # What the steps have left after the turns ``start`` already
                 # spent; the first pass has spent none.
                 steps = None if max_steps is None else max(1, max_steps - steps_used(start))
-                stream: Any = agent_executor.astream(
+                stream: Any = graph["executor"].astream(
                     {"messages": start},
                     {"recursion_limit": recursion_limit(steps)},
                     stream_mode="values",
@@ -5130,10 +5067,22 @@ class BaseAnalyst(BudgetMeter, ABC):
                         # does not fit, which is a configuration fault — has
                         # nothing to salvage and fails the agent as it always
                         # did.
-                        if not window_full_error(exc):
+                        if isinstance(exc, OfferReadAgainFirst) or isinstance(
+                            exc.__cause__, OfferReadAgainFirst
+                        ):
+                            # The request about to be sent carries the loop's
+                            # first clear: the graph is built again with the
+                            # tool that reads a cleared answer, and the turn
+                            # is sent again; without it no clear is made.
+                            _offer_read_again()
+                            resend = True
+                        elif not window_full_error(exc):
                             raise
-                        if clearing is not None and clearing.refused(
-                            list(latest.get("messages") or []), _message_chars
+                        elif (
+                            clearing is not None
+                            and clearing.enabled
+                            and clearing.refused(list(latest.get("messages") or []), _message_chars)
+                            and _offer_read_again()
                         ):
                             resend = True
                             self.logger.warning(
@@ -5973,7 +5922,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             self.logger.debug("%s: tools bound unpinned for the nudge (%s).", self.name, exc)
             pinned = tools
         # And the read-again tool, where the loop offered it after a clear
-        # (``_ReadAgainOffer``): the transcript was produced against it too.
+        # (``_offer_read_again``): the transcript was produced against it too.
         pinned = [*pinned, *(getattr(self, "_offered_after_clear", None) or [])]
         try:
             return bind(pinned, tool_choice="none")

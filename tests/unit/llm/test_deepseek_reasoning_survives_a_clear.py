@@ -2,7 +2,8 @@
 
 DeepSeek refuses a request with tools that drops an earlier assistant turn's
 ``reasoning_content`` (its thinking-mode guide), so a loop that clears old tool
-answers (``agents.tool_answer_clearing``) clears the tool turns only: every
+answers (``agents.tool_answer_clearing``, here a prompt past the model's own window)
+clears the tool turns only: every
 request after a clear still carries every earlier turn's reasoning, byte for
 byte, and the read-again tool rides the request's tools from that clear on.
 
@@ -52,7 +53,10 @@ class _Container:
 
 def test_every_request_after_a_clear_carries_every_reasoning() -> None:
     wire = _DeepSeek(calls=8)
-    agent = _Analyst(_model(wire))
+    model = _model(wire)
+    # The model's own window, small enough that the loop's prompt passes it.
+    cw.record_built_window(model, cw.WindowFact(6_000, cw.DECLARED, "test"))
+    agent = _Analyst(model)
     agent.logger = logging.getLogger("test.deepseek_clear")
     agent.run_state_block = "sample: c"
     agent._container = _Container()
@@ -74,7 +78,6 @@ def test_every_request_after_a_clear_carries_every_reasoning() -> None:
         cfg.react_agent_max_steps = None
         cfg.react_agent_max_steps_overrides = {}
         cfg.react_agent_tool_call_budget = 100
-        cfg.react_agent_clear_tool_answers_at = 6_000
         cfg.llm.provider = "openai"
         cfg.llm.agents = {}
         cfg.llm.openai.context_size = 0

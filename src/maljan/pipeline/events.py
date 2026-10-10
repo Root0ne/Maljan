@@ -132,10 +132,8 @@ MODEL_USAGE = "model_usage"
 # (``agents.tool_answer_clearing``): the agent, the model turn, how many
 # answers, what the request weighed before and after in characters, and why —
 # ``refused`` (the provider refused the request as over its window and the
-# turn is sent again), ``window`` (the prompt alone is past the agent's own
-# window) or ``setting`` (the operator's
-# ``react_agent_clear_tool_answers_at``). Telemetry; the clear itself is what
-# the model reads.
+# turn is sent again) or ``window`` (the prompt alone is past the agent's own
+# window). Telemetry; the clear itself is what the model reads.
 TOOL_ANSWERS_CLEARED = "tool_answers_cleared"
 BUDGET_TICK_EVERY = 5
 CAPS: tuple[str, ...] = ("steps", "time", "repeats", "no_room", "spend", "budget_seconds")
