@@ -556,9 +556,10 @@ class TestTheEventsEndpoint:
 
         seen: dict[str, Any] = {}
 
-        async def fake_read(db, redis_conn, job_id, *, since=None, limit=500):  # noqa: ANN001
+        async def fake_read(db, redis_conn, job_id, *, since=None, limit=500, usage=False):  # noqa: ANN001
             seen["since"] = since
             seen["limit"] = limit
+            seen["usage"] = usage
             return [{"type": "agent_message", "data": {"seq": 9}, "ts": None}]
 
         monkeypatch.setattr("app.services.job_events.read_events", fake_read)
@@ -579,7 +580,7 @@ class TestTheEventsEndpoint:
             svc=self._Service(object()),
             db=_Session(),
         )
-        assert seen == {"since": 8, "limit": 10}
+        assert seen == {"since": 8, "limit": 10, "usage": True}
         assert body["count"] == 1
 
 

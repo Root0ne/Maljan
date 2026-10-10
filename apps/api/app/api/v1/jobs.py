@@ -438,6 +438,12 @@ async def get_job_events(
     answers what the stream can no longer reach — an expired stream, or a
     cursor older than the cap. ``seq`` is the ordering key; ``stream_id`` is
     still on an event the stream answered, for a client that keyed on it.
+
+    The job's ``model_usage`` events, one per model call, are written to the
+    table alone, never to the stream or the live socket; a page the stream
+    answers is given the ones in its range from the table, so per-call usage
+    is here while the stream lives as well as after. ``GET
+    /jobs/{job_id}/usage`` totals them.
     """
     import redis.asyncio as aioredis
 
@@ -450,7 +456,7 @@ async def get_job_events(
 
     redis_conn = aioredis.from_url(settings.redis_url, decode_responses=True)
     try:
-        events = await read_events(db, redis_conn, job_id, since=since, limit=limit)
+        events = await read_events(db, redis_conn, job_id, since=since, limit=limit, usage=True)
     finally:
         try:
             await redis_conn.aclose()
@@ -458,6 +464,48 @@ async def get_job_events(
             pass
 
     return {"job_id": str(job_id), "events": events, "count": len(events)}
+
+
+@router.get("/{job_id}/usage")
+async def get_job_usage(
+    job_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    svc: AnalysisService = Depends(_get_service),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """What this job's model calls used and cost so far, from its ``model_usage`` events.
+
+    The worker commits one event per model call as the call is recorded, so
+    this answers during a run and after a worker that died before its run
+    summary. ``tokens`` is the run summary's own block (input and output,
+    cache reads and writes, reasoning, the provider-reported cost, per
+    agent), built by the same code from the same calls; ``spend`` is priced
+    by the run's spend meter code at the current ``llm.model_prices`` over
+    the vendored table, a cost the provider reported first, per agent too.
+    Owner or admin, checked the way the events endpoint checks it.
+    """
+    from maljan.analysis.run_summary import usage_totals
+    from maljan.core.spend import SpendMeter
+
+    from app.services.job_events import read_usage
+    from app.services.settings_service import effective_core_settings
+
+    job = await svc.get_job(job_id, user)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+
+    core = await effective_core_settings(db)
+    # Prices as ``SpendMeter.from_settings`` reads them, without the ceiling:
+    # a total is not a run, and nothing here is admitted or refused.
+    llm = core.llm
+    prices = dict(llm.model_prices or {})
+    anthropic = getattr(llm, "anthropic", None)
+    hour_writes = str(getattr(anthropic, "prompt_cache_ttl", "") or "") == "1h"
+    totals = usage_totals(
+        await read_usage(db, job_id),
+        lambda: SpendMeter(None, prices, hour_writes=hour_writes),
+    )
+    return {"job_id": str(job_id), **totals}
 
 
 @router.get("/{job_id}/evidence", response_model=EvidenceListResponse)

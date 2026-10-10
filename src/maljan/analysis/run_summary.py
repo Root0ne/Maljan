@@ -25,7 +25,7 @@ Design:
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -360,6 +360,63 @@ def spend_blocks(snapshot: dict[str, Any] | None) -> dict[str, Any]:
     summary = RunSummaryBuilder(start_time=time.time()).set_token_usage(snapshot).build()
     stored = summary.to_dict()
     return {"tokens": stored["tokens"], "models": stored["models"]}
+
+
+# The figures of a ``model_usage`` record that are the call's usage, as
+# ``TokenLedger.add`` and ``SpendMeter.settle`` take it.
+_USAGE_KEYS: tuple[str, ...] = (
+    "input_tokens",
+    "output_tokens",
+    "cached_input_tokens",
+    "cache_write_input_tokens",
+    "cache_write_1h_input_tokens",
+    "reasoning_tokens",
+    "cost",
+    "sent_at",
+)
+
+
+def usage_totals(calls: Iterable[Any], meter: Callable[[], Any]) -> dict[str, Any]:
+    """A job's usage totals from its ``model_usage`` records (``token_ledger.call_record``).
+
+    The records are replayed through a fresh ``TokenLedger`` and the run
+    summary's own ``spend_blocks``, so ``tokens`` is the block a run summary
+    built from the same calls stores, per agent included; and through the
+    spend meters ``meter`` makes (one for the job, one per agent), so
+    ``spend`` is priced by the same code and prices that settle a run.
+    Readable while the run is going and after a worker that died before its
+    summary: the records are committed call by call.
+    """
+    from maljan.core.token_ledger import TokenLedger
+
+    total = meter()
+    ledger = TokenLedger(spend=total)
+    agents: dict[str, Any] = {}
+    count = 0
+    for record in calls:
+        if not isinstance(record, dict):
+            continue
+        count += 1
+        usage: dict[str, Any] | None = None
+        if record.get("reported"):
+            usage = {
+                key: record[key]
+                for key in _USAGE_KEYS
+                if isinstance(record.get(key), int | float) and not isinstance(record[key], bool)
+            }
+        agent = str(record.get("agent") or "")
+        model = str(record.get("model") or "")
+        call = str(record.get("call") or "")
+        ledger.add(usage, agent=agent, model=model, call=call)
+        if agent:
+            agents.setdefault(agent, meter()).settle(usage, model, call)
+    spend = total.priced()
+    spend["per_agent"] = {name: agents[name].priced() for name in sorted(agents)}
+    return {
+        "calls": count,
+        "tokens": spend_blocks(ledger.snapshot()).get("tokens", {}),
+        "spend": spend,
+    }
 
 
 def server_rest_sentence(row: dict[str, Any]) -> str:

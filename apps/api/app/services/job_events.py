@@ -12,6 +12,11 @@ navigated away and came back ten seconds later wants the last few events — and
 the table is one query behind it when the stream cannot answer: when it has
 expired, and when the cursor the client resumes from is older than the oldest
 event the capped stream still holds.
+
+One kind of event is in the table alone: ``model_usage``, one per model call,
+which the publisher keeps off the stream and the socket. The events endpoint
+asks for it (``usage=True``) and a page the stream answered gets it from the
+table; the socket's resume does not ask and gets it from neither store.
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ import uuid
 from typing import Any
 
 import redis.asyncio as aioredis
+from maljan.pipeline.events import MODEL_USAGE
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -79,9 +85,19 @@ async def _from_stream(
 
 
 async def _from_table(
-    db: AsyncSession, job_id: Any, since: int | None, limit: int
+    db: AsyncSession,
+    job_id: Any,
+    since: int | None,
+    limit: int | None,
+    *,
+    usage: bool | None = True,
 ) -> list[dict[str, Any]]:
-    """What the table holds, newer than ``since``, in sequence order."""
+    """What the table holds, newer than ``since``, in sequence order.
+
+    ``usage`` is which events about model usage come back: ``True`` every
+    event, ``False`` every event but ``model_usage``, ``None`` only
+    ``model_usage``. ``limit`` ``None`` is every row.
+    """
     from app.models.job_event import JobEvent
 
     try:
@@ -90,10 +106,17 @@ async def _from_table(
         return []
 
     query = select(JobEvent).where(JobEvent.job_id == job_uuid)
+    if usage is None:
+        query = query.where(JobEvent.type == MODEL_USAGE)
+    elif not usage:
+        query = query.where(JobEvent.type != MODEL_USAGE)
     if since is not None:
         query = query.where(JobEvent.seq > since)
+    query = query.order_by(JobEvent.seq)
+    if limit is not None:
+        query = query.limit(limit)
     try:
-        rows = (await db.execute(query.order_by(JobEvent.seq).limit(limit))).scalars().all()
+        rows = (await db.execute(query)).scalars().all()
     except Exception as exc:  # noqa: BLE001 — a replay never 500s
         logger.warning(f"Event table read failed for job={log_safe(job_id)}: {log_safe(exc)}")
         return []
@@ -108,6 +131,45 @@ async def _from_table(
     ]
 
 
+async def _with_usage(
+    db: AsyncSession,
+    job_id: Any,
+    since: int | None,
+    limit: int,
+    page: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """The stream's ``page`` with the table's ``model_usage`` events in its range, on ``seq``.
+
+    A page that came back full may end before the stream does, so a usage
+    event past its last ``seq`` is left for the next page: taking it would
+    move the client's cursor past the stream events between the two. An event
+    both stores hold is returned once.
+    """
+    found = await _from_table(db, job_id, since, limit, usage=None)
+    if not found:
+        return page
+    if len(page) >= limit:
+        last = max((_seq_of(e) for e in page), default=0)
+        found = [e for e in found if _seq_of(e) <= last]
+    unsequenced = [e for e in page if _seq_of(e) <= 0]
+    merged: dict[int, dict[str, Any]] = {_seq_of(e): e for e in found}
+    merged.update({_seq_of(e): e for e in page if _seq_of(e) > 0})
+    return (unsequenced + [merged[seq] for seq in sorted(merged)])[:limit]
+
+
+async def read_usage(db: AsyncSession, job_id: Any) -> list[dict[str, Any]]:
+    """Every ``model_usage`` record of this job, in sequence order, from the table.
+
+    The table is the only store that holds them. No ceiling: a job's usage
+    total is the sum over all of its calls.
+    """
+    return [
+        dict(event["data"])
+        for event in await _from_table(db, job_id, None, None, usage=None)
+        if isinstance(event.get("data"), dict)
+    ]
+
+
 async def read_events(
     db: AsyncSession,
     redis_conn: aioredis.Redis,
@@ -115,8 +177,16 @@ async def read_events(
     *,
     since: int | None = None,
     limit: int = 500,
+    usage: bool = False,
 ) -> list[dict[str, Any]]:
     """This job's events after ``since``, in sequence order, from either store.
+
+    ``usage`` adds the job's ``model_usage`` events. The publisher writes them
+    to the table alone — the live socket and the capped stream are left to
+    the events a reader follows — so a page the stream answers is given the
+    table's usage events in its range, merged on ``seq``. The events endpoint
+    asks for them; the socket's resume does not, and gets none from either
+    store.
 
     No cursor means "from the beginning", which is the same question as
     ``since=0``: the publisher's first event of a run is ``seq`` 1, so a read
@@ -145,11 +215,15 @@ async def read_events(
     floor = 0 if since is None else since
     lowest = min((_seq_of(e) for e in from_stream), default=0)
     if from_stream and lowest <= floor + 1:
-        return sorted(from_stream, key=_seq_of)
+        page = sorted(from_stream, key=_seq_of)
+        if not usage:
+            return page
+        return await _with_usage(db, job_id, since, limit, page)
 
     merged: dict[int, dict[str, Any]] = {}
     unsequenced: list[dict[str, Any]] = []
-    for event in [*await _from_table(db, job_id, since, limit), *from_stream]:
+    table = await _from_table(db, job_id, since, limit, usage=usage)
+    for event in [*table, *from_stream]:
         seq = _seq_of(event)
         if seq <= 0:
             unsequenced.append(event)

@@ -1797,6 +1797,30 @@ class SpendMeter:
             "only the verdict and the report ran, tool-free, on what was kept for them."
         )
 
+    def priced(self) -> dict[str, Any]:
+        """What the settled calls cost, ceiling or none: the priced part of :meth:`snapshot`.
+
+        ``spent_usd``, where each model's prices came from, and the calls that
+        could not be priced — those that reported no usage and those of a
+        model with no price — with ``spent_is_at_least`` where either left
+        something out.
+        """
+        with self._lock:
+            out: dict[str, Any] = {
+                "spent_usd": round(self._settled + sum(self._in_flight.values()), 6),
+                "prices_from": {
+                    name: "; ".join(sorted(sources))
+                    for name, sources in sorted(self._priced_from.items())
+                },
+            }
+            if self._unreported:
+                out["unreported_calls"] = self._unreported
+            if self._unpriced:
+                out["unpriced_models"] = dict(sorted(self._unpriced.items()))
+            if self._unreported or self._unpriced:
+                out["spent_is_at_least"] = True
+            return out
+
     def snapshot(self) -> dict[str, Any] | None:
         """The run summary's ``spend`` block, or ``None`` with no ceiling set."""
         if self.ceiling_usd is None:

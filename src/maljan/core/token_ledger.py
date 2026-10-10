@@ -252,15 +252,23 @@ class _Tally:
 
 
 # The parts of a call's usage a durable record of it carries, where the
-# provider reported them.
+# provider reported them: the figures the ledger tallies, and the two the
+# spend meter prices a call by besides — the hour's share of its cache writes
+# and when it was sent — so a total built from the records alone is priced the
+# way the run's own meter priced it.
 _CALL_PARTS: tuple[str, ...] = (
     "input_tokens",
     "output_tokens",
     "cached_input_tokens",
     "cache_write_input_tokens",
+    "cache_write_1h_input_tokens",
     "reasoning_tokens",
     "cost",
+    "sent_at",
 )
+
+# The parts held as fractions; the rest are counts.
+_FRACTIONAL_PARTS = frozenset({"cost", "sent_at"})
 
 
 def call_record(
@@ -283,7 +291,7 @@ def call_record(
     for part in _CALL_PARTS:
         value = usage.get(part)
         if isinstance(value, int | float) and not isinstance(value, bool):
-            row[part] = float(value) if part == "cost" else int(value)
+            row[part] = float(value) if part in _FRACTIONAL_PARTS else int(value)
     return row
 
 
