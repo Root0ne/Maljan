@@ -211,6 +211,13 @@ class FunctionHashStore:
             logger.warning("FunctionHashStore.count error: %s", exc)
             return 0
 
+    def close(self) -> None:
+        """Close the client (shared with the case store it came from, when it was)."""
+        try:
+            self._client.close()
+        except Exception as exc:  # noqa: BLE001 — closing never fails the caller
+            logger.debug("FunctionHashStore.close: %s", exc)
+
     def __repr__(self) -> str:
         return f"FunctionHashStore(url={self._url!r}, collection={self._collection!r})"
 

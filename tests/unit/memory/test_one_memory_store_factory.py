@@ -523,11 +523,20 @@ class TestTheCommandLineUsesTheFactory:
 
 
 class TestABackendIsSelectedAndConfiguredThroughTheSettings:
-    def test_an_unregistered_backend_is_refused_by_the_settings(self) -> None:
-        from pydantic import ValidationError
+    def test_saving_an_unregistered_backend_is_refused(self) -> None:
+        from app.services.settings_service import SettingsService, SettingsValidationError
 
-        with pytest.raises(ValidationError, match="not a registered memory backend"):
-            Settings(_env_file=None, memory={"backend": "vectorhub"})
+        with pytest.raises(SettingsValidationError) as refused:
+            SettingsService(db=None).check_keys({"core.memory.backend": "vectorhub"})  # type: ignore[arg-type]
+        assert "qdrant" in refused.value.errors["core.memory.backend"]
+        SettingsService(db=None).check_keys({"core.memory.backend": "memory"})  # type: ignore[arg-type]
+
+    def test_a_stored_unregistered_backend_still_loads_and_the_factory_says_so(self) -> None:
+        cfg = Settings(_env_file=None, memory={"backend": "vectorhub", "top_k": 7})
+        assert (cfg.memory.backend, cfg.memory.top_k) == ("vectorhub", 7)
+        with pytest.raises(store_factory.MemoryBackendNotConfiguredError) as missing:
+            store_factory.build_memory_store(cfg)
+        assert missing.value.unavailable is False
 
     def test_a_registered_backend_reads_its_own_settings_under_its_id(
         self, third_backend: Any
@@ -676,11 +685,17 @@ class TestTheFunctionHashStoreIsBuiltOncePerSettings:
         second = store_factory.build_function_hash_store(_settings("qdrant"))
         assert first is second and len(_FakeQdrant.built) == 1
 
-    def test_other_settings_another_store(self) -> None:
+    def test_other_settings_another_store_and_the_old_one_closed(self) -> None:
         store_factory.build_function_hash_store(_settings("qdrant"))
         other = Settings(_env_file=None, memory={"qdrant": {"url": URL, "api_key": "other"}})
         store_factory.build_function_hash_store(other)
         assert [c.api_key for c in _FakeQdrant.built] == ["k", "other"]
+        assert [c.closed for c in _FakeQdrant.built] == [1, 0]
+
+    def test_forgetting_closes_what_was_held(self) -> None:
+        store_factory.build_function_hash_store(_settings("qdrant"))
+        store_factory.forget_built_stores()
+        assert [c.closed for c in _FakeQdrant.built] == [1]
 
 
 class TestTheJudgeReadsAndHoldsThroughTheConfiguredBackend:
@@ -766,3 +781,84 @@ class TestTheContainerStoreIsTheFactorys:
     def test_the_container_reaches_qdrant_with_the_configured_key(self) -> None:
         self._container_store(_settings("qdrant"))
         assert [(c.url, c.api_key) for c in _FakeQdrant.built] == [(URL, "k")]
+
+
+class TestABrokenPackageBackendNeverStopsTheSettings:
+    @pytest.fixture
+    def broken(self, monkeypatch: Any) -> Any:
+        def _boom() -> None:
+            raise ImportError("vectorhub_client is not installed")
+
+        point = SimpleNamespace(name="vectorhub", load=lambda: _boom)
+        monkeypatch.setattr(store_factory, "entry_points", lambda group: [point])
+        monkeypatch.setattr(store_factory, "_entry_points_loaded", False)
+        monkeypatch.setattr(store_factory, "_UNAVAILABLE", {})
+        return Settings(_env_file=None, memory={"backend": "vectorhub", "top_k": 5})
+
+    def test_the_settings_load_with_the_rest_intact(self, broken: Any) -> None:
+        assert broken.memory.top_k == 5
+        assert broken.memory.qdrant.url == "http://localhost:6333"
+        assert "vectorhub" in store_factory.unavailable_backends()
+
+    def test_every_build_says_the_backend_is_unavailable_and_why(self, broken: Any) -> None:
+        with pytest.raises(store_factory.MemoryBackendNotConfiguredError) as missing:
+            store_factory.build_memory_store(broken)
+        assert missing.value.unavailable is True
+        assert "vectorhub_client is not installed" in missing.value.reason
+
+    def test_health_reports_it_unavailable_with_the_reason(self, broken: Any) -> None:
+        component = TestHealthProbesTheConfiguredBackend._memory_component(broken)
+        assert component["ok"] is False and component["detail"] == "unavailable"
+        assert component["backend"] == "vectorhub"
+        assert "vectorhub_client is not installed" in component["error"]
+
+    def test_a_run_goes_on_without_memory(self, broken: Any) -> None:
+        from maljan.core.container import ServiceContainer
+
+        container = ServiceContainer(broken)
+        with pytest.raises(store_factory.MemoryBackendNotConfiguredError):
+            container.get_memory_store()
+        assert TestTheJudgeReadsAndHoldsThroughTheConfiguredBackend._run(broken)[:2] == ([], None)
+        assert TestTheFunctionMatchStepUsesTheConfiguredBackend._step(broken)()[1]["matches"] == []
+
+
+class TestOneMapOfMovedKeys:
+    def test_the_flat_memory_keys_are_read_off_the_renamed_settings(self) -> None:
+        from maljan.core.config import LEGACY_MEMORY_KEYS
+        from maljan.core.settings_annotations import RENAMED_SETTINGS
+
+        assert LEGACY_MEMORY_KEYS == {
+            old.removeprefix("core.memory."): tuple(new.removeprefix("core.memory.").split(".", 1))
+            for old, new in RENAMED_SETTINGS.items()
+            if old.startswith("core.memory.")
+        }
+        assert LEGACY_MEMORY_KEYS["qdrant_url"] == ("qdrant", "url")
+
+    def test_a_patch_reads_an_old_key_as_the_new_one(self) -> None:
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from app.api.v1 import settings as settings_module
+        from app.database import get_db
+        from app.deps import require_admin
+
+        app = FastAPI()
+        app.include_router(settings_module.router, prefix="/api/v1")
+        app.dependency_overrides[require_admin] = lambda: SimpleNamespace(id=None)
+        app.dependency_overrides[get_db] = lambda: AsyncMock()
+        saved: dict[str, Any] = {}
+
+        async def _save(self: Any, changes: dict[str, Any], **_kw: Any) -> Any:
+            saved.update(changes)
+            return SimpleNamespace(applied=sorted(changes), applies={})
+
+        with (
+            patch.object(settings_module, "_unprobed_models_in", AsyncMock(return_value=[])),
+            patch.object(settings_module, "_agent_warnings", AsyncMock(return_value={})),
+            patch.object(settings_module.SettingsService, "save", _save),
+        ):
+            response = TestClient(app).patch(
+                "/api/v1/settings", json={"changes": {"core.memory.qdrant_url": URL}}
+            )
+        assert response.status_code == 200, response.text
+        assert saved == {"core.memory.qdrant.url": URL}

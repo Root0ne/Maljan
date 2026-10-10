@@ -3252,8 +3252,12 @@ backend that derives from `MemoryStoreDefaults` gets those answers for what it
 does not implement; the factory refuses a store without the interface, naming
 what it lacks.
 
-`memory.backend` is the id of a registered backend, and the settings refuse
-any other. Each backend's own settings live under `memory.<id>.*`
+`memory.backend` is the id of a registered backend: saving any other id is
+refused (a settings PATCH or import), while a stored id whose package was
+removed or failed to load still loads with the rest of the settings — the
+factory then reports that backend not configured or unavailable, with the
+reason, to every caller, `/health` says so, and a run goes on without
+long-term memory as it does when any store cannot be built. Each backend's own settings live under `memory.<id>.*`
 (`memory.qdrant.url`, `memory.qdrant.collection`,
 `memory.qdrant.function_hash_collection`, `memory.qdrant.api_key`); the
 console's memory guide asks for the keys under the selected backend's id and
@@ -3264,9 +3268,10 @@ annotations=...)` — which every process loads on first use, so the API, the
 analysis worker and the enrichment worker all know it; its settings model's
 leaves join the catalogue under `memory.<id>.` with the annotations it
 registered. The flat keys stored before the move (`memory.qdrant_url` and its
-siblings) are still read: revision `20261010000000` renames the stored rows,
-an older export imports onto the new keys, and an environment's flat values
-land under the backend.
+siblings) are still read, through the one map of moved keys
+(`settings_annotations.RENAMED_SETTINGS`): revision `20261010000000` renames
+the stored rows, an older export or a settings PATCH naming an old key writes
+the new one, and an environment's flat values land under the backend.
 
 The case a run adds to long-term memory, and the function hashes it files
 under the judge's family in the attribution corpus, are decided by the judge

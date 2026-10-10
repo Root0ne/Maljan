@@ -842,16 +842,26 @@ class QdrantMemoryConfig(BaseModel):
     api_key: SecretStr | None = None
 
 
-# The flat ``memory.<backend>_<leaf>`` keys stored before each backend's
-# settings moved under ``memory.<backend>.*``, and the leaf each now is. Read
-# wherever settings arrive (an environment, an older export, a settings row a
-# migration has not reached yet), so none of them is silently dropped.
-LEGACY_MEMORY_KEYS: dict[str, tuple[str, str]] = {
-    "qdrant_url": ("qdrant", "url"),
-    "qdrant_collection": ("qdrant", "collection"),
-    "qdrant_function_hash_collection": ("qdrant", "function_hash_collection"),
-    "qdrant_api_key": ("qdrant", "api_key"),
-}
+def _legacy_memory_keys() -> dict[str, tuple[str, str]]:
+    """The flat ``memory.<backend>_<leaf>`` keys, each as ``(backend, leaf)``.
+
+    Read off ``settings_annotations.RENAMED_SETTINGS``, the one map of moved
+    keys, wherever settings arrive (an environment, an older export, a
+    settings row a migration has not reached yet), so none is dropped.
+    """
+    from maljan.core.settings_annotations import RENAMED_SETTINGS
+
+    prefix = "core.memory."
+    out: dict[str, tuple[str, str]] = {}
+    for old, new in RENAMED_SETTINGS.items():
+        if old.startswith(prefix) and new.startswith(prefix):
+            backend, _, leaf = new[len(prefix) :].partition(".")
+            if leaf:
+                out[old[len(prefix) :]] = (backend, leaf)
+    return out
+
+
+LEGACY_MEMORY_KEYS: dict[str, tuple[str, str]] = _legacy_memory_keys()
 
 
 class MemoryConfig(BaseModel):
@@ -863,7 +873,9 @@ class MemoryConfig(BaseModel):
     backend:  the id of a registered memory backend
               (``maljan.memory.store_factory``): ``memory`` keeps cases in
               process with no external dependency, ``qdrant`` in a Qdrant
-              server. An id no backend registered is refused.
+              server. Saving an id no backend registered is refused; a stored
+              one whose package has gone or broken still loads, and the
+              factory reports that backend unavailable to every caller.
     <id>:     each backend's own settings, ``memory.<id>.*``. A backend
               registered by an installed package is read with the settings
               model it registered.
@@ -899,16 +911,11 @@ class MemoryConfig(BaseModel):
 
     @field_validator("backend", mode="before")
     @classmethod
-    def _registered_backend(cls, value: Any) -> str:
-        from maljan.memory.store_factory import memory_backends
-
-        backend = str(value or "").strip().lower()
-        known = memory_backends()
-        if backend not in known:
-            raise ValueError(
-                f"{backend!r} is not a registered memory backend (known: {', '.join(known)})"
-            )
-        return backend
+    def _backend_id(cls, value: Any) -> str:
+        """The id, normalised. Never refused here: a settings build is never
+        stopped by a backend package that went away or broke, so everything
+        else keeps working while the factory reports that backend."""
+        return str(value or "").strip().lower()
 
     @model_validator(mode="after")
     def _registered_backend_settings(self) -> "MemoryConfig":

@@ -286,6 +286,16 @@ class SettingsService:
                 errors[key] = "unknown setting"
             elif not entry.editable:
                 errors[key] = entry.reason or "read-only"
+            elif (
+                entry.choices_from
+                and entry.choices is not None
+                and changes[key] is not None
+                and str(changes[key]).strip().lower() not in entry.choices
+            ):
+                # A choice a registry holds (a memory backend, say) is checked
+                # here, where it is saved, rather than wherever the settings
+                # are read: a stored id whose package later breaks still loads.
+                errors[key] = f"not one of: {', '.join(entry.choices)}"
         if errors:
             raise SettingsValidationError(errors)
 

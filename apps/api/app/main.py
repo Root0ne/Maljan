@@ -85,7 +85,14 @@ async def _probe_memory() -> dict[str, Any]:
     backend = configured_backend(core)
     try:
         store = await asyncio.to_thread(build_memory_store, core)
-    except MemoryBackendNotConfiguredError:
+    except MemoryBackendNotConfiguredError as exc:
+        if exc.unavailable:
+            return {
+                "ok": False,
+                "error": redact_url(exc.reason)[:200],
+                "backend": backend,
+                "detail": "unavailable",
+            }
         return {"ok": None, "error": None, "backend": backend, "detail": "not configured"}
     except Exception as exc:  # noqa: BLE001 — a probe failure is a result
         return _memory_failure(backend, exc, redact_url)

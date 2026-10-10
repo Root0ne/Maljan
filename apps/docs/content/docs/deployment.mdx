@@ -124,7 +124,8 @@ a bare and a Kubernetes-style liveness probe work without extra configuration.
   probed) concurrently, each with a three-second budget, and reports every
   result as data. An in-process backend answers without I/O; a backend id no
   registered builder knows is reported with `ok: null` and `detail: "not
-  configured"`, never as a failure. `status` becomes `degraded` when Postgres
+  configured"`, never as a failure, and one whose package failed to load with
+  `ok: false`, `detail: "unavailable"` and the reason in `error`. `status` becomes `degraded` when Postgres
   or Redis is unreachable and `degraded_optional` when only MinIO or the memory
   store is, so use the deep form for readiness and the bare form for liveness.
 

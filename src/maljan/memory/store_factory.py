@@ -41,7 +41,17 @@ ENTRY_POINT_GROUP = "maljan.memory_backends"
 
 
 class MemoryBackendNotConfiguredError(MemoryStoreError):
-    """``memory.backend`` names no registered backend (or is empty)."""
+    """``memory.backend`` names no backend this process can build.
+
+    ``unavailable`` is true when a package declared that backend and failed to
+    load (``reason`` says how); false when nothing registered the id at all.
+    """
+
+    def __init__(self, backend: str, reason: str, *, unavailable: bool) -> None:
+        super().__init__(reason)
+        self.backend = backend
+        self.reason = reason
+        self.unavailable = unavailable
 
 
 @dataclass(frozen=True)
@@ -61,6 +71,9 @@ class MemoryBackend:
 
 
 _BACKENDS: dict[str, MemoryBackend] = {}
+# Entry points that failed to load, by entry-point name (the backend id it
+# registers, by convention), with the reason.
+_UNAVAILABLE: dict[str, str] = {}
 _LOAD_LOCK = threading.Lock()
 _entry_points_loaded = False
 
@@ -104,6 +117,8 @@ def _load_entry_points() -> None:
                 if callable(loaded):
                     loaded()
             except Exception as exc:  # noqa: BLE001 — one broken package never stops the rest
+                reason = f"{type(exc).__name__}: {exc}".strip()
+                _UNAVAILABLE[_key(point.name)] = reason
                 logger.warning(
                     "memory backend entry point %r failed to load (%s).", point.name, exc
                 )
@@ -113,6 +128,12 @@ def registered_backends() -> dict[str, MemoryBackend]:
     """Every registered backend by id, in registration order."""
     _load_entry_points()
     return dict(_BACKENDS)
+
+
+def unavailable_backends() -> dict[str, str]:
+    """Backends a package declared that failed to load, each with the reason."""
+    _load_entry_points()
+    return dict(_UNAVAILABLE)
 
 
 def memory_backends() -> tuple[str, ...]:
@@ -138,12 +159,21 @@ def backend_settings(settings_or_memory: Any, backend_id: str) -> Any:
 def _backend(settings_or_memory: Any) -> MemoryBackend:
     backend = configured_backend(settings_or_memory)
     found = registered_backends().get(backend)
-    if found is None:
-        known = ", ".join(_BACKENDS) or "none"
+    if found is not None:
+        return found
+    broken = _UNAVAILABLE.get(backend)
+    if broken is not None:
         raise MemoryBackendNotConfiguredError(
-            f"memory.backend {backend!r} is not a registered memory backend (known: {known})"
+            backend,
+            f"memory backend {backend!r} is unavailable: its package failed to load ({broken})",
+            unavailable=True,
         )
-    return found
+    known = ", ".join(_BACKENDS) or "none"
+    raise MemoryBackendNotConfiguredError(
+        backend,
+        f"memory.backend {backend!r} is not a registered memory backend (known: {known})",
+        unavailable=False,
+    )
 
 
 def build_memory_store(settings_or_memory: Any) -> MemoryStore:
@@ -194,7 +224,9 @@ def _settings_fingerprint(memory: Any, backend_id: str) -> str:
     return hashlib.sha256(f"{backend_id}\0{text}".encode()).hexdigest()
 
 
-_FUNCTION_HASH_STORES: dict[str, FunctionHashIndex | None] = {}
+# One store per backend id, with the fingerprint of the settings it was
+# built from; a settings change replaces (and closes) it.
+_FUNCTION_HASH_STORES: dict[str, tuple[str, FunctionHashIndex | None]] = {}
 _FUNCTION_HASH_LOCK = threading.Lock()
 
 
@@ -206,17 +238,35 @@ def build_function_hash_store(settings_or_memory: Any) -> FunctionHashIndex | No
     """
     memory = _memory_config(settings_or_memory)
     backend = _backend(memory)
-    key = _settings_fingerprint(memory, backend.id)
+    fingerprint = _settings_fingerprint(memory, backend.id)
     with _FUNCTION_HASH_LOCK:
-        if key not in _FUNCTION_HASH_STORES:
-            _FUNCTION_HASH_STORES[key] = build_memory_store(memory).function_hash_store()
-        return _FUNCTION_HASH_STORES[key]
+        held = _FUNCTION_HASH_STORES.get(backend.id)
+        if held is not None and held[0] == fingerprint:
+            return held[1]
+        store = build_memory_store(memory).function_hash_store()
+        _FUNCTION_HASH_STORES[backend.id] = (fingerprint, store)
+    if held is not None:
+        _close(held[1])
+    return store
+
+
+def _close(store: Any) -> None:
+    """Close a function-hash store that offers ``close``; closing never fails the caller."""
+    close = getattr(store, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("closing a superseded function-hash store: %s", exc)
 
 
 def forget_built_stores() -> None:
     """Drop every cached function-hash store, so the next ask builds afresh."""
     with _FUNCTION_HASH_LOCK:
+        held = list(_FUNCTION_HASH_STORES.values())
         _FUNCTION_HASH_STORES.clear()
+    for _fingerprint, store in held:
+        _close(store)
 
 
 # ---------------------------------------------------------------------------

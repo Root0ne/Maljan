@@ -237,7 +237,8 @@ async def patch_values(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> PatchResponse | JSONResponse:
-    unprobed = await _unprobed_models_in(db, body.changes)
+    changes = _current_keys(body.changes)
+    unprobed = await _unprobed_models_in(db, changes)
     if unprobed:
         from app.services.model_probes import AGENT_MODELS_KEY, refusal_sentence
 
@@ -249,7 +250,7 @@ async def patch_values(
             content={"errors": {AGENT_MODELS_KEY: refusal_sentence(unprobed)}},
         )
     try:
-        res = await SettingsService(db).save(body.changes, user_id=user.id, ip=_client_ip(request))
+        res = await SettingsService(db).save(changes, user_id=user.id, ip=_client_ip(request))
     except SettingsValidationError as exc:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": exc.errors}
