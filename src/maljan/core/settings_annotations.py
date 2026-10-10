@@ -1306,6 +1306,21 @@ ANNOTATIONS: dict[str, Annotation] = {
         "subgroup": "Limits",
         "advanced": True,
     },
+    "react_agent_clear_tool_answers_at": {
+        "title": "Clear old tool answers past (tokens)",
+        "description": (
+            "A prompt size, in tokens, past which an agent's tool loop clears its oldest "
+            "tool answers to a short line naming their evidence ids, down to half of it in "
+            "one batch, so the request's front stays the same for many turns between "
+            "clears. The newest turn's answers, the prompt, the pack, the run state and "
+            "the agent's own turns are never cleared, and the model reads a cleared answer "
+            "again with the read_evidence tool. Empty, the default, clears only a request "
+            "that would not fit its model's window, which would otherwise end the loop. "
+            "Clearing changes what the model reads: set it to keep long loops cheaper, for "
+            "example below a provider's price tier boundary."
+        ),
+        "subgroup": "Limits",
+    },
     "react_agent_tool_call_budget": {
         "title": "Tool calls before a warning",
         "description": (

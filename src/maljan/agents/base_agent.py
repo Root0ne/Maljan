@@ -39,6 +39,13 @@ from maljan.agents.claim_headings import (
     count_claims_begun,
 )
 from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT, KEEP_REPLY
+from maljan.agents.tool_answer_clearing import (
+    CLEARED_FOR_WINDOW,
+    READ_EVIDENCE_TOOL,
+    Clearing,
+    ToolAnswerClearing,
+    read_evidence_tool,
+)
 from maljan.analysis.sandbox_sections import item_index_of
 from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError, SampleNotOpened
@@ -353,15 +360,16 @@ def _message_chars(m: object) -> int:
     return total
 
 
-def _reported_request_chars(messages: list, per_token: int) -> int:
-    """What the server said the conversation weighs, in the budget's characters.
+def _reported_request(messages: list, per_token: int) -> tuple[int, int]:
+    """What the server said the conversation weighs, and the turn that carries the count.
 
     The last assistant turn that carries usage is the answer to a request the
     server counted in full: ``input_tokens`` is everything before that turn,
     tool definitions and template included. That count converted at the
     budget's rate, plus the measured size of that turn and of everything after
     it, is what the next request weighs as far as anything reported can say.
-    Zero where no turn carries a count, and the measure alone then answers.
+    ``(0, -1)`` where no turn carries a count, and the measure alone then
+    answers; otherwise ``(characters, index of that turn)``.
     """
     for index in range(len(messages) - 1, -1, -1):
         message = messages[index]
@@ -373,11 +381,19 @@ def _reported_request_chars(messages: list, per_token: int) -> int:
         except (AttributeError, TypeError, ValueError):
             prompt = 0
         if prompt > 0:
-            return prompt * max(1, per_token) + sum(_message_chars(m) for m in messages[index:])
-    return 0
+            after = sum(_message_chars(m) for m in messages[index:])
+            return prompt * max(1, per_token) + after, index
+    return 0, -1
 
 
-def request_chars(messages: list, definition_chars: int, per_token: int) -> int:
+def _reported_request_chars(messages: list, per_token: int) -> int:
+    """What the server said the conversation weighs, in the budget's characters; see ``_reported_request``."""
+    return _reported_request(messages, per_token)[0]
+
+
+def request_chars(
+    messages: list, definition_chars: int, per_token: int, cleared_chars: int = 0
+) -> int:
     """What a tool loop's next request weighs, in the budget's characters.
 
     The messages as the server will see them, plus the definitions of the
@@ -385,9 +401,14 @@ def request_chars(messages: list, definition_chars: int, per_token: int) -> int:
     server itself reported for the last request plus what came after it. One
     rule for every loop that sizes itself against the window — the analysts'
     and the judge's.
+
+    ``cleared_chars`` is what this request newly cleared ahead of the turn the
+    server last counted (``tool_answer_clearing``): that count still holds it,
+    so it comes off the reported figure; the measure already sees the clear.
     """
     measured = sum(_message_chars(m) for m in messages) + max(0, int(definition_chars))
-    return max(measured, _reported_request_chars(messages, per_token))
+    reported = _reported_request_chars(messages, per_token) - max(0, int(cleared_chars))
+    return max(measured, reported)
 
 
 def counted_window_tokens(budget: Any) -> int:
@@ -873,6 +894,49 @@ def _model_that_closes_off_truncated_calls(llm: Any, tools: list, repair: Any) -
     if not isinstance(bound, RunnableBinding):
         return llm
     return bound | RunnableLambda(repair)
+
+
+def _bound_tool_list(loop_model: Any) -> list[Any] | None:
+    """The tool definitions a loop's model binding sends with each request, or ``None``.
+
+    The list itself, so a definition added to it or taken off it is sent or
+    withheld from the next request on (the binding reads its arguments per
+    call, as a turn's held cap relies on).
+    """
+    from langchain_core.runnables import RunnableBinding, RunnableSequence
+
+    first = loop_model.first if isinstance(loop_model, RunnableSequence) else loop_model
+    if not isinstance(first, RunnableBinding) or not isinstance(first.kwargs, dict):
+        return None
+    tools = first.kwargs.get("tools")
+    return tools if isinstance(tools, list) and tools else None
+
+
+def _definition_name(definition: Any) -> str:
+    """The name a bound tool definition carries, in the OpenAI or the Anthropic shape."""
+    if not isinstance(definition, dict):
+        return ""
+    function = definition.get("function")
+    if isinstance(function, dict):
+        return str(function.get("name") or "")
+    return str(definition.get("name") or "")
+
+
+def _stored_answer_of(recorder: Any) -> Callable[[str], str | None]:
+    """What the read-again tool reads: an entry's stored output in this loop's ledger.
+
+    A repeat's id reads the entry that holds its answer (``holder_of``).
+    ``None`` for an id this loop did not file.
+    """
+
+    def stored(entry_id: str) -> str | None:
+        holder = recorder.holder_of(entry_id)
+        for entry in reversed(list(recorder.entries)):
+            if str(entry.id).lower() == str(holder).lower():
+                return str(entry.output or "")
+        return None
+
+    return stored
 
 
 def _loop_binding(loop_model: Any, llm: Any) -> Any | None:
@@ -3736,7 +3800,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             self.logger.debug("%s: the context budget is unavailable (%s).", self.name, exc)
             return None
 
-    def _note_conversation(self, messages: list) -> None:
+    def _note_conversation(self, messages: list, cleared_chars: int = 0) -> None:
         """Tell the job's budget what this loop's next request will weigh.
 
         Called from the run-state refresher, which already runs before every
@@ -3755,6 +3819,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         content that tokenises worse than the rate assumes, and the template
         the server wraps every message in, are in the server's count and in
         nobody else's.
+
+        ``cleared_chars`` is what this request newly cleared ahead of the turn
+        the server last counted (:func:`request_chars`).
         """
         budget = self._context_budget()
         if budget is None:
@@ -3767,6 +3834,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                     int(getattr(self, "_tool_definition_chars", 0) or 0)
                     + self._replayed_run_state_chars(),
                     int(getattr(budget, "chars_per_token", CHARS_PER_TOKEN) or CHARS_PER_TOKEN),
+                    cleared_chars,
                 ),
             )
         except Exception as exc:  # noqa: BLE001 — a budget is never worth a lost loop
@@ -3886,6 +3954,15 @@ class BaseAnalyst(BudgetMeter, ABC):
             return []
         tool = items_tool(report, _answer_sizer(container), normalised_by_of(container))
         return stamp_source([tool], SANDBOX_FAMILY)
+
+    def _answer_sizer(self) -> Any | None:
+        """The job's tool-answer guardrail (``ServerRegistry.answer_sizer``), or ``None`` without a job."""
+        try:
+            registry = self._server_registry()
+            return None if registry is None else registry.answer_sizer()
+        except Exception as exc:  # noqa: BLE001 — an answer read again unsized is still an answer
+            self.logger.debug("%s: no answer guardrail for read_evidence (%s).", self.name, exc)
+            return None
 
     def _profile_excluded_servers(self) -> str:
         """The servers the active profile withholds, as ``for_agent``'s argument."""
@@ -4127,6 +4204,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         spend_slot: Any = None,
         held_binding: Any = None,
         turn_holds: dict[int, int | None] | None = None,
+        clearing: ToolAnswerClearing | None = None,
+        on_clear: Callable[[Clearing], None] | None = None,
     ) -> Any:
         """The per-turn hook that regenerates the run-state block's budget line.
 
@@ -4149,6 +4228,11 @@ class BaseAnalyst(BudgetMeter, ABC):
         the cap each turn was sent with, keyed by its place among the
         conversation's model turns (1 for the first), so the turn the loop
         keeps is checked against its own cap, not against a later turn's.
+
+        ``clearing`` is the loop's ``ToolAnswerClearing``, or ``None`` where
+        neither the window nor the operator gives a point to clear at: the
+        request is then the conversation as it always was. ``on_clear`` is
+        told of each new clear, before the request is measured.
         """
         ledger = budget if budget is not None else LoopBudget(max_steps, timeout, started)
         from maljan.pipeline.events import BUDGET_TICK_EVERY
@@ -4184,7 +4268,13 @@ class BaseAnalyst(BudgetMeter, ABC):
             # provider sends them again (``anthropic_history``): counted in
             # every measure of this request, never hidden.
             self._note_replayed_run_state(messages, sent)
-            self._note_conversation(sent)
+            # The oldest tool answers cleared to references, in a batch, where
+            # the request is past the point in force (``tool_answer_clearing``);
+            # the answers already cleared stay cleared, under the same text.
+            cleared_chars = 0
+            if clearing is not None:
+                sent, cleared_chars = self._cleared_request(clearing, sent, on_clear)
+            self._note_conversation(sent, cleared_chars)
             # The spend ceiling's word on the turn about to be sent: held to
             # what the spend it may use pays for, or not sent, and then the
             # loop's salvage writes the answer from what was gathered.
@@ -4221,6 +4311,110 @@ class BaseAnalyst(BudgetMeter, ABC):
             return sent
 
         return refresh
+
+    def _clearing_per_token(self) -> int:
+        """The characters a token is counted at by this job's budget."""
+        budget = self._context_budget()
+        try:
+            return max(
+                1, int(getattr(budget, "chars_per_token", CHARS_PER_TOKEN) or CHARS_PER_TOKEN)
+            )
+        except (TypeError, ValueError):
+            return CHARS_PER_TOKEN
+
+    def _tool_answer_clearing(self) -> ToolAnswerClearing | None:
+        """This loop's clearing, or ``None`` where nothing gives a point to clear at.
+
+        The window's point is the room a request has before its server refuses
+        it: the job's window (``ContextBudget``, the one every cap of the run
+        is sized from) less the output this agent's requests ask room for (its
+        built output cap, ``context_window.built_output_cap``, else the
+        budget's reply reserve), in the budget's characters. No window was
+        learned, no point: nothing is derived from a window nobody measured.
+        The operator's point is ``react_agent_clear_tool_answers_at``, in
+        tokens at the same rate; unset, none.
+        """
+        from maljan.llm.context_window import ContextBudget, built_output_cap
+
+        per_token = self._clearing_per_token()
+        window_chars: int | None = None
+        budget = self._context_budget()
+        try:
+            if isinstance(budget, ContextBudget) and budget.derives:
+                cap = built_output_cap(getattr(self, "llm", None))
+                output = int(cap.tokens) if cap is not None else int(budget.reply_tokens)
+                room = int(budget.window.tokens) - max(0, output)
+                window_chars = room * per_token if room > 0 else None
+        except Exception as exc:  # noqa: BLE001 — no point is today's loop, never a lost one
+            self.logger.debug("%s: no window point for clearing (%s).", self.name, exc)
+        setting = getattr(get_settings(), "react_agent_clear_tool_answers_at", None)
+        setting_chars = (
+            int(setting) * per_token
+            if isinstance(setting, int) and not isinstance(setting, bool) and setting > 0
+            else None
+        )
+        if window_chars is None and setting_chars is None:
+            return None
+        return ToolAnswerClearing(window_chars=window_chars, setting_chars=setting_chars)
+
+    def _cleared_request(
+        self,
+        clearing: ToolAnswerClearing,
+        sent: list[Any],
+        on_clear: Callable[[Clearing], None] | None,
+    ) -> tuple[list[Any], int]:
+        """``sent`` with the loop's clears in place, and the characters newly cleared; never raises."""
+        try:
+            per_token = self._clearing_per_token()
+            fitted = clearing.fit(
+                sent,
+                extra_chars=self._definitions_sent() + self._replayed_run_state_chars(),
+                measure=_message_chars,
+                reported=lambda messages: _reported_request(messages, per_token),
+                turn=sum(1 for m in sent if is_model_turn(m)) + 1,
+            )
+        except Exception as exc:  # noqa: BLE001 — a clear never costs a turn
+            self.logger.debug("%s: tool answers not cleared (%s).", self.name, exc)
+            return sent, 0
+        if fitted.clearing is not None and on_clear is not None:
+            try:
+                on_clear(fitted.clearing)
+            except Exception as exc:  # noqa: BLE001 — a record never costs a turn
+                self.logger.debug("%s: a clear was not recorded (%s).", self.name, exc)
+        return fitted.messages, fitted.freed_before_report
+
+    def _note_clearing(self, clearing: Clearing) -> None:
+        """Say one clear in the agent's log and as a ``tool_answers_cleared`` event."""
+        why = (
+            "the request would not fit the model's window"
+            if clearing.why == CLEARED_FOR_WINDOW
+            else "the request passed react_agent_clear_tool_answers_at"
+        )
+        self.logger.info(
+            "%s: cleared %d old tool answer(s) to ledger references at turn %d, because %s: "
+            "the request went from %d to %d characters of context (clearing starts past %d and "
+            "clears to %d).",
+            self.name,
+            clearing.answers,
+            clearing.turn,
+            why,
+            clearing.chars_before,
+            clearing.chars_after,
+            clearing.point_chars,
+            clearing.target_chars,
+        )
+        from maljan.pipeline.events import emit_tool_answers_cleared
+
+        emit_tool_answers_cleared(
+            self._event_sink(),
+            agent=str(self.name),
+            stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
+            turn=clearing.turn,
+            answers=clearing.answers,
+            chars_before=clearing.chars_before,
+            chars_after=clearing.chars_after,
+            why=clearing.why,
+        )
 
     def execute_tool_loop(self, prompt_messages: list) -> str:
         """Run the tool loop (``_run_tool_loop``) and let go of its run-state copies.
@@ -4427,16 +4621,24 @@ class BaseAnalyst(BudgetMeter, ABC):
                 return answer
             return repaired if repaired is not None else answer
 
+        # Where the window or the operator gives a point to clear old tool
+        # answers at (``tool_answer_clearing``), the loop carries the tool that
+        # reads a cleared one again; it is offered from the first clear on.
+        clearing = self._tool_answer_clearing()
+        loop_tools = self.pinned_tools()
+        if clearing is not None:
+            loop_tools = [
+                *loop_tools,
+                read_evidence_tool(_stored_answer_of(recorder), self._answer_sizer()),
+            ]
         recorded = record_tools(
-            self.pinned_tools(),
+            loop_tools,
             recorder,
             repeats,
             repairs,
             self._context_budget(),
             on_question=self._count_question,
         )
-        # Sent with every request of this loop, so counted with its conversation.
-        self._tool_definition_chars = tool_definition_chars(recorded)
         self.ended_out_of_room = False
         # The key this loop's turns are counted and reserved under with the
         # job's spend meter, until the ledger records them.
@@ -4444,10 +4646,36 @@ class BaseAnalyst(BudgetMeter, ABC):
         loop_model = _model_that_closes_off_truncated_calls(
             self.llm, recorded, _close_off_truncated_calls
         )
+        offered = _bound_tool_list(loop_model) if clearing is not None else None
+        if clearing is not None and (
+            offered is None or _definition_name(offered[-1]) != READ_EVIDENCE_TOOL
+        ):
+            # A model whose bound tool list the loop cannot reach cannot be
+            # offered the read-again tool later, and an answer nobody can read
+            # again is not cleared: the loop runs as it always did.
+            clearing, offered = None, None
+            recorded = recorded[:-1]
+            loop_model = _model_that_closes_off_truncated_calls(
+                self.llm, recorded, _close_off_truncated_calls
+            )
+        # Sent with every request of this loop, so counted with its conversation.
+        self._tool_definition_chars = tool_definition_chars(
+            recorded if clearing is None else recorded[:-1]
+        )
         # Where each turn's held cap is set, and the cap each turn was sent
         # with, read back for the kept last turn's cut check.
         held_binding = _loop_binding(loop_model, self.llm)
         turn_holds: dict[int, int | None] = {}
+        # The read-again tool's definition while it is withheld, and its size.
+        withheld: list[Any] = []
+        withheld_chars = tool_definition_chars(recorded[-1:]) if clearing is not None else 0
+
+        def _on_clear(cleared: Clearing) -> None:
+            if withheld and offered is not None:
+                offered.append(withheld.pop())
+                self._tool_definition_chars = self._definitions_sent() + withheld_chars
+            self._note_clearing(cleared)
+
         agent_executor = create_react_agent(
             loop_model,
             recorded,
@@ -4460,8 +4688,15 @@ class BaseAnalyst(BudgetMeter, ABC):
                 spend_slot=spend_key,
                 held_binding=held_binding,
                 turn_holds=turn_holds,
+                clearing=clearing,
+                on_clear=_on_clear,
             ),
         )
+        if offered is not None:
+            # Checked whole by the executor above; withheld from the requests
+            # until a clear, so a loop that never clears sends the tool list
+            # it always sent.
+            withheld.append(offered.pop())
 
         # Whether the server, rather than the budget, said the window was full.
         window_full = False
@@ -5103,6 +5338,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         # keeps the turn whole: taking a call off it would rebuild the turn the
         # API needs back as it was received, and the tool-reply completion
         # answers each unrun call with a reply saying it did not run.
+        # A turn sent after the loop (the nudge, the salvage) sends the
+        # answers the loop cleared as the loop last sent them.
+        if clearing is not None:
+            msgs = clearing.apply(msgs)
         kept, unrun = without_unanswered_calls(msgs)
         # The loop is over: a turn sent after it (the nudge, the salvage)
         # carries every block the loop's turns were sent with.
