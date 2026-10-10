@@ -90,6 +90,7 @@ from maljan.agents.tool_answer_clearing import (
     READ_EVIDENCE_DESCRIPTION,
     UNKNOWN_EVIDENCE_REMEDIATION,
     cleared_reference,
+    unknown_evidence_message,
 )
 from maljan.agents.tool_fence import FENCE_STATEMENT as _FENCE_STATEMENT
 from maljan.agents.tool_fence import fenced as _fenced
@@ -1793,7 +1794,8 @@ PROMPTS: dict[str, str] = {
     "the function index as the pack, the run state and the map say it": _function_index_text(),
     "a cleared tool answer's reference and the tool that reads it again": " ".join(
         [
-            cleared_reference(["ev_0001", "ev_0002"], 12_345),
+            cleared_reference("ev_0001", 12_345),
+            unknown_evidence_message("ev_0002"),
             READ_EVIDENCE_DESCRIPTION,
             UNKNOWN_EVIDENCE_REMEDIATION,
         ]

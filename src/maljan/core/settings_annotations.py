@@ -1310,14 +1310,17 @@ ANNOTATIONS: dict[str, Annotation] = {
         "title": "Clear old tool answers past (tokens)",
         "description": (
             "A prompt size, in tokens, past which an agent's tool loop clears its oldest "
-            "tool answers to a short line naming their evidence ids, down to half of it in "
-            "one batch, so the request's front stays the same for many turns between "
-            "clears. The newest turn's answers, the prompt, the pack, the run state and "
-            "the agent's own turns are never cleared, and the model reads a cleared answer "
-            "again with the read_evidence tool. Empty, the default, clears only a request "
-            "that would not fit its model's window, which would otherwise end the loop. "
-            "Clearing changes what the model reads: set it to keep long loops cheaper, for "
-            "example below a provider's price tier boundary."
+            "tool answers to a short line naming their evidence id, in one batch: down to "
+            "what no clear can take (the prompt, the pack, the run state, the agent's own "
+            "turns and reasoning, its newest answers) plus half of the room above it. The "
+            "model reads a cleared answer again with the read_evidence tool, offered from "
+            "the first clear on. Where what no clear can take is already past this size, "
+            "the setting does not clear and the agent's log says so once. Empty, the "
+            "default, clears only where the provider refuses a request as over its window, "
+            "or where the prompt alone is past the model's own window. Clearing changes what "
+            "the model reads and can cost more than it saves: the first clear changes the "
+            "tool list, so the provider reads the whole prompt again uncached, and on run 7's "
+            "reverser every setting tried cost more on Claude Haiku 5.5 and on DeepSeek."
         ),
         "subgroup": "Limits",
     },

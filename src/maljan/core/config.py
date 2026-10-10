@@ -3748,11 +3748,13 @@ class Settings(BaseSettings):
     # loop changes when it is passed.
     react_agent_tool_call_budget: Annotated[int, Field(ge=1)] = 20
     # A prompt size, in tokens, past which a tool loop clears its oldest tool
-    # answers to references naming their ledger ids, in a batch down to half
-    # of it (``agents.tool_answer_clearing``). ``None``, the default, clears
-    # only a request that would not fit its model's window. Clearing changes
-    # what the model reads, so it is the operator's choice; a model reads a
-    # cleared answer again with ``read_evidence``.
+    # answers to references naming their ledger ids, in a batch down to what no
+    # clear can take plus half of the room above it
+    # (``agents.tool_answer_clearing``). ``None``, the default, clears only a
+    # request the provider refuses as over its window, or one whose prompt
+    # alone is past the model's own window. Clearing changes what the model
+    # reads and can cost more than it saves, so it is the operator's choice; a
+    # model reads a cleared answer again with ``read_evidence``.
     react_agent_clear_tool_answers_at: Annotated[int, Field(ge=1)] | None = None
 
     # Deprecated, and operator-only: a budget belongs to the agent that spends

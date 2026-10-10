@@ -40,6 +40,7 @@ from maljan.agents.claim_headings import (
 )
 from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT, KEEP_REPLY
 from maljan.agents.tool_answer_clearing import (
+    CLEARED_FOR_REFUSAL,
     CLEARED_FOR_WINDOW,
     READ_EVIDENCE_TOOL,
     Clearing,
@@ -920,6 +921,75 @@ def _definition_name(definition: Any) -> str:
     if isinstance(function, dict):
         return str(function.get("name") or "")
     return str(definition.get("name") or "")
+
+
+class _ReadAgainOffer:
+    """The read-again tool of one loop, held back until its first clear, then offered at once.
+
+    Until :meth:`make` the tool is in nothing the loop sends or names: not in
+    the request's tool list, not in the tool node (so an unknown-tool reply
+    lists the tools it always listed), not in the list the no-tool-call
+    question names. :meth:`make` adds it to all three, and to what the nudge
+    and the salvage bind after the loop (``_offered_after_clear``).
+    """
+
+    def __init__(
+        self,
+        agent: Any,
+        offered: list[Any],
+        definition: dict[str, Any],
+        tool: Any,
+        recorded: list[Any],
+        tool_node: Any,
+    ) -> None:
+        self.agent = agent
+        self.offered = offered
+        self.definition = definition
+        self.tool = tool
+        self.recorded = recorded
+        self.tool_node = tool_node
+        self.made = False
+
+    @classmethod
+    def build(
+        cls, agent: Any, loop_model: Any, tool: Any, recorded: list[Any]
+    ) -> _ReadAgainOffer | None:
+        """The offer for a loop over ``loop_model``, or ``None`` where it could never be made."""
+        offered = _bound_tool_list(loop_model)
+        if offered is None:
+            return None
+        try:
+            from langgraph.prebuilt import ToolNode
+
+            bound = agent.llm.bind_tools([tool])
+            definition = (getattr(bound, "kwargs", {}) or {}).get("tools", [None])[0]
+            tool_node = ToolNode(list(recorded))
+            if not isinstance(getattr(tool_node, "_tools_by_name", None), dict) or not isinstance(
+                getattr(tool_node, "_injected_args", None), dict
+            ):
+                return None
+        except Exception as exc:  # noqa: BLE001 — no offer is today's loop, never a lost one
+            agent.logger.debug("%s: the read-again tool cannot be offered (%s).", agent.name, exc)
+            return None
+        if not isinstance(definition, dict) or _definition_name(definition) != READ_EVIDENCE_TOOL:
+            return None
+        return cls(agent, offered, definition, tool, recorded, tool_node)
+
+    def make(self) -> None:
+        """Offer the tool from the next request on; once."""
+        if self.made:
+            return
+        self.made = True
+        from langgraph.prebuilt.tool_node import _get_all_injected_args
+
+        self.offered.append(self.definition)
+        self.recorded.append(self.tool)
+        self.tool_node._tools_by_name[self.tool.name] = self.tool
+        self.tool_node._injected_args[self.tool.name] = _get_all_injected_args(self.tool)
+        self.agent._tool_definition_chars = self.agent._definitions_sent() + (
+            tool_definition_chars([self.tool])
+        )
+        self.agent._offered_after_clear = [self.tool]
 
 
 def _stored_answer_of(recorder: Any) -> Callable[[str], str | None]:
@@ -4322,40 +4392,55 @@ class BaseAnalyst(BudgetMeter, ABC):
         except (TypeError, ValueError):
             return CHARS_PER_TOKEN
 
-    def _tool_answer_clearing(self) -> ToolAnswerClearing | None:
-        """This loop's clearing, or ``None`` where nothing gives a point to clear at.
+    def _own_window_tokens(self) -> int | None:
+        """The window this agent's own model serves, in tokens, or ``None`` where none is known.
 
-        The window's point is the room a request has before its server refuses
-        it: the job's window (``ContextBudget``, the one every cap of the run
-        is sized from) less the output this agent's requests ask room for (its
-        built output cap, ``context_window.built_output_cap``, else the
-        budget's reply reserve), in the budget's characters. No window was
-        learned, no point: nothing is derived from a window nobody measured.
-        The operator's point is ``react_agent_clear_tool_answers_at``, in
-        tokens at the same rate; unset, none.
+        The window recorded on the built model (``context_window.built_window``,
+        a declared or probed fact), else the smallest window of the models the
+        agent's assignment may call, as ``context_window`` learns it without a
+        request; never the job's smallest window, which another agent's model
+        may set, and never the fallback for a window nobody reported.
         """
-        from maljan.llm.context_window import ContextBudget, built_output_cap
+        from maljan.llm.context_window import FALLBACK, built_window, window_for_assignment
 
-        per_token = self._clearing_per_token()
-        window_chars: int | None = None
-        budget = self._context_budget()
+        fact = built_window(getattr(self, "llm", None))
+        if fact is not None:
+            return int(fact.tokens)
         try:
-            if isinstance(budget, ContextBudget) and budget.derives:
-                cap = built_output_cap(getattr(self, "llm", None))
-                output = int(cap.tokens) if cap is not None else int(budget.reply_tokens)
-                room = int(budget.window.tokens) - max(0, output)
-                window_chars = room * per_token if room > 0 else None
-        except Exception as exc:  # noqa: BLE001 — no point is today's loop, never a lost one
-            self.logger.debug("%s: no window point for clearing (%s).", self.name, exc)
+            from maljan.core.model_assignments import assignment_chain_for
+
+            cfg = get_settings()
+            windows = [
+                window_for_assignment(cfg, assignment, probe=False)
+                for assignment in assignment_chain_for(cfg, self.name)
+            ]
+        except Exception as exc:  # noqa: BLE001 — no window is no point, never a lost loop
+            self.logger.debug("%s: its own window is not known (%s).", self.name, exc)
+            return None
+        known = [int(w.tokens) for w in windows if w.source != FALLBACK and int(w.tokens) > 0]
+        return min(known) if known else None
+
+    def _tool_answer_clearing(self) -> ToolAnswerClearing:
+        """This loop's clearing: a refusal always, the agent's own window, the operator's point.
+
+        A provider's refusal of a request as over its window clears whatever
+        else is known. The window point is the window the agent's own model
+        serves (:meth:`_own_window_tokens`), in the budget's characters: a
+        prompt past it is refused by every server. The operator's point is
+        ``react_agent_clear_tool_answers_at``, in tokens at the same rate;
+        unset, none.
+        """
+        per_token = self._clearing_per_token()
+        window = self._own_window_tokens()
         setting = getattr(get_settings(), "react_agent_clear_tool_answers_at", None)
         setting_chars = (
             int(setting) * per_token
             if isinstance(setting, int) and not isinstance(setting, bool) and setting > 0
             else None
         )
-        if window_chars is None and setting_chars is None:
-            return None
-        return ToolAnswerClearing(window_chars=window_chars, setting_chars=setting_chars)
+        return ToolAnswerClearing(
+            window_chars=window * per_token if window else None, setting_chars=setting_chars
+        )
 
     def _cleared_request(
         self,
@@ -4376,6 +4461,17 @@ class BaseAnalyst(BudgetMeter, ABC):
         except Exception as exc:  # noqa: BLE001 — a clear never costs a turn
             self.logger.debug("%s: tool answers not cleared (%s).", self.name, exc)
             return sent, 0
+        if fitted.setting_unreachable is not None:
+            fixed, point = fitted.setting_unreachable
+            self.logger.info(
+                "%s: react_agent_clear_tool_answers_at (%d characters of context) is at or below "
+                "the %d characters of this loop's request that no clear can take (the prompt, "
+                "the pack, the agent's own turns and its newest answers); the setting does not "
+                "clear this loop.",
+                self.name,
+                point,
+                fixed,
+            )
         if fitted.clearing is not None and on_clear is not None:
             try:
                 on_clear(fitted.clearing)
@@ -4385,11 +4481,10 @@ class BaseAnalyst(BudgetMeter, ABC):
 
     def _note_clearing(self, clearing: Clearing) -> None:
         """Say one clear in the agent's log and as a ``tool_answers_cleared`` event."""
-        why = (
-            "the request would not fit the model's window"
-            if clearing.why == CLEARED_FOR_WINDOW
-            else "the request passed react_agent_clear_tool_answers_at"
-        )
+        why = {
+            CLEARED_FOR_REFUSAL: "the model server refused the request as over its window",
+            CLEARED_FOR_WINDOW: "the request's prompt is past the model's own window",
+        }.get(clearing.why, "the request passed react_agent_clear_tool_answers_at")
         self.logger.info(
             "%s: cleared %d old tool answer(s) to ledger references at turn %d, because %s: "
             "the request went from %d to %d characters of context (clearing starts past %d and "
@@ -4429,6 +4524,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         finally:
             self._replayed_blocks = {}
             self._replay_upto = None
+            self._offered_after_clear: list[Any] = []
 
     def _run_tool_loop(self, prompt_messages: list) -> str:
         """Executes a tool-calling ReAct loop if tools are available.
@@ -4621,24 +4717,16 @@ class BaseAnalyst(BudgetMeter, ABC):
                 return answer
             return repaired if repaired is not None else answer
 
-        # Where the window or the operator gives a point to clear old tool
-        # answers at (``tool_answer_clearing``), the loop carries the tool that
-        # reads a cleared one again; it is offered from the first clear on.
-        clearing = self._tool_answer_clearing()
-        loop_tools = self.pinned_tools()
-        if clearing is not None:
-            loop_tools = [
-                *loop_tools,
-                read_evidence_tool(_stored_answer_of(recorder), self._answer_sizer()),
-            ]
         recorded = record_tools(
-            loop_tools,
+            self.pinned_tools(),
             recorder,
             repeats,
             repairs,
             self._context_budget(),
             on_question=self._count_question,
         )
+        # Sent with every request of this loop, so counted with its conversation.
+        self._tool_definition_chars = tool_definition_chars(recorded)
         self.ended_out_of_room = False
         # The key this loop's turns are counted and reserved under with the
         # job's spend meter, until the ledger records them.
@@ -4646,39 +4734,46 @@ class BaseAnalyst(BudgetMeter, ABC):
         loop_model = _model_that_closes_off_truncated_calls(
             self.llm, recorded, _close_off_truncated_calls
         )
-        offered = _bound_tool_list(loop_model) if clearing is not None else None
-        if clearing is not None and (
-            offered is None or _definition_name(offered[-1]) != READ_EVIDENCE_TOOL
-        ):
-            # A model whose bound tool list the loop cannot reach cannot be
-            # offered the read-again tool later, and an answer nobody can read
-            # again is not cleared: the loop runs as it always did.
-            clearing, offered = None, None
-            recorded = recorded[:-1]
-            loop_model = _model_that_closes_off_truncated_calls(
-                self.llm, recorded, _close_off_truncated_calls
-            )
-        # Sent with every request of this loop, so counted with its conversation.
-        self._tool_definition_chars = tool_definition_chars(
-            recorded if clearing is None else recorded[:-1]
-        )
         # Where each turn's held cap is set, and the cap each turn was sent
         # with, read back for the kept last turn's cut check.
         held_binding = _loop_binding(loop_model, self.llm)
         turn_holds: dict[int, int | None] = {}
-        # The read-again tool's definition while it is withheld, and its size.
-        withheld: list[Any] = []
-        withheld_chars = tool_definition_chars(recorded[-1:]) if clearing is not None else 0
+        # Old tool answers cleared to references (``tool_answer_clearing``),
+        # and the tool that reads one again. Until the loop's first clear the
+        # tool is nowhere: not in the request, not in the tool node, not in
+        # any list a model reads. A model whose bound tool list the loop
+        # cannot reach could never be offered it, and an answer nobody can
+        # read again is not cleared: such a loop runs as it always did.
+        self._offered_after_clear = []
+        clearing: ToolAnswerClearing | None = self._tool_answer_clearing()
+        offer = (
+            _ReadAgainOffer.build(
+                self,
+                loop_model,
+                record_tools(
+                    [read_evidence_tool(_stored_answer_of(recorder), self._answer_sizer())],
+                    recorder,
+                    repeats,
+                    repairs,
+                    self._context_budget(),
+                    on_question=self._count_question,
+                )[0],
+                recorded,
+            )
+            if clearing is not None
+            else None
+        )
+        if offer is None:
+            clearing = None
 
         def _on_clear(cleared: Clearing) -> None:
-            if withheld and offered is not None:
-                offered.append(withheld.pop())
-                self._tool_definition_chars = self._definitions_sent() + withheld_chars
+            if offer is not None:
+                offer.make()
             self._note_clearing(cleared)
 
         agent_executor = create_react_agent(
             loop_model,
-            recorded,
+            offer.tool_node if offer is not None else recorded,
             prompt=self._run_state_refresher(
                 max_steps,
                 timeout,
@@ -4692,11 +4787,6 @@ class BaseAnalyst(BudgetMeter, ABC):
                 on_clear=_on_clear,
             ),
         )
-        if offered is not None:
-            # Checked whole by the executor above; withheld from the requests
-            # until a clear, so a loop that never clears sends the tool list
-            # it always sent.
-            withheld.append(offered.pop())
 
         # Whether the server, rather than the budget, said the window was full.
         window_full = False
@@ -4906,6 +4996,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                     stream_mode="values",
                 )
                 finished = False
+                resend = False
                 async with contextlib.aclosing(stream) as snapshots:
                     try:
                         async for snapshot in snapshots:
@@ -5027,25 +5118,46 @@ class BaseAnalyst(BudgetMeter, ABC):
                     except Exception as exc:
                         # The server saying the window is full is this
                         # conversation out of room, whatever the budget
-                        # believed: the tool phase ends the way it does when
-                        # the budget sees it first, and what was gathered is
-                        # salvaged rather than lost with the analyst. Only
-                        # then. A failure that is not a provider's full-window
-                        # answer, or one met before any tool ran — the framing
-                        # alone does not fit, which is a configuration fault —
-                        # has nothing to salvage and fails the agent as it
-                        # always did.
-                        if not (window_full_error(exc) and answers_held(recorder.entries)):
+                        # believed. Where old tool answers are left to clear,
+                        # one batch is cleared and the turn is sent again
+                        # (``tool_answer_clearing``) — again only while each
+                        # resend is refused and something is left. Otherwise
+                        # the tool phase ends the way it does when the budget
+                        # sees it first, and what was gathered is salvaged
+                        # rather than lost with the analyst. Only then. A
+                        # failure that is not a provider's full-window answer,
+                        # or one met before any tool ran — the framing alone
+                        # does not fit, which is a configuration fault — has
+                        # nothing to salvage and fails the agent as it always
+                        # did.
+                        if not window_full_error(exc):
                             raise
-                        nonlocal window_full
-                        window_full = True
-                        note_a_window_that_moved(exc)
-                        self.logger.warning(
-                            "%s ReAct loop ended: the model server reported its context "
-                            "window full (%s); synthesising from what it gathered.",
-                            self.name,
-                            type(exc).__name__,
-                        )
+                        if clearing is not None and clearing.refused(
+                            list(latest.get("messages") or []), _message_chars
+                        ):
+                            resend = True
+                            self.logger.warning(
+                                "%s: the model server refused the request as over its context "
+                                "window (%s); clearing old tool answers and sending it again.",
+                                self.name,
+                                type(exc).__name__,
+                            )
+                        elif not answers_held(recorder.entries):
+                            raise
+                        else:
+                            nonlocal window_full
+                            window_full = True
+                            note_a_window_that_moved(exc)
+                            self.logger.warning(
+                                "%s ReAct loop ended: the model server reported its context "
+                                "window full (%s); synthesising from what it gathered.",
+                                self.name,
+                                type(exc).__name__,
+                            )
+                if resend:
+                    # Outside the closed stream: the graph runs again from the
+                    # conversation as it stood, its next request cleared.
+                    return await _one_pass(list(latest.get("messages") or []), spoken, pace)
                 return finished
 
             try:
@@ -5860,6 +5972,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         except Exception as exc:  # noqa: BLE001 — the bare tools are the fallback's fallback
             self.logger.debug("%s: tools bound unpinned for the nudge (%s).", self.name, exc)
             pinned = tools
+        # And the read-again tool, where the loop offered it after a clear
+        # (``_ReadAgainOffer``): the transcript was produced against it too.
+        pinned = [*pinned, *(getattr(self, "_offered_after_clear", None) or [])]
         try:
             return bind(pinned, tool_choice="none")
         except Exception as exc:  # noqa: BLE001 — a model that cannot bind has no fallback

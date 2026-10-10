@@ -131,7 +131,9 @@ MODEL_USAGE = "model_usage"
 # A tool loop cleared its oldest tool answers to ledger references
 # (``agents.tool_answer_clearing``): the agent, the model turn, how many
 # answers, what the request weighed before and after in characters, and why —
-# ``window`` (it would not have fit) or ``setting`` (the operator's
+# ``refused`` (the provider refused the request as over its window and the
+# turn is sent again), ``window`` (the prompt alone is past the agent's own
+# window) or ``setting`` (the operator's
 # ``react_agent_clear_tool_answers_at``). Telemetry; the clear itself is what
 # the model reads.
 TOOL_ANSWERS_CLEARED = "tool_answers_cleared"
