@@ -1596,7 +1596,13 @@ the row is committed as soon as the worker's loop runs the publish, normally
 milliseconds after the call is recorded, not with the next batch; a worker
 killed inside that window loses that one call's row. It is a record, not
 progress, so it is kept off the live socket and the 1,000-entry replay stream
-and read back through `GET /jobs/{id}/events`. It lives exactly as long as the
+and read back through `GET /jobs/{id}/events`, which merges it into a page the
+stream answers, in `seq` order, so it is there while the stream lives as well
+as after. `GET /jobs/{id}/usage` totals the job's `model_usage` events: tokens
+in and out, cache reads and writes, reasoning and priced spend, per agent,
+built by the run summary's own code, priced at the current `llm.model_prices`
+over the vendored table (a cost the provider reported first), so cost is
+readable during a run and after a worker that died. It lives exactly as long as the
 rest of the feed: `events.retention_days` (30) after the run. The run summary,
 which a completed or stopped run stores with its report, keeps the totals for
 good; the `model_usage` rows matter for a run whose worker died before it

@@ -169,7 +169,8 @@ Programmatically:
 | :-- | :-- |
 | `GET /api/v1/jobs/{job_id}` | The job's `status` — `pending`, `running`, `completed`, `failed` or `cancelled` — with its timing and error message. |
 | `/ws/analysis/{job_id}` | The run's events as they happen, including `stage_started`, `stage_skipped` and `stage_finished` once per stage. |
-| `GET /api/v1/jobs/{job_id}/events` | The same events, in sequence order, for a tab that opens mid-run or resumes with `since`. They are read first from a live buffer (24 hours, at most 1,000 events) and then from the `job_events` table, kept for `core.events.retention_days` (30 days by default). |
+| `GET /api/v1/jobs/{job_id}/events` | The same events, in sequence order, for a tab that opens mid-run or resumes with `since`. They are read first from a live buffer (24 hours, at most 1,000 events) and then from the `job_events` table, kept for `core.events.retention_days` (30 days by default). Each model call's `model_usage` event is in the table alone and is merged in by `seq` either way. |
+| `GET /api/v1/jobs/{job_id}/usage` | The job's usage so far, from its `model_usage` events: `calls`, `tokens` (the run summary's block: input, output, cache reads and writes, reasoning, per agent) and `spend` (`spent_usd`, where each price came from, calls that could not be priced, per agent). Answers during a run and after a worker that died. |
 | `GET /api/v1/jobs/{job_id}/evidence` | The evidence ledger, one entry per tool call, filterable by stage, agent and tool. |
 | `DELETE /api/v1/jobs/{job_id}` | Cancels a pending or running job; its model calls stop. |
 
