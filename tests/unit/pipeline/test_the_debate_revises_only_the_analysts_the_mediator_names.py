@@ -146,7 +146,8 @@ class TestTheField:
         named, note = analysts_to_revise([line], NAMES)
 
         assert named is None
-        assert note == analysts_field_unknown_note("ghidra")
+        assert note == analysts_field_unknown_note(["ghidra"])
+        assert "1 name(s)" in note and "'ghidra'" in note
 
     def test_spacing_case_and_hyphens_in_a_name_are_read_alike(self) -> None:
         line = "[analysts: All-Tools Static R2] says x. [blocking: y]"
@@ -696,3 +697,49 @@ class TestAClaimNumberOfAnyLengthIsReadAsText:
         from maljan.pipeline.debate_facts import _claim_place
 
         assert _claim_place(written, count) == place
+
+
+class TestAnUnknownNameIsNeverQuotedWhole:
+    def test_a_two_hundred_kilobyte_name_is_counted_as_unreadable(self) -> None:
+        huge = "Q" * 200_000
+        line = f"[analysts: {huge}, ghidra, Ghost Analyst] STATIC says x. [blocking: y]"
+
+        named, note = analysts_to_revise([line], NAMES)
+
+        assert named is None
+        assert huge[:40] not in note
+        assert len(note) < 400
+        assert "3 name(s)" in note
+        assert "'ghidra', 'ghost_analyst'" in note
+        assert "1 of them cannot be read as an analyst name" in note
+
+    def test_every_unknown_name_of_every_line_is_counted(self) -> None:
+        lines = [
+            "[analysts: static, ghidra] STATIC says x. [blocking: y]",
+            "[analysts: ghidra, capa, @@@] DYNAMIC says x. [blocking: y]",
+        ]
+
+        named, note = analysts_to_revise(lines, NAMES)
+
+        assert named is None
+        assert "3 name(s)" in note and "'ghidra', 'capa'" in note
+        assert "1 of them cannot be read" in note
+
+    def test_the_log_and_the_round_record_carry_the_bounded_note(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        huge = "Q" * 200_000
+        argument = AgentArgument(
+            agent_name="Mediator",
+            finding=FINDING,
+            confidence_score=0.6,
+            contradictions=[f"[analysts: {huge}] STATIC says x. [blocking: y]"],
+        )
+
+        with caplog.at_level("INFO"):
+            recorded = _negotiate(argument)["discussion_history"][0]
+        update, _agents = _revise(recorded)
+
+        assert recorded.revise is None and huge[:40] not in recorded.revise_note
+        assert all(huge[:40] not in r.getMessage() for r in caplog.records)
+        assert update["revision_rounds"][0]["asked_all"] == recorded.revise_note

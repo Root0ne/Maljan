@@ -1519,7 +1519,7 @@ PROMPTS: dict[str, str] = {
             sycophancy_asks_every_analyst("no_consensus"),
             BLOCK_NOT_READ_NOTE,
             ANALYSTS_FIELD_MISSING_NOTE,
-            analysts_field_unknown_note("network"),
+            analysts_field_unknown_note(["network", "@@@"]),
             NO_CONTESTED_POINT,
         ]
     ),

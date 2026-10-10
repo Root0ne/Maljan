@@ -31,6 +31,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from maljan.core.config import AGENT_KEY_PATTERN
+
 # A ledger id as the evidence ledger writes it.
 _ENTRY_ID = re.compile(r"\bev_\d+\b")
 # A decimal number standing alone.
@@ -282,6 +284,8 @@ def with_ledger_facts(directive: str, facts: Sequence[str]) -> str:
 _NAME_SEPARATOR = re.compile(r"\s*(?:,|;|&|\band\b)\s*", re.IGNORECASE)
 # The word a report heading closes a name with.
 _HEADING_WORD = "_analyst"
+# An analyst key, its characters and its length, as the configuration admits one.
+_AGENT_KEY = re.compile(AGENT_KEY_PATTERN)
 
 # Why a revision round asked every analyst, as its record says.
 BLOCK_NOT_READ_NOTE = (
@@ -293,12 +297,32 @@ ANALYSTS_FIELD_MISSING_NOTE = (
 )
 
 
-def analysts_field_unknown_note(written: str) -> str:
-    """Why a round asked every analyst: a blocking line named someone outside the debate."""
+def _readable_name(written: str) -> str | None:
+    """A name from the field as an analyst key, where it can be one, or ``None``.
+
+    Read as ``resolve_analyst`` reads it (case, spaces, hyphens and
+    underscores alike) and kept only where it fits the analyst-key pattern,
+    its characters and its length (``core.config.AGENT_KEY_PATTERN``).
+    """
+    key = _key(written)
+    return key if _AGENT_KEY.fullmatch(key) else None
+
+
+def analysts_field_unknown_note(written: Sequence[str]) -> str:
+    """Why a round asked every analyst: blocking lines named names outside the debate.
+
+    It counts the names, quotes each one only as an analyst key, and counts
+    the ones that cannot be read as one, so no name is quoted whole.
+    """
+    names = list(dict.fromkeys(str(w) for w in written))
+    readable = list(dict.fromkeys(k for w in names if (k := _readable_name(w)) is not None))
+    unreadable = sum(1 for w in names if _readable_name(w) is None)
+    quoted = f": {', '.join(repr(k) for k in readable)}" if readable else ""
+    unread = f"; {unreadable} of them cannot be read as an analyst name" if unreadable else ""
     return (
-        "A blocking line of the mediator's final CONTRADICTIONS: block named "
-        f"'{written}' in its [analysts: ...] field, which is no analyst of this debate; "
-        "every analyst was asked to revise."
+        "The blocking lines of the mediator's final CONTRADICTIONS: block named "
+        f"{len(names)} name(s) in their [analysts: ...] field that are no analyst of this "
+        f"debate{quoted}{unread}; every analyst was asked to revise."
     )
 
 
@@ -348,6 +372,7 @@ def analysts_to_revise(
     the participants' order.
     """
     named: set[str] = set()
+    unknown: dict[str, None] = {}
     for line in blocking:
         written = read_analysts_field(line)
         if written is None:
@@ -355,8 +380,11 @@ def analysts_to_revise(
         for name in written:
             found = resolve_analyst(name, participants)
             if found is None:
-                return None, analysts_field_unknown_note(name)
-            named.add(found)
+                unknown[name] = None
+            else:
+                named.add(found)
+    if unknown:
+        return None, analysts_field_unknown_note(list(unknown))
     return [str(p) for p in participants if str(p) in named], ""
 
 
