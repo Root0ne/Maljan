@@ -3343,6 +3343,34 @@ conversation weighs before every model turn, and what it hands out is charged
 as it goes so a turn that calls several tools spends one turn's room between
 them. See [Configuration](/configuration/) for the numbers.
 
+**Old answers cleared, in batches.** A tool loop sends its whole conversation
+on every turn, so what the caps above bound is each answer, not what the loop
+reads again. Where the next request would not fit — the job's window less the
+output the agent's requests ask room for (its built output cap), in the same
+characters — the run-state refresher replaces the oldest tool answers with one
+line each naming the evidence ids the answer carried and how to read it again,
+until the request weighs half of that point; without it the server refuses the
+request as a full window and the loop ends with what it gathered, or fails its
+agent where nothing had answered yet. `core.react_agent_clear_tool_answers_at`,
+unset by default, is a prompt size in tokens at which the same clearing starts
+earlier. A cleared answer stays cleared under the same line on every later
+turn, so the request's front is the same characters from one clear to the next
+and a provider's prompt cache keeps it; a clear is one batch, never one answer
+a turn. Never cleared: the newest turn's answers, an answer that names no
+ledger id, the system prompt, the task and its pack, the run-state block, the
+agent's own turns and the reasoning a provider requires back on them (DeepSeek's
+`reasoning_content`). From the first clear the loop offers `read_evidence`, which
+answers an id with the output the ledger keeps for it, sized by the job's
+guardrail and filed and fenced like any tool answer; before it, the loop sends
+the tool list it always sent. The nudge and the salvage after the loop send the
+cleared answers as the loop last sent them. Each clear is in the agent's log and
+is published as `tool_answers_cleared` (agent, turn, answers, characters before
+and after, `window` or `setting`). On a model whose thinking blocks are bound to
+the turns before them (Anthropic's `prefix_bound_thinking` rows) a clear changes
+that history, and the provider's own recovery drops the blocks it makes stale.
+The judge's tool loop does not clear. The code is
+`maljan.agents.tool_answer_clearing`.
+
 **An answer wider than the prompt allows.** Before any of that, a tool result
 over that limit meets the output guardrail, which
 now has three outcomes rather than two. A JSON object is **shortened as a
@@ -3465,6 +3493,7 @@ and the console draws the running analysis from them.
 | `validation_feedback` | `pipeline/validation.retry_with_feedback` | `stage`, `agent`, `code`, `message`, `retry_index`, `state`, `path`; `answer_kept` on an unread answer's question: one sentence saying where the answer is kept (`run_summary.validation.unparsed_answers`, one masked row per answer with its analyst and round), never the answer |
 | `judge_question` | the judge's ReAct loop | `stage`, `text`, `addressed_to` |
 | `budget_tick` / `stage_ended_at_cap` | the budget meter | see *The evidence ledger* |
+| `tool_answers_cleared` | an analyst's tool loop, on each clear of its oldest tool answers | `stage`, `agent`, `turn`, `answers`, `chars_before`, `chars_after`, `why` (`window` or `setting`) |
 | `tool_server_rested` | a tool server's guard, when its breaker opens | `server`, `failures`, `cooldown_s`, `reason` |
 | `enrichment_complete` | the enrichment worker, after the run | `report_id`, `domains_enriched`, `ips_enriched`, `similar_samples` |
 | `completed` / `error` / `cancelled` | the worker | the outcome |
