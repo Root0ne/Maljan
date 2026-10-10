@@ -1322,12 +1322,12 @@ ANNOTATIONS: dict[str, Annotation] = {
         "title": "Composer section max tokens",
         "description": (
             "Output-token cap per report section when composer_enabled is true. 0 takes the "
-            "judge's max tokens where set, else the model's declared maximum output, else a "
-            "quarter of the context window the model serves; never more than the model's "
-            "maximum. A positive value gets the reporter's own cap on top for reasoning where "
-            "thinking is left on, held at the model's maximum; with no judge's max tokens set "
-            "that resolves to the model's maximum. The run summary and the worker log show "
-            "the derivation."
+            "judge's max tokens where set, else the judge's own derivation: the smaller of a "
+            "quarter of the context window the model serves and the model's declared maximum "
+            "output, so the section's prompt keeps the rest of the window. Never more than the "
+            "model's maximum. A positive value gets the reporter's own cap on top for reasoning "
+            "where thinking is left on, held at the model's maximum. The run summary and the "
+            "worker log show the derivation."
         ),
         "subgroup": "Report content",
     },

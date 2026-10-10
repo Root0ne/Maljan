@@ -176,9 +176,10 @@ def report_stage_budget(config: Settings, assignment: Any, *, probe: bool = True
     the operator's cap it follows is ``llm.judge_max_tokens`` — the cap
     :meth:`ServiceContainer.get_reporter_llm` has always been built with; the
     analysts' ``llm.expert_max_tokens`` is not the reporter's. Above 0 it is
-    used as set; at 0 the model's declared maximum output; with none declared,
-    the analysts' derivation (``context_window.report_output_budget``). Never
-    more than the model's maximum.
+    used as set; at 0 the derivation every role's cap follows: the smaller of
+    a quarter of the window and the model's declared maximum output
+    (``context_window.report_output_budget``). Never more than the model's
+    maximum.
     """
     from maljan.llm.context_window import report_output_budget
 
@@ -195,9 +196,10 @@ def composer_output_budget(config: Settings, assignment: Any) -> tuple[int, str,
     section budget, plus the reporter's own cap as room for reasoning where the
     provider was not asked to keep reasoning out (:func:`_reporter_reasons`);
     else the operator's ``llm.judge_max_tokens``, the reporter's cap; else the
-    model's declared maximum output; else the analysts' derivation, a quarter
-    of the window. Never more than the model's maximum output, the reasoning
-    room included (``context_window.report_output_budget``). A section was
+    derivation every role's cap follows, the smaller of a quarter of the window
+    and the model's declared maximum output. Never more than the model's
+    maximum output, the reasoning room included
+    (``context_window.report_output_budget``). A section was
     dropped from a live report when its answer outgrew a fixed budget.
 
     Returns the tokens, the sentence that says how they were reached, which
@@ -607,10 +609,10 @@ class ServiceContainer:
     def _report_output_cap(self) -> int:
         """The output cap the reporter's model is built with, its derivation logged and recorded.
 
-        The report stage's own order (:func:`report_stage_budget`): the
-        operator's ``llm.judge_max_tokens``, else the model's declared maximum
-        output, else the analysts' derivation. Over a fallback list, the
-        smallest of its models, as every other agent's cap is.
+        The report stage's budget (:func:`report_stage_budget`): the
+        operator's ``llm.judge_max_tokens``, else the derivation every role's
+        cap follows. Over a fallback list, the smallest of its models, as every
+        other agent's cap is.
         """
         from maljan.core.model_assignments import assignment_chain_for
 

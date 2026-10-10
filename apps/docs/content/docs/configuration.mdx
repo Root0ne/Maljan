@@ -1006,42 +1006,43 @@ On a local 32,768-token window that is 8,192; on a local 131,072, 32,768; on
 the shipped gpt-4o, 16,384.
 A window nothing reported derives nothing: the documented fallback of 8,192
 applies and the sentence says the window is unknown. The reply reserve follows
-the same rule, bounded by an operator's generation cap where one is set; the
-report stage has an order of its own, below. A value above 0 is
+the same rule, bounded by an operator's generation cap where one is set; so
+does the report stage, below. A value above 0 is
 the operator's and is used as set; a stored setting keeps its value. Each
 derivation is logged and recorded in `run_summary.generation.output_caps`
 (`{agent: {tokens, derivation}}`), and the judge's is printed beside the
 verdict wait. 0 no longer means unbounded.
 
-**The report stage writes up to the model's own maximum.** A report is as
-long as its evidence needs, so the report stage — each composer section and
-the narrative round — does not take the analysts' quarter of the window. For
-each model of the reporter's list, in order:
+**The report stage derives its budget as the judge does.** Each composer
+section and the narrative round is one reply written into the window its
+prompt already fills, so for each model of the reporter's list, in order:
 
 1. the operator's value: `composer_section_max_tokens` above 0 for a section
-   (plus the reporter's own cap for reasoning, below), otherwise
+   (plus the reporter's own budget for reasoning, below), otherwise
    `llm.judge_max_tokens` above 0 — the reporter runs on the judge role and
    has always been built with the judge's cap; `llm.expert_max_tokens` is the
    analysts' and no longer reaches the report stage;
-2. else the model's declared maximum output (the probe's model list, then the
-   vendored `max_output` row);
-3. else the analysts' derivation above: a quarter of the window for a runtime
-   we run, the documented 8,192 for a hosted API that declares nothing.
+2. else the derivation above (`context_window.derived_reply`), the one every
+   role's cap follows: the smaller of a quarter of the window and the model's
+   declared maximum output, a quarter of the window for a runtime we run, the
+   documented 8,192 for a hosted API that declares nothing.
 
 It is never more than the model's maximum — its declared maximum output, or
 the window it serves when it declares none — and a value held at it says so;
-the reasoning room is inside that bound too. With thinking left on and no
-`llm.judge_max_tokens`, the reasoning room is the model's whole maximum, so
-any positive `composer_section_max_tokens` resolves to the model's maximum.
-On DeepSeek's `deepseek-flash` with nothing set, a section may write 393,216
-tokens, and the 1,048,576-token window leaves the remaining 655,360 for the
-section's evidence.
+the reasoning room is inside that bound too. Sized at the declared maximum
+alone, a model whose maximum output reaches its window (a 200,000-token
+window under DeepSeek's 393,216) was given the whole window as its answer, and
+the narrative was recorded as degraded and sections as not written. With
+nothing set, a section on DeepSeek's `deepseek-flash` with a 1,048,576-token
+window may write 262,144 tokens and the remaining 786,432 hold its evidence;
+on Claude Haiku 5.5's 1,000,000-token window, 128,000, its declared maximum,
+leaving 872,000; on a local 65,536-token window, 16,384.
 
 A section's evidence is sized against the window only when the window was
 learned. The 8,192-token fallback a failed probe leaves is a number printed
 beside the word `fallback`, not a fact: the section's claims and tool answers
 are then shown whole, and its budget is the operator's value, else the
-model's declared maximum, else the documented 8,192. Where the window is
+documented 8,192, never above the model's declared maximum. Where the window is
 known, the evidence room is the window less the budget, never below zero,
 and each call is held to what the window leaves after that call's own prompt
 (at three characters a token) when its budget would not fit beside it — a
@@ -1078,9 +1079,9 @@ time its budget takes at that pace for each call it may make (its answer, the
 one retry, and the structured attempt where the endpoint supports one).
 Appendix B prints it as `narrative:round`. The worker log prints one line per section ("ReportComposer: section
 '…' output budget: …"), and the run summary prints the derivation beside the
-section's wait ("Output budget of `composer:section`: 393216 tokens — the
-model's declared maximum output of 393216 (the vendored table's
-'deepseek-flash' row, from …)"). A fixed budget dropped a live report's
+section's wait ("Output budget of `composer:section`: 262144 tokens — the
+smallest of a quarter (262144) of the model's 1048576-token context window
+(declared), the model's declared maximum output of 393216"). A fixed budget dropped a live report's
 section when the model's answer outgrew it. The run summary keeps one
 `composer:section` row, the wait last sized: written one after another, that
 is the last section's, sized from the pace measured over the sections before

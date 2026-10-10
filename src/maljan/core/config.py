@@ -3336,11 +3336,12 @@ class ReportingConfig(BaseModel):
     # per-section timeout keep the local SWA model from stalling.
     composer_enabled: bool = True
     # What one report section may generate, in tokens. 0, the default, takes
-    # the report stage's own order per model: the reporter's
-    # ``judge_max_tokens`` where the operator set it, else the model's
-    # declared maximum output, else a quarter of the context window the model
-    # serves; never more than the model's maximum, with the derivation printed
-    # in the run summary and the worker log. A positive value is an operator's
+    # the reporter's ``judge_max_tokens`` where the operator set it, else the
+    # derivation every role's cap follows (``context_window.derived_reply``):
+    # the smaller of a quarter of the context window the model serves and the
+    # model's declared maximum output, so the section's prompt keeps the rest
+    # of the window; never more than the model's maximum, with the derivation
+    # printed in the run summary and the worker log. A positive value is an operator's
     # own budget, plus the reporter's cap as reasoning room where thinking is
     # left on, held at the model's maximum. A fixed budget dropped a section of
     # a live report when the model's answer outgrew it.
