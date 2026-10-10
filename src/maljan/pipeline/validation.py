@@ -5529,7 +5529,7 @@ class EntryTexts:
         text = self.text_of(entry_id)
         return bool(text) and any(
             whole_value_in(form, text)
-            for spelling in library_spellings(value)
+            for spelling in held_spellings(value)
             for form in written_forms(spelling)
         )
 
@@ -5569,7 +5569,7 @@ class EntryTexts:
             self._runs.update({run: frozenset(ids) for run, ids in runs.items()})
             self._runs[""] = frozenset()
         found: set[str] = set()
-        for spelling in library_spellings(value):
+        for spelling in held_spellings(value):
             for form in written_forms(spelling):
                 needed = set(_TEXT_RUN_RE.findall(form.lower()))
                 if not needed:
@@ -5632,6 +5632,51 @@ def library_spellings(value: str) -> tuple[str, ...]:
     if _BARE_NAME_RE.fullmatch(lowered):
         return (lowered, f"{lowered}.dll")
     return (lowered,)
+
+
+# A value written as a field name and the field's value: ``seed 0x33629d40``,
+# ``first_key=0x41``, ``port: 443``. The name is one identifier word; what
+# follows it is the field's whole value.
+_FIELD_AND_VALUE_RE = re.compile(r"([a-z_][a-z0-9_-]*)(?:\s*[=:]\s*|\s+)(\S(?:.*\S)?)", re.DOTALL)
+
+
+def field_value_spellings(value: str) -> tuple[str, ...]:
+    """How an entry writes ``value`` when it is a field name and that field's value.
+
+    A table row may state ``seed 0x33629d40`` for an entry whose JSON holds
+    ``"seed": "0x33629d40"``. The entry holds the value when it pairs that
+    field name with that whole value: as a JSON member (the value quoted or
+    bare, with or without the space after the colon) or as ``name=value`` or
+    ``name: value``. Only the pair is read, never the two parts apart, so a
+    value the entry gives another field, a prefix of the field's value and the
+    same digits read in another radix are not held. Lower-cased, as
+    :func:`library_spellings` is; ``()`` for a value of any other shape.
+    """
+    match = _FIELD_AND_VALUE_RE.fullmatch(str(value or "").strip().lower())
+    if match is None:
+        return ()
+    name, held = match.group(1), match.group(2)
+    quoted_name, quoted = json.dumps(name), json.dumps(held, ensure_ascii=False)
+    return (
+        f"{quoted_name}: {quoted}",
+        f"{quoted_name}:{quoted}",
+        f"{quoted_name}: {held}",
+        f"{quoted_name}:{held}",
+        f"{name}={held}",
+        f"{name}: {held}",
+    )
+
+
+def held_spellings(value: str) -> tuple[str, ...]:
+    """Every spelling :meth:`EntryTexts.holds` looks for ``value`` in, before its written forms.
+
+    The one normalisation every value-in-entry question shares: the value
+    lower-cased (:func:`library_spellings`) and, for a field name written with
+    its value, the pairs an entry writes it as (:func:`field_value_spellings`).
+    """
+    spellings = list(library_spellings(value))
+    spellings.extend(form for form in field_value_spellings(value) if form not in spellings)
+    return tuple(spellings)
 
 
 def decidable(value: str) -> bool:
