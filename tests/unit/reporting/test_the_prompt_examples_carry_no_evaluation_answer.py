@@ -186,6 +186,7 @@ from maljan.pipeline.validation import (
     undescribed_technique_finding,
     ungrounded_capabilities,
     unpublished_value_violations,
+    unreadable_answer_reason,
     validate_verdict_bundle,
     whole_answer_after_retry_question,
 )
@@ -1135,6 +1136,11 @@ PROMPTS: dict[str, str] = {
     "composer published-techniques heading": PUBLISHED_TECHNIQUES_HEADING,
     "composer claim note": WHERE_QUOTED_LEAD,
     "composer cut-at-cap question": section_cut_violation(8192).message,
+    "composer question for an answer with no text": unreadable_answer_reason(""),
+    "composer question for an answer that is not valid JSON": unreadable_answer_reason(
+        '{"text": "a value with a stray " quote"}'
+    ),
+    "composer question for an answer holding no JSON object": unreadable_answer_reason("[]"),
     "composer cut-at-cap question on a repeating answer": section_cut_violation(
         8192, chars=20000, begun=160, distinct=20
     ).message,

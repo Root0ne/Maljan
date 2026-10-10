@@ -131,3 +131,32 @@ def safe_parse_json(text: str) -> Any:
         return json.loads(cleaned)
     except json.JSONDecodeError:
         return None
+
+
+# Characters of the JSON shown either side of where the decoder stopped.
+_AROUND = 40
+
+
+def json_error(text: str) -> str:
+    """Why :func:`safe_parse_json` reads nothing from ``text``, or ``""`` when it reads it.
+
+    The decoder's own complaint about the JSON this reader found in ``text``
+    (fence and surrounding words taken off by :func:`extract_json`, as the
+    reader takes them off), the character it stopped at, counted from 1 in that
+    JSON, and the text either side of it. Said of the JSON before the repair
+    pass, which is what the writer wrote. Linear in ``text``.
+    """
+    if not text or not text.strip():
+        return "the text is empty"
+    if safe_parse_json(text) is not None:
+        return ""
+    cleaned = extract_json(text)
+    try:
+        json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        start = max(0, exc.pos - _AROUND)
+        return (
+            f"{exc.msg} at character {exc.pos + 1} of the JSON, where it reads: "
+            f"{cleaned[start : exc.pos + _AROUND]}"
+        )
+    return ""

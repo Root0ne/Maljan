@@ -359,6 +359,7 @@ MESSAGE_BUILDERS: frozenset[str] = frozenset(
         "joined_within_the_bound",
         "shortened_evidence_note",
         "partial_evidence_note",
+        "unreadable_answer_reason",
     }
 )
 

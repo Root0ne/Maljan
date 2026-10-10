@@ -2384,7 +2384,35 @@ def keep_known_keys(model: Any, payload: Any) -> tuple[Any, list[str]]:
     return _walk(model, payload, ""), dropped
 
 
-def schema_violations(model: Any, payload: Any, *, code: str) -> list[Violation]:
+def unreadable_answer_reason(answer: str) -> str:
+    """What a model is told when its answer gives the JSON reader nothing.
+
+    An answer with no text says so. An answer whose JSON the shared reader
+    (``utils.json_cleaner``) cannot decode is told the decoder's complaint,
+    where it is and the text there, with how a double quote and a backslash
+    are written inside a JSON string: the two characters a model most often
+    leaves unescaped in a value it copies from a sample. The text quoted from
+    the answer goes through ``safe_finding_value``, as every finding row's
+    model-written value does. An answer that decodes to something holding no
+    object is told that.
+    """
+    from maljan.utils.json_cleaner import json_error
+
+    if not str(answer or "").strip():
+        return "the answer held no text. Write the JSON object the request asks for."
+    why = json_error(answer)
+    if why:
+        return (
+            f"the answer is not valid JSON: {safe_finding_value(why)}. Inside a JSON "
+            "string, write a double "
+            'quote as \\" and a backslash as two backslashes.'
+        )
+    return "the answer holds no JSON object."
+
+
+def schema_violations(
+    model: Any, payload: Any, *, code: str, answer: str | None = None
+) -> list[Violation]:
     """Pydantic's complaints about ``payload``, in words the model can act on.
 
     The narrative and the report composer answer against a schema with real
@@ -2397,6 +2425,10 @@ def schema_violations(model: Any, payload: Any, *, code: str) -> list[Violation]
     rule, which is what the retry turn shows the model.
     """
     if payload is None:
+        # ``answer``, the text the payload was read from, lets the model be
+        # told why nothing was read (``unreadable_answer_reason``).
+        if answer is not None:
+            return [Violation(code=code, message=unreadable_answer_reason(answer))]
         return [Violation(code=code, message="the answer was not JSON at all.")]
     try:
         model.model_validate(payload)
@@ -8202,12 +8234,13 @@ def _with_feedback(
 
     content = getattr(answer, "content", None)
     turns = list(messages)
-    # A block list with no text in it (thinking alone, or thinking and a tool
-    # call) holds nothing to correct, and an assistant turn of thinking alone
-    # is not a shape any request here is known to be accepted with: it is left
-    # out like a described answer, and the correction is asked at the end of
-    # the user turn before it.
-    if isinstance(content, list) and not answer_text(content).strip():
+    # An answer with no text in it — an empty or whitespace string, or a block
+    # list of thinking alone, or thinking and a tool call — holds nothing to
+    # correct, and an assistant turn of thinking alone is not a shape any
+    # request here is known to be accepted with: it is left out like a
+    # described answer, and the correction is asked at the end of the user
+    # turn before it, so the retry is never the request just answered.
+    if isinstance(content, list | str) and not answer_text(content).strip():
         keep_answer = False
     if keep_answer:
         # A block list (a thinking model's answer on ``ChatAnthropic``) goes back
