@@ -46,6 +46,14 @@ from maljan.agents.prompts import (
     TRIAGE_PROMPT,
 )
 from maljan.core import virustotal
+from maljan.core.tool_declarations import (
+    ErrorPattern,
+    ToolFacts,
+    check_env_names,
+    check_mount,
+    check_roles,
+    fill_declaration,
+)
 
 # The stdlib logger rather than ``maljan.core.logger``: this module is imported
 # by almost everything, including the logging setup itself, and it has exactly
@@ -1162,6 +1170,42 @@ class MCPServerConfig(BaseModel):
     # Which tool opens a sample, and which select and analyse one; empty
     # declares nothing. See ``SampleOpenConfig``.
     sample_open: SampleOpenConfig = Field(default_factory=SampleOpenConfig)
+    # The rest of the server's declaration (``maljan.core.tool_declarations``):
+    # the facts the core reads about this server and its tools instead of a
+    # table of tool names. A built-in's block takes its shipped value for any
+    # of these it never set; every other server starts from nothing.
+    #
+    # Where the server sees the job's sample: the absolute path inside the
+    # server that the worker's sample mirror is mounted at; empty when the
+    # server reads the worker's own filesystem.
+    sample_mount: str = ""
+    # How the server's plain-text answers say "error" instead of answering.
+    error_patterns: list[ErrorPattern] = Field(default_factory=list)
+    # What the server is for (``reputation``, ``decompiler``, ``sandbox`` …).
+    roles: list[str] = Field(default_factory=list)
+    # The workflow text shown to an agent only while this server is attached.
+    prompt_fragment: str = ""
+    # The environment names the server cannot run without.
+    required_env_allow: list[str] = Field(default_factory=list)
+    # Whether the server's path-taking tools read the sample the platform staged.
+    reads_staged_sample: bool = False
+    # Per tool: what kind of fact its answer is and where the facts sit in it.
+    tool_facts: dict[str, ToolFacts] = Field(default_factory=dict)
+
+    @field_validator("roles")
+    @classmethod
+    def _roles_are_words(cls, value: list[str]) -> list[str]:
+        return check_roles(value)
+
+    @field_validator("required_env_allow")
+    @classmethod
+    def _required_names_are_env_names(cls, value: list[str]) -> list[str]:
+        return check_env_names(value)
+
+    @field_validator("sample_mount")
+    @classmethod
+    def _mount_is_absolute(cls, value: str) -> str:
+        return check_mount(value)
 
     @model_validator(mode="after")
     def _refuse_the_composed_names(self) -> "MCPServerConfig":
@@ -1211,6 +1255,17 @@ REQUIRED_ENV_ALLOW: dict[str, tuple[str, ...]] = {
 }
 
 
+def _declared(key: str, **fields: Any) -> MCPServerConfig:
+    """A built-in server's block: its launch settings and its shipped declaration.
+
+    The declaration (``maljan.core.builtin_declarations``) is the facts the
+    code's name tables hold about this server and its tools, as data.
+    """
+    from maljan.core.builtin_declarations import server_declaration
+
+    return MCPServerConfig(**fields, **server_declaration(key))
+
+
 def _builtin_servers() -> dict[str, MCPServerConfig]:
     """The servers a deployment starts with, as settings rather than constants.
 
@@ -1248,7 +1303,8 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
     tool list.
     """
     return {
-        "analysis": MCPServerConfig(
+        "analysis": _declared(
+            "analysis",
             enabled=True,
             transport="stdio",
             command=sys.executable,
@@ -1262,7 +1318,8 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
             agents=[],
             label="Analysis MCP",
         ),
-        "knowledge": MCPServerConfig(
+        "knowledge": _declared(
+            "knowledge",
             enabled=True,
             transport="stdio",
             command=sys.executable,
@@ -1272,7 +1329,8 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
             agents=[],
             label="Knowledge MCP",
         ),
-        "network": MCPServerConfig(
+        "network": _declared(
+            "network",
             enabled=True,
             transport="stdio",
             command=sys.executable,
@@ -1282,7 +1340,8 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
             agents=["network"],
             label="Network MCP",
         ),
-        "threatintel": MCPServerConfig(
+        "threatintel": _declared(
+            "threatintel",
             enabled=True,
             transport="stdio",
             command=sys.executable,
@@ -1303,7 +1362,8 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
         # ``agents=[]`` for the reason the tool sidecars carry it: the
         # definitions in ``_builtin_definitions()`` reference this server by
         # name, and a role binding on top would make those lists decorative.
-        virustotal.SERVER_KEY: MCPServerConfig(
+        virustotal.SERVER_KEY: _declared(
+            virustotal.SERVER_KEY,
             enabled=False,
             transport="streamable-http",
             url=virustotal.MCP_ENDPOINT,
@@ -1401,12 +1461,16 @@ class MCPConfig(BaseModel):
         sidecar the pipeline assumes.
 
         A stored ``env_allow`` is kept as it is, except that the names in
-        ``REQUIRED_ENV_ALLOW`` come back — see ``builtin_env_allow``.
+        ``REQUIRED_ENV_ALLOW`` come back — see ``builtin_env_allow``. A
+        declaration field the stored entry never set takes the built-in's
+        shipped value; one it set, even to an empty value, is kept
+        (``tool_declarations.fill_declaration``).
         """
         for key, default in _builtin_servers().items():
             stored = self.servers.setdefault(key, default)
             if stored is not default:
                 stored.env_allow = builtin_env_allow(key, stored.env_allow)
+                fill_declaration(stored, default)
         return self
 
 
@@ -3270,6 +3334,29 @@ class StaticGenericConfig(BaseModel):
     server: str = ""
 
 
+def ghidra_block() -> MCPServerConfig:
+    """The Ghidra block as it ships: its open tools and its declaration."""
+    from maljan.core.builtin_declarations import provider_declaration
+
+    return MCPServerConfig(
+        sample_open=GHIDRA_SAMPLE_OPEN.model_copy(), **provider_declaration("ghidra")
+    )
+
+
+def r2_block() -> StaticR2Config:
+    """The radare2 block as it ships, with its declaration."""
+    from maljan.core.builtin_declarations import provider_declaration
+
+    return StaticR2Config(**provider_declaration("r2"))
+
+
+def cape_mcp_block() -> MCPServerConfig:
+    """The CAPE MCP sidecar's block as it ships, with its declaration."""
+    from maljan.core.builtin_declarations import provider_declaration
+
+    return MCPServerConfig(**provider_declaration("cape2_mcp"))
+
+
 class StaticConfig(BaseModel):
     """Which static-analysis tool the static analyst attaches, and its settings.
 
@@ -3279,21 +3366,19 @@ class StaticConfig(BaseModel):
     """
 
     provider: Literal["ghidra", "r2", "capa_yara", "generic_mcp", "none"] = "ghidra"
-    ghidra: MCPServerConfig = Field(
-        default_factory=lambda: MCPServerConfig(sample_open=GHIDRA_SAMPLE_OPEN)
-    )
-    r2: StaticR2Config = Field(default_factory=StaticR2Config)
+    ghidra: MCPServerConfig = Field(default_factory=lambda: ghidra_block())
+    r2: StaticR2Config = Field(default_factory=lambda: r2_block())
 
     @model_validator(mode="after")
-    def _ghidra_declares_its_open_tools(self) -> "StaticConfig":
-        """A stored Ghidra block that never set ``sample_open`` carries Ghidra's own declaration.
+    def _the_providers_carry_their_declarations(self) -> "StaticConfig":
+        """A stored provider block carries its provider's declaration where it set none.
 
-        A block stored whole before the field existed would otherwise parse
-        with an empty one; one an operator set (to anything, empty included)
-        is kept as set.
+        A block stored whole before a declaration field existed would otherwise
+        parse with an empty one (Ghidra's ``sample_open`` among them); a field
+        an operator set (to anything, empty included) is kept as set.
         """
-        if "sample_open" not in self.ghidra.model_fields_set:
-            self.ghidra.sample_open = GHIDRA_SAMPLE_OPEN.model_copy()
+        fill_declaration(self.ghidra, ghidra_block())
+        fill_declaration(self.r2, r2_block())
         return self
 
     capa: StaticCapaConfig = Field(default_factory=StaticCapaConfig)
@@ -3324,7 +3409,13 @@ class SandboxCape2Config(BaseModel):
     poll_interval_seconds: Annotated[int, Field(ge=1)] = 10
     submit_options: dict[str, str] = Field(default_factory=dict)
     package_by_format: dict[str, str] = Field(default_factory=dict)
-    mcp: MCPServerConfig = Field(default_factory=MCPServerConfig)
+    mcp: MCPServerConfig = Field(default_factory=lambda: cape_mcp_block())
+
+    @model_validator(mode="after")
+    def _the_mcp_block_carries_its_declaration(self) -> "SandboxCape2Config":
+        """A stored CAPE MCP block takes the shipped declaration fields it never set."""
+        fill_declaration(self.mcp, cape_mcp_block())
+        return self
 
 
 class SandboxTriageConfig(BaseModel):

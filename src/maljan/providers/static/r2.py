@@ -20,26 +20,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from maljan.core import builtin_declarations
 from maljan.core.logger import logger
 from maljan.providers.base import MirrorSpec
 from maljan.providers.errors import ProviderError
 from maljan.providers.registry import register_static_provider
 from maljan.providers.static.generic_mcp import GenericMCPStaticProvider
-from maljan.tools.errors import BAD_ARGUMENT, TOOL_FAILED, error_parts, tool_error
+from maljan.tools.errors import TOOL_FAILED, error_parts, tool_error
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
 
     from maljan.core.config import Settings
 
-# The replies r2mcp gives in place of an answer, as it writes them. r2mcp sends
-# these as an ordinary text result rather than as an MCP error, so without this
-# list the ledger filed "Invalid regex used in filter parameter, try a simpler
-# expression" as a successful ``list_strings`` whose output was that sentence.
-# Matched against the whole reply, never a line inside one: a listing of the
-# sample's own strings can hold any sentence, and a string the sample carries is
-# not the tool failing.
-_R2_OPEN_FILE_FIRST = "call open_file with the path you are given, then call this tool again"
+# What a model is told after an answer that says no file is open.
+_R2_OPEN_FILE_FIRST = builtin_declarations.R2_OPEN_FILE_FIRST
 # The same advice when the path radare2 can open for this sample is known: it
 # names it, so a model whose open failed is not left to guess it.
 _R2_OPEN_FILE_FIRST_AT = "call open_file with {readable}, then call this tool again"
@@ -58,25 +53,17 @@ _R2_OPEN_TOOL = "open_file"
 _R2_OPEN_FIRST_ERROR = re.compile(
     r"(?:\w+: )?Use the open_file method before calling any other method\b.*"
 )
-_R2_ERROR_REPLIES: tuple[tuple[re.Pattern[str], str, str | None], ...] = (
-    (re.compile(r"Invalid regex used in filter parameter\b.*"), BAD_ARGUMENT, None),
-    (re.compile(r"Invalid parameter '[^']*':.*"), BAD_ARGUMENT, None),
-    (re.compile(r"Invalid params:.*"), BAD_ARGUMENT, None),
-    (re.compile(r"Missing required parameter:.*"), BAD_ARGUMENT, None),
-    (re.compile(r"Unknown tool: .*"), BAD_ARGUMENT, None),
-    (re.compile(r"Unknown decompiler\b.*"), BAD_ARGUMENT, None),
-    (
-        re.compile(r"Cannot run (?:commands|script files) without calling the `open_file` tool.*"),
-        TOOL_FAILED,
-        _R2_OPEN_FILE_FIRST,
-    ),
-    (re.compile(r"No file is currently open\..*"), TOOL_FAILED, _R2_OPEN_FILE_FIRST),
-    (
-        re.compile(r"Failed to (?:open file|initialize r(?:adare)?2(?: core)?)\b.*"),
-        TOOL_FAILED,
-        None,
-    ),
-    (re.compile(r"Error: command returned NULL"), TOOL_FAILED, None),
+# The replies r2mcp gives in place of an answer, as it writes them: the
+# radare2 declaration's error patterns (``core.builtin_declarations``). r2mcp
+# sends these as an ordinary text result rather than as an MCP error, so
+# without them the ledger filed "Invalid regex used in filter parameter, try a
+# simpler expression" as a successful ``list_strings`` whose output was that
+# sentence. Matched against the whole reply, never a line inside one: a listing
+# of the sample's own strings can hold any sentence, and a string the sample
+# carries is not the tool failing.
+_R2_ERROR_REPLIES: tuple[tuple[re.Pattern[str], str, str | None], ...] = tuple(
+    (re.compile(p["match"]), p["code"], p.get("remediation") or None)
+    for p in builtin_declarations.R2_ERROR_PATTERNS
 )
 
 
@@ -427,21 +414,8 @@ class R2StaticProvider(GenericMCPStaticProvider):
     rather than a failed job.
     """
 
-    R2_PROMPT_FRAGMENT: ClassVar[str] = (
-        "Analyze binary files (e.g. PE, ELF) utilizing radare2 through your available tools. "
-        "For EVERY claim you make, you MUST cite a concrete artifact: a function name, "
-        "string offset (.data+0xNN), API import, or hex pattern. "
-        "Focus on MITRE ATT&CK: T1027 (Obfuscation), T1106 (Native API), "
-        "T1055 (Process Injection), T1140 (Deobfuscation).\n\n"
-        "=== TOOL USAGE WORKFLOW ===\n"
-        "1. Call `open_file` with the path you are given, then `analyze` to run the\n"
-        "   analysis pass.\n"
-        "2. Call `list_imports` and `list_strings` to see what the binary can reach.\n"
-        "3. Call `list_functions` and pick the 3-5 that reference crypto, network or\n"
-        "   process APIs; `decompile_function` those and `xrefs_to` their addresses.\n"
-        "4. Summarise assembly patterns instead of dumping raw hex, and prefer one\n"
-        "   summarising call over many narrow ones.\n"
-    )
+    # The workflow prompt is the radare2 declaration's text (``core.builtin_declarations``).
+    R2_PROMPT_FRAGMENT: ClassVar[str] = builtin_declarations.R2_PROMPT_FRAGMENT
 
     # ``StaticR2Config.mirror_dir``'s own default, kept here too: a provider
     # built any way other than ``from_settings`` (there is none today, but the
