@@ -136,10 +136,54 @@ EFFORT_SETTING_OF_PROVIDER: dict[str, str] = {
 }
 
 
+# The names Docker gives the host a container runs on.
+_DOCKER_HOST_NAMES = frozenset({"host.docker.internal", "gateway.docker.internal"})
+
+
+def _is_loopback(host: str) -> bool:
+    """Whether ``host`` is literally this machine: ``localhost``, 127.0.0.0/8 or ``::1``."""
+    import ipaddress
+
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host.strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
+def _is_docker_host(host: str) -> bool:
+    """Whether ``host`` is how a containerised worker may reach the host it runs on.
+
+    Docker's names for the host (``host.docker.internal``,
+    ``gateway.docker.internal``) and an IPv4 address of Docker's default
+    bridge address pool, 172.17.0.0 to 172.31.255.255. Neither is proven to
+    be this machine: the names resolve as DNS says and the range is part of
+    the private 172.16.0.0/12 a LAN may use, so plain http to them is taken
+    only on the operator's explicit opt-in.
+    """
+    import ipaddress
+
+    if host in _DOCKER_HOST_NAMES:
+        return True
+    try:
+        address = ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        return False
+    if not isinstance(address, ipaddress.IPv4Address):
+        return False
+    return ipaddress.IPv4Address("172.17.0.0") <= address <= ipaddress.IPv4Address("172.31.255.255")
+
+
 class AnthropicConfig(BaseModel):
     """Anthropic-specific model selection."""
 
     api_key: SecretStr | None = None
+    # Where every Anthropic request goes: a job's calls, the Models API
+    # question and the settings probe. ``None``, the default, is the Anthropic
+    # API itself. An address here is a proxy, or the loopback stub a rehearsal
+    # runs against, written without ``/v1`` (the client adds the path).
+    base_url: str | None = None
     expert_model: str = "claude-sonnet-4-20250514"
     judge_model: str = "claude-sonnet-4-20250514"
     # The effort every request is sent with, as ``output_config.effort``.
@@ -153,6 +197,81 @@ class AnthropicConfig(BaseModel):
     # vendor's price list prices both) and outlives a pause longer than five
     # minutes between two turns of one conversation.
     prompt_cache_ttl: Literal["5m", "1h"] = "5m"
+    # Plain http to the base URL is taken for loopback alone. Set, it is also
+    # taken for a Docker host gateway (``host.docker.internal``,
+    # ``gateway.docker.internal``, 172.17.0.0 to 172.31.255.255), which a
+    # containerised worker reaches the host on. The API key then crosses that
+    # hop in clear, and those names and addresses can be another machine.
+    allow_plain_http_to_docker_host: bool = False
+
+    @field_validator("base_url", mode="before")
+    @classmethod
+    def _an_address_the_client_can_use(cls, value: Any) -> Any:
+        """The address as every Anthropic request, probe included, will be sent to it.
+
+        A cleared field is no address. Anything else is refused unless the
+        client can send to it and the key it carries is not sent in clear:
+        ``http`` or ``https`` with a host, ``https`` unless the host is this
+        machine, no user name, query or fragment, and no ``/v1`` ending (the
+        client adds the path, so ``/v1/v1/messages`` would be asked). The
+        scheme and host are folded and a trailing slash dropped, so the probe
+        files its row under the address the job's client uses.
+        """
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            return value
+        raw = value.strip()
+        if not raw:
+            return None
+        from urllib.parse import urlsplit
+
+        parts = urlsplit(raw)
+        scheme = parts.scheme.lower()
+        if scheme not in ("http", "https"):
+            raise ValueError("the Anthropic base URL must start with http:// or https://")
+        try:
+            host = (parts.hostname or "").lower()
+            port = parts.port
+        except ValueError as exc:
+            raise ValueError(f"the Anthropic base URL has no usable host or port: {exc}") from exc
+        if not host:
+            raise ValueError("the Anthropic base URL names no host")
+        if parts.username or parts.password:
+            raise ValueError("the Anthropic base URL may not carry a user name or password")
+        if parts.query:
+            raise ValueError("the Anthropic base URL may not carry a query")
+        if parts.fragment:
+            raise ValueError("the Anthropic base URL may not carry a fragment")
+        path = parts.path.rstrip("/")
+        if path.lower().endswith("/v1"):
+            raise ValueError(
+                "the Anthropic base URL is written without /v1: the client adds /v1/messages"
+            )
+        if scheme == "http" and not (_is_loopback(host) or _is_docker_host(host)):
+            raise ValueError(
+                "the Anthropic base URL must use https: the API key is sent to it, and only "
+                "loopback (or, opted into, a Docker host gateway) may take it over plain http"
+            )
+        shown_host = f"[{host}]" if ":" in host else host
+        authority = f"{shown_host}:{port}" if port else shown_host
+        return f"{scheme}://{authority}{path}"
+
+    @model_validator(mode="after")
+    def _plain_http_only_where_allowed(self) -> "AnthropicConfig":
+        """Plain http to a Docker host gateway only when the operator opted into it."""
+        if not self.base_url or not self.base_url.startswith("http://"):
+            return self
+        from urllib.parse import urlsplit
+
+        host = (urlsplit(self.base_url).hostname or "").lower()
+        if _is_loopback(host) or self.allow_plain_http_to_docker_host:
+            return self
+        raise ValueError(
+            f"the Anthropic base URL sends the API key in clear to {host}: plain http is taken "
+            "for loopback only, or for a Docker host gateway when "
+            "llm.anthropic.allow_plain_http_to_docker_host is set"
+        )
 
 
 class OllamaConfig(BaseModel):

@@ -338,3 +338,25 @@ describe("the enrichment guide", () => {
     }
   });
 });
+
+describe("the llm guide", () => {
+  it("offers the Anthropic base URL among the credentials, folded away as advanced", () => {
+    const guide = guideById("llm")!;
+    const credentials = guide
+      .steps(context({ "core.llm.provider": "anthropic" }))
+      .find((s) => s.id === "credentials")!;
+    expect(credentials.keys).toEqual([
+      "core.llm.anthropic.api_key",
+      "core.llm.anthropic.base_url",
+      "core.llm.anthropic.allow_plain_http_to_docker_host",
+      "core.llm.anthropic.effort",
+      "core.llm.anthropic.prompt_cache_ttl",
+    ]);
+    expect(credentials.advancedKeys).toEqual([
+      "core.llm.anthropic.base_url",
+      "core.llm.anthropic.allow_plain_http_to_docker_host",
+      "core.llm.anthropic.effort",
+      "core.llm.anthropic.prompt_cache_ttl",
+    ]);
+  });
+});

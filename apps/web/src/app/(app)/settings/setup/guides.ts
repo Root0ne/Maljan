@@ -174,10 +174,17 @@ const CREDENTIAL_KEYS: Record<string, { keys: string[]; advanced: string[] }> = 
   anthropic: {
     keys: [
       "core.llm.anthropic.api_key",
+      "core.llm.anthropic.base_url",
+      "core.llm.anthropic.allow_plain_http_to_docker_host",
       "core.llm.anthropic.effort",
       "core.llm.anthropic.prompt_cache_ttl",
     ],
-    advanced: ["core.llm.anthropic.effort", "core.llm.anthropic.prompt_cache_ttl"],
+    advanced: [
+      "core.llm.anthropic.base_url",
+      "core.llm.anthropic.allow_plain_http_to_docker_host",
+      "core.llm.anthropic.effort",
+      "core.llm.anthropic.prompt_cache_ttl",
+    ],
   },
   gemini: { keys: ["core.llm.gemini.api_key"], advanced: [] },
   ollama: {

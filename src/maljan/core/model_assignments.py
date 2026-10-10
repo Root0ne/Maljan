@@ -171,6 +171,7 @@ def endpoint_where(
     *,
     openai_base_url: object = None,
     ollama_base_url: object = None,
+    anthropic_base_url: object = None,
 ) -> str:
     """Where ``provider`` sends its calls, an entry's own ``base_url`` first.
 
@@ -184,6 +185,10 @@ def endpoint_where(
         return named or normalised_endpoint(openai_base_url) or _OPENAI_DEFAULT
     if provider == "ollama":
         return named or normalised_endpoint(ollama_base_url) or _OLLAMA_DEFAULT
+    if provider == "anthropic":
+        # The vendor's name unless an address is configured: a proxy, or a
+        # loopback stub, is an address a probe reached and is filed as one.
+        return normalised_endpoint(anthropic_base_url) or _VENDOR_ENDPOINTS[provider]
     return _VENDOR_ENDPOINTS.get(provider, provider)
 
 
@@ -195,6 +200,7 @@ def endpoint_for(settings: object, provider: str, base_url: str | None = None) -
         base_url,
         openai_base_url=llm.openai.base_url,
         ollama_base_url=llm.ollama.base_url,
+        anthropic_base_url=getattr(llm.anthropic, "base_url", None),
     )
 
 

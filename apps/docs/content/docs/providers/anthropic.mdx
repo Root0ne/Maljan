@@ -13,6 +13,8 @@ Claude Haiku 5.5 (`claude-haiku-5-5`) included.
 | :-- | :-- | :-- |
 | `core.llm.provider` | `openai` | Set to `anthropic`. |
 | `core.llm.anthropic.api_key` | — | Required; the provider refuses to build a model without it. Stored encrypted. |
+| `core.llm.anthropic.base_url` | empty | Where every Anthropic request goes — a job's calls, the Models API question and the connection test — written without `/v1`: a proxy, or the loopback stub of a [rehearsal](/usage/rehearsal/). **The API key is sent to this address** with every request, so `https` is required unless the host is loopback (127.0.0.0/8, `::1`, `localhost`), or a Docker host gateway when `core.llm.anthropic.allow_plain_http_to_docker_host` is on; a user name, a query, a fragment or a `/v1` ending is refused on save. Empty is the Anthropic API. |
+| `core.llm.anthropic.allow_plain_http_to_docker_host` | off | Also takes a plain-http base URL on a Docker host gateway (`host.docker.internal`, `gateway.docker.internal`, 172.17.0.0 to 172.31.255.255), the address a containerised worker reaches a stub or proxy on the host by. **The API key then crosses that hop in clear text**, and those names and addresses can be another machine on a LAN that uses 172.16.0.0/12: turn it on only for a rehearsal stub on this host. |
 | `core.llm.anthropic.expert_model` | `claude-sonnet-4-20250514` | The analysts' model. Name the model you run, such as `claude-haiku-5-5`. |
 | `core.llm.anthropic.judge_model` | `claude-sonnet-4-20250514` | The judge's model. |
 | `core.llm.anthropic.effort` | empty | Sent as `output_config.effort` on every request: `low`, `medium`, `high`, `xhigh` or `max`. Empty sends nothing and keeps the model's own default (`medium` on Claude Haiku 5.5). |
@@ -28,8 +30,10 @@ core.llm.anthropic.effort       = max
 
 ## How it behaves
 
-- **No endpoint to override.** Anthropic is a vendor API here: a per-agent entry
-  on `anthropic` takes no `base_url`, and one set is rejected on save.
+- **One endpoint for every agent.** A per-agent entry on `anthropic` takes no
+  `base_url`, and one set is rejected on save; `core.llm.anthropic.base_url`
+  moves every Anthropic request at once, and a probe is filed under that
+  address.
 - **Sampling parameters.** Claude Haiku 5.5 and the other models of its
   generation refuse a non-default `temperature`, `top_p` or `top_k` with a 400.
   The vendored model table's `fixed_sampling` rows name those models, each with

@@ -425,6 +425,12 @@ class AnthropicProvider:
             output_config.setdefault("effort", effort)
             kwargs["output_config"] = output_config
 
+        # A configured address (``llm.anthropic.base_url``) takes every
+        # request; none leaves the client's own, the Anthropic API.
+        address = str(getattr(settings, "base_url", None) or "").strip()
+        if address:
+            kwargs.setdefault("base_url", address)
+
         if needs_streaming(model, kwargs.get("max_tokens")):
             kwargs.setdefault("streaming", True)
             kwargs.setdefault("stream_usage", True)

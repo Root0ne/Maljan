@@ -87,3 +87,6 @@ logs/
 .claude/settings.local.json
 # Ephemeral cron lock, written per session by Claude /schedule.
 .claude/scheduled_tasks.lock
+
+# Rehearsal outputs (scripts/rehearsal/run.py --out default) and its in-process work files.
+rehearsal-results/
