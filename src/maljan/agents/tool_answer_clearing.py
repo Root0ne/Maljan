@@ -187,8 +187,10 @@ class ToolAnswerClearing:
         ``measure`` sizes one message as the server sees it, and ``reported``
         answers ``(characters, index)``: what the server said the request up
         to the turn at ``index`` weighed, in the budget's characters, plus what
-        came after, or ``(0, -1)``. The same rule the loop's budget measures
-        by (``base_agent.request_chars``). One pass over the messages.
+        came after, or ``(0, -1)`` (``base_agent._reported_request``). The
+        request is sized by the server's count where there is one, since the
+        point stands for what the server refuses, and by the measure only
+        where nothing was counted yet. One pass over the messages.
         """
         out = self.apply(messages)
         point = self.point_chars
@@ -197,7 +199,12 @@ class ToolAnswerClearing:
         sizes = [measure(m) for m in out]
         measured = sum(sizes) + max(0, int(extra_chars))
         floor, report_at = reported(out)
-        before = max(measured, floor)
+        # The server's own count where it gave one: the point is a fact about
+        # what the server refuses, and the characters' measure, at three a
+        # token, runs ahead of the count on prose. The measure where nothing
+        # was counted yet.
+        size = floor if report_at >= 0 and floor > 0 else measured
+        before = size
         if before <= point:
             return FitResult(out)
         target = point // 2
@@ -207,7 +214,7 @@ class ToolAnswerClearing:
         answers = 0
         freed_before_report = 0
         for index in range(last_turn):
-            if max(measured, floor) <= target:
+            if size <= target:
                 break
             message = out[index]
             if not _is_tool_answer(message):
@@ -227,14 +234,13 @@ class ToolAnswerClearing:
             self._references[key] = reference
             out[index] = cleared
             sizes[index] -= saving
-            measured -= saving
+            size -= saving
             if index < report_at:
-                floor -= saving
                 freed_before_report += saving
             answers += 1
         if not answers:
             return FitResult(out)
-        after = max(measured, floor)
+        after = size
         clearing = Clearing(
             turn=int(turn),
             answers=answers,

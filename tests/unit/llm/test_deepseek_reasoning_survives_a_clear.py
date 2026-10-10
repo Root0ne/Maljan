@@ -21,7 +21,17 @@ from langchain_core.tools import StructuredTool
 from maljan.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
 from maljan.llm import context_window as cw
 
+from . import test_deepseek_reasoning_is_sent_back as sent_back
 from .test_deepseek_reasoning_is_sent_back import THOUGHT, _Analyst, _DeepSeek, _model, _What
+
+
+def _counted(request: Any, payload: dict[str, Any]) -> Any:
+    """The stand-in's answer, its usage counting the request as a server would (3 chars a token)."""
+    payload["usage"]["prompt_tokens"] = len(request.content) // 3
+    return _reply(request, payload)
+
+
+_reply = sent_back.reply
 
 
 class _Container:
@@ -54,7 +64,10 @@ def test_every_request_after_a_clear_carries_every_reasoning() -> None:
             args_schema=_What,
         )
     ]
-    with patch("maljan.agents.base_agent.get_settings") as settings:
+    with (
+        patch.object(sent_back, "reply", _counted),
+        patch("maljan.agents.base_agent.get_settings") as settings,
+    ):
         cfg = settings.return_value
         cfg.react_agent_timeout = None
         cfg.react_agent_timeout_overrides = {}

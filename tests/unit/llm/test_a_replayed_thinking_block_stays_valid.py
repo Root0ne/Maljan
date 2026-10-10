@@ -560,7 +560,7 @@ class TestTheEarlierBlocksAreCounted:
         monkeypatch.setattr(
             agent,
             "_note_conversation",
-            lambda _sent: counted.append(agent._replayed_run_state_chars()),
+            lambda _sent, *_cleared: counted.append(agent._replayed_run_state_chars()),
         )
         agent.execute_tool_loop([("system", "You are a static analyst."), ("human", "Analyse.")])
         return agent, counted

@@ -99,6 +99,19 @@ class TestNoPointOrUnderIt:
         assert all(a is b for a, b in zip(fitted.messages, messages, strict=True))
         assert _wire(fitted.messages) == _wire(messages)
 
+    def test_the_server_s_count_under_the_point_wins_over_a_larger_measure(self) -> None:
+        messages = _conversation(4, 4_000)
+        last_turn = max(i for i, m in enumerate(messages) if isinstance(m, AIMessage))
+        clearing = tac.ToolAnswerClearing(window_chars=_size(messages) // 2)
+        fitted = clearing.fit(
+            messages,
+            extra_chars=0,
+            measure=_message_chars,
+            reported=lambda _sent: (_size(messages) // 3, last_turn),
+            turn=5,
+        )
+        assert fitted.clearing is None and _wire(fitted.messages) == _wire(messages)
+
     def test_no_point_at_all_is_the_same_messages(self) -> None:
         messages = _conversation(4, 1_000)
         fitted = _fit(tac.ToolAnswerClearing(), messages)
