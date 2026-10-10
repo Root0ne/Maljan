@@ -4500,8 +4500,9 @@ is assembled from what the run gathered rather than recomputed beside it:
   a section's model writes is kept whole. The derivation is logged per
   section and printed in Appendix B beside the section's wait ("Output budget
   of `composer:section`"). A fixed budget dropped a section of a live report
-  when the model's answer outgrew it, and a quarter of a million-token window
-  held a model that declares 393,216 to 262,144. No section schema and no
+  when the model's answer outgrew it, and a budget sized at the declared
+  maximum alone gave a model whose maximum output reaches its window the
+  whole window, leaving the prompt no room. No section schema and no
   report prompt sets an upper size: the prose fields, the executive summary,
   the key findings and the recommendations keep only their lower bounds. An answer the cap cuts is told so — `composer.cut_at_output_cap`,
   naming the cap, the answer's size (characters, items begun, and — when a
