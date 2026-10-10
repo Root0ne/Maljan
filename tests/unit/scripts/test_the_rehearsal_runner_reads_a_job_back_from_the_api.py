@@ -208,6 +208,8 @@ class _Api:
         self.probe_ok = probe_ok
         self.seen: list[str] = []
         self.status = "completed"
+        self.error = ""
+        self.incomplete_reason: str | None = None
         self.active: dict[str, list[str]] = {}
 
     def handler(self, request: httpx.Request) -> httpx.Response:
@@ -240,7 +242,8 @@ class _Api:
             self.status = "cancelled"
             return httpx.Response(204)
         if path == f"/jobs/{JOB}":
-            return httpx.Response(200, json={"id": JOB, "status": self.status})
+            job = {"id": JOB, "status": self.status, "error_message": self.error or None}
+            return httpx.Response(200, json=job)
         if path == f"/jobs/{JOB}/events":
             events = [
                 {"seq": 1, "type": "stage_started", "data": {"stage": "analysis"}},
@@ -262,6 +265,7 @@ class _Api:
                 json={
                     "id": REPORT,
                     "verdict": "Malware",
+                    "incomplete_reason": self.incomplete_reason,
                     "run_summary": {"verdict_reading": "stated"},
                     "malware_report": {},
                     "stix_bundle": {"type": "bundle", "objects": [{"type": "malware"}]},
@@ -440,3 +444,48 @@ def test_without_configure_the_connection_test_is_still_asked(
     assert "POST /settings/test/llm" in api.seen
     assert records[0].probe["ok"] is True
     assert list(records[0].required_stages)[0] == "triage_pack"
+
+
+STOP_NOTE = "Stopped by the job timeout (20 s, core.job_timeout) 21 s into the run"
+
+
+def test_a_deadline_rehearsal_sets_the_worker_s_job_timeout_and_puts_it_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    api = _Api(_values())
+    api.status, api.error, api.incomplete_reason = "failed", STOP_NOTE, STOP_NOTE
+    patched: list[dict[str, Any]] = []
+    original = _Api.handler
+
+    def recording(self: _Api, request: httpx.Request) -> httpx.Response:
+        if request.method == "PATCH":
+            patched.append(json.loads(request.content)["changes"])
+        return original(self, request)
+
+    monkeypatch.setattr(_Api, "handler", recording)
+    args = _args(tmp_path, scenario="deadline_hit", job_timeout=20.0)
+    records = _run_with(api, args, monkeypatch)
+    assert patched[0]["core.job_timeout"] == 20
+    # The operator had no job timeout: it goes back to none.
+    assert "core.job_timeout" not in api.values
+    record = records[0]
+    assert record.scenario_params["deadline_by"] == "core.job_timeout"
+    assert record.scenario_params["job_timeout_s"] == 20.0
+    assert record.incomplete_reason == STOP_NOTE
+    assert record.job_status == "failed" and record.job_error == STOP_NOTE
+
+
+@pytest.mark.parametrize(
+    ("extra", "said"),
+    [({"job_timeout": None}, "name --job-timeout"), ({"configure": None}, "name --configure")],
+)
+def test_a_deadline_rehearsal_names_the_job_timeout_it_sets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extra: dict[str, Any], said: str
+) -> None:
+    api = _Api(_values())
+    args = _args(tmp_path, scenario="deadline_hit", job_timeout=20.0, stub_port=8765)
+    for key, value in extra.items():
+        setattr(args, key, value)
+    with pytest.raises(SystemExit, match=said):
+        _run_with(api, args, monkeypatch)
+    assert not any(call.startswith("PATCH") for call in api.seen)

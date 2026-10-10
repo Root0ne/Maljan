@@ -82,8 +82,17 @@ taken there, and for the Anthropic base URL too, only for these addresses:
 
 Any other address needs https. A model the stub has no facts for, and that the
 configuration does not name, is answered 404, as the real API answers. A job the wait gives up on
-(`--timeout`) is cancelled. `--job-timeout` gives the worker's job timeout,
-and a run that finishes within 20% of it fails.
+(`--timeout`) is cancelled. `--job-timeout` gives the worker's job timeout
+(`core.job_timeout`, no limit by default) when the settings carry none, and a
+run that finishes within 20% of it fails.
+
+`--scenario deadline_hit --configure gate --job-timeout 20` rehearses the
+worker's own job timeout: `core.job_timeout` is set to the given seconds with
+the other changes, snapshotted and put back after. Every model call is slow
+(`--slow-seconds`, 2 s by default), so the worker stops the job. The run must
+end as a failed job whose reason names `core.job_timeout`, and must keep what
+it produced: a stored run summary and a partial report, whose
+`incomplete_reason` names the timeout too.
 
 `--configure harness` rehearses the harness's own fixed models and settings
 instead, with the same snapshot and restore; it touches no key. Without
@@ -103,7 +112,7 @@ asked against the stub first. Its setup differs from a paid run on the stack:
 
 - no API, queue or worker, so no job bookkeeping, no probe gate a job is
   submitted through, no stored report, and the deadline is the runner's own,
-  not the worker's job timeout;
+  not the worker's job timeout (rehearse that one against the stack, above);
 - the static provider is `none` (no Ghidra or radare2) and long-term memory
   is in memory (no Qdrant);
 - its own settings: `claude-haiku-5-5` on the Anthropic wire,
@@ -168,7 +177,7 @@ single-call role once.
 | `redacted_thinking` | Every answer that thinks also carries a `redacted_thinking` block (Anthropic only). |
 | `unusual_stop` | Every first call stops as `refusal`, `pause_turn` or `model_context_window_exceeded`. |
 | `prose_instead_of_tool` | Every first structured call answers in prose instead of calling its schema tool (Anthropic only). |
-| `deadline_hit` | Every call is slow enough that the run's deadline fires. It must end as a failed job with the reason said. |
+| `deadline_hit` | Every call is slow enough that the run's deadline fires. It must end as a failed job with the reason said. Against the stack the deadline is `core.job_timeout`, and the stopped job must keep its run summary and a partial report. |
 | `cross_loop` | Normal answers, with the report stage's calls after the analysts' calls on the same client. |
 
 ## What it checks

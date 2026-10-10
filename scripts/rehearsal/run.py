@@ -600,6 +600,7 @@ def record_from_stack(
         gate=dict(gate or {}),
         probe=dict(probe or {}),
         scenario_params=scenario_params,
+        incomplete_reason=str(report.get("incomplete_reason") or ""),
         elapsed_s=elapsed,
     )
 
@@ -634,10 +635,25 @@ def _job_timeout(args: argparse.Namespace, values: dict[str, dict[str, Any]]) ->
     return None
 
 
+def deadline_changes(scenario: str, job_timeout: float | None) -> dict[str, Any]:
+    """What a stack rehearsal of ``deadline_hit`` sets: the worker's own job timeout.
+
+    Snapshotted and put back with every other change, so the operator's value
+    (or none) is in force again when the rehearsal ends.
+    """
+    if scenario != "deadline_hit":
+        return {}
+    if not job_timeout:
+        raise SystemExit("deadline_hit against the stack sets core.job_timeout: name --job-timeout")
+    return {"core.job_timeout": max(1, int(job_timeout))}
+
+
 def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
     password = os.environ.get(args.login_env, "")
     if not password:
         raise SystemExit(f"{args.login_env} is empty: it holds the account's sign-in")
+    if args.scenario == "deadline_hit" and not args.configure:
+        raise SystemExit("deadline_hit against the stack sets core.job_timeout: name --configure")
     if not args.configure and not args.stub_url and not args.stub_port:
         raise SystemExit("without --configure the stack must already call a stub: name --stub-port")
     _sigterm_is_interrupt()
@@ -673,6 +689,7 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
 
                 changes = {**harness_changes(args.provider, stub_root), **third_party_off(values)}
                 expected = {**expected_for(Rehearsal(provider=args.provider)), **expected}
+            changes.update(deadline_changes(args.scenario, args.job_timeout))
             answer = client.probe_models(changes)
             probe = {"ok": bool(answer.get("ok")), "detail": str(answer.get("detail") or "")}
             print(f"connection test: {'passed' if probe['ok'] else 'failed'}", flush=True)
@@ -694,6 +711,8 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
             "slow_seconds": brain.slow_seconds,
             "job_timeout_s": _job_timeout(args, values),
         }
+        if args.scenario == "deadline_hit":
+            params["deadline_by"] = "core.job_timeout"
         if not args.configure:
             # The connection test over the stack's stored settings, as the console's button asks it.
             answer = client.probe_models({})
@@ -855,7 +874,10 @@ def main(argv: list[str] | None = None) -> int:
         "--job-timeout",
         type=float,
         default=None,
-        help="the worker's job timeout, when the settings do not carry one",
+        help=(
+            "the worker's job timeout, when the settings do not carry one; "
+            "deadline_hit against the stack sets core.job_timeout to it"
+        ),
     )
     args = parser.parse_args(argv)
     if args.restore:

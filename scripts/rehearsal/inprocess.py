@@ -16,8 +16,9 @@ How this differs from a paid run on the stack (``scripts/rehearsal/run.py``
 in gate mode is the gate):
 
 * no API, no queue, no worker: the job bookkeeping, the probe gate a job is
-  submitted through, the stored report and the worker's job timeout are not
-  exercised; the deadline here is ``asyncio.wait_for``;
+  submitted through, the stored report and the worker's job timeout
+  (``core.job_timeout``) are exercised only against the stack; the deadline
+  here is ``asyncio.wait_for``;
 * the static provider is ``none`` (no Ghidra or radare2) and long-term
   memory is in memory (no Qdrant);
 * the rehearsal's own settings, not the operator's: effort ``high`` (judge

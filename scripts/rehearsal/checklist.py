@@ -153,6 +153,9 @@ class RunRecord:
     # What a stack rehearsal changed on the stack: each setting before and
     # during it, and the tool servers it took away or withheld keys from.
     gate: dict[str, Any] = field(default_factory=dict)
+    # The stored report's own note that it was kept from a run that did not
+    # finish; empty on a completed run's report and where no report was stored.
+    incomplete_reason: str = ""
     elapsed_s: float = 0.0
 
 
@@ -224,7 +227,25 @@ def section_statuses(record: RunRecord) -> dict[str, str]:
 # ----------------------------------------------------------------------- checks
 
 
+# The worker's own job timeout, named in the reason a job it stopped carries.
+JOB_TIMEOUT_SETTING = "core.job_timeout"
+
+
+def stopped_by_the_worker(record: RunRecord) -> bool:
+    """Whether the run's deadline is the worker's job timeout rather than the runner's own."""
+    return record.scenario_params.get("deadline_by") == JOB_TIMEOUT_SETTING
+
+
 def _check_job(record: RunRecord) -> Check:
+    if record.scenario == "deadline_hit" and stopped_by_the_worker(record):
+        ok = record.job_status in ("failed", "stopped") and (
+            JOB_TIMEOUT_SETTING in record.job_error
+        )
+        return Check(
+            f"job stopped by {JOB_TIMEOUT_SETTING} as a failed job",
+            ok,
+            f"job status {record.job_status}: {record.job_error or 'no reason given'}",
+        )
     if record.scenario == "deadline_hit":
         said = record.job_error.lower()
         ok = record.job_status == "failed" and (
@@ -658,13 +679,42 @@ CHECKS = (
     _check_deadline,
     _check_scenario,
 )
-# What a run whose deadline fired is held to: it has no report to check.
+
+
+def _check_kept(record: RunRecord) -> Check:
+    """A job the worker stopped keeps what it produced: its run summary and a partial report."""
+    problems = []
+    if JOB_TIMEOUT_SETTING not in record.incomplete_reason:
+        problems.append(
+            f"the stored report's incomplete reason is {record.incomplete_reason or 'missing'!r}"
+        )
+    if not record.run_summary:
+        problems.append("no run summary was stored")
+    if not record.markdown.strip():
+        problems.append("no partial report renders")
+    return Check(
+        "the stopped run kept its run summary and a partial report",
+        not problems,
+        "; ".join(problems)
+        or f"incomplete reason: {record.incomplete_reason}; "
+        f"{len(record.run_summary.get('stages') or [])} stages in the run summary",
+    )
+
+
+# What a run whose deadline fired is held to: the in-process run has no report
+# to check; a job the worker's own job timeout stopped must have kept one.
 DEADLINE_CHECKS = (_check_job, _check_refusals, _check_recognised, _check_probe, _check_scenario)
+WORKER_DEADLINE_CHECKS = (*DEADLINE_CHECKS, _check_kept)
 
 
 def check_run(record: RunRecord) -> list[Check]:
     """Every check of the checklist over one run."""
-    checks = DEADLINE_CHECKS if record.scenario == "deadline_hit" else CHECKS
+    if record.scenario != "deadline_hit":
+        checks = CHECKS
+    elif stopped_by_the_worker(record):
+        checks = WORKER_DEADLINE_CHECKS
+    else:
+        checks = DEADLINE_CHECKS
     return [check(record) for check in checks]
 
 
@@ -781,6 +831,7 @@ def as_json(record: RunRecord, checks: list[Check]) -> dict[str, Any]:
         "passed": all(c.ok for c in checks),
         "verdict": record.verdict,
         "elapsed_s": round(record.elapsed_s, 2),
+        "incomplete_reason": record.incomplete_reason,
         "checks": [asdict(c) for c in checks],
         "signature": signature(record, checks),
         "observations": observations(record),

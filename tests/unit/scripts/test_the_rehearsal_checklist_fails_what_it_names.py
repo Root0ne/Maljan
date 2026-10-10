@@ -377,6 +377,39 @@ class TestTheHolesAGreenRunCouldHide:
         record.job_status = "completed"
         assert _failed(record) == ["job ended at its deadline as a failed job"]
 
+    def _stopped_by_the_worker(self) -> RunRecord:
+        note = "Stopped by the job timeout (20 s, core.job_timeout) 21 s into the run"
+        record = _record(scenario="deadline_hit", job_status="failed", job_error=note)
+        for entry in record.stub_log:
+            entry["delay"] = 2.0
+        record.scenario_params = {
+            "slow_seconds": 2.0,
+            "job_timeout_s": 20,
+            "deadline_by": "core.job_timeout",
+        }
+        record.elapsed_s = 24.0
+        record.incomplete_reason = note
+        return record
+
+    def test_a_job_the_worker_s_job_timeout_stopped_keeps_its_run_summary_and_report(
+        self,
+    ) -> None:
+        assert _failed(self._stopped_by_the_worker()) == []
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [("incomplete_reason", ""), ("run_summary", {}), ("markdown", "")],
+    )
+    def test_a_stopped_job_that_kept_nothing(self, field: str, value: Any) -> None:
+        record = self._stopped_by_the_worker()
+        setattr(record, field, value)
+        assert _failed(record) == ["the stopped run kept its run summary and a partial report"]
+
+    def test_a_job_stopped_by_anything_but_its_job_timeout(self) -> None:
+        record = self._stopped_by_the_worker()
+        record.job_error = "Cancelled by the operator"
+        assert _failed(record) == ["job stopped by core.job_timeout as a failed job"]
+
 
 class TestRepeatedRuns:
     def test_identical_runs_compare_equal(self) -> None:
