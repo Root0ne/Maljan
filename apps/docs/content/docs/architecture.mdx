@@ -3104,24 +3104,26 @@ and an import is not analysed: its functions come from the file's tables and
 no call or code reference is recorded, so callers, callees and
 cross-references read empty for every function, which read as "nothing calls
 it". The stored runs show each `load_program` a model made replacing the
-program the triage pass had analysed. So a job loads and analyses its sample
-once: the first load (the triage pass's, the one before the loop, or the
-model's) is followed by the switch and Ghidra's auto-analysis
-(`/run_analysis`, waited for without a limit), and the analysed program is
-noted on the job's Ghidra provider (`ghidra_program.JobPrograms`, one per job,
-never shared). Every later load of the same path in the job, before the loop
-or the model's own, is a `/switch_program` to the noted program, and the
-model's call is answered with the load's own recorded answer. Only a switch
-Ghidra does not confirm (after a restart, the program gone) forgets the note
-and loads, switches and analyses afresh. An analysis Ghidra did not confirm is
-logged and not noted, so the next load tries again.
-A Ghidra tool that takes a function by name or by address is sent only the
-arguments the call set, so a call with an address alone queries the address;
-its one-line answer, which Ghidra ends with the empty name ("No callees found
-for function: null", "Function not found: null"), ends with the address the
-call gave instead. The cross-reference tool's "No references found to
-function: null", which Ghidra also says for an address no function stands at,
-becomes "No function at 0x…, or no references to the one there".
+program the triage pass had analysed. The fix is not Ghidra's: any server whose
+open resets its analysis declares, as data in its settings block
+(`sample_open`), which tool opens a sample and optionally which selects one
+already open and which runs its analysis, and the general opener
+(`maljan.providers.sample_open`) keeps a note per job and per server of each
+path opened. A later open of the same path, by a model, the load before the
+loop, the triage pass or the function-hash pass, is answered from the note
+after the declared select; a select the server refuses opens and analyses the
+path afresh. Ghidra's block ships declaring `load_program`, `switch_program`
+and `run_analysis` (*A server whose open resets its analysis* in
+[configuration.md](/configuration/)).
+
+What stays in the Ghidra adapter is Ghidra's own transport and its own
+failures: the REST client (each tool is an endpoint, and the client makes a
+loaded program current, since Ghidra sets its current program only when none
+is), the path pin that replaces a model's path with the job's mirror (the mount
+Ghidra's container reads, kept even with no declaration), and the stop with a
+sentence naming that mount when the job's own sample does not open. Ghidra's
+answers are handed on as they came; the ledger entry beside an answer holds the
+arguments the call sent.
 
 **A model that fails as a provider.** An agent's entry under `llm.agents` may
 name an ordered list of models (`fallbacks`), held as one model object

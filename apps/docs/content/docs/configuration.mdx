@@ -2796,6 +2796,47 @@ CLI at, or an HTTP sidecar on another host that is handed paths rather than
 uploads. `ruleset` is held to the rule corpora instead: the repository's `data`
 tree and whatever `MALJAN_YARA_RULES_DIR` and `MALJAN_SIGMA_RULES_DIR` name.
 
+### A server whose open resets its analysis
+
+Some analysis servers reset what they have analysed when their "open the
+sample" tool is called again: Ghidra's `load_program` imports the file afresh in
+the place of the analysed program, and a disassembler's open may drop its
+analysis the same way. A model that opens the sample before each question then
+reads a program with no call or code reference. Each server's settings block,
+built-in or added, may declare which of its tools opens a sample under
+`sample_open`, and nothing in the platform names a server or a tool:
+
+| key | meaning |
+| :-- | :-- |
+| `open_tool` | the tool that opens a sample; empty declares nothing |
+| `path_argument` | the argument the path goes in (required with `open_tool`) |
+| `name_field` | the field of the open's JSON answer that names what was opened; empty means the path |
+| `select_tool` | the tool that selects a sample already open (optional) |
+| `select_argument` | the argument the opened name goes in |
+| `analyse_tool` | the tool that runs or awaits the server's analysis after the first open (optional) |
+| `analyse_argument` | the argument the opened name goes in; empty calls it with none |
+
+With `open_tool` set, the platform keeps a note per job and per server of each
+path once it has been opened, and analysed where `analyse_tool` is named. A
+later open of the same path, by a model or by one of the platform's own passes,
+is answered from the note with the first open's own answer and logged as such;
+where `select_tool` is named it is sent first, and only a select the server
+refuses (it restarted, the program is gone) opens and analyses the path afresh
+and writes the note again. An open the server refused, or an analysis it did
+not confirm, is not noted, so the next open tries again. A lock per path makes
+two first opens at once import once. The note belongs to one job and is never
+shared with another; a handle a static provider starts beside the registry's
+own session of the same server notes under a name of its own. The select and
+analysis tools are called even when the model is not offered them.
+
+Ghidra's block ships declaring `load_program` (path argument `file`, name field
+`program`), `switch_program` (argument `program`) and `run_analysis` (argument
+`program`), and its analysis tool's calls wait as long as Ghidra takes. A
+stored Ghidra block that never set `sample_open` carries that declaration; one
+an operator set, empty included, is kept as set. The fields are in the settings
+schema and catalogue now; the server editor's form for them is a follow-up, and
+until then a registry server's declaration is written in its JSON.
+
 ### A tool server that keeps failing is rested
 
 Per job and per tool server, three settings under **Tool servers → Resilience**:
