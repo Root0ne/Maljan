@@ -34,7 +34,7 @@ from maljan.loaders.binary_chunker import (
     TextChunk,
     joined_when_it_fits,
 )
-from maljan.pipeline.nodes import make_stage_agent_node
+from maljan.pipeline.nodes import agent_input_room, make_stage_agent_node
 from tests.stages import ANALYSIS_STAGE, paper_profile
 
 
@@ -328,6 +328,51 @@ class TestTheNode:
 
         agent.safe_analyze_isr.assert_not_called()
         agent.safe_analyze_isr_chunked.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# A revision path asks for the room by the agent's name
+# ---------------------------------------------------------------------------
+
+
+class TestARevisionChunksWhereTheFirstAnalysisDid:
+    def _container(self, room: int | None) -> MagicMock:
+        agent = _agent(room=room)
+        container = _container(agent, role="network", settings=_no_overlap())
+        container.parser_registry.create.side_effect = None
+        container.parser_registry.create.return_value.parse.return_value = "r" * 250_000
+        return container
+
+    def test_the_room_by_name_is_the_agent_s_own(self) -> None:
+        container = self._container(room=100_000)
+        container.get_agent.reset_mock()
+        room = agent_input_room(container, "network")
+        assert room("anything") == 100_000
+        container.get_agent.assert_called_once_with("network")
+
+    def test_the_input_splits_as_the_first_analysis_split_it(self) -> None:
+        container = self._container(room=100_000)
+        report = {"network": {"hosts": ["203.0.113.9"]}}
+        first = container.load_data_for_agent(
+            "network", file_hash="abc123", sandbox_report=report, room=_room(100_000)
+        )
+        again = container.load_data_for_agent(
+            "network",
+            file_hash="abc123",
+            sandbox_report=report,
+            room=agent_input_room(container, "network"),
+        )
+        assert [c.content for c in again] == [c.content for c in first]
+        assert [c.char_count for c in again] == [100_000, 100_000, 50_000]
+
+    def test_an_agent_that_cannot_be_built_gives_the_unknown_window_size(self) -> None:
+        container = self._container(room=100_000)
+        container.get_agent.side_effect = RuntimeError("no model")
+        chunks = container.loader.chunk_text(
+            "network", "r" * 200_000, room=agent_input_room(container, "network")
+        )
+        assert all(c.char_count <= UNKNOWN_WINDOW_CHUNK_TOKENS * _CHARS_PER_TOKEN for c in chunks)
+        assert len(chunks) == 3
 
 
 # ---------------------------------------------------------------------------

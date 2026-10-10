@@ -1968,6 +1968,22 @@ def input_room_of(agent: Any) -> Room:
     return room
 
 
+def agent_input_room(container: Any, agent_name: str) -> Room:
+    """The input room of agent ``agent_name``, for a caller that holds only its name.
+
+    What a revision path hands ``container.load_chunked`` and
+    ``container.load_data_for_agent`` (``room=``) so its input is chunked
+    where the agent's first analysis chunked it. An agent that cannot be built
+    has no room to give, and the chunker uses the unknown-window size.
+    """
+    try:
+        agent = container.get_agent(agent_name)
+    except Exception as exc:  # noqa: BLE001 — no agent is no measure, never a lost revision
+        logger.debug("input room: agent %r not built (%s)", agent_name, exc)
+        agent = None
+    return input_room_of(agent)
+
+
 def _measured(room: Room | None, text: str) -> int | None:
     """``room``'s answer for ``text`` when it measured one (a positive count), else ``None``."""
     chars = room(text) if room is not None else None
