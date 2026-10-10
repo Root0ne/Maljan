@@ -219,6 +219,20 @@ def with_unforced_structured_output(chat_class: Any) -> Any:
 
 
 _PROMPT_USAGE_CLASSES: dict[type, type] = {}
+_capture_skipped_said = threading.Event()
+
+
+def _say_capture_skipped(exc: BaseException) -> None:
+    """Warn once per process that a stream's prompt usage could not be read from its chunk."""
+    if _capture_skipped_said.is_set():
+        return
+    _capture_skipped_said.set()
+    logger.warning(
+        "anthropic provider: the chunk langchain-anthropic built from message_start has a "
+        "shape this reader does not know (%s); the stream is unaffected, and a stream that "
+        "breaks is charged by estimate without the prompt usage the provider reported.",
+        type(exc).__name__,
+    )
 
 
 def with_reported_prompt_usage(chat_class: Any) -> Any:
@@ -243,21 +257,33 @@ def with_reported_prompt_usage(chat_class: Any) -> Any:
     base: Any = chat_class
 
     def _make_message_chunk_from_anthropic_event(self: Any, event: Any, **kwargs: Any) -> Any:
-        message, block = base._make_message_chunk_from_anthropic_event(self, event, **kwargs)
-        if message is not None and getattr(event, "type", "") == "message_start":
-            usage = getattr(getattr(event, "message", None), "usage", None)
-            if usage is not None:
-                with contextlib.suppress(Exception):
-                    from langchain_anthropic.chat_models import _create_usage_metadata
+        result = base._make_message_chunk_from_anthropic_event(self, event, **kwargs)
+        if getattr(event, "type", "") != "message_start":
+            return result
+        # The base's result is handed back exactly as it came, whatever its
+        # shape: the capture is read from it inside this guard, and a shape it
+        # does not expect skips the capture alone.
+        try:
+            message, _block = result
+            metadata = message.response_metadata if message is not None else None
+            if message is not None and not isinstance(metadata, dict):
+                raise TypeError(type(metadata).__name__)
+        except Exception as exc:  # noqa: BLE001 — the stream is never touched
+            _say_capture_skipped(exc)
+            return result
+        usage = getattr(getattr(event, "message", None), "usage", None)
+        if isinstance(metadata, dict) and usage is not None:
+            with contextlib.suppress(Exception):
+                from langchain_anthropic.chat_models import _create_usage_metadata
 
-                    from maljan.llm.generation_rate import PROMPT_USAGE_KEY
+                from maljan.llm.generation_rate import PROMPT_USAGE_KEY
 
-                    reported: dict[str, Any] = dict(_create_usage_metadata(usage))
-                    reported["output_tokens"] = 0
-                    reported["total_tokens"] = int(reported.get("input_tokens") or 0)
-                    reported.pop("output_token_details", None)
-                    message.response_metadata[PROMPT_USAGE_KEY] = reported
-        return message, block
+                reported: dict[str, Any] = dict(_create_usage_metadata(usage))
+                reported["output_tokens"] = 0
+                reported["total_tokens"] = int(reported.get("input_tokens") or 0)
+                reported.pop("output_token_details", None)
+                metadata[PROMPT_USAGE_KEY] = reported
+        return result
 
     kept = type(
         chat_class.__name__,
