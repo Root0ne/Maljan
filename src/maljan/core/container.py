@@ -624,18 +624,14 @@ class ServiceContainer:
                     best = budget
         except Exception as exc:  # noqa: BLE001 — an unreadable assignment takes the derived cap
             logger.warning(
-                "Report stage: the reporter's list could not be budgeted (%s); its model "
-                "takes the analysts' derived cap instead of the report stage's order.",
+                "Report stage: the reporter's list could not be budgeted per model (%s); "
+                "its model takes the judge role's cap (llm.judge_max_tokens, or derived).",
                 exc,
             )
         if best is None:
-            tokens = self._output_cap("judge_max_tokens", REPORTER_AGENT_KEY, role="judge")
-            self._reporter_output_budget = (
-                tokens,
-                f"{tokens} tokens — the analysts' derivation",
-                0,
-            )
-            return tokens
+            cap = self._built_cap("judge_max_tokens", REPORTER_AGENT_KEY, role="judge")
+            self._reporter_output_budget = (int(cap.tokens), cap.sentence, 0)
+            return int(cap.tokens)
         rates = getattr(self, "_generation_rates", None)
         if rates is not None:
             rates.note_output_cap(REPORTER_AGENT_KEY, best.tokens, best.sentence())

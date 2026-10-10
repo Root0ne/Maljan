@@ -161,6 +161,22 @@ class TestAMillionTokenWindow:
         assert not [reason for reason in degradations if "window" in reason]
 
 
+class TestAListThatCannotBeBudgeted:
+    def test_the_reporter_takes_the_judge_roles_cap_and_says_so(self) -> None:
+        container = _container(200000, DEEPSEEK)
+        with (
+            patch(
+                "maljan.core.model_assignments.assignment_chain_for",
+                side_effect=ValueError("unreadable"),
+            ),
+            patch("maljan.llm.context_window.learn_window", return_value=_fact(200000)),
+        ):
+            narrative = container.get_narrative_agent()
+
+        assert narrative.budget_note.startswith("llm.judge_max_tokens is 0, so derived: ")
+        assert narrative.output_cap == int(narrative.budget_note.split(": ", 1)[1].split()[0])
+
+
 class TestAFailedProbeOnDeepSeek:
     """A DeepSeek window probe that fails lands on the vendored table, for every role."""
 
