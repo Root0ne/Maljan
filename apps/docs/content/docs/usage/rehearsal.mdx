@@ -103,8 +103,7 @@ A stack rehearsal's known product defects are rows of
 `tests/fixtures/rehearsal/known_defects.json` whose `wire` is `stack`. A check
 failing with exactly a row's detail is reported as `KNOWN DEFECT <id>` with the
 defect's description, and does not fail the run; a pinned check that passes asks
-for its row to be struck. Today: D5, a job stopped inside the report node keeps
-nothing (`--deadline-in report`).
+for its row to be struck. None is pinned today.
 
 `--configure harness` rehearses the harness's own fixed models and settings
 instead, with the same snapshot and restore; it touches no key. Without
@@ -182,7 +181,7 @@ single-call role once.
 | `schema_break` | Every first call answers in a form its reader cannot parse. |
 | `long_loop` | Every analyst calls tools for many steps (`--loop-steps`) before answering. |
 | `slow_model` | Every call waits a fixed time (`--slow-seconds`). |
-| `server_error_once` | Every first call is a 500. The Anthropic client retries it. An OpenAI analyst's call is not retried today, and that analyst is lost. |
+| `server_error_once` | Every first call is a 500. Both clients retry it, and no analyst is lost. |
 | `rate_limited` | Every first call is a 429 with `retry-after`. |
 | `overloaded` | Every first call is a 529 (503 on the OpenAI wire). |
 | `stream_error` | Every first streamed answer breaks off with an overloaded error mid-stream. |

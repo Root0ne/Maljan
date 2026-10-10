@@ -66,12 +66,23 @@ _PINNED = json.loads(PINS_FILE.read_text(encoding="utf-8"))
 KNOWN_DEFECTS: dict[tuple[str, str], dict[str, str]] = {}
 for _row in _PINNED["pins"]:
     KNOWN_DEFECTS.setdefault((_row["scenario"], _row["wire"]), {})[_row["check"]] = _row["detail"]
-# The numbers a run must show exactly. The defects' own (the same file's
-# ``observations``) and two clean ones: a mediator answer cut at its cap is
-# not mediated, and the answers in force go to the judge after one round.
+# The numbers a run must show exactly: any defect's own (the same file's
+# ``observations``) and the clean ones. A mediator answer cut at its cap is
+# not mediated, and the answers in force go to the judge after one round. A
+# clean debate takes 2 rounds and ends in consensus, also when every first
+# revision answer was empty, and no revision draws a citation retry.
+_CLEAN_DEBATE = {
+    "negotiation_rounds": 2,
+    "termination_reason": "consensus",
+    "isr.ungrounded_technique": None,
+}
 PINNED_OBSERVATIONS: dict[tuple[str, str], dict[str, object]] = {
     ("cut_at_cap", "openai"): {"negotiation_rounds": 1, "termination_reason": "not_mediated"},
     ("cut_at_cap", "anthropic"): {"negotiation_rounds": 1, "termination_reason": "not_mediated"},
+    ("normal", "openai"): dict(_CLEAN_DEBATE),
+    ("normal", "anthropic"): dict(_CLEAN_DEBATE),
+    ("empty_answer", "openai"): dict(_CLEAN_DEBATE),
+    ("empty_answer", "anthropic"): dict(_CLEAN_DEBATE),
 }
 for _row in _PINNED["observations"]:
     PINNED_OBSERVATIONS.setdefault((_row["scenario"], _row["wire"]), {})[_row["observation"]] = (
@@ -139,7 +150,7 @@ def test_a_deadline_aimed_at_the_report_stage_lands_there(tmp_path: Path, wire: 
     """The in-process deadline stops the run inside the report stage, every time.
 
     Against the stack the same aim stops the worker inside its report node,
-    where a stopped run keeps nothing today (``known_defects.json``, D5).
+    whose stopped run must keep its run summary, its usage and a partial report.
     """
     rehearsal = Rehearsal(
         scenario="deadline_hit", provider=wire, deadline_in="report", work_dir=tmp_path / "dl"

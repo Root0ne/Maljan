@@ -521,15 +521,25 @@ def test_a_deadline_rehearsal_names_the_job_timeout_it_sets(
 
 
 def test_a_stack_run_failing_as_a_known_defect_is_reported_as_that_defect(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from scripts.rehearsal.run import KNOWN_DEFECTS_FILE
+    from scripts.rehearsal import run
+    from scripts.rehearsal.checklist import Check
 
-    row = next(
-        r for r in json.loads(KNOWN_DEFECTS_FILE.read_text())["pins"] if r.get("wire") == "stack"
-    )
+    row = {
+        "id": "DX",
+        "scenario": "deadline_hit",
+        "wire": "stack",
+        "deadline_in": "report",
+        "check": "the stopped run kept its run summary and a partial report",
+        "detail": "no spend was kept; no token totals were kept for {n} answered call(s)",
+        "defect": "a defect described for the test",
+    }
+    pins_file = tmp_path / "known_defects.json"
+    pins_file.write_text(json.dumps({"pins": [row], "observations": []}))
+    monkeypatch.setattr(run, "KNOWN_DEFECTS_FILE", pins_file)
     record = RunRecord(
-        scenario=row["scenario"],
+        scenario="deadline_hit",
         job_status="failed",
         job_error="Stopped by the job timeout (40 s, core.job_timeout)",
         stub_log=[
@@ -540,36 +550,34 @@ def test_a_stack_run_failing_as_a_known_defect_is_reported_as_that_defect(
         scenario_params={
             "mode": "stack",
             "deadline_by": "core.job_timeout",
-            "deadline_in": row["deadline_in"],
+            "deadline_in": "report",
             "slow_roles": ["composer", "narrative"],
             "slow_seconds": 3600.0,
         },
         elapsed_s=50.0,
     )
-    from scripts.rehearsal import run
-
     real = run.check_run
 
     def pinned(rec: RunRecord) -> list[Any]:
-        from scripts.rehearsal.checklist import Check
+        shown = row["detail"].replace("{n}", "18")
+        return [Check(c.name, False, shown) if c.name == row["check"] else c for c in real(rec)]
 
-        return [
-            Check(c.name, False, row["detail"].replace("{n}", "18"))
-            if c.name == row["check"]
-            else c
-            for c in real(rec)
-        ]
-
-    import unittest.mock
-
-    with unittest.mock.patch.object(run, "check_run", pinned):
-        code = write_results([record], tmp_path)
+    monkeypatch.setattr(run, "check_run", pinned)
+    out = tmp_path / "out"
+    code = write_results([record], out)
     shown = capsys.readouterr().out
-    assert f"KNOWN DEFECT {row['id']}" in shown
-    result = json.loads((tmp_path / f"{row['scenario']}-run1.json").read_text())
-    assert result["known_defects"][0]["id"] == row["id"]
+    assert "KNOWN DEFECT DX" in shown
+    result = json.loads((out / "deadline_hit-run1.json").read_text())
+    assert result["known_defects"][0]["id"] == "DX"
     others = [c for c in result["checks"] if not c["ok"] and c["name"] != row["check"]]
     assert code == (1 if others else 0)
+
+
+def test_no_known_defect_is_pinned_today() -> None:
+    from scripts.rehearsal.run import KNOWN_DEFECTS_FILE
+
+    pinned = json.loads(KNOWN_DEFECTS_FILE.read_text())
+    assert pinned["pins"] == [] and pinned["observations"] == []
 
 
 def test_an_in_process_run_never_reads_the_stack_s_known_defects() -> None:
@@ -605,11 +613,3 @@ class TestAPinnedDetail:
         from scripts.rehearsal.run import detail_matches
 
         assert not detail_matches(self.PINNED, shown)
-
-    def test_the_d5_pin_counts_its_calls_with_the_placeholder(self) -> None:
-        from scripts.rehearsal.run import KNOWN_DEFECTS_FILE
-
-        row = next(
-            r for r in json.loads(KNOWN_DEFECTS_FILE.read_text())["pins"] if r.get("id") == "D5"
-        )
-        assert "{n} answered call(s)" in row["detail"]
