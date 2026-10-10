@@ -136,7 +136,7 @@ class TestTheStreamPageCarriesUsage:
         # The stream holds the progress events; ``seq`` 3 and 6 are usage and
         # live in the table alone. The table also holds 1 and 2 (written by an
         # earlier batch), which the stream holds too.
-        redis_conn = _Redis([_event(1), _event(2), _event(4), _event(5)])
+        redis_conn = _Redis([_event(1), _event(2), _event(4), _event(5), _event(7)])
         table = _Table(
             [
                 _Row(1, "agent_message"),
@@ -150,7 +150,7 @@ class TestTheStreamPageCarriesUsage:
     def test_the_whole_feed_holds_both_in_sequence_order(self) -> None:
         redis_conn, table = self._stores()
         events = asyncio.run(read_events(table, redis_conn, uuid.uuid4(), usage=True))
-        assert _seqs(events) == [1, 2, 3, 4, 5, 6]
+        assert _seqs(events) == [1, 2, 3, 4, 5, 6, 7]
         assert _types(events) == [
             "agent_message",
             "agent_message",
@@ -158,6 +158,7 @@ class TestTheStreamPageCarriesUsage:
             "agent_message",
             "agent_message",
             MODEL_USAGE,
+            "agent_message",
         ]
 
     def test_an_event_both_stores_hold_is_returned_once(self) -> None:
@@ -169,7 +170,7 @@ class TestTheStreamPageCarriesUsage:
     def test_the_cursor_applies_to_usage_too(self) -> None:
         redis_conn, table = self._stores()
         events = asyncio.run(read_events(table, redis_conn, uuid.uuid4(), since=3, usage=True))
-        assert _seqs(events) == [4, 5, 6]
+        assert _seqs(events) == [4, 5, 6, 7]
 
     def test_pages_walk_the_merged_feed_without_a_gap_or_a_repeat(self) -> None:
         redis_conn, table = self._stores()
@@ -184,7 +185,7 @@ class TestTheStreamPageCarriesUsage:
             assert len(page) <= 2
             seen += _seqs(page)
             cursor = max(_seqs(page))
-        assert seen == [1, 2, 3, 4, 5, 6]
+        assert seen == [1, 2, 3, 4, 5, 6, 7]
 
     def test_a_full_stream_page_takes_no_usage_beyond_its_last_event(self) -> None:
         """A usage event past a full page waits for the next page.
@@ -198,13 +199,67 @@ class TestTheStreamPageCarriesUsage:
         page = asyncio.run(read_events(table, redis_conn, uuid.uuid4(), limit=2, usage=True))
         assert _seqs(page) == [1, 2]
         page = asyncio.run(read_events(table, redis_conn, uuid.uuid4(), since=2, usage=True))
-        assert _seqs(page) == [3, 4, 9]
+        assert _seqs(page) == [3, 4]
+        # Past the stream's last event the stream has nothing newer, and the
+        # table, which holds every type, answers the rest.
+        page = asyncio.run(read_events(table, redis_conn, uuid.uuid4(), since=4, usage=True))
+        assert _seqs(page) == [9]
+
+    def test_a_short_page_takes_no_usage_beyond_its_last_event_either(self) -> None:
+        """A progress event can reach the stream after a usage event with a higher ``seq``.
+
+        The publisher takes the number first; a usage event is committed to
+        the table by its own flush while the progress event before it is still
+        on its way to the stream. A page read in between holds 1..9 from the
+        stream and usage 11 from the table: ending the page at 11 would put
+        the client's cursor past 10 for good.
+        """
+        redis_conn = _Redis([_event(seq) for seq in range(1, 10)])
+        table = _Table([_Row(seq, "agent_message") for seq in range(1, 10)] + [_usage_row(11)])
+        page = asyncio.run(read_events(table, redis_conn, uuid.uuid4(), usage=True))
+        assert _seqs(page) == list(range(1, 10))
+        # Progress event 10 reaches the stream and the table.
+        redis_conn = _Redis([_event(seq) for seq in range(1, 11)])
+        table.rows.append(_Row(10, "agent_message"))
+        page = asyncio.run(read_events(table, redis_conn, uuid.uuid4(), since=9, usage=True))
+        assert _seqs(page) == [10]
+        page = asyncio.run(read_events(table, redis_conn, uuid.uuid4(), since=10, usage=True))
+        assert _seqs(page) == [11]
+
+    def test_a_resume_inside_a_stream_longer_than_one_read_loses_nothing(self) -> None:
+        """The stream is trimmed approximately, so it holds more entries than one read takes.
+
+        ``maxlen=1000, approximate=True`` leaves roughly a thousand to eleven
+        hundred entries, and one read takes the oldest thousand. A resume
+        inside them gets a short page although newer stream entries exist;
+        the walk must still return every event once.
+        """
+        usage_seqs = set(range(10, 1201, 10))
+        progress = [seq for seq in range(1, 1201) if seq not in usage_seqs]
+        redis_conn = _Redis([_event(seq) for seq in progress[-1080:]])
+        table = _Table(
+            [
+                _usage_row(seq) if seq in usage_seqs else _Row(seq, "agent_message")
+                for seq in range(1, 1201)
+            ]
+        )
+        seen: list[int] = []
+        cursor = 600
+        for _ in range(20):
+            page = asyncio.run(
+                read_events(table, redis_conn, uuid.uuid4(), since=cursor, limit=500, usage=True)
+            )
+            if not page:
+                break
+            seen += _seqs(page)
+            cursor = max(_seqs(page))
+        assert seen == list(range(601, 1201))
 
     def test_a_reader_that_filters_by_type_finds_only_progress_in_the_rest(self) -> None:
         redis_conn, table = self._stores()
         events = asyncio.run(read_events(table, redis_conn, uuid.uuid4(), usage=True))
         progress = [e for e in events if e["type"] != MODEL_USAGE]
-        assert _seqs(progress) == [1, 2, 4, 5]
+        assert _seqs(progress) == [1, 2, 4, 5, 7]
         usage = [e for e in events if e["type"] == MODEL_USAGE]
         assert [e["data"]["input_tokens"] for e in usage] == [10, 20]
 

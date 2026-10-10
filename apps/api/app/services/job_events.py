@@ -140,17 +140,22 @@ async def _with_usage(
 ) -> list[dict[str, Any]]:
     """The stream's ``page`` with the table's ``model_usage`` events in its range, on ``seq``.
 
-    A page that came back full may end before the stream does, so a usage
-    event past its last ``seq`` is left for the next page: taking it would
-    move the client's cursor past the stream events between the two. An event
-    both stores hold is returned once.
+    No usage event past the page's highest ``seq`` is taken, on a full page
+    or a short one: taking it would move the client's cursor past stream
+    events the page does not hold. A page ends short of the stream's newest
+    event when it is full, when the stream holds more entries than one read
+    takes (its trim is approximate), and when a progress event numbered
+    before a usage event reaches the stream after the usage event was
+    committed. Usage past the stream's last event is not lost: once the
+    cursor reaches that event the stream has nothing newer, and the table,
+    which holds every type, answers. An event both stores hold is returned
+    once.
     """
     found = await _from_table(db, job_id, since, limit, usage=None)
     if not found:
         return page
-    if len(page) >= limit:
-        last = max((_seq_of(e) for e in page), default=0)
-        found = [e for e in found if _seq_of(e) <= last]
+    last = max((_seq_of(e) for e in page), default=0)
+    found = [e for e in found if _seq_of(e) <= last]
     unsequenced = [e for e in page if _seq_of(e) <= 0]
     merged: dict[int, dict[str, Any]] = {_seq_of(e): e for e in found}
     merged.update({_seq_of(e): e for e in page if _seq_of(e) > 0})
@@ -223,6 +228,16 @@ async def read_events(
     merged: dict[int, dict[str, Any]] = {}
     unsequenced: list[dict[str, Any]] = []
     table = await _from_table(db, job_id, since, limit, usage=usage)
+    if usage and from_stream:
+        # While the stream still has events after the cursor, a usage event
+        # past every progress event either store holds waits, for the reason
+        # ``_with_usage`` gives: a progress event numbered before it may be
+        # on its way to both stores still.
+        highest = max(
+            (_seq_of(e) for e in [*from_stream, *table] if e.get("type") != MODEL_USAGE),
+            default=0,
+        )
+        table = [e for e in table if e.get("type") != MODEL_USAGE or _seq_of(e) <= highest]
     for event in [*table, *from_stream]:
         seq = _seq_of(event)
         if seq <= 0:
