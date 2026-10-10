@@ -275,6 +275,13 @@ async def ltm_purge(
     # store that is unavailable.
     await end_read_transaction(db)
 
+    try:
+        return _purge(store, body, admin)
+    finally:
+        store.close()
+
+
+def _purge(store: MemoryStore, body: LTMPurgeRequest, admin: User) -> LTMPurgeResponse:
     backend_name = type(store).__name__
 
     if body.dry_run:

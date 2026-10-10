@@ -25,10 +25,10 @@ When to upgrade to QdrantStore:
 from __future__ import annotations
 
 from maljan.memory.embeddings import cosine, encode
-from maljan.memory.long_term_memory import StoredCase
+from maljan.memory.long_term_memory import MemoryStoreDefaults, StoredCase
 
 
-class InMemoryStore:
+class InMemoryStore(MemoryStoreDefaults):
     """Pure-Python MemoryStore implementation backed by semantic embeddings.
 
     Thread safety: NOT thread-safe. For single-threaded pipelines this is
@@ -126,14 +126,6 @@ class InMemoryStore:
         before = len(self._cases)
         self._cases = [(c, v) for c, v in self._cases if not _low_quality(c)]
         return before - len(self._cases)
-
-    def readiness(self) -> str:
-        """Always ready: the cases live in this process."""
-        return "in process"
-
-    def function_hash_store(self) -> None:
-        """This backend keeps no function hashes."""
-        return None
 
     def __repr__(self) -> str:
         return f"InMemoryStore(count={self.count()})"

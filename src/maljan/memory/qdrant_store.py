@@ -26,8 +26,8 @@ Design notes:
 
 Configuration (.env):
   MEMORY__BACKEND=qdrant
-  MEMORY__QDRANT_URL=http://localhost:6333
-  MEMORY__QDRANT_COLLECTION=maljan_cases_v2
+  MEMORY__QDRANT__URL=http://localhost:6333
+  MEMORY__QDRANT__COLLECTION=maljan_cases_v2
   MEMORY__TOP_K=3
 """
 
@@ -354,6 +354,13 @@ class QdrantStore:
         return FunctionHashStore(
             url=self._url, collection=self._function_hash_collection, client=self._client
         )
+
+    def close(self) -> None:
+        """Close the client (and with it any function-hash store sharing it)."""
+        try:
+            self._client.close()
+        except Exception as exc:  # noqa: BLE001 — closing never fails the caller
+            logger.debug("QdrantStore.close: %s", exc)
 
     def __repr__(self) -> str:
         return (

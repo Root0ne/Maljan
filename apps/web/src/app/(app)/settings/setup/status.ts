@@ -95,9 +95,11 @@ function agentStatus(effective: EffectiveValue): string {
 
 function memoryStatus(effective: EffectiveValue): string {
   const backend = text(effective("core.memory.backend")) || "memory";
-  if (backend !== "qdrant") return "memory (in-process)";
-  const url = text(effective("core.memory.qdrant_url"));
-  return `qdrant · ${url || "no URL set"}`;
+  // A backend with an endpoint declares it as `core.memory.<id>.url`; one
+  // without (the in-process store) has no such key.
+  const url = effective(`core.memory.${backend}.url`);
+  if (url === undefined) return backend;
+  return `${backend} · ${text(url) || "no URL set"}`;
 }
 
 function enrichmentStatus(effective: EffectiveValue, isSet: IsSet): string {

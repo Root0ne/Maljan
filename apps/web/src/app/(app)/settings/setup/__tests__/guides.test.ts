@@ -55,10 +55,26 @@ const KEYS = [
   "core.sandbox.rest.report.path",
   "core.sandbox.rest.report.format",
   "core.memory.backend",
+  "core.memory.qdrant.url",
+  "core.memory.qdrant.api_key",
+  "core.memory.vectorhub.endpoint",
+  "core.memory.top_k",
 ];
 
+/** The probe each catalog entry declares, as the catalogue annotations do. */
+const PROBES: Record<string, string> = {
+  "core.memory.qdrant.url": "qdrant",
+};
+
 const schema: SettingsSchema = {
-  groups: [{ key: "all", title: "All", description: "", entries: KEYS.map(entry) }],
+  groups: [
+    {
+      key: "all",
+      title: "All",
+      description: "",
+      entries: KEYS.map((key) => ({ ...entry(key), probe: PROBES[key] ?? null })),
+    },
+  ],
 };
 
 function context(
@@ -307,20 +323,33 @@ describe("the agent guide", () => {
 });
 
 describe("the memory guide", () => {
-  it("skips the Qdrant steps for the in-process backend", () => {
+  it("asks a backend with no keys of its own for nothing more", () => {
     expect(stepIds("memory", context({ "core.memory.backend": "memory" }))).toEqual([
       "backend",
       "review",
     ]);
-    expect(stepIds("memory", context({ "core.memory.backend": "qdrant" }))).toEqual([
-      "backend",
-      "qdrant",
-      "test",
-      "review",
-    ]);
   });
 
-  it("blocks the Qdrant test until it has passed", () => {
+  it("asks for the keys under the backend's id and tests with the probe they declare", () => {
+    const qdrant = context({ "core.memory.backend": "qdrant" });
+    expect(stepIds("memory", qdrant)).toEqual(["backend", "connection", "test", "review"]);
+    const connection = guideById("memory")!
+      .steps(qdrant)
+      .find((s) => s.id === "connection");
+    expect(connection?.keys).toEqual([
+      "core.memory.qdrant.url",
+      "core.memory.qdrant.api_key",
+      "core.memory.top_k",
+    ]);
+    expect(guideById("memory")!.steps(qdrant).find((s) => s.id === "test")?.probe).toBe("qdrant");
+  });
+
+  it("offers a backend whose keys declare no probe its keys and no test", () => {
+    const other = context({ "core.memory.backend": "vectorhub" });
+    expect(stepIds("memory", other)).toEqual(["backend", "connection", "review"]);
+  });
+
+  it("blocks the test until it has passed", () => {
     const values = { "core.memory.backend": "qdrant" };
     expect(blockedReason("memory", "test", context(values))).toBe("run the test first");
     expect(blockedReason("memory", "test", context(values, { probes: ["qdrant"] }))).toBeNull();

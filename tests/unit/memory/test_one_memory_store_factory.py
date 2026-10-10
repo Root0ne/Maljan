@@ -10,11 +10,13 @@ registered at run time is used by the same callers unchanged.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from pydantic import BaseModel, SecretStr
 
 from maljan.core.config import Settings
 from maljan.core.exceptions import MemoryStoreError
@@ -42,7 +44,11 @@ class _FakeQdrant:
         }
         self.scroll_calls = 0
         self.deleted: list[Any] = []
+        self.closed = 0
         _FakeQdrant.built.append(self)
+
+    def close(self) -> None:
+        self.closed += 1
 
     def get_collections(self) -> Any:
         if self.down:
@@ -88,12 +94,19 @@ class _FakeQdrant:
 
 
 @pytest.fixture(autouse=True)
-def _fake_qdrant(monkeypatch: pytest.MonkeyPatch) -> type[_FakeQdrant]:
+def _fake_qdrant(monkeypatch: pytest.MonkeyPatch) -> Iterator[type[_FakeQdrant]]:
     _FakeQdrant.built = []
     _FakeQdrant.down = False
     _FakeQdrant.seed = {}
     monkeypatch.setattr("qdrant_client.QdrantClient", _FakeQdrant)
-    return _FakeQdrant
+    store_factory.forget_built_stores()
+    yield _FakeQdrant
+    store_factory.forget_built_stores()
+
+
+class _ThirdSettings(BaseModel):
+    endpoint: str = "http://store:9000"
+    token: SecretStr | None = None
 
 
 @pytest.fixture
@@ -120,21 +133,36 @@ def third_backend() -> Any:
     hashes.upsert_sample("older", "FamilyA", [("h1", "f1"), ("h2", "f2")])
 
     class _Third(InMemoryStore):
+        def __init__(self, endpoint: str) -> None:
+            super().__init__()
+            self.endpoint = endpoint
+
         def readiness(self) -> str:
-            return "third backend ready"
+            return f"third backend ready at {self.endpoint}"
 
         def function_hash_store(self) -> Any:
             return hashes
 
-    store_factory.register_memory_backend("third", lambda _memory: _Third())
-    yield SimpleNamespace(memory=SimpleNamespace(backend="third"))
+    def _build(memory: Any) -> _Third:
+        return _Third(store_factory.backend_settings(memory, "third").endpoint)
+
+    store_factory.register_memory_backend(
+        "third",
+        _build,
+        settings_model=_ThirdSettings,
+        annotations={"endpoint": {"title": "Third endpoint", "description": "Where it is."}},
+    )
+    yield Settings(
+        _env_file=None, memory={"backend": "third", "third": {"endpoint": "http://third:1"}}
+    )
     store_factory._BACKENDS.pop("third", None)
+    store_factory.forget_built_stores()
 
 
 def _settings(backend: str) -> Settings:
     return Settings(
         _env_file=None,
-        memory={"backend": backend, "qdrant_url": URL, "qdrant_api_key": "k"},
+        memory={"backend": backend, "qdrant": {"url": URL, "api_key": "k"}},
     )
 
 
@@ -196,7 +224,7 @@ class TestTheFactoryBuildsTheConfiguredStore:
     def test_a_registered_backend_is_built_like_the_shipped_ones(self, third_backend: Any) -> None:
         assert "third" in store_factory.memory_backends()
         store = store_factory.build_memory_store(third_backend)
-        assert store.readiness() == "third backend ready"
+        assert store.readiness() == "third backend ready at http://third:1"
 
     def test_an_empty_id_cannot_be_registered(self) -> None:
         with pytest.raises(ValueError):
@@ -245,7 +273,7 @@ class TestReadiness:
         _FakeQdrant.down = True
         cfg = Settings(
             _env_file=None,
-            memory={"backend": "qdrant", "qdrant_url": "http://user:pw-123@q:6333"},
+            memory={"backend": "qdrant", "qdrant": {"url": "http://user:pw-123@q:6333"}},
         )
         with pytest.raises(MemoryStoreError) as raised:
             store_factory.build_memory_store(cfg).readiness()
@@ -291,8 +319,8 @@ class TestTheEnrichWorkerReadsTheConfiguredBackend:
         assert [c.url for c in _FakeQdrant.built] == [URL]
 
     def test_a_registered_backend(self, third_backend: Any) -> None:
-        store = self._built(SimpleNamespace(memory=third_backend.memory))
-        assert store.readiness() == "third backend ready"
+        store = self._built(third_backend)
+        assert store.readiness() == "third backend ready at http://third:1"
 
 
 class TestThePurgeRouteAsksTheStore:
@@ -309,7 +337,7 @@ class TestThePurgeRouteAsksTheStore:
         app.include_router(router, prefix="/api/v1")
         app.dependency_overrides[require_admin] = lambda: SimpleNamespace(id="admin")
         app.dependency_overrides[get_db] = lambda: AsyncMock()
-        overrides = {"memory.backend": backend, "memory.qdrant_url": URL}
+        overrides = {"memory.backend": backend, "memory.qdrant.url": URL}
         with patch(
             "app.services.settings_service.load_core_overrides",
             AsyncMock(return_value=overrides),
@@ -378,7 +406,7 @@ class TestHealthProbesTheConfiguredBackend:
         assert component == {"ok": None, "error": None, "backend": "x", "detail": "not configured"}
 
     def test_a_registered_backend_is_probed(self, third_backend: Any) -> None:
-        component = self._memory_component(SimpleNamespace(memory=third_backend.memory))
+        component = self._memory_component(third_backend)
         assert component["ok"] is True and component["backend"] == "third"
 
 
@@ -413,17 +441,33 @@ class TestTheFunctionMatchStepUsesTheConfiguredBackend:
         }
         assert [m["family"] for m in value["matches"]] == ["FamilyA"]
 
-    def test_a_store_that_cannot_be_built_still_says_why(self, monkeypatch: Any) -> None:
+    def test_a_store_that_cannot_be_built_still_says_why_naming_no_password(
+        self, monkeypatch: Any
+    ) -> None:
         def _broken(_memory: Any) -> Any:
-            raise MemoryStoreError("client library missing")
+            raise MemoryStoreError("client library missing for http://user:pw-123@q:6333")
 
-        monkeypatch.setitem(store_factory._BACKENDS, "qdrant", _broken)
+        monkeypatch.setitem(
+            store_factory._BACKENDS, "qdrant", store_factory.MemoryBackend("qdrant", _broken)
+        )
         _args, value = self._step(_settings("qdrant"))()
         assert value["matches"] == []
         assert "client library missing" in value["reason"]
+        assert "pw-123" not in value["reason"]
+
+    def test_no_store_is_built_for_a_provider_that_cannot_hash(self) -> None:
+        from maljan.pipeline.nodes import _function_matches_step
+
+        provider = SimpleNamespace(capabilities=SimpleNamespace(provides_function_hashes=False))
+        container = SimpleNamespace(
+            config=_settings("qdrant"), get_static_provider=lambda: provider
+        )
+        state = {"static_sample_path": "/mirror/s.bin", "file_hash": "this"}
+        assert _function_matches_step(container, state) is None  # type: ignore[arg-type]
+        assert _FakeQdrant.built == []
 
     def test_a_registered_backend(self, third_backend: Any) -> None:
-        _args, value = self._step(SimpleNamespace(memory=third_backend.memory))()
+        _args, value = self._step(third_backend)()
         assert [(m["func_hash"], m["family"]) for m in value["matches"]] == [("h1", "FamilyA")]
 
 
@@ -476,3 +520,208 @@ class TestTheCommandLineUsesTheFactory:
         assert result.exit_code == 0, result.output
         assert "would remove 2 of 3 cases" in result.output
         assert _FakeQdrant.built[-1].deleted == []
+
+
+class TestABackendIsSelectedAndConfiguredThroughTheSettings:
+    def test_an_unregistered_backend_is_refused_by_the_settings(self) -> None:
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="not a registered memory backend"):
+            Settings(_env_file=None, memory={"backend": "vectorhub"})
+
+    def test_a_registered_backend_reads_its_own_settings_under_its_id(
+        self, third_backend: Any
+    ) -> None:
+        own = store_factory.backend_settings(third_backend, "third")
+        assert isinstance(own, _ThirdSettings) and own.endpoint == "http://third:1"
+
+    def test_its_settings_reach_the_catalogue_with_the_annotations_it_registered(
+        self, third_backend: Any
+    ) -> None:
+        from maljan.core.settings_catalog import core_catalog
+
+        by_key = {e.key: e for e in core_catalog()}
+        assert by_key["core.memory.third.endpoint"].title == "Third endpoint"
+        assert by_key["core.memory.third.token"].secret is True
+        assert "third" in by_key["core.memory.backend"].choices
+
+    def test_the_backend_choice_is_the_registry(self) -> None:
+        from maljan.core.settings_catalog import core_catalog
+
+        (entry,) = [e for e in core_catalog() if e.key == "core.memory.backend"]
+        assert entry.type == "enum"
+        assert entry.choices == list(store_factory.memory_backends())
+
+    def test_an_installed_package_registers_through_its_entry_point(self, monkeypatch: Any) -> None:
+        def _register() -> None:
+            store_factory.register_memory_backend("packaged", lambda _m: InMemoryStore())
+
+        point = SimpleNamespace(name="packaged", load=lambda: _register)
+        monkeypatch.setattr(store_factory, "entry_points", lambda group: [point])
+        monkeypatch.setattr(store_factory, "_entry_points_loaded", False)
+        try:
+            assert "packaged" in store_factory.memory_backends()
+            cfg = Settings(_env_file=None, memory={"backend": "packaged"})
+            assert isinstance(store_factory.build_memory_store(cfg), InMemoryStore)
+        finally:
+            store_factory._BACKENDS.pop("packaged", None)
+
+    def test_a_broken_entry_point_leaves_the_others_registered(self, monkeypatch: Any) -> None:
+        def _boom() -> None:
+            raise RuntimeError("broken package")
+
+        point = SimpleNamespace(name="broken", load=lambda: _boom)
+        monkeypatch.setattr(store_factory, "entry_points", lambda group: [point])
+        monkeypatch.setattr(store_factory, "_entry_points_loaded", False)
+        assert {"memory", "qdrant"} <= set(store_factory.memory_backends())
+
+
+class TestTheOldFlatKeysAreStillRead:
+    def test_flat_keys_land_under_the_backend(self) -> None:
+        cfg = Settings(
+            _env_file=None,
+            memory={
+                "qdrant_url": URL,
+                "qdrant_collection": "cases",
+                "qdrant_function_hash_collection": "hashes",
+                "qdrant_api_key": "k",
+            },
+        )
+        own = cfg.memory.qdrant
+        assert (own.url, own.collection, own.function_hash_collection) == (URL, "cases", "hashes")
+        assert own.api_key is not None and own.api_key.get_secret_value() == "k"
+
+    def test_a_nested_value_wins_over_a_flat_one(self) -> None:
+        cfg = Settings(
+            _env_file=None, memory={"qdrant_url": "http://old:1", "qdrant": {"url": URL}}
+        )
+        assert cfg.memory.qdrant.url == URL
+
+    def test_an_older_export_imports_onto_the_new_keys(self) -> None:
+        from app.api.v1.settings import _current_keys
+
+        assert _current_keys(
+            {"core.memory.qdrant_url": "http://old:1", "core.memory.top_k": 4}
+        ) == {"core.memory.top_k": 4, "core.memory.qdrant.url": "http://old:1"}
+        both = {"core.memory.qdrant_url": "http://old:1", "core.memory.qdrant.url": URL}
+        assert _current_keys(both) == {"core.memory.qdrant.url": URL}
+
+
+class TestABackendWithoutTheNewMethods:
+    def test_one_built_on_the_defaults_degrades_like_any_other(self) -> None:
+        from maljan.memory.long_term_memory import MemoryStoreDefaults
+
+        class _Plain(MemoryStoreDefaults):
+            def store(self, case: Any) -> None: ...
+            def retrieve(self, query: str, top_k: int = 3, exclude_sample_id: Any = None) -> list:
+                return []
+
+            def count(self) -> int:
+                return 0
+
+            def clear(self) -> None: ...
+            def purge_low_quality(self, **_kwargs: Any) -> int:
+                return 0
+
+        store_factory.register_memory_backend("plain", lambda _m: _Plain())
+        try:
+            cfg = SimpleNamespace(backend="plain")
+            assert store_factory.build_memory_store(cfg).readiness() == "in process"
+            assert store_factory.build_function_hash_store(cfg) is None
+        finally:
+            store_factory._BACKENDS.pop("plain", None)
+
+    def test_one_lacking_the_interface_is_refused_naming_what_it_lacks(self) -> None:
+        class _Old:
+            def store(self, case: Any) -> None: ...
+
+        store_factory.register_memory_backend("old", lambda _m: _Old())
+        try:
+            with pytest.raises(MemoryStoreError, match="readiness"):
+                store_factory.build_memory_store(SimpleNamespace(backend="old"))
+        finally:
+            store_factory._BACKENDS.pop("old", None)
+
+
+class TestHealthNamesTheBackendOnEveryAnswer:
+    def test_a_builder_that_raises_is_a_failure_naming_the_backend_and_no_password(
+        self, monkeypatch: Any
+    ) -> None:
+        def _broken(_memory: Any) -> Any:
+            raise MemoryStoreError("bad address http://user:pw-123@q:6333")
+
+        monkeypatch.setitem(
+            store_factory._BACKENDS, "qdrant", store_factory.MemoryBackend("qdrant", _broken)
+        )
+        component = TestHealthProbesTheConfiguredBackend._memory_component(_settings("qdrant"))
+        assert component["ok"] is False and component["backend"] == "qdrant"
+        assert "pw-123" not in component["error"]
+
+    def test_an_unreachable_store_names_its_backend(self) -> None:
+        _FakeQdrant.down = True
+        component = TestHealthProbesTheConfiguredBackend._memory_component(_settings("qdrant"))
+        assert component["backend"] == "qdrant"
+
+    def test_the_probe_closes_what_it_built(self) -> None:
+        TestHealthProbesTheConfiguredBackend._memory_component(_settings("qdrant"))
+        assert [c.closed for c in _FakeQdrant.built] == [1]
+        _FakeQdrant.down = True
+        TestHealthProbesTheConfiguredBackend._memory_component(_settings("qdrant"))
+        assert [c.closed for c in _FakeQdrant.built] == [1, 1]
+
+
+class TestTheFunctionHashStoreIsBuiltOncePerSettings:
+    def test_asked_twice_one_client(self) -> None:
+        first = store_factory.build_function_hash_store(_settings("qdrant"))
+        second = store_factory.build_function_hash_store(_settings("qdrant"))
+        assert first is second and len(_FakeQdrant.built) == 1
+
+    def test_other_settings_another_store(self) -> None:
+        store_factory.build_function_hash_store(_settings("qdrant"))
+        other = Settings(_env_file=None, memory={"qdrant": {"url": URL, "api_key": "other"}})
+        store_factory.build_function_hash_store(other)
+        assert [c.api_key for c in _FakeQdrant.built] == ["k", "other"]
+
+
+class TestTheJudgeReadsAndHoldsThroughTheConfiguredBackend:
+    @staticmethod
+    def _run(config: Any) -> tuple[list[dict[str, Any]], Any, list[str]]:
+        from maljan.pipeline import nodes
+
+        asked: list[str] = []
+
+        def _hashes(job: Any) -> list[tuple[str, str]]:
+            asked.append(job.mirror_sample_path)
+            return [("f1", "h1"), ("f2", "h2")]
+
+        provider = SimpleNamespace(
+            capabilities=SimpleNamespace(provides_function_hashes=True), function_hashes=_hashes
+        )
+        container = SimpleNamespace(
+            config=config, get_static_provider=lambda: provider, pending_function_hashes=None
+        )
+        state = {"static_sample_path": "/mirror/s.bin", "file_hash": "this"}
+        with (
+            patch("maljan.core.config.get_settings", return_value=config),
+            patch.object(nodes, "_assessed_family", return_value="FamilyB"),
+        ):
+            report = nodes._function_hash_attribution(container, state, bundle=None)  # type: ignore[arg-type]
+        return report, container.pending_function_hashes, asked
+
+    def test_a_backend_without_function_hashes_holds_nothing_and_asks_nothing(self) -> None:
+        report, held, asked = self._run(_settings("memory"))
+        assert (report, held, asked) == ([], None, [])
+
+    def test_qdrant_reads_and_holds_its_function_hash_collection(self) -> None:
+        _FakeQdrant.seed = {
+            "maljan_function_hashes_v1": {
+                1: {"func_hash": "h1", "family": "FamilyA", "sample_id": "older", "func_name": "f1"}
+            }
+        }
+        report, held, asked = self._run(_settings("qdrant"))
+        assert [row["family"] for row in report] == ["FamilyA"]
+        store, sample_id, family, functions = held
+        assert isinstance(store, FunctionHashStore)
+        assert store._collection == "maljan_function_hashes_v1"
+        assert (sample_id, family, functions) == ("this", "FamilyB", [("f1", "h1"), ("f2", "h2")])
+        assert asked == ["/mirror/s.bin"]

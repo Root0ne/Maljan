@@ -30,6 +30,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
+    ConfigDict,
     Field,
     SecretStr,
     SerializerFunctionWrapHandler,
@@ -820,40 +821,124 @@ class ChunkingConfig(BaseModel):
     skip_if_fits: bool = True
 
 
+class QdrantMemoryConfig(BaseModel):
+    """``memory.qdrant.*``: the Qdrant backend's server and collections."""
+
+    url: str = "http://localhost:6333"
+    # v2 collection name — created with fastembed/BGE 384-dim vectors. Operators
+    # upgrading from the pre-fastembed era (which used 512-dim hash vectors in
+    # a collection named ``maljan_cases``) should either point at this fresh
+    # name or delete the old collection explicitly.
+    collection: str = "maljan_cases_v2"
+    # Function-hash attribution tier (deterministic, exact opcode-hash match).
+    # A separate collection stores per-function normalized-opcode hashes keyed
+    # to the malware family, so a new sample sharing functions with a known one
+    # yields a high-precision family link. Independent of the semantic
+    # ``collection`` above (which does fuzzy prose retrieval).
+    function_hash_collection: str = "maljan_function_hashes_v1"
+    # Sent with every request when the server enforces one (compose does, via
+    # QDRANT__SERVICE__API_KEY). Empty means no authentication, which is fine
+    # for a loopback-only server.
+    api_key: SecretStr | None = None
+
+
+# The flat ``memory.<backend>_<leaf>`` keys stored before each backend's
+# settings moved under ``memory.<backend>.*``, and the leaf each now is. Read
+# wherever settings arrive (an environment, an older export, a settings row a
+# migration has not reached yet), so none of them is silently dropped.
+LEGACY_MEMORY_KEYS: dict[str, tuple[str, str]] = {
+    "qdrant_url": ("qdrant", "url"),
+    "qdrant_collection": ("qdrant", "collection"),
+    "qdrant_function_hash_collection": ("qdrant", "function_hash_collection"),
+    "qdrant_api_key": ("qdrant", "api_key"),
+}
+
+
 class MemoryConfig(BaseModel):
     """Long-Term Memory configuration.
 
     Controls which backend is used to store and retrieve past analysis
     cases for few-shot context injection in JudgeAgent.give_verdict().
 
-    backend:            "memory" (default) uses InMemoryStore — no external
-                        dependencies. "qdrant" uses QdrantStore which requires
-                        a running Qdrant instance and the qdrant-client package.
-    qdrant_url:         Qdrant server URL (only used when backend="qdrant").
-    qdrant_collection:  Qdrant collection name for Maljan cases.
-    top_k:              Maximum number of similar cases to inject into the
-                        judge prompt. Higher values provide more context but
-                        increase prompt length.
+    backend:  the id of a registered memory backend
+              (``maljan.memory.store_factory``): ``memory`` keeps cases in
+              process with no external dependency, ``qdrant`` in a Qdrant
+              server. An id no backend registered is refused.
+    <id>:     each backend's own settings, ``memory.<id>.*``. A backend
+              registered by an installed package is read with the settings
+              model it registered.
+    top_k:    Maximum number of similar cases to inject into the judge
+              prompt. Higher values provide more context but increase prompt
+              length.
     """
 
-    backend: Literal["memory", "qdrant"] = "qdrant"
-    qdrant_url: str = "http://localhost:6333"
-    # v2 collection name — created with fastembed/BGE 384-dim vectors. Operators
-    # upgrading from the pre-fastembed era (which used 512-dim hash vectors in
-    # a collection named ``maljan_cases``) should either point at this fresh
-    # name or delete the old collection explicitly.
-    qdrant_collection: str = "maljan_cases_v2"
+    model_config = ConfigDict(extra="allow")
+
+    backend: str = "qdrant"
     top_k: Annotated[int, Field(ge=1)] = 3
-    # Function-hash attribution tier (deterministic, exact opcode-hash match).
-    # A separate Qdrant collection stores per-function normalized-opcode hashes
-    # keyed to the malware family, so a new sample sharing functions with a
-    # known one yields a high-precision family link. Independent of the
-    # semantic ``qdrant_collection`` above (which does fuzzy prose retrieval).
-    qdrant_function_hash_collection: str = "maljan_function_hashes_v1"
-    # Sent with every Qdrant request when the server enforces one (compose
-    # does, via QDRANT__SERVICE__API_KEY). Empty means no authentication,
-    # which is fine for a loopback-only server.
-    qdrant_api_key: SecretStr | None = None
+    qdrant: QdrantMemoryConfig = Field(default_factory=QdrantMemoryConfig)
+
+    # Read-only views of the old flat names, for the one reader that has not
+    # moved to the factory yet (``ServiceContainer.get_memory_store``); they
+    # go when it does.
+    @property
+    def qdrant_url(self) -> str:
+        return self.qdrant.url
+
+    @property
+    def qdrant_collection(self) -> str:
+        return self.qdrant.collection
+
+    @property
+    def qdrant_api_key(self) -> SecretStr | None:
+        return self.qdrant.api_key
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_flat_keys(cls, data: Any) -> Any:
+        """Move each flat ``<backend>_<leaf>`` key under its backend; a nested value wins."""
+        if not isinstance(data, Mapping) or not any(k in data for k in LEGACY_MEMORY_KEYS):
+            return data
+        out = dict(data)
+        for flat, (backend, leaf) in LEGACY_MEMORY_KEYS.items():
+            if flat not in out:
+                continue
+            value = out.pop(flat)
+            own = out.get(backend)
+            if isinstance(own, BaseModel):
+                own = own.model_dump()
+            own = dict(own) if isinstance(own, Mapping) else {}
+            own.setdefault(leaf, value)
+            out[backend] = own
+        return out
+
+    @field_validator("backend", mode="before")
+    @classmethod
+    def _registered_backend(cls, value: Any) -> str:
+        from maljan.memory.store_factory import memory_backends
+
+        backend = str(value or "").strip().lower()
+        known = memory_backends()
+        if backend not in known:
+            raise ValueError(
+                f"{backend!r} is not a registered memory backend (known: {', '.join(known)})"
+            )
+        return backend
+
+    @model_validator(mode="after")
+    def _registered_backend_settings(self) -> "MemoryConfig":
+        """Read each registered backend's ``memory.<id>`` with the model it registered."""
+        from maljan.memory.store_factory import registered_backends
+
+        extra = self.__pydantic_extra__ or {}
+        for backend_id, backend in registered_backends().items():
+            model = backend.settings_model
+            if model is None or backend_id in type(self).model_fields:
+                continue
+            raw = extra.get(backend_id)
+            if raw is None or not isinstance(raw, model):
+                extra[backend_id] = model.model_validate(raw or {})
+        return self
 
 
 class PreprocessingConfig(BaseModel):

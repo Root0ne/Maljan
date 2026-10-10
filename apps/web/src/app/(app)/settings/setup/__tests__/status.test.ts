@@ -121,18 +121,25 @@ describe("guideStatus", () => {
     );
   });
 
-  it("names the memory backend and the Qdrant URL when there is one", () => {
+  it("names the memory backend, and its URL when the backend declares one", () => {
     const mem = ctx({ "core.memory.backend": "memory" });
-    expect(guideStatus("memory", mem.effective, mem.isSet)).toBe("memory (in-process)");
+    expect(guideStatus("memory", mem.effective, mem.isSet)).toBe("memory");
     const qdrant = ctx({
       "core.memory.backend": "qdrant",
-      "core.memory.qdrant_url": "http://localhost:6333",
+      "core.memory.qdrant.url": "http://localhost:6333",
     });
     expect(guideStatus("memory", qdrant.effective, qdrant.isSet)).toBe(
       "qdrant · http://localhost:6333"
     );
-    const noUrl = ctx({ "core.memory.backend": "qdrant", "core.memory.qdrant_url": "" });
+    const noUrl = ctx({ "core.memory.backend": "qdrant", "core.memory.qdrant.url": "" });
     expect(guideStatus("memory", noUrl.effective, noUrl.isSet)).toBe("qdrant · no URL set");
+    const other = ctx({
+      "core.memory.backend": "vectorhub",
+      "core.memory.vectorhub.url": "http://store:9000",
+    });
+    expect(guideStatus("memory", other.effective, other.isSet)).toBe(
+      "vectorhub · http://store:9000"
+    );
   });
 
   it("reports enrichment on or off and which keys are set", () => {

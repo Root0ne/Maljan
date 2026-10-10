@@ -3243,11 +3243,29 @@ the enrichment worker, the API's purge and its dry run, `/health?deep=true`,
 the function-hash attribution steps and the command line. No caller names a
 backend. Each backend implements the one `MemoryStore` interface — store,
 retrieve, count, clear, `purge_low_quality` (with `dry_run=True` counting what
-the same gate would remove), `readiness()` and `function_hash_store()` — and
-says what it cannot do through it: the in-process backend's
+the same gate would remove), `readiness()`, `function_hash_store()` and
+`close()` — and says what it cannot do through it: the in-process backend's
 `function_hash_store()` answers `None`, and function-hash attribution is then
-left out the way it is for any backend that keeps no function hashes. A new
-backend is one `register_memory_backend(id, builder)` call.
+left out the way it is for any backend that keeps no function hashes. A
+backend that derives from `MemoryStoreDefaults` gets those answers for what it
+does not implement; the factory refuses a store without the interface, naming
+what it lacks.
+
+`memory.backend` is the id of a registered backend, and the settings refuse
+any other. Each backend's own settings live under `memory.<id>.*`
+(`memory.qdrant.url`, `memory.qdrant.collection`,
+`memory.qdrant.function_hash_collection`, `memory.qdrant.api_key`); the
+console's memory guide asks for the keys under the selected backend's id and
+tests them with the probe those keys declare. A backend from an installed
+package registers through the `maljan.memory_backends` entry-point group — a
+callable that calls `register_memory_backend(id, builder, settings_model=...,
+annotations=...)` — which every process loads on first use, so the API, the
+analysis worker and the enrichment worker all know it; its settings model's
+leaves join the catalogue under `memory.<id>.` with the annotations it
+registered. The flat keys stored before the move (`memory.qdrant_url` and its
+siblings) are still read: revision `20261010000000` renames the stored rows,
+an older export imports onto the new keys, and an environment's flat values
+land under the backend.
 
 The case a run adds to long-term memory, and the function hashes it files
 under the judge's family in the attribution corpus, are decided by the judge

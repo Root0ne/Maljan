@@ -68,9 +68,11 @@ async def _probe_memory() -> dict[str, Any]:
     """The configured long-term-memory backend's own readiness answer.
 
     Built by the factory every caller uses, so ``/health`` probes the store
-    the runs write, whichever backend that is. A backend id the factory does
-    not know is reported as not configured rather than as a failure.
+    the runs write, whichever backend that is, and closed again once it has
+    answered. A backend id the factory does not know is reported as not
+    configured rather than as a failure; every answer names the backend.
     """
+    from maljan.core.settings_overrides import redact_url
     from maljan.memory.store_factory import (
         MemoryBackendNotConfiguredError,
         build_memory_store,
@@ -85,10 +87,22 @@ async def _probe_memory() -> dict[str, Any]:
         store = await asyncio.to_thread(build_memory_store, core)
     except MemoryBackendNotConfiguredError:
         return {"ok": None, "error": None, "backend": backend, "detail": "not configured"}
-    # The answer names a collection or a path; this endpoint is
-    # unauthenticated, so only the fact that the store answered is published.
-    await asyncio.to_thread(store.readiness)
+    except Exception as exc:  # noqa: BLE001 — a probe failure is a result
+        return _memory_failure(backend, exc, redact_url)
+    try:
+        # The answer names a collection or a path; this endpoint is
+        # unauthenticated, so only the fact that the store answered is published.
+        await asyncio.to_thread(store.readiness)
+    except Exception as exc:  # noqa: BLE001 — a probe failure is a result
+        return _memory_failure(backend, exc, redact_url)
+    finally:
+        await asyncio.to_thread(store.close)
     return {"ok": True, "error": None, "backend": backend}
+
+
+def _memory_failure(backend: str, exc: Exception, redact: Any) -> dict[str, Any]:
+    detail = str(exc).strip() or type(exc).__name__
+    return {"ok": False, "error": redact(detail)[:200], "backend": backend}
 
 
 async def _probe_components() -> dict[str, dict[str, Any]]:

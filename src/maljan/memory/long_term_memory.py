@@ -95,7 +95,8 @@ class MemoryStore(Protocol):
     this Protocol, and every caller builds one through
     ``maljan.memory.store_factory.build_memory_store``. A caller never asks
     which backend it holds: what a backend cannot do it says through this
-    interface (``function_hash_store`` answering ``None``). The
+    interface (``function_hash_store`` answering ``None``); a backend derives
+    from ``MemoryStoreDefaults`` for those answers. The
     @runtime_checkable decorator enables isinstance() checks in tests and
     container code.
 
@@ -183,6 +184,29 @@ class MemoryStore(Protocol):
         it is.
         """
         ...
+
+    def close(self) -> None:
+        """Release what the store holds open (a client, a connection); a no-op without one."""
+        ...
+
+
+class MemoryStoreDefaults:
+    """The interface's optional capabilities, answered as "not offered".
+
+    A backend derives from this and implements what it can: a store with no
+    server answers ``readiness`` without I/O, keeps no function hashes and has
+    nothing to close. Every caller then degrades the same way for it as for
+    any backend without the capability.
+    """
+
+    def readiness(self) -> str:
+        return "in process"
+
+    def function_hash_store(self) -> FunctionHashIndex | None:
+        return None
+
+    def close(self) -> None:
+        return None
 
 
 @runtime_checkable

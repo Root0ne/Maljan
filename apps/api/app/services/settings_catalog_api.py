@@ -556,6 +556,7 @@ def _choice_sources(
     servers, profiles or agents exist right now; the web must not decide
     either, or "what is a valid profile" has two answers.
     """
+    from maljan.memory.store_factory import memory_backends
     from maljan.providers.registry import sandbox_provider_ids, static_provider_ids
 
     return {
@@ -572,6 +573,7 @@ def _choice_sources(
         # any agent an operator has defined (spec §2, role vocabulary).
         "agent_roles": list(agents),
         "profiles": list(profiles),
+        "memory_backends": list(memory_backends()),
     }
 
 
