@@ -45,6 +45,7 @@ from maljan.pipeline.nodes import (
 )
 from maljan.pipeline.routing import (
     CONSENSUS,
+    CONVERGENCE,
     NO_CONSENSUS,
     NO_CONTESTED_POINT,
     SYCOPHANCY,
@@ -254,6 +255,15 @@ class TestTheRouter:
         state = _routed_state(_mediator(revise=[], lines=[]), consensus=True)
 
         assert debate_route(state, max_rounds=5) == ("judge", CONSENSUS)
+
+    def test_stable_confidence_ends_as_convergence_before_no_contested_point(self) -> None:
+        state = {
+            **_routed_state(_mediator(revise=[], lines=[]), consensus=False),
+            "iteration_count": 3,
+            "confidence_history": [0.8, 0.8, 0.8],
+        }
+
+        assert debate_route(state, max_rounds=5) == ("judge", CONVERGENCE)
 
     def test_named_analysts_open_a_round(self) -> None:
         state = _routed_state(_mediator(revise=["static"]), consensus=False)

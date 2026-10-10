@@ -16,12 +16,12 @@ Decision priority (highest to lowest), in ``debate_route``:
   4. Sycophancy override — if sycophancy AND consensus, force revision.
   5. Genuine LLM consensus (no listed line the mediator marked blocking, or
      left unmarked) — judge.
+  6. Adaptive termination — statistical confidence convergence, with no
+     contradiction standing → judge.
      No contested point — the mediator's final block was read and lists no
      blocking line, so it names no analyst to revise, and no sycophancy was
      detected: judge (``no_contested_point``). A round would ask nobody.
      With sycophancy detected the devil's-advocate round runs as before.
-  6. Adaptive termination — statistical confidence convergence, with no
-     contradiction standing → judge.
   7. Default → revision.
 
 The run summary reads its termination reason from the same function, so the
@@ -262,6 +262,17 @@ def route_within_limit(
         say("Genuine consensus reached at round %d.", iteration)
         return "judge", CONSENSUS
 
+    # Adaptive termination on the confidence series, unless the last
+    # mediation lists contradictions still standing: a number that stopped
+    # moving is not agreement while the mediator says what is disputed. The
+    # round limit still bounds the debate.
+    standing = bool(getattr(last, "contradictions", None)) and (
+        getattr(last, "agent_name", "") == "Mediator"
+    )
+    if not standing and is_confidence_stable(confidence_history):
+        say("Adaptive termination triggered at round %d (stable confidence).", iteration)
+        return "judge", CONVERGENCE
+
     # The mediator's block was read and names nobody in a contested point
     # (``AgentArgument.revise == []``): a revision round asks only the analysts
     # it names, so it would ask nobody. Not read (``None``) is not this, and
@@ -279,17 +290,6 @@ def route_within_limit(
             iteration,
         )
         return "judge", NO_CONTESTED_POINT
-
-    # Adaptive termination on the confidence series, unless the last
-    # mediation lists contradictions still standing: a number that stopped
-    # moving is not agreement while the mediator says what is disputed. The
-    # round limit still bounds the debate.
-    standing = bool(getattr(last, "contradictions", None)) and (
-        getattr(last, "agent_name", "") == "Mediator"
-    )
-    if not standing and is_confidence_stable(confidence_history):
-        say("Adaptive termination triggered at round %d (stable confidence).", iteration)
-        return "judge", CONVERGENCE
 
     return "revision", NO_CONSENSUS
 
