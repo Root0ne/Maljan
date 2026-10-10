@@ -281,13 +281,54 @@ class TestTheSocketResumeStaysWithoutUsage:
         assert _seqs(events) == [1, 3]
         assert MODEL_USAGE not in _types(events)
 
-    def test_the_socket_reads_without_usage(self) -> None:
-        import inspect
+    @pytest.mark.parametrize(
+        "stream",
+        [
+            [_event(1), _event(3)],
+            [],
+        ],
+        ids=["stream-alive", "stream-expired"],
+    )
+    @pytest.mark.asyncio
+    async def test_the_socket_resume_sends_no_usage_event(
+        self, monkeypatch: pytest.MonkeyPatch, stream: list[dict[str, Any]]
+    ) -> None:
+        from app.api import ws as ws_module
 
-        from app.api import ws
+        table = _Table([_Row(1, "agent_message"), _usage_row(2), _Row(3, "agent_message")])
+        redis_conn = _Redis(stream)
+        asked: list[Any] = []
 
-        source = inspect.getsource(ws)
-        assert "usage=True" not in source
+        class _Session:
+            async def __aenter__(self) -> _Table:
+                return table
+
+            async def __aexit__(self, *exc: object) -> bool:
+                return False
+
+        async def aclose() -> None:
+            return None
+
+        real_read = read_events
+
+        async def watched(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+            asked.append(kwargs.get("usage", False))
+            return await real_read(*args, **kwargs)
+
+        redis_conn.aclose = aclose  # type: ignore[attr-defined]
+        sent: list[dict[str, Any]] = []
+
+        class _Socket:
+            async def send_text(self, payload: str) -> None:
+                sent.append(json.loads(payload))
+
+        monkeypatch.setattr(ws_module, "async_session_factory", _Session)
+        monkeypatch.setattr(ws_module.aioredis, "from_url", lambda *a, **k: redis_conn)
+        monkeypatch.setattr("app.services.job_events.read_events", watched)
+        await ws_module._replay(_Socket(), str(uuid.uuid4()), 0)  # type: ignore[arg-type]
+        assert asked and not any(asked)
+        assert _seqs(sent) == [1, 3]
+        assert MODEL_USAGE not in _types(sent)
 
 
 class TestAnExpiredStreamIsUnchanged:
@@ -464,19 +505,89 @@ class _Service:
         return self._job
 
 
-class TestTheUsageEndpoint:
+class _JobsAndEvents(_Table):
+    """``_Table`` that also answers the job service's ownership query.
+
+    A query on ``analysis_jobs`` is answered with the stored jobs whose
+    columns equal every parameter the statement binds (``id``,
+    ``created_by``), which is what the service's ``WHERE`` asks.
+    """
+
+    def __init__(self, rows: list[_Row], jobs: list[Any]) -> None:
+        super().__init__(rows)
+        self.jobs = jobs
+
+    async def execute(self, statement: Any) -> Any:
+        compiled = statement.compile()
+        if "FROM analysis_jobs" not in str(compiled):
+            return await super().execute(statement)
+        params = compiled.params
+        found = [
+            job
+            for job in self.jobs
+            if all(getattr(job, name.rsplit("_", 1)[0]) == value for name, value in params.items())
+        ]
+
+        class _One:
+            def scalar_one_or_none(self) -> Any:
+                return found[0] if found else None
+
+        return _One()
+
+
+class TestWhoReadsTheUsage:
+    def _store(self) -> tuple[Any, Any, Any, _JobsAndEvents]:
+        from types import SimpleNamespace
+
+        alice = SimpleNamespace(id=uuid.uuid4())
+        bob = SimpleNamespace(id=uuid.uuid4())
+        job = SimpleNamespace(id=uuid.uuid4(), created_by=alice.id)
+        rows = [_usage_row(1, input_tokens=10, output_tokens=2)]
+        return alice, bob, job, _JobsAndEvents(rows, [job])
+
     @pytest.mark.asyncio
-    async def test_a_job_the_caller_does_not_own_is_not_found(self) -> None:
+    async def test_another_user_s_job_is_not_found(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from fastapi import HTTPException
 
         from app.api.v1.jobs import get_job_usage
+        from app.services.analysis_service import AnalysisService
+        from maljan.core.config import Settings
 
+        async def settings_now(db: Any) -> Settings:
+            return Settings(_env_file=None)
+
+        monkeypatch.setattr("app.services.settings_service.effective_core_settings", settings_now)
+        alice, bob, job, db = self._store()
         with pytest.raises(HTTPException) as exc:
-            await get_job_usage(
-                job_id=uuid.uuid4(), user=object(), svc=_Service(None), db=_Table([])
-            )
+            await get_job_usage(job_id=job.id, user=bob, svc=AnalysisService(db), db=db)
         assert exc.value.status_code == 404
+        body = await get_job_usage(job_id=job.id, user=alice, svc=AnalysisService(db), db=db)
+        assert body["calls"] == 1
+        assert body["tokens"]["input_tokens"] == 10
 
+    def test_an_unauthenticated_call_is_refused(self) -> None:
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from app.api.v1.jobs import router
+        from app.database import get_db
+
+        app = FastAPI()
+        app.include_router(router, prefix="/api/v1")
+        app.dependency_overrides[get_db] = lambda: MagicMock()
+        read = AsyncMock(return_value=[])
+        with (
+            patch("app.deps.settings.auth_disabled", False),
+            patch("app.services.job_events.read_usage", read),
+        ):
+            resp = TestClient(app).get(f"/api/v1/jobs/{uuid.uuid4()}/usage")
+        assert resp.status_code == 401
+        read.assert_not_awaited()
+
+
+class TestTheUsageEndpoint:
     @pytest.mark.asyncio
     async def test_the_totals_come_from_the_job_s_usage_events(
         self, monkeypatch: pytest.MonkeyPatch
