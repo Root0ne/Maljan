@@ -135,6 +135,20 @@ class TestTheGateChangesOnlyTheEndpoints:
         assert expected["effort.mediator"] == "low"
         assert expected["model.judge"] == "deepseek-v4-pro" and expected["effort.judge"] == "max"
 
+    def test_an_entry_without_an_effort_inherits_its_own_provider_s_effort(self) -> None:
+        agents = _values()["core.llm.agents"]["value"]
+        agents["mediator"] = {"provider": "anthropic", "model": "claude-haiku-5-5"}
+        values = _values(
+            **{
+                "core.llm.agents": {"value": agents, "source": "ui"},
+                "core.llm.anthropic.effort": {"value": "medium", "source": "ui"},
+            }
+        )
+        expected = gate_expected(values, gate_changes(values, STUB))
+        assert expected["model.mediator"] == "claude-haiku-5-5"
+        assert expected["effort.mediator"] == "medium"
+        assert expected["effort.static"] == "high"
+
     def test_no_third_party_is_reached_and_no_token_is_touched(self) -> None:
         values = _values(
             **{

@@ -75,6 +75,8 @@ from scripts.rehearsal.roles import SCENARIOS, Brain  # noqa: E402
 from scripts.rehearsal.sample import sample_bytes  # noqa: E402
 from scripts.rehearsal.stub_model import Pace, StubServer, StubState  # noqa: E402
 
+from maljan.core.config import EFFORT_SETTING_OF_PROVIDER  # noqa: E402
+
 TERMINAL = {"completed", "failed", "cancelled", "canceled"}
 ACTIVE = ("pending", "queued", "running")
 SNAPSHOT_NAME = "settings-snapshot.json"
@@ -366,7 +368,11 @@ def gate_expected(values: dict[str, dict[str, Any]], changes: dict[str, Any]) ->
     def own(agent: str) -> tuple[Any, Any]:
         entry = agents.get(agent) if isinstance(agents, dict) else None
         if isinstance(entry, dict) and entry.get("model"):
-            return entry.get("model"), entry.get("effort") or effort
+            # An entry with no effort of its own inherits its own provider's
+            # global effort, not the global provider's.
+            setting = EFFORT_SETTING_OF_PROVIDER.get(str(entry.get("provider") or provider))
+            inherited = str(_value(values, f"core.{setting}", "") or "") if setting else ""
+            return entry.get("model"), entry.get("effort") or inherited
         return expert, effort
 
     # The mediator reads its own ``llm.agents.mediator`` entry and, with none,
