@@ -1561,6 +1561,7 @@ class ReportComposer:
         the spend ceiling does not admit the call.
         """
         from maljan.llm.context_window import (
+            CHARS_PER_TOKEN,
             accepts_output_bound,
             call_output_bound,
             prompt_overflow_sentence,
@@ -1579,6 +1580,11 @@ class ReportComposer:
         # beside the prompt, the call is held to the least any model of the
         # list may write: never past a model's own cap or its window.
         rooms = self._model_rooms()
+        # A model whose whole window the prompt already passes cannot answer
+        # it (the overflow is recorded above); it does not hold the call of a
+        # model that can. With none that can, every model still holds it.
+        prompt_tokens = -(-chars // CHARS_PER_TOKEN)
+        rooms = [room for room in rooms if prompt_tokens < room[1]] or rooms
         bound = None
         if any(call_output_bound(c, w, chars) is not None for _label, w, c in rooms):
             # Each model's limit, and the words for it: what its window leaves

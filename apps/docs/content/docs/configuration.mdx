@@ -1166,7 +1166,10 @@ cannot tell a reasoning tag from its name, and sending `think: false` to a
 model that does not reason is an error on Ollama. A section's evidence room is
 what every model of the list leaves, each by its own window less its own cap;
 where one model's cap does not fit beside a call's prompt, that call is held
-to the least any model of the list may write, never past a model's own cap.
+to the least any model of the list may write, never past a model's own cap,
+and the log names the limit that held it (a model's own output cap, or what its
+window leaves). A model whose whole window the prompt already passes cannot
+answer it, is recorded as such, and does not hold the others' call.
 A section the cap cut is
 recorded as cut at that cap, not as a schema failure. On Ollama every output
 cap — this one, `judge_max_tokens`, `expert_max_tokens` — now reaches the

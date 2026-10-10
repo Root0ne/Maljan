@@ -321,3 +321,39 @@ class TestAHeldCallNamesItsLimit:
 
         assert bound == 3000
         assert why == "what its 60000-token window leaves after the prompt"
+
+
+class TestAPromptOneFallbackCannotHold:
+    """A model whose window the prompt alone overflows does not hold the others' call."""
+
+    def test_the_first_model_is_not_held_to_one_token(self) -> None:
+        from langchain_core.messages import HumanMessage
+
+        composer = _listed(
+            {"deepseek": 262144, "qwen": 16384}, {"deepseek": 1048576, "qwen": 65536}
+        )
+        # 100,000 tokens of prompt: past qwen's whole window, well inside
+        # deepseek's beside its cap.
+        turns = [HumanMessage(content="x" * 300000)]
+
+        assert composer._call_bound(turns) is None
+        assert any("larger than its model" in reason for reason in composer.degradations)
+
+    def test_the_others_are_still_held_to_their_own_limits(self) -> None:
+        from langchain_core.messages import HumanMessage
+
+        composer = _listed(
+            {"deepseek": 262144, "qwen": 16384, "mid": 50000},
+            {"deepseek": 1048576, "qwen": 65536, "mid": 120000},
+        )
+        # 100,000 tokens: past qwen's window; mid's window leaves 20,000.
+        bound = composer._call_bound([HumanMessage(content="x" * 300000)])
+
+        assert bound == 20000
+
+    def test_a_prompt_past_every_window_is_still_held(self) -> None:
+        from langchain_core.messages import HumanMessage
+
+        composer = _listed({"qwen": 16384}, {"qwen": 65536})
+
+        assert composer._call_bound([HumanMessage(content="x" * 300000)]) == 1
