@@ -44,6 +44,7 @@ from maljan.core.container import ServiceContainer
 from maljan.core.exceptions import AnalystError, LLMError, SampleNotOpened
 from maljan.core.logger import logger
 from maljan.core.spend import SpendCeilingStop
+from maljan.loaders.binary_chunker import Room, joined_when_it_fits
 from maljan.memory.long_term_memory import build_stored_case
 from maljan.pipeline import triage_pack
 from maljan.pipeline.claim_drops import (
@@ -1942,6 +1943,30 @@ def upstream_findings(stage: Any, state: AnalysisState, container: ServiceContai
     return block
 
 
+def input_room_of(agent: Any) -> Room:
+    """The characters of input ``agent``'s prompt has room for, as the chunker asks it.
+
+    The analyst's own measure (``BaseAnalyst._input_room_chars``): the room its
+    window leaves before the reply, less the prompt around the input and one
+    tool answer's share, or the operator's ``max_token_limit``. The same bound
+    an input is shortened at, so a chunk of this size reaches the model whole.
+    An agent that cannot say has no room to give: ``None``, nothing bounds it.
+    """
+    measure = getattr(agent, "_input_room_chars", None)
+
+    def room(text: str) -> int | None:
+        if not callable(measure):
+            return None
+        try:
+            chars = measure(text)
+        except Exception as exc:  # noqa: BLE001 — no measure is no bound, never a lost analyst
+            logger.debug("input room: not measured (%s)", exc)
+            return None
+        return chars if isinstance(chars, int) and not isinstance(chars, bool) else None
+
+    return room
+
+
 def _with_upstream(chunks: list, block: str) -> list:
     """Put the upstream block into the first chunk, without breaking its shape.
 
@@ -2716,11 +2741,15 @@ def make_stage_agent_node(
             if role in SAMPLE_FED_ROLES:
                 _pin_sample_path(agent, state)
 
+            # A chunk is what this analyst's prompt has room for, measured
+            # by the analyst from its own window once the pack is on it.
+            room = input_room_of(agent)
             chunks = container.load_data_for_agent(
                 agent_name,
                 file_hash=state["file_hash"],
                 sandbox_report=sandbox_report,
                 sample_path=_absolute_host_sample_path(state) or None,
+                room=room,
             )
 
             if role in SAMPLE_FED_ROLES:
@@ -2802,6 +2831,8 @@ def make_stage_agent_node(
                 )
 
             chunks = _with_upstream(chunks, upstream_findings(stage, state, container))
+            # Sources that fit the room together are one chunk, and one loop.
+            chunks = joined_when_it_fits(chunks, container.config.chunking, room)
 
             if len(chunks) == 1:
                 # View-decomposition pilot (findings-log §3.6): when enabled,

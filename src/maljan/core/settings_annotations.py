@@ -155,9 +155,13 @@ ANNOTATIONS: dict[str, Annotation] = {
     "chunking.max_tokens_per_chunk": {
         "title": "Max tokens per chunk",
         "description": (
-            "Maximum tokens per chunk when splitting oversized analyst input for the "
-            "LLM. Raise it on a larger-context model to produce fewer, richer chunks; "
-            "lowering it produces more, smaller chunks."
+            "Tokens per chunk when an analyst's input is split, at four characters a "
+            "token. Empty, the default, sizes a chunk from the analyst's own window: "
+            "what its prompt holds before the reply, less the system prompt, the pack, "
+            "the tool definitions and one tool answer's share. Sources that fit a chunk "
+            "together are joined, so an input that fits runs one loop; with no window "
+            "learned the input goes whole. A number set here wins. Every chunk is a "
+            "full tool loop run after the one before it."
         ),
     },
     "chunking.overlap_tokens": {
@@ -170,9 +174,10 @@ ANNOTATIONS: dict[str, Annotation] = {
     "chunking.skip_if_fits": {
         "title": "Skip chunking if it fits",
         "description": (
-            "When true, input smaller than max_tokens_per_chunk is sent as a single "
-            "chunk instead of always being split. Set false to force chunking even on "
-            "small input — useful for testing the chunked code path."
+            "When true, input inside the chunk size is sent as a single chunk, and "
+            "sources that fit it together are joined into one, instead of always being "
+            "split. Set false to force chunking even on small input — useful for "
+            "testing the chunked code path."
         ),
     },
     "google_api_key": {

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 from maljan.core.config import ChunkingConfig
 from maljan.core.exceptions import DataLoadError, UnsafePathError
 from maljan.core.logger import logger
-from maljan.loaders.binary_chunker import BinaryChunker, TextChunk
+from maljan.loaders.binary_chunker import BinaryChunker, Room, TextChunk
 from maljan.parsers.registry import ParserRegistry
 
 if TYPE_CHECKING:
@@ -77,14 +77,16 @@ class FileDataLoader:
     # Public chunker access
     # ------------------------------------------------------------------
 
-    def chunk_text(self, data_type: str, text: str) -> list[TextChunk]:
+    def chunk_text(self, data_type: str, text: str, room: Room | None = None) -> list[TextChunk]:
         """Public entry point for chunking arbitrary already-parsed text.
 
         Exposes the internal :class:`BinaryChunker` without leaking the
         attribute. Callers (e.g. :class:`ServiceContainer`) should use this
-        instead of touching ``loader._chunker`` directly.
+        instead of touching ``loader._chunker`` directly. ``room`` is the
+        analyst's input room, which sizes a chunk where no operator figure is
+        set.
         """
-        return self._chunker.chunk(data_type, text)
+        return self._chunker.chunk(data_type, text, room=room)
 
     # ------------------------------------------------------------------
     # File-based loading
@@ -121,10 +123,12 @@ class FileDataLoader:
             logger.warning("No parser registered for '%s', returning raw JSON.", data_type)
             return json.dumps(raw, indent=2)
 
-    def load_chunked(self, sample_id: str, data_type: str) -> list[TextChunk]:
+    def load_chunked(
+        self, sample_id: str, data_type: str, room: Room | None = None
+    ) -> list[TextChunk]:
         """Load, parse, and split data into LLM-safe chunks."""
         text = self.load(sample_id, data_type)
-        chunks = self._chunker.chunk(data_type, text)
+        chunks = self._chunker.chunk(data_type, text, room=room)
         if len(chunks) > 1:
             logger.info(
                 "load_chunked: sample='%s' domain='%s' produced %d chunks.",
