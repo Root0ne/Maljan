@@ -89,7 +89,7 @@ worker's own job timeout: `core.job_timeout` is set to the given seconds with
 the other changes, snapshotted and put back after. Every model call is slow
 (`--slow-seconds`, 2 s by default), so the worker stops the job. The run must
 end as a failed job whose reason names `core.job_timeout`, and must keep what
-it produced: a stored run summary with its spend and token usage (or the per-call usage events), and a partial report, whose
+it produced: a stored run summary with its spend and token usage (or a per-call usage event for every answered call), and a partial report, whose
 `incomplete_reason` names the timeout too.
 
 `--deadline-in analysis|debate|verdict|report` aims the deadline at one stage:

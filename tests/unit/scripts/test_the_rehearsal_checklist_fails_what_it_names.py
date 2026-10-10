@@ -473,7 +473,13 @@ class TestTheHolesAGreenRunCouldHide:
             "no spend was kept; no token totals were kept for "
             f"{sum(1 for e in record.stub_log if e.get('status') == 200)} answered call(s)"
         ]
+        answered = sum(1 for e in record.stub_log if e.get("status") == 200)
         record.events.append({"type": "model_usage", "data": {"output_tokens": 10}})
+        assert answered > 1
+        assert _failed(record) == ["the stopped run kept its run summary and a partial report"]
+        record.events += [
+            {"type": "model_usage", "data": {"output_tokens": 10}} for _ in range(answered - 1)
+        ]
         assert _failed(record) == []
 
     def test_a_stopped_job_with_no_answered_call_keeps_a_spend_and_no_token_totals(

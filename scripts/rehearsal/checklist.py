@@ -733,13 +733,15 @@ CHECKS = (
 def _usage_problems(record: RunRecord) -> list[str]:
     """What the stopped run did not keep of what it spent: its spend, and its token totals.
 
-    The per-call usage events stand for both. A run none of whose calls was
-    answered spent nothing and counts no tokens: its run summary then holds
-    a spend record and no token totals, as the product writes it.
+    The per-call usage events stand for both, one for every answered call. A
+    run none of whose calls was answered spent nothing and counts no tokens:
+    its run summary then holds a spend record and no token totals, as the
+    product writes it.
     """
-    if any(str(e.get("type")) == "model_usage" for e in record.events):
-        return []
     answered = [e for e in record.stub_log if e.get("status") == 200 and not e.get("waiting")]
+    usage_events = sum(1 for e in record.events if str(e.get("type")) == "model_usage")
+    if answered and usage_events >= len(answered):
+        return []
     tokens = record.run_summary.get("tokens")
     spend = record.run_summary.get("spend")
     problems = []
