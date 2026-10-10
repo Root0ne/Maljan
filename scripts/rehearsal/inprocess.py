@@ -464,14 +464,25 @@ def window_models(settings: Any) -> list[str]:
     really calls, read on the judge role as ``get_judge_llm`` builds it. The
     product's own budget reads the judge on the expert role, so a global
     judge model with a smaller window than the expert's makes this check
-    fail rather than agree with it. Empty when the settings cannot answer, so
-    the window check fails.
+    fail rather than agree with it.
+
+    The mediator counts whenever the profile has a debate stage, and the
+    function summariser whenever it is on, each with or without an entry of
+    its own: both are built on the expert role (``get_mediator_llm``,
+    ``get_summarizer_llm``, ``fallback_role="expert"``), so with no entry they
+    call the global expert model, which a team whose analysts all have
+    entries would otherwise leave out. Empty when the settings cannot
+    answer, so the window check fails.
     """
-    from maljan.agents.composition import analyst_keys, role_entries_called
-    from maljan.core.config import JUDGE_AGENT_KEY
+    from maljan.agents.composition import active_profile, analyst_keys, role_entries_called
+    from maljan.core.config import JUDGE_AGENT_KEY, MEDIATOR_AGENT_KEY, SUMMARIZER_AGENT_KEY
     from maljan.core.model_assignments import assignment_chain_for, assignments_for
 
     agents = [*analyst_keys(settings), *role_entries_called(settings)]
+    if any(getattr(stage, "kind", "") == "debate" for stage in active_profile(settings).stages):
+        agents.append(MEDIATOR_AGENT_KEY)
+    if settings.preprocessing.use_function_summarizer:
+        agents.append(SUMMARIZER_AGENT_KEY)
     try:
         chain = [
             *assignments_for(settings, agents),

@@ -252,8 +252,10 @@ closed: what it cannot confirm is a failure.
   must fit the tightest model of its agent's list: a quarter of that model's
   window, bounded by its maximum output. The analysts' window must be the
   smallest window served to any model the job's tool answers are sized for
-  (its analysts', the role entries' it calls, and the judge's, read as the
-  judge is built: its own entry, else the global judge model). A gate that names
+  (its analysts'; the mediator's when the profile debates and the
+  summariser's when it is on, each on its entry or else the global expert
+  model; and the judge's, read as the judge is built: its own entry, else the
+  global judge model). A gate that names
   `--window` for a model the product cannot learn a window for (no
   `core.llm.openai.context_size`, no table row) warns before it starts, and
   this check then fails: the paid run would be sized on 8,192 tokens.
@@ -264,7 +266,8 @@ closed: what it cannot confirm is a failure.
   is the agent the product names on that call's usage record, each call paired
   with one record of its own (by its usage, and by when it was sent where
   several agents report the same usage); an answer whose writer cannot be told
-  fails the check. The answer in force is the analyst's
+  fails the check. A stack whose usage records carry no send time falls back
+  to holding every agent sharing a usage to its answer, which fails closed. The answer in force is the analyst's
   last one, a debate's revision included, so its claims are numbered as the
   report labels them.
 - The settings in force are the ones configured.

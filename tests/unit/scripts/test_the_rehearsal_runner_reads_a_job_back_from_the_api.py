@@ -356,6 +356,49 @@ class TestTheJobsRoster:
         assert roster_models(values)["judge"] == ["acme-small-judge"]
         assert job_window_models(values) == ["deepseek-v4-flash", "acme-small-judge"]
 
+    def test_the_mediator_and_summariser_count_on_the_global_model_without_entries(self) -> None:
+        """Every analyst on an entry of its own: the debate's mediator still calls the expert."""
+        own = {
+            agent: {"provider": "openai", "model": f"acme-{agent}"}
+            for agent in ("static", "dynamic", "network")
+        }
+        values = _values(
+            **{
+                "core.llm.openai.expert_model": {"value": "acme-global", "source": "ui"},
+                "core.llm.agents": {"value": own, "source": "ui"},
+            }
+        )
+        windowed = job_window_models(values)
+        assert {"acme-static", "acme-dynamic", "acme-network"} <= set(windowed)
+        assert "acme-global" in windowed
+        no_debate = _values(
+            **CUSTOM_TEAM,
+            **{
+                "core.llm.openai.expert_model": {"value": "acme-global", "source": "ui"},
+                "core.llm.openai.judge_model": {"value": "acme-judge", "source": "ui"},
+                "core.llm.agents": {"value": own, "source": "ui"},
+            },
+        )
+        profiles = no_debate["core.agents.profiles"]["value"]["mine"]["stages"]
+        no_debate["core.agents.profiles"]["value"]["mine"]["stages"] = [
+            {**stage, "depends_on": ["second"]} if stage["key"] == "verdict" else stage
+            for stage in profiles
+            if stage["kind"] != "debate"
+        ]
+        # my_triage and my_reverser have no entry, so the global model stays in
+        # through them; with them on entries too it leaves with the debate.
+        no_debate["core.llm.agents"]["value"] = {
+            **own,
+            "my_triage": {"provider": "openai", "model": "acme-my-triage"},
+            "my_reverser": {"provider": "openai", "model": "acme-my-reverser"},
+        }
+        assert "acme-global" not in job_window_models(no_debate)
+        summarising = {
+            **no_debate,
+            "core.preprocessing.use_function_summarizer": {"value": True, "source": "ui"},
+        }
+        assert "acme-global" in job_window_models(summarising)
+
     def test_unreadable_settings_name_no_window_model(self) -> None:
         broken = _values(**{"core.agents.profile": {"value": "no_such_team", "source": "ui"}})
         assert job_window_models(broken) == []
