@@ -630,7 +630,13 @@ class _Reader:
             )
         moved = _register_copy(code, at, is64)
         carried = self.live.get(moved[1]) if moved is not None else None
-        carried_code = self.code_held.get(moved[1]) if moved is not None else None
+        # A code address is carried only by a copy of the whole pointer: on x64
+        # a 32-bit copy (``mov r8d, eax``) holds a cut one.
+        carried_code = (
+            self.code_held.get(moved[1])
+            if moved is not None and (not is64 or _rex_w(code, at))
+            else None
+        )
         frame = self._frame_events(code, at, rva, ins, hashed)
         for register in ins.writes:
             self.loaded.pop(register, None)
@@ -651,10 +657,20 @@ class _Reader:
             taken = slot
             if shape[1] is not None:
                 self.code_held[shape[1]] = slot
+        # The words pushed since the last call are the call's arguments only
+        # while nothing else moves the stack or writes into it: a push adds
+        # one, a ``pop r32`` takes the last off, and any other stack move
+        # (``add``/``sub esp``, ``pushad``, ``popad``, ``pop [mem]``, a ``lea``
+        # into the stack pointer) or a store to ``[esp+x]`` leaves positions
+        # that cannot be read, so the words are dropped and the call's
+        # arguments are absent rather than misread.
         if ins.kind == "push":
             self.code_pushed.append(taken if shape is not None and shape[1] is None else None)
-        elif not is64 and 0x58 <= code[at] <= 0x5F and self.code_pushed:
-            self.code_pushed.pop()
+        elif not is64 and 0x58 <= code[at] <= 0x5F:
+            if self.code_pushed:
+                self.code_pushed.pop()
+        elif ins.moves_stack or 4 in ins.writes or _stack_pointer_store(code, at):
+            self.code_pushed.clear()
         for held in hashed:
             if ins.kind == "push" or (not is64 and _stack_store(code, at)):
                 self.stacked.append(held)
@@ -902,6 +918,18 @@ def _register_copy(code: bytes, at: int, is64: bool) -> tuple[int, int] | None:
     reg = ((modrm >> 3) & 7) | (((rex >> 2) & 1) << 3)
     rm = (modrm & 7) | ((rex & 1) << 3)
     return (rm, reg) if op == 0x89 else (reg, rm)
+
+
+def _rex_w(code: bytes, at: int) -> bool:
+    """Whether an x64 instruction carries REX.W (a 64-bit operand)."""
+    found = _operand_bytes(code, at, True)
+    return found is not None and bool(found[1] & 8)
+
+
+def _stack_pointer_store(code: bytes, at: int) -> bool:
+    """Whether the instruction stores to ``[esp+x]``/``[rsp+x]``, by ``call_sites._frame_store``."""
+    stored = _frame_store(code, at)
+    return stored is not None and stored[0] == 4
 
 
 def _stack_store(code: bytes, at: int) -> bool:
@@ -1552,6 +1580,10 @@ THREAD_START_ARGUMENT: dict[str, int] = {
     "SHCreateThread": 1,
 }
 
+# The thread-starting APIs whose thread runs in another process: the routine's
+# address is one in that process, and the row says so.
+REMOTE_THREAD_APIS = frozenset({"CreateRemoteThread", "CreateRemoteThreadEx"})
+
 
 def _relations(graph: _Graph, filled: Mapping[int, tuple[str, int]]) -> None:
     """The thread starts and the addresses taken, once the slots' names are known.
@@ -1943,13 +1975,16 @@ def row_parts(row: Mapping[str, Any], entry_id: str) -> str:
     return "; ".join(parts)
 
 
-def _threads_said(cells: Any, verb: str) -> str | None:
+def _threads_said(cells: Any, verb: str, remote_verb: str) -> str | None:
+    """The thread starts of one direction, each with its own verb: a thread an API
+    starts in another process (``REMOTE_THREAD_APIS``) is said as such."""
     said = [
-        f"{c.get('function')} through {sample_text(c.get('through'))} (call at {c.get('call')})"
+        f"{remote_verb if c.get('through') in REMOTE_THREAD_APIS else verb} {c.get('function')} "
+        f"through {sample_text(c.get('through'))} (call at {c.get('call')})"
         for c in cells or []
         if isinstance(c, Mapping)
     ]
-    return f"{verb} {', '.join(said)} {NOT_A_CALL}" if said else None
+    return f"{', '.join(said)} {NOT_A_CALL}" if said else None
 
 
 def relation_parts(row: Mapping[str, Any]) -> list[str]:
@@ -1961,8 +1996,16 @@ def relation_parts(row: Mapping[str, Any]) -> list[str]:
     parts = [
         said
         for said in (
-            _threads_said(row.get("started_as_thread_by"), "started as a thread by"),
-            _threads_said(row.get("starts_threads"), "starts a thread at"),
+            _threads_said(
+                row.get("started_as_thread_by"),
+                "started as a thread by",
+                "started as a thread in another process by",
+            ),
+            _threads_said(
+                row.get("starts_threads"),
+                "starts a thread at",
+                "starts a thread in another process at",
+            ),
         )
         if said
     ]

@@ -326,3 +326,116 @@ class TestAnX86ThreadStart:
                 "call": _va(site, X86_BASE),
             }
         ]
+
+    def _x86_index(self, tmp_path: Path, pushes: list[bytes]) -> dict[str, Any]:
+        """STARTER runs ``pushes`` and calls CreateThread through its import slot."""
+        image = SyntheticPE(is64=False, image_base=X86_BASE)
+        slots = image.imports_at(0x100, {"KERNEL32.dll": ["CreateThread"]})
+        code = _Code(image)
+        code.go(MAIN)
+        code.call(STARTER)
+        code.ret()
+        code.go(STARTER)
+        for blob in pushes:
+            code.raw(blob)
+        code.raw(b"\xff\x15" + struct.pack("<I", X86_BASE + slots["CreateThread"]))
+        code.ret()
+        target = tmp_path / "s.exe"
+        target.write_bytes(image.build())
+        return artefact_index.function_index(
+            str(target), pe_info=("ev_0004", {"entry_point": MAIN, "export_rows": []})
+        )
+
+    def test_the_pushes_alone_still_name_the_routine(self, tmp_path: Path) -> None:
+        answer = self._x86_index(
+            tmp_path,
+            [
+                b"\x6a\x00",
+                b"\x6a\x00",
+                b"\x68" + struct.pack("<I", X86_BASE + PARAMETER),
+                b"\x68" + struct.pack("<I", X86_BASE + WORKER),
+                b"\x6a\x00",
+                b"\x6a\x00",
+            ],
+        )
+        assert [p["started"] for p in answer["thread_starts"]] == [_va(WORKER, X86_BASE)]
+
+    def test_a_junk_push_dropped_by_add_esp_names_no_routine(self, tmp_path: Path) -> None:
+        """The real routine comes from a register; a junk word is pushed and dropped."""
+        answer = self._x86_index(
+            tmp_path,
+            [
+                b"\x6a\x00",  # push 0: thread id
+                b"\x6a\x00",  # push 0: flags
+                b"\x68" + struct.pack("<I", X86_BASE + PARAMETER),  # parameter
+                b"\x50",  # push eax: the start routine, from a register
+                b"\x68" + struct.pack("<I", X86_BASE + WORKER),  # push offset junk
+                b"\x83\xc4\x04",  # add esp, 4
+                b"\x6a\x00",  # push 0: stack size
+                b"\x6a\x00",  # push 0: attributes
+            ],
+        )
+        assert "thread_starts" not in answer
+
+    def test_a_pushad_drops_the_words_pushed_before_it(self, tmp_path: Path) -> None:
+        answer = self._x86_index(
+            tmp_path,
+            [
+                b"\x6a\x00",
+                b"\x6a\x00",
+                b"\x68" + struct.pack("<I", X86_BASE + PARAMETER),
+                b"\x68" + struct.pack("<I", X86_BASE + WORKER),
+                b"\x60",  # pushad
+                b"\x61",  # popad
+                b"\x6a\x00",
+                b"\x6a\x00",
+            ],
+        )
+        assert "thread_starts" not in answer
+
+    def test_a_store_into_the_pushed_words_drops_them(self, tmp_path: Path) -> None:
+        answer = self._x86_index(
+            tmp_path,
+            [
+                b"\x6a\x00",
+                b"\x6a\x00",
+                b"\x68" + struct.pack("<I", X86_BASE + PARAMETER),
+                b"\x68" + struct.pack("<I", X86_BASE + WORKER),
+                b"\x6a\x00",
+                b"\x6a\x00",
+                b"\x89\x44\x24\x08",  # mov [esp+8], eax: the routine's word overwritten
+            ],
+        )
+        assert "thread_starts" not in answer
+
+
+class TestTheWholePointerOnly:
+    def test_a_32_bit_copy_of_a_code_address_starts_nothing(self, tmp_path: Path) -> None:
+        image, code, slots = _image(["CreateThread"])
+        code.go(STARTER)
+        code._rip(b"\x48\x8d\x05", WORKER)  # lea rax, [rip+WORKER]
+        code.raw(b"\x44\x8b\xc0")  # mov r8d, eax: a cut pointer
+        code.call_slot(slots["CreateThread"])
+        code.ret()
+        answer = _index(image, tmp_path)
+
+        assert "thread_starts" not in answer
+        assert _row(answer, WORKER)["address_taken_by"] == [_va(STARTER)]
+
+
+class TestARemoteThreadIsSaidAsOne:
+    def test_create_remote_thread_says_another_process(self, tmp_path: Path) -> None:
+        image, code, slots = _image(["CreateRemoteThread"])
+        code.go(STARTER)
+        code.lea("r9", WORKER)  # the fourth argument: the start routine
+        site = code.call_slot(slots["CreateRemoteThread"])
+        code.ret()
+        answer = _index(image, tmp_path)
+
+        line = artefact_index.row_line(_row(answer, WORKER), "ev_0025")
+        assert (
+            f"started as a thread in another process by {_va(STARTER)} through "
+            f'"CreateRemoteThread" (call at {_va(site)})'
+        ) in line
+        line = artefact_index.row_line(_row(answer, STARTER), "ev_0025")
+        assert f"starts a thread in another process at {_va(WORKER)}" in line
