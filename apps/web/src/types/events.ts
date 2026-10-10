@@ -59,7 +59,7 @@ export type WSEventType =
   | "model_fallback"
   /* A tool loop cleared its oldest tool answers to evidence-id references:
    * agent, turn, how many answers, the request's characters before and
-   * after, and why (`window` or `setting`). See
+   * after, and why (`refused`, `window` or `setting`). See
    * maljan/agents/tool_answer_clearing.py. */
   | "tool_answers_cleared"
   /* One model call's usage as the job's token ledger recorded it: agent,
