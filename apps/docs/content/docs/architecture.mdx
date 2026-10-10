@@ -1124,9 +1124,12 @@ Two producers use it:
   `wininet.dll`. A value written as a field name and its value (`seed
   0x5a17c0de`, `first_key=0x2b`) is also held by an entry that pairs that name
   with that whole value, as a JSON member or as `name=value` or `name: value`
-  (`validation.field_value_spellings`); the two parts apart never count, so a
-  value another field holds, a prefix and the same digits in another radix are
-  not held. Held by a cited entry, the citation stands; held only by another
+  (`validation.field_value_spellings`), each part whole on its own side
+  (`validation.field_pair_in`): the two parts apart never count, so a value
+  another field holds, a prefix (`time: 12:30:00` does not hold `time 12`), a
+  name that ends another (`cfg/key`) and the same digits in another radix are
+  not held. Only the table and citation checks read pairs; a sample-string
+  read never takes a tool's own field and value for a string. Held by a cited entry, the citation stands; held only by another
   entry, the model is asked once with that entry named; held by none, nothing
   is said, because a paraphrase or a composed value cannot be judged. "Held"
   means held as a whole value in one of its spellings, never as a slice of a
@@ -1729,25 +1732,30 @@ decides.
    descriptions, detection text and procedure examples are not read, and the
    capa rules are downloaded beside the repository, not vendored. The words
    are built once per technique.
-   A sentence also describes its technique by the plain words the same
-   vendored texts (the card's requirements and indicators, the API rule)
-   describe it with (`validation.described_by_its_words`): each word compared
-   without its inflection and its silent "e" ("decode", "decodes", "decoded";
-   "delete", "deletion"), stopwords, calls, programs and modules left out (a
-   procedure word counts only as one, above), and each weighing one over the
-   number of technique families whose texts write it, so a word of one family
-   weighs 1, "encoded" (three families) a third, and a word of more than six
-   families ("file", "command", "process") nothing. A sub-technique reads its
-   parent's words, and a parent its sub-techniques': strings "XOR-encoded and
-   decoded at run time from their blobs" and API names "resolved by walking
-   each loaded module's export table" both describe Obfuscated Files or
-   Information. The sentence has to write two such words or more whose weights
-   add up to one: one word alone is often an object a card acts on ("a short
-   header" is not Masquerade File Type). Measured on every stored claim with a
-   technique of five runs (1,103 pairs): the question fell from 399 to 276
-   asked, and on a hand-labelled sample of 100 asked pairs from 73 asked of
-   true claims to 36, every one of the 27 asked of claims that do not describe
-   their technique still asked.
+   A sentence also describes its technique by the plain words one phrase of
+   the same vendored texts (a requirement or an indicator of the card, the API
+   rule) describes it with (`validation.described_by_its_words`): each word
+   compared without its inflection, its silent "e" and its plural ("decode",
+   "decodes", "decoded"; "delete", "deletion"; "URL", "URLs"), generic English
+   words (`data/english_stopwords_v1.json`: "very", "few", "made"), calls,
+   programs and modules left out (a procedure word counts only as one, above),
+   and each weighing one over the number of technique families whose texts
+   write it, so a word of one family weighs 1, "encoded" (three families) a
+   third, and a word of more than six families ("file", "command", "process")
+   nothing. A sub-technique reads its parent's phrases, and a parent its
+   sub-techniques': API names found "by a walk of each loaded module's export
+   table" describe Obfuscated Files or Information. The sentence has to write
+   two words or more of one phrase whose weights add up to one: one word alone
+   is often an object a card acts on ("a short header" is not Masquerade File
+   Type), and two words of different phrases are not what the data says
+   together. They are read as procedure words are: none counts in a sentence
+   that says the behaviour was not seen, nor a word the absence reader reads as
+   absent or one after a negating word of its own clause ("no string is encoded
+   and nothing is decoded"). Measured on every stored claim with a technique of
+   five runs (1,103 pairs): the question fell from 399 to 387 asked, and on a
+   hand-labelled sample of 100 asked pairs from 73 asked of true claims to 66,
+   every one of the 27 asked of claims that do not describe their technique
+   still asked.
    A sub-technique whose sentence shares terms with it only through what
    every sub-technique of its parent shares (the parent's name and capability
    terms, its tactic) is asked the same question, naming the sibling, when
