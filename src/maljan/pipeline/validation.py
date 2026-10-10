@@ -5654,19 +5654,29 @@ class EntryTexts:
                 partial.add(repeat)
         return cls(texts=texts, tools=tools, partial=frozenset(partial))
 
-    def holds(self, entry_id: str, value: str) -> bool:
+    def holds(self, entry_id: str, value: str, *, fields: bool = False) -> bool:
         """Whether this entry's text holds ``value`` as a value of its own, however spelt.
 
         A whole value, never a slice of a longer run: ``443`` is not held by an
         answer whose only ``443`` is inside a timestamp. See :func:`decidable`
-        for the values no text can answer for at all.
+        for the values no text can answer for at all. With ``fields`` (a
+        table's stated value, a citation), a field name written with its value
+        is also held by the entry's pair of the two (:func:`field_pair_in`).
         """
         from maljan.agents._indicator_denylists import whole_value_in
 
         text = self.text_of(entry_id)
-        return bool(text) and any(
+        if not text:
+            return False
+        if any(
             whole_value_in(form, text)
-            for spelling in held_spellings(value)
+            for spelling in library_spellings(value)
+            for form in written_forms(spelling)
+        ):
+            return True
+        return fields and any(
+            field_pair_in(form, text)
+            for spelling in field_value_spellings(value)
             for form in written_forms(spelling)
         )
 
@@ -5682,7 +5692,7 @@ class EntryTexts:
         """Whether a citation names an entry or an item whose text this run holds."""
         return bool(self.text_of(cited))
 
-    def may_hold(self, value: str) -> set[str]:
+    def may_hold(self, value: str, *, fields: bool = False) -> set[str]:
         """The entries that may hold ``value`` for :meth:`holds`: never fewer, often far fewer.
 
         A text holds a value only where every letter-and-digit run of one of
@@ -5706,7 +5716,8 @@ class EntryTexts:
             self._runs.update({run: frozenset(ids) for run, ids in runs.items()})
             self._runs[""] = frozenset()
         found: set[str] = set()
-        for spelling in held_spellings(value):
+        spellings = held_spellings(value) if fields else library_spellings(value)
+        for spelling in spellings:
             for form in written_forms(spelling):
                 needed = set(_TEXT_RUN_RE.findall(form.lower()))
                 if not needed:
@@ -5720,11 +5731,11 @@ class EntryTexts:
                 found |= holders or set()
         return found
 
-    def holding(self, value: str) -> list[str]:
+    def holding(self, value: str, *, fields: bool = False) -> list[str]:
         """Every entry whose text holds ``value``, in ledger order; none for an undecidable one."""
         if not decidable(value):
             return []
-        return [entry_id for entry_id in self.texts if self.holds(entry_id, value)]
+        return [entry_id for entry_id in self.texts if self.holds(entry_id, value, fields=fields)]
 
     def named(self, entry_id: str) -> str:
         """``ev_0012 (floss)``: an id with the tool that answered it."""
@@ -5784,9 +5795,9 @@ def field_value_spellings(value: str) -> tuple[str, ...]:
     ``"seed": "0x5a17c0de"``. The entry holds the value when it pairs that
     field name with that whole value: as a JSON member (the value quoted or
     bare, with or without the space after the colon) or as ``name=value`` or
-    ``name: value``. Only the pair is read, never the two parts apart, so a
-    value the entry gives another field, a prefix of the field's value and the
-    same digits read in another radix are not held. Lower-cased, as
+    ``name: value``, each looked for by :func:`field_pair_in`. Only the pair is
+    read, never the two parts apart, so a value the entry gives another field
+    and the same digits read in another radix are not held. Lower-cased, as
     :func:`library_spellings` is; ``()`` for a value of any other shape.
     """
     match = _FIELD_AND_VALUE_RE.fullmatch(str(value or "").strip().lower())
@@ -5804,12 +5815,39 @@ def field_value_spellings(value: str) -> tuple[str, ...]:
     )
 
 
-def held_spellings(value: str) -> tuple[str, ...]:
-    """Every spelling :meth:`EntryTexts.holds` looks for ``value`` in, before its written forms.
+def field_pair_in(pair: str, text: str) -> bool:
+    """Whether ``text`` writes ``pair`` (a spelling of :func:`field_value_spellings`) whole.
 
-    The one normalisation every value-in-entry question shares: the value
-    lower-cased (:func:`library_spellings`) and, for a field name written with
-    its value, the pairs an entry writes it as (:func:`field_value_spellings`).
+    Each part is bounded on its own side as a single part is, the colon, slash
+    and backslash a compound value is joined with continuing it: the field
+    name starts where no name runs on into it (``cfg:key`` and ``cfg/key`` do
+    not write ``key``), and the value ends where the field's value ends
+    (``time: 12:30:00`` does not pair ``time`` with ``12``, nor ``url:
+    http://…`` ``url`` with ``http``). An escape bounds a part as it bounds a
+    value (:func:`whole_value_in`).
+    """
+    from maljan.agents._indicator_denylists import (
+        _CONTINUES_A_COMPONENT_RE,
+        _closes_a_value,
+        _opens_a_value,
+    )
+
+    start = text.find(pair)
+    while start != -1:
+        if _opens_a_value(text, start, _CONTINUES_A_COMPONENT_RE) and _closes_a_value(
+            text, start + len(pair), _CONTINUES_A_COMPONENT_RE
+        ):
+            return True
+        start = text.find(pair, start + 1)
+    return False
+
+
+def held_spellings(value: str) -> tuple[str, ...]:
+    """Every spelling :meth:`EntryTexts.may_hold` looks ``value`` up by with ``fields``.
+
+    The value lower-cased (:func:`library_spellings`) and, for a field name
+    written with its value, the pairs an entry writes it as
+    (:func:`field_value_spellings`).
     """
     spellings = list(library_spellings(value))
     spellings.extend(form for form in field_value_spellings(value) if form not in spellings)
@@ -6079,13 +6117,13 @@ def wrong_entry_citations(
         known = [entry_id for entry_id in cited if entries.has_text(entry_id)]
         if not decidable(value) or not known:
             return
-        if any(entries.holds(entry_id, value) for entry_id in known):
+        if any(entries.holds(entry_id, value, fields=True) for entry_id in known):
             return
         if any(entry_id in entries.partial for entry_id in known):
             # A cited entry that is not the whole answer may hold it in the
             # part that is missing; no "is not in" is said of it.
             return
-        holders = entries.holding(value)
+        holders = entries.holding(value, fields=True)
         if not holders:
             return
         values = wrong.setdefault((tuple(known), tuple(holders)), [])
@@ -6248,9 +6286,9 @@ def stated_value_violations(payload: Any, entries: EntryTexts | None) -> list[Vi
         # A cited item is read directly: it is in no lookup of the entries.
         cited_items = [ref for ref in among if ref not in entries.texts]
         return any(
-            entries.holds(ref, form)
+            entries.holds(ref, form, fields=True)
             for form in _stated_spellings(value, numbers=numbers)
-            for ref in [*(entries.may_hold(form) & among), *cited_items]
+            for ref in [*(entries.may_hold(form, fields=True) & among), *cited_items]
         )
 
     for list_key, (noun, nouns) in _STATED_VALUE_ROWS.items():
@@ -6267,7 +6305,8 @@ def stated_value_violations(payload: Any, entries: EntryTexts | None) -> list[Vi
                     continue
                 if value not in held_elsewhere:
                     held_elsewhere[value] = decidable(value) and any(
-                        entries.holds(ref, value) for ref in entries.may_hold(value)
+                        entries.holds(ref, value, fields=True)
+                        for ref in entries.may_hold(value, fields=True)
                     )
             except (ValueError, OverflowError, RecursionError) as exc:
                 # A value no reader can take is not decidable: nothing is said of it.

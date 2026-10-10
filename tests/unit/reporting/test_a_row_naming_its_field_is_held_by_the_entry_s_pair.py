@@ -19,6 +19,8 @@ import json
 import time
 from typing import Any
 
+import pytest
+
 from maljan.pipeline.validation import (
     CITATION_WRONG_ENTRY_CODE,
     STATED_VALUE_UNHELD_CODE,
@@ -130,6 +132,50 @@ class TestOnlyThePairTheEntryHoldsCounts:
 
     def test_a_field_name_that_ends_another_is_asked(self) -> None:
         assert _codes(_items("key 0x2b")) == [STATED_VALUE_UNHELD_CODE]
+
+
+# A plain ``name: value`` text whose value or name runs on through a colon, a
+# slash or a backslash: each part is bounded on its own.
+@pytest.mark.parametrize(
+    ("text", "row"),
+    [
+        ("time: 12:30:00", "time 12"),
+        ("seed: 0x5a17:c0de", "seed 0x5a17"),
+        ("key: abc/def", "key abc"),
+        ("url: http://host.example/x", "url http"),
+        ("path: c:\\windows\\x", "path c"),
+        ("cmd: ipconfig /all/x", "cmd ipconfig /all"),
+        ("cfg:key: 0x2b", "key 0x2b"),
+        ("cfg/key: 0x2b", "key 0x2b"),
+        ('{"cfg/key": "0x2b"}', "key 0x2b"),
+    ],
+)
+def test_a_part_that_runs_on_is_not_held(text: str, row: str) -> None:
+    texts = EntryTexts.from_ledger([_entry("ev_0050", text)])
+    assert not texts.holds("ev_0050", row, fields=True)
+    assert _codes(_items(row, ref="ev_0050"), texts) == [STATED_VALUE_UNHELD_CODE]
+
+
+@pytest.mark.parametrize(
+    ("text", "row"),
+    [
+        ("time: 12 and more", "time 12"),
+        ("key: abc, next: 1", "key abc"),
+        ("url: http://host.example/x", "url http://host.example/x"),
+        ("cfg key: 0x2b.", "key 0x2b"),
+    ],
+)
+def test_a_whole_pair_in_plain_text_is_held(text: str, row: str) -> None:
+    texts = EntryTexts.from_ledger([_entry("ev_0050", text)])
+    assert texts.holds("ev_0050", row, fields=True)
+
+
+class TestOnlyTheTableAndCitationChecksReadPairs:
+    def test_a_sample_string_read_is_never_held_by_a_tool_s_field(self) -> None:
+        texts = EntryTexts.from_ledger([_entry("ev_0060", json.dumps({"offset": 4096}))])
+        assert texts.holds("ev_0060", "offset 4096", fields=True)
+        assert not texts.holds("ev_0060", "offset 4096")
+        assert texts.holding("offset 4096") == []
 
 
 class TestTheSpellings:
