@@ -26,11 +26,15 @@ from scripts.rehearsal.run import (
     describe_changes,
     gate_changes,
     gate_expected,
+    gate_models,
     harness_changes,
+    job_window_models,
     profile_stages,
     record_from_stack,
     restore_snapshot,
     roster_models,
+    run_models,
+    served_outputs,
     served_windows,
     third_party_off,
     write_results,
@@ -324,6 +328,58 @@ class TestTheJobsRoster:
         assert windows["acme-reverser"] == 200_000
         assert windows["acme-reverser-small"] == 100_000
         assert {"deepseek-v4-flash", "deepseek-v4-pro"} <= set(windows)
+
+    def test_the_job_s_window_is_taken_over_its_analysts_the_judge_and_its_entries(self) -> None:
+        """The judge's entry and its fallback count, the reporter's model does not."""
+        windowed = job_window_models(self._custom())
+        assert windowed == [
+            "deepseek-v4-flash",
+            "acme-reverser",
+            "acme-reverser-small",
+            "deepseek-v4-pro",
+        ]
+        mediator = self._custom()
+        mediator["core.llm.agents"]["value"]["mediator"] = {
+            "provider": "openai",
+            "model": "acme-mediator",
+        }
+        assert "acme-mediator" in job_window_models(mediator)
+
+    def test_unreadable_settings_name_no_window_model(self) -> None:
+        broken = _values(**{"core.agents.profile": {"value": "no_such_team", "source": "ui"}})
+        assert job_window_models(broken) == []
+
+    def test_the_guessed_window_refusal_and_the_stub_vet_every_roster_model(self) -> None:
+        values = self._custom()
+        expected = {"model.static": "deepseek-v4-flash"}
+        roster = roster_models(values)
+        assert {"acme-reverser", "acme-reverser-small"} <= set(
+            gate_models(values, expected, roster)
+        )
+        everything = run_models(expected, roster, job_window_models(values))
+        assert {"acme-reverser", "acme-reverser-small", "deepseek-v4-pro"} <= set(everything)
+
+    def test_every_roster_model_s_served_maximum_output_is_recorded(self) -> None:
+        roster = roster_models(self._custom())
+        outputs = served_outputs({"model.static": "deepseek-v4-flash"}, None, None, {}, roster)
+        assert set(outputs) == set(served_windows({}, None, None, {}, roster))
+        assert all(isinstance(v, int) and v > 0 for v in outputs.values())
+
+
+def test_the_in_process_run_requires_the_stages_of_its_own_profile() -> None:
+    from scripts.rehearsal.inprocess import _required_stages
+
+    from maljan.core.settings_overrides import build_settings
+
+    core = {
+        key.removeprefix("core."): row["value"]
+        for key, row in _values(**CUSTOM_TEAM).items()
+        if key.startswith("core.") and row.get("value") is not None
+    }
+    stages = _required_stages(build_settings(core))
+    assert stages["first"] == ["my_triage"]
+    assert stages["second"] == ["static", "my_reverser"]
+    assert "analysis" not in stages
 
 
 def test_a_revision_s_claims_are_the_answer_in_force() -> None:

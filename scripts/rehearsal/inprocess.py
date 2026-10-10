@@ -366,8 +366,17 @@ async def rehearse(rehearsal: Rehearsal) -> RunRecord:
                 empty = None
         required = _required_stages(settings)
         roster = agent_models(settings)
+        windowed = window_models(settings)
     finally:
         kept.restore()
+    # Every model the run may call: the rehearsal's own and every model of
+    # the job's roster and window, so an agent with an entry of its own is
+    # held to the facts its model is served with.
+    served = sorted(
+        set(MODELS[rehearsal.provider].values())
+        | {m for chain in roster.values() for m in chain}
+        | set(windowed)
+    )
     return RunRecord(
         scenario=rehearsal.scenario,
         api=rehearsal.provider,
@@ -385,6 +394,7 @@ async def rehearse(rehearsal: Rehearsal) -> RunRecord:
         expected=expected_for(rehearsal),
         required_stages=required,
         agent_models=roster,
+        window_models=windowed,
         empty_evidence_sections=empty,
         probe={"ok": probe_ok, "detail": probe_detail, "calls": len(probe_calls)},
         scenario_params={
@@ -394,10 +404,8 @@ async def rehearse(rehearsal: Rehearsal) -> RunRecord:
             "deadline_in": brain.deadline_in,
             "slow_roles": sorted(brain.slow_roles),
             "mode": "in_process",
-            "served_windows": {
-                model: state.facts(model).window
-                for model in sorted(set(MODELS[rehearsal.provider].values()))
-            },
+            "served_windows": {m: state.facts(m).window for m in served},
+            "served_outputs": {m: state.facts(m).max_output for m in served},
         },
         elapsed_s=elapsed,
     )
@@ -443,3 +451,24 @@ def agent_models(settings: Any) -> dict[str, list[str]]:
         if models:
             out[agent] = models
     return out
+
+
+def window_models(settings: Any) -> list[str]:
+    """Every model the job's one window is taken over, read from the settings.
+
+    The agents the product sizes its tool answers for
+    (``ServiceContainer.get_context_budget``): the active profile's analysts,
+    the judge and the role entries the run calls, each with every model it
+    may call (``assignments_for``, as ``context_window.window_for_settings``
+    asks). Empty when the settings cannot answer, so the window check fails.
+    """
+    from maljan.agents.composition import analyst_keys, role_entries_called
+    from maljan.core.config import JUDGE_AGENT_KEY
+    from maljan.core.model_assignments import assignments_for
+
+    agents = [*analyst_keys(settings), JUDGE_AGENT_KEY, *role_entries_called(settings)]
+    try:
+        chain = assignments_for(settings, agents)
+    except Exception:  # noqa: BLE001 — models nobody can read are not assumed
+        return []
+    return list(dict.fromkeys(str(a.model) for a in chain if str(a.model or "")))

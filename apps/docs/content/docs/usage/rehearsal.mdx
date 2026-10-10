@@ -247,15 +247,23 @@ closed: what it cannot confirm is a failure.
   are read from the job's own roster (every agent its settings define, every
   agent of its profile, the mediator and the summariser), so a custom team is
   checked by the same rule as the built-in one; an agent fails only when its
-  models or the windows served to them were not recorded. A gate that names
+  models, or the windows and maximum outputs served to them, were not
+  recorded, and a roster that cannot be read fails the check. A derived cap
+  must fit the tightest model of its agent's list: a quarter of that model's
+  window, bounded by its maximum output. The analysts' window must be the
+  smallest window served to any model the job's tool answers are sized for
+  (its analysts', the judge's and the role entries' it calls). A gate that names
   `--window` for a model the product cannot learn a window for (no
   `core.llm.openai.context_size`, no table row) warns before it starts, and
   this check then fails: the paid run would be sized on 8,192 tokens.
 - The STIX bundles and the markdown are rendered.
-- No claim is lost: every claim the model wrote is in an answer in force or
-  recorded as dropped, and every claim in force is discussed in the report's
-  body. The answer in force is the analyst's last one, a debate's revision
-  included, so its claims are numbered as the report labels them.
+- No claim is lost: every claim the model wrote for an analyst is in that
+  analyst's answer in force or recorded as dropped for that analyst, and every
+  claim in force is discussed in the report's body. The writer of each answer
+  is the agent the product names on that call's usage record; an answer whose
+  writer cannot be told fails the check. The answer in force is the analyst's
+  last one, a debate's revision included, so its claims are numbered as the
+  report labels them.
 - The settings in force are the ones configured.
 - The judge stated the verdict.
 - The run finished well inside its deadline.

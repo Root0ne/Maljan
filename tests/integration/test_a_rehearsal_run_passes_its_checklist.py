@@ -33,7 +33,13 @@ pytest.importorskip("starlette", reason="the stub model is served with starlette
 pytest.importorskip("uvicorn", reason="the stub model is served with uvicorn")
 pytest.importorskip("mcp", reason="the tool sidecars speak the mcp package's protocol")
 
-from scripts.rehearsal.checklist import check_run, compare, observations, signature  # noqa: E402
+from scripts.rehearsal.checklist import (  # noqa: E402
+    answer_writers,
+    check_run,
+    compare,
+    observations,
+    signature,
+)
 from scripts.rehearsal.inprocess import Rehearsal, rehearse  # noqa: E402
 from scripts.rehearsal.roles import SCENARIOS  # noqa: E402
 
@@ -207,3 +213,11 @@ def test_a_custom_team_passes_every_check(tmp_path: Path, wire: str) -> None:
     assert custom | {"triage"} <= set(record.run_summary["generation"]["output_caps"])
     assert record.required_stages["reversing"] == ["all_tools_reverser_ghidra"]
     assert observations(record)["negotiation_rounds"] > 2
+    # Every answer the stub wrote is held to the one analyst that wrote it.
+    writers, unknown = answer_writers(record)
+    assert unknown == []
+    assert all(len(agents) == 1 for agents in writers.values())
+    assert custom | {"triage"} <= set().union(*writers.values())
+    assert record.window_models and set(record.window_models) <= set(
+        record.scenario_params["served_outputs"]
+    )

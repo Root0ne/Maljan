@@ -32,6 +32,9 @@ from scripts.rehearsal.checklist import _stub_cost as stub_cost
 MODEL = "deepseek-v4-flash"
 NOW = time.time()
 WINDOW = 1_000_000
+OUTPUT = 393_216
+# The agent the product names on a role's usage record.
+WRITERS = {"analyst": "static", "revision": "static", "narrative": "reporter"}
 
 
 def _cap_from(window: int, source: str) -> str:
@@ -77,7 +80,7 @@ def _stub_log() -> list[dict[str, Any]]:
 def _usage_event(entry: dict[str, Any], **extra: Any) -> dict[str, Any]:
     """The per-call usage record the product writes for one answered stub call."""
     data = {
-        "agent": entry["role"],
+        "agent": WRITERS.get(entry["role"], entry["role"]),
         "model": entry["model"],
         "call": "loop turn",
         "reported": True,
@@ -178,9 +181,10 @@ def _record(**changes: Any) -> RunRecord:
         expected={"model.static": MODEL, "effort.static": "high", "max_steps": 40},
         required_stages={"analysis": ["static"], "report": ["reporter"]},
         agent_models={"static": [MODEL], "judge": [MODEL], "reporter": [MODEL]},
+        window_models=[MODEL],
         empty_evidence_sections=[],
         probe={"ok": True, "detail": "answered"},
-        scenario_params={"served_windows": {MODEL: WINDOW}},
+        scenario_params={"served_windows": {MODEL: WINDOW}, "served_outputs": {MODEL: OUTPUT}},
     )
     usd, _ = priced_usage(record)
     record.run_summary["spend"] = {"spent_usd": round(usd, 6)}
@@ -362,10 +366,20 @@ class TestTheHolesAGreenRunCouldHide:
         record = _record()
         first = next(e for e in record.events if e.get("type") == "model_usage")
         record.events.remove(first)
-        (check,) = [c for c in check_run(record) if not c.ok]
-        assert check.name == "tokens and spend as the provider reported them"
-        assert "per-call usage record(s), the model answered" in check.detail
-        assert "no usage record carries its reported usage" in check.detail
+        failed = {c.name: c.detail for c in check_run(record) if not c.ok}
+        detail = failed.pop("tokens and spend as the provider reported them")
+        assert "per-call usage record(s), the model answered" in detail
+        assert "no usage record carries its reported usage" in detail
+        # Nor can the claims check tell whose answer the call was: every other
+        # record of this fixture reports the same usage, and none is an analyst's.
+        assert list(failed) == ["no claim lost on the way to the report"]
+        assert failed["no claim lost on the way to the report"].startswith(
+            "call 1 (analyst): its usage is shared by "
+        )
+        assert (
+            "none of which has an answer in force"
+            in failed["no claim lost on the way to the report"]
+        )
 
     def test_a_usage_record_charged_apart_from_its_usage(self) -> None:
         record = _record()
@@ -445,6 +459,61 @@ class TestTheHolesAGreenRunCouldHide:
         }
         assert _failed(record) == []
 
+    @staticmethod
+    def _claims_detail(record: RunRecord) -> str:
+        (check,) = [
+            c for c in check_run(record) if c.name == "no claim lost on the way to the report"
+        ]
+        return "" if check.ok else check.detail
+
+    @staticmethod
+    def _second_analyst(record: RunRecord, agent: str, claims: list[str], tokens: int) -> None:
+        """A second analyst's answer, its usage record naming it, as the product writes one."""
+        entry = _log(99, "analyst", answer="final", claims=claims, input_tokens=tokens)
+        record.stub_log.append(entry)
+        record.events.append(_usage_event(entry, agent=agent))
+
+    def test_a_claim_one_analyst_drops_is_lost_though_another_holds_the_same_text(self) -> None:
+        record = _record()
+        self._second_analyst(record, "static_r2", ["It talks HTTP", "It reads pe_info"], 2000)
+        record.claims_in_force = {
+            "static": ["It talks HTTP", "It reads pe_info"],
+            "static_r2": ["It talks HTTP"],
+        }
+        record.malware_report["intro_background"] += " static claim 2 and static_r2 claim 1."
+        assert self._claims_detail(record) == (
+            "written by the model for static_r2, then neither in its answer in force nor "
+            "dropped: It reads pe_info"
+        )
+        record.run_summary["negotiation"] = {
+            "dropped_claims": ['The static analyst no longer states "It reads pe_info".']
+        }
+        assert "for static_r2" in self._claims_detail(record)
+        record.run_summary["negotiation"] = {
+            "dropped_claims": ['The static_r2 analyst no longer states "It reads pe_info".']
+        }
+        assert self._claims_detail(record) == ""
+
+    def test_answers_sharing_their_usage_count_for_every_agent_that_shares_it(self) -> None:
+        record = _record()
+        self._second_analyst(record, "static_r2", ["It talks HTTP"], 1000)
+        record.claims_in_force = {"static": ["It talks HTTP"], "static_r2": []}
+        assert self._claims_detail(record) == (
+            "written by the model for static_r2, then neither in its answer in force nor "
+            "dropped: It talks HTTP"
+        )
+
+    def test_answers_sharing_their_usage_with_different_claims_have_no_known_writer(self) -> None:
+        record = _record()
+        self._second_analyst(record, "static_r2", ["It reads pe_info"], 1000)
+        record.claims_in_force = {"static": ["It talks HTTP"], "static_r2": ["It reads pe_info"]}
+        record.malware_report["intro_background"] += " static_r2 claim 1."
+        assert self._claims_detail(record) == (
+            "call 1 (analyst): its usage is shared by static, static_r2, which wrote different "
+            "claims, so its writer cannot be told; call 99 (analyst): its usage is shared by "
+            "static, static_r2, which wrote different claims, so its writer cannot be told"
+        )
+
     def test_nothing_configured_to_compare(self) -> None:
         assert _failed(_record(expected={})) == ["settings in force as configured"]
 
@@ -464,7 +533,11 @@ class TestTheHolesAGreenRunCouldHide:
     def test_a_run_too_close_to_its_deadline(self) -> None:
         record = _record(
             elapsed_s=95.0,
-            scenario_params={"job_timeout_s": 100, "served_windows": {MODEL: WINDOW}},
+            scenario_params={
+                "job_timeout_s": 100,
+                "served_windows": {MODEL: WINDOW},
+                "served_outputs": {MODEL: OUTPUT},
+            },
         )
         assert _failed(record) == ["finished inside its deadline"]
 
@@ -785,7 +858,7 @@ class TestTheWindowInForce:
         record.expected["model.judge"] = MODEL
         record.run_summary["generation"]["output_caps"]["judge"] = {
             "tokens": WINDOW,
-            "derivation": f"{WINDOW} tokens — the model's declared maximum output of {WINDOW}",
+            "derivation": f"{WINDOW} tokens — llm.judge_max_tokens is set to {WINDOW}",
         }
         assert self._detail(record) == (
             f"judge's output cap of {WINDOW} tokens does not fit inside the {WINDOW}-token "
@@ -793,8 +866,7 @@ class TestTheWindowInForce:
         )
         record.run_summary["generation"]["output_caps"]["judge"] = {
             "tokens": WINDOW - 1,
-            "derivation": f"{WINDOW - 1} tokens — the model's declared maximum output of "
-            f"{WINDOW - 1}",
+            "derivation": f"{WINDOW - 1} tokens — llm.judge_max_tokens is set to {WINDOW - 1}",
         }
         assert self._detail(record) == ""
 
@@ -862,11 +934,81 @@ class TestTheWindowInForce:
     def test_every_model_an_agent_may_fall_back_to_must_hold_its_cap(self) -> None:
         record = _record()
         record.scenario_params["served_windows"]["acme-small"] = 8192
+        record.scenario_params["served_outputs"]["acme-small"] = 4096
         record.agent_models["static"] = [MODEL, "acme-small"]
         assert self._detail(record) == (
             "static's output cap of 8192 tokens does not fit inside the 8192-token window the "
-            "stub serves acme-small"
+            "stub serves acme-small; static's output cap of 8192 tokens is more than the "
+            "tightest model of its chain allows (acme-small 2048)"
         )
+
+    def test_a_derived_cap_must_fit_the_tightest_model_of_its_chain(self) -> None:
+        """A cap derived from the roomy model of a chain is refused by its tight fallback."""
+        record = _record()
+        record.scenario_params["served_windows"]["acme-fallback"] = 200_000
+        record.scenario_params["served_outputs"]["acme-fallback"] = OUTPUT
+        record.agent_models["static"] = [MODEL, "acme-fallback"]
+        record.run_summary["generation"]["output_caps"]["static"] = {
+            "tokens": 128_000,
+            "derivation": (
+                "llm.expert_max_tokens is 0, so derived: 128000 tokens — the smallest of a "
+                f"quarter (250000) of the model's {WINDOW}-token context window (probed), the "
+                "model's declared maximum output of 128000"
+            ),
+        }
+        assert self._detail(record) == (
+            "static's output cap of 128000 tokens is more than the tightest model of its chain "
+            "allows (acme-fallback 50000)"
+        )
+        record.run_summary["generation"]["output_caps"]["static"] = {
+            "tokens": 50_000,
+            "derivation": (
+                "llm.expert_max_tokens is 0, so derived: 50000 tokens — the smallest of a "
+                "quarter (50000) of the model's 200000-token context window (probed), the "
+                f"model's declared maximum output of {OUTPUT}"
+            ),
+        }
+        assert self._detail(record) == ""
+
+    def test_a_served_model_with_no_recorded_maximum_output_fails(self) -> None:
+        record = _record()
+        record.scenario_params["served_outputs"] = {}
+        assert self._detail(record) == (
+            f"no maximum output was recorded as served to {MODEL} of static"
+        )
+
+    def test_an_unreadable_roster_fails_rather_than_falling_back(self) -> None:
+        """No roster: the per-role setting names no fallback, so nothing is checked by it."""
+        record = _record()
+        record.expected["model.judge"] = MODEL
+        record.agent_models = {}
+        detail = self._detail(record)
+        assert detail.startswith(
+            "the job's roster could not be read: no agent's models are known; "
+            "no model is recorded for judge"
+        )
+        assert "no model is recorded for static" in detail
+
+    def test_the_job_s_window_is_the_smallest_over_every_model_it_is_taken_over(self) -> None:
+        """A judge entry on a smaller model sets the job's window, not the static analyst's."""
+        record = _record()
+        record.scenario_params["served_windows"]["acme-judge"] = 200_000
+        record.window_models = [MODEL, "acme-judge"]
+        assert self._detail(record) == (
+            f"the analysts' window is {WINDOW} tokens (declared); the smallest window the stub "
+            "serves the job's models is acme-judge 200000"
+        )
+        record.run_summary["truncation"]["context_window"]["tokens"] = 200_000
+        assert self._detail(record) == ""
+
+    def test_the_job_s_window_needs_every_model_it_is_taken_over(self) -> None:
+        record = _record()
+        record.window_models = []
+        assert self._detail(record) == (
+            "the models the job's window is taken over were not recorded"
+        )
+        record.window_models = [MODEL, "acme-unserved"]
+        assert self._detail(record) == "no window was recorded as served to acme-unserved"
 
     def test_no_output_caps_fails(self) -> None:
         record = _record()
