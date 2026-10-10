@@ -400,6 +400,18 @@ class TestTheNarrativeGetsOneTurnToFixItsShape:
         assert "key_findings" in feedback
 
     @pytest.mark.asyncio
+    async def test_an_answer_the_decoder_refuses_is_told_where(self) -> None:
+        broken = _valid_narrative().model_dump_json().replace('"', '"\\%', 1)
+        llm = self._llm(broken, _valid_narrative().model_dump_json())
+
+        out = await NarrativeAgent(llm=llm).generate(_make_report())
+
+        feedback = str(llm.ainvoke.await_args_list[1].args[0][-1].content)
+        assert "not JSON at all" not in feedback
+        assert "the answer is not valid JSON: Invalid \\escape at character 3" in feedback
+        assert out is not None
+
+    @pytest.mark.asyncio
     async def test_a_good_first_answer_costs_no_retry(self) -> None:
         llm = self._llm(_valid_narrative().model_dump_json())
 

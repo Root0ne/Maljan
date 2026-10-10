@@ -170,6 +170,29 @@ class TestTheScenarios:
         assert brain.answer(dynamic)[2] == "empty_answer"
         assert brain.answer(static)[2] == ""
 
+    def test_a_composer_section_s_empty_answer_is_whitespace_alone(self) -> None:
+        schema = composer.SECTION_SCHEMAS["execution_flow"]
+        request = _section_request(
+            "execution_flow", composer.section_contract("execution_flow", schema)
+        )
+        role, reply, fault = Brain(scenario="empty_answer").answer(request)
+        assert (role, fault) == ("composer", "empty_answer")
+        assert reply.text and not reply.text.strip() and not reply.tool_calls
+
+    @pytest.mark.parametrize("scenario", ["normal", "schema_break"])
+    def test_a_composer_section_thinks_first_on_the_anthropic_wire_only(
+        self, scenario: str
+    ) -> None:
+        schema = composer.SECTION_SCHEMAS["execution_flow"]
+        contract = composer.section_contract("execution_flow", schema)
+        evidence = composer._bundle_text(
+            "execution_flow", {"claims": [], "tool_outputs": [], "facts": {}}, None
+        )
+        for api, thinks in (("anthropic", True), ("openai", False)):
+            request = _request(composer._SYSTEM, f"{contract}\n\n{evidence}", api=api)
+            reply = Brain(scenario=scenario).answer(request)[1]
+            assert bool(reply.thinking) is thinks, api
+
     def test_overloaded_is_529_on_the_anthropic_wire(self) -> None:
         reply = Brain(scenario="overloaded").answer(
             _request(MEDIATOR_SYSTEM_HEAD, "x", api="anthropic")

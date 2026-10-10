@@ -177,7 +177,8 @@ def refusal(body: dict[str, Any], betas: set[str] = frozenset()) -> str:  # type
 
     Sampling parameters at a non-default value, ``budget_tokens``, a request
     ending on an assistant turn (a prefill, refused while thinking is on), a
-    message other than the last with empty content, a mid-conversation system
+    message other than the last with empty content, a text block that is empty
+    or only whitespace (in a turn or the system prompt), a mid-conversation system
     message out of place or turn-scoped without its beta, a ``tool_use``
     without its ``tool_result`` at the front of the next user turn. The
     preserved-thinking checks are :meth:`Wire.thinking_refusal`.
@@ -199,6 +200,26 @@ def refusal(body: dict[str, Any], betas: set[str] = frozenset()) -> str:  # type
         content = turn.get("content")
         if content in ([], "") and not turn.get("clear_at"):
             return f"messages.{index}: all messages must have non-empty content"
+    system = body.get("system")
+    for block in system if isinstance(system, list) else []:
+        if isinstance(block, dict) and block.get("type") == "text":
+            if not str(block.get("text") or "").strip():
+                return "system: text content blocks must be non-empty"
+    for turn in messages:
+        content = turn.get("content")
+        blocks = list(content) if isinstance(content, list) else []
+        for block in list(blocks):
+            inner = block.get("content") if isinstance(block, dict) else None
+            if isinstance(inner, list) and block.get("type") == "tool_result":
+                blocks.extend(inner)
+        for block in blocks:
+            if isinstance(block, dict) and block.get("type") == "text":
+                if not str(block.get("text") or ""):
+                    return "messages: text content blocks must be non-empty"
+                if not str(block.get("text")).strip():
+                    return "messages: text content blocks must contain non-whitespace text"
+        if isinstance(content, str) and content and not content.strip():
+            return "messages: text content blocks must contain non-whitespace text"
     placed = _system_placement(messages, betas)
     if placed:
         return placed

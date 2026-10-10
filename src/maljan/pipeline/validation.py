@@ -2384,7 +2384,99 @@ def keep_known_keys(model: Any, payload: Any) -> tuple[Any, list[str]]:
     return _walk(model, payload, ""), dropped
 
 
-def schema_violations(model: Any, payload: Any, *, code: str) -> list[Violation]:
+# Characters of the masked JSON quoted either side of where the decoder stopped.
+DECODE_EXCERPT_AROUND = 40
+
+
+def unreadable_answer_reason(answer: str) -> str:
+    """What a model is told when its answer gives the JSON reader nothing.
+
+    An answer with no text says so. An answer whose JSON the shared reader
+    (``utils.json_cleaner``) cannot decode is told the decoder's complaint,
+    the character it stopped at and the text there (:func:`_where_it_stopped`),
+    with how a double quote and a backslash are written inside a JSON string:
+    the two characters a model most often leaves unescaped in a value it
+    copies from a sample. An answer that decodes to something that is not an
+    object with fields is told what it decoded to.
+    """
+    from maljan.utils.json_cleaner import json_decode_error
+
+    if not str(answer or "").strip():
+        return "the answer held no text. Write the JSON object the request asks for."
+    found = json_decode_error(answer)
+    if found is not None:
+        complaint, position, document = found
+        return (
+            f"the answer is not valid JSON: {safe_finding_value(complaint)} at character "
+            f"{int(position + 1)} of the JSON{_where_it_stopped(document, complaint, position)}"
+            '. Inside a JSON string, write a double quote as \\" and a backslash as two '
+            "backslashes."
+        )
+    return _what_it_decoded_to(answer)
+
+
+def _where_it_stopped(document: str, complaint: str, position: int) -> str:
+    """``", where it reads: …"`` around the decoder's stop, masked before it is cut, or ``""``.
+
+    Every credential is masked over the whole JSON first (``safe_answer_text``,
+    the masking a stored answer gets), and only then is the window cut, from
+    the masked text at the place the decoder stops in it: a window cut first
+    would keep the tail of a key whose head, the context the masking reads it
+    by, it had cut away. Masking that moves or clears the fault quotes
+    nothing. A character the excerpt cannot show (a raw control character,
+    which is what such a complaint is about) is named by its code point.
+    """
+    masked = safe_answer_text(document)
+    quoted = ""
+    try:
+        json.loads(masked)
+    except json.JSONDecodeError as exc:
+        if exc.msg == complaint:
+            start = max(0, exc.pos - DECODE_EXCERPT_AROUND)
+            quoted = safe_finding_value(masked[start : exc.pos + DECODE_EXCERPT_AROUND])
+    char = document[position] if 0 <= position < len(document) else ""
+    named = (
+        f" (the character there is U+{int(ord(char)):04X})"
+        if char and not char.isprintable()
+        else ""
+    )
+    where = f", where it reads: {quoted}" if quoted else ""
+    return f"{where}{named}"
+
+
+def _what_it_decoded_to(answer: str) -> str:
+    """What an answer that decodes but holds no object with fields is told: what it is."""
+    from maljan.utils.json_cleaner import extract_json
+
+    try:
+        value = json.loads(extract_json(answer))
+    except (ValueError, RecursionError):
+        return "the answer holds no JSON object."
+    if isinstance(value, dict) and not value:
+        return (
+            "the answer is an empty JSON object. Write the object the request asks for, "
+            "with its fields."
+        )
+    if isinstance(value, list):
+        empty = "an empty JSON array" if not value else "a JSON array"
+        return f"the answer is {empty}. Write the object the request asks for, not an array."
+    if not isinstance(value, dict):
+        kind = (
+            "the JSON value null"
+            if value is None
+            else "a JSON boolean"
+            if isinstance(value, bool)
+            else "a JSON number"
+            if isinstance(value, int | float)
+            else "a JSON string"
+        )
+        return f"the answer is {kind}. Write the object the request asks for."
+    return "the answer holds no JSON object."
+
+
+def schema_violations(
+    model: Any, payload: Any, *, code: str, answer: str | None = None
+) -> list[Violation]:
     """Pydantic's complaints about ``payload``, in words the model can act on.
 
     The narrative and the report composer answer against a schema with real
@@ -2397,6 +2489,10 @@ def schema_violations(model: Any, payload: Any, *, code: str) -> list[Violation]
     rule, which is what the retry turn shows the model.
     """
     if payload is None:
+        # ``answer``, the text the payload was read from, lets the model be
+        # told why nothing was read (``unreadable_answer_reason``).
+        if answer is not None:
+            return [Violation(code=code, message=unreadable_answer_reason(answer))]
         return [Violation(code=code, message="the answer was not JSON at all.")]
     try:
         model.model_validate(payload)
@@ -8202,12 +8298,13 @@ def _with_feedback(
 
     content = getattr(answer, "content", None)
     turns = list(messages)
-    # A block list with no text in it (thinking alone, or thinking and a tool
-    # call) holds nothing to correct, and an assistant turn of thinking alone
-    # is not a shape any request here is known to be accepted with: it is left
-    # out like a described answer, and the correction is asked at the end of
-    # the user turn before it.
-    if isinstance(content, list) and not answer_text(content).strip():
+    # An answer with no text in it — an empty or whitespace string, or a block
+    # list of thinking alone, or thinking and a tool call — holds nothing to
+    # correct, and an assistant turn of thinking alone is not a shape any
+    # request here is known to be accepted with: it is left out like a
+    # described answer, and the correction is asked at the end of the user
+    # turn before it, so the retry is never the request just answered.
+    if isinstance(content, list | str) and not answer_text(content).strip():
         keep_answer = False
     if keep_answer:
         # A block list (a thinking model's answer on ``ChatAnthropic``) goes back

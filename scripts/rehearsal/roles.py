@@ -43,7 +43,9 @@ from scripts.rehearsal import wire
 SCENARIOS: dict[str, str] = {
     "normal": "every role answers well-formed, citing the run's own ledger ids",
     "cut_at_cap": "every first call is cut at its output cap with only thinking and no text",
-    "empty_answer": "every first call answers with no text at all",
+    "empty_answer": (
+        "every first call answers with no text at all; a composer section's with whitespace alone"
+    ),
     "schema_break": "every first call answers in a form its reader cannot parse",
     "long_loop": "every analyst calls tools for many steps before answering",
     "slow_model": "every call takes a fixed time before it answers",
@@ -368,7 +370,11 @@ class Brain:
         if fault == "cut_at_cap":
             return wire.Reply(thinking=thinking, stop="max_tokens")
         if fault == "empty_answer":
-            return wire.Reply(text="", stop="end")
+            # A composer section's empty answer is whitespace alone, as a model
+            # that thinks first can end one: an answer with no text that a
+            # retry must neither send back (the Messages API refuses a turn of
+            # whitespace with a 400) nor ask about as broken JSON.
+            return wire.Reply(text="\n\n" if role == "composer" else "", stop="end")
         if fault == "server_error_once":
             return wire.Reply(status=500, error="Internal server error")
         if fault == "rate_limited":
@@ -400,7 +406,10 @@ class Brain:
             return wire.Reply(text="The sample looks interesting but I will not list findings.")
         if role == "mediator":
             return wire.Reply(text="The analysts mostly agree.")
-        return wire.Reply(text='{"executive_summary": "cut off mid')
+        return wire.Reply(
+            thinking=_SECTION_THINKING if _thinks_first(role, request) else "",
+            text='{"executive_summary": "cut off mid',
+        )
 
     # ---------------------------------------------------------------- scripts
 
@@ -427,7 +436,9 @@ class Brain:
             return _as_schema_call(request, self._narrative(facts, labels))
         if role == "composer":
             text, content = self._composer(request, facts)
-            reply = _as_schema_call(request, text)
+            reply = _as_schema_call(
+                request, text, thinking=_SECTION_THINKING if _thinks_first(role, request) else ""
+            )
             section = composer_section(request)
             reply.note = {
                 "section": section,
@@ -814,6 +825,18 @@ def _without_techniques(answer: str) -> str:
 
 _FLAGGED_CLAIM = re.compile(r"\bclaims\[(\d+)\]")
 _ITEM_LABEL = re.compile(r"^([A-Z]\d+)\. ", re.MULTILINE)
+
+
+# What a composer section's answer on the Anthropic wire thinks first. Claude
+# Haiku 5.5 thinks by default, so a section's answer is a block list, thinking
+# then text, which a streamed join starts with the empty string of its opening
+# chunk: sent back by a validation retry, that string is the empty text block
+# a paid run's section was refused for.
+_SECTION_THINKING = "Weighing the section's evidence."
+
+
+def _thinks_first(role: str, request: wire.Request) -> bool:
+    return role == "composer" and request.api == "anthropic"
 
 
 def _as_schema_call(request: wire.Request, text: str, thinking: str = "") -> wire.Reply:

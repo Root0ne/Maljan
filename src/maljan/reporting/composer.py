@@ -1839,9 +1839,14 @@ class ReportComposer:
                 )
             return raw
 
+        # The text the latest answer was read from: an answer that gives the
+        # reader nothing is told why (``schema_violations``' ``answer``).
+        answer_read = ""
+
         def _parse(answer: Any) -> Any:
-            nonlocal declined
-            payload = safe_parse_json(_message_text(answer))
+            nonlocal declined, answer_read
+            answer_read = _message_text(answer)
+            payload = safe_parse_json(answer_read)
             declined = bool(payload) and _section_declined(payload, schema)
             if not payload or declined:
                 return None
@@ -1885,7 +1890,7 @@ class ReportComposer:
                     )
                 ]
             found = [
-                *schema_violations(schema, payload, code="composer.schema"),
+                *schema_violations(schema, payload, code="composer.schema", answer=answer_read),
                 *section_capability_violations(payload, self._grounding),
                 *citation_violations(payload, citable, prose=prose, items=self._items),
                 *wrong_entry_citations(payload, entries, prose=prose),

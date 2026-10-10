@@ -14,6 +14,8 @@ paid run is the most expensive failure there is. :func:`check_anthropic` and
   every OpenAI ``tool_calls`` by its ``tool`` messages), and no result without
   its call;
 * at most four ``cache_control`` breakpoints;
+* no empty or whitespace-only text block, and no empty turn but a final
+  assistant prefill;
 * every ``thinking`` and ``redacted_thinking`` block sent back exactly as it
   was received — for a model whose blocks are bound to their prefix, bound to
   the system prompt, the tools and every earlier message too — unless the
@@ -180,6 +182,65 @@ def _check_tool_pairs_anthropic(messages: list[dict[str, Any]]) -> None:
             )
 
 
+def _check_text_blocks_anthropic(body: dict[str, Any]) -> None:
+    """Every text block holds text that is not all whitespace, and no turn but a prefill is empty.
+
+    The API's own refusals: an empty text block anywhere in the messages,
+    inside a ``tool_result``'s list content too (the 400 a paid run met, word
+    for word, when a streamed answer's joined content went back with the empty
+    string its first chunk carried), one holding only whitespace, one with no
+    ``text`` field, the same in the system prompt, a turn whose content is an
+    empty string anywhere but the final assistant turn, and a final assistant
+    prefill ending in whitespace.
+    """
+    system = body.get("system")
+    if isinstance(system, list):
+        for n, block in enumerate(system):
+            if isinstance(block, dict) and block.get("type") == "text":
+                _check_text("system", f"system.{n}", block)
+    messages = list(body.get("messages") or [])
+    for index, message in enumerate(messages):
+        content = message.get("content")
+        final_prefill = index == len(messages) - 1 and message.get("role") == "assistant"
+        if isinstance(content, str):
+            if not content and not final_prefill:
+                raise ApiError(
+                    400,
+                    f"messages.{index}: all messages must have non-empty content except for "
+                    "the optional final assistant message",
+                )
+            if content and final_prefill and content != content.rstrip():
+                raise ApiError(400, "final assistant content cannot end with trailing whitespace")
+            if content:
+                # A string is read as one text block.
+                _check_text("messages", f"messages.{index}.content", {"text": content})
+            continue
+        blocks = _blocks(message)
+        for n, block in enumerate(blocks):
+            where = f"messages.{index}.content.{n}"
+            if block.get("type") == "text":
+                _check_text("messages", where, block)
+            inner = block.get("content") if block.get("type") == "tool_result" else None
+            for m, part in enumerate(inner if isinstance(inner, list) else []):
+                if isinstance(part, dict) and part.get("type") == "text":
+                    _check_text("messages", f"{where}.content.{m}", part)
+        last = blocks[-1] if blocks else {}
+        if final_prefill and last.get("type") == "text":
+            text = str(last.get("text") or "")
+            if text != text.rstrip():
+                raise ApiError(400, "final assistant content cannot end with trailing whitespace")
+
+
+def _check_text(where: str, path: str, block: dict[str, Any]) -> None:
+    if "text" not in block:
+        raise ApiError(400, f"{path}.text: Field required")
+    text = str(block.get("text") or "")
+    if not text:
+        raise ApiError(400, f"{where}: text content blocks must be non-empty")
+    if not text.strip():
+        raise ApiError(400, f"{where}: text content blocks must contain non-whitespace text")
+
+
 def breakpoints(body: dict[str, Any]) -> list[tuple[str, int, int]]:
     """Every ``cache_control`` mark as (where, message index or -1, block index)."""
     found: list[tuple[str, int, int]] = []
@@ -252,6 +313,7 @@ def check_anthropic(
             f"Found {len(marks)}.",
         )
     _check_sampling_and_effort(body, facts)
+    _check_text_blocks_anthropic(body)
     messages = list(body.get("messages") or [])
     _check_tool_pairs_anthropic(messages)
     if thinking_on(body, facts):

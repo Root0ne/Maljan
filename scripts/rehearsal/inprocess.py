@@ -23,7 +23,7 @@ in gate mode is the gate):
 * the static provider is ``none`` (no Ghidra or radare2) and long-term
   memory is in memory (no Qdrant);
 * the rehearsal's own settings, not the operator's: effort ``high`` (judge
-  ``medium`` / ``max``), the judge's cap, step and time limits, a spend
+  ``medium`` / ``max``), step and time limits, a spend
   ceiling so the run summary carries its spend, ``compat`` ``deepseek`` and
   parallel analysts as a hosted DeepSeek endpoint resolves them.
 
@@ -85,7 +85,11 @@ class Rehearsal:
     # timeout; ``None`` holds it to none (``deadline_hit`` sets its own).
     job_timeout_s: float | None = None
     effort: str = "high"
-    judge_max_tokens: int = 9000
+    # 0, the product's default: the judge, the narrative and each composer
+    # section take the output budget the product derives (a quarter of the
+    # window, at most the model's declared output), so a section on Claude
+    # Haiku 5.5 is streamed and joined as it is on a paid run.
+    judge_max_tokens: int = 0
     max_steps: int = 40
     agent_timeout_s: int = 900
     spend_ceiling_usd: float = 1000.0
@@ -168,9 +172,10 @@ def expected_for(rehearsal: Rehearsal) -> dict[str, Any]:
         "effort.judge": JUDGE_EFFORT[rehearsal.provider],
         "effort.mediator": rehearsal.effort,
         "effort.reporter": rehearsal.effort,
-        "max_tokens.judge": rehearsal.judge_max_tokens,
         "max_steps": rehearsal.max_steps,
         "timeout_s": rehearsal.agent_timeout_s,
+        # A cap set is found in force; 0 leaves it to the product's derivation.
+        **({"max_tokens.judge": rehearsal.judge_max_tokens} if rehearsal.judge_max_tokens else {}),
     }
 
 
