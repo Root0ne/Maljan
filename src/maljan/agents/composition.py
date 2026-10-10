@@ -122,8 +122,9 @@ def called_assignments(settings: Settings, stages: Sequence[Any] | None = None) 
     * the judge on the judge role (``get_judge_llm``): its own entry, or else
       the global judge model, never the expert one — every team has exactly
       one verdict stage;
-    * the reporter on the judge role whenever a report stage exists
-      (``get_reporter_llm``, the narrative and the composer).
+    * the reporter on the judge role whenever a report stage exists and
+      ``reporting.enabled`` is on (``get_reporter_llm``, the narrative and the
+      composer); with reporting off the report stage is not planned.
 
     Each agent's fallbacks are in, because a model the run falls back to is a
     model the run calls (``assignment_chain_for``). ``stages`` defaults to the
@@ -154,7 +155,7 @@ def called_assignments(settings: Settings, stages: Sequence[Any] | None = None) 
         *assignments_for(settings, agents),
         *assignment_chain_for(settings, JUDGE_AGENT_KEY, role="judge"),
     ]
-    if "report" in kinds:
+    if "report" in kinds and bool(getattr(settings.reporting, "enabled", True)):
         called += assignment_chain_for(settings, REPORTER_AGENT_KEY, role="judge")
     return called
 
@@ -166,8 +167,10 @@ def window_assignments(settings: Settings, stages: Sequence[Any] | None = None) 
     included, so it has to fit the tightest model any agent that takes a tool
     answer under it calls (:func:`called_assignments`). The reporter is the one
     called role it leaves out: the narrative and the composer make no tool
-    call under the job's budget, and the composer sizes each section's evidence
-    on its own models' windows (``ServiceContainer.get_report_composer``).
+    call under the job's budget, the composer sizes each section's evidence on
+    its own models' windows (``ServiceContainer.get_report_composer``), and the
+    triage pack they read is cut on the smaller of the job's window and the
+    reporter's own (``pipeline.nodes.pack_text``).
     """
     from maljan.core.config import REPORTER_AGENT_KEY
 

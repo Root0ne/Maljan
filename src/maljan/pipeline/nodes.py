@@ -1617,18 +1617,26 @@ def _ledger_servers(state: AnalysisState) -> set[str]:
 # ---------------------------------------------------------------------------
 
 
-def pack_text(state: AnalysisState, container: ServiceContainer) -> str:
+def pack_text(
+    state: AnalysisState, container: ServiceContainer, *, for_reporter: bool = False
+) -> str:
     """The triage pack as every agent is shown it, or ``""`` on a run without one.
 
     Cut at the same bound the upstream findings block has
     (:func:`upstream_chars`): both are what a stage is told before it starts,
     and one budget for the two keeps a long pack from spending a late stage's
-    context.
+    context. The reporter's models are not among the job's window
+    (``composition.window_assignments``), so for the narrative and the
+    composer (``for_reporter``) the pack is cut at the smaller of the job's
+    bound and the one the reporter's own models' window derives.
     """
-    return pack_block(pack_entries(state.get("evidence_ledger") or []), upstream_chars(container))
+    chars = upstream_chars(container)
+    if for_reporter:
+        chars = min(chars, upstream_chars(container, reporter=True))
+    return pack_block(pack_entries(state.get("evidence_ledger") or []), chars)
 
 
-def upstream_chars(container: ServiceContainer) -> int:
+def upstream_chars(container: ServiceContainer, *, reporter: bool = False) -> int:
     """How many characters the upstream findings block and the triage pack may take.
 
     ``reporting.upstream_findings_max_chars`` above 0 is the operator's; at 0,
@@ -1644,7 +1652,11 @@ def upstream_chars(container: ServiceContainer) -> int:
     budget: Any = None
     if configured <= 0:
         try:
-            budget = container.get_context_budget()
+            budget = (
+                container.get_reporter_context_budget()
+                if reporter
+                else container.get_context_budget()
+            )
         except Exception as exc:  # noqa: BLE001 — no window is the documented fallback
             logger.debug("upstream findings: no context budget (%s)", exc)
     chars, how = upstream_block_chars(configured, budget)
@@ -5711,7 +5723,7 @@ def make_report_node(
         # starts at its first model again, with turn deadlines measured against
         # the narrative's own clock, sized from its output budget and the
         # model's measured pace.
-        _narrative_facts = pack_text(state, container)
+        _narrative_facts = pack_text(state, container, for_reporter=True)
         _narrative_state = render_run_state(state)
         narrative_seconds = (
             _narrative_timeout(
@@ -5833,7 +5845,7 @@ def make_report_node(
                 await composer.compose(
                     report,
                     state.get("isr_reports"),
-                    facts_block=pack_text(state, container),
+                    facts_block=pack_text(state, container, for_reporter=True),
                     run_state=render_run_state(state),
                     citable_ids=ledger_ids(state),
                     items=_items,

@@ -516,8 +516,8 @@ the run can reach — fallbacks included, each named in the refusal as the model
 the agent *falls back to* — each read on the model its builder calls: the agents of
 the team's analysis stages and every agent those can ask through `ask_<key>`, and so
 on; the mediator of a debate and the function summariser while it is on, each on its
-entry or else the global expert model; and the judge and the reporter on their
-entries or else the global **judge** model — and refuses with 422 when one of them
+entry or else the global expert model; and the judge, and the reporter while
+`reporting.enabled` is on, on their entries or else the global **judge** model — and refuses with 422 when one of them
 has no passing row, naming the agent, the model, the endpoint and the probe's
 last message. The endpoint appears there as its label — scheme and host — and
 never as the value a call is made with: that refusal is read by whoever
@@ -979,7 +979,9 @@ model; and the judge on its own entry, or else the global **judge** model
 with a smaller window than the analysts' therefore sizes the whole job. These
 are the models the probe gate checks, but for the reporter: its narrative and
 composer calls take no tool answer under this cap, and the composer sizes each
-section's evidence on its own models' windows.
+section's evidence on its own models' windows. The triage pack the narrative and
+the composer read is cut at the smaller of the job's bound and the one the
+reporter's own models' window derives.
 
 Where to see what applied: the Settings page prints the detected window beside
 the field, with the source word itself, and `run_summary.truncation` records

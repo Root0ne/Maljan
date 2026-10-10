@@ -252,7 +252,14 @@ def builds_provider(provider: str) -> bool:
         from maljan.llm.registry import _PROVIDER_REGISTRY, discover_providers
 
         discover_providers()
-    except Exception:  # noqa: BLE001 — a registry that cannot load decides nothing
+    except Exception as exc:  # noqa: BLE001 — a registry that cannot load decides nothing
+        from maljan.core.logger import logger
+
+        logger.debug(
+            "The LLM provider registry could not load every built-in provider (%s); "
+            "an entry's provider is read as built.",
+            type(exc).__name__,
+        )
         return True
     return str(provider) in _PROVIDER_REGISTRY
 

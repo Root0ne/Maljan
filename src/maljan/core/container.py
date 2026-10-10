@@ -535,6 +535,7 @@ class ServiceContainer:
         # window costs a metadata request to the operator's own endpoint, and a
         # container that never attaches a tool server should never make it.
         self._context_budget: Any | None = None
+        self._reporter_context_budget: Any | None = None
 
         _LIVE_CONTAINERS.add(self)
         _register_retirement_hook()
@@ -1028,6 +1029,32 @@ class ServiceContainer:
             budget.cap_without_recording(),
         )
         return budget
+
+    def get_reporter_context_budget(self) -> Any:
+        """The window the reporter's own models serve, as a budget, built once.
+
+        The reporter is left out of the job's window
+        (``composition.window_assignments``), so what it reads before it starts
+        — the triage pack — is cut on the smaller of the two
+        (``pipeline.nodes.pack_text``). Its models are the chain
+        ``get_reporter_llm`` builds, fallbacks included; learned as the job's
+        window is, and never asked of an endpoint by a mock container.
+        """
+        held = self._reporter_context_budget
+        if held is not None:
+            return held
+        from maljan.core.model_assignments import assignment_chain_for
+        from maljan.llm.context_window import budget_for_settings
+
+        budget = budget_for_settings(
+            self.config,
+            assignment_chain_for(self.config, REPORTER_AGENT_KEY, role="judge"),
+            probe=self._cap_is_derived() and not self.mock,
+        )
+        with self._lock:
+            if self._reporter_context_budget is None:
+                self._reporter_context_budget = budget
+            return self._reporter_context_budget
 
     def _cap_is_derived(self) -> bool:
         """Whether the tool-output cap comes from the window rather than a setting."""

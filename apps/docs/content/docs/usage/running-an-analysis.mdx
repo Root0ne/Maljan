@@ -95,7 +95,8 @@ three kinds of job that could only fail later:
 - **A model no probe has reached.** With `llm.require_probe` on (the default),
   every model the job calls must have answered a connection test: every agent
   of the team and every agent it can ask, the mediator and summariser when they
-  run, and the judge and the reporter on the global judge model unless they
+  run, and the judge and (while reporting is on) the reporter on the global judge
+  model unless they
   have an entry.
   See [a model is probed before a job may name
   it](/configuration/#a-model-is-probed-before-a-job-may-name-it).

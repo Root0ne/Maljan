@@ -352,3 +352,77 @@ class TestAnEntryTheRegistryCannotBuild:
             _PROVIDER_REGISTRY.pop("acme-plugged", None)
 
         assert [a.model for a in chain] == ["acme-judge"]
+
+    def test_a_registry_that_cannot_load_is_logged(self, monkeypatch: Any, caplog: Any) -> None:
+        import logging
+
+        from maljan.core.logger import logger
+        from maljan.core.model_assignments import builds_provider
+        from maljan.llm import registry
+
+        def _broken() -> None:
+            raise ImportError("a provider module is missing")
+
+        monkeypatch.setattr(registry, "discover_providers", _broken)
+        logger.addHandler(caplog.handler)
+        caplog.set_level(logging.DEBUG)
+        monkeypatch.setattr(logger, "level", logging.DEBUG)
+        try:
+            assert builds_provider("acme-anything") is True
+        finally:
+            logger.removeHandler(caplog.handler)
+
+        assert any(
+            "could not load every built-in provider (ImportError)" in r.getMessage()
+            for r in caplog.records
+        )
+
+
+class TestTheReporter:
+    def test_it_is_called_only_while_reporting_is_on(self) -> None:
+        from maljan.agents.composition import called_assignments
+
+        on = _haiku_everywhere()
+        off = _haiku_everywhere(**{"reporting.enabled": False})
+
+        assert "reporter" in {a.agent for a in called_assignments(on)}
+        assert "reporter" not in {a.agent for a in called_assignments(off)}
+
+    def test_the_pack_it_reads_fits_its_own_smaller_window(self, monkeypatch: Any) -> None:
+        from maljan.pipeline import nodes
+
+        settings = _deepseek(
+            "deepseek-v4-flash",
+            "deepseek-v4-flash",
+            **{"llm.agents": {"reporter": _entry("deepseek-v3")}},
+        )
+        container = _container(settings)
+        cut: list[int] = []
+        monkeypatch.setattr(nodes, "pack_block", lambda _entries, chars: cut.append(chars) or "")
+
+        job = nodes.upstream_chars(container)
+        own = nodes.upstream_chars(container, reporter=True)
+        nodes.pack_text({}, container)
+        nodes.pack_text({}, container, for_reporter=True)
+
+        assert container.get_context_budget().window.tokens == 1048576
+        assert container.get_reporter_context_budget().window.tokens == 65536
+        assert own < job
+        assert cut == [job, own]
+
+    def test_a_reporter_on_a_larger_window_keeps_the_job_s_cut(self, monkeypatch: Any) -> None:
+        from maljan.pipeline import nodes
+
+        settings = _deepseek(
+            "deepseek-v3",
+            "deepseek-v3",
+            **{"llm.agents": {"reporter": _entry("deepseek-v4-pro")}},
+        )
+        container = _container(settings)
+        cut: list[int] = []
+        monkeypatch.setattr(nodes, "pack_block", lambda _entries, chars: cut.append(chars) or "")
+
+        nodes.pack_text({}, container)
+        nodes.pack_text({}, container, for_reporter=True)
+
+        assert cut[0] == cut[1] == nodes.upstream_chars(container)
