@@ -743,3 +743,32 @@ class TestAnUnknownNameIsNeverQuotedWhole:
         assert recorded.revise is None and huge[:40] not in recorded.revise_note
         assert all(huge[:40] not in r.getMessage() for r in caplog.records)
         assert update["revision_rounds"][0]["asked_all"] == recorded.revise_note
+
+
+class TestTheMentionsOfALineAreReadInLinearTime:
+    def test_eight_thousand_mentions_take_about_ten_times_eight_hundred(self) -> None:
+        import time
+
+        from maljan.pipeline.debate_facts import _claims_named
+
+        def cost(count: int) -> float:
+            line = "STATIC Claim 1 ALL_TOOLS_STATIC_R2 Claim 2 " * (count // 2)
+            best = float("inf")
+            for _ in range(3):
+                began = time.perf_counter()
+                found = _claims_named(line, NAMES)
+                best = min(best, time.perf_counter() - began)
+            assert len(found) == count
+            return best
+
+        small, large = cost(800), cost(8000)
+
+        # Linear is about 10x; the quadratic scan it replaces was about 100x.
+        assert large < 30 * small
+
+    def test_a_name_inside_a_longer_one_is_read_once(self) -> None:
+        from maljan.pipeline.debate_facts import _claims_named
+
+        found = _claims_named("ALL_TOOLS_STATIC_R2 Claim 2 and STATIC Claim 1", NAMES)
+
+        assert found == [("all_tools_static_r2", ["2"]), ("static", ["1"])]

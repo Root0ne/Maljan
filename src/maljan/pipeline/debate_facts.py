@@ -86,14 +86,17 @@ def _claims_named(line: str, agent_names: Iterable[str]) -> list[tuple[str, list
     any length are read (``_claim_place``).
     """
     names = sorted({str(n) for n in agent_names if str(n).strip()}, key=len, reverse=True)
-    taken: list[tuple[int, int]] = []
+    # The characters a name already read covers: a match over any of them is
+    # inside a longer name. One name's matches never overlap each other, so
+    # each name looks at each character at most once.
+    taken = bytearray(len(line))
     found: list[tuple[str, list[str]]] = []
     for name in names:
         for match in _name_pattern(name).finditer(line):
-            span = match.span()
-            if any(span[0] < end and start < span[1] for start, end in taken):
+            start, end = match.span()
+            if taken.find(1, start, end) != -1:
                 continue
-            taken.append(span)
+            taken[start:end] = b"\x01" * (end - start)
             numbers = _CLAIM_NUMBERS.match(line, match.end())
             if numbers is not None:
                 found.append((name, re.findall(r"\d+", numbers.group(1))))
