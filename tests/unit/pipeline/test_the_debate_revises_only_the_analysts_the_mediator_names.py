@@ -502,3 +502,19 @@ class TestACitedClaimIsShownAsTheMediatorReadIt:
         assert peers == {"static": summary_line}
         assert "T1547.001" in summary_line and "(revised)" in summary_line
         assert "Confidence: 0.70" in summary_line
+
+
+class TestTheNamesStayOutOfModelInput:
+    def test_the_history_a_prompt_carries_reads_the_same_with_or_without_them(self) -> None:
+        read = _mediator(revise=["static"], note="")
+        unread = _mediator(revise=None, note=ANALYSTS_FIELD_MISSING_NOTE)
+        legacy = AgentArgument(
+            agent_name="Mediator",
+            finding=FINDING,
+            confidence_score=0.6,
+            contradictions=[LINE_STATIC_R2, LINE_STATIC],
+            not_blocking=[LINE_NOT_BLOCKING],
+        )
+
+        assert str([read]) == str([legacy]) == str([unread])
+        assert "revise" not in str([read]) and "revise" not in repr(unread)
