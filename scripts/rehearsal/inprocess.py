@@ -456,19 +456,27 @@ def agent_models(settings: Any) -> dict[str, list[str]]:
 def window_models(settings: Any) -> list[str]:
     """Every model the job's one window is taken over, read from the settings.
 
-    The agents the product sizes its tool answers for
-    (``ServiceContainer.get_context_budget``): the active profile's analysts,
-    the judge and the role entries the run calls, each with every model it
-    may call (``assignments_for``, as ``context_window.window_for_settings``
-    asks). Empty when the settings cannot answer, so the window check fails.
+    The agents whose tool answers that one window sizes
+    (``ServiceContainer.get_context_budget``; the judge's own tool calls take
+    it too, ``JudgeAgent._context_budget``): the active profile's analysts and
+    the role entries the run calls, each with every model it may call on the
+    expert role (``assignments_for``), and the judge with every model it
+    really calls, read on the judge role as ``get_judge_llm`` builds it. The
+    product's own budget reads the judge on the expert role, so a global
+    judge model with a smaller window than the expert's makes this check
+    fail rather than agree with it. Empty when the settings cannot answer, so
+    the window check fails.
     """
     from maljan.agents.composition import analyst_keys, role_entries_called
     from maljan.core.config import JUDGE_AGENT_KEY
-    from maljan.core.model_assignments import assignments_for
+    from maljan.core.model_assignments import assignment_chain_for, assignments_for
 
-    agents = [*analyst_keys(settings), JUDGE_AGENT_KEY, *role_entries_called(settings)]
+    agents = [*analyst_keys(settings), *role_entries_called(settings)]
     try:
-        chain = assignments_for(settings, agents)
+        chain = [
+            *assignments_for(settings, agents),
+            *assignment_chain_for(settings, JUDGE_AGENT_KEY, role="judge"),
+        ]
     except Exception:  # noqa: BLE001 — models nobody can read are not assumed
         return []
     return list(dict.fromkeys(str(a.model) for a in chain if str(a.model or "")))

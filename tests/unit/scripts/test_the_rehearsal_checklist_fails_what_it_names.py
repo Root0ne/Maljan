@@ -20,6 +20,7 @@ import pytest
 from scripts.rehearsal.checklist import (
     COMPOSED,
     RunRecord,
+    answer_writers,
     check_run,
     compare,
     priced_usage,
@@ -191,6 +192,11 @@ def _record(**changes: Any) -> RunRecord:
     for key, value in changes.items():
         setattr(record, key, value)
     return record
+
+
+def _billed_in_order(record: RunRecord) -> list[dict[str, Any]]:
+    """The answered calls in the stub log's order, as their usage records were written."""
+    return [e for e in record.stub_log if e.get("status") == 200]
 
 
 def _failed(record: RunRecord) -> list[str]:
@@ -512,6 +518,43 @@ class TestTheHolesAGreenRunCouldHide:
             "call 1 (analyst): its usage is shared by static, static_r2, which wrote different "
             "claims, so its writer cannot be told; call 99 (analyst): its usage is shared by "
             "static, static_r2, which wrote different claims, so its writer cannot be told"
+        )
+
+    @staticmethod
+    def _tool_step_sharing_the_answer_s_usage(record: RunRecord, timed: bool) -> None:
+        """static_r2's own answer, and one of its tool steps reporting static's answer's usage."""
+        answer = _log(97, "analyst", answer="final", claims=["It reads pe_info"], input_tokens=2000)
+        step = _log(98, "analyst", tool_calls=["pe_info"])
+        record.stub_log += [answer, step]
+        record.events += [
+            _usage_event(answer, agent="static_r2"),
+            _usage_event(step, agent="static_r2"),
+        ]
+        if timed:
+            # Each call received a moment after the product sent it, a second apart.
+            for index, entry in enumerate(record.stub_log):
+                entry["at"] = NOW + index
+            usage = [e for e in record.events if e.get("type") == "model_usage"]
+            for entry, event in zip(_billed_in_order(record), usage, strict=True):
+                event["data"]["sent_at"] = entry["at"] - 0.01
+        record.claims_in_force = {"static": ["It talks HTTP"], "static_r2": ["It reads pe_info"]}
+        record.malware_report["intro_background"] += " static_r2 claim 1."
+
+    def test_a_tool_step_is_never_held_to_another_analyst_s_answer(self) -> None:
+        record = _record()
+        self._tool_step_sharing_the_answer_s_usage(record, timed=True)
+        writers, unknown = answer_writers(record)
+        assert unknown == []
+        assert writers == {1: {"static"}, 97: {"static_r2"}}
+        assert self._claims_detail(record) == ""
+
+    def test_with_no_timing_a_shared_usage_holds_every_sharer_to_the_answer(self) -> None:
+        """Untimed records cannot be paired; the check then fails rather than guess."""
+        record = _record()
+        self._tool_step_sharing_the_answer_s_usage(record, timed=False)
+        assert self._claims_detail(record) == (
+            "written by the model for static_r2, then neither in its answer in force nor "
+            "dropped: It talks HTTP"
         )
 
     def test_nothing_configured_to_compare(self) -> None:
@@ -1000,6 +1043,16 @@ class TestTheWindowInForce:
         )
         record.run_summary["truncation"]["context_window"]["tokens"] = 200_000
         assert self._detail(record) == ""
+
+    def test_a_window_that_leaves_out_the_judge_s_own_model_fails(self) -> None:
+        """The product sizes on the expert's window; the judge calls a model of a smaller one."""
+        record = _record()
+        record.scenario_params["served_windows"]["deepseek-v3"] = 65_536
+        record.window_models = [MODEL, "deepseek-v3"]
+        assert self._detail(record) == (
+            f"the analysts' window is {WINDOW} tokens (declared); the smallest window the stub "
+            "serves the job's models is deepseek-v3 65536"
+        )
 
     def test_the_job_s_window_needs_every_model_it_is_taken_over(self) -> None:
         record = _record()

@@ -345,6 +345,17 @@ class TestTheJobsRoster:
         }
         assert "acme-mediator" in job_window_models(mediator)
 
+    def test_the_judge_counts_for_the_window_with_the_model_it_really_calls(self) -> None:
+        """No judge entry: the judge calls the global judge model, not the expert one."""
+        values = _values(
+            **{
+                "core.llm.openai.judge_model": {"value": "acme-small-judge", "source": "ui"},
+                "core.llm.agents": {"value": {}, "source": "ui"},
+            }
+        )
+        assert roster_models(values)["judge"] == ["acme-small-judge"]
+        assert job_window_models(values) == ["deepseek-v4-flash", "acme-small-judge"]
+
     def test_unreadable_settings_name_no_window_model(self) -> None:
         broken = _values(**{"core.agents.profile": {"value": "no_such_team", "source": "ui"}})
         assert job_window_models(broken) == []
@@ -358,6 +369,10 @@ class TestTheJobsRoster:
         )
         everything = run_models(expected, roster, job_window_models(values))
         assert {"acme-reverser", "acme-reverser-small", "deepseek-v4-pro"} <= set(everything)
+
+    def test_the_guessed_window_refusal_vets_every_window_model(self) -> None:
+        vetted = gate_models(_values(), {}, None, ["acme-window-only"])
+        assert "acme-window-only" in vetted
 
     def test_every_roster_model_s_served_maximum_output_is_recorded(self) -> None:
         roster = roster_models(self._custom())

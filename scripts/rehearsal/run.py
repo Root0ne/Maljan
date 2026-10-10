@@ -254,18 +254,19 @@ def gate_models(
     values: dict[str, dict[str, Any]],
     expected: dict[str, Any],
     roster: dict[str, list[str]] | None = None,
+    windowed: list[str] | None = None,
 ) -> list[str]:
     """Every model the operator's configuration can call.
 
-    Each role's, entry's and fallback's, and every model of the job's roster
-    (``roster_models``): a custom agent with no entry runs on a role's model,
-    and the window it is served with is vetted like any other.
+    Each role's, entry's and fallback's, every model of the job's roster
+    (``roster_models``) and every model the job's window is taken over
+    (``job_window_models``): a custom agent with no entry runs on a role's
+    model, and the window it is served with is vetted like any other.
     """
     agents = _value(values, "core.llm.agents", {}) or {}
     models = [str(v) for k, v in expected.items() if k.startswith("model.") and v]
     models += [str(e.get("model")) for e in _entries(agents) if e.get("model")]
-    models += [str(m) for chain in (roster or {}).values() for m in chain if m]
-    return sorted(set(models))
+    return sorted(set(models) | set(run_models({}, roster, windowed)))
 
 
 def parse_windows(given: list[str] | None) -> tuple[int | None, dict[str, int]]:
@@ -928,7 +929,12 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
             if args.configure == "gate":
                 changes = gate_changes(values, stub_root)
                 expected = {**gate_expected(values, changes), **expected}
-                models = gate_models(values, expected, roster_models(values, changes))
+                models = gate_models(
+                    values,
+                    expected,
+                    roster_models(values, changes),
+                    job_window_models(values, changes),
+                )
                 windows = resolve_windows(models, bare_window, named_windows)
                 refuse_a_guessed_window(models, windows)
                 for model in windows_the_product_cannot_learn(values, windows):

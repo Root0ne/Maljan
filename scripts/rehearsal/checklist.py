@@ -994,54 +994,90 @@ def answer_writers(record: RunRecord) -> tuple[dict[int, set[str]], list[str]]:
 
     The stub cannot read the agent from a request: two analysts of one role
     get the same system prompt. The product names it on the usage record of
-    every call (``model_usage`` ``agent``), and a stub call is paired with its
-    record by the usage the stub reported, as the token check pairs them.
-    Records sharing that usage among several agents are narrowed to the
-    agents with an answer in force; a call still shared is attributed to all
+    every call (``model_usage`` ``agent``). Every answered call, tool steps
+    included, is paired with one record of its own, one to one in the stub
+    log's order, by the usage the stub reported, as the token check pairs
+    them. Where records with that usage name several agents, the record sent
+    closest to the moment the stub received the call is its own
+    (``sent_at`` against the call's ``at``), so a tool step of one analyst is
+    never held to another's answer. A call no timing can pair is shared: it
+    is narrowed to the agents with an answer in force, and attributed to all
     of them only when every answer with that usage wrote the same claims,
-    because then each of them wrote those claims. Otherwise the call's writer
-    is unknown, and that is a problem.
+    because then each of them wrote those claims. Otherwise the call's
+    writer is unknown, and that is a problem.
     """
     from maljan.llm.transient import FAILED_ATTEMPT_CALL
 
-    agents_by_key: dict[tuple[int, int, int], list[str]] = {}
+    pools: dict[tuple[int, int, int], list[dict[str, Any]]] = {}
     for row in usage_records(record):
         if str(row.get("call") or "") != FAILED_ATTEMPT_CALL:
-            agents_by_key.setdefault(_usage_key(row), []).append(str(row.get("agent") or ""))
-    answers = [
-        (
-            (
-                int(e.get("input_tokens") or 0),
-                int(e.get("output_tokens") or 0),
-                int(e.get("cache_read_tokens") or 0),
-            ),
-            e,
+            pools.setdefault(_usage_key(row), []).append(row)
+    sharers = {key: {str(r.get("agent") or "") for r in rows} - {""} for key, rows in pools.items()}
+    paired: dict[int, set[str] | None] = {}
+    shared: set[int] = set()
+    shared_keys: set[tuple[int, int, int]] = set()
+    answers: list[tuple[tuple[int, int, int], dict[str, Any]]] = []
+    for entry in _billed(record):
+        key = (
+            int(entry.get("input_tokens") or 0),
+            int(entry.get("output_tokens") or 0),
+            int(entry.get("cache_read_tokens") or 0),
         )
-        for e in _billed(record)
-        if e.get("answer") in ("final", "revision")
-    ]
+        n = int(entry.get("n") or 0)
+        if entry.get("answer") in ("final", "revision"):
+            answers.append((key, entry))
+        pool = pools.get(key) or []
+        if not pool:
+            paired[n] = None
+            continue
+        agents = {str(r.get("agent") or "") for r in pool} - {""}
+        at = _figure(entry.get("at"))
+        sent = [_figure(r.get("sent_at")) for r in pool]
+        if key in shared_keys:
+            # Once one call of a usage could not be paired, no later one can be:
+            # the record it took was a guess.
+            pool.pop(0)
+            shared.add(n)
+            paired[n] = None
+            continue
+        if len(agents) <= 1:
+            row = pool.pop(0)
+        elif at is not None and all(s is not None for s in sent):
+            row = pool.pop(min(range(len(pool)), key=lambda i: abs(float(sent[i] or 0) - at)))
+        else:
+            pool.pop(0)
+            shared.add(n)
+            shared_keys.add(key)
+            paired[n] = None
+            continue
+        agent = str(row.get("agent") or "")
+        paired[n] = {agent} if agent else None
     claims_by_key: dict[tuple[int, int, int], set[tuple[str, ...]]] = {}
     for key, entry in answers:
-        written = tuple(_normal(c) for c in entry.get("claims") or [])
-        claims_by_key.setdefault(key, set()).add(written)
+        claims_by_key.setdefault(key, set()).add(
+            tuple(_normal(c) for c in entry.get("claims") or [])
+        )
     writers: dict[int, set[str]] = {}
     problems: list[str] = []
     for key, entry in answers:
+        n = int(entry.get("n") or 0)
         label = f"call {entry.get('n', '?')} ({entry.get('role', '')})"
-        named = {a for a in agents_by_key.get(key, []) if a}
-        if len(named) > 1:
-            shared = named
-            named = {a for a in shared if a in record.claims_in_force}
-            if not named:
-                problems.append(
-                    f"{label}: its usage is shared by {', '.join(sorted(shared))}, none of "
-                    "which has an answer in force, so its writer cannot be told"
-                )
-                continue
+        if n not in shared:
+            named = paired.get(n)
+            if named:
+                writers[n] = named
+            else:
+                problems.append(f"{label}: no usage record names the agent that wrote its answer")
+            continue
+        everyone = sharers.get(key, set())
+        named = {a for a in everyone if a in record.claims_in_force}
         if not named:
-            problems.append(f"{label}: no usage record names the agent that wrote its answer")
+            problems.append(
+                f"{label}: its usage is shared by {', '.join(sorted(everyone))}, none of "
+                "which has an answer in force, so its writer cannot be told"
+            )
         elif len(named) == 1 or len(claims_by_key[key]) == 1:
-            writers[int(entry.get("n") or 0)] = named
+            writers[n] = named
         else:
             problems.append(
                 f"{label}: its usage is shared by {', '.join(sorted(named))}, which wrote "
