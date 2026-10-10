@@ -1494,89 +1494,6 @@ def _without_catalogue_names(text: str) -> str:
     return _ID_WITH_BRACKETED_WORDS_RE.sub(_plain, text)
 
 
-def _chunk_prompt(chunk: Any, block: str) -> str:
-    """What one chunk's loop is handed: its header, the earlier chunks' calls, and the chunk."""
-    return f"{chunk.to_prompt_header()}\n\n" + (
-        f"{block}\n\n{chunk.content}" if block else chunk.content
-    )
-
-
-def _configured_chunk_chars(settings: Any) -> int | None:
-    """The operator's chunk size in characters, or ``None`` where it is unset."""
-    from maljan.loaders.binary_chunker import configured_chunk_chars
-
-    return configured_chunk_chars(getattr(settings, "chunking", None))
-
-
-def _carried_past_room(agent: Any, chunks: list, at: int, block: str) -> list:
-    """``chunks`` with chunk ``at`` cut where its prompt meets ``agent``'s room.
-
-    The prompt is the chunk's header, the earlier chunks' calls (``block``)
-    and the chunk. Where that is over the room the analyst measured
-    (``_input_room_chars``), the chunk keeps what fits beside the header and
-    the calls and the rest becomes the next chunk, numbered in order: the
-    input is cut, never shortened. With no room measured, an operator's
-    chunk size or a header and call list that alone fill the room, the
-    list is returned as it came.
-    """
-    import dataclasses
-
-    chunk = chunks[at]
-    if not (dataclasses.is_dataclass(chunk) and not isinstance(chunk, type)):
-        return chunks
-    content = str(getattr(chunk, "content", "") or "")
-    if _configured_chunk_chars(get_settings()) is not None:
-        return chunks
-    measure = getattr(agent, "_input_room_chars", None)
-    if not callable(measure):
-        return chunks
-    prompt = _chunk_prompt(chunk, block)
-    room = measure(prompt)
-    if not isinstance(room, int) or isinstance(room, bool) or room <= 0:
-        return chunks
-    # A chunk's prompt is never shortened, so the room kept for the notice a
-    # shortened input begins with is the chunk header's: a chunk sized at
-    # the room carries its header without being cut for it.
-    room += INPUT_NOTICE_ROOM
-    if len(prompt) <= room:
-        return chunks
-    keep = room - (len(prompt) - len(content))
-    if keep <= 0:
-        getattr(agent, "logger", logger).warning(
-            "%s: chunk %d's header and earlier calls (%d chars) fill the input room (%d chars).",
-            getattr(agent, "name", ""),
-            at + 1,
-            len(prompt) - len(content),
-            room,
-        )
-        return chunks
-    cut_list = chunks
-    while keep > 0:
-        cut = [
-            dataclasses.replace(
-                chunk, content=part, char_count=len(part), token_estimate=len(part) // 4
-            )
-            for part in (content[:keep], content[keep:])
-        ]
-        cut_list = _numbered_in_order([*chunks[:at], *cut, *chunks[at + 1 :]])
-        # The new numbering can lengthen the header by a digit; the cut
-        # moves back by what it overran.
-        over = len(_chunk_prompt(cut_list[at], block)) - room
-        if over <= 0:
-            break
-        keep -= over
-    if keep <= 0:
-        return chunks
-    getattr(agent, "logger", logger).info(
-        "%s: chunk %d cut at %d chars to fit beside the earlier chunks' calls; "
-        "the rest is the next chunk.",
-        getattr(agent, "name", ""),
-        at + 1,
-        keep,
-    )
-    return cut_list
-
-
 def _numbered_in_order(chunks: list[Any]) -> list[Any]:
     """``chunks`` with each one's index and total its place in this list.
 
@@ -6536,10 +6453,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         entries = getattr(self, "_evidence_entries", None)
         first_entry = len(entries) if isinstance(entries, list) else 0
 
-        position = 0
-        while position < len(chunks):
-            chunk = chunks[position]
-            position += 1
+        for chunk in chunks:
             # No new chunk once the job's spend ceiling is reached: what the
             # chunks so far gathered is merged, and the degradation says why.
             if spend_reached(self):
@@ -6548,12 +6462,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             entries = getattr(self, "_evidence_entries", None)
             earlier = list(entries[first_entry:]) if isinstance(entries, list) else []
             block = earlier_chunks_block(earlier)
-            # A chunk is sized before the calls of the chunks ahead of it are
-            # known. Its prompt is measured with them, and what does not fit
-            # beside them goes on as a chunk of its own after it.
-            chunks = _carried_past_room(self, chunks, position - 1, block)
-            chunk = chunks[position - 1]
-            prompt_text = _chunk_prompt(chunk, block)
+            prompt_text = f"{chunk.to_prompt_header()}\n\n" + (
+                f"{block}\n\n{chunk.content}" if block else chunk.content
+            )
             try:
                 # Each chunk's loop under this agent's lock, so an ask of it
                 # cannot run inside one: an ask drives the same buffers, the

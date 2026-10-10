@@ -37,7 +37,6 @@ from maljan.loaders.binary_chunker import (
     joined_when_it_fits,
 )
 from maljan.pipeline.nodes import agent_input_room, make_stage_agent_node
-from maljan.schemas.isr_models import AgentISR
 from tests.stages import ANALYSIS_STAGE, paper_profile
 
 
@@ -454,53 +453,6 @@ def test_on_64k_the_reverser_s_room_is_below_the_old_split_and_its_input_splits_
     old = BinaryChunker(ChunkingConfig(max_tokens_per_chunk=20_000, overlap_tokens=0))
     assert room is not None and 0 < room < 80_000
     assert len(derived) > len(old.chunk("triage", text))
-
-
-class TestALaterChunkFitsBesideTheEarlierCalls:
-    """A chunk's prompt — header, earlier chunks' calls, chunk — is measured as one."""
-
-    def _run(self, block_chars: int) -> tuple[_Analyst, list[str], int, str]:
-        agent, _budget = _reverser(65_536)
-        cfg = Settings(_env_file=None, chunking={"overlap_tokens": 0})
-        text = "".join(f"line {i:06d}\n" for i in range(9_000))
-        prompts: list[str] = []
-
-        def analyze_isr(prompt: str) -> AgentISR:
-            prompts.append(prompt)
-            return AgentISR(agent_id=agent.name, domain="static", claims=[], dissent_items=[])
-
-        agent.analyze_isr = analyze_isr  # type: ignore[method-assign]
-        agent._validate_isr = lambda isr, *_a, **_k: isr  # type: ignore[method-assign]
-        agent._apply_consistency_gate = lambda isr, *_a: isr  # type: ignore[method-assign]
-        block = "Earlier chunks of this same input were already analysed.\n" + "c" * block_chars
-        with (
-            patch("maljan.agents.base_agent.get_settings", lambda: cfg),
-            patch(
-                "maljan.agents.base_agent.earlier_chunks_block",
-                lambda entries: block if prompts else "",
-            ),
-        ):
-            room = agent._input_room_chars(text)
-            assert room is not None
-            chunks = BinaryChunker(cfg.chunking).chunk("static", text, room=agent._input_room_chars)
-            agent.safe_analyze_isr_chunked(chunks)
-            measured = [agent._input_room_chars(p) for p in prompts]
-        assert measured and all(m == room for m in measured)
-        return agent, prompts, room, text
-
-    def test_every_chunk_prompt_fits_the_room_and_nothing_is_lost(self) -> None:
-        _agent_, prompts, room, text = self._run(block_chars=20_000)
-        # The room kept for a shortened input's notice holds a chunk's header instead.
-        assert all(len(p) <= room + INPUT_NOTICE_ROOM for p in prompts)
-        assert len(prompts[0]) < room + INPUT_NOTICE_ROOM
-        bodies = [p.split("\n\n", 1)[1] for p in prompts]
-        bodies = [b.split("\n\n", 1)[1] if b.startswith("Earlier chunks") else b for b in bodies]
-        assert "".join(bodies) == text
-
-    def test_a_later_chunk_is_cut_and_the_rest_runs_after_it(self) -> None:
-        _agent_, prompts, room, text = self._run(block_chars=20_000)
-        sized = -(-len(text) // room)
-        assert len(prompts) > sized
 
 
 # ---------------------------------------------------------------------------
