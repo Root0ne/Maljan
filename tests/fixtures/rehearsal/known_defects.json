@@ -1,7 +1,8 @@
 {
- "_comment": "The checks each scenario fails today, with the exact detail, and the product defect behind each. A fix makes the rehearsal integration test fail and ask to strike the entry.",
+ "_comment": "The checks each scenario fails today (pins), with the exact detail, and the numbers a defect moves (observations), with the exact value; each names its product defect. A fix makes the rehearsal integration test fail and ask to strike the entry.",
  "pins": [
   {
+   "id": "D2",
    "scenario": "overloaded",
    "wire": "openai",
    "check": "every analyst answered",
@@ -9,6 +10,7 @@
    "defect": "one HTTP 5xx, 429 or mid-stream error on an analyst's call loses its whole tool loop (base_agent retries only a connection error; the OpenAI client is built with max_retries=0; a mid-stream error is not retried on either wire); the stage, section, claim and settings failures beside it follow from the lost analysts"
   },
   {
+   "id": "D2",
    "scenario": "overloaded",
    "wire": "openai",
    "check": "every report section written or accounted for",
@@ -16,6 +18,7 @@
    "defect": "one HTTP 5xx, 429 or mid-stream error on an analyst's call loses its whole tool loop (base_agent retries only a connection error; the OpenAI client is built with max_retries=0; a mid-stream error is not retried on either wire); the stage, section, claim and settings failures beside it follow from the lost analysts"
   },
   {
+   "id": "D2",
    "scenario": "overloaded",
    "wire": "openai",
    "check": "no claim lost on the way to the report",
@@ -23,6 +26,7 @@
    "defect": "one HTTP 5xx, 429 or mid-stream error on an analyst's call loses its whole tool loop (base_agent retries only a connection error; the OpenAI client is built with max_retries=0; a mid-stream error is not retried on either wire); the stage, section, claim and settings failures beside it follow from the lost analysts"
   },
   {
+   "id": "D2",
    "scenario": "overloaded",
    "wire": "openai",
    "check": "settings in force as configured",
@@ -30,6 +34,7 @@
    "defect": "one HTTP 5xx, 429 or mid-stream error on an analyst's call loses its whole tool loop (base_agent retries only a connection error; the OpenAI client is built with max_retries=0; a mid-stream error is not retried on either wire); the stage, section, claim and settings failures beside it follow from the lost analysts"
   },
   {
+   "id": "D2",
    "scenario": "rate_limited",
    "wire": "openai",
    "check": "every analyst answered",
@@ -37,6 +42,7 @@
    "defect": "one HTTP 5xx, 429 or mid-stream error on an analyst's call loses its whole tool loop (base_agent retries only a connection error; the OpenAI client is built with max_retries=0; a mid-stream error is not retried on either wire); the stage, section, claim and settings failures beside it follow from the lost analysts"
   },
   {
+   "id": "D2",
    "scenario": "rate_limited",
    "wire": "openai",
    "check": "every report section written or accounted for",
@@ -44,6 +50,7 @@
    "defect": "one HTTP 5xx, 429 or mid-stream error on an analyst's call loses its whole tool loop (base_agent retries only a connection error; the OpenAI client is built with max_retries=0; a mid-stream error is not retried on either wire); the stage, section, claim and settings failures beside it follow from the lost analysts"
   },
   {
+   "id": "D2",
    "scenario": "rate_limited",
    "wire": "openai",
    "check": "no claim lost on the way to the report",
@@ -51,6 +58,7 @@
    "defect": "one HTTP 5xx, 429 or mid-stream error on an analyst's call loses its whole tool loop (base_agent retries only a connection error; the OpenAI client is built with max_retries=0; a mid-stream error is not retried on either wire); the stage, section, claim and settings failures beside it follow from the lost analysts"
   },
   {
+   "id": "D2",
    "scenario": "rate_limited",
    "wire": "openai",
    "check": "settings in force as configured",
@@ -58,6 +66,7 @@
    "defect": "one HTTP 5xx, 429 or mid-stream error on an analyst's call loses its whole tool loop (base_agent retries only a connection error; the OpenAI client is built with max_retries=0; a mid-stream error is not retried on either wire); the stage, section, claim and settings failures beside it follow from the lost analysts"
   },
   {
+   "id": "D2",
    "scenario": "server_error_once",
    "wire": "openai",
    "check": "every analyst answered",
@@ -65,6 +74,7 @@
    "defect": "one HTTP 5xx, 429 or mid-stream error on an analyst's call loses its whole tool loop (base_agent retries only a connection error; the OpenAI client is built with max_retries=0; a mid-stream error is not retried on either wire); the stage, section, claim and settings failures beside it follow from the lost analysts"
   },
   {
+   "id": "D2",
    "scenario": "server_error_once",
    "wire": "openai",
    "check": "every report section written or accounted for",
@@ -72,6 +82,7 @@
    "defect": "one HTTP 5xx, 429 or mid-stream error on an analyst's call loses its whole tool loop (base_agent retries only a connection error; the OpenAI client is built with max_retries=0; a mid-stream error is not retried on either wire); the stage, section, claim and settings failures beside it follow from the lost analysts"
   },
   {
+   "id": "D2",
    "scenario": "server_error_once",
    "wire": "openai",
    "check": "no claim lost on the way to the report",
@@ -79,6 +90,7 @@
    "defect": "one HTTP 5xx, 429 or mid-stream error on an analyst's call loses its whole tool loop (base_agent retries only a connection error; the OpenAI client is built with max_retries=0; a mid-stream error is not retried on either wire); the stage, section, claim and settings failures beside it follow from the lost analysts"
   },
   {
+   "id": "D2",
    "scenario": "server_error_once",
    "wire": "openai",
    "check": "settings in force as configured",
@@ -86,6 +98,7 @@
    "defect": "one HTTP 5xx, 429 or mid-stream error on an analyst's call loses its whole tool loop (base_agent retries only a connection error; the OpenAI client is built with max_retries=0; a mid-stream error is not retried on either wire); the stage, section, claim and settings failures beside it follow from the lost analysts"
   },
   {
+   "id": "D2",
    "scenario": "stream_error",
    "wire": "anthropic",
    "check": "every analyst answered",
@@ -93,6 +106,7 @@
    "defect": "one HTTP 5xx, 429 or mid-stream error on an analyst's call loses its whole tool loop (base_agent retries only a connection error; the OpenAI client is built with max_retries=0; a mid-stream error is not retried on either wire); the stage, section, claim and settings failures beside it follow from the lost analysts"
   },
   {
+   "id": "D2",
    "scenario": "stream_error",
    "wire": "anthropic",
    "check": "every report section written or accounted for",
@@ -100,6 +114,7 @@
    "defect": "one HTTP 5xx, 429 or mid-stream error on an analyst's call loses its whole tool loop (base_agent retries only a connection error; the OpenAI client is built with max_retries=0; a mid-stream error is not retried on either wire); the stage, section, claim and settings failures beside it follow from the lost analysts"
   },
   {
+   "id": "D2",
    "scenario": "stream_error",
    "wire": "anthropic",
    "check": "every stage of the profile ran",
@@ -107,6 +122,7 @@
    "defect": "one HTTP 5xx, 429 or mid-stream error on an analyst's call loses its whole tool loop (base_agent retries only a connection error; the OpenAI client is built with max_retries=0; a mid-stream error is not retried on either wire); the stage, section, claim and settings failures beside it follow from the lost analysts"
   },
   {
+   "id": "D2",
    "scenario": "stream_error",
    "wire": "anthropic",
    "check": "no claim lost on the way to the report",
@@ -114,6 +130,7 @@
    "defect": "one HTTP 5xx, 429 or mid-stream error on an analyst's call loses its whole tool loop (base_agent retries only a connection error; the OpenAI client is built with max_retries=0; a mid-stream error is not retried on either wire); the stage, section, claim and settings failures beside it follow from the lost analysts"
   },
   {
+   "id": "D2",
    "scenario": "stream_error",
    "wire": "anthropic",
    "check": "settings in force as configured",
@@ -121,6 +138,7 @@
    "defect": "one HTTP 5xx, 429 or mid-stream error on an analyst's call loses its whole tool loop (base_agent retries only a connection error; the OpenAI client is built with max_retries=0; a mid-stream error is not retried on either wire); the stage, section, claim and settings failures beside it follow from the lost analysts"
   },
   {
+   "id": "D2",
    "scenario": "stream_error",
    "wire": "openai",
    "check": "every analyst answered",
@@ -128,6 +146,7 @@
    "defect": "one HTTP 5xx, 429 or mid-stream error on an analyst's call loses its whole tool loop (base_agent retries only a connection error; the OpenAI client is built with max_retries=0; a mid-stream error is not retried on either wire); the stage, section, claim and settings failures beside it follow from the lost analysts"
   },
   {
+   "id": "D2",
    "scenario": "stream_error",
    "wire": "openai",
    "check": "every report section written or accounted for",
@@ -135,6 +154,7 @@
    "defect": "one HTTP 5xx, 429 or mid-stream error on an analyst's call loses its whole tool loop (base_agent retries only a connection error; the OpenAI client is built with max_retries=0; a mid-stream error is not retried on either wire); the stage, section, claim and settings failures beside it follow from the lost analysts"
   },
   {
+   "id": "D2",
    "scenario": "stream_error",
    "wire": "openai",
    "check": "no claim lost on the way to the report",
@@ -142,11 +162,62 @@
    "defect": "one HTTP 5xx, 429 or mid-stream error on an analyst's call loses its whole tool loop (base_agent retries only a connection error; the OpenAI client is built with max_retries=0; a mid-stream error is not retried on either wire); the stage, section, claim and settings failures beside it follow from the lost analysts"
   },
   {
+   "id": "D2",
    "scenario": "stream_error",
    "wire": "openai",
    "check": "settings in force as configured",
    "detail": "max_steps: expected 40, the run's budget says {}; timeout_s: expected 900, the run's budget says {}",
    "defect": "one HTTP 5xx, 429 or mid-stream error on an analyst's call loses its whole tool loop (base_agent retries only a connection error; the OpenAI client is built with max_retries=0; a mid-stream error is not retried on either wire); the stage, section, claim and settings failures beside it follow from the lost analysts"
+  }
+ ],
+ "observations": [
+  {
+   "id": "D3",
+   "scenario": "normal",
+   "wire": "openai",
+   "observation": "isr.ungrounded_technique",
+   "value": 2,
+   "defect": "a revision's validation cannot cite the analyst's own round-0 tool entries, so each restated technique claim draws an isr.ungrounded_technique retry"
+  },
+  {
+   "id": "D6",
+   "scenario": "empty_answer",
+   "wire": "openai",
+   "observation": "negotiation_rounds",
+   "value": 5,
+   "defect": "the sycophancy check reads answers no revision changed as converging: when every revision's first answer is empty, the round-0 answers stay in force, two of them (dynamic and network) score above the 0.90 similarity threshold, and every later consensus is overridden until the round limit (a clean debate takes 2 rounds)"
+  },
+  {
+   "id": "D6",
+   "scenario": "empty_answer",
+   "wire": "openai",
+   "observation": "termination_reason",
+   "value": "converged",
+   "defect": "the sycophancy check reads answers no revision changed as converging: when every revision's first answer is empty, the round-0 answers stay in force, two of them (dynamic and network) score above the 0.90 similarity threshold, and every later consensus is overridden until the round limit (a clean debate takes 2 rounds)"
+  },
+  {
+   "id": "D3",
+   "scenario": "normal",
+   "wire": "anthropic",
+   "observation": "isr.ungrounded_technique",
+   "value": 2,
+   "defect": "a revision's validation cannot cite the analyst's own round-0 tool entries, so each restated technique claim draws an isr.ungrounded_technique retry"
+  },
+  {
+   "id": "D6",
+   "scenario": "empty_answer",
+   "wire": "anthropic",
+   "observation": "negotiation_rounds",
+   "value": 5,
+   "defect": "the sycophancy check reads answers no revision changed as converging: when every revision's first answer is empty, the round-0 answers stay in force, two of them (dynamic and network) score above the 0.90 similarity threshold, and every later consensus is overridden until the round limit (a clean debate takes 2 rounds)"
+  },
+  {
+   "id": "D6",
+   "scenario": "empty_answer",
+   "wire": "anthropic",
+   "observation": "termination_reason",
+   "value": "converged",
+   "defect": "the sycophancy check reads answers no revision changed as converging: when every revision's first answer is empty, the round-0 answers stay in force, two of them (dynamic and network) score above the 0.90 similarity threshold, and every later consensus is overridden until the round limit (a clean debate takes 2 rounds)"
   }
  ]
 }

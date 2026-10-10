@@ -62,26 +62,21 @@ WIRES = ("openai", "anthropic")
 # failing for one more reason is a new failure, and a defect fixed is a test
 # asking to strike its rows.
 PINS_FILE = Path(__file__).resolve().parents[1] / "fixtures" / "rehearsal" / "known_defects.json"
+_PINNED = json.loads(PINS_FILE.read_text(encoding="utf-8"))
 KNOWN_DEFECTS: dict[tuple[str, str], dict[str, str]] = {}
-for _row in json.loads(PINS_FILE.read_text(encoding="utf-8"))["pins"]:
+for _row in _PINNED["pins"]:
     KNOWN_DEFECTS.setdefault((_row["scenario"], _row["wire"]), {})[_row["check"]] = _row["detail"]
-# A revision's validation cannot cite the analyst's own round-0 tool
-# entries, so each restated technique claim draws a retry.
-#
-# The debate's rounds, exact. A mediator answer cut at its cap is not
-# mediated: the answers in force go to the judge after one round. An empty
-# first answer of every revision leaves the round-0 answers in force, and the
-# sycophancy check reads two of them (the dynamic and network analysts')
-# as converging, so every later consensus is overridden until the round
-# limit; a clean debate takes 2.
+# The numbers a run must show exactly. The defects' own (the same file's
+# ``observations``) and two clean ones: a mediator answer cut at its cap is
+# not mediated, and the answers in force go to the judge after one round.
 PINNED_OBSERVATIONS: dict[tuple[str, str], dict[str, object]] = {
-    ("normal", "openai"): {"isr.ungrounded_technique": 2},
-    ("normal", "anthropic"): {"isr.ungrounded_technique": 2},
     ("cut_at_cap", "openai"): {"negotiation_rounds": 1, "termination_reason": "not_mediated"},
     ("cut_at_cap", "anthropic"): {"negotiation_rounds": 1, "termination_reason": "not_mediated"},
-    ("empty_answer", "openai"): {"negotiation_rounds": 5, "termination_reason": "converged"},
-    ("empty_answer", "anthropic"): {"negotiation_rounds": 5, "termination_reason": "converged"},
 }
+for _row in _PINNED["observations"]:
+    PINNED_OBSERVATIONS.setdefault((_row["scenario"], _row["wire"]), {})[_row["observation"]] = (
+        _row["value"]
+    )
 
 
 @pytest.fixture(autouse=True)
