@@ -9,7 +9,8 @@
   its vendor documents, matched by the longest family prefix; a model the
   table does not name gets 200,000 / 64,000 and no capability statement, and
   the Models API answers 404 for it, as the real one does for an id it does
-  not know.
+  not know. A window nothing documents is marked so (``window_documented``):
+  the gate refuses to guess one and asks for ``--window``.
 * Sampling: a model in the table's ``fixed_sampling`` rows refuses
   ``temperature``, ``top_p`` and ``top_k``; thinking blocks of a model in its
   ``prefix_bound_thinking`` rows are bound to everything before them.
@@ -68,6 +69,9 @@ class ModelFacts:
     # Whether a vendor documents the model: a stored description or a row of
     # the vendored table. An id nothing documents is answered 404.
     known: bool = False
+    # Whether the window is a documented one (a stored description, a window
+    # row of the table, or one the run named) rather than the stub's default.
+    window_documented: bool = False
     # Effort levels the description says the model takes; ``None`` states nothing.
     effort_levels: tuple[str, ...] | None = None
     thinking_types: dict[str, bool] = field(default_factory=dict)
@@ -112,6 +116,7 @@ def facts_for(model: str, *, window: int | None = None, slots: int = 1) -> Model
     key = _longest_prefix(name, windows)
     if key:
         facts.window = int(windows[key])
+        facts.window_documented = True
     outputs = table.get("max_output") or {}
     key = _longest_prefix(name, outputs)
     if key and isinstance(outputs[key], dict):
@@ -132,7 +137,9 @@ def facts_for(model: str, *, window: int | None = None, slots: int = 1) -> Model
     if described is not None:
         facts.known = True
         facts.description = described
-        facts.window = int(described.get("max_input_tokens") or facts.window)
+        if described.get("max_input_tokens"):
+            facts.window = int(described["max_input_tokens"])
+            facts.window_documented = True
         facts.max_output = int(described.get("max_tokens") or facts.max_output)
         capabilities = described.get("capabilities") or {}
         effort = capabilities.get("effort") or {}
@@ -148,6 +155,15 @@ def facts_for(model: str, *, window: int | None = None, slots: int = 1) -> Model
         }
     if window:
         facts.window = int(window)
+        facts.window_documented = True
         if facts.description is not None:
             facts.description = {**facts.description, "max_input_tokens": int(window)}
     return facts
+
+
+def undocumented_windows(models: Any, window: int | None = None) -> list[str]:
+    """The models among ``models`` whose window nothing documents, ``window`` named or not."""
+    if window:
+        return []
+    names = sorted({str(m).strip() for m in models if str(m or "").strip()})
+    return [name for name in names if not facts_for(name).window_documented]

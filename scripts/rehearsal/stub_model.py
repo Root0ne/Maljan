@@ -2,11 +2,10 @@
 
 It speaks the Anthropic Messages API (``POST /v1/messages``, the Models API's
 ``GET /v1/models/{id}``) and the OpenAI-compatible chat completions API
-(``POST /v1/chat/completions``, ``GET /v1/models``, llama.cpp's ``/props``),
-streamed or whole, and answers every request from a script
-(``scripts.rehearsal.roles``) that reads the request's own role markers and
-tool list. Maljan reaches it only through its own settings: the OpenAI base URL,
-or the Anthropic base URL.
+(``POST /v1/chat/completions``, ``GET /v1/models``), streamed or whole, and
+answers every request from a script (``scripts.rehearsal.roles``) that reads
+the request's own role markers and tool list. Maljan reaches it only through
+its own settings: the OpenAI base URL, or the Anthropic base URL.
 
 Before a request is answered it is held to the rules the real API holds it to
 (``scripts.rehearsal.validate``): a request the paid API would refuse is
@@ -26,6 +25,14 @@ Run on its own::
         --tokens-per-second 400 --first-token-seconds 0.2
 
 It binds 127.0.0.1 only and never makes a request of its own.
+
+By default it stands for a hosted API (``runtime="hosted"``): its model list
+names each model as the hosted provider's does, with no window, and it serves
+no runtime metadata (``/props``, ``/info``), so the product learns each window
+and output cap as it would from the paid API — the stored Models API answer,
+the vendored table, or the operator's own setting. ``runtime="llama"`` stands
+for a local llama.cpp server instead: ``/props`` reports the window and the
+slots, and the model list carries each model's window.
 """
 
 from __future__ import annotations
@@ -71,6 +78,9 @@ class StubState:
     # A window every model is served with instead of its documented one.
     window: int | None = None
     slots: int = 1
+    # What the stub stands for: ``hosted`` (a paid API) or ``llama`` (a local
+    # llama.cpp server, which answers ``/props``).
+    runtime: str = "hosted"
     # The key every request must carry; ``None`` checks only that one is sent.
     api_key: str | None = None
     # The model names ``GET /v1/models`` lists, beside any model a request named.
@@ -283,6 +293,7 @@ def build_app(state: StubState) -> Any:
     async def model_list(http: HttpRequest) -> Any:
         with state.lock:
             names = list(state.served)
+        local = state.runtime == "llama"
         return JSONResponse(
             {
                 "object": "list",
@@ -291,7 +302,8 @@ def build_app(state: StubState) -> Any:
                         "id": name,
                         "object": "model",
                         "owned_by": "rehearsal",
-                        "context_length": state.facts(name).window,
+                        # A hosted API's list names no window; a runtime's does.
+                        **({"context_length": state.facts(name).window} if local else {}),
                     }
                     for name in names
                 ],
@@ -299,6 +311,9 @@ def build_app(state: StubState) -> Any:
         )
 
     async def props(http: HttpRequest) -> Any:
+        if state.runtime != "llama":
+            # A hosted API has no runtime metadata: the path is not there.
+            return JSONResponse({"error": "Not Found"}, status_code=404)
         with state.lock:
             names = list(state.served)
         window = state.facts(names[0]).window if names else (state.window or 200_000)
@@ -397,6 +412,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--first-token-seconds", type=float, default=0.0)
     parser.add_argument("--window", type=int, default=None, help="serve every model this window")
     parser.add_argument("--slots", type=int, default=1)
+    parser.add_argument(
+        "--runtime", default="hosted", choices=["hosted", "llama"], help="what the stub stands for"
+    )
     parser.add_argument("--chars-per-token", type=int, default=4)
     parser.add_argument("--loop-steps", type=int, default=0, help="tool calls per analyst loop")
     parser.add_argument("--slow-seconds", type=float, default=0.0, help="slow-model delay")
@@ -413,6 +431,7 @@ def main(argv: list[str] | None = None) -> int:
         pace=Pace(args.first_token_seconds, args.tokens_per_second),
         window=args.window,
         slots=args.slots,
+        runtime=args.runtime,
         served=list(args.model),
         dump_dir=Path(args.dump_dir) if args.dump_dir else None,
     )

@@ -36,6 +36,7 @@ from scripts.rehearsal.run import (
 JOB = "11111111-1111-1111-1111-111111111111"
 REPORT = "22222222-2222-2222-2222-222222222222"
 STUB = "http://127.0.0.1:41234"
+PROVIDER_WINDOW = 1_000_000
 
 
 def _values(**overrides: Any) -> dict[str, dict[str, Any]]:
@@ -407,8 +408,10 @@ def _args(tmp_path: Path, **extra: Any) -> Any:
         "slow_seconds": None,
         "first_token_seconds": 0.0,
         "tokens_per_second": 0.0,
-        "window": None,
+        # The provider's window, named: the table documents none for these models.
+        "window": PROVIDER_WINDOW,
         "slots": 1,
+        "runtime": "hosted",
         "api": "http://api",
         "out": str(tmp_path),
         "expect": [],
@@ -450,6 +453,29 @@ def test_a_failed_connection_test_changes_nothing(
         _run_with(api, _args(tmp_path), monkeypatch)
     assert not any(call.startswith("PATCH") for call in api.seen)
     assert not any(call.startswith("POST /jobs") for call in api.seen)
+
+
+def test_the_gate_refuses_to_guess_a_window_nothing_documents(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    api = _Api(_values())
+    with pytest.raises(SystemExit, match="deepseek-v4-flash, deepseek-v4-pro: name the provider"):
+        _run_with(api, _args(tmp_path, window=None), monkeypatch)
+    assert not any(call.startswith("PATCH") for call in api.seen)
+    assert not any(call.startswith("POST /jobs") for call in api.seen)
+
+
+def test_a_documented_window_needs_no_window_named() -> None:
+    from scripts.rehearsal.models import undocumented_windows
+    from scripts.rehearsal.run import gate_models
+
+    values = _values(**{"core.llm.agents": {"value": {}, "source": "ui"}})
+    assert undocumented_windows(["claude-haiku-5-5", "deepseek-chat"]) == []
+    assert undocumented_windows(["deepseek-v4-pro", "claude-haiku-5-5"]) == ["deepseek-v4-pro"]
+    assert undocumented_windows(["deepseek-v4-pro"], PROVIDER_WINDOW) == []
+    expected = {"model.static": "deepseek-v4-flash", "model.judge": "deepseek-v4-flash"}
+    assert gate_models(_values(), expected) == ["deepseek-v4-flash", "deepseek-v4-pro"]
+    assert gate_models(values, expected) == ["deepseek-v4-flash"]
 
 
 def test_an_interrupt_mid_run_still_puts_the_settings_back(

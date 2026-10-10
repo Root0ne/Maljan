@@ -250,6 +250,31 @@ def _entries(agents: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def gate_models(values: dict[str, dict[str, Any]], expected: dict[str, Any]) -> list[str]:
+    """Every model the operator's configuration can call: each role's, entry's and fallback's."""
+    agents = _value(values, "core.llm.agents", {}) or {}
+    models = [str(v) for k, v in expected.items() if k.startswith("model.") and v]
+    models += [str(e.get("model")) for e in _entries(agents) if e.get("model")]
+    return sorted(set(models))
+
+
+def refuse_a_guessed_window(models: list[str], window: int | None) -> None:
+    """Refuse a gate whose models' windows nothing documents, unless ``--window`` names one.
+
+    The gate rehearses the operator's paid configuration, and the product sizes
+    its prompts and output caps by the window: a window the stub guessed would
+    rehearse a model that does not exist, and its result would be false.
+    """
+    from scripts.rehearsal.models import undocumented_windows
+
+    missing = undocumented_windows(models, window)
+    if missing:
+        raise SystemExit(
+            f"no stored description or table row documents the window of {', '.join(missing)}: "
+            "name the provider's window with --window"
+        )
+
+
 def gate_changes(values: dict[str, dict[str, Any]], stub_root: str) -> dict[str, Any]:
     """The fewest changes that send the operator's own configuration's calls to the stub.
 
@@ -695,6 +720,7 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
             pace=Pace(args.first_token_seconds, args.tokens_per_second),
             window=args.window,
             slots=args.slots,
+            runtime=args.runtime,
         )
         server = StubServer(state, args.stub_port, host=args.stub_host).start()
     stub_root = args.stub_url.rstrip("/") if args.stub_url else server.root  # type: ignore[union-attr]
@@ -712,11 +738,14 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
             if args.configure == "gate":
                 changes = gate_changes(values, stub_root)
                 expected = {**gate_expected(values, changes), **expected}
+                refuse_a_guessed_window(gate_models(values, expected), args.window)
             else:
-                from scripts.rehearsal.inprocess import Rehearsal, expected_for
+                from scripts.rehearsal.inprocess import HARNESS_WINDOW, Rehearsal, expected_for
 
                 changes = {**harness_changes(args.provider, stub_root), **third_party_off(values)}
                 expected = {**expected_for(Rehearsal(provider=args.provider)), **expected}
+                if server is not None and args.window is None:
+                    server.state.window = HARNESS_WINDOW[args.provider]
             changes.update(deadline_changes(args.scenario, args.job_timeout))
             answer = client.probe_models(changes)
             probe = {"ok": bool(answer.get("ok")), "detail": str(answer.get("detail") or "")}
@@ -957,8 +986,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expect", action="append", default=[], help="key=value in force")
     parser.add_argument("--tokens-per-second", type=float, default=0.0)
     parser.add_argument("--first-token-seconds", type=float, default=0.0)
-    parser.add_argument("--window", type=int, default=None)
+    parser.add_argument(
+        "--window", type=int, default=None, help="the provider window for a model nothing documents"
+    )
     parser.add_argument("--slots", type=int, default=1)
+    parser.add_argument(
+        "--runtime",
+        default="hosted",
+        choices=["hosted", "llama"],
+        help="what the stub stands for: a hosted API, or a local llama.cpp server (/props)",
+    )
     parser.add_argument("--chars-per-token", type=int, default=4)
     parser.add_argument("--loop-steps", type=int, default=None)
     parser.add_argument("--slow-seconds", type=float, default=None)

@@ -488,6 +488,43 @@ class TestTheAnthropicMessagesApi:
         assert unknown.json()["error"]["type"] == "not_found_error"
 
 
+class TestTheStubStandsForAHostedApiOrALocalRuntime:
+    def test_a_hosted_api_serves_no_runtime_metadata_and_lists_no_window(self) -> None:
+        server, _ = _stub(wire.Reply(text="x"), served=["deepseek-v4-flash"])
+        try:
+            props = httpx.get(f"{server.root}/props")
+            info = httpx.get(f"{server.root}/info")
+            listed = httpx.get(f"{server.root}/v1/models").json()["data"]
+        finally:
+            server.stop()
+        assert props.status_code == 404 and info.status_code == 404
+        assert listed == [{"id": "deepseek-v4-flash", "object": "model", "owned_by": "rehearsal"}]
+
+    def test_a_local_llama_server_reports_its_window_and_slots(self) -> None:
+        server, _ = _stub(
+            wire.Reply(text="x"),
+            served=["deepseek-v4-flash"],
+            runtime="llama",
+            window=32_768,
+            slots=2,
+        )
+        try:
+            props = httpx.get(f"{server.root}/props").json()
+            listed = httpx.get(f"{server.root}/v1/models").json()["data"]
+        finally:
+            server.stop()
+        assert props == {"default_generation_settings": {"n_ctx": 32_768}, "total_slots": 2}
+        assert listed[0]["context_length"] == 32_768
+
+    def test_a_window_is_documented_only_by_a_description_a_table_row_or_the_run(self) -> None:
+        from scripts.rehearsal.models import facts_for
+
+        assert facts_for("claude-haiku-5-5").window_documented
+        assert facts_for("deepseek-chat").window_documented
+        assert not facts_for("deepseek-v4-pro").window_documented
+        assert facts_for("deepseek-v4-pro", window=1_000_000).window_documented
+
+
 class TestTheOpenAiChatCompletionsApi:
     def test_text_reasoning_and_usage(self) -> None:
         server, _ = _stub(wire.Reply(text="CLAIM: one", thinking="weighing"))
