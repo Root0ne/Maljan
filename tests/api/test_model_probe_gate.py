@@ -350,9 +350,15 @@ class TestTheGate:
 
 
 class TestWhoTheGateChecks:
+    @staticmethod
+    def _called(settings: Settings, stages: Any = None) -> list[str]:
+        from maljan.agents.composition import called_assignments
+
+        return list(dict.fromkeys(a.agent for a in called_assignments(settings, stages)))
+
     def test_it_follows_the_agents_a_lead_can_ask(self) -> None:
         """The lead team names one agent in its stage; the rest are reached by name."""
-        from app.api.v1.jobs import _everyone_the_run_can_reach
+        from types import SimpleNamespace
 
         settings = Settings(
             _env_file=None,
@@ -377,39 +383,49 @@ class TestWhoTheGateChecks:
                 }
             },
         )
+        stages = [
+            SimpleNamespace(kind="analysis", agents=["boss"]),
+            SimpleNamespace(kind="verdict", agents=["judge"]),
+        ]
 
-        reached = _everyone_the_run_can_reach(settings, ["boss", "judge"])
+        reached = self._called(settings, stages)
 
         assert set(reached) == {"boss", "judge", "helper", "second", "third"}
         assert "stranger" not in reached
 
     def test_an_agent_nothing_names_is_not_checked(self) -> None:
-        from app.api.v1.jobs import _everyone_the_run_can_reach
+        from types import SimpleNamespace
 
-        assert _everyone_the_run_can_reach(_settings(), ["static"]) == ["static"]
+        stages = [SimpleNamespace(kind="analysis", agents=["static"])]
+
+        assert self._called(_settings(), stages) == ["static", "judge"]
 
 
 class TestTheRolesWithNoDefinition:
-    """The mediator and the summariser are checked when they have an entry of their own.
+    """The mediator and the summariser are checked whenever the job calls them.
 
-    With no entry each runs on the global expert model, and the gate asks
-    about them exactly as it did before they could have one: not at all.
+    With no entry each runs on the global expert model, and the gate checks
+    that model under its name; with an entry, the entry's models.
     """
 
     def _with(self, **over: Any) -> Settings:
         return Settings(_env_file=None, **over)
 
+    @staticmethod
+    def _called(settings: Settings, stages: Any = None) -> dict[str, list[str]]:
+        from maljan.agents.composition import called_assignments
+
+        out: dict[str, list[str]] = {}
+        for assignment in called_assignments(settings, stages):
+            out.setdefault(assignment.agent, []).append(assignment.model)
+        return out
+
     def test_a_mediator_entry_is_called_by_a_team_with_a_debate_stage(self) -> None:
-        from maljan.agents.composition import role_entries_called
-
         settings = self._with(llm={"agents": {"mediator": {"provider": "ollama", "model": "m"}}})
-        team = settings.agents.profiles[settings.agents.profile]
 
-        assert role_entries_called(settings, team.stages) == ["mediator"]
+        assert self._called(settings)["mediator"] == ["m"]
 
     def test_a_team_with_no_debate_stage_calls_no_mediator(self) -> None:
-        from maljan.agents.composition import role_entries_called
-
         settings = self._with(llm={"agents": {"mediator": {"provider": "ollama", "model": "m"}}})
         stages = [
             s
@@ -417,25 +433,26 @@ class TestTheRolesWithNoDefinition:
             if s.kind != "debate"
         ]
 
-        assert role_entries_called(settings, stages) == []
+        assert "mediator" not in self._called(settings, stages)
 
-    def test_a_summarizer_entry_is_called_only_while_the_summariser_is_on(self) -> None:
-        from maljan.agents.composition import role_entries_called
-
+    def test_a_summarizer_is_called_only_while_the_summariser_is_on(self) -> None:
         entry = {"summarizer": {"provider": "ollama", "model": "s"}}
         off = self._with(llm={"agents": entry})
         on = self._with(llm={"agents": entry}, preprocessing={"use_function_summarizer": True})
 
-        assert role_entries_called(off, []) == []
-        assert role_entries_called(on, []) == ["summarizer"]
+        assert "summarizer" not in self._called(off)
+        assert self._called(on)["summarizer"] == ["s"]
 
-    def test_with_no_entry_neither_role_is_checked(self) -> None:
-        from maljan.agents.composition import role_entries_called
+    def test_with_no_entry_each_role_is_checked_on_the_model_it_calls(self) -> None:
+        settings = self._with(
+            llm={"openai": {"expert_model": "acme-expert", "judge_model": "acme-judge"}},
+            preprocessing={"use_function_summarizer": True},
+        )
 
-        settings = self._with(preprocessing={"use_function_summarizer": True})
-        team = settings.agents.profiles[settings.agents.profile]
+        called = self._called(settings)
 
-        assert role_entries_called(settings, team.stages) == []
+        assert called["mediator"] == called["summarizer"] == ["acme-expert"]
+        assert called["judge"] == called["reporter"] == ["acme-judge"]
 
     @pytest.mark.asyncio
     async def test_submitting_a_job_asks_about_a_mediator_entry(self) -> None:
@@ -444,8 +461,8 @@ class TestTheRolesWithNoDefinition:
         settings = self._with(llm={"agents": {"mediator": {"provider": "ollama", "model": "m"}}})
         asked: list[list[str]] = []
 
-        async def _unprobed(_db: Any, _settings: Any, agents: list[str]) -> list[str]:
-            asked.append(list(agents))
+        async def _unprobed(_db: Any, _settings: Any, agents: list[Any]) -> list[str]:
+            asked.append([a.agent for a in agents])
             return []
 
         with (
@@ -459,6 +476,34 @@ class TestTheRolesWithNoDefinition:
 
         assert "mediator" in asked[0]
         assert "summarizer" not in asked[0]
+
+    @pytest.mark.asyncio
+    async def test_the_shipped_default_refuses_a_judge_model_no_probe_reached(self) -> None:
+        """The judge and the reporter call the global judge model, which is checked too."""
+        from app.api.v1 import jobs
+
+        settings = self._with()
+        expert = settings.llm.openai.expert_model
+        judge = settings.llm.openai.judge_model
+        rows = [_Row(endpoint_for(settings, "openai"), expert, True, "ok")]
+
+        with patch(
+            "app.services.settings_service.effective_core_settings",
+            AsyncMock(return_value=settings),
+        ):
+            refusals = await jobs._unprobed_models_for(_Db(rows), {})
+
+        assert expert != judge
+        assert refusals == [
+            f"agent 'judge' names model '{judge}' at https://api.openai.com: {NEVER_PROBED}",
+            f"agent 'reporter' names model '{judge}' at https://api.openai.com: {NEVER_PROBED}",
+        ]
+        both = [_Row(endpoint_for(settings, "openai"), m, True, "ok") for m in (expert, judge)]
+        with patch(
+            "app.services.settings_service.effective_core_settings",
+            AsyncMock(return_value=settings),
+        ):
+            assert await jobs._unprobed_models_for(_Db(both), {}) == []
 
     @pytest.mark.asyncio
     async def test_a_mediator_entry_that_no_probe_reached_refuses_the_job(self) -> None:

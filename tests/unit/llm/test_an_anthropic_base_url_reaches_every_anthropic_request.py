@@ -14,7 +14,7 @@ from typing import Any
 import httpx
 import pytest
 
-from maljan.core.model_assignments import endpoint_for, endpoint_where
+from maljan.core.model_assignments import assignments_for, endpoint_for, endpoint_where
 from maljan.core.settings_overrides import build_settings
 from maljan.llm import context_window as cw
 from maljan.llm import model_capabilities, model_output_limits
@@ -85,7 +85,9 @@ class TestSet:
         monkeypatch.setattr(
             httpx, "Client", lambda **_kw: real(transport=httpx.MockTransport(handler))
         )
-        fact = cw.window_for_settings(_settings(base_url=STUB), ["static"])
+        fact = cw.window_for_settings(
+            _settings(base_url=STUB), assignments_for(_settings(base_url=STUB), ["static"])
+        )
         assert fact.tokens == 200_000
         assert seen == [f"{STUB}/v1/models/{MODEL}"]
 

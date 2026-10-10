@@ -28,11 +28,13 @@ can wave away is not a gate.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from maljan.core.model_assignments import (
     ModelAssignment,
-    assignments_for,
+    assignment_chain_for,
+    builder_role,
     endpoint_label,
 )
 from sqlalchemy import select
@@ -201,15 +203,27 @@ def _calls(entry: dict[str, Any]) -> list[tuple[Any, Any, Any, Any]]:
     ]
 
 
-async def unprobed_models(db: AsyncSession, settings: Any, agents: list[str]) -> list[str]:
+async def unprobed_models(
+    db: AsyncSession, settings: Any, agents: Sequence[str | ModelAssignment]
+) -> list[str]:
     """Every agent whose model has no passing probe, as sentences, or nothing.
 
-    Empty when the gate is off, when the profile names no agent, and — the
-    ordinary case — when every model an agent would call has been reached.
+    ``agents`` holds models already read (``composition.called_assignments``)
+    or agent names, each read with every model it may call on the role its
+    builder reads it on (``builder_role``: the judge's and the reporter's
+    global model is the judge model). Empty when the gate is off, when the
+    profile names no agent, and — the ordinary case — when every model an
+    agent would call has been reached.
     """
     if not getattr(settings.llm, "require_probe", True):
         return []
-    assignments = [a for a in assignments_for(settings, agents) if a.model and a.endpoint]
+    read: list[ModelAssignment] = []
+    for item in agents:
+        if isinstance(item, str):
+            read.extend(assignment_chain_for(settings, item, role=builder_role(item)))
+        else:
+            read.append(item)
+    assignments = [a for a in read if a.model and a.endpoint]
     stored = await _results(db, {a.key for a in assignments})
     refusals: list[str] = []
     for assignment in assignments:

@@ -29,6 +29,7 @@ from app.services.agent_map import (
 )
 from maljan.agents.composition import aresolve_agent, reachable_agents, reads_static_provider
 from maljan.agents.prompts import REVERSER_PROMPT
+from maljan.core.model_assignments import assignments_for
 from maljan.core.settings_overrides import build_settings
 from maljan.providers.static.ghidra import GHIDRA_GUIDANCE, GHIDRA_WORKFLOW
 from maljan.providers.static.r2 import R2StaticProvider
@@ -159,7 +160,9 @@ class _Container:
         self.config = settings
         self._providers: dict[str, Any] = {}
         self._ledger = TruncationLedger()
-        self._budget = budget_for_settings(settings, ["static"], probe=False)
+        self._budget = budget_for_settings(
+            settings, assignments_for(settings, ["static"]), probe=False
+        )
         self._registry = ServerRegistry(settings, truncation_ledger=self._ledger)
 
     def get_static_provider(self, provider_id: str | None = None) -> Any:

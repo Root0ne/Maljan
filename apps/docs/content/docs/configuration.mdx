@@ -353,9 +353,8 @@ follows an entry follows these two as well — the output cap derived from the
 entry's model and logged as `Output cap for mediator`, the model each ledger
 row and `run_summary.models` records the call under, the `Building dedicated
 LLM for agent 'mediator'` line, the run's window, and the probe gate, which
-checks a role's entry when the run calls the role (a debate stage, the
-summariser switched on) and leaves a role with no entry to the global expert
-model as before.
+checks a role whenever the run calls it (a debate stage, the summariser
+switched on): on its entry, or with none on the global model it falls back to.
 
 The Agents page offers the field once an entry names a model, with the levels
 the backend serves for that provider and model (`GET
@@ -514,8 +513,11 @@ stored row.
 
 **Where the gate stands.** Submitting a job reads that record for every model
 the run can reach — fallbacks included, each named in the refusal as the model
-the agent *falls back to* — the agents its team's stages name, and every agent those
-can ask through `ask_<key>`, and so on — and refuses with 422 when one of them
+the agent *falls back to* — each read on the model its builder calls: the agents of
+the team's analysis stages and every agent those can ask through `ask_<key>`, and so
+on; the mediator of a debate and the function summariser while it is on, each on its
+entry or else the global expert model; and the judge, and the reporter while
+`reporting.enabled` is on, on their entries or else the global **judge** model — and refuses with 422 when one of them
 has no passing row, naming the agent, the model, the endpoint and the probe's
 last message. The endpoint appears there as its label — scheme and host — and
 never as the value a call is made with: that refusal is read by whoever
@@ -967,7 +969,19 @@ A run whose agents sit on different models takes the **smallest** of their
 windows, because one cap is handed to every tool server the job opens. The
 models an agent falls back to count as models it sits on: a fallback with a
 smaller window than the first model governs the cap, because the turn it
-answers reads the same conversation.
+answers reads the same conversation. The agents counted are the ones whose
+tool answers the cap sizes, each on the model it really calls: every analyst
+and every agent they can ask through `ask_<key>` (a lead's specialists sit in
+no stage); the mediator whenever the team has a debate stage and the function summariser
+whenever it is on, each on its own `llm.agents` entry or else the global expert
+model; and the judge on its own entry, or else the global **judge** model
+(`core.llm.<provider>.judge_model`), never the expert one. A global judge model
+with a smaller window than the analysts' therefore sizes the whole job. These
+are the models the probe gate checks, but for the reporter: its narrative and
+composer calls take no tool answer under this cap, and the composer sizes each
+section's evidence on its own models' windows. The triage pack the narrative and
+the composer read is cut at the smaller of the job's bound and the one the
+reporter's own models' window derives.
 
 Where to see what applied: the Settings page prints the detected window beside
 the field, with the source word itself, and `run_summary.truncation` records
@@ -1010,6 +1024,10 @@ applies and the sentence says the window is unknown. The reply reserve follows
 the same rule, bounded by an operator's generation cap where one is set; so
 does the report stage, below. A value above 0 is
 the operator's and is used as set; a stored setting keeps its value. Each
+agent's cap is derived over the models its own model is built from: its
+`llm.agents` entry and that entry's fallbacks, the smallest of them, or else
+the global model of its role. The judge's cap follows `llm.agents.judge` when
+one is set, and the global judge model only without one. Each
 derivation is logged and recorded in `run_summary.generation.output_caps`
 (`{agent: {tokens, derivation}}`), and the judge's is printed beside the
 verdict wait. 0 no longer means unbounded.

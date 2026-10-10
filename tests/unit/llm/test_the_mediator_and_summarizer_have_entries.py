@@ -126,32 +126,39 @@ class TestTheMediatorsEntry:
 class TestTheRunsWindow:
     """A role with an entry of its own is one of the models the run's window is learned for."""
 
-    def _agents(self, settings: Any, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    def _asked(self, settings: Any, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
         from maljan.llm import context_window
 
-        asked: list[list[str]] = []
+        asked: list[list[Any]] = []
         real = context_window.budget_for_settings
 
-        def _budget(cfg: Any, agents: list[str], **kwargs: Any) -> Any:
+        def _budget(cfg: Any, agents: list[Any], **kwargs: Any) -> Any:
             asked.append(list(agents))
             return real(cfg, agents, **kwargs)
 
         monkeypatch.setattr(context_window, "budget_for_settings", _budget)
         container(settings).get_context_budget()
-        return asked[0]
+        return [(a.agent, a.model) for a in asked[0]]
 
     def test_a_mediator_entry_is_asked_about(self, monkeypatch: pytest.MonkeyPatch) -> None:
         settings = deepseek_settings(mediator={"provider": "openai", "model": "deepseek-lite"})
 
-        assert "mediator" in self._agents(settings, monkeypatch)
+        assert ("mediator", "deepseek-lite") in self._asked(settings, monkeypatch)
 
-    def test_with_no_entry_the_run_asks_what_it_asked(
+    def test_with_no_entry_the_roles_ask_about_the_expert_model(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         settings = deepseek_settings()
         settings.preprocessing.use_function_summarizer = True
 
-        assert self._agents(settings, monkeypatch) == ["static", "dynamic", "network", "judge"]
+        assert self._asked(settings, monkeypatch) == [
+            ("static", "deepseek-pro"),
+            ("dynamic", "deepseek-flash"),
+            ("network", "deepseek-flash"),
+            ("mediator", "deepseek-flash"),
+            ("summarizer", "deepseek-flash"),
+            ("judge", "deepseek-pro"),
+        ]
 
 
 class TestTheSummarizersEntry:

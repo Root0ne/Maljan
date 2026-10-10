@@ -535,6 +535,7 @@ class ServiceContainer:
         # window costs a metadata request to the operator's own endpoint, and a
         # container that never attaches a tool server should never make it.
         self._context_budget: Any | None = None
+        self._reporter_context_budget: Any | None = None
 
         _LIVE_CONTAINERS.add(self)
         _register_retirement_hook()
@@ -598,14 +599,18 @@ class ServiceContainer:
         ``llm.expert_max_tokens`` / ``llm.judge_max_tokens`` above 0 are the
         operator's; at 0 the cap is derived from the window the agent's model
         serves (``context_window.output_cap_for``), learned once per endpoint.
-        A mock container asks no endpoint. The builder keeps it on the model it
-        builds (``context_window.record_built_cap``), which is where every
-        consumer of the cap reads it from.
+        The models are the chain the agent's model is built from
+        (``assignment_chain_for(config, agent, role=role)``, the reading
+        ``build_model_for_agent`` makes): its own entry with its fallbacks, or
+        the global model of ``role`` — for the judge its ``llm.agents.judge``
+        entry before the global judge model. A mock container asks no endpoint.
+        The builder keeps it on the model it builds
+        (``context_window.record_built_cap``), which is where every consumer
+        of the cap reads it from.
         """
         from maljan.llm.context_window import output_cap_for
 
-        named = "" if agent in ("expert", "judge") and role == agent else agent
-        cap = output_cap_for(self.config, setting, named, role=role, probe=not self.mock)
+        cap = output_cap_for(self.config, setting, agent, role=role, probe=not self.mock)
         rates = getattr(self, "_generation_rates", None)
         if rates is not None:
             rates.note_output_cap(agent, cap.tokens, cap.sentence)
@@ -975,6 +980,11 @@ class ServiceContainer:
     def get_context_budget(self) -> Any:
         """The window this job's models serve, and what one tool answer may take.
 
+        The window is the smallest any model the job's tool-calling agents
+        call serves (``composition.window_assignments``): every analyst, the
+        mediator of a debate and the function summariser while it is on, and
+        the judge with the models it really calls, read on the judge role.
+
         Built once, on first use, because learning the window means asking the
         operator's own endpoint for its metadata — free, but a request, and a
         container that attaches no tool server never makes it. A mock container
@@ -995,12 +1005,13 @@ class ServiceContainer:
         held = self._context_budget
         if held is not None:
             return held
-        from maljan.agents.composition import analyst_keys, role_entries_called
+        from maljan.agents.composition import window_assignments
         from maljan.llm.context_window import budget_for_settings
 
-        agents = [*analyst_keys(self.config), "judge", *role_entries_called(self.config)]
         budget = budget_for_settings(
-            self.config, agents, probe=self._cap_is_derived() and not self.mock
+            self.config,
+            window_assignments(self.config),
+            probe=self._cap_is_derived() and not self.mock,
         )
         with self._lock:
             if self._context_budget is None:
@@ -1018,6 +1029,32 @@ class ServiceContainer:
             budget.cap_without_recording(),
         )
         return budget
+
+    def get_reporter_context_budget(self) -> Any:
+        """The window the reporter's own models serve, as a budget, built once.
+
+        The reporter is left out of the job's window
+        (``composition.window_assignments``), so what it reads before it starts
+        — the triage pack — is cut on the smaller of the two
+        (``pipeline.nodes.pack_text``). Its models are the chain
+        ``get_reporter_llm`` builds, fallbacks included; learned as the job's
+        window is, and never asked of an endpoint by a mock container.
+        """
+        held = self._reporter_context_budget
+        if held is not None:
+            return held
+        from maljan.core.model_assignments import assignment_chain_for
+        from maljan.llm.context_window import budget_for_settings
+
+        budget = budget_for_settings(
+            self.config,
+            assignment_chain_for(self.config, REPORTER_AGENT_KEY, role="judge"),
+            probe=self._cap_is_derived() and not self.mock,
+        )
+        with self._lock:
+            if self._reporter_context_budget is None:
+                self._reporter_context_budget = budget
+            return self._reporter_context_budget
 
     def _cap_is_derived(self) -> bool:
         """Whether the tool-output cap comes from the window rather than a setting."""

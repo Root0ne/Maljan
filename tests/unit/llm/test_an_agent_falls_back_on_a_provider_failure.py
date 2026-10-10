@@ -262,9 +262,11 @@ class TestEveryModelOnTheListIsAModelTheRunCalls:
         assert model_label("anthropic", "claude", "the Anthropic API") == "anthropic/claude"
 
     def test_the_window_is_asked_of_the_fallback_too(self) -> None:
+        from maljan.core.model_assignments import assignments_for
         from maljan.llm.context_window import _questions
 
-        asked = _questions(_settings_with_fallbacks(), ["static"])
+        settings = _settings_with_fallbacks()
+        asked = _questions(settings, assignments_for(settings, ["static"]))
         assert {q["model"] for q in asked} == {"qwen", "gemma"}
 
     def test_the_salvage_is_sized_for_the_smallest_declared_window(self) -> None:

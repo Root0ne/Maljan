@@ -57,7 +57,9 @@ def test_a_declared_window_is_still_checked_against_the_server(client) -> None:
     ):
         r = client.get("/api/v1/settings/context-window")
 
-    assert asked.await_count == 1
+    # Once per model the job calls: the analysts' expert model and the judge's
+    # own judge model, which ship as two models.
+    assert asked.await_count == 2
     assert r.status_code == 200
     body = r.json()
     assert body["tokens"] == 32768

@@ -239,6 +239,31 @@ def _assignment(
     )
 
 
+def builds_provider(provider: str) -> bool:
+    """Whether the LLM registry builds a model for ``provider``.
+
+    Read from the registry itself (every provider ``register_provider``
+    named, the built-in ones discovered first), so a provider a deployment
+    plugs in counts as soon as it is registered. An entry naming one the
+    registry does not build is built on its role's global model instead
+    (``build_model_for_agent``), and is read that way here too.
+    """
+    try:
+        from maljan.llm.registry import _PROVIDER_REGISTRY, discover_providers
+
+        discover_providers()
+    except Exception as exc:  # noqa: BLE001 — a registry that cannot load decides nothing
+        from maljan.core.logger import logger
+
+        logger.debug(
+            "The LLM provider registry could not load every built-in provider (%s); "
+            "an entry's provider is read as built.",
+            type(exc).__name__,
+        )
+        return True
+    return str(provider) in _PROVIDER_REGISTRY
+
+
 def assignment_chain_for(
     settings: object, agent: str, *, role: str = "expert"
 ) -> list[ModelAssignment]:
@@ -248,11 +273,12 @@ def assignment_chain_for(
     model for ``role`` alone when the agent has no entry. A fallback is a
     model the run can reach exactly as the first one is, so everything that
     asks what a run will call — the probe gate, the context window — asks
-    this.
+    this. An entry whose provider the registry builds nothing for is read as
+    no entry, because the builder then builds the role's global model.
     """
     llm = settings.llm  # type: ignore[attr-defined]
     override = llm.agents.get(agent)
-    if override is not None:
+    if override is not None and builds_provider(str(getattr(override, "provider", ""))):
         chain = override.chain() if hasattr(override, "chain") else [override]
         return [
             _assignment(
@@ -269,6 +295,18 @@ def assignment_chain_for(
     provider = str(llm.provider)
     model = str(llm.judge_model if role == "judge" else llm.expert_model)
     return [_assignment(settings, agent, provider, model, None, 0)]
+
+
+def builder_role(agent: str) -> str:
+    """The role whose global model ``agent`` is built on when it has no entry.
+
+    The judge and the reporter are built on the judge role
+    (``get_judge_llm``, ``get_reporter_llm``); every other agent, the mediator
+    and the function summariser included, on the expert role.
+    """
+    from maljan.core.config import JUDGE_AGENT_KEY, REPORTER_AGENT_KEY
+
+    return "judge" if agent in (JUDGE_AGENT_KEY, REPORTER_AGENT_KEY) else "expert"
 
 
 def assignment_for(settings: object, agent: str) -> ModelAssignment:

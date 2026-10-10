@@ -790,7 +790,7 @@ async def context_window_facts(settings: Any) -> dict[str, Any]:
     ``setting`` is what ``core.preprocessing.max_tool_output_chars`` holds, so
     the console can say whether the window decides at all.
     """
-    from maljan.agents.composition import analyst_keys, role_entries_called
+    from maljan.agents.composition import window_assignments
     from maljan.llm.context_window import (
         ANSWER_SHARE,
         UNKNOWN_WINDOW_REMEDY,
@@ -801,8 +801,9 @@ async def context_window_facts(settings: Any) -> dict[str, Any]:
 
     configured = int(getattr(settings.preprocessing, "max_tool_output_chars", 0) or 0)
     try:
-        agents = [*analyst_keys(settings), "judge", *role_entries_called(settings)]
-        window = await awindow_for_settings(settings, agents, probe=configured <= 0)
+        window = await awindow_for_settings(
+            settings, window_assignments(settings), probe=configured <= 0
+        )
     except Exception as exc:  # noqa: BLE001 — a window is never worth a failed page
         logger.warning("the context window could not be learned: %s", type(exc).__name__)
         from maljan.llm.context_window import unknown_window
