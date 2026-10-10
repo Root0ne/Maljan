@@ -57,6 +57,20 @@ class AgentArgument(BaseModel):
             "listed lines cite, every one of them, as the platform put them to it."
         ),
     )
+    revise: list[str] | None = Field(
+        default=None,
+        description=(
+            "For the mediator: the analysts its blocking lines name in their "
+            "[analysts: ...] field, the ones a revision round asks; ``[]`` when its "
+            "final block lists no blocking line. ``None`` when the names were not read "
+            "(``revise_note`` says why, where the platform tried) — a revision round "
+            "then asks every analyst."
+        ),
+    )
+    revise_note: str = Field(
+        default="",
+        description="For the mediator: the platform's sentence on why ``revise`` was not read.",
+    )
     note: str = Field(
         default="",
         description=(

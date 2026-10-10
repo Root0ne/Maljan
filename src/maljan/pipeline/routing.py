@@ -16,6 +16,9 @@ Decision priority (highest to lowest), in ``debate_route``:
   4. Sycophancy override — if sycophancy AND consensus, force revision.
   5. Genuine LLM consensus (no listed line the mediator marked blocking, or
      left unmarked) — judge.
+     No contested point — the mediator's final block was read and lists no
+     blocking line, so it names no analyst to revise: judge
+     (``no_contested_point``). A round would ask nobody.
   6. Adaptive termination — statistical confidence convergence, with no
      contradiction standing → judge.
   7. Default → revision.
@@ -118,6 +121,9 @@ NOT_APPLICABLE = "not_applicable"
 # No analyst was revised in the round before this mediation: the round made no
 # change, and the answers in force go to the judge.
 NOT_REVISED = "not_revised"
+# The last mediation's final block was read and lists no blocking line: it
+# names no analyst to revise, so no revision round is held.
+NO_CONTESTED_POINT = "no_contested_point"
 # Why a revision round opens.
 SYCOPHANCY = "sycophancy"
 NO_CONSENSUS = "no_consensus"
@@ -254,6 +260,21 @@ def route_within_limit(
     if consensus:
         say("Genuine consensus reached at round %d.", iteration)
         return "judge", CONSENSUS
+
+    # The mediator's block was read and names nobody in a contested point
+    # (``AgentArgument.revise == []``): a revision round asks only the analysts
+    # it names, so it would ask nobody. Not read (``None``) is not this.
+    if (
+        bool(last)
+        and getattr(last, "agent_name", "") == "Mediator"
+        and getattr(last, "revise", None) == []
+    ):
+        say(
+            "The mediator names no analyst in a contested point at round %d; no revision "
+            "round is held. Routing to judge with the answers in force.",
+            iteration,
+        )
+        return "judge", NO_CONTESTED_POINT
 
     # Adaptive termination on the confidence series, unless the last
     # mediation lists contradictions still standing: a number that stopped

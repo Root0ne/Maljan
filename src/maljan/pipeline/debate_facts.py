@@ -13,7 +13,12 @@ things:
 - **reads marks**: the mediator ends each line with ``[blocking: <reason>]`` or
   ``[not blocking: <reason>]``. A line marked not blocking does not stand
   against consensus. An unmarked line blocks, as every line did before marks
-  existed, so a mediator that writes none is read exactly as before.
+  existed, so a mediator that writes none is read exactly as before;
+- **reads names**: the mediator opens each line with ``[analysts: <name>, ...]``,
+  the analysts who must revise over it. A revision round asks the analysts the
+  blocking lines name, each shown the lines that name it and the peers they
+  name. A blocking line without the field, or naming no analyst of the
+  debate, leaves the names unread and the round asks every analyst.
 
 A size or a time is not a count: keys naming seconds, milliseconds, bytes or a
 size are left out.
@@ -68,11 +73,15 @@ def _name_pattern(name: str) -> re.Pattern[str]:
     )
 
 
-def _claims_named(line: str, agent_names: Iterable[str]) -> list[tuple[str, list[int]]]:
-    """``(agent, claim numbers)`` for each analyst the line names with claim numbers."""
+def _mentions(line: str, agent_names: Iterable[str]) -> list[tuple[str, list[int] | None]]:
+    """``(agent, claim numbers or None)`` for each time the line names an analyst.
+
+    Longer names are read first, so a name inside a longer one is not read
+    again. ``None`` is a mention that cites no claim number right after it.
+    """
     names = sorted({str(n) for n in agent_names if str(n).strip()}, key=len, reverse=True)
     taken: list[tuple[int, int]] = []
-    found: list[tuple[str, list[int]]] = []
+    found: list[tuple[str, list[int] | None]] = []
     for name in names:
         for match in _name_pattern(name).finditer(line):
             span = match.span()
@@ -80,9 +89,15 @@ def _claims_named(line: str, agent_names: Iterable[str]) -> list[tuple[str, list
                 continue
             taken.append(span)
             numbers = _CLAIM_NUMBERS.match(line, match.end())
-            if numbers is not None:
-                found.append((name, [int(n) for n in re.findall(r"\d+", numbers.group(1))]))
+            found.append(
+                (name, [int(n) for n in re.findall(r"\d+", numbers.group(1))] if numbers else None)
+            )
     return found
+
+
+def _claims_named(line: str, agent_names: Iterable[str]) -> list[tuple[str, list[int]]]:
+    """``(agent, claim numbers)`` for each analyst the line names with claim numbers."""
+    return [(name, numbers) for name, numbers in _mentions(line, agent_names) if numbers]
 
 
 def _claims_of(isr_reports: Mapping[str, Any], name: str) -> list[Any]:
@@ -247,3 +262,174 @@ def with_ledger_facts(directive: str, facts: Sequence[str]) -> str:
         return directive
     block = "\n".join([LEDGER_FACTS_HEAD, *(f"- {f}" for f in said)])
     return f"{directive}\n\n{block}" if directive else block
+
+
+# The field the mediator opens a listed line with: the analysts who must
+# revise over it, by the names their reports are headed with.
+_ANALYSTS_FIELD = re.compile(r"\[\s*analysts?\s*:(?P<names>[^\[\]]*)\]", re.IGNORECASE)
+# What separates two names in the field.
+_NAME_SEPARATOR = re.compile(r"\s*(?:,|;|&|\band\b)\s*", re.IGNORECASE)
+# The word a report heading closes a name with.
+_HEADING_WORD = "_analyst"
+
+# Why a revision round asked every analyst, as its record says.
+BLOCK_NOT_READ_NOTE = (
+    "The mediator's final CONTRADICTIONS: block was not read; every analyst was asked to revise."
+)
+ANALYSTS_FIELD_MISSING_NOTE = (
+    "A blocking line of the mediator's final CONTRADICTIONS: block named no analyst in an "
+    "[analysts: ...] field; every analyst was asked to revise."
+)
+
+
+def analysts_field_unknown_note(written: str) -> str:
+    """Why a round asked every analyst: a blocking line named someone outside the debate."""
+    return (
+        "A blocking line of the mediator's final CONTRADICTIONS: block named "
+        f"'{written}' in its [analysts: ...] field, which is no analyst of this debate; "
+        "every analyst was asked to revise."
+    )
+
+
+def read_analysts_field(line: str) -> list[str] | None:
+    """The names a line's ``[analysts: ...]`` fields hold, as written, or ``None``.
+
+    ``None`` is a line with no such field, or with fields that hold no name.
+    """
+    names: list[str] = []
+    for match in _ANALYSTS_FIELD.finditer(str(line)):
+        for part in _NAME_SEPARATOR.split(match.group("names")):
+            name = part.strip().strip("*_`'\"").strip()
+            if name and name not in names:
+                names.append(name)
+    return names or None
+
+
+def _key(name: str) -> str:
+    return "_".join(part for part in re.split(r"[_\-\s]+", str(name).lower()) if part)
+
+
+def resolve_analyst(written: str, participants: Sequence[str]) -> str | None:
+    """The participant a name in the field stands for, or ``None``.
+
+    Read as the platform heads a report: case, spaces, hyphens and underscores
+    alike, and the closing word ``ANALYST`` of a heading left off where the
+    name without it is a participant's.
+    """
+    keys = {_key(p): str(p) for p in participants}
+    key = _key(written)
+    if key in keys:
+        return keys[key]
+    if key.endswith(_HEADING_WORD):
+        return keys.get(key[: -len(_HEADING_WORD)])
+    return None
+
+
+def analysts_to_revise(
+    blocking: Sequence[str], participants: Sequence[str]
+) -> tuple[list[str] | None, str]:
+    """``(the analysts the blocking lines name, "")``, or ``(None, why)``.
+
+    The names come from each line's ``[analysts: ...]`` field and nowhere else.
+    No blocking line names nobody: ``[]``. A blocking line without the field,
+    or naming someone who is no participant, leaves the round unread: every
+    analyst is asked, as before, and the sentence says why. The names are in
+    the participants' order.
+    """
+    named: set[str] = set()
+    for line in blocking:
+        written = read_analysts_field(line)
+        if written is None:
+            return None, ANALYSTS_FIELD_MISSING_NOTE
+        for name in written:
+            found = resolve_analyst(name, participants)
+            if found is None:
+                return None, analysts_field_unknown_note(name)
+            named.add(found)
+    return [str(p) for p in participants if str(p) in named], ""
+
+
+def points_naming(name: str, lines: Iterable[str], participants: Sequence[str]) -> list[str]:
+    """The lines whose ``[analysts: ...]`` field names the analyst ``name``."""
+    found: list[str] = []
+    for line in lines:
+        written = read_analysts_field(line) or []
+        if any(resolve_analyst(w, participants) == name for w in written):
+            found.append(str(line))
+    return found
+
+
+# How the mediation's finding lays out its listed lines (``JudgeAgent.mediate``).
+_LISTED_HEAD = "\n\nContradictions: "
+_CONFIDENCE_TAIL = "\nConfidence: "
+
+
+def _claim_line(number: int, claim: Any) -> str:
+    return (
+        f"Claim {number}: {getattr(claim, 'claim', '')} | Evidence: "
+        f"{getattr(claim, 'evidence_ref', '')}"
+    )
+
+
+def contested_input(
+    name: str,
+    finding: str,
+    blocking: Sequence[str],
+    participants: Sequence[str],
+    reports: Mapping[str, str],
+    isr_reports: Mapping[str, Any],
+) -> tuple[str, dict[str, str]]:
+    """``(mediator feedback, peer reports)`` for a named analyst's revision.
+
+    The feedback is the mediation's finding with its listed lines cut to the
+    blocking lines whose field names ``name``; a finding not laid out as the
+    mediation writes it is passed whole. The peers are the ones those lines
+    name, in the field or by the name their report is headed with, in the
+    participants' order. A peer whose every mention in those lines cites its
+    claims by number is shown those claims as the mediator read them; any
+    other peer, and one cited past its claims, is shown its whole answer in
+    force. The lines themselves are kept whole, with every claim number and
+    ledger id they cite.
+    """
+    mine = points_naming(name, blocking, participants)
+    head_at = finding.rfind(_LISTED_HEAD)
+    tail_at = finding.rfind(_CONFIDENCE_TAIL)
+    if 0 <= head_at < tail_at:
+        feedback = f"{finding[:head_at]}{_LISTED_HEAD}{'; '.join(mine)}{finding[tail_at:]}"
+    else:
+        feedback = finding
+    whole: set[str] = set()
+    cited: dict[str, list[int]] = {}
+    mentioned: list[str] = []
+    for line in mine:
+        in_field = {
+            found
+            for w in (read_analysts_field(line) or [])
+            if (found := resolve_analyst(w, participants)) is not None
+        }
+        # The names the line's prose gives, the field itself left out.
+        in_prose: set[str] = set()
+        for peer, numbers in _mentions(_ANALYSTS_FIELD.sub(" ", line), participants):
+            in_prose.add(peer)
+            if peer == name:
+                continue
+            if peer not in mentioned:
+                mentioned.append(peer)
+            if numbers is None:
+                whole.add(peer)
+            else:
+                cited.setdefault(peer, []).extend(numbers)
+        # A peer the field names and the prose does not cites no claim.
+        for peer in in_field - in_prose - {name}:
+            if peer not in mentioned:
+                mentioned.append(peer)
+            whole.add(peer)
+    peers: dict[str, str] = {}
+    for peer in [str(p) for p in participants if str(p) in mentioned]:
+        claims = _claims_of(isr_reports, peer)
+        numbers = list(dict.fromkeys(cited.get(peer, [])))
+        if peer in whole or not numbers or any(not 1 <= n <= len(claims) for n in numbers):
+            peers[peer] = str(reports.get(peer, ""))
+        else:
+            peers[peer] = "\n".join(_claim_line(n, claims[n - 1]) for n in numbers)
+    return feedback, peers

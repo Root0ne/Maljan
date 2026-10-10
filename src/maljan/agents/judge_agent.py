@@ -475,13 +475,21 @@ CONTRADICTION_DEFINITION = (
     "claim that an evidence ledger entry contradicts."
 )
 
+# The field each listed line opens with: whom a revision round asks over it
+# (``pipeline.debate_facts.analysts_to_revise``).
+ANALYSTS_FIELD_RULE = (
+    "Open each line with [analysts: <name>, <name>] naming the analysts who must revise "
+    "over it, each written as its report is headed; a revision round asks only the analysts "
+    "the blocking lines name, and every other analyst keeps its answer as it stands."
+)
+
 # The closing block the mediator writes, and the only part of its answer the
 # contradictions are read from (``final_contradictions``).
 CONTRADICTIONS_BLOCK_RULE = (
     "After your reasoning, write one final block. It begins with a line reading exactly "
     "'CONTRADICTIONS:' and then lists each contradiction still standing on a line of its "
     "own: the analyst, its claim, and what contradicts it (another analyst's claim, or the "
-    "id of the ledger entry). When none stands, write the single line "
+    "id of the ledger entry). " + ANALYSTS_FIELD_RULE + " When none stands, write the single line "
     "'CONTRADICTIONS: NONE'. Only this final block is counted: a contradiction you drafted "
     "above it and then resolved is left out of it. End each line with "
     "[blocking: <one-line reason>] when the analysts must revise over it, or "
@@ -495,7 +503,8 @@ CONTRADICTIONS_BLOCK_QUESTION = (
     "Your answer has no final 'CONTRADICTIONS:' block. Write it now: a line reading "
     "exactly 'CONTRADICTIONS:' followed by one line per contradiction still standing (the "
     "analyst, its claim, and what contradicts it: another analyst's claim or the id of the "
-    "ledger entry), each ending in [blocking: <one-line reason>] or "
+    "ledger entry), each opening with [analysts: <name>, <name>] for the analysts who must "
+    "revise over it and ending in [blocking: <one-line reason>] or "
     "[not blocking: <one-line reason>], or the single line 'CONTRADICTIONS: NONE'; then the "
     "line 'agreement_confidence: <number>'. This turn carries no tools."
 )
@@ -506,7 +515,8 @@ MEDIATION_EXTRACTION_SYSTEM = (
     "Extract the final structured verdict from the mediator's reasoning log.\n"
     "You MUST produce a structured response with:\n"
     "- contradictions: the lines of the log's final 'CONTRADICTIONS:' block, one item "
-    "per line written whole with its [blocking: …] or [not blocking: …] mark, and an empty "
+    "per line written whole with its [analysts: …] field and its [blocking: …] or "
+    "[not blocking: …] mark, and an empty "
     "list when that block reads 'CONTRADICTIONS: NONE'. A "
     "contradiction the log drafted above that block and then resolved is not one.\n"
     "- resolution_summary: what was resolved and what remains\n"
