@@ -141,6 +141,27 @@ def test_every_check_passes_but_a_known_defect(tmp_path: Path, scenario: str, wi
         )
 
 
+def test_every_anthropic_composer_call_is_streamed_as_the_product_streams_it(
+    tmp_path: Path,
+) -> None:
+    """A section on Claude Haiku 5.5 is streamed at the derived cap, so its join is rehearsed.
+
+    A paid run's section was refused for the empty text block a streamed
+    answer's join carries; a rehearsal whose composer calls stopped streaming
+    would pass without rehearsing that path at all.
+    """
+    from maljan.llm.anthropic_provider import needs_streaming
+
+    rehearsal = Rehearsal(scenario="normal", provider="anthropic", work_dir=tmp_path / "run")
+    record = asyncio.run(rehearse(rehearsal))
+    sections = [e for e in record.stub_log if e.get("role") == "composer"]
+
+    assert sections
+    for entry in sections:
+        assert entry.get("stream") is True, entry
+        assert needs_streaming(str(entry.get("model")), entry.get("max_tokens")), entry
+
+
 @pytest.mark.parametrize("wire", WIRES)
 def test_two_normal_runs_are_identical(tmp_path: Path, wire: str) -> None:
     signatures = []
