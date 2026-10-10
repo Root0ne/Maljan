@@ -77,6 +77,9 @@ class StubState:
     pace: Pace = field(default_factory=Pace)
     # A window every model is served with instead of its documented one.
     window: int | None = None
+    # A window per model (by its id), served instead of the documented one and
+    # of ``window``.
+    windows: dict[str, int] = field(default_factory=dict)
     slots: int = 1
     # What the stub stands for: ``hosted`` (a paid API) or ``llama`` (a local
     # llama.cpp server, which answers ``/props``).
@@ -97,7 +100,8 @@ class StubState:
     dump_dir: Path | None = None
 
     def facts(self, model: str) -> ModelFacts:
-        return facts_for(model, window=self.window, slots=self.slots)
+        own = self.windows.get(str(model or "").strip().lower())
+        return facts_for(model, window=own or self.window, slots=self.slots)
 
     def calls(self) -> list[dict[str, Any]]:
         """Every call logged, then every call still held in its delay (``waiting``)."""

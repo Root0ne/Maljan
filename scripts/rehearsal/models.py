@@ -161,9 +161,12 @@ def facts_for(model: str, *, window: int | None = None, slots: int = 1) -> Model
     return facts
 
 
-def undocumented_windows(models: Any, window: int | None = None) -> list[str]:
-    """The models among ``models`` whose window nothing documents, ``window`` named or not."""
-    if window:
-        return []
+def undocumented_windows(models: Any, named: dict[str, int] | None = None) -> list[str]:
+    """The models among ``models`` whose window nothing documents and the run does not name."""
     names = sorted({str(m).strip() for m in models if str(m or "").strip()})
-    return [name for name in names if not facts_for(name).window_documented]
+    named = {str(k).strip().lower(): v for k, v in (named or {}).items()}
+    return [
+        name
+        for name in names
+        if not named.get(name.lower()) and not facts_for(name).window_documented
+    ]

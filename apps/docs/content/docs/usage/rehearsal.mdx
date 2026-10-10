@@ -156,8 +156,10 @@ here with the same status and error body, and fails the rehearsal:
 The facts per model are data: the Anthropic Models API's stored answer for
 Claude Haiku 5.5 (`scripts/rehearsal/model_descriptions/`), and otherwise the
 repository's vendored model table. A model whose window neither documents is
-not given a guessed one in a gate: the gate refuses to start until `--window`
-names the provider's window, which the stub then serves for every model.
+not given a guessed one in a gate: the gate refuses to start until
+`--window model=N` names the provider's window for each such model
+(repeatable). Documented windows are kept unless named. A bare `--window N`
+is taken only where exactly one model lacks a window, and is that model's.
 
 By default the stub stands for a hosted API. Its model list names each model
 with no window, and it serves no runtime metadata (no llama.cpp `/props`, no

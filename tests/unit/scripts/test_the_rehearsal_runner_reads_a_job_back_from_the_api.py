@@ -409,7 +409,7 @@ def _args(tmp_path: Path, **extra: Any) -> Any:
         "first_token_seconds": 0.0,
         "tokens_per_second": 0.0,
         # The provider's window, named: the table documents none for these models.
-        "window": PROVIDER_WINDOW,
+        "window": [f"deepseek-v4-flash={PROVIDER_WINDOW}", f"deepseek-v4-pro={PROVIDER_WINDOW}"],
         "slots": 1,
         "runtime": "hosted",
         "api": "http://api",
@@ -460,7 +460,7 @@ def test_the_gate_refuses_to_guess_a_window_nothing_documents(
 ) -> None:
     api = _Api(_values())
     with pytest.raises(SystemExit, match="deepseek-v4-flash, deepseek-v4-pro: name the provider"):
-        _run_with(api, _args(tmp_path, window=None), monkeypatch)
+        _run_with(api, _args(tmp_path, window=[]), monkeypatch)
     assert not any(call.startswith("PATCH") for call in api.seen)
     assert not any(call.startswith("POST /jobs") for call in api.seen)
 
@@ -472,10 +472,62 @@ def test_a_documented_window_needs_no_window_named() -> None:
     values = _values(**{"core.llm.agents": {"value": {}, "source": "ui"}})
     assert undocumented_windows(["claude-haiku-5-5", "deepseek-chat"]) == []
     assert undocumented_windows(["deepseek-v4-pro", "claude-haiku-5-5"]) == ["deepseek-v4-pro"]
-    assert undocumented_windows(["deepseek-v4-pro"], PROVIDER_WINDOW) == []
+    assert undocumented_windows(["deepseek-v4-pro"], {"deepseek-v4-pro": PROVIDER_WINDOW}) == []
+    assert undocumented_windows(["deepseek-v4-pro"], {"deepseek-v4-flash": PROVIDER_WINDOW}) == [
+        "deepseek-v4-pro"
+    ]
     expected = {"model.static": "deepseek-v4-flash", "model.judge": "deepseek-v4-flash"}
     assert gate_models(_values(), expected) == ["deepseek-v4-flash", "deepseek-v4-pro"]
     assert gate_models(values, expected) == ["deepseek-v4-flash"]
+
+
+class TestTheWindowIsNamedPerModel:
+    def test_model_equals_n_is_that_model_s_window_and_repeats(self) -> None:
+        from scripts.rehearsal.run import parse_windows, resolve_windows
+
+        bare, named = parse_windows(["deepseek-v4-flash=1000", "DeepSeek-V4-Pro=2000"])
+        assert bare is None
+        assert named == {"deepseek-v4-flash": 1000, "deepseek-v4-pro": 2000}
+        models = ["claude-haiku-5-5", "deepseek-v4-flash", "deepseek-v4-pro"]
+        assert resolve_windows(models, bare, named) == named
+
+    def test_a_bare_n_is_taken_only_for_the_one_model_without_a_window(self) -> None:
+        from scripts.rehearsal.run import resolve_windows
+
+        # Haiku keeps its documented window; the bare N is DeepSeek's alone.
+        assert resolve_windows(["claude-haiku-5-5", "deepseek-v4-pro"], 5000, {}) == {
+            "deepseek-v4-pro": 5000
+        }
+        assert resolve_windows(
+            ["deepseek-v4-flash", "deepseek-v4-pro"], 5000, {"deepseek-v4-flash": 7000}
+        ) == {"deepseek-v4-flash": 7000, "deepseek-v4-pro": 5000}
+        with pytest.raises(SystemExit, match="deepseek-v4-flash, deepseek-v4-pro are undocumented"):
+            resolve_windows(["deepseek-v4-flash", "deepseek-v4-pro"], 5000, {})
+        with pytest.raises(SystemExit, match="every model's window is documented"):
+            resolve_windows(["claude-haiku-5-5"], 5000, {})
+
+    @pytest.mark.parametrize(
+        ("given", "said"),
+        [
+            (["x"], "is not N or model=N"),
+            (["m=0"], "positive"),
+            (["=5"], "names no model"),
+            (["5", "6"], "one bare N"),
+        ],
+    )
+    def test_a_malformed_window_is_refused(self, given: list[str], said: str) -> None:
+        from scripts.rehearsal.run import parse_windows
+
+        with pytest.raises(SystemExit, match=said):
+            parse_windows(given)
+
+    def test_the_stub_serves_a_named_window_to_that_model_alone(self) -> None:
+        from scripts.rehearsal.roles import Brain
+        from scripts.rehearsal.stub_model import StubState
+
+        state = StubState(brain=Brain(), windows={"deepseek-v4-pro": 5000})
+        assert state.facts("deepseek-v4-pro").window == 5000
+        assert state.facts("claude-haiku-5-5").window == 1_000_000
 
 
 def test_an_interrupt_mid_run_still_puts_the_settings_back(

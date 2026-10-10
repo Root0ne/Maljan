@@ -258,8 +258,55 @@ def gate_models(values: dict[str, dict[str, Any]], expected: dict[str, Any]) -> 
     return sorted(set(models))
 
 
-def refuse_a_guessed_window(models: list[str], window: int | None) -> None:
-    """Refuse a gate whose models' windows nothing documents, unless ``--window`` names one.
+def parse_windows(given: list[str] | None) -> tuple[int | None, dict[str, int]]:
+    """``--window`` as given: a bare window (at most one), and windows named ``model=N``."""
+    bare: int | None = None
+    named: dict[str, int] = {}
+    for raw in given or []:
+        model, sep, number = str(raw).rpartition("=")
+        try:
+            tokens = int(number)
+        except ValueError:
+            raise SystemExit(f"--window {raw!r} is not N or model=N") from None
+        if tokens <= 0:
+            raise SystemExit(f"--window {raw!r}: a window is a positive number of tokens")
+        if not sep:
+            if bare is not None:
+                raise SystemExit("--window takes one bare N; name each other model as model=N")
+            bare = tokens
+        elif not model.strip():
+            raise SystemExit(f"--window {raw!r} names no model")
+        else:
+            named[model.strip().lower()] = tokens
+    return bare, named
+
+
+def resolve_windows(models: list[str], bare: int | None, named: dict[str, int]) -> dict[str, int]:
+    """The window each model is rehearsed with where the run names one.
+
+    A window named ``model=N`` is that model's. A bare N is taken only where
+    exactly one model's window nothing documents and nothing names: it is that
+    model's window, and every documented window is kept.
+    """
+    from scripts.rehearsal.models import undocumented_windows
+
+    windows = dict(named)
+    if bare is None:
+        return windows
+    missing = undocumented_windows(models, windows)
+    if len(missing) != 1:
+        which = (
+            f"the windows of {', '.join(missing)} are undocumented"
+            if missing
+            else "every model's window is documented or named"
+        )
+        raise SystemExit(f"a bare --window {bare} names no one model: {which}; use model=N")
+    windows[missing[0].lower()] = bare
+    return windows
+
+
+def refuse_a_guessed_window(models: list[str], windows: dict[str, int]) -> None:
+    """Refuse a gate whose models' windows nothing documents, unless ``--window`` names them.
 
     The gate rehearses the operator's paid configuration, and the product sizes
     its prompts and output caps by the window: a window the stub guessed would
@@ -267,11 +314,11 @@ def refuse_a_guessed_window(models: list[str], window: int | None) -> None:
     """
     from scripts.rehearsal.models import undocumented_windows
 
-    missing = undocumented_windows(models, window)
+    missing = undocumented_windows(models, windows)
     if missing:
         raise SystemExit(
             f"no stored description or table row documents the window of {', '.join(missing)}: "
-            "name the provider's window with --window"
+            "name the provider's window with --window model=N"
         )
 
 
@@ -706,6 +753,7 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
         raise SystemExit("deadline_hit against the stack sets core.job_timeout: name --configure")
     if not args.configure and not args.stub_url and not args.stub_port:
         raise SystemExit("without --configure the stack must already call a stub: name --stub-port")
+    bare_window, named_windows = parse_windows(args.window)
     _sigterm_is_interrupt()
     brain = Brain(
         scenario=args.scenario,
@@ -715,10 +763,12 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
     )
     server: StubServer | None = None
     if not args.stub_url:
+        # Outside a gate a bare window is every model's, as the stub's own --window.
         state = StubState(
             brain=brain,
             pace=Pace(args.first_token_seconds, args.tokens_per_second),
-            window=args.window,
+            window=None if args.configure == "gate" else bare_window,
+            windows=dict(named_windows),
             slots=args.slots,
             runtime=args.runtime,
         )
@@ -738,13 +788,17 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
             if args.configure == "gate":
                 changes = gate_changes(values, stub_root)
                 expected = {**gate_expected(values, changes), **expected}
-                refuse_a_guessed_window(gate_models(values, expected), args.window)
+                models = gate_models(values, expected)
+                windows = resolve_windows(models, bare_window, named_windows)
+                refuse_a_guessed_window(models, windows)
+                if server is not None:
+                    server.state.windows = windows
             else:
                 from scripts.rehearsal.inprocess import HARNESS_WINDOW, Rehearsal, expected_for
 
                 changes = {**harness_changes(args.provider, stub_root), **third_party_off(values)}
                 expected = {**expected_for(Rehearsal(provider=args.provider)), **expected}
-                if server is not None and args.window is None:
+                if server is not None and not args.window:
                     server.state.window = HARNESS_WINDOW[args.provider]
             changes.update(deadline_changes(args.scenario, args.job_timeout))
             answer = client.probe_models(changes)
@@ -987,7 +1041,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tokens-per-second", type=float, default=0.0)
     parser.add_argument("--first-token-seconds", type=float, default=0.0)
     parser.add_argument(
-        "--window", type=int, default=None, help="the provider window for a model nothing documents"
+        "--window",
+        action="append",
+        default=[],
+        help="model=N: the provider's window for a model nothing documents (repeatable); "
+        "a bare N only where a single model lacks one",
     )
     parser.add_argument("--slots", type=int, default=1)
     parser.add_argument(
