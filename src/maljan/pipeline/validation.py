@@ -5771,8 +5771,8 @@ def library_spellings(value: str) -> tuple[str, ...]:
     return (lowered,)
 
 
-# A value written as a field name and the field's value: ``seed 0x33629d40``,
-# ``first_key=0x41``, ``port: 443``. The name is one identifier word; what
+# A value written as a field name and the field's value: ``seed 0x5a17c0de``,
+# ``first_key=0x2b``, ``port: 443``. The name is one identifier word; what
 # follows it is the field's whole value.
 _FIELD_AND_VALUE_RE = re.compile(r"([a-z_][a-z0-9_-]*)(?:\s*[=:]\s*|\s+)(\S(?:.*\S)?)", re.DOTALL)
 
@@ -5780,8 +5780,8 @@ _FIELD_AND_VALUE_RE = re.compile(r"([a-z_][a-z0-9_-]*)(?:\s*[=:]\s*|\s+)(\S(?:.*
 def field_value_spellings(value: str) -> tuple[str, ...]:
     """How an entry writes ``value`` when it is a field name and that field's value.
 
-    A table row may state ``seed 0x33629d40`` for an entry whose JSON holds
-    ``"seed": "0x33629d40"``. The entry holds the value when it pairs that
+    A table row may state ``seed 0x5a17c0de`` for an entry whose JSON holds
+    ``"seed": "0x5a17c0de"``. The entry holds the value when it pairs that
     field name with that whole value: as a JSON member (the value quoted or
     bare, with or without the space after the colon) or as ``name=value`` or
     ``name: value``. Only the pair is read, never the two parts apart, so a

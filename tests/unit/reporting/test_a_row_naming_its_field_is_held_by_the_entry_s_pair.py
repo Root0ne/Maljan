@@ -1,12 +1,13 @@
 """A row that writes a field name before its value is held by the entry that pairs the two.
 
-A run's configuration table stated ``seed 0x33629d40`` and ``first_key 0x41``,
-both citing the decoder's entry whose JSON held ``"seed": "0x33629d40"`` and
-``"first_key": "0x41"``. The whole-value check looked for the row as written,
-found no ``seed 0x33629d40`` in the entry, and printed both correct rows as
-unresolved. The entry holds the value when it pairs that field name with that
-whole value; the two parts apart never count, so a value the entry gives
-another field, a prefix and the same digits in another radix stay unheld.
+A run's configuration table stated a decoder's seed and first key as
+``seed <value>`` and ``first_key <value>``, both citing the decoder's entry
+whose JSON held ``"seed": "<value>"`` and ``"first_key": "<value>"``. The
+whole-value check looked for each row as written, found no ``seed <value>``
+in the entry, and printed both correct rows as unresolved. The entry holds
+the value when it pairs that field name with that whole value; the two parts
+apart never count, so a value the entry gives another field, a prefix and the
+same digits in another radix stay unheld.
 
 Every name and number here is made up for the test.
 """
