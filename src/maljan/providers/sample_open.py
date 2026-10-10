@@ -43,7 +43,9 @@ __all__ = [
     "declared",
     "is_refusal",
     "long_running_tools",
-    "normalised_path",
+    "answer_field",
+    "canonical_path",
+    "path_refusal",
     "server_note_key",
     "wrap_open_tool",
 ]
@@ -81,23 +83,28 @@ class SampleNotes:
         self._guard = threading.Lock()
 
     def get(self, server: str, path: str) -> OpenedSample | None:
+        key = canonical_path(path)
+        if key is None:
+            return None
         with self._guard:
-            return self._opened.get((server, normalised_path(path)))
+            return self._opened.get((server, key))
 
     def note(self, server: str, path: str, name: str, answer: str) -> None:
-        if path:
-            with self._guard:
-                self._opened[(server, normalised_path(path))] = OpenedSample(
-                    name=name or path, answer=answer
-                )
+        key = canonical_path(path)
+        if key is None:
+            return
+        with self._guard:
+            self._opened[(server, key)] = OpenedSample(name=name or key, answer=answer)
 
     def forget(self, server: str, path: str) -> None:
+        key = canonical_path(path)
         with self._guard:
-            self._opened.pop((server, normalised_path(path)), None)
+            self._opened.pop((server, key or ""), None)
 
     def lock(self, server: str, path: str) -> threading.Lock:
+        key = canonical_path(path) or ""
         with self._guard:
-            return self._locks.setdefault((server, normalised_path(path)), threading.Lock())
+            return self._locks.setdefault((server, key), threading.Lock())
 
 
 # The transports that reach a running server at an address: every handle that
@@ -105,10 +112,61 @@ class SampleNotes:
 REMOTE_TRANSPORTS = frozenset({"http", "streamable-http", "sse"})
 
 
-def normalised_path(path: str) -> str:
-    """``path`` as one spelling: separators, ``.``/``..`` segments and doubled slashes read off."""
-    text = str(path or "").strip().replace("\\", "/")
-    return posixpath.normpath(text) if text else ""
+def path_refusal(path: Any, held: str | None = None) -> str | None:
+    """Why ``path`` is refused as the sample a server opens, or ``None`` when it is not.
+
+    The one reading of a path the opener makes, for the note's key, the check
+    against the job's held sample and the argument sent to the declared tools
+    alike (``canonical_path``). Nothing is rewritten that the server might read
+    another way: a spelling with a backslash, a percent sign, a control
+    character, surrounding blanks, a doubled separator, a ``.`` or ``..``
+    segment or a trailing slash is refused, not tidied, because the server
+    resolves its own symlinks, case and mounts and may land somewhere a
+    lexical tidy-up does not. A relative path is joined to the held sample's
+    directory, and refused where there is none. Where the job holds a sample,
+    any path that is not exactly that sample is refused.
+    """
+    if not isinstance(path, str) or not path:
+        return "no path was given"
+    if any(ord(c) < 0x20 or ord(c) == 0x7F for c in path):
+        return "the path holds a control character"
+    if path != path.strip():
+        return "the path has blanks around it"
+    if "\\" in path:
+        return "the path holds a backslash"
+    if "%" in path:
+        return "the path holds a percent sign, which may be read as an encoding"
+    candidate = path
+    held_path: str | None = None
+    if held is not None:
+        if path_refusal(held) is not None:
+            return "the job's own sample path is not one this reading accepts"
+        held_path = held
+    if not candidate.startswith("/"):
+        if held_path is None:
+            return "the path is relative and this server holds no sample to resolve it against"
+        candidate = posixpath.dirname(held_path).rstrip("/") + "/" + candidate
+    if candidate != "/" and candidate.endswith("/"):
+        return "the path ends in a separator"
+    segments = candidate.split("/")[1:]
+    if "" in segments:
+        return "the path holds a doubled separator"
+    if any(segment in (".", "..") for segment in segments):
+        return "the path holds a . or .. segment"
+    if held_path is not None and candidate != held_path:
+        return "the path is not the job's own sample"
+    return None
+
+
+def canonical_path(path: Any, held: str | None = None) -> str | None:
+    """``path`` in its one spelling (a relative path joined to the held sample's
+    directory), or ``None`` when ``path_refusal`` refuses it."""
+    if path_refusal(path, held) is not None:
+        return None
+    text = str(path)
+    if held is not None and not text.startswith("/"):
+        return held
+    return text
 
 
 def server_note_key(config: Any, instance: str = "") -> str:
@@ -141,16 +199,32 @@ def is_refusal(answer: Any) -> bool:
     return error_parts(answer) is not None
 
 
-def _opened_name(answer: str, field: str, path: str) -> str:
-    """The name the server gave what it opened: the declared field of its answer, else the path."""
-    if not field:
-        return path
+def answer_object(answer: Any) -> dict[str, Any] | None:
+    """A tool's answer as a JSON object, or ``None``: the one reader of answer fields."""
+    if isinstance(answer, dict):
+        return answer
     try:
-        payload = json.loads(answer)
+        payload = json.loads(str(answer))
     except (TypeError, ValueError):
-        return path
-    value = payload.get(field) if isinstance(payload, dict) else None
-    return str(value) if isinstance(value, (str, int)) and str(value).strip() else path
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def answer_field(answer: Any, field: str) -> str | None:
+    """A text field of a tool's JSON answer, non-blank, or ``None``."""
+    payload = answer_object(answer) if field else None
+    value = payload.get(field) if payload is not None else None
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _opened_name(answer: str, field: str, path: str) -> str:
+    """The name the server gave what it opened, for the select and analysis tools.
+
+    Read from the declared field of the open's answer, else the path. It is
+    what those tools are given and nothing more: the note is keyed by the
+    path alone, so no answer decides which note answers.
+    """
+    return answer_field(answer, field) or path
 
 
 class SampleOpener:
@@ -223,13 +297,37 @@ class SampleOpener:
         self.notes.note(self.server, path, name, opened)
         return opened
 
+    def refused(self, path: Any, why: str) -> str:
+        """The structured refusal for a path the opener does not open."""
+        logger.warning("%s: %s of %r refused: %s", self.server, self.spec.open_tool, path, why)
+        return json.dumps(
+            {
+                "error": {
+                    "code": "sample_path_refused",
+                    "message": f"{self.spec.open_tool} was not called: {why}",
+                    "remediation": "open the job's own sample by its path exactly as it was given",
+                }
+            }
+        )
+
     async def aopen(
         self,
-        path: str,
+        path: Any,
         call: Callable[[str, dict[str, Any]], Awaitable[Any]],
         arguments: dict[str, Any] | None = None,
+        held: str | None = None,
     ) -> str:
-        """Open ``path`` with ``call`` (one tool by name, awaited), or answer from the note."""
+        """Open ``path`` with ``call`` (one tool by name, awaited), or answer from the note.
+
+        ``path`` is read once (``canonical_path``, against the job's ``held``
+        sample when there is one); that one spelling is the note's key and the
+        argument every declared tool is sent, and a refused path calls nothing.
+        """
+        why = path_refusal(path, held)
+        canonical = canonical_path(path, held)
+        if why is not None or canonical is None:
+            return self.refused(path, why or "the path could not be read")
+        path = canonical
         lock = self.notes.lock(self.server, path)
         # Taken without blocking the loop, and so that a call cancelled while
         # it waits never holds the lock: the holder may be another coroutine
@@ -269,11 +367,18 @@ class SampleOpener:
 
     def open(
         self,
-        path: str,
+        path: Any,
         call: Callable[[str, dict[str, Any]], Any],
         arguments: dict[str, Any] | None = None,
+        held: str | None = None,
     ) -> str:
-        """Open ``path`` with ``call`` (one tool by name), or answer from the note."""
+        """Open ``path`` with ``call`` (one tool by name), or answer from the note; ``path``
+        read once, as :meth:`aopen` reads it."""
+        why = path_refusal(path, held)
+        canonical = canonical_path(path, held)
+        if why is not None or canonical is None:
+            return self.refused(path, why or "the path could not be read")
+        path = canonical
         with self.notes.lock(self.server, path):
             noted = self.notes.get(self.server, path)
             if noted is not None:
@@ -320,8 +425,9 @@ def wrap_open_tool(
 
     ``every_tool`` is the server's whole manifest, allow-list aside: a select
     or analysis tool the model is not offered is still the server's to call.
-    ``held_path``, when given, answers the path the server must open for this
-    job, and a model's own path is replaced with it. With no declaration, no
+    ``held_path``, when given, answers the job's own sample: the opener
+    refuses any other path (``path_refusal``), and a relative one is read
+    against it. With no declaration, no
     note store, or no open tool among ``tools``, ``tools`` come back as they
     were.
     """
@@ -353,19 +459,10 @@ def wrap_open_tool(
         return await found.ainvoke(arguments)
 
     async def open_once(**kwargs: Any) -> str:
-        path = str(kwargs.get(spec.path_argument) or "")
+        path = kwargs.get(spec.path_argument)
         held = held_path() if held_path is not None else None
-        if held and path != held:
-            logger.warning(
-                "%s: %s path %r replaced with the job's path %r.",
-                server,
-                spec.open_tool,
-                path,
-                held,
-            )
-            path = held
         rest = {k: v for k, v in kwargs.items() if k != spec.path_argument and v is not None}
-        return await opener.aopen(path, call, rest)
+        return await opener.aopen(path, call, rest, held=held or None)
 
     try:
         wrapped = StructuredTool.from_function(

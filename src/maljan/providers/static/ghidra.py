@@ -348,7 +348,7 @@ def open_ghidra_sample(
             {tool: lambda arguments: open_call(tool, arguments)} if open_call is not None else {}
         )
         call = rest_tool_call(http, base, overrides=overrides)
-        return SampleOpener(key, spec, notes).open(file_path, call)
+        return SampleOpener(key, spec, notes).open(file_path, call, held=file_path)
     loaded = (
         open_call(UNDECLARED_LOAD_TOOL, {"file": file_path})
         if open_call is not None
@@ -698,6 +698,7 @@ class GhidraStaticProvider(StaticProvider):
             server=server_note_key(getattr(self, "_cfg", None), f"provider {id(self)}"),
             spec=getattr(getattr(self, "_cfg", None), "sample_open", None),
             notes=getattr(self, "sample_notes", None),
+            held_path=self._held_path,
         )
         out: list[Any] = []
         for tool in tools:

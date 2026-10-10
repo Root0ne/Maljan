@@ -292,8 +292,7 @@ class TestConcurrentFirstOpens:
 
 
 class TestTheHeldPath:
-    def test_a_model_s_own_path_is_replaced_with_the_job_s(self) -> None:
-        server = _Server()
+    def _wrapped(self, server: _Server) -> Any:
         tools = server.tools()
         wrapped = wrap_open_tool(
             tools,
@@ -304,7 +303,19 @@ class TestTheHeldPath:
             held_path=lambda: PATH,
         )
         (tool,) = [t for t in wrapped if t.name == "open_thing"]
-        asyncio.run(tool.ainvoke({"where": "/invented/path"}))
+        return tool
+
+    def test_a_path_other_than_the_job_s_sample_is_refused_and_nothing_called(self) -> None:
+        from maljan.providers.sample_open import is_refusal
+
+        server = _Server()
+        said = asyncio.run(self._wrapped(server).ainvoke({"where": "/invented/path"}))
+        assert is_refusal(said) and "not the job's own sample" in said
+        assert server.calls == []
+
+    def test_a_relative_path_is_read_against_the_held_sample(self) -> None:
+        server = _Server()
+        asyncio.run(self._wrapped(server).ainvoke({"where": "a.bin"}))
         assert server.calls[0] == ("open_thing", {"where": PATH})
 
 
@@ -354,12 +365,14 @@ class TestOneServerOneNote:
         assert first.note_key != second.note_key
         assert first.note_key.startswith("stdio decompiler-mcp --stdio")
 
-    def test_two_spellings_of_one_path_share_a_note(self) -> None:
+    def test_a_second_spelling_of_a_noted_path_is_refused_not_answered(self) -> None:
+        from maljan.providers.sample_open import is_refusal
+
         server = _Server()
         handle = _handle(server)
         _open(handle, "/samples/a.bin")
-        _open(handle, "/samples//sub/../a.bin")
-        assert server.names().count("open_thing") == 1
+        assert is_refusal(_open(handle, "/samples//sub/../a.bin"))
+        assert server.names() == ["open_thing", "pick", "study"]
 
 
 class TestTheDeclaredToolsHaveNoClientDeadline:

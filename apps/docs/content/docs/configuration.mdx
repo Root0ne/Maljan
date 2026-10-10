@@ -2833,9 +2833,21 @@ logged and leaves the open tool as it is.
 The note belongs to one job and is never shared with another. Within the job it
 is kept per server, not per handle: every handle to a remote server (`http`,
 `streamable-http`, `sse`) names the same address and shares the note, while a
-local (`stdio`) server is a process per handle and keeps its own. A path is
-noted in one spelling, so `/samples//sub/../a.bin` and `/samples/a.bin` are one
-path.
+local (`stdio`) server is a process per handle and keeps its own.
+
+**A path is read once.** The opener reads the path it is asked to open in one
+way, and that one spelling is the note's key, the check against the job's own
+sample and the argument every declared tool is sent. Nothing is tidied that the
+server might read differently: a path with a backslash, a percent sign (an
+encoding), a control character, surrounding blanks, a doubled separator, a `.`
+or `..` segment or a trailing slash is refused, and no tool is called. Where the
+job holds a sample (the mirror a static provider pins), a relative path is read
+against that sample's directory and any path that is not exactly the sample is
+refused (another case, a symlink's name, the host's mount of the same file);
+a registry server with no held sample refuses a relative path. The refusal is a
+structured error, `sample_path_refused`. Nothing read from a tool's answer, the
+`name_field` included, decides which note answers: it is only what the select
+and analysis tools are sent.
 
 The declared open and analysis tools are held as long-running, exactly as a
 tool the server's own `capabilities` manifest marks `long_running`: an import

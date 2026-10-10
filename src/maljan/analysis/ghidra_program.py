@@ -50,19 +50,16 @@ def program_name_from_load(response_text: str) -> str | None:
     ``None`` has nothing to switch to and must not guess: switching to a name
     derived from the *requested* path would paper over a load that did not
     happen, which is the same silent-wrong-answer this module exists to stop.
+    Read with the general opener's one reader of answer fields
+    (``providers.sample_open.answer_field``), so the name the stop reads is the
+    name the opener sends.
     """
-    try:
-        payload: Any = json.loads(response_text)
-    except (TypeError, ValueError):
+    from maljan.providers.sample_open import answer_field, answer_object
+
+    payload = answer_object(response_text)
+    if payload is None or payload.get("success") is not True:
         return None
-    if not isinstance(payload, dict):
-        return None
-    if payload.get("success") is not True:
-        return None
-    name = payload.get("program")
-    if not isinstance(name, str) or not name.strip():
-        return None
-    return name
+    return answer_field(payload, "program")
 
 
 def switch_is_confirmed(response_text: str, expected: str) -> bool:

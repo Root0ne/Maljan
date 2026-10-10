@@ -672,7 +672,7 @@ class GhidraPasses:
             if not isinstance(notes, SampleNotes):
                 notes = SampleNotes()
             opener = SampleOpener(self.note_key, self.sample_open, notes)
-            answer = opener.open(self.sample_path, call)
+            answer = opener.open(self.sample_path, call, held=self.sample_path)
             # An open is noted only once the declared analysis answered: an
             # opened program with none noted was not analysed, and this pass
             # reads what the analysis records.

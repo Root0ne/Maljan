@@ -306,7 +306,7 @@ def _opened_for_hashes(
 
     opener = SampleOpener(key, spec, sample_notes_of(notes))
     try:
-        answer = opener.open(file_path, rest_tool_call(http, base))
+        answer = opener.open(file_path, rest_tool_call(http, base), held=file_path)
     except Exception as exc:  # noqa: BLE001 - a transport failure is the same as no load
         answer = f"{type(exc).__name__}: {exc}"
     if opener.name_of(file_path) is not None:
