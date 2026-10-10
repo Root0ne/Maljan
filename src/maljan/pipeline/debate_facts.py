@@ -31,6 +31,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from maljan.schemas.isr_models import claim_summary_line
+
 # A ledger id as the evidence ledger writes it.
 _ENTRY_ID = re.compile(r"\bev_\d+\b")
 # A decimal number standing alone.
@@ -364,13 +366,6 @@ _LISTED_HEAD = "\n\nContradictions: "
 _CONFIDENCE_TAIL = "\nConfidence: "
 
 
-def _claim_line(number: int, claim: Any) -> str:
-    return (
-        f"Claim {number}: {getattr(claim, 'claim', '')} | Evidence: "
-        f"{getattr(claim, 'evidence_ref', '')}"
-    )
-
-
 def contested_input(
     name: str,
     finding: str,
@@ -431,5 +426,5 @@ def contested_input(
         if peer in whole or not numbers or any(not 1 <= n <= len(claims) for n in numbers):
             peers[peer] = str(reports.get(peer, ""))
         else:
-            peers[peer] = "\n".join(_claim_line(n, claims[n - 1]) for n in numbers)
+            peers[peer] = "\n".join(claim_summary_line(n, claims[n - 1]) for n in numbers)
     return feedback, peers

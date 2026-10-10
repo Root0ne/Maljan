@@ -409,7 +409,9 @@ class TestTheNarrowedPrompt:
         # Its one point names only itself, and cites STATIC Claim 1: the
         # field names whom the line asks, and the claim it cites is shown.
         assert set(peers) == {"static"}
-        assert peers["static"] == "Claim 1: Reads the flag at 0x40. | Evidence: [ev_0010]"
+        assert peers["static"] == (
+            "Claim 1: Reads the flag at 0x40. | Evidence: [ev_0010] | Confidence: 0.80"
+        )
         assert "Claim 2" in feedback and "[ev_0007]" in feedback
 
     def test_every_claim_number_and_entry_id_the_points_cite_is_kept(self) -> None:
@@ -477,3 +479,26 @@ class TestTheMediatorIsAskedForTheField:
         (mark,) = read_marks(items)
         assert mark.blocking and mark.marked and not mark.unread
         assert analysts_to_revise(items, NAMES) == (["static", "dynamic"], "")
+
+
+class TestACitedClaimIsShownAsTheMediatorReadIt:
+    def test_its_technique_marker_heading_note_and_confidence_are_kept(self) -> None:
+        claim = ClaimEvidence(
+            claim="Writes a startup entry.",
+            evidence_ref="[ev_0031]",
+            confidence=0.7,
+            technique_id="T1547.001",
+            heading_note="(revised)",
+        )
+        claim.technique_id_valid = False
+        isrs = {**IN_FORCE, "static": AgentISR(agent_id="static", domain="static", claims=[claim])}
+        line = "[analysts: dynamic] DYNAMIC differs from STATIC Claim 1. [blocking: x]"
+
+        _feedback, peers = contested_input(
+            "dynamic", FINDING, [line], NAMES, {n: f"{n} first" for n in NAMES}, isrs
+        )
+
+        summary_line = isrs["static"].to_text_summary().splitlines()[2].strip()
+        assert peers == {"static": summary_line}
+        assert "T1547.001" in summary_line and "(revised)" in summary_line
+        assert "Confidence: 0.70" in summary_line
