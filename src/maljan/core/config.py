@@ -1078,6 +1078,54 @@ RESERVED_SERVER_KEYS: tuple[str, ...] = (
 )
 
 
+class SampleOpenConfig(BaseModel):
+    """Which of a server's tools opens a sample, and which select it and analyse it.
+
+    For a server whose open tool resets what it has analysed when it is called
+    again. With ``open_tool`` set, a job opens each path once on this server
+    (``maljan.providers.sample_open``): a later open of the same path is
+    answered from the job's note, after ``select_tool`` when one is named; a
+    select the server refuses opens it afresh. ``analyse_tool``, when named,
+    runs after the first open, and an open is noted only once it answered.
+    ``name_field`` is the field of the open's JSON answer that names what was
+    opened (the value the select and analysis tools are given); empty means
+    the path itself. All empty declares nothing, and the server's tools are
+    offered as they are.
+    """
+
+    open_tool: str = ""
+    path_argument: str = ""
+    name_field: str = ""
+    select_tool: str = ""
+    select_argument: str = ""
+    analyse_tool: str = ""
+    analyse_argument: str = ""
+
+    @model_validator(mode="after")
+    def _an_open_tool_names_its_path(self) -> "SampleOpenConfig":
+        rest = (self.name_field, self.select_tool, self.select_argument, self.analyse_tool)
+        if self.open_tool and not self.path_argument:
+            raise ValueError("sample_open.open_tool needs path_argument, where the path goes")
+        if not self.open_tool and (self.path_argument or any(rest) or self.analyse_argument):
+            raise ValueError("sample_open declares a select or analysis tool but no open_tool")
+        return self
+
+
+# Ghidra's own declaration: ``load_program`` imports the file afresh in the
+# place of an analysed program of the same name, ``switch_program`` makes an
+# open program current, and ``run_analysis`` runs its auto-analysis. Data like
+# any server's, editable in the settings.
+GHIDRA_SAMPLE_OPEN = SampleOpenConfig(
+    open_tool="load_program",
+    path_argument="file",
+    name_field="program",
+    select_tool="switch_program",
+    select_argument="program",
+    analyse_tool="run_analysis",
+    analyse_argument="program",
+)
+
+
 class MCPServerConfig(BaseModel):
     """Configuration for a single MCP server connection.
 
@@ -1111,6 +1159,9 @@ class MCPServerConfig(BaseModel):
     agents: list[str] = Field(default_factory=list)
     # Display name; empty means "use the key".
     label: str = ""
+    # Which tool opens a sample, and which select and analyse one; empty
+    # declares nothing. See ``SampleOpenConfig``.
+    sample_open: SampleOpenConfig = Field(default_factory=SampleOpenConfig)
 
     @model_validator(mode="after")
     def _refuse_the_composed_names(self) -> "MCPServerConfig":
@@ -3228,8 +3279,23 @@ class StaticConfig(BaseModel):
     """
 
     provider: Literal["ghidra", "r2", "capa_yara", "generic_mcp", "none"] = "ghidra"
-    ghidra: MCPServerConfig = Field(default_factory=MCPServerConfig)
+    ghidra: MCPServerConfig = Field(
+        default_factory=lambda: MCPServerConfig(sample_open=GHIDRA_SAMPLE_OPEN)
+    )
     r2: StaticR2Config = Field(default_factory=StaticR2Config)
+
+    @model_validator(mode="after")
+    def _ghidra_declares_its_open_tools(self) -> "StaticConfig":
+        """A stored Ghidra block that never set ``sample_open`` carries Ghidra's own declaration.
+
+        A block stored whole before the field existed would otherwise parse
+        with an empty one; one an operator set (to anything, empty included)
+        is kept as set.
+        """
+        if "sample_open" not in self.ghidra.model_fields_set:
+            self.ghidra.sample_open = GHIDRA_SAMPLE_OPEN.model_copy()
+        return self
+
     capa: StaticCapaConfig = Field(default_factory=StaticCapaConfig)
     yara: StaticYaraConfig = Field(default_factory=StaticYaraConfig)
     generic: StaticGenericConfig = Field(default_factory=StaticGenericConfig)

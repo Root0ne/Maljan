@@ -84,7 +84,7 @@ class _FakeHTTP:
         self.options.append(kw)
         return _Response(self._reply(url))
 
-    async def get(self, url: str, params=None) -> _Response:
+    async def get(self, url: str, params=None, **kw) -> _Response:
         self.calls.append(("GET", url, dict(params or {})))
         return _Response(self._reply(url))
 

@@ -71,11 +71,16 @@ def fetch_bulk_function_hashes(
     page_limit: int = 2000,
     max_pages: int = 8,
     timeout: float = 120.0,
+    sample_open: Any = None,
+    sample_notes: Any = None,
 ) -> list[tuple[str, str]]:
     """Return ``(func_name, func_hash)`` for the binary's meaningful functions.
 
-    Best-effort ``load_program`` + ``run_analysis`` (tolerated if the program is
-    already loaded by another pre-pass), then paginates ``get_bulk_function_hashes``
+    Opens the sample through the general opener with the tools the Ghidra
+    block declares (``sample_open``) and the job's note (``sample_notes``), so
+    a path the job already opened is selected rather than imported again; with
+    none declared, a best-effort ``load_program`` + switch + ``run_analysis``.
+    Then paginates ``get_bulk_function_hashes``
     and keeps only functions with at least ``min_instructions`` instructions.
     Fail-safe: any error yields an empty list.
     """
@@ -95,6 +100,7 @@ def fetch_bulk_function_hashes(
             SWITCH_PATH,
             program_name_from_load,
         )
+        from maljan.providers.sample_open import declared
 
         with httpx.Client(timeout=timeout, headers=headers) as http:
             # Best-effort load + activate + analyse; another pre-pass may have
@@ -103,32 +109,36 @@ def fetch_bulk_function_hashes(
             # without it `get_bulk_function_hashes` below returns the hashes of
             # whichever binary the container looked at first — attributing this
             # sample to another sample's functions, silently and plausibly.
-            try:
-                loaded = http.post(f"{base}/load_program", json={"file": file_path})
-                name = program_name_from_load(loaded.text)
-            except Exception:  # noqa: BLE001 - a transport failure is the same as no load
-                name = None
-            if not name:
-                # A refused load answers 200 with an `error` body. Hashing on
-                # regardless would attribute this sample to whichever binary is
-                # still current — the wrong family, stated confidently.
-                logger.warning(
-                    "function-hash fetch: load_program did not yield a program for %s; "
-                    "skipping attribution rather than hashing the previously loaded binary.",
-                    file_path,
-                )
-                return []
-            try:
-                http.post(f"{base}{SWITCH_PATH}", params={SWITCH_PARAM: name}, json={})
-                http.post(f"{base}/run_analysis", json={})
-            except Exception as exc:  # noqa: BLE001 - the current program is now unknown
-                logger.warning(
-                    "function-hash fetch: could not switch Ghidra to %s (%s); skipping "
-                    "attribution rather than hashing whichever binary is current.",
-                    name,
-                    type(exc).__name__,
-                )
-                return []
+            if declared(sample_open):
+                if not _opened_for_hashes(http, base, file_path, sample_open, sample_notes):
+                    return []
+            else:
+                try:
+                    loaded = http.post(f"{base}/load_program", json={"file": file_path})
+                    name = program_name_from_load(loaded.text)
+                except Exception:  # noqa: BLE001 - a transport failure is the same as no load
+                    name = None
+                if not name:
+                    # A refused load answers 200 with an `error` body. Hashing on
+                    # regardless would attribute this sample to whichever binary is
+                    # still current — the wrong family, stated confidently.
+                    logger.warning(
+                        "function-hash fetch: load_program did not yield a program for %s; "
+                        "skipping attribution rather than hashing the previously loaded binary.",
+                        file_path,
+                    )
+                    return []
+                try:
+                    http.post(f"{base}{SWITCH_PATH}", params={SWITCH_PARAM: name}, json={})
+                    http.post(f"{base}/run_analysis", json={})
+                except Exception as exc:  # noqa: BLE001 - the current program is now unknown
+                    logger.warning(
+                        "function-hash fetch: could not switch Ghidra to %s (%s); skipping "
+                        "attribution rather than hashing whichever binary is current.",
+                        name,
+                        type(exc).__name__,
+                    )
+                    return []
 
             offset = 0
             for _ in range(max_pages):
@@ -273,3 +283,33 @@ def to_report_dicts(results: list[FamilyHashAttribution]) -> list[dict[str, Any]
         }
         for r in results
     ]
+
+
+def _opened_for_hashes(http: Any, base: str, file_path: str, spec: Any, notes: Any) -> bool:
+    """Open the sample for the hash pass through the general opener; whether it is current.
+
+    The make-current step is not optional cleanup: a load only becomes
+    Ghidra's *current* program when nothing is current yet, so without it
+    ``get_bulk_function_hashes`` returns the hashes of whichever binary the
+    container looked at first. The opener notes a path only once its declared
+    select and analysis answered, so a path it did not note is not known to be
+    current, and attribution is skipped with a warning.
+    """
+    from maljan.analysis.ghidra_program import NOTE_KEY, rest_tool_call
+    from maljan.providers.sample_open import SampleOpener
+    from maljan.providers.static.ghidra import sample_notes_of
+
+    opener = SampleOpener(NOTE_KEY, spec, sample_notes_of(notes))
+    try:
+        answer = opener.open(file_path, rest_tool_call(http, base))
+    except Exception as exc:  # noqa: BLE001 - a transport failure is the same as no load
+        answer = f"{type(exc).__name__}: {exc}"
+    if opener.name_of(file_path) is not None:
+        return True
+    logger.warning(
+        "function-hash fetch: Ghidra did not open, select and analyse %s (%s); skipping "
+        "attribution rather than hashing whichever binary is current.",
+        file_path,
+        str(answer)[:160],
+    )
+    return False

@@ -33,8 +33,7 @@ sync pre-pass, sync attribution pass).
 from __future__ import annotations
 
 import json
-import threading
-from dataclasses import dataclass
+from collections.abc import Callable
 from typing import Any
 
 #: The endpoint that actually moves Ghidra's attention, and the parameter name
@@ -82,57 +81,40 @@ def switch_is_confirmed(response_text: str, expected: str) -> bool:
     return payload.get("switched_to") == expected
 
 
-#: The endpoint that runs Ghidra's auto-analysis on a program. A load imports
-#: the file without it, and in the place of any program of the same name.
-ANALYSIS_PATH = "/run_analysis"
+#: The name the job's note (``providers.sample_open``) holds Ghidra's opens
+#: under, for every path that speaks to it: the static provider's tools, the
+#: load before the loop, the triage pass and the function-hash pass.
+NOTE_KEY = "ghidra"
 
 
-def analysis_is_confirmed(response_text: str) -> bool:
-    """Whether a ``/run_analysis`` response says the analysis ran."""
-    try:
-        payload = json.loads(response_text)
-    except (TypeError, ValueError):
-        return False
-    return isinstance(payload, dict) and payload.get("success") is True
+def rest_tool_call(
+    http: Any, base: str, *, overrides: dict[str, Any] | None = None
+) -> Callable[[str, dict[str, Any]], str]:
+    """A function that calls one Ghidra tool by name over its REST API, for the general opener.
 
-
-@dataclass(frozen=True)
-class OpenedProgram:
-    """A program one job loaded and analysed: its name, and the load's own answer."""
-
-    name: str
-    answer: str
-
-
-class JobPrograms:
-    """The programs this job has loaded *and* analysed on Ghidra, by the path loaded.
-
-    Every ``load_program`` imports the file afresh, in the place of any program
-    of the same name, and an import is not analysed: callers, callees and
-    cross-references then read empty, and the program it replaced stays in
-    Ghidra's memory. So a job loads and analyses a path once and notes it here;
-    a later load of the same path is a switch to the noted program, answered
-    with the load's own answer, and a switch that fails (Ghidra restarted, the
-    program gone) forgets the note so the next load is made afresh.
-
-    One per job: it lives on the job's Ghidra provider and is handed to the
-    triage pack's pass, never shared between jobs. Safe across the job's
-    threads.
+    ``POST /<tool>`` with the arguments both in the query and in the JSON
+    body, since Ghidra's endpoints read some from one and some from the other,
+    waited for as long as Ghidra takes (an analysis is the slow one, and what
+    follows reads what it records). A request that failed answers a
+    ``tool_error`` marker, which the opener reads as a refusal. ``overrides``
+    answers named tools in the caller's own way.
     """
+    import httpx
 
-    def __init__(self) -> None:
-        self._opened: dict[str, OpenedProgram] = {}
-        self._lock = threading.Lock()
+    def call(tool: str, arguments: dict[str, Any]) -> str:
+        override = (overrides or {}).get(tool)
+        if override is not None:
+            return str(override(arguments))
+        try:
+            resp = http.post(
+                f"{base}/{tool}", params=dict(arguments), json=dict(arguments), timeout=None
+            )
+        except httpx.HTTPError as exc:
+            failed = {"tool_error": "request_failed", "tool": tool, "type": type(exc).__name__}
+            return json.dumps(failed)
+        status = int(getattr(resp, "status_code", 200) or 200)
+        if status >= 400:
+            return json.dumps({"tool_error": "http_status", "tool": tool, "status": str(status)})
+        return str(getattr(resp, "text", ""))
 
-    def get(self, path: str) -> OpenedProgram | None:
-        with self._lock:
-            return self._opened.get(path)
-
-    def note(self, path: str, name: str, answer: str) -> None:
-        if path and name:
-            with self._lock:
-                self._opened[path] = OpenedProgram(name=name, answer=answer)
-
-    def forget(self, path: str) -> None:
-        with self._lock:
-            self._opened.pop(path, None)
+    return call

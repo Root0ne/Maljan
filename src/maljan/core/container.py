@@ -431,6 +431,12 @@ class ServiceContainer:
         self._sandbox_provider_cache: SandboxProvider | None = None
         self._static_provider_cache: dict[str, StaticProvider] = {}
         self._server_registry_cache: ServerRegistry | None = None
+        # The paths this job opened on each server that declares its open tool
+        # (``providers.sample_open``): one note for the job, shared by its
+        # static providers, its tool servers and the deterministic passes.
+        from maljan.providers.sample_open import SampleNotes
+
+        self.sample_notes = SampleNotes()
         self._function_summarizer_cache: FunctionSummarizer | None = None
         self._narrative_agent_cache: Any | None = None
         # The analyst run mode this job resolved (``pipeline.analyst_mode``),
@@ -896,6 +902,8 @@ class ServiceContainer:
                     cfg.static.provider = wanted  # type: ignore[assignment]
                 cached = build(cfg)
                 logger.info("Static provider: %s.", cached.id)
+                if hasattr(cached, "sample_notes"):
+                    cached.sample_notes = self.sample_notes
                 self._static_provider_cache[wanted] = cached
             return cached
 
@@ -922,6 +930,7 @@ class ServiceContainer:
 
                 self._server_registry_cache = ServerRegistry(
                     self.config,
+                    sample_notes=self.sample_notes,
                     truncation_ledger=self._truncation_ledger,
                     context_budget=budget,
                     event_sink=self.event_sink,

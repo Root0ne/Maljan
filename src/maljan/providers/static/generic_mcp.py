@@ -77,6 +77,18 @@ class GenericMCPStaticProvider(StaticProvider):
         self._prompt_fragment_text = prompt_fragment_text
         self._job = StaticJobContext()
         self.tools: list[Any] = []
+        # Its own session beside any registry handle of the same server, so
+        # its opens are noted under a name of its own.
+        self._handle.note_key = f"static provider {self._handle.name}"
+
+    @property
+    def sample_notes(self) -> Any:
+        """The job's note of the paths this provider's server opened (``providers.sample_open``)."""
+        return self._handle.sample_notes
+
+    @sample_notes.setter
+    def sample_notes(self, notes: Any) -> None:
+        self._handle.sample_notes = notes
 
     def _build_handle(self, name: str, cfg: MCPServerConfig) -> ServerHandle:
         """Wrap a directly-supplied config in a handle, honouring ``server_command``.

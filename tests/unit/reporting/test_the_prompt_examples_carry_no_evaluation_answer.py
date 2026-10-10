@@ -42,7 +42,7 @@ from maljan.agents.delegation import (
     _what_an_ask_gets_sentence,
 )
 from maljan.agents.evidence_recorder import earlier_chunk_answer, same_function_notice
-from maljan.agents.ghidra_http_client import function_named_by_address, no_program_as_error
+from maljan.agents.ghidra_http_client import no_program_as_error
 from maljan.agents.judge_agent import (
     COMPACT_BUNDLE_RULES,
     CONTRADICTION_DEFINITION,
@@ -1895,14 +1895,6 @@ PROMPTS: dict[str, str] = {
     ),
     "a Ghidra answer with no program current": no_program_as_error(
         "No program loaded.", "get_function_count"
-    ),
-    "a Ghidra answer about a function asked by address": " ".join(
-        function_named_by_address(said, ["name", "address"], {"address": "0x401000"})
-        for said in (
-            "No callees found for function: null",
-            "Function not found: null",
-            "No references found to function: null",
-        )
     ),
     "static provider sentence when its tools did not attach": absent_provider_fragment("Ghidra")[
         len(STATIC_EVIDENCE_INSTRUCTIONS) :

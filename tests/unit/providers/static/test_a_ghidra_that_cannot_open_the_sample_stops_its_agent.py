@@ -211,6 +211,7 @@ class _HttpClient:
             return _Resp(self.load_body)
         if url.endswith("/switch_program"):
             if self.switch_refused:
+                self.switch_refused = False
                 return _Resp('{"error": "Program not found"}')
             name = (params or {}).get("program", "")
             return _Resp(f'{{"success": true, "switched_to": "{name}"}}')
@@ -235,11 +236,14 @@ def _status(code: int) -> httpx.HTTPStatusError:
 
 
 def _settings(*, sink: bool = True) -> Any:
+    from maljan.core.config import GHIDRA_SAMPLE_OPEN
+
     class _G:
         enabled = True
         transport = "http"
         url = "http://ghidra.invalid"
         auth_token = SecretStr("")
+        sample_open = GHIDRA_SAMPLE_OPEN
 
     class _P:
         use_sink_reachability = sink
@@ -310,7 +314,7 @@ class TestTheLoadIsAPrecondition:
         prepare_sample(_settings(sink=False), "ghidra", CONTAINER_PATH, provider=provider)
         prepare_sample(_settings(sink=False), "ghidra", CONTAINER_PATH, provider=provider)
         assert http.paths == ["load_program", "switch_program", "run_analysis", "switch_program"]
-        noted = provider.programs.get(CONTAINER_PATH)
+        noted = provider.sample_notes.get("ghidra", CONTAINER_PATH)
         assert noted is not None and noted.name == "abc.exe" and noted.answer == LOADED
 
     def test_a_refused_switch_loads_and_analyses_afresh(
@@ -319,17 +323,34 @@ class TestTheLoadIsAPrecondition:
         http = _HttpClient(LOADED)
         monkeypatch.setattr("httpx.Client", http)
         provider = _provider()
-        provider.programs.note(CONTAINER_PATH, "abc.exe", LOADED)
+        provider.sample_notes.note("ghidra", CONTAINER_PATH, "abc.exe", LOADED)
         http.switch_refused = True
         prepare_sample(_settings(sink=False), "ghidra", CONTAINER_PATH, provider=provider)
         assert http.paths == ["switch_program", "load_program", "switch_program", "run_analysis"]
         # The analysis was confirmed, so the path is noted again.
-        assert provider.programs.get(CONTAINER_PATH) is not None
+        assert provider.sample_notes.get("ghidra", CONTAINER_PATH) is not None
 
     def test_a_job_s_note_is_its_own(self) -> None:
         first, second = _provider(), _provider()
-        first.programs.note(CONTAINER_PATH, "abc.exe", LOADED)
-        assert second.programs.get(CONTAINER_PATH) is None
+        first.sample_notes.note("ghidra", CONTAINER_PATH, "abc.exe", LOADED)
+        assert second.sample_notes.get("ghidra", CONTAINER_PATH) is None
+
+    def test_with_nothing_declared_the_load_is_made_current_and_not_analysed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.core.config import SampleOpenConfig
+
+        http = _HttpClient(LOADED)
+        monkeypatch.setattr("httpx.Client", http)
+        settings = _settings(sink=False)
+        settings.static.ghidra.sample_open = SampleOpenConfig()
+        try:
+            prepare_sample(settings, "ghidra", CONTAINER_PATH, provider=_provider())
+        finally:
+            from maljan.core.config import GHIDRA_SAMPLE_OPEN
+
+            settings.static.ghidra.sample_open = GHIDRA_SAMPLE_OPEN
+        assert http.paths == ["load_program", "switch_program"]
 
     def test_another_provider_calls_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         http = _HttpClient(NOT_FOUND)

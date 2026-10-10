@@ -1308,19 +1308,6 @@ def _function_matches_step(container: ServiceContainer, state: AnalysisState) ->
     return step
 
 
-def _ghidra_programs(container: ServiceContainer) -> Any:
-    """The job's note of the programs it loaded and analysed on Ghidra, or ``None``.
-
-    Held by the job's Ghidra provider, which the container builds once per job;
-    building it opens nothing. A container that cannot build one has no note,
-    and the pass runs as it always did.
-    """
-    try:
-        return getattr(container.get_static_provider("ghidra"), "programs", None)
-    except Exception:  # noqa: BLE001 - the note is an economy, never a precondition
-        return None
-
-
 def _ghidra_passes_step(container: ServiceContainer, state: AnalysisState) -> Any:
     """The Ghidra the pack's passes call, or the sentence saying why there is none.
 
@@ -1357,7 +1344,8 @@ def _ghidra_passes_step(container: ServiceContainer, state: AnalysisState) -> An
             token=ghidra.auth_token.get_secret_value(),
             sample_path=str(path),
             call_timeout=budget if budget > 0 else None,
-            programs=_ghidra_programs(container),
+            sample_open=getattr(ghidra, "sample_open", None),
+            sample_notes=getattr(container, "sample_notes", None),
         )
     return GhidraPasses(unavailable=reason)
 

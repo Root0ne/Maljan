@@ -14,7 +14,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import Any
 
 import httpx
@@ -67,51 +67,6 @@ def no_program_as_error(text: str, tool: str) -> str:
     return text
 
 
-# The arguments a Ghidra tool that takes a function by name or by address names it with.
-FUNCTION_NAME_ARGUMENTS = ("name", "function_name")
-
-# How Ghidra ends an answer about a function it was given by address alone:
-# it names the function by the name argument, which it holds as nothing.
-NULL_NAME_ENDING = ": null"
-
-# Ghidra's cross-reference tool says the same sentence when no function stands
-# at the address and when one does with no references, so the restatement
-# says both.
-NO_REFERENCES_LEAD = "No references found to function"
-NO_FUNCTION_OR_NO_REFERENCES = "No function at {address}, or no references to the one there"
-
-
-def function_named_by_address(text: str, params: Sequence[str], kwargs: Mapping[str, Any]) -> str:
-    """``text`` with the function it speaks of named by the address the call gave.
-
-    A Ghidra tool that takes a function by name or by address (callers,
-    callees, cross-references, jump targets, the call graph, variables) is
-    sent only the arguments the call set, so a call with an address and no
-    name queries that address. Its one-line answers name the function by the
-    name argument, though: "No callees found for function: null",
-    "Function not found: null". Such an answer, from a call that gave an
-    address and no name, ends with the address instead: "No callees found
-    for function at 0x1400022c0", "Function not found at 0x1400022c0". The
-    cross-reference tool's "No references found to function: null", which
-    Ghidra also says for an address no function stands at, becomes
-    ``NO_FUNCTION_OR_NO_REFERENCES``. Any other answer, and any call that gave
-    a name, is returned exactly as it came.
-    """
-    names = [p for p in FUNCTION_NAME_ARGUMENTS if p in params]
-    if "address" not in params or not names:
-        return text
-    address = str(kwargs.get("address") or "").strip()
-    if not address or any(str(kwargs.get(p) or "").strip() for p in names):
-        return text
-    stripped = text.strip()
-    if "\n" in stripped or not stripped.endswith(NULL_NAME_ENDING):
-        return text
-    lead = stripped[: -len(NULL_NAME_ENDING)]
-    if lead == NO_REFERENCES_LEAD:
-        return NO_FUNCTION_OR_NO_REFERENCES.format(address=address)
-    return f"{lead} at {address}"
-
-
 class GhidraHTTPClient:
     """Client that discovers and calls GhidraMCP headless REST endpoints."""
 
@@ -123,8 +78,14 @@ class GhidraHTTPClient:
         max_output_chars: int = 0,
         truncation_ledger: Any | None = None,
         context_budget: Any | None = None,
+        unbounded_tools: frozenset[str] = frozenset(),
     ):
         self.base_url = base_url.rstrip("/")
+        # The tools whose calls wait as long as Ghidra takes rather than the
+        # client's own request timeout: the analysis tool the server's block
+        # declares (``sample_open.analyse_tool``), whose answer the calls after
+        # it read.
+        self._unbounded_tools = frozenset(t for t in unbounded_tools if t)
         # Callers pass a plain string (``SecretStr.get_secret_value()`` already
         # unwrapped at the config boundary); stored plain here too, since this
         # client builds the header string itself.
@@ -263,18 +224,20 @@ class GhidraHTTPClient:
 
         tool = path.lstrip("/").replace("/", "_")
         client = await self._get_http()
+        timeout: Any = None if tool in self._unbounded_tools else httpx.USE_CLIENT_DEFAULT
         try:
             if method == "POST":
                 resp = await client.post(
-                    url, params=query, json=body, headers={"Content-Type": "application/json"}
+                    url,
+                    params=query,
+                    json=body,
+                    headers={"Content-Type": "application/json"},
+                    timeout=timeout,
                 )
             else:
-                resp = await client.get(url, params=query)
+                resp = await client.get(url, params=query, timeout=timeout)
             resp.raise_for_status()
             output = no_program_as_error(resp.text, tool)
-            output = function_named_by_address(
-                output, [pdef["name"] for pdef in param_defs], kwargs
-            )
         except httpx.HTTPStatusError as exc:
             output = tool_error_marker(
                 "http_status",
@@ -337,62 +300,6 @@ class GhidraHTTPClient:
                 )
         except Exception as exc:  # noqa: BLE001 — never fail an analysis over this
             logger.warning("Ghidra switch_program failed for '%s' (non-fatal): %s", name, exc)
-
-    async def switch_to(self, name: str) -> bool:
-        """Make the program ``name`` current; whether Ghidra confirmed it.
-
-        For a load of a path this job already loaded and analysed: the switch
-        stands in for the load, so the analysed program is not replaced by a
-        fresh import. A switch Ghidra does not confirm, or one that failed,
-        answers ``False`` and the caller loads afresh.
-        """
-        from maljan.analysis.ghidra_program import SWITCH_PARAM, SWITCH_PATH, switch_is_confirmed
-
-        try:
-            client = await self._get_http()
-            resp = await client.post(
-                f"{self.base_url}{SWITCH_PATH}",
-                params={SWITCH_PARAM: name},
-                json={},
-                headers={"Content-Type": "application/json"},
-            )
-        except Exception as exc:  # noqa: BLE001 — the caller loads afresh
-            logger.warning("Ghidra switch_program failed for '%s': %s", name, exc)
-            return False
-        return switch_is_confirmed(resp.text, name)
-
-    async def analyse_program(self, name: str) -> bool:
-        """Run Ghidra's auto-analysis on the program ``name``; whether Ghidra confirmed it.
-
-        A load imports the file without analysing it, and with no analysis no
-        call or code reference is recorded: callers, callees and
-        cross-references read empty for every function. Waited for as long as
-        Ghidra takes, since the calls after the load read what the analysis
-        records. A failed analysis is logged and answers ``False``.
-        """
-        from maljan.analysis.ghidra_program import ANALYSIS_PATH, analysis_is_confirmed
-
-        try:
-            client = await self._get_http()
-            resp = await client.post(
-                f"{self.base_url}{ANALYSIS_PATH}",
-                params={"program": name},
-                json={"program": name},
-                headers={"Content-Type": "application/json"},
-                timeout=None,
-            )
-        except Exception as exc:  # noqa: BLE001 — never fail an analysis over this
-            logger.warning("Ghidra run_analysis failed for '%s' (non-fatal): %s", name, exc)
-            return False
-        if analysis_is_confirmed(resp.text):
-            return True
-        logger.warning(
-            "Ghidra run_analysis did not confirm '%s' (%s); callers, callees and "
-            "cross-references may be empty for its functions.",
-            name,
-            resp.text[:160],
-        )
-        return False
 
     def _tag_description(self, path: str, description: str) -> str:
         """Prefix the description with a category tag; the text itself is kept whole."""
