@@ -2,48 +2,6 @@
  "_comment": "The checks each scenario fails today, with the exact detail, and the product defect behind each. A fix makes the rehearsal integration test fail and ask to strike the entry.",
  "pins": [
   {
-   "scenario": "cross_loop",
-   "wire": "anthropic",
-   "check": "verdict stated by the judge",
-   "detail": "verdict Malware, read as fallback",
-   "defect": "the judge reads a ChatAnthropic answer as str(content), so an answer with a thinking block before its JSON is never read as the bundle (judge_agent._answer_text, _bundle_from_response)"
-  },
-  {
-   "scenario": "cut_at_cap",
-   "wire": "anthropic",
-   "check": "verdict stated by the judge",
-   "detail": "verdict Malware, read as fallback",
-   "defect": "the judge reads a ChatAnthropic answer as str(content), so an answer with a thinking block before its JSON is never read as the bundle (judge_agent._answer_text, _bundle_from_response)"
-  },
-  {
-   "scenario": "empty_answer",
-   "wire": "anthropic",
-   "check": "verdict stated by the judge",
-   "detail": "verdict Malware, read as fallback",
-   "defect": "the judge reads a ChatAnthropic answer as str(content), so an answer with a thinking block before its JSON is never read as the bundle (judge_agent._answer_text, _bundle_from_response)"
-  },
-  {
-   "scenario": "long_loop",
-   "wire": "anthropic",
-   "check": "verdict stated by the judge",
-   "detail": "verdict Malware, read as fallback",
-   "defect": "the judge reads a ChatAnthropic answer as str(content), so an answer with a thinking block before its JSON is never read as the bundle (judge_agent._answer_text, _bundle_from_response)"
-  },
-  {
-   "scenario": "normal",
-   "wire": "anthropic",
-   "check": "verdict stated by the judge",
-   "detail": "verdict Malware, read as fallback",
-   "defect": "the judge reads a ChatAnthropic answer as str(content), so an answer with a thinking block before its JSON is never read as the bundle (judge_agent._answer_text, _bundle_from_response)"
-  },
-  {
-   "scenario": "overloaded",
-   "wire": "anthropic",
-   "check": "verdict stated by the judge",
-   "detail": "verdict Malware, read as fallback",
-   "defect": "the judge reads a ChatAnthropic answer as str(content), so an answer with a thinking block before its JSON is never read as the bundle (judge_agent._answer_text, _bundle_from_response)"
-  },
-  {
    "scenario": "overloaded",
    "wire": "openai",
    "check": "every analyst answered",
@@ -70,20 +28,6 @@
    "check": "settings in force as configured",
    "detail": "effort.static: no static call was made; max_steps: expected 40, the run's budget says {}; model.static: no static call was made; timeout_s: expected 900, the run's budget says {}",
    "defect": "one HTTP 5xx, 429 or mid-stream error on an analyst's call loses its whole tool loop (base_agent retries only a connection error; the OpenAI client is built with max_retries=0; a mid-stream error is not retried on either wire); the stage, section, claim and settings failures beside it follow from the lost analysts"
-  },
-  {
-   "scenario": "prose_instead_of_tool",
-   "wire": "anthropic",
-   "check": "verdict stated by the judge",
-   "detail": "verdict Malware, read as fallback",
-   "defect": "the judge reads a ChatAnthropic answer as str(content), so an answer with a thinking block before its JSON is never read as the bundle (judge_agent._answer_text, _bundle_from_response)"
-  },
-  {
-   "scenario": "rate_limited",
-   "wire": "anthropic",
-   "check": "verdict stated by the judge",
-   "detail": "verdict Malware, read as fallback",
-   "defect": "the judge reads a ChatAnthropic answer as str(content), so an answer with a thinking block before its JSON is never read as the bundle (judge_agent._answer_text, _bundle_from_response)"
   },
   {
    "scenario": "rate_limited",
@@ -114,27 +58,6 @@
    "defect": "one HTTP 5xx, 429 or mid-stream error on an analyst's call loses its whole tool loop (base_agent retries only a connection error; the OpenAI client is built with max_retries=0; a mid-stream error is not retried on either wire); the stage, section, claim and settings failures beside it follow from the lost analysts"
   },
   {
-   "scenario": "redacted_thinking",
-   "wire": "anthropic",
-   "check": "verdict stated by the judge",
-   "detail": "verdict Malware, read as fallback",
-   "defect": "the judge reads a ChatAnthropic answer as str(content), so an answer with a thinking block before its JSON is never read as the bundle (judge_agent._answer_text, _bundle_from_response)"
-  },
-  {
-   "scenario": "schema_break",
-   "wire": "anthropic",
-   "check": "verdict stated by the judge",
-   "detail": "verdict Malware, read as fallback",
-   "defect": "the judge reads a ChatAnthropic answer as str(content), so an answer with a thinking block before its JSON is never read as the bundle (judge_agent._answer_text, _bundle_from_response)"
-  },
-  {
-   "scenario": "server_error_once",
-   "wire": "anthropic",
-   "check": "verdict stated by the judge",
-   "detail": "verdict Malware, read as fallback",
-   "defect": "the judge reads a ChatAnthropic answer as str(content), so an answer with a thinking block before its JSON is never read as the bundle (judge_agent._answer_text, _bundle_from_response)"
-  },
-  {
    "scenario": "server_error_once",
    "wire": "openai",
    "check": "every analyst answered",
@@ -161,13 +84,6 @@
    "check": "settings in force as configured",
    "detail": "effort.static: no static call was made; max_steps: expected 40, the run's budget says {}; model.static: no static call was made; timeout_s: expected 900, the run's budget says {}",
    "defect": "one HTTP 5xx, 429 or mid-stream error on an analyst's call loses its whole tool loop (base_agent retries only a connection error; the OpenAI client is built with max_retries=0; a mid-stream error is not retried on either wire); the stage, section, claim and settings failures beside it follow from the lost analysts"
-  },
-  {
-   "scenario": "slow_model",
-   "wire": "anthropic",
-   "check": "verdict stated by the judge",
-   "detail": "verdict Malware, read as fallback",
-   "defect": "the judge reads a ChatAnthropic answer as str(content), so an answer with a thinking block before its JSON is never read as the bundle (judge_agent._answer_text, _bundle_from_response)"
   },
   {
    "scenario": "stream_error",
@@ -206,13 +122,6 @@
   },
   {
    "scenario": "stream_error",
-   "wire": "anthropic",
-   "check": "verdict stated by the judge",
-   "detail": "verdict Malware, read as fallback",
-   "defect": "the judge reads a ChatAnthropic answer as str(content), so an answer with a thinking block before its JSON is never read as the bundle (judge_agent._answer_text, _bundle_from_response)"
-  },
-  {
-   "scenario": "stream_error",
    "wire": "openai",
    "check": "every analyst answered",
    "detail": "static: failed; dynamic: failed; network: failed",
@@ -238,13 +147,6 @@
    "check": "settings in force as configured",
    "detail": "max_steps: expected 40, the run's budget says {}; timeout_s: expected 900, the run's budget says {}",
    "defect": "one HTTP 5xx, 429 or mid-stream error on an analyst's call loses its whole tool loop (base_agent retries only a connection error; the OpenAI client is built with max_retries=0; a mid-stream error is not retried on either wire); the stage, section, claim and settings failures beside it follow from the lost analysts"
-  },
-  {
-   "scenario": "unusual_stop",
-   "wire": "anthropic",
-   "check": "verdict stated by the judge",
-   "detail": "verdict Malware, read as fallback",
-   "defect": "the judge reads a ChatAnthropic answer as str(content), so an answer with a thinking block before its JSON is never read as the bundle (judge_agent._answer_text, _bundle_from_response)"
   }
  ]
 }
