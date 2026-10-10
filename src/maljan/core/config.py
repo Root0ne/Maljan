@@ -140,25 +140,36 @@ EFFORT_SETTING_OF_PROVIDER: dict[str, str] = {
 _DOCKER_HOST_NAMES = frozenset({"host.docker.internal", "gateway.docker.internal"})
 
 
-def _is_this_host(host: str) -> bool:
-    """Whether ``host`` is this machine as a local worker or a containerised one reaches it.
+def _is_loopback(host: str) -> bool:
+    """Whether ``host`` is literally this machine: ``localhost``, 127.0.0.0/8 or ``::1``."""
+    import ipaddress
 
-    ``localhost`` and loopback addresses; Docker's names for the host
-    (``host.docker.internal``, ``gateway.docker.internal``); and an IPv4
-    address of Docker's default bridge address pool, 172.17.0.0 to
-    172.31.255.255, where a container finds the host's bridge gateway. Any
-    other address is another machine, and a key sent there goes over https.
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host.strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
+def _is_docker_host(host: str) -> bool:
+    """Whether ``host`` is how a containerised worker may reach the host it runs on.
+
+    Docker's names for the host (``host.docker.internal``,
+    ``gateway.docker.internal``) and an IPv4 address of Docker's default
+    bridge address pool, 172.17.0.0 to 172.31.255.255. Neither is proven to
+    be this machine: the names resolve as DNS says and the range is part of
+    the private 172.16.0.0/12 a LAN may use, so plain http to them is taken
+    only on the operator's explicit opt-in.
     """
     import ipaddress
 
-    if host in ("localhost",) or host.endswith(".localhost") or host in _DOCKER_HOST_NAMES:
+    if host in _DOCKER_HOST_NAMES:
         return True
     try:
         address = ipaddress.ip_address(host.strip("[]"))
     except ValueError:
         return False
-    if address.is_loopback:
-        return True
     if not isinstance(address, ipaddress.IPv4Address):
         return False
     return ipaddress.IPv4Address("172.17.0.0") <= address <= ipaddress.IPv4Address("172.31.255.255")
@@ -186,6 +197,12 @@ class AnthropicConfig(BaseModel):
     # vendor's price list prices both) and outlives a pause longer than five
     # minutes between two turns of one conversation.
     prompt_cache_ttl: Literal["5m", "1h"] = "5m"
+    # Plain http to the base URL is taken for loopback alone. Set, it is also
+    # taken for a Docker host gateway (``host.docker.internal``,
+    # ``gateway.docker.internal``, 172.17.0.0 to 172.31.255.255), which a
+    # containerised worker reaches the host on. The API key then crosses that
+    # hop in clear, and those names and addresses can be another machine.
+    allow_plain_http_to_docker_host: bool = False
 
     @field_validator("base_url", mode="before")
     @classmethod
@@ -231,15 +248,30 @@ class AnthropicConfig(BaseModel):
             raise ValueError(
                 "the Anthropic base URL is written without /v1: the client adds /v1/messages"
             )
-        if scheme == "http" and not _is_this_host(host):
+        if scheme == "http" and not (_is_loopback(host) or _is_docker_host(host)):
             raise ValueError(
                 "the Anthropic base URL must use https: the API key is sent to it, and only "
-                "this machine (loopback, or the Docker host gateway a containerised worker "
-                "reaches it on) may take it over plain http"
+                "loopback (or, opted into, a Docker host gateway) may take it over plain http"
             )
         shown_host = f"[{host}]" if ":" in host else host
         authority = f"{shown_host}:{port}" if port else shown_host
         return f"{scheme}://{authority}{path}"
+
+    @model_validator(mode="after")
+    def _plain_http_only_where_allowed(self) -> "AnthropicConfig":
+        """Plain http to a Docker host gateway only when the operator opted into it."""
+        if not self.base_url or not self.base_url.startswith("http://"):
+            return self
+        from urllib.parse import urlsplit
+
+        host = (urlsplit(self.base_url).hostname or "").lower()
+        if _is_loopback(host) or self.allow_plain_http_to_docker_host:
+            return self
+        raise ValueError(
+            f"the Anthropic base URL sends the API key in clear to {host}: plain http is taken "
+            "for loopback only, or for a Docker host gateway when "
+            "llm.anthropic.allow_plain_http_to_docker_host is set"
+        )
 
 
 class OllamaConfig(BaseModel):

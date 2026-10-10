@@ -71,16 +71,14 @@ read the stack's queue as well, which covers every account's jobs.
 
 The stub runs on a free port on `127.0.0.1`. A worker inside a Docker container
 reaches the host on its bridge gateway instead. For that, `--stub-host` binds
-the stub to that address, for example `--stub-host 172.17.0.1`. Plain http is
-taken there, and for the Anthropic base URL too, only for these addresses:
-
-- loopback;
-- `localhost`;
-- `host.docker.internal` and `gateway.docker.internal`;
-- an IPv4 address in Docker's default bridge pool, 172.17.0.0 to
-  172.31.255.255.
-
-Any other address needs https. A model the stub has no facts for, and that the
+the stub to that address, for example `--stub-host 172.17.0.1`. The Anthropic
+base URL takes plain http for loopback (127.0.0.0/8, `::1`, `localhost`) only,
+unless `core.llm.anthropic.allow_plain_http_to_docker_host` is on, which also
+takes a Docker host gateway (`host.docker.internal`, `gateway.docker.internal`,
+172.17.0.0 to 172.31.255.255). With a stub host that is not loopback, the gate
+switches that setting on for the rehearsal and puts it back after. The
+placeholder key the operator stored then crosses that hop in clear text, so
+use it only for a gateway on this host. Any other address needs https. A model the stub has no facts for, and that the
 configuration does not name, is answered 404, as the real API answers. A job the wait gives up on
 (`--timeout`) is cancelled. `--job-timeout` gives the worker's job timeout
 (`core.job_timeout`, no limit by default) when the settings carry none, and a

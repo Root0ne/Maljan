@@ -348,11 +348,13 @@ describe("the llm guide", () => {
     expect(credentials.keys).toEqual([
       "core.llm.anthropic.api_key",
       "core.llm.anthropic.base_url",
+      "core.llm.anthropic.allow_plain_http_to_docker_host",
       "core.llm.anthropic.effort",
       "core.llm.anthropic.prompt_cache_ttl",
     ]);
     expect(credentials.advancedKeys).toEqual([
       "core.llm.anthropic.base_url",
+      "core.llm.anthropic.allow_plain_http_to_docker_host",
       "core.llm.anthropic.effort",
       "core.llm.anthropic.prompt_cache_ttl",
     ]);

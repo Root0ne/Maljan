@@ -96,6 +96,20 @@ class TestTheGateChangesOnlyTheEndpoints:
             "core.llm.max_spend_usd_per_job": 1_000_000.0,
         }
 
+    def test_a_docker_gateway_stub_is_opted_into_plain_http_for_the_rehearsal(self) -> None:
+        values = _values(
+            **{
+                "core.llm.provider": {"value": "anthropic", "source": "ui"},
+                "core.llm.agents": {"value": {}, "source": "default"},
+            }
+        )
+        changes = gate_changes(values, "http://172.17.0.1:41234")
+        assert changes["core.llm.anthropic.base_url"] == "http://172.17.0.1:41234"
+        assert changes["core.llm.anthropic.allow_plain_http_to_docker_host"] is True
+        assert "core.llm.anthropic.allow_plain_http_to_docker_host" not in gate_changes(
+            values, STUB
+        )
+
     @pytest.mark.parametrize("provider", ["gemini", "ollama"])
     def test_a_provider_the_stub_cannot_stand_in_for_is_refused(self, provider: str) -> None:
         values = _values(**{"core.llm.provider": {"value": provider, "source": "ui"}})

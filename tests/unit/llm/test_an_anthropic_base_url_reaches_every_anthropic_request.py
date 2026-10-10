@@ -113,6 +113,9 @@ class TestARefusedAddress:
             ("http://192.168.1.5:8765", "https"),
             ("http://172.32.0.1:8765", "https"),
             ("http://172.16.0.1:8765", "https"),
+            ("http://172.17.0.1:8765", "allow_plain_http_to_docker_host"),
+            ("http://host.docker.internal:8765", "allow_plain_http_to_docker_host"),
+            ("http://rehearsal.localhost:8765", "https"),
             ("https://user:pw@proxy.example.org", "user name"),
             ("https://proxy.example.org?x=1", "query"),
             ("https://proxy.example.org#x", "fragment"),
@@ -134,13 +137,27 @@ class TestARefusedAddress:
             "http://127.0.0.1:8765",
             "http://localhost:8765",
             "http://[::1]:8765",
-            "http://host.docker.internal:8765",
-            "http://172.17.0.1:8765",
-            "http://172.31.255.1:8765",
+            "http://127.8.0.2:8765",
         ],
     )
     def test_https_or_a_loopback_address_is_taken(self, value: str) -> None:
         assert _settings(base_url=value).llm.anthropic.base_url == value
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "http://host.docker.internal:8765",
+            "http://gateway.docker.internal:8765",
+            "http://172.17.0.1:8765",
+            "http://172.31.255.1:8765",
+        ],
+    )
+    def test_a_docker_host_gateway_is_taken_over_http_only_when_opted_into(
+        self, value: str
+    ) -> None:
+        built = _settings(base_url=value, allow_plain_http_to_docker_host=True)
+        assert built.llm.anthropic.base_url == value
+        assert _settings().llm.anthropic.allow_plain_http_to_docker_host is False
 
     def test_the_probe_asks_the_address_the_client_uses(self) -> None:
         from app.services.settings_probes import _completion_request

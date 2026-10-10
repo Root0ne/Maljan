@@ -58,6 +58,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
@@ -75,7 +76,7 @@ from scripts.rehearsal.roles import SCENARIOS, Brain  # noqa: E402
 from scripts.rehearsal.sample import sample_bytes  # noqa: E402
 from scripts.rehearsal.stub_model import Pace, StubServer, StubState  # noqa: E402
 
-from maljan.core.config import EFFORT_SETTING_OF_PROVIDER  # noqa: E402
+from maljan.core.config import EFFORT_SETTING_OF_PROVIDER, _is_loopback  # noqa: E402
 
 TERMINAL = {"completed", "failed", "cancelled", "canceled"}
 ACTIVE = ("pending", "queued", "running")
@@ -259,6 +260,10 @@ def gate_changes(values: dict[str, dict[str, Any]], stub_root: str) -> dict[str,
     changes: dict[str, Any] = {}
     if "anthropic" in providers:
         changes["core.llm.anthropic.base_url"] = stub_root
+        if not _is_loopback(urlsplit(stub_root).hostname or ""):
+            # A Docker gateway stub: plain http there is the operator's opt-in,
+            # given for the rehearsal and put back with the rest.
+            changes["core.llm.anthropic.allow_plain_http_to_docker_host"] = True
     if "openai" in providers:
         paid = _value(values, "core.llm.openai.base_url")
         changes["core.llm.openai.base_url"] = f"{stub_root}/v1"
