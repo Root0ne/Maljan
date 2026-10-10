@@ -22,6 +22,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from langchain_core.utils.function_calling import convert_to_openai_tool
 
 from maljan.agents.base_agent import INPUT_NOTICE_ROOM, BaseAnalyst
 from maljan.core.config import ChunkingConfig, Settings
@@ -416,29 +417,43 @@ def _reverser(window: int) -> tuple[_Analyst, cw.ContextBudget]:
 
 
 @pytest.mark.parametrize("window", WINDOWS)
-def test_on_every_known_window_a_chunk_fits_beside_its_prompt(window: int) -> None:
-    agent = _Analyst(llm=None, name="triage")  # type: ignore[arg-type]
-    budget = cw.ContextBudget(cw.WindowFact(window, cw.DECLARED, "test"))
-    agent._context_budget = lambda: budget  # type: ignore[method-assign]
-    agent._system_prompt = lambda *a, **k: "s" * 6_000  # type: ignore[method-assign]
-    agent.facts_block = "p" * 4_000
-    cfg = Settings(_env_file=None)
+def test_on_every_known_window_a_chunk_fits_beside_the_reverser_s_prompt(window: int) -> None:
+    agent, budget = _reverser(window)
+    cfg = Settings(_env_file=None, chunking={"overlap_tokens": 0})
+    text = "x" * 300_000
 
     with patch("maljan.agents.base_agent.get_settings", lambda: cfg):
-        text = "x" * (budget.tool_budget_chars() * 2)
         room = agent._input_room_chars(text)
         chunks = BinaryChunker(cfg.chunking).chunk("triage", text, room=agent._input_room_chars)
 
-    framing = 6_000 + 4_000
-    assert room is not None
+    # Measured here on its own: the definitions as the provider is sent them.
+    tools = sum(
+        len(json.dumps(convert_to_openai_tool(t), ensure_ascii=False)) for t in REVERSER_TOOLS
+    )
+    assert tools > 70_000
+    budget_chars = budget.tool_budget_chars()
+    expected = budget_chars - REVERSER_SYSTEM - len(agent.facts_block) - tools
+    expected -= int(budget_chars * cw.ANSWER_SHARE) + INPUT_NOTICE_ROOM
+    assert room == max(0, expected)
     if room == 0:
-        # Nothing fits beside the prompt: one chunk, which the prompt shortens and says so.
+        # The framing alone fills the window: one chunk, which the prompt shortens and says so.
         assert len(chunks) == 1
         return
     assert all(c.char_count <= room for c in chunks)
-    assert room + framing + int(budget.tool_budget_chars() * cw.ANSWER_SHARE) <= (
-        budget.tool_budget_chars()
-    )
+    assert len(chunks) == -(-len(text) // room)
+    assert "".join(c.content for c in chunks) == text
+
+
+def test_on_64k_the_reverser_s_room_is_below_the_old_split_and_its_input_splits_more() -> None:
+    agent, _budget = _reverser(65_536)
+    cfg = Settings(_env_file=None, chunking={"overlap_tokens": 0})
+    text = "x" * 160_000
+    with patch("maljan.agents.base_agent.get_settings", lambda: cfg):
+        room = agent._input_room_chars(text)
+        derived = BinaryChunker(cfg.chunking).chunk("triage", text, room=agent._input_room_chars)
+    old = BinaryChunker(ChunkingConfig(max_tokens_per_chunk=20_000, overlap_tokens=0))
+    assert room is not None and 0 < room < 80_000
+    assert len(derived) > len(old.chunk("triage", text))
 
 
 class TestALaterChunkFitsBesideTheEarlierCalls:
