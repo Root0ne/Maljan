@@ -284,3 +284,40 @@ class TestAFailedProbeOnDeepSeek:
         _window, caps = self._caps()
 
         assert caps == dict.fromkeys(caps, 1048576 // 4)
+
+
+def _listed(caps: dict[str, int], windows: dict[str, int]) -> Any:
+    """A composer over a model list, each model with its own cap and window."""
+    from maljan.reporting.composer import ReportComposer
+
+    return ReportComposer(
+        llm=SimpleNamespace(),  # type: ignore[arg-type]
+        per_section_timeout=5,
+        output_cap=max(caps.values()),
+        caps_by_model=caps,
+        window_tokens=min(windows.values()),
+        windows_by_model=windows,
+    )
+
+
+class TestAHeldCallNamesItsLimit:
+    def test_a_model_s_own_cap_is_named_as_its_cap(self) -> None:
+        from langchain_core.messages import HumanMessage
+
+        composer = _listed({"a/wide": 50000, "b/long": 8000}, {"a/wide": 60000, "b/long": 200000})
+        # 20,000 tokens of prompt: a/wide's 50,000 no longer fits its window,
+        # and b/long's own 8,000 is the least any model may write.
+        bound, why = composer._call_limit([HumanMessage(content="x" * 60000)], preview=True)
+
+        assert bound == 8000
+        assert why == "b/long's output cap of 8000 tokens"
+
+    def test_a_window_is_named_as_the_window(self) -> None:
+        from langchain_core.messages import HumanMessage
+
+        composer = _listed({"a/wide": 50000, "b/long": 8000}, {"a/wide": 60000, "b/long": 200000})
+        # 57,000 tokens of prompt: a/wide's window leaves 3,000.
+        bound, why = composer._call_limit([HumanMessage(content="x" * 171000)], preview=True)
+
+        assert bound == 3000
+        assert why == "what its 60000-token window leaves after the prompt"

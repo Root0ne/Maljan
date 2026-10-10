@@ -1496,8 +1496,8 @@ class ReportComposer:
             return None
         return max(0, (room - int(prompt_chars)) // answers)
 
-    def _room_pairs(self) -> list[tuple[int, int]]:
-        """``(window, output cap)`` for each model of the list whose window is known.
+    def _model_rooms(self) -> list[tuple[str, int, int]]:
+        """``(label, window, output cap)`` for each model of the list whose window is known.
 
         Each model is paired with its own window and its own cap, since any of
         them may be the one that answers; the largest cap of the list beside
@@ -1509,12 +1509,17 @@ class ReportComposer:
         reply = int(getattr(self, "output_cap", 0) or getattr(self, "section_max_tokens", 0) or 0)
         if windows:
             return [
-                (int(window), int(caps.get(label) or reply))
+                (str(label), int(window), int(caps.get(label) or reply))
                 for label, window in windows.items()
                 if int(window or 0) > 0
             ]
         window = int(getattr(self, "window_tokens", 0) or 0)
-        return [(window, reply)] if window > 0 else []
+        label = str(getattr(self, "model_label", "") or "")
+        return [(label, window, reply)] if window > 0 else []
+
+    def _room_pairs(self) -> list[tuple[int, int]]:
+        """``(window, output cap)`` for each model of the list whose window is known."""
+        return [(window, cap) for _label, window, cap in self._model_rooms()]
 
     def _room_chars(self) -> int | None:
         """The characters a section's whole prompt may take, or ``None`` with no window known.
@@ -1573,14 +1578,19 @@ class ReportComposer:
         # whichever model answers, so where any model's cap does not fit
         # beside the prompt, the call is held to the least any model of the
         # list may write: never past a model's own cap or its window.
-        pairs = self._room_pairs()
+        rooms = self._model_rooms()
         bound = None
-        if any(call_output_bound(c, w, chars) is not None for w, c in pairs):
-            held_window, bound = min(
-                ((w, min(c, call_output_bound(c, w, chars) or c)) for w, c in pairs),
-                key=lambda pair: pair[1],
-            )
-            why = f"what its {held_window}-token window leaves after the prompt"
+        if any(call_output_bound(c, w, chars) is not None for _label, w, c in rooms):
+            # Each model's limit, and the words for it: what its window leaves
+            # where its cap does not fit beside the prompt, else its own cap.
+            limits = []
+            for label, w, c in rooms:
+                left = call_output_bound(c, w, chars)
+                if left is not None:
+                    limits.append((left, f"what its {w}-token window leaves after the prompt"))
+                else:
+                    limits.append((c, f"{label}'s output cap of {c} tokens"))
+            bound, why = min(limits, key=lambda limit: limit[0])
         ledger = getattr(self, "token_ledger", None)
         if preview:
             held = spend_preview(ledger, self.llm, chars, cap)
