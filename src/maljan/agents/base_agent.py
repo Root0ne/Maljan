@@ -1374,6 +1374,13 @@ _BLOCK_CLAIM_RE = re.compile(
     r"CLAIM:\s*(.+?)(?=\s*\n" + LINE_PREFIX + r"(?:EVIDENCE|CONFIDENCE|TECHNIQUE):|\Z)",
     re.DOTALL,
 )
+# A field line, as a claim's sentence would begin if its heading wrote none:
+# ``CLAIM:`` with nothing after it and ``EVIDENCE: [ev_0001]`` on the next line
+# is a claim with no sentence, never one whose sentence is its evidence line.
+_FIELD_LINE_RE = re.compile(
+    r"^" + LINE_PREFIX + r"(?:EVIDENCE|CONFIDENCE|TECHNIQUE|DISSENT)[ \t]*(?:\*\*)?[ \t]*:",
+    re.IGNORECASE,
+)
 # The fields are read in a block's tail: from the first field label that
 # begins a line to the block's end. The claim sentence above the tail never
 # lends a field, so a claim that says "TECHNIQUE: flags" mid-sentence keeps
@@ -1806,6 +1813,10 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
         if not claim_match:
             continue
         claim_text = strip_tool_call_scaffolding(claim_match.group(1)).strip()
+        if _FIELD_LINE_RE.match(claim_text):
+            # The heading wrote no sentence: the block is begun and not read,
+            # as a block with no claim marker is, and counted as unread.
+            continue
         if not claim_text:
             # The whole claim was a tool call. An empty finding is worse than
             # none at all -- it reaches the operator as a blank row.

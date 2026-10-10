@@ -1121,7 +1121,15 @@ Two producers use it:
   output). A DLL or API name is compared without regard to case, and a bare
   library name is held by an entry that writes it with its `.dll`
   (`validation.library_spellings`): `WinINet` is held by an entry listing
-  `wininet.dll`. Held by a cited entry, the citation stands; held only by another
+  `wininet.dll`. A value written as a field name and its value (`seed
+  0x5a17c0de`, `first_key=0x2b`) is also held by an entry that pairs that name
+  with that whole value, as a JSON member or as `name=value` or `name: value`
+  (`validation.field_value_spellings`), each part whole on its own side
+  (`validation.field_pair_in`): the two parts apart never count, so a value
+  another field holds, a prefix (`time: 12:30:00` does not hold `time 12`), a
+  name that ends another (`cfg/key`) and the same digits in another radix are
+  not held. Only the table and citation checks read pairs; a sample-string
+  read never takes a tool's own field and value for a string. Held by a cited entry, the citation stands; held only by another
   entry, the model is asked once with that entry named; held by none, nothing
   is said, because a paraphrase or a composed value cannot be judged. "Held"
   means held as a whole value in one of its spellings, never as a slice of a
@@ -1724,6 +1732,32 @@ decides.
    descriptions, detection text and procedure examples are not read, and the
    capa rules are downloaded beside the repository, not vendored. The words
    are built once per technique.
+   A sentence also describes its technique by the plain words the vendored
+   texts of one technique id (its card's requirements and indicators, its API
+   rule) describe it with (`validation.described_by_its_words`): each word
+   compared without its inflection, its silent "e" and its plural ("decode",
+   "decodes", "decoded"; "delete", "deletion"; "URL", "URLs"), generic English
+   words (`data/english_stopwords_v1.json`: "very", "few", "made"), calls,
+   programs and modules left out (a procedure word counts only as one, above),
+   and each weighing one over the number of technique families whose texts
+   write it, so a word of one family weighs 1, "encoded" (three families) a
+   third, and a word of more than six families ("file", "command", "process")
+   nothing. The six is a measured heuristic threshold beside the procedure
+   words' one family, not a cap on any data. A sub-technique reads its
+   parent's texts, and a parent each of its sub-techniques': API names found
+   "by a walk of each loaded module's export table" describe Obfuscated Files
+   or Information. The sentence has to write two words or more that the texts
+   of one of those ids write, their weights adding up to one: one word alone is
+   often an object a card acts on ("a short header" is not Masquerade File
+   Type), and two words of two ids (one the parent's, one a sub-technique's)
+   are not what the data says of one technique. They are read as procedure
+   words are: none counts in a sentence that says the behaviour was not seen,
+   nor a word the absence reader reads as absent or one after a negating word
+   of its own clause ("no string is encoded and nothing is decoded"). Measured
+   on every stored claim with a technique of five runs (1,103 pairs): the
+   question fell from 399 to 292 asked, and on a hand-labelled sample of 100
+   asked pairs from 73 asked of true claims to 42, every one of the 27 asked of
+   claims that do not describe their technique still asked.
    A sub-technique whose sentence shares terms with it only through what
    every sub-technique of its parent shares (the parent's name and capability
    terms, its tactic) is asked the same question, naming the sibling, when
@@ -4514,7 +4548,8 @@ is assembled from what the run gathered rather than recomputed beside it:
   cites no entry of the run), `report.value_not_in_cited_entry` (a host
   identifier's or a configuration value's whole value is in none of the entries
   it cites; a configuration number is held in decimal or hex, or by its number
-  beside a known time or size unit; rows citing the same entries are one
+  beside a known time or size unit, and a field name written with its value by
+  the entry's pair of the two; rows citing the same entries are one
   question, a kept row marked beside its evidence) and
   `report.unpublished_value` (a section's prose — a body, the introduction, a
   flow step — names a network value the IOC table does not publish with no

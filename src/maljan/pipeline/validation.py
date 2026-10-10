@@ -26,6 +26,7 @@ import json
 import re
 from collections.abc import Awaitable, Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from fractions import Fraction
 from functools import cache, lru_cache
 from typing import Any, get_args, get_origin
 
@@ -1210,6 +1211,12 @@ _NEGATED_PHRASE_RE = re.compile(r"\b(?:without|instead\s+of|not|never)\b[^,;.()]
 # two families or more is what they share. ``procedure_word_families`` gives
 # the measured count of every word; a test pins where the cut falls.
 PROCEDURE_WORD_MAX_FAMILIES = 1
+# The description words' threshold, beside it: a measured heuristic threshold,
+# not a cap on any data. A stem more than six technique families' vendored
+# texts write is the catalogue's shared vocabulary (fourteen families write
+# "data") and weighs nothing as a description word (``described_by_its_words``);
+# a test pins the behaviour, not the number.
+DESCRIPTION_MAX_FAMILIES = 6
 # The spellings of a call a procedure word names: the word, its ANSI and wide
 # forms and its extended ones (``HttpSendRequest`` is written
 # ``HttpSendRequestA``, ``RegQueryValueEx`` ``RegQueryValueExW``).
@@ -1475,6 +1482,234 @@ def name_stem_families() -> dict[str, int]:
     return dict(_name_stem_families())
 
 
+# The words the vendored data describes a technique with: the stems of its
+# card's requirements and indicators (``data/attck_technique_cards.json``,
+# written from the ATT&CK definitions) and of the API catalogue's rule for it
+# (``data/api_attck_map_v1.json``), the texts :func:`_procedure_sources` reads,
+# a part that says what the technique is not left out (``_NEGATED_PHRASE_RE``).
+# A stem weighs one over the number of technique families whose texts write
+# it: a stem one family's texts alone write weighs 1, one that four families
+# write ("string") a quarter, and one more families write than
+# ``DESCRIPTION_MAX_FAMILIES`` nothing ("file", "process", "command"). A
+# sentence describes the technique by these words when it writes at least
+# ``DESCRIPTION_STEMS_NEEDED`` distinct stems that the texts of one technique
+# id write (the id's own, its parent's, or one of its sub-techniques') and
+# their weights add up to ``DESCRIPTION_WEIGHT_NEEDED``: two words the data
+# writes for one technique, not two words gathered from several. One word alone
+# is not enough: a card names the objects it acts on (a file's "header" under
+# Masquerade File Type), and a sentence names the same object for another
+# reason.
+DESCRIPTION_STEMS_NEEDED = 2
+DESCRIPTION_WEIGHT_NEEDED = Fraction(1)
+
+
+# The inflections a description word loses before two are compared, the first
+# that fits, four letters kept (three for a plural "s": "urls" is "url"): a
+# verb's and a noun's own endings only. An agent noun keeps its "-er"
+# ("header" is not "head", "decoder" not "decode").
+_DESCRIPTION_ENDINGS = (("ings", "", 4), ("ing", "", 4), ("ions", "", 4), ("ion", "", 4),
+                        ("ies", "y", 4), ("es", "", 4), ("ed", "", 4), ("s", "", 3))  # fmt: skip
+
+
+def _description_stem(word: str) -> str:
+    """``word`` lower-cased without its inflection and its silent "e": a card writes
+    "a decode loop", "decodes" and "decoded", "a delayed delete" and "deletion"."""
+    stem = word.lower()
+    for ending, replaced, kept in _DESCRIPTION_ENDINGS:
+        if (
+            stem.endswith(ending)
+            and len(stem) - len(ending) >= kept
+            and not (ending == "s" and stem.endswith("ss"))
+        ):
+            stem = stem[: -len(ending)] + replaced
+            break
+    return stem[:-1] if stem.endswith("e") and len(stem) >= 5 else stem
+
+
+@lru_cache(maxsize=1)
+def _description_stopwords() -> frozenset[str]:
+    """The words no description is compared by: the vendored generic English
+    stopword list (``data/english_stopwords_v1.json``: ``very``, ``few``,
+    ``made``), the catalogue index's stopwords and a name's filler words."""
+    from maljan.core.paths import resolve_data
+    from maljan.memory.attck_index import _STOPWORDS
+
+    try:
+        document = json.loads(resolve_data(ENGLISH_STOPWORDS_FILE).read_text(encoding="utf-8"))
+        english = {str(word).lower() for word in document.get("words") or []}
+    except (OSError, ValueError, AttributeError) as exc:
+        logger.warning("validation: the English stopword list could not be read (%s).", exc)
+        english = set()
+    return frozenset(english | _STOPWORDS | _NAME_FILLER_WORDS)
+
+
+ENGLISH_STOPWORDS_FILE = "data/english_stopwords_v1.json"
+
+
+def _description_words(text: str) -> Iterator[tuple[str, re.Match[str]]]:
+    """Each description word of ``text`` with its stem, three letters or more.
+
+    A call, a class, a program or a module is no description word: it names a
+    procedure, and a procedure word counts only as :func:`_names_a_procedure`
+    reads it (written as something run or called, in a sentence that does not
+    say it was not seen). "The string table holds cmd.exe" names an object.
+    """
+    stopwords = _description_stopwords()
+    modules = _module_exports()
+    for match in re.finditer(r"[A-Za-z0-9_]+", text):
+        word = match.group(0)
+        lowered = word.lower()
+        if (
+            len(word) >= 3
+            and lowered not in stopwords
+            and not _PROCEDURE_SHAPE_RE.search(word)
+            and not _is_a_program_name(lowered, modules)
+        ):
+            yield _description_stem(word), match
+
+
+def _description_stems(text: str) -> set[str]:
+    """The description stems of ``text`` (:func:`_description_words`)."""
+    return {stem for stem, _match in _description_words(text)}
+
+
+@lru_cache(maxsize=1)
+def _description_phrases_by_id() -> tuple[dict[str, tuple[frozenset[str], ...]], dict[str, int]]:
+    """Every technique id's description stems as one set, by id, and how many
+    technique families' texts write each stem. Read once.
+
+    One set per id: the stems of all its texts (its card's requirements and
+    indicators, its API rule), so two words count together when the data
+    writes both for that one technique.
+    """
+    phrases_by_id: dict[str, tuple[frozenset[str], ...]] = {}
+    families: dict[str, set[str]] = {}
+    for technique_id, texts in _procedure_sources().items():
+        stems: set[str] = set()
+        for text in texts:
+            stems |= _description_stems(_NEGATED_PHRASE_RE.sub(" ", text))
+        phrases = (frozenset(stems),) if stems else ()
+        phrases_by_id[technique_id] = phrases
+        for stem in frozenset().union(*phrases):
+            families.setdefault(stem, set()).add(_family(technique_id))
+    return phrases_by_id, {stem: len(found) for stem, found in families.items()}
+
+
+def description_stem_families() -> dict[str, int]:
+    """How many technique families' vendored texts write each description stem."""
+    return dict(_description_phrases_by_id()[1])
+
+
+@cache
+def description_phrases(technique_id: str) -> tuple[dict[str, Fraction], ...]:
+    """The word sets a claim may describe ``technique_id`` by, one per technique
+    id read: each a map of its weighed stems to their weights, a set with fewer
+    than ``DESCRIPTION_STEMS_NEEDED`` of them left out.
+
+    The id's own texts and, for a sub-technique, its parent's (as the name check
+    reads the parent's name); for a parent, its sub-techniques' too, since a
+    sentence that describes a sub-technique describes its parent.
+    """
+    from maljan.memory.attck_loader import sub_technique_entries
+
+    phrases_by_id, families = _description_phrases_by_id()
+    tid = str(technique_id or "").strip().upper()
+    ids = [tid, _family(tid)] if "." in tid else [tid]
+    if "." not in tid:
+        ids.extend(entry.technique_id for entry in sub_technique_entries(tid))
+    found: list[dict[str, Fraction]] = []
+    for one in ids:
+        for phrase in phrases_by_id.get(one, ()):
+            weighed = {
+                stem: Fraction(1, families[stem])
+                for stem in phrase
+                if 0 < families.get(stem, 0) <= DESCRIPTION_MAX_FAMILIES
+            }
+            if len(weighed) >= DESCRIPTION_STEMS_NEEDED and weighed not in found:
+                found.append(weighed)
+    return tuple(found)
+
+
+def description_weights(technique_id: str) -> dict[str, Fraction]:
+    """Every weighed stem of :func:`description_phrases`, with its weight."""
+    return {stem: w for phrase in description_phrases(technique_id) for stem, w in phrase.items()}
+
+
+# A negating word, and where the clause a description word sits in begins: a
+# description word after a negating word of its own clause ("and nothing is
+# decoded", "no export walk") is no hit, whatever the absence reader makes of it.
+_DESCRIPTION_CLAUSE_NEGATED_RE = re.compile(
+    r"\b(?:no|not|never|nothing|none|neither|nor|without|cannot)\b|n't\b", re.IGNORECASE
+)
+_DESCRIPTION_CLAUSE_START_RE = re.compile(
+    r"[.;:!?,(]|\b(?:and|but|while|whereas|although|though)\b", re.IGNORECASE
+)
+
+
+def _negated_in_its_clause(text: str) -> Callable[[int], bool]:
+    """For ``text``, whether a negating word stands before a position in its clause.
+
+    The clause starts and the negating words are read once, so each word asks
+    two bisections.
+    """
+    starts = [found.end() for found in _DESCRIPTION_CLAUSE_START_RE.finditer(text)]
+    negations = [found.start() for found in _DESCRIPTION_CLAUSE_NEGATED_RE.finditer(text)]
+
+    def negated(at: int) -> bool:
+        cut = bisect.bisect_right(starts, at)
+        begin = starts[cut - 1] if cut else 0
+        return bisect.bisect_left(negations, begin) < bisect.bisect_left(negations, at)
+
+    return negated
+
+
+def described_by_its_words(text: str, technique_id: str) -> bool:
+    """Whether ``text`` writes enough of the words the vendored texts of one
+    technique id describe ``technique_id`` with, by their number and their
+    weight (see above).
+
+    Read as a procedure word is read: nothing counts in a sentence that says the
+    behaviour was not seen, run or used (``_NOT_SEEN_RE``), and a word named to
+    say it is absent ("no string is encoded", "without a decode loop") is no
+    hit (:func:`_named_as_absent`), nor is one after a negating word of its own
+    clause ("and nothing is decoded"). The absence reading is asked of the
+    clause a word stands in (it reads no further), once per word of the
+    technique's phrases and clause, so a long answer costs its length.
+    """
+    phrases = description_phrases(technique_id)
+    if not phrases:
+        return False
+    text = _read_dashes(text)
+    if _NOT_SEEN_RE.search(text):
+        return False
+    vocabulary = {stem for phrase in phrases for stem in phrase}
+    negated = _negated_in_its_clause(text)
+    breaks = [(found.start(), found.end()) for found in _CLAUSE_BREAK_RE.finditer(text)]
+    break_ends = [end for _start, end in breaks]
+    break_starts = [start for start, _end in breaks]
+    written: set[str] = set()
+    asked: set[tuple[str, int]] = set()
+    for stem, match in _description_words(text):
+        start, end = match.span()
+        if stem in written or stem not in vocabulary or negated(start):
+            continue
+        cut = bisect.bisect_right(break_ends, start)
+        begin = break_ends[cut - 1] if cut else 0
+        if (stem, begin) in asked:
+            continue
+        asked.add((stem, begin))
+        after = bisect.bisect_left(break_starts, end)
+        finish = break_starts[after] if after < len(break_starts) else len(text)
+        clause = text[begin:finish]
+        if not _named_as_absent(clause, start - begin, end - begin):
+            written.add(stem)
+    for phrase in phrases:
+        hits = [weight for stem, weight in phrase.items() if stem in written]
+        if len(hits) >= DESCRIPTION_STEMS_NEEDED and sum(hits) >= DESCRIPTION_WEIGHT_NEEDED:
+            return True
+    return False
+
+
 def _joined_word_places(text: str, stems: Collection[str]) -> list[tuple[int, int]]:
     """Where an identifier of joined words writes one of ``stems`` that the names of one
     technique family only hold (see above)."""
@@ -1529,14 +1764,18 @@ def _names_a_procedure(text: str, technique_id: str, stems: Collection[str]) -> 
 
 def _shares_a_name_term(text: str, technique_id: str, attck: Any) -> bool:
     """Whether ``text`` shares a term with the technique's capability terms, catalogue
-    name or tactic phrase: the reading the does-not-describe question had before
-    procedure words were read."""
+    name or tactic phrase, or writes enough of the words the vendored data
+    describes it with (:func:`described_by_its_words`)."""
     _name, stems, forms = _name_terms(technique_id, attck)
     pattern = behaviour_pattern(technique_id, attck)
-    return (pattern is not None and pattern.search(text) is not None) or any(
-        _stem(word) in stems or word.lower() in forms
-        for word in re.findall(r"[A-Za-z0-9]+", text)
-        if len(word) >= 3
+    return (
+        (pattern is not None and pattern.search(text) is not None)
+        or any(
+            _stem(word) in stems or word.lower() in forms
+            for word in re.findall(r"[A-Za-z0-9]+", text)
+            if len(word) >= 3
+        )
+        or described_by_its_words(text, technique_id)
     )
 
 
@@ -1557,7 +1796,12 @@ def claim_does_not_describe_violation(
     Security Software Discovery) as something the sample does shares a term
     with it too, and so does an identifier whose joined words write a stem of
     the name one technique family's names hold ("BeingDebugged" under Debugger
-    Evasion) (:func:`_names_a_procedure`). Only a sentence that shares none of
+    Evasion) (:func:`_names_a_procedure`). So does a sentence that writes two
+    or more of the words the technique's card and API rule describe it with,
+    weighed by how few technique families write them, its sub-techniques'
+    words read for a parent ("strings XOR-encoded, decoded at run time from
+    their blobs" under Obfuscated Files or Information;
+    :func:`described_by_its_words`). Only a sentence that shares none of
     them is asked about, once: "accesses the PEB to bypass sandboxing" under OS
     Credential Dumping. What the analyst answers stands, and a technique kept
     after the question is published as the analyst stated it. Nothing is
@@ -5517,19 +5761,29 @@ class EntryTexts:
                 partial.add(repeat)
         return cls(texts=texts, tools=tools, partial=frozenset(partial))
 
-    def holds(self, entry_id: str, value: str) -> bool:
+    def holds(self, entry_id: str, value: str, *, fields: bool = False) -> bool:
         """Whether this entry's text holds ``value`` as a value of its own, however spelt.
 
         A whole value, never a slice of a longer run: ``443`` is not held by an
         answer whose only ``443`` is inside a timestamp. See :func:`decidable`
-        for the values no text can answer for at all.
+        for the values no text can answer for at all. With ``fields`` (a
+        table's stated value, a citation), a field name written with its value
+        is also held by the entry's pair of the two (:func:`field_pair_in`).
         """
         from maljan.agents._indicator_denylists import whole_value_in
 
         text = self.text_of(entry_id)
-        return bool(text) and any(
+        if not text:
+            return False
+        if any(
             whole_value_in(form, text)
             for spelling in library_spellings(value)
+            for form in written_forms(spelling)
+        ):
+            return True
+        return fields and any(
+            field_pair_in(form, text)
+            for spelling in field_value_spellings(value)
             for form in written_forms(spelling)
         )
 
@@ -5545,7 +5799,7 @@ class EntryTexts:
         """Whether a citation names an entry or an item whose text this run holds."""
         return bool(self.text_of(cited))
 
-    def may_hold(self, value: str) -> set[str]:
+    def may_hold(self, value: str, *, fields: bool = False) -> set[str]:
         """The entries that may hold ``value`` for :meth:`holds`: never fewer, often far fewer.
 
         A text holds a value only where every letter-and-digit run of one of
@@ -5569,7 +5823,8 @@ class EntryTexts:
             self._runs.update({run: frozenset(ids) for run, ids in runs.items()})
             self._runs[""] = frozenset()
         found: set[str] = set()
-        for spelling in library_spellings(value):
+        spellings = held_spellings(value) if fields else library_spellings(value)
+        for spelling in spellings:
             for form in written_forms(spelling):
                 needed = set(_TEXT_RUN_RE.findall(form.lower()))
                 if not needed:
@@ -5583,11 +5838,11 @@ class EntryTexts:
                 found |= holders or set()
         return found
 
-    def holding(self, value: str) -> list[str]:
+    def holding(self, value: str, *, fields: bool = False) -> list[str]:
         """Every entry whose text holds ``value``, in ledger order; none for an undecidable one."""
         if not decidable(value):
             return []
-        return [entry_id for entry_id in self.texts if self.holds(entry_id, value)]
+        return [entry_id for entry_id in self.texts if self.holds(entry_id, value, fields=fields)]
 
     def named(self, entry_id: str) -> str:
         """``ev_0012 (floss)``: an id with the tool that answered it."""
@@ -5632,6 +5887,78 @@ def library_spellings(value: str) -> tuple[str, ...]:
     if _BARE_NAME_RE.fullmatch(lowered):
         return (lowered, f"{lowered}.dll")
     return (lowered,)
+
+
+# A value written as a field name and the field's value: ``seed 0x5a17c0de``,
+# ``first_key=0x2b``, ``port: 443``. The name is one identifier word; what
+# follows it is the field's whole value.
+_FIELD_AND_VALUE_RE = re.compile(r"([a-z_][a-z0-9_-]*)(?:\s*[=:]\s*|\s+)(\S(?:.*\S)?)", re.DOTALL)
+
+
+def field_value_spellings(value: str) -> tuple[str, ...]:
+    """How an entry writes ``value`` when it is a field name and that field's value.
+
+    A table row may state ``seed 0x5a17c0de`` for an entry whose JSON holds
+    ``"seed": "0x5a17c0de"``. The entry holds the value when it pairs that
+    field name with that whole value: as a JSON member (the value quoted or
+    bare, with or without the space after the colon) or as ``name=value`` or
+    ``name: value``, each looked for by :func:`field_pair_in`. Only the pair is
+    read, never the two parts apart, so a value the entry gives another field
+    and the same digits read in another radix are not held. Lower-cased, as
+    :func:`library_spellings` is; ``()`` for a value of any other shape.
+    """
+    match = _FIELD_AND_VALUE_RE.fullmatch(str(value or "").strip().lower())
+    if match is None:
+        return ()
+    name, held = match.group(1), match.group(2)
+    quoted_name, quoted = json.dumps(name), json.dumps(held, ensure_ascii=False)
+    return (
+        f"{quoted_name}: {quoted}",
+        f"{quoted_name}:{quoted}",
+        f"{quoted_name}: {held}",
+        f"{quoted_name}:{held}",
+        f"{name}={held}",
+        f"{name}: {held}",
+    )
+
+
+def field_pair_in(pair: str, text: str) -> bool:
+    """Whether ``text`` writes ``pair`` (a spelling of :func:`field_value_spellings`) whole.
+
+    Each part is bounded on its own side as a single part is, the colon, slash
+    and backslash a compound value is joined with continuing it: the field
+    name starts where no name runs on into it (``cfg:key`` and ``cfg/key`` do
+    not write ``key``), and the value ends where the field's value ends
+    (``time: 12:30:00`` does not pair ``time`` with ``12``, nor ``url:
+    http://…`` ``url`` with ``http``). An escape bounds a part as it bounds a
+    value (:func:`whole_value_in`).
+    """
+    from maljan.agents._indicator_denylists import (
+        _CONTINUES_A_COMPONENT_RE,
+        _closes_a_value,
+        _opens_a_value,
+    )
+
+    start = text.find(pair)
+    while start != -1:
+        if _opens_a_value(text, start, _CONTINUES_A_COMPONENT_RE) and _closes_a_value(
+            text, start + len(pair), _CONTINUES_A_COMPONENT_RE
+        ):
+            return True
+        start = text.find(pair, start + 1)
+    return False
+
+
+def held_spellings(value: str) -> tuple[str, ...]:
+    """Every spelling :meth:`EntryTexts.may_hold` looks ``value`` up by with ``fields``.
+
+    The value lower-cased (:func:`library_spellings`) and, for a field name
+    written with its value, the pairs an entry writes it as
+    (:func:`field_value_spellings`).
+    """
+    spellings = list(library_spellings(value))
+    spellings.extend(form for form in field_value_spellings(value) if form not in spellings)
+    return tuple(spellings)
 
 
 def decidable(value: str) -> bool:
@@ -5897,13 +6224,13 @@ def wrong_entry_citations(
         known = [entry_id for entry_id in cited if entries.has_text(entry_id)]
         if not decidable(value) or not known:
             return
-        if any(entries.holds(entry_id, value) for entry_id in known):
+        if any(entries.holds(entry_id, value, fields=True) for entry_id in known):
             return
         if any(entry_id in entries.partial for entry_id in known):
             # A cited entry that is not the whole answer may hold it in the
             # part that is missing; no "is not in" is said of it.
             return
-        holders = entries.holding(value)
+        holders = entries.holding(value, fields=True)
         if not holders:
             return
         values = wrong.setdefault((tuple(known), tuple(holders)), [])
@@ -6066,9 +6393,9 @@ def stated_value_violations(payload: Any, entries: EntryTexts | None) -> list[Vi
         # A cited item is read directly: it is in no lookup of the entries.
         cited_items = [ref for ref in among if ref not in entries.texts]
         return any(
-            entries.holds(ref, form)
+            entries.holds(ref, form, fields=True)
             for form in _stated_spellings(value, numbers=numbers)
-            for ref in [*(entries.may_hold(form) & among), *cited_items]
+            for ref in [*(entries.may_hold(form, fields=True) & among), *cited_items]
         )
 
     for list_key, (noun, nouns) in _STATED_VALUE_ROWS.items():
@@ -6085,7 +6412,8 @@ def stated_value_violations(payload: Any, entries: EntryTexts | None) -> list[Vi
                     continue
                 if value not in held_elsewhere:
                     held_elsewhere[value] = decidable(value) and any(
-                        entries.holds(ref, value) for ref in entries.may_hold(value)
+                        entries.holds(ref, value, fields=True)
+                        for ref in entries.may_hold(value, fields=True)
                     )
             except (ValueError, OverflowError, RecursionError) as exc:
                 # A value no reader can take is not decidable: nothing is said of it.
