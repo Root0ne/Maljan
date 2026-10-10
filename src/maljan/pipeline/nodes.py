@@ -4022,7 +4022,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     contested,
                     agent_names,
                     reports_in_force,
-                    {n: label_of(container, n) for n in agent_names},
+                    {n: label_of(container, n) for n in [*agent_names, *reports_in_force]},
                 )
                 directive = build_revision_directive(False, feedback)
             return await asyncio.to_thread(

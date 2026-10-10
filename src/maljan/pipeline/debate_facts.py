@@ -430,7 +430,8 @@ def contested_input(
     with every claim number and ledger id they cite.
 
     The peers shown are the ones those lines name in their field, and every
-    peer whose key or label (``labels``) the lines write, in any case or form:
+    peer, or other analyst whose report ``reports`` holds, whose key or label
+    (``labels``) the lines write, in any case or form:
     a peer the prose may mean is shown rather than left out. Each is shown
     exactly as a round that asks every analyst shows it, its answer in force
     from ``reports`` whole, in ``reports``' order; no claim is picked out of it.
@@ -448,7 +449,8 @@ def contested_input(
             for spelling in dict.fromkeys([str(p), str((labels or {}).get(str(p)) or "")])
             if spelling.strip()
         ]
-        for p in participants
+        # Every report a round shows, a participant's or not, as dev shows it.
+        for p in dict.fromkeys([*map(str, participants), *map(str, reports)])
     }
     shown: set[str] = set()
     for line in mine:

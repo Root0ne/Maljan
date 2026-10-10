@@ -791,3 +791,48 @@ class TestAFieldOfManyNamesIsReadInLinearTime:
         fixed = len(analysts_field_unknown_note([]))
         assert len(few) < fixed + 10 * 40 + 60
         assert len(many) < fixed + sum(len(n) + 4 for n in names) + 20
+
+
+class TestAReportFromOutsideTheDebateIsShownAsOnDev:
+    def test_a_named_report_of_an_analyst_outside_the_debate_is_shown_whole(self) -> None:
+        reports = {**{n: f"{n} first" for n in NAMES}, "triage_stopped": "triage stopped first"}
+        line = "[analysts: static] STATIC Claim 1 contradicts TRIAGE_STOPPED Claim 1. [blocking: x]"
+
+        _feedback, peers = contested_input("static", FINDING, [line], NAMES, reports)
+
+        assert peers == {"triage_stopped": "triage stopped first"}
+
+    def test_it_is_shown_by_its_label_too(self) -> None:
+        reports = {**{n: f"{n} first" for n in NAMES}, "triage_stopped": "triage stopped first"}
+        line = "[analysts: static] STATIC differs from the First Look. [blocking: x]"
+
+        _feedback, peers = contested_input(
+            "static", FINDING, [line], NAMES, reports, {"triage_stopped": "First Look"}
+        )
+
+        assert peers == {"triage_stopped": "triage stopped first"}
+
+    def test_the_round_shows_it_as_the_full_round_shows_it(self) -> None:
+        line = "[analysts: static] STATIC Claim 1 contradicts TRIAGE_STOPPED Claim 1. [blocking: x]"
+        argument = _mediator(revise=["static"], lines=[line])
+        container, agents = _revision_container()
+        state = {
+            "iteration_count": 1,
+            "is_consensus": False,
+            "consensus_applicable": True,
+            "reports": {
+                **{name: f"{name} first" for name in NAMES},
+                "triage_stopped": "triage stopped first",
+            },
+            "revised_reports": {},
+            "isr_reports": dict(IN_FORCE),
+            "sycophancy_detected": False,
+            "discussion_history": [argument],
+        }
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("maljan.pipeline.nodes._revision_input_is_absent", lambda *a: False)
+            mp.setattr("maljan.pipeline.nodes._build_revision_context", lambda *a: "data")
+            asyncio.run(make_revision_node(container)(state))
+
+        peers = agents["static"].safe_revise_isr.call_args[0][2]
+        assert peers == {"triage_stopped": "triage stopped first"}
