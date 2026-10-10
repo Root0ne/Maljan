@@ -39,6 +39,12 @@ the one before it plus its new turns:
   reasoning. A block is kept where leaving it out would empty its turn or
   touch the latest assistant turn, and the request then asks to drop again.
 
+**No empty text block** reaches the API, on any model: one that is empty or
+only whitespace, which the API refuses with a 400, is left out of every turn
+and the system prompt, and a turn left with nothing is left out whole. A
+streamed answer sent back again carries one (LangChain's join of a stream
+starts with the empty string of its opening chunk).
+
 **Prompt caching** is asked for only where a prefix is sent again: a request
 of a tool loop (the loop's turns are noted, :data:`TOOL_LOOP_TURN`) or one that
 carries an earlier assistant turn. It gets explicit breakpoints on the last
@@ -511,6 +517,53 @@ def _cache_breakpoints(messages: list[Any], marker: dict[str, str], loop: bool) 
     return [_marked(m, marker) if i in marks else m for i, m in enumerate(messages)]
 
 
+# ── Empty text ────────────────────────────────────────────────────────────
+
+
+def _holds_text(block: Any) -> bool:
+    """Whether ``block`` is anything but a text block with no character other than whitespace."""
+    if not isinstance(block, dict) or block.get("type") != "text":
+        return True
+    return bool(str(block.get("text") or "").strip())
+
+
+def _without_empty_text(payload: dict[str, Any], messages: list[Any]) -> list[Any]:
+    """``messages`` and ``payload['system']`` without a text block the API refuses as empty.
+
+    The Messages API refuses, with a 400, a text block that is empty or holds
+    only whitespace, and a turn other than a final prefill with no content.
+    LangChain joins a streamed answer's chunks into a list that starts with
+    the empty string the opening chunk carried, and ``ChatAnthropic`` sends
+    that string back as an empty text block when the answer is sent again (a
+    validation retry, a tool loop's next step). Every such block is left out
+    here, from every turn and from the system prompt; a turn left with nothing
+    is left out whole, and the API takes the turns either side of it as one.
+    Every other block keeps its place and its bytes, so a thinking block's
+    signature still checks. One pass over the request.
+    """
+    system = payload.get("system")
+    if isinstance(system, list) and not all(_holds_text(block) for block in system):
+        kept_system = [block for block in system if _holds_text(block)]
+        if kept_system:
+            payload["system"] = kept_system
+        else:
+            payload.pop("system", None)
+    out: list[Any] = []
+    for message in messages:
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, str):
+            if content.strip():
+                out.append(message)
+            continue
+        if isinstance(content, list) and not all(_holds_text(block) for block in content):
+            kept = [block for block in content if _holds_text(block)]
+            if kept:
+                out.append({**message, "content": kept})
+            continue
+        out.append(message)
+    return out
+
+
 # ── The request hook ──────────────────────────────────────────────────────
 
 # The digest of the request a call is about to send, handed from the request
@@ -537,14 +590,20 @@ def prepared(
     append-only and its blocks checked. ``attached`` is the exact run-state
     block the platform put on the newest turn, ``loop`` whether the request is
     a tool loop's. ``heads`` maps the text of each user turn noted with a
-    shared head to the head's length (:data:`SHARED_HEAD`). Never raises: a
-    request this cannot read is sent as built.
+    shared head to the head's length (:data:`SHARED_HEAD`). On every model, a
+    text block that is empty or only whitespace is left out first
+    (:func:`_without_empty_text`). Never raises: a request this cannot read is
+    sent as built.
     """
     try:
         messages = payload.get("messages")
         if not isinstance(messages, list):
             return payload
         payload = dict(payload)
+        # First, so every later step, and the digests the thinking check
+        # keeps, read the request as it is sent.
+        messages = _without_empty_text(payload, messages)
+        payload["messages"] = messages
         messages = _shared_heads(messages, dict(heads or {}), cache_marker)
         messages = _first_turn_listed(memory, messages, loop)
         if bound:
