@@ -149,6 +149,23 @@ class TestTheGateChangesOnlyTheEndpoints:
         assert expected["effort.mediator"] == "low"
         assert expected["model.judge"] == "deepseek-v4-pro" and expected["effort.judge"] == "max"
 
+    def test_the_reporter_runs_on_the_judge_role_s_model_unless_it_has_an_entry(self) -> None:
+        values = _values(
+            **{"core.llm.openai.judge_model": {"value": "deepseek-v4-pro", "source": "ui"}}
+        )
+        expected = gate_expected(values, gate_changes(values, STUB))
+        # The provider's judge model at the provider's effort; the judge's own
+        # entry (deepseek-v4-pro at max) does not move it.
+        assert expected["model.reporter"] == "deepseek-v4-pro"
+        assert expected["effort.reporter"] == "high"
+        assert expected["model.static"] == "deepseek-v4-flash"
+        assert expected["model.mediator"] == "deepseek-v4-flash"
+        agents = values["core.llm.agents"]["value"]
+        agents["reporter"] = {"provider": "openai", "model": "deepseek-v4-flash", "effort": "low"}
+        expected = gate_expected(values, gate_changes(values, STUB))
+        assert expected["model.reporter"] == "deepseek-v4-flash"
+        assert expected["effort.reporter"] == "low"
+
     def test_an_entry_without_an_effort_inherits_its_own_provider_s_effort(self) -> None:
         agents = _values()["core.llm.agents"]["value"]
         agents["mediator"] = {"provider": "anthropic", "model": "claude-haiku-5-5"}

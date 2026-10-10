@@ -375,11 +375,15 @@ def gate_expected(values: dict[str, dict[str, Any]], changes: dict[str, Any]) ->
     provider = str(_value(values, "core.llm.provider", "openai"))
     agents = _value(values, "core.llm.agents", {}) or {}
     expert = _value(values, f"core.llm.{provider}.expert_model")
+    # The reporter with no entry of its own is built on the judge role
+    # (``ServiceContainer.get_reporter_llm``): the provider's judge model, at
+    # the provider's effort. A judge entry does not move it.
+    judge_role = _value(values, f"core.llm.{provider}.judge_model") or expert
     effort_key = "effort" if provider == "anthropic" else "reasoning_effort"
     effort = str(_value(values, f"core.llm.{provider}.{effort_key}", "") or "")
     expected: dict[str, Any] = {}
 
-    def own(agent: str) -> tuple[Any, Any]:
+    def own(agent: str, fallback: Any = expert) -> tuple[Any, Any]:
         entry = agents.get(agent) if isinstance(agents, dict) else None
         if isinstance(entry, dict) and entry.get("model"):
             # An entry with no effort of its own inherits its own provider's
@@ -387,12 +391,12 @@ def gate_expected(values: dict[str, dict[str, Any]], changes: dict[str, Any]) ->
             setting = EFFORT_SETTING_OF_PROVIDER.get(str(entry.get("provider") or provider))
             inherited = str(_value(values, f"core.{setting}", "") or "") if setting else ""
             return entry.get("model"), entry.get("effort") or inherited
-        return expert, effort
+        return fallback, effort
 
     # The mediator reads its own ``llm.agents.mediator`` entry and, with none,
     # the expert model; a judge entry does not move it.
     for group in ("static", "judge", "reporter", "mediator"):
-        model, its_effort = own(group)
+        model, its_effort = own(group, judge_role if group == "reporter" else expert)
         if model:
             expected[f"model.{group}"] = model
         expected[f"effort.{group}"] = its_effort
