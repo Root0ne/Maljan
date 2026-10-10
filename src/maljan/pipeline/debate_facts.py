@@ -77,11 +77,15 @@ def _name_pattern(name: str) -> re.Pattern[str]:
     )
 
 
-def _claims_named(line: str, agent_names: Iterable[str]) -> list[tuple[str, list[int]]]:
-    """``(agent, claim numbers)`` for each analyst the line names with claim numbers."""
+def _claims_named(line: str, agent_names: Iterable[str]) -> list[tuple[str, list[str]]]:
+    """``(agent, claim numbers)`` for each analyst the line names with claim numbers.
+
+    A number is kept as the digits the line wrote, never converted: digits of
+    any length are read (``_claim_place``).
+    """
     names = sorted({str(n) for n in agent_names if str(n).strip()}, key=len, reverse=True)
     taken: list[tuple[int, int]] = []
-    found: list[tuple[str, list[int]]] = []
+    found: list[tuple[str, list[str]]] = []
     for name in names:
         for match in _name_pattern(name).finditer(line):
             span = match.span()
@@ -90,8 +94,21 @@ def _claims_named(line: str, agent_names: Iterable[str]) -> list[tuple[str, list
             taken.append(span)
             numbers = _CLAIM_NUMBERS.match(line, match.end())
             if numbers is not None:
-                found.append((name, [int(n) for n in re.findall(r"\d+", numbers.group(1))]))
+                found.append((name, re.findall(r"\d+", numbers.group(1))))
     return found
+
+
+def _claim_place(number: str, count: int) -> int | None:
+    """The place of claim ``number`` (digits as written) among ``count`` claims, or ``None``.
+
+    Compared as text first: a number with more digits than ``count`` is no
+    place, so no digits of any length are converted.
+    """
+    digits = number.lstrip("0")
+    if not digits.isdecimal() or len(digits) > len(str(count)):
+        return None
+    value = int(digits)
+    return value - 1 if value <= count else None
 
 
 def _claims_of(isr_reports: Mapping[str, Any], name: str) -> list[Any]:
@@ -162,8 +179,9 @@ def ledger_count_facts(
             for name, claim_numbers in _claims_named(text, names):
                 claims = _claims_of(isr_reports, name)
                 for number in claim_numbers:
-                    if 1 <= number <= len(claims):
-                        ref = str(getattr(claims[number - 1], "evidence_ref", "") or "")
+                    place = _claim_place(number, len(claims))
+                    if place is not None:
+                        ref = str(getattr(claims[place], "evidence_ref", "") or "")
                         cited.extend(i for i in _ENTRY_ID.findall(ref) if i not in cited)
             stated = []
             for entry_id in cited:

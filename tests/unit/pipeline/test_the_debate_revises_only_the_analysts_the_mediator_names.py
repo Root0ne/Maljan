@@ -653,3 +653,46 @@ class TestNoClaimIsPickedByItsNumber:
         assert peers == {"dynamic": _whole("dynamic", isrs)}
         for text in ("first", "third", "fourth"):
             assert text in peers["dynamic"]
+
+
+class TestAClaimNumberOfAnyLengthIsReadAsText:
+    def test_a_five_thousand_digit_claim_number_shows_the_peer_whole(self) -> None:
+        huge = "9" * 5000
+        line = f"[analysts: static] STATIC Claim 1 contradicts DYNAMIC Claim {huge}. [blocking: x]"
+
+        feedback, peers = contested_input(
+            "static", FINDING, [line], NAMES, {n: f"{n} first" for n in NAMES}, IN_FORCE
+        )
+
+        assert peers == {"dynamic": _whole("dynamic")}
+        assert line in feedback
+
+    def test_a_five_thousand_digit_claim_number_leaves_the_line_s_other_counts_stated(
+        self,
+    ) -> None:
+        from maljan.pipeline.debate_facts import ledger_count_facts
+
+        line = f"DYNAMIC Claim 1 counts 41 texts; STATIC Claim {'9' * 5000} counts 40."
+        isrs = {
+            "dynamic": AgentISR(
+                agent_id="dynamic",
+                domain="dynamic",
+                claims=[ClaimEvidence(claim="c", evidence_ref="[ev_0007]", confidence=0.8)],
+            )
+        }
+        entry = {"id": "ev_0007", "tool": "strings", "structured": {"total": 41}}
+
+        facts = ledger_count_facts([line], isrs, [entry], NAMES)
+
+        assert len(facts) == 1 and "total = 41" in facts[0]
+
+    @pytest.mark.parametrize(
+        ("written", "count", "place"),
+        [("1", 3, 0), ("03", 3, 2), ("4", 3, None), ("0", 3, None), ("1" + "0" * 5000, 3, None)],
+    )
+    def test_a_claim_place_is_compared_as_text_first(
+        self, written: str, count: int, place: int | None
+    ) -> None:
+        from maljan.pipeline.debate_facts import _claim_place
+
+        assert _claim_place(written, count) == place
