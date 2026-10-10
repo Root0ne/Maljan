@@ -456,7 +456,17 @@ async def get_job_events(
 
     redis_conn = aioredis.from_url(settings.redis_url, decode_responses=True)
     try:
-        events = await read_events(db, redis_conn, job_id, since=since, limit=limit, usage=True)
+        events = await read_events(
+            db,
+            redis_conn,
+            job_id,
+            since=since,
+            limit=limit,
+            usage=True,
+            # A job still publishing holds back a usage event past its last
+            # progress event (``read_events``).
+            running=str(getattr(job, "status", "") or "") in ("pending", "running"),
+        )
     finally:
         try:
             await redis_conn.aclose()

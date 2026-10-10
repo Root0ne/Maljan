@@ -341,6 +341,48 @@ class TestAnExpiredStreamIsUnchanged:
         assert len(table.statements) == 1
 
 
+class TestARunningJobsTableTail:
+    """Past the stream's end, a running job's usage waits for a later progress event.
+
+    The cursor has reached the stream's last event, so the table answers. A
+    usage event committed by its own flush can be in the table before a
+    progress event numbered before it; while the job publishes, the page ends
+    at its highest progress event and the usage event comes with the next.
+    """
+
+    def test_usage_past_the_last_progress_event_waits_while_the_job_runs(self) -> None:
+        redis_conn = _Redis([_event(1), _event(2)])
+        table = _Table([_Row(1, "agent_message"), _Row(2, "agent_message"), _usage_row(4)])
+        page = asyncio.run(
+            read_events(table, redis_conn, uuid.uuid4(), since=2, usage=True, running=True)
+        )
+        assert page == []
+        # Progress event 3 reaches the table and is served; usage 4 still
+        # waits for a progress event after it.
+        table.rows.append(_Row(3, "agent_message"))
+        page = asyncio.run(
+            read_events(table, redis_conn, uuid.uuid4(), since=2, usage=True, running=True)
+        )
+        assert _seqs(page) == [3]
+        table.rows.append(_Row(5, "agent_message"))
+        page = asyncio.run(
+            read_events(table, redis_conn, uuid.uuid4(), since=3, usage=True, running=True)
+        )
+        assert _seqs(page) == [4, 5]
+
+    def test_usage_below_the_last_progress_event_is_served_while_the_job_runs(self) -> None:
+        redis_conn = _Redis([])
+        table = _Table([_Row(1, "agent_message"), _usage_row(2), _Row(3, "agent_message")])
+        page = asyncio.run(read_events(table, redis_conn, uuid.uuid4(), usage=True, running=True))
+        assert _seqs(page) == [1, 2, 3]
+
+    def test_once_the_job_has_ended_every_usage_event_is_served(self) -> None:
+        redis_conn = _Redis([_event(1), _event(2)])
+        table = _Table([_Row(1, "agent_message"), _Row(2, "agent_message"), _usage_row(4)])
+        page = asyncio.run(read_events(table, redis_conn, uuid.uuid4(), since=2, usage=True))
+        assert _seqs(page) == [4]
+
+
 CHARGE_PARTS = ("priced_usd", "price_source", "estimated_usd")
 
 
@@ -627,16 +669,25 @@ class TestTheUsageEndpoint:
         assert snapshot is not None
         assert body["spend"]["spent_usd"] == snapshot["spent_usd"]
 
+    @pytest.mark.parametrize(
+        ("status", "running"),
+        [("running", True), ("pending", True), ("completed", False), ("failed", False)],
+    )
     @pytest.mark.asyncio
-    async def test_the_events_endpoint_asks_for_usage(
-        self, monkeypatch: pytest.MonkeyPatch
+    async def test_the_events_endpoint_asks_for_usage_and_says_whether_the_job_runs(
+        self, monkeypatch: pytest.MonkeyPatch, status: str, running: bool
     ) -> None:
+        from types import SimpleNamespace
+
         import app.api.v1.jobs as jobs_module
 
         seen: dict[str, Any] = {}
 
-        async def fake_read(db, redis_conn, job_id, *, since=None, limit=500, usage=False):  # noqa: ANN001
+        async def fake_read(
+            db, redis_conn, job_id, *, since=None, limit=500, usage=False, running=False
+        ):  # noqa: ANN001, E501
             seen["usage"] = usage
+            seen["running"] = running
             return []
 
         class _Conn:
@@ -650,7 +701,7 @@ class TestTheUsageEndpoint:
             limit=10,
             since=None,
             user=object(),
-            svc=_Service(object()),
+            svc=_Service(SimpleNamespace(status=status)),
             db=_Table([]),
         )
-        assert seen == {"usage": True}
+        assert seen == {"usage": True, "running": running}

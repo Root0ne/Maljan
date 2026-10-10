@@ -1598,7 +1598,9 @@ killed inside that window loses that one call's row. It is a record, not
 progress, so it is kept off the live socket and the 1,000-entry replay stream
 and read back through `GET /jobs/{id}/events`, which merges it into a page the
 stream answers, in `seq` order, so it is there while the stream lives as well
-as after. `GET /jobs/{id}/usage` totals the job's `model_usage` events: tokens
+as after. While the job runs, a usage event numbered past the last progress
+event a page holds comes with the next page, so a resume never skips a progress
+event still on its way. `GET /jobs/{id}/usage` totals the job's `model_usage` events: tokens
 in and out, cache reads and writes, reasoning and priced spend, per agent,
 built by the run summary's own code. Each record carries what the job's spend
 meter charged it when it was settled (`priced_usd`), failed attempts included,

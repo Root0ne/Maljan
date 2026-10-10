@@ -183,6 +183,7 @@ async def read_events(
     since: int | None = None,
     limit: int = 500,
     usage: bool = False,
+    running: bool = False,
 ) -> list[dict[str, Any]]:
     """This job's events after ``since``, in sequence order, from either store.
 
@@ -191,7 +192,10 @@ async def read_events(
     the events a reader follows — so a page the stream answers is given the
     table's usage events in its range, merged on ``seq``. The events endpoint
     asks for them; the socket's resume does not, and gets none from either
-    store.
+    store. ``running`` says the job is still publishing: a usage event past
+    the highest progress event the page holds then waits for the next page,
+    because a progress event numbered before it may still be on its way to
+    the table. Once the job has ended every usage event is served.
 
     No cursor means "from the beginning", which is the same question as
     ``since=0``: the publisher's first event of a run is ``seq`` 1, so a read
@@ -228,11 +232,11 @@ async def read_events(
     merged: dict[int, dict[str, Any]] = {}
     unsequenced: list[dict[str, Any]] = []
     table = await _from_table(db, job_id, since, limit, usage=usage)
-    if usage and from_stream:
-        # While the stream still has events after the cursor, a usage event
-        # past every progress event either store holds waits, for the reason
-        # ``_with_usage`` gives: a progress event numbered before it may be
-        # on its way to both stores still.
+    if usage and (from_stream or running):
+        # While the stream still has events after the cursor, or the job is
+        # still publishing, a usage event past every progress event either
+        # store holds waits, for the reason ``_with_usage`` gives: a progress
+        # event numbered before it may be on its way to both stores still.
         highest = max(
             (_seq_of(e) for e in [*from_stream, *table] if e.get("type") != MODEL_USAGE),
             default=0,

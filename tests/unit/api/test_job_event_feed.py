@@ -556,7 +556,9 @@ class TestTheEventsEndpoint:
 
         seen: dict[str, Any] = {}
 
-        async def fake_read(db, redis_conn, job_id, *, since=None, limit=500, usage=False):  # noqa: ANN001
+        async def fake_read(
+            db, redis_conn, job_id, *, since=None, limit=500, usage=False, running=False
+        ):  # noqa: ANN001, E501
             seen["since"] = since
             seen["limit"] = limit
             seen["usage"] = usage
