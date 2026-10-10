@@ -554,7 +554,10 @@ def test_a_stack_run_failing_as_a_known_defect_is_reported_as_that_defect(
         from scripts.rehearsal.checklist import Check
 
         return [
-            Check(c.name, False, row["detail"]) if c.name == row["check"] else c for c in real(rec)
+            Check(c.name, False, row["detail"].replace("{n}", "18"))
+            if c.name == row["check"]
+            else c
+            for c in real(rec)
         ]
 
     import unittest.mock
@@ -576,3 +579,37 @@ def test_an_in_process_run_never_reads_the_stack_s_known_defects() -> None:
         scenario="deadline_hit", job_status="failed", scenario_params={"deadline_in": "report"}
     )
     assert known_stack_defects(record) == {}
+
+
+class TestAPinnedDetail:
+    PINNED = "no spend was kept; no token totals were kept for {n} answered call(s)"
+
+    @pytest.mark.parametrize("count", ["0", "18", "240"])
+    def test_matches_with_any_count(self, count: str) -> None:
+        from scripts.rehearsal.run import detail_matches
+
+        shown = f"no spend was kept; no token totals were kept for {count} answered call(s)"
+        assert detail_matches(self.PINNED, shown)
+
+    @pytest.mark.parametrize(
+        "shown",
+        [
+            "no spend was kept; no token totals were kept for many answered call(s)",
+            "no token totals were kept for 18 answered call(s)",
+            "no spend was kept; no token totals were kept for 18 answered call(s); no partial "
+            "report renders",
+            "no spend was kept. no token totals were kept for 18 answered call(s)",
+        ],
+    )
+    def test_matches_no_other_clause(self, shown: str) -> None:
+        from scripts.rehearsal.run import detail_matches
+
+        assert not detail_matches(self.PINNED, shown)
+
+    def test_the_d5_pin_counts_its_calls_with_the_placeholder(self) -> None:
+        from scripts.rehearsal.run import KNOWN_DEFECTS_FILE
+
+        row = next(
+            r for r in json.loads(KNOWN_DEFECTS_FILE.read_text())["pins"] if r.get("id") == "D5"
+        )
+        assert "{n} answered call(s)" in row["detail"]

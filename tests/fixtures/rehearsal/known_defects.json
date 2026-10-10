@@ -175,7 +175,7 @@
    "wire": "stack",
    "deadline_in": "report",
    "check": "the stopped run kept its run summary and a partial report",
-   "detail": "the stored report's incomplete reason is 'missing'; no run summary was stored; no spend was kept; no token totals were kept for 18 answered call(s); no partial report renders",
+   "detail": "the stored report's incomplete reason is 'missing'; no run summary was stored; no spend was kept; no token totals were kept for {n} answered call(s); no partial report renders",
    "defect": "a job the job timeout stops inside the report node keeps nothing: keep_the_stopped_run's insert into analysis_reports fails with StatementError (Object of type datetime is not JSON serializable) in one of its JSONB columns, so no report row, run summary or partial report is stored (app.worker.analysis_worker.keep_the_stopped_run, _store_the_report)"
   }
  ],

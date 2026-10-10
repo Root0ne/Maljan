@@ -821,6 +821,18 @@ def run_in_process(args: argparse.Namespace) -> list[RunRecord]:
 KNOWN_DEFECTS_FILE = _ROOT / "tests" / "fixtures" / "rehearsal" / "known_defects.json"
 
 
+# The one part of a pinned detail that may vary: a count, written ``{n}``.
+COUNT_PLACEHOLDER = "{n}"
+
+
+def detail_matches(pinned: str, detail: str) -> bool:
+    """Whether ``detail`` is the pinned one, word for word, ``{n}`` matching any count."""
+    import re
+
+    pattern = re.escape(pinned).replace(re.escape(COUNT_PLACEHOLDER), r"\d+")
+    return re.fullmatch(pattern, detail) is not None
+
+
 def known_stack_defects(record: RunRecord) -> dict[str, dict[str, Any]]:
     """The known-defect rows a stack run of this scenario fails, by check name."""
     if record.scenario_params.get("mode") != "stack":
@@ -855,7 +867,7 @@ def write_results(records: list[RunRecord], out: Path) -> int:
         matched = [
             c
             for c in checks
-            if not c.ok and c.name in known and known[c.name]["detail"] == c.detail
+            if not c.ok and c.name in known and detail_matches(known[c.name]["detail"], c.detail)
         ]
         failures = [c for c in checks if not c.ok and c not in matched]
         failed = failed or bool(failures)
