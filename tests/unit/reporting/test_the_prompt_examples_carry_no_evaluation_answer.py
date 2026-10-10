@@ -127,9 +127,9 @@ from maljan.pipeline.nodes import (
     NO_STATIC_FIXTURE_NOTE,
     NOT_ASKED_TO_REVISE,
     NOT_NAMED_BY_MEDIATOR,
-    SYCOPHANCY_ASKS_EVERY_ANALYST,
     run_quality_note,
     skipped_analysts_reason,
+    sycophancy_asks_every_analyst,
 )
 from maljan.pipeline.routing import NO_CONTESTED_POINT, NOT_REVISED
 from maljan.pipeline.run_state import NO_LIMIT, budget_line
@@ -1515,7 +1515,8 @@ PROMPTS: dict[str, str] = {
     "a revision round asking only the analysts the mediator names": " ".join(
         [
             NOT_NAMED_BY_MEDIATOR,
-            SYCOPHANCY_ASKS_EVERY_ANALYST,
+            sycophancy_asks_every_analyst("sycophancy"),
+            sycophancy_asks_every_analyst("no_consensus"),
             BLOCK_NOT_READ_NOTE,
             ANALYSTS_FIELD_MISSING_NOTE,
             analysts_field_unknown_note("network"),

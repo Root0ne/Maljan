@@ -39,9 +39,9 @@ from maljan.pipeline.debate_facts import (
 from maljan.pipeline.mediation_models import CONTRADICTIONS_BLOCK_MISSING_NOTE
 from maljan.pipeline.nodes import (
     NOT_NAMED_BY_MEDIATOR,
-    SYCOPHANCY_ASKS_EVERY_ANALYST,
     make_negotiation_node,
     make_revision_node,
+    sycophancy_asks_every_analyst,
 )
 from maljan.pipeline.routing import (
     CONSENSUS,
@@ -318,10 +318,14 @@ def _revision_container() -> tuple[Any, dict[str, Any]]:
     return container, agents
 
 
-def _revise(argument: AgentArgument, *, syco: bool = False) -> tuple[dict[str, Any], Any]:
+def _revise(
+    argument: AgentArgument, *, syco: bool = False, consensus: bool = False
+) -> tuple[dict[str, Any], Any]:
     container, agents = _revision_container()
     state = {
         "iteration_count": 1,
+        "is_consensus": consensus,
+        "consensus_applicable": True,
         "reports": {name: f"{name} first" for name in NAMES},
         "revised_reports": {},
         "isr_reports": dict(IN_FORCE),
@@ -372,10 +376,25 @@ class TestOnlyTheNamedRevise:
         update, agents = _revise(_mediator(revise=["static"]), syco=True)
 
         assert all(agents[name].safe_revise_isr.call_count == 1 for name in NAMES)
-        assert update["revision_rounds"][0]["asked_all"] == SYCOPHANCY_ASKS_EVERY_ANALYST
+        assert update["revision_rounds"][0]["asked_all"] == sycophancy_asks_every_analyst(
+            NO_CONSENSUS
+        )
         args, _kw = agents["static"].safe_revise_isr.call_args
         assert set(args[2]) == {"all_tools_static_r2", "dynamic", "network"}
         assert LINE_NOT_BLOCKING in args[3]
+
+    def test_the_record_names_the_override_where_the_override_opened_the_round(self) -> None:
+        update, _agents = _revise(_mediator(revise=[], lines=[]), syco=True, consensus=True)
+
+        said = update["revision_rounds"][0]["asked_all"]
+        assert said == sycophancy_asks_every_analyst(SYCOPHANCY)
+        assert "sycophancy override" in said
+
+    def test_the_record_names_no_override_where_no_consensus_opened_the_round(self) -> None:
+        update, _agents = _revise(_mediator(revise=["static"]), syco=True, consensus=False)
+
+        said = update["revision_rounds"][0]["asked_all"]
+        assert "no_consensus" in said and "override" not in said
 
     def test_a_record_without_a_reading_asks_every_analyst_as_before(self) -> None:
         update, agents = _revise(

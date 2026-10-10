@@ -98,7 +98,12 @@ from maljan.pipeline.outcome import (
     verdict_for_run,
     verdict_reading,
 )
-from maljan.pipeline.routing import revised_in, revision_round_before
+from maljan.pipeline.routing import (
+    SYCOPHANCY,
+    revised_in,
+    revision_round_before,
+    route_within_limit,
+)
 from maljan.pipeline.run_state import render_run_state
 from maljan.pipeline.sandbox_status import NOT_RUN as SANDBOX_NOT_RUN
 from maljan.pipeline.sandbox_status import sandbox_status
@@ -3879,10 +3884,20 @@ def _home_stage(container: ServiceContainer, name: str) -> Any:
 # asked to revise in.
 NOT_ASKED_TO_REVISE = "not asked: no data to revise"
 NOT_NAMED_BY_MEDIATOR = "not asked: not named by the mediator"
-# Why a round the mediator's names would have narrowed asked every analyst.
-SYCOPHANCY_ASKS_EVERY_ANALYST = (
-    "A sycophancy override opened the round; every analyst was asked to revise."
-)
+
+
+def sycophancy_asks_every_analyst(reason: str) -> str:
+    """Why a round the mediator's names would have narrowed asked every analyst.
+
+    ``reason`` is the router's reason for opening the round (``sycophancy``
+    for its override, ``no_consensus`` otherwise).
+    """
+    opened = (
+        "A sycophancy override opened the round"
+        if reason == SYCOPHANCY
+        else f"The round opened on {reason}, with sycophancy detected at the mediation before it"
+    )
+    return f"{opened}; every analyst was asked to revise under the devil's-advocate directive."
 
 
 def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any:
@@ -3914,7 +3929,11 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         named = getattr(mediation, "revise", None)
         asked_all = ""
         if named is not None and syco_detected:
-            asked_all, named = SYCOPHANCY_ASKS_EVERY_ANALYST, None
+            # The reason the router opened this round on, read from the same
+            # state and the same rules, quietly.
+            check = bool(getattr(getattr(stage, "debate", None), "sycophancy_check", True))
+            _route, opened_on = route_within_limit(state, sycophancy_check=check, log=False)
+            asked_all, named = sycophancy_asks_every_analyst(opened_on), None
         elif named is None:
             asked_all = str(getattr(mediation, "revise_note", "") or "")
         asked = list(agent_names) if named is None else [n for n in agent_names if n in named]
