@@ -26,6 +26,7 @@ import os
 import socket
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -242,3 +243,72 @@ def test_a_custom_team_passes_every_check(tmp_path: Path, wire: str) -> None:
     assert record.window_models and set(record.window_models) <= set(
         record.scenario_params["served_outputs"]
     )
+
+
+# The judge with no entry of its own, on a global judge model whose window is
+# far smaller than the analysts' expert model: deepseek-v3 serves 65,536
+# tokens, deepseek-v4-flash 1,048,576. The judge and the reporter call the
+# global judge model at the global effort, so that is what the checklist finds
+# in force for them. The vendored table prices no deepseek-v3, so the run and
+# the checklist price it as deepseek-v4-flash: the spend check then holds its
+# calls to a charge rather than stopping at a missing row.
+_SMALL_JUDGE = {"llm.openai.judge_model": "deepseek-v3", "llm.agents": {}}
+
+
+@pytest.fixture
+def small_judge_priced(monkeypatch: pytest.MonkeyPatch) -> None:
+    from maljan.core import spend
+
+    prices = dict(spend.table_prices())
+    monkeypatch.setattr(spend, "_table", {**prices, "deepseek-v3": prices["deepseek-v4-flash"]})
+
+
+def _small_judge_run(tmp_path: Path) -> Any:
+    rehearsal = Rehearsal(
+        scenario="normal",
+        provider="openai",
+        work_dir=tmp_path / "small-judge",
+        job_timeout_s=JOB_DEADLINE_S,
+        extra=dict(_SMALL_JUDGE),
+    )
+    record = asyncio.run(rehearse(rehearsal))
+    record.expected["model.judge"] = "deepseek-v3"
+    record.expected["model.reporter"] = "deepseek-v3"
+    record.expected["effort.judge"] = rehearsal.effort
+    return record
+
+
+@pytest.mark.usefixtures("small_judge_priced")
+def test_a_judge_on_a_smaller_global_model_sizes_the_job_s_window(tmp_path: Path) -> None:
+    """The job's one window is the judge's own model's, and every check agrees with it."""
+    record = _small_judge_run(tmp_path)
+
+    failed = {c.name: c.detail for c in check_run(record) if not c.ok}
+
+    assert failed == {}
+    assert "deepseek-v3" in record.window_models
+    assert record.run_summary["truncation"]["context_window"]["tokens"] == 65536
+
+
+@pytest.mark.usefixtures("small_judge_priced")
+def test_a_window_taken_over_fewer_models_than_the_job_calls_still_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The gate reads the job's models on its own, so a product window left wide is named."""
+    from maljan.agents import composition
+
+    real = composition.window_assignments
+
+    def _without_the_judge(settings: Any) -> list[Any]:
+        return [a for a in real(settings) if a.agent != "judge"]
+
+    monkeypatch.setattr(composition, "window_assignments", _without_the_judge)
+    record = _small_judge_run(tmp_path)
+
+    failed = {c.name: c.detail for c in check_run(record) if not c.ok}
+
+    assert record.run_summary["truncation"]["context_window"]["tokens"] == 1048576
+    assert any(
+        "the smallest window the stub serves the job's models is deepseek-v3 65536" in detail
+        for detail in failed.values()
+    ), failed

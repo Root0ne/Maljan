@@ -79,7 +79,7 @@ import json
 import re
 import threading
 import time
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
@@ -1758,9 +1758,12 @@ def output_cap_for(
     return OutputCap(tokens, f"llm.{setting} is 0, so derived: {said}")
 
 
-def _questions(settings: Any, agents: list[str]) -> list[dict[str, Any]]:
+def _questions(settings: Any, agents: Sequence[Any]) -> list[dict[str, Any]]:
     """The distinct windows this run has to learn, one per pair, in order.
 
+    ``agents`` names agents, each read with every model it may call on the
+    expert role (``assignments_for``), or holds model assignments already read
+    on the role their builder reads them on (``composition.window_assignments``).
     Deduplicated on ``(provider, endpoint, model)`` — the cache's own key —
     because that is the question, and a team of five agents on one endpoint is
     one question asked once. Asked per agent instead, a dead endpoint cost a
@@ -1769,7 +1772,10 @@ def _questions(settings: Any, agents: list[str]) -> list[dict[str, Any]]:
     from maljan.core.model_assignments import assignments_for
 
     asked: dict[tuple[str, str, str], dict[str, Any]] = {}
-    for assignment in assignments_for(settings, agents):
+    read: list[Any] = []
+    for item in agents:
+        read.extend(assignments_for(settings, [item]) if isinstance(item, str) else [item])
+    for assignment in read:
         declared, is_default = declared_window(settings, assignment.provider)
         asked.setdefault(
             (assignment.provider, assignment.endpoint, assignment.model),
@@ -1785,7 +1791,7 @@ def _questions(settings: Any, agents: list[str]) -> list[dict[str, Any]]:
     return list(asked.values())
 
 
-def window_for_settings(settings: Any, agents: list[str], *, probe: bool = True) -> WindowFact:
+def window_for_settings(settings: Any, agents: Sequence[Any], *, probe: bool = True) -> WindowFact:
     """The window one run may count on, across every model its agents call.
 
     The smallest of them, because one cap is handed to every tool server the
@@ -1800,7 +1806,7 @@ def window_for_settings(settings: Any, agents: list[str], *, probe: bool = True)
 
 
 async def awindow_for_settings(
-    settings: Any, agents: list[str], *, probe: bool = True
+    settings: Any, agents: Sequence[Any], *, probe: bool = True
 ) -> WindowFact:
     """:func:`window_for_settings` on the caller's loop."""
     facts = [
@@ -2195,7 +2201,9 @@ class ContextBudget:
         }
 
 
-def budget_for_settings(settings: Any, agents: list[str], *, probe: bool = True) -> ContextBudget:
+def budget_for_settings(
+    settings: Any, agents: Sequence[Any], *, probe: bool = True
+) -> ContextBudget:
     """This run's context budget, window learned and reply room reserved."""
     return ContextBudget(
         window_for_settings(settings, agents, probe=probe),

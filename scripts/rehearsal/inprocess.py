@@ -466,10 +466,10 @@ def window_models(settings: Any) -> list[str]:
     it too, ``JudgeAgent._context_budget``): the active profile's analysts and
     the role entries the run calls, each with every model it may call on the
     expert role (``assignments_for``), and the judge with every model it
-    really calls, read on the judge role as ``get_judge_llm`` builds it. The
-    product's own budget reads the judge on the expert role, so a global
-    judge model with a smaller window than the expert's makes this check
-    fail rather than agree with it.
+    really calls, read on the judge role as ``get_judge_llm`` builds it. Read
+    here independently of the product's own set
+    (``composition.window_assignments``), so a product window taken over a
+    narrower set than this one makes the check fail rather than agree with it.
 
     The mediator counts whenever the profile has a debate stage, and the
     function summariser whenever it is on, each with or without an entry of

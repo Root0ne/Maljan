@@ -129,6 +129,38 @@ def role_entries_called(settings: Settings, stages: Sequence[Any] | None = None)
     return called
 
 
+def window_assignments(settings: Settings) -> list[Any]:
+    """Every model the job's one context window is taken over, each read as its builder reads it.
+
+    One window sizes every tool answer of the job, the judge's own tool calls
+    included, so it has to fit the tightest model any of those agents calls:
+
+    * every analyst of the active profile, on the expert role;
+    * the mediator whenever the profile has a debate stage, and the function
+      summariser whenever ``preprocessing.use_function_summarizer`` is on, each
+      on the expert role with or without an entry of its own
+      (``get_mediator_llm``, ``get_summarizer_llm``) — with none they call the
+      global expert model;
+    * the judge on the judge role (``get_judge_llm``): its own entry, or else
+      the global judge model, never the expert one.
+
+    Each agent's fallbacks are in, because a model the run falls back to is a
+    model the run calls (``assignment_chain_for``).
+    """
+    from maljan.core.config import JUDGE_AGENT_KEY, MEDIATOR_AGENT_KEY, SUMMARIZER_AGENT_KEY
+    from maljan.core.model_assignments import assignment_chain_for, assignments_for
+
+    agents = list(analyst_keys(settings))
+    if any(getattr(stage, "kind", "") == "debate" for stage in active_profile(settings).stages):
+        agents.append(MEDIATOR_AGENT_KEY)
+    if settings.preprocessing.use_function_summarizer:
+        agents.append(SUMMARIZER_AGENT_KEY)
+    return [
+        *assignments_for(settings, agents),
+        *assignment_chain_for(settings, JUDGE_AGENT_KEY, role="judge"),
+    ]
+
+
 def stages(settings: Settings) -> list[Any]:
     """The active profile's stages, in the order it declares them."""
     return list(active_profile(settings).stages)

@@ -771,9 +771,10 @@ def _analysts_window_problems(
     """The job's window against the smallest window served to the models it is taken over.
 
     The product sizes every tool answer with one window: the smallest over
-    every model the job's analysts, the judge and the role entries it calls
-    may use (``ServiceContainer.get_context_budget``,
-    ``context_window.window_for_settings``). The run records those models
+    every model the job's analysts, the judge on its own role, the mediator of
+    a debate and the summariser while it is on may use
+    (``ServiceContainer.get_context_budget``,
+    ``composition.window_assignments``). The run records those models
     (``window_models``), read from the settings the job ran with.
     """
     tokens = int(window.get("tokens") or 0)
