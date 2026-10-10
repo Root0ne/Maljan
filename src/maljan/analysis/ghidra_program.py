@@ -78,3 +78,21 @@ def switch_is_confirmed(response_text: str, expected: str) -> bool:
     if not isinstance(payload, dict) or payload.get("success") is not True:
         return False
     return payload.get("switched_to") == expected
+
+
+#: The endpoint that runs Ghidra's auto-analysis on a program. A load imports
+#: the file without it, and in the place of any program of the same name.
+ANALYSIS_PATH = "/run_analysis"
+
+
+def analysis_is_confirmed(response_text: str) -> bool:
+    """Whether a ``/run_analysis`` response says the analysis ran.
+
+    Like :func:`switch_is_confirmed`, it decides what to log, not what to
+    raise.
+    """
+    try:
+        payload = json.loads(response_text)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(payload, dict) and payload.get("success") is True

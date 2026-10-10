@@ -24,6 +24,7 @@ import json
 from typing import Any
 
 from maljan.analysis.ghidra_program import (
+    ANALYSIS_PATH,
     SWITCH_PARAM,
     SWITCH_PATH,
     program_name_from_load,
@@ -77,9 +78,11 @@ class _FakeHTTP:
     def __init__(self, replies: dict[str, str]) -> None:
         self.replies = replies
         self.calls: list[tuple[str, str, dict[str, Any]]] = []
+        self.options: list[dict[str, Any]] = []
 
-    async def post(self, url: str, params=None, json=None, headers=None) -> _Response:  # noqa: A002
+    async def post(self, url: str, params=None, json=None, headers=None, **kw) -> _Response:  # noqa: A002
         self.calls.append(("POST", url, dict(params or {})))
+        self.options.append(kw)
         return _Response(self._reply(url))
 
     async def get(self, url: str, params=None) -> _Response:
@@ -114,7 +117,7 @@ class TestTheClientFollowsALoadWithASwitch:
                 "/load_program", "POST", [{"name": "file", "source": "body"}], {"file": "/x/b.exe"}
             )
         )
-        assert _paths(http) == ["/load_program", SWITCH_PATH]
+        assert _paths(http) == ["/load_program", SWITCH_PATH, ANALYSIS_PATH]
         assert http.calls[1][2] == {SWITCH_PARAM: "b.exe"}, "the switch must be query-encoded"
         assert "success" in out, "the caller still receives the load response"
 

@@ -269,13 +269,13 @@ class TestTheLoadIsAPrecondition:
         with pytest.raises(SampleNotOpened):
             prepare_sample(_settings(sink=False), "ghidra", CONTAINER_PATH)
 
-    def test_an_opened_sample_is_made_current_and_the_pass_is_optional(
+    def test_an_opened_sample_is_made_current_and_analysed_and_the_pass_is_optional(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         http = _HttpClient(LOADED)
         monkeypatch.setattr("httpx.Client", http)
         assert prepare_sample(_settings(sink=False), "ghidra", CONTAINER_PATH) == ""
-        assert http.paths == ["load_program", "switch_program"]
+        assert http.paths == ["load_program", "switch_program", "run_analysis"]
 
     def test_the_provider_remembers_and_is_not_asked_again(
         self, monkeypatch: pytest.MonkeyPatch
@@ -586,7 +586,7 @@ class TestAGhidraThatDidNotAnswer:
         http = _HttpClient(LOADED, failures=[_refused()])
         monkeypatch.setattr("httpx.Client", http)
         assert prepare_sample(_settings(sink=False), "ghidra", CONTAINER_PATH) == ""
-        assert http.paths == ["load_program", "load_program", "switch_program"]
+        assert http.paths == ["load_program", "load_program", "switch_program", "run_analysis"]
 
     def test_two_failed_connections_name_the_address_and_not_the_samples_path(
         self, monkeypatch: pytest.MonkeyPatch

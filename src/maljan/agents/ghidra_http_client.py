@@ -14,7 +14,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import httpx
@@ -65,6 +65,40 @@ def no_program_as_error(text: str, tool: str) -> str:
     if stripped.rstrip(".").strip().lower() == NO_PROGRAM_LOADED:
         return tool_error_marker("tool_returned_error", tool, detail=stripped)
     return text
+
+
+# The arguments a Ghidra tool that takes a function by name or by address names it with.
+FUNCTION_NAME_ARGUMENTS = ("name", "function_name")
+
+# How Ghidra ends an answer about a function it was given by address alone:
+# it names the function by the name argument, which it holds as nothing.
+NULL_NAME_ENDING = ": null"
+
+
+def function_named_by_address(text: str, params: Sequence[str], kwargs: Mapping[str, Any]) -> str:
+    """``text`` with the function it speaks of named by the address the call gave.
+
+    A Ghidra tool that takes a function by name or by address (callers,
+    callees, cross-references, jump targets, the call graph, variables) is
+    sent only the arguments the call set, so a call with an address and no
+    name queries that address. Its one-line answers name the function by the
+    name argument, though: "No callees found for function: null",
+    "Function not found: null". Such an answer, from a call that gave an
+    address and no name, ends with the address instead: "No callees found
+    for function at 0x1400022c0", "Function not found at 0x1400022c0". Any
+    other answer, and any call that gave a name, is returned exactly as it
+    came.
+    """
+    names = [p for p in FUNCTION_NAME_ARGUMENTS if p in params]
+    if "address" not in params or not names:
+        return text
+    address = str(kwargs.get("address") or "").strip()
+    if not address or any(str(kwargs.get(p) or "").strip() for p in names):
+        return text
+    stripped = text.strip()
+    if "\n" in stripped or not stripped.endswith(NULL_NAME_ENDING):
+        return text
+    return f"{stripped[: -len(NULL_NAME_ENDING)]} at {address}"
 
 
 class GhidraHTTPClient:
@@ -227,6 +261,9 @@ class GhidraHTTPClient:
                 resp = await client.get(url, params=query)
             resp.raise_for_status()
             output = no_program_as_error(resp.text, tool)
+            output = function_named_by_address(
+                output, [pdef["name"] for pdef in param_defs], kwargs
+            )
         except httpx.HTTPStatusError as exc:
             output = tool_error_marker(
                 "http_status",
@@ -289,6 +326,45 @@ class GhidraHTTPClient:
                 )
         except Exception as exc:  # noqa: BLE001 — never fail an analysis over this
             logger.warning("Ghidra switch_program failed for '%s' (non-fatal): %s", name, exc)
+        await self._analyse_loaded_program(name)
+
+    async def _analyse_loaded_program(self, name: str) -> None:
+        """Run Ghidra's auto-analysis on the program a load just imported.
+
+        Every ``load_program`` imports the file afresh and puts the new program
+        in the place of any program of the same name — one an earlier pass
+        analysed included — and an import is not analysed: its functions come
+        from the file's tables, its code is not disassembled, and no call or
+        code reference is recorded. Callers, callees and cross-references are
+        then empty for every function, which reads as "nothing calls it".
+        Measured on a stored run: ``get_function_callees`` on a function the
+        decompiler showed calling nine others answered "No callees found", and
+        every ``get_xrefs_to`` named only the exception directory's entry.
+
+        Waited for as long as Ghidra takes, since the calls after the load read
+        what the analysis records. Best-effort like the switch: a failed
+        analysis is said in the log and the load's answer stands.
+        """
+        from maljan.analysis.ghidra_program import ANALYSIS_PATH, analysis_is_confirmed
+
+        try:
+            client = await self._get_http()
+            resp = await client.post(
+                f"{self.base_url}{ANALYSIS_PATH}",
+                params={"program": name},
+                json={"program": name},
+                headers={"Content-Type": "application/json"},
+                timeout=None,
+            )
+            if not analysis_is_confirmed(resp.text):
+                logger.warning(
+                    "Ghidra run_analysis did not confirm '%s' (%s) — callers, callees and "
+                    "cross-references may be empty for its functions.",
+                    name,
+                    resp.text[:160],
+                )
+        except Exception as exc:  # noqa: BLE001 — never fail an analysis over this
+            logger.warning("Ghidra run_analysis failed for '%s' (non-fatal): %s", name, exc)
 
     def _tag_description(self, path: str, description: str) -> str:
         """Prefix the description with a category tag; the text itself is kept whole."""

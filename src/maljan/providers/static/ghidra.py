@@ -228,10 +228,13 @@ def prepare_sample(
     A load Ghidra gave no answer to — a connection that failed twice, a 5xx,
     a refused token — raises too, with a sentence naming Ghidra's address and
     token rather than the samples path, and is not remembered.
-    A load that opens the program makes it the current one.
+    A load that opens the program makes it the current one, and Ghidra's
+    auto-analysis runs on it: the load imported it afresh, and an import holds
+    no call or code reference for the agent's callers, callees and
+    cross-references to read.
 
     Then, with ``preprocessing.use_sink_reachability`` on, the pre-pass:
-    auto-analysis, the whole call graph, and the functions that reach
+    the whole call graph, and the functions that reach
     sensitive sinks rendered as a hint, so the loop decompiles the malicious
     core first. The pre-pass is fail-safe: any error in it, or a binary with
     no named sink reachable, returns ``""``.
@@ -288,6 +291,11 @@ def prepare_sample(
             http.post(f"{base}{SWITCH_PATH}", params={SWITCH_PARAM: name}, json={})
         except httpx.HTTPError as exc:
             logger_.warning("Ghidra switch_program failed for '%s' (non-fatal): %s", name, exc)
+        # Nor is loading analysing. The load imported the file afresh, in the
+        # place of any program of its name an earlier pass analysed, and an
+        # import records no call or code reference: callers, callees and
+        # cross-references would be empty for every function.
+        _analyse(http, base, name, logger_)
         if not getattr(cfg.preprocessing, "use_sink_reachability", False):
             return ""
         return _sink_priority_hint(cfg, http, base, file_path, logger_)
@@ -326,12 +334,31 @@ def _load(http: Any, base: str, file_path: str, address: str, log: Any) -> Any:
     raise AssertionError("unreachable")  # pragma: no cover
 
 
+def _analyse(http: Any, base: str, name: str, log: Any) -> None:
+    """Ghidra's auto-analysis of the program just opened. Best-effort: a failure is logged."""
+    import httpx
+
+    from maljan.analysis.ghidra_program import ANALYSIS_PATH, analysis_is_confirmed
+
+    try:
+        resp = http.post(f"{base}{ANALYSIS_PATH}", params={"program": name}, json={"program": name})
+    except httpx.HTTPError as exc:
+        log.warning("Ghidra run_analysis failed for '%s' (non-fatal): %s", name, exc)
+        return
+    if not analysis_is_confirmed(getattr(resp, "text", "")):
+        log.warning(
+            "Ghidra run_analysis did not confirm '%s' (%s); callers, callees and "
+            "cross-references may be empty for its functions.",
+            name,
+            str(getattr(resp, "text", ""))[:160],
+        )
+
+
 def _sink_priority_hint(cfg: Settings, http: Any, base: str, file_path: str, log: Any) -> str:
     """The sink-reachability pre-pass over the program just opened. Fail-safe: ``""``."""
     try:
         from maljan.analysis.sink_reachability import build_priority_hint
 
-        http.post(f"{base}/run_analysis", json={}).raise_for_status()
         resp = http.get(
             f"{base}/get_full_call_graph",
             params={"format": "json", "limit": 20000},
