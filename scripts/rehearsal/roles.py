@@ -406,7 +406,10 @@ class Brain:
             return wire.Reply(text="The sample looks interesting but I will not list findings.")
         if role == "mediator":
             return wire.Reply(text="The analysts mostly agree.")
-        return wire.Reply(text='{"executive_summary": "cut off mid')
+        return wire.Reply(
+            thinking=_SECTION_THINKING if _thinks_first(role, request) else "",
+            text='{"executive_summary": "cut off mid',
+        )
 
     # ---------------------------------------------------------------- scripts
 
@@ -433,7 +436,9 @@ class Brain:
             return _as_schema_call(request, self._narrative(facts, labels))
         if role == "composer":
             text, content = self._composer(request, facts)
-            reply = _as_schema_call(request, text)
+            reply = _as_schema_call(
+                request, text, thinking=_SECTION_THINKING if _thinks_first(role, request) else ""
+            )
             section = composer_section(request)
             reply.note = {
                 "section": section,
@@ -820,6 +825,18 @@ def _without_techniques(answer: str) -> str:
 
 _FLAGGED_CLAIM = re.compile(r"\bclaims\[(\d+)\]")
 _ITEM_LABEL = re.compile(r"^([A-Z]\d+)\. ", re.MULTILINE)
+
+
+# What a composer section's answer on the Anthropic wire thinks first. Claude
+# Haiku 5.5 thinks by default, so a section's answer is a block list, thinking
+# then text, which a streamed join starts with the empty string of its opening
+# chunk: sent back by a validation retry, that string is the empty text block
+# a paid run's section was refused for.
+_SECTION_THINKING = "Weighing the section's evidence."
+
+
+def _thinks_first(role: str, request: wire.Request) -> bool:
+    return role == "composer" and request.api == "anthropic"
 
 
 def _as_schema_call(request: wire.Request, text: str, thinking: str = "") -> wire.Reply:
