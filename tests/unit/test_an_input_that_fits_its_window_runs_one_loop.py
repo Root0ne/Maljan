@@ -26,7 +26,7 @@ from maljan.agents.base_agent import BaseAnalyst
 from maljan.core.config import ChunkingConfig, Settings
 from maljan.core.container import ServiceContainer
 from maljan.llm import context_window as cw
-from maljan.llm.context_window import _load_table
+from maljan.llm.context_window import UNKNOWN_WINDOW_CHUNK_TOKENS, _load_table
 from maljan.loaders.binary_chunker import (
     _CHARS_PER_TOKEN,
     BinaryChunker,
@@ -88,10 +88,12 @@ class TestTheChunkIsTheRoom:
         _derived().chunk("triage", "D" * 10, room=lambda text: seen.append(text) or 100)
         assert seen == ["D" * 10]
 
-    def test_with_no_window_learned_the_input_is_whole(self) -> None:
-        text = "E" * 2_000_000
-        (only,) = _derived().chunk("triage", text, room=_room(None))
-        assert only.content == text
+    def test_with_no_window_learned_the_shipped_size_splits(self) -> None:
+        text = "E" * 200_000
+        shipped = UNKNOWN_WINDOW_CHUNK_TOKENS * _CHARS_PER_TOKEN
+        for room in (_room(None), None):
+            chunks = _derived(overlap_tokens=0).chunk("triage", text, room=room)
+            assert [c.char_count for c in chunks] == [shipped, shipped, 200_000 - 2 * shipped]
 
     def test_with_no_room_at_all_the_input_is_one_chunk(self) -> None:
         text = "F" * 5_000
@@ -133,9 +135,12 @@ class TestSourcesThatFitTogetherAreOneChunk:
         chunks = [_chunk("only")]
         assert joined_when_it_fits(chunks, ChunkingConfig(), _room(1)) is chunks
 
-    def test_with_no_window_learned_every_source_joins(self) -> None:
-        chunks = [_chunk("K" * 900_000), _chunk("L" * 900_000)]
-        assert len(joined_when_it_fits(chunks, ChunkingConfig(), _room(None))) == 1
+    def test_with_no_window_learned_sources_join_only_within_the_shipped_size(self) -> None:
+        shipped = UNKNOWN_WINDOW_CHUNK_TOKENS * _CHARS_PER_TOKEN
+        small = [_chunk("K" * 100), _chunk("L" * 100)]
+        assert len(joined_when_it_fits(small, ChunkingConfig(), _room(None))) == 1
+        large = [_chunk("K" * (shipped // 2)), _chunk("L" * (shipped // 2))]
+        assert joined_when_it_fits(large, ChunkingConfig(), _room(None)) is large
 
 
 # ---------------------------------------------------------------------------
@@ -242,6 +247,21 @@ class TestTheNode:
         assert "".join(c.content for c in chunks[1:]) == json.dumps(
             report, separators=(",", ":"), default=str
         )
+
+    def test_with_no_window_learned_the_node_splits_at_the_shipped_size(self) -> None:
+        agent = _agent(room=None)
+        container = _container(agent, role="network")
+        parsed = "## Network\n- 203.0.113.9:443 (TLS)\n" * 6_000
+        container.parser_registry.create.side_effect = None
+        container.parser_registry.create.return_value.parse.return_value = parsed
+        node = make_stage_agent_node(ANALYSIS_STAGE, "network", container)
+
+        node(_state(sandbox_report={"network": {"hosts": ["203.0.113.9"]}}))
+
+        agent.safe_analyze_isr.assert_not_called()
+        (chunks,) = agent.safe_analyze_isr_chunked.call_args[0]
+        assert len(chunks) == 3
+        assert all(c.char_count <= UNKNOWN_WINDOW_CHUNK_TOKENS * _CHARS_PER_TOKEN for c in chunks)
 
     def test_an_operator_figure_decides_the_split(self) -> None:
         agent = _agent(room=1_000_000)

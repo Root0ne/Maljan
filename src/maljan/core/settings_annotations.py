@@ -160,8 +160,8 @@ ANNOTATIONS: dict[str, Annotation] = {
             "what its prompt holds before the reply, less the system prompt, the pack, "
             "the tool definitions and one tool answer's share. Sources that fit a chunk "
             "together are joined, so an input that fits runs one loop; with no window "
-            "learned the input goes whole. A number set here wins. Every chunk is a "
-            "full tool loop run after the one before it."
+            "learned a chunk is the 20,000 tokens this setting shipped with. A number "
+            "set here wins. Every chunk is a full tool loop run after the one before it."
         ),
     },
     "chunking.overlap_tokens": {

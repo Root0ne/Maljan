@@ -25,7 +25,8 @@ Chunking strategy selection:
 Chunk size: what the analyst's prompt has room for, measured by the analyst
 from its own window (``BaseAnalyst._input_room_chars``) and handed in as
 ``room``. ``chunking.max_tokens_per_chunk``, where an operator set it, wins, at
-1 token ≈ 4 characters (GPT-4 average). With neither, nothing is split.
+1 token ≈ 4 characters (GPT-4 average). With no window learned, the size the
+platform shipped with (``UNKNOWN_WINDOW_CHUNK_TOKENS``).
 Sources that fit the size together are joined into one chunk
 (:func:`joined_when_it_fits`), so an analyst whose input fits runs one loop.
 
@@ -49,6 +50,7 @@ from enum import Enum, auto
 
 from maljan.core.config import ChunkingConfig
 from maljan.core.logger import logger
+from maljan.llm.context_window import UNKNOWN_WINDOW_CHUNK_TOKENS
 
 # Characters per token approximation (GPT-4 average)
 _CHARS_PER_TOKEN: int = 4
@@ -66,17 +68,20 @@ def chunk_chars(config: ChunkingConfig, text: str, room: Room | None) -> int | N
     """Characters one chunk of ``text`` may hold, or ``None`` for no bound.
 
     The operator's ``max_tokens_per_chunk`` where it is set; otherwise the
-    room the analyst's prompt has for ``text``. A room of nothing — no window
-    learned, or a prompt with no room left for any input — is no bound: there
-    is nothing to split at, and the prompt that carries the input shortens it
-    and says so (``BaseAnalyst._truncate_input``).
+    room the analyst's prompt has for ``text``. With no room measured — no
+    window learned, or no analyst to ask — the chunk size the platform shipped
+    with (``UNKNOWN_WINDOW_CHUNK_TOKENS``), as a tool answer keeps its old
+    constant on an unknown window. A prompt with no room left for any input is
+    no bound: the framing alone does not fit, there is nothing to split at,
+    and the prompt that carries the input shortens it and says so
+    (``BaseAnalyst._truncate_input``).
     """
     configured = getattr(config, "max_tokens_per_chunk", None)
     if isinstance(configured, int) and not isinstance(configured, bool) and configured > 0:
         return configured * _CHARS_PER_TOKEN
-    if room is None:
-        return None
-    chars = room(text)
+    chars = room(text) if room is not None else None
+    if chars is None:
+        return UNKNOWN_WINDOW_CHUNK_TOKENS * _CHARS_PER_TOKEN
     if isinstance(chars, int) and not isinstance(chars, bool) and chars > 0:
         return chars
     return None
@@ -207,7 +212,8 @@ class BinaryChunker:
 
         A chunk holds what :func:`chunk_chars` allows: the operator's
         ``max_tokens_per_chunk``, else the ``room`` the analyst's prompt has
-        for this text. With no bound the text is one chunk. When
+        for this text, else the unknown-window size. A prompt with no room
+        left for input is one chunk. When
         `config.skip_if_fits` is True and the text fits in a single chunk, a
         list with one chunk is returned immediately (no splitting).
 
@@ -225,7 +231,7 @@ class BinaryChunker:
         max_chars = chunk_chars(self._config, text, room)
         if max_chars is None:
             logger.debug(
-                "Chunking skipped for domain='%s': no chunk size in force, %d chars whole.",
+                "Chunking skipped for domain='%s': no room left for input, %d chars whole.",
                 domain,
                 len(text),
             )

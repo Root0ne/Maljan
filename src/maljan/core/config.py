@@ -682,8 +682,10 @@ class ChunkingConfig(BaseModel):
     # is sized from — the room an input is shortened at
     # (``BaseAnalyst._input_room_chars``, ``max_token_limit``). Sources that
     # fit that room together are one chunk, so the analyst runs one loop over
-    # all of them; with no window learned the input goes whole. A number set
-    # here wins over the derived room, for splitting and for joining.
+    # all of them. With no window learned nothing is derived: a chunk is the
+    # size this setting shipped with (``UNKNOWN_WINDOW_CHUNK_TOKENS``), as a
+    # tool answer keeps its old constant. A number set here wins over the
+    # derived room, for splitting and for joining.
     #
     # Each chunk is a full tool loop, run one after another, so a figure below
     # the room buys serial loops and nothing else: a fixed 20,000 tokens, the

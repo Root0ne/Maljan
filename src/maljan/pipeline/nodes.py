@@ -1950,7 +1950,8 @@ def input_room_of(agent: Any) -> Room:
     window leaves before the reply, less the prompt around the input and one
     tool answer's share, or the operator's ``max_token_limit``. The same bound
     an input is shortened at, so a chunk of this size reaches the model whole.
-    An agent that cannot say has no room to give: ``None``, nothing bounds it.
+    An agent that cannot say has no room to give: ``None``, and the chunker
+    uses the unknown-window size (``UNKNOWN_WINDOW_CHUNK_TOKENS``).
     """
     measure = getattr(agent, "_input_room_chars", None)
 
