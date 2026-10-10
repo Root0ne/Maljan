@@ -168,6 +168,12 @@ class RunRecord:
     scenario_params: dict[str, Any] = field(default_factory=dict)
     # The profile's stages, each with the agents it names; empty reads the run summary's.
     required_stages: dict[str, list[str]] = field(default_factory=dict)
+    # Every agent of the job's roster, read from the settings the job ran with,
+    # with the models it may call in the order it tries them.
+    agent_models: dict[str, list[str]] = field(default_factory=dict)
+    # Every model the job's one window is taken over, read from the same
+    # settings: its analysts', the judge's and the role entries' it calls.
+    window_models: list[str] = field(default_factory=list)
     # The sections the product's own bundling finds empty; ``None`` when not known.
     empty_evidence_sections: list[str] | None = None
     # The connection test's outcome, where the run asked one.
@@ -717,15 +723,6 @@ def _totals_problems(record: RunRecord, recorded: float) -> list[str]:
     return problems
 
 
-# The model group whose model each agent of the run summary's output caps runs on.
-_AGENT_GROUP = {
-    "static": "static",
-    "dynamic": "static",
-    "network": "static",
-    "judge": "judge",
-    "mediator": "mediator",
-    "reporter": "reporter",
-}
 # The run summary's word for a window nothing reported (``context_window.FALLBACK``).
 _FALLBACK_SOURCE = "fallback"
 _WINDOW_SAID = re.compile(r"(\d+)-token context window \((\w+)\)")
@@ -745,6 +742,93 @@ _CAP_SAID = (
 _OWN_TOOL_CAP = "settings.preprocessing.max_tool_output_chars"
 
 
+# How a cap the operator set is said (``context_window.output_cap_for`` and the
+# reporter's budget): used as set, so no window derivation is held to it.
+_OPERATOR_CAP_SAID = " is set to "
+
+
+def _models_of(record: RunRecord, agent: str) -> list[str]:
+    """The models ``agent`` may call, as the job's roster records them, in lower case.
+
+    The roster is read from the settings the job ran with, so a custom team's
+    agents are named by the same reading as the built-in ones. An agent the
+    roster does not name falls back to a model the settings name for it
+    (``model.<agent>``). With no roster at all nothing is known: the per-role
+    settings name no fallback model and no custom agent.
+    """
+    if not record.agent_models:
+        return []
+    chain = record.agent_models.get(agent)
+    if chain:
+        return list(dict.fromkeys(str(m).lower() for m in chain if m))
+    configured = str(record.expected.get(f"model.{agent}") or "").lower()
+    return [configured] if configured else []
+
+
+def _analysts_window_problems(
+    record: RunRecord, window: dict[str, Any], served: dict[str, int]
+) -> list[str]:
+    """The job's window against the smallest window served to the models it is taken over.
+
+    The product sizes every tool answer with one window: the smallest over
+    every model the job's analysts, the judge and the role entries it calls
+    may use (``ServiceContainer.get_context_budget``,
+    ``context_window.window_for_settings``). The run records those models
+    (``window_models``), read from the settings the job ran with.
+    """
+    tokens = int(window.get("tokens") or 0)
+    source = str(window.get("source") or "")
+    models = list(dict.fromkeys(str(m).lower() for m in record.window_models if m))
+    if not models:
+        return ["the models the job's window is taken over were not recorded"]
+    unserved = [m for m in models if m not in served]
+    if unserved:
+        return [f"no window was recorded as served to {', '.join(unserved)}"]
+    wanted = min(served[m] for m in models)
+    tightest = ", ".join(m for m in models if served[m] == wanted)
+    if source == _FALLBACK_SOURCE:
+        return [
+            f"the analysts' window is the {tokens}-token fallback "
+            f"({window.get('detail') or 'nothing reported one'}); the stub serves "
+            f"{tightest} {wanted}"
+        ]
+    if tokens != wanted:
+        return [
+            f"the analysts' window is {tokens} tokens ({source}); the smallest window the "
+            f"stub serves the job's models is {tightest} {wanted}"
+        ]
+    return []
+
+
+def _tightest_problems(
+    agent: str, cap: int, models: list[str], served: dict[str, int], outputs: dict[str, int]
+) -> list[str]:
+    """A derived cap must fit the tightest model of the agent's chain.
+
+    Each model allows the documented rule's reply (``context_window.derived_reply``):
+    a quarter of the window the stub serves it, bounded by the maximum output
+    the stub declares for it. The product derives a chain's cap from its
+    smallest member, so a cap above any member's allowance was derived from
+    the wrong one, and a fallback call to that member would be refused or
+    leave its prompt no room. Computed here from the served facts, not by the
+    product's own function, so a changed rule shows as a failure.
+    """
+    from maljan.llm.context_window import REPLY_RESERVE_DIVISOR
+
+    unknown = [m for m in models if m not in outputs]
+    if unknown:
+        return [f"no maximum output was recorded as served to {', '.join(unknown)} of {agent}"]
+    allowed = {m: min(max(1, served[m] // REPLY_RESERVE_DIVISOR), outputs[m]) for m in models}
+    tightest = min(allowed.values())
+    if cap <= tightest:
+        return []
+    which = ", ".join(f"{m} {allowed[m]}" for m in models if allowed[m] == tightest)
+    return [
+        f"{agent}'s output cap of {cap} tokens is more than the tightest model of its chain "
+        f"allows ({which})"
+    ]
+
+
 def _check_window(record: RunRecord) -> Check:
     """The window the product sized each model with is the window the stub serves it.
 
@@ -753,6 +837,10 @@ def _check_window(record: RunRecord) -> Check:
     derivation. A window the product fell back to, or one other than the
     stub's documented or named window, sizes the paid run's prompts and caps
     for a model that does not exist.
+
+    Each capped agent's models come from the job's roster (``agent_models``),
+    so any team the operator configures is checked by the same rule; an agent
+    whose models or served windows were not recorded fails for that reason.
     """
     name = "window in force as the provider serves it"
     served = {
@@ -762,20 +850,15 @@ def _check_window(record: RunRecord) -> Check:
     if not served:
         return Check(name, False, "the windows the stub served were not recorded")
     problems: list[str] = []
-
-    def model_of(group: str) -> str:
-        configured = str(record.expected.get(f"model.{group}") or "").lower()
-        if configured in served:
-            return configured
-        # Nothing configured to compare: the model the group's calls carried.
-        carried = Counter(
-            str(e.get("model") or "").lower()
-            for e in record.stub_log
-            if e.get("role") in ROLE_GROUPS.get(group, set())
-        )
-        return carried.most_common(1)[0][0] if carried else ""
-
-    analyst = model_of("static")
+    outputs = {
+        str(k).lower(): int(v)
+        for k, v in (record.scenario_params.get("served_outputs") or {}).items()
+    }
+    if not record.agent_models:
+        # Without the roster no agent's models are known from the job itself;
+        # a fallback to the per-role settings would leave every fallback model
+        # and every custom agent unchecked.
+        problems.append("the job's roster could not be read: no agent's models are known")
     truncation = record.run_summary.get("truncation") or {}
     window = truncation.get("context_window") if isinstance(truncation, dict) else None
     said = ""
@@ -783,23 +866,11 @@ def _check_window(record: RunRecord) -> Check:
         if not record.expected.get(_OWN_TOOL_CAP):
             problems.append("the run summary records no window the analysts were sized with")
     else:
-        tokens = int(window.get("tokens") or 0)
-        source = str(window.get("source") or "")
-        wanted = served.get(analyst)
-        said = f"{analyst} sized at {tokens} tokens ({source})"
-        if source == _FALLBACK_SOURCE:
-            problems.append(
-                f"the analysts' window is the {tokens}-token fallback "
-                f"({window.get('detail') or 'nothing reported one'}); the stub serves "
-                f"{analyst or 'their model'} {wanted if wanted else 'an unrecorded window'}"
-            )
-        elif wanted is None:
-            problems.append(f"no window was recorded as served to {analyst or 'the analysts'}")
-        elif tokens != wanted:
-            problems.append(
-                f"the analysts' window is {tokens} tokens ({source}); the stub serves "
-                f"{analyst} {wanted}"
-            )
+        problems += _analysts_window_problems(record, window, served)
+        said = (
+            f"the job's models sized at {int(window.get('tokens') or 0)} tokens "
+            f"({window.get('source') or ''})"
+        )
     generation = record.run_summary.get("generation")
     caps = generation.get("output_caps") if isinstance(generation, dict) else None
     unlearned: list[str] = []
@@ -815,28 +886,30 @@ def _check_window(record: RunRecord) -> Check:
         if not isinstance(cap, int) or isinstance(cap, bool) or not isinstance(derivation, str):
             problems.append(f"{agent}'s output cap cannot be read: {entry!r}")
             continue
-        group = _AGENT_GROUP.get(str(agent))
-        if group is None and record.expected.get(f"model.{agent}"):
-            group = str(agent)
-        if group is None:
+        models = _models_of(record, str(agent))
+        if not models:
             problems.append(
-                f"{agent} is an agent the window check does not know (its cap: {derivation!r})"
+                f"no model is recorded for {agent}: neither the job's roster nor its "
+                f"settings name one (its cap: {derivation!r})"
             )
             continue
-        capped = model_of(group)
-        if capped not in served:
+        unserved = [m for m in models if m not in served]
+        if unserved:
             problems.append(
-                f"no window was recorded as served to {capped or 'the model'} of {agent} "
+                f"no window was recorded as served to {', '.join(unserved)} of {agent} "
                 f"(its cap: {derivation!r})"
             )
             continue
-        if cap >= served[capped]:
-            # The cap the model was built with must leave the prompt room in
-            # the window the provider serves it.
-            problems.append(
-                f"{agent}'s output cap of {cap} tokens does not fit inside the "
-                f"{served[capped]}-token window the stub serves {capped}"
-            )
+        for capped in models:
+            if cap >= served[capped]:
+                # The cap the model was built with must leave the prompt room in
+                # the window the provider serves it.
+                problems.append(
+                    f"{agent}'s output cap of {cap} tokens does not fit inside the "
+                    f"{served[capped]}-token window the stub serves {capped}"
+                )
+        if _OPERATOR_CAP_SAID not in derivation:
+            problems += _tightest_problems(str(agent), cap, models, served, outputs)
         # The sentence must state the cap the field holds ("derived: 8192 tokens — …").
         if not re.search(rf"(?<!\d){cap} tokens\b", derivation) or not any(
             said in derivation for said in _CAP_SAID
@@ -852,10 +925,11 @@ def _check_window(record: RunRecord) -> Check:
         tokens, source = int(found.group(1)), found.group(2)
         if source == _FALLBACK_SOURCE:
             unlearned.append(str(agent))
-        elif tokens != served[capped]:
+        elif all(tokens != served[m] for m in models):
+            windows = ", ".join(f"{m} {served[m]}" for m in models)
             problems.append(
                 f"{agent}'s output cap was derived from a {tokens}-token window ({source}); "
-                f"the stub serves {capped} {served[capped]}"
+                f"the stub serves {windows}"
             )
     if unlearned:
         problems.append(f"output caps derived from no window: {', '.join(unlearned)}")
@@ -897,29 +971,144 @@ def _body_text(record: RunRecord) -> str:
     )
 
 
-def _dropped_text(record: RunRecord) -> str:
+def _dropped_rows(record: RunRecord) -> list[str]:
+    """Every row the run records a dropped claim or value in, each normalised."""
     negotiation = record.run_summary.get("negotiation") or {}
     validation = record.run_summary.get("validation") or {}
     rows = [str(r) for r in negotiation.get("dropped_claims") or []]
     rows += [json.dumps(r, ensure_ascii=False) for r in validation.get("retry_drops") or []]
-    return _normal(" ".join(rows))
+    return [_normal(r) for r in rows]
+
+
+def _usage_key(row: dict[str, Any]) -> tuple[int, int, int]:
+    """A usage record's reported usage, as ``_record_problems`` pairs it with a stub call."""
+    return (
+        int(row.get("input_tokens") or 0),
+        int(row.get("output_tokens") or 0),
+        int(row.get("cached_input_tokens") or 0),
+    )
+
+
+def answer_writers(record: RunRecord) -> tuple[dict[int, set[str]], list[str]]:
+    """The agent that wrote each analyst answer the stub logged, and what cannot be told.
+
+    The stub cannot read the agent from a request: two analysts of one role
+    get the same system prompt. The product names it on the usage record of
+    every call (``model_usage`` ``agent``). Every answered call, tool steps
+    included, is paired with one record of its own, one to one in the stub
+    log's order, by the usage the stub reported, as the token check pairs
+    them. Where records with that usage name several agents, the record sent
+    closest to the moment the stub received the call is its own
+    (``sent_at`` against the call's ``at``), so a tool step of one analyst is
+    never held to another's answer. A call no timing can pair is shared: it
+    is narrowed to the agents with an answer in force, and attributed to all
+    of them only when every answer with that usage wrote the same claims,
+    because then each of them wrote those claims. Otherwise the call's
+    writer is unknown, and that is a problem.
+    """
+    from maljan.llm.transient import FAILED_ATTEMPT_CALL
+
+    pools: dict[tuple[int, int, int], list[dict[str, Any]]] = {}
+    for row in usage_records(record):
+        if str(row.get("call") or "") != FAILED_ATTEMPT_CALL:
+            pools.setdefault(_usage_key(row), []).append(row)
+    sharers = {key: {str(r.get("agent") or "") for r in rows} - {""} for key, rows in pools.items()}
+    paired: dict[int, set[str] | None] = {}
+    shared: set[int] = set()
+    shared_keys: set[tuple[int, int, int]] = set()
+    answers: list[tuple[tuple[int, int, int], dict[str, Any]]] = []
+    for entry in _billed(record):
+        key = (
+            int(entry.get("input_tokens") or 0),
+            int(entry.get("output_tokens") or 0),
+            int(entry.get("cache_read_tokens") or 0),
+        )
+        n = int(entry.get("n") or 0)
+        if entry.get("answer") in ("final", "revision"):
+            answers.append((key, entry))
+        pool = pools.get(key) or []
+        if not pool:
+            paired[n] = None
+            continue
+        agents = {str(r.get("agent") or "") for r in pool} - {""}
+        at = _figure(entry.get("at"))
+        sent = [_figure(r.get("sent_at")) for r in pool]
+        if key in shared_keys:
+            # Once one call of a usage could not be paired, no later one can be:
+            # the record it took was a guess.
+            pool.pop(0)
+            shared.add(n)
+            paired[n] = None
+            continue
+        if len(agents) <= 1:
+            row = pool.pop(0)
+        elif at is not None and all(s is not None for s in sent):
+            row = pool.pop(min(range(len(pool)), key=lambda i: abs(float(sent[i] or 0) - at)))
+        else:
+            pool.pop(0)
+            shared.add(n)
+            shared_keys.add(key)
+            paired[n] = None
+            continue
+        agent = str(row.get("agent") or "")
+        paired[n] = {agent} if agent else None
+    claims_by_key: dict[tuple[int, int, int], set[tuple[str, ...]]] = {}
+    for key, entry in answers:
+        claims_by_key.setdefault(key, set()).add(
+            tuple(_normal(c) for c in entry.get("claims") or [])
+        )
+    writers: dict[int, set[str]] = {}
+    problems: list[str] = []
+    for key, entry in answers:
+        n = int(entry.get("n") or 0)
+        label = f"call {entry.get('n', '?')} ({entry.get('role', '')})"
+        if n not in shared:
+            named = paired.get(n)
+            if named:
+                writers[n] = named
+            else:
+                problems.append(f"{label}: no usage record names the agent that wrote its answer")
+            continue
+        everyone = sharers.get(key, set())
+        named = {a for a in everyone if a in record.claims_in_force}
+        if not named:
+            problems.append(
+                f"{label}: its usage is shared by {', '.join(sorted(everyone))}, none of "
+                "which has an answer in force, so its writer cannot be told"
+            )
+        elif len(named) == 1 or len(claims_by_key[key]) == 1:
+            writers[n] = named
+        else:
+            problems.append(
+                f"{label}: its usage is shared by {', '.join(sorted(named))}, which wrote "
+                "different claims, so its writer cannot be told"
+            )
+    return writers, problems
 
 
 def _check_claims(record: RunRecord) -> Check:
     if not record.claims_in_force:
         return Check("no claim lost on the way to the report", False, "no answer in force")
-    problems = []
-    in_force = {_normal(c) for claims in record.claims_in_force.values() for c in claims}
-    dropped = _dropped_text(record)
+    writers, problems = answer_writers(record)
+    in_force = {
+        agent: {_normal(c) for c in claims} for agent, claims in record.claims_in_force.items()
+    }
+    dropped = _dropped_rows(record)
     for entry in _answered(record):
         if entry.get("answer") not in ("final", "revision"):
             continue
-        for claim in entry.get("claims") or []:
-            text = _normal(claim)
-            if text and text not in in_force and text not in dropped:
-                problems.append(
-                    f"written by the model, then neither in force nor dropped: {claim[:70]}"
-                )
+        for agent in sorted(writers.get(int(entry.get("n") or 0), set())):
+            held = in_force.get(agent, set())
+            # The rows that name this agent by its key, as a whole word.
+            named = re.compile(rf"(?<![a-z0-9_]){re.escape(agent.lower())}(?![a-z0-9_])")
+            mine = [row for row in dropped if named.search(row)]
+            for claim in entry.get("claims") or []:
+                text = _normal(claim)
+                if text and text not in held and not any(text in row for row in mine):
+                    problems.append(
+                        f"written by the model for {agent}, then neither in its answer in "
+                        f"force nor dropped: {claim[:70]}"
+                    )
     body = _body_text(record)
     total = 0
     for agent, claims in record.claims_in_force.items():

@@ -750,21 +750,44 @@ _ORIGINAL_CLAIM = re.compile(
 )
 
 
+# A claim block as an answer writes it, which is how a later round's revision
+# request shows the answer in force: the revision the analyst wrote before.
+_WRITTEN_CLAIM = re.compile(
+    r"^CLAIM(?: \d+)?:[ \t]*(?P<claim>.+?)[ \t]*$"
+    r"(?:\nEVIDENCE:[ \t]*(?P<evidence>.*?)[ \t]*$)?"
+    r"(?:\nCONFIDENCE:[ \t]*(?P<confidence>[0-9.]+)[ \t]*$)?"
+    r"(?:\nTECHNIQUE:[ \t]*(?P<tids>.*?)[ \t]*$)?",
+    re.MULTILINE,
+)
+
+
 def _original_claims(text: str) -> list[str]:
-    """The ``CLAIM`` blocks of the analyst's own report, read from a revision request."""
+    """The ``CLAIM`` blocks of the analyst's own report, read from a revision request.
+
+    The first round shows the report as numbered lines (``Claim 1: … |
+    Evidence: … | Confidence: …``); a later round shows the answer in force as
+    the analyst wrote it, in ``CLAIM:`` blocks. Both are read, so a revision
+    restates every claim of the answer in force in every round.
+    """
     head, marker, tail = text.partition("YOUR ORIGINAL REPORT:")
     if not marker:
         return []
     own = tail.split("PEER REPORTS:", 1)[0]
+    rows = [
+        (m.group("claim"), m.group("evidence"), m.group("confidence"), m.group("tids"))
+        for m in _ORIGINAL_CLAIM.finditer(own)
+    ] or [
+        (m.group("claim"), m.group("evidence"), m.group("confidence"), m.group("tids"))
+        for m in _WRITTEN_CLAIM.finditer(own)
+    ]
     blocks = []
-    for found in _ORIGINAL_CLAIM.finditer(own):
-        claim = found.group("claim").rstrip(".")
-        evidence = found.group("evidence")
-        blocks.append(
-            f"CLAIM: {claim}.\nEVIDENCE: {evidence}\n"
-            f"CONFIDENCE: {found.group('confidence')}\n"
-            f"TECHNIQUE: {found.group('tids') or 'NONE'}\n---"
-        )
+    for claim, evidence, confidence, tids in rows:
+        # A line the report did not show is not made up: only what it showed is restated.
+        lines = [f"CLAIM: {claim.rstrip('.')}."]
+        lines += [f"EVIDENCE: {evidence}"] if evidence is not None else []
+        lines += [f"CONFIDENCE: {confidence}"] if confidence is not None else []
+        lines += [f"TECHNIQUE: {tids or 'NONE'}", "---"]
+        blocks.append("\n".join(lines))
     return blocks
 
 

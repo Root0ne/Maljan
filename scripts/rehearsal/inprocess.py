@@ -1,6 +1,7 @@
 """One rehearsal run inside this process: the stub model, the real pipeline, no Docker.
 
-The pipeline is ``MaljanApp`` with the default profile, the mock sandbox, the
+The pipeline is ``MaljanApp`` with the profile its settings name (the default
+one unless ``Rehearsal.extra`` names a team of its own), the mock sandbox, the
 repository's own tool sidecars (started as the worker starts them, over
 stdio), and every model call going to the stub on a loopback port through the
 settings a deployment would set: ``llm.openai.base_url`` or
@@ -61,6 +62,9 @@ JUDGE_EFFORT = {"anthropic": "medium", "openai": "max"}
 DEADLINE_HIT_S = 12.0
 # How long a run stopped at its deadline is given for its in-flight work to see the stop.
 STRAGGLER_WAIT_S = 5.0
+# The transcript roles whose claims are an analyst's answer: its own answer
+# and a debate's revision of it (``pipeline.events.emit_agent_message``).
+ANSWER_ROLES = (None, "analyst", "reviser")
 
 
 @dataclass
@@ -181,10 +185,15 @@ def _as_dict(value: Any) -> dict[str, Any]:
 
 
 def claims_from_events(events: list[dict[str, Any]]) -> dict[str, list[str]]:
-    """Each analyst's answer in force: the claims of the last message it said with claims."""
+    """Each analyst's answer in force: the claims of the last message it said with claims.
+
+    A debate's revision (``role`` ``reviser``) replaces the answer in force, or
+    says the one in force stands, so its claims are the ones the report
+    numbers and the body cites by label.
+    """
     out: dict[str, list[str]] = {}
     for event in events:
-        if event.get("type") != "agent_message" or event.get("role") not in (None, "analyst"):
+        if event.get("type") != "agent_message" or event.get("role") not in ANSWER_ROLES:
             continue
         claims = event.get("claims")
         speaker = str(event.get("speaker") or "")
@@ -355,9 +364,19 @@ async def rehearse(rehearsal: Rehearsal) -> RunRecord:
                 )
             except Exception:  # noqa: BLE001 — sections nothing can vouch for are not excused
                 empty = None
-        required = _required_stages()
+        required = _required_stages(settings)
+        roster = agent_models(settings)
+        windowed = window_models(settings)
     finally:
         kept.restore()
+    # Every model the run may call: the rehearsal's own and every model of
+    # the job's roster and window, so an agent with an entry of its own is
+    # held to the facts its model is served with.
+    served = sorted(
+        set(MODELS[rehearsal.provider].values())
+        | {m for chain in roster.values() for m in chain}
+        | set(windowed)
+    )
     return RunRecord(
         scenario=rehearsal.scenario,
         api=rehearsal.provider,
@@ -374,6 +393,8 @@ async def rehearse(rehearsal: Rehearsal) -> RunRecord:
         stub_log=log,
         expected=expected_for(rehearsal),
         required_stages=required,
+        agent_models=roster,
+        window_models=windowed,
         empty_evidence_sections=empty,
         probe={"ok": probe_ok, "detail": probe_detail, "calls": len(probe_calls)},
         scenario_params={
@@ -383,19 +404,90 @@ async def rehearse(rehearsal: Rehearsal) -> RunRecord:
             "deadline_in": brain.deadline_in,
             "slow_roles": sorted(brain.slow_roles),
             "mode": "in_process",
-            "served_windows": {
-                model: state.facts(model).window
-                for model in sorted(set(MODELS[rehearsal.provider].values()))
-            },
+            "served_windows": {m: state.facts(m).window for m in served},
+            "served_outputs": {m: state.facts(m).max_output for m in served},
         },
         elapsed_s=elapsed,
     )
 
 
-def _required_stages() -> dict[str, list[str]]:
-    """The default profile's stages, each with the agents it names."""
+def _required_stages(settings: Any) -> dict[str, list[str]]:
+    """The stages of the profile the run's settings name, each with the agents it names."""
     from maljan.agents.composition import active_profile
-    from maljan.core.settings_overrides import build_settings
 
-    profile = active_profile(build_settings({}))
+    profile = active_profile(settings)
     return {str(stage.key): [str(a) for a in stage.agents] for stage in profile.stages}
+
+
+def agent_models(settings: Any) -> dict[str, list[str]]:
+    """Every agent of the job's roster with the models it may call, in the order it tries them.
+
+    The roster is what the settings name: every agent definition, every agent
+    of the active profile's analysis stages and the model-calling roles that
+    are no definition (``ROLE_ENTRY_KEYS``). Each agent's models are the
+    product's own reading (``assignment_chain_for``), on the role its output
+    cap is derived for: the judge's for the judge and the reporter
+    (``ServiceContainer._built_cap`` and ``_report_output_cap``), the
+    expert's for every other agent. An agent whose models cannot be read is
+    left out, so the checks that need them fail for that agent.
+    """
+    from maljan.agents.composition import analyst_keys
+    from maljan.core.config import JUDGE_AGENT_KEY, REPORTER_AGENT_KEY, ROLE_ENTRY_KEYS
+    from maljan.core.model_assignments import assignment_chain_for
+
+    roster = [
+        *(str(key) for key in settings.agents.definitions),
+        *analyst_keys(settings),
+        *ROLE_ENTRY_KEYS,
+    ]
+    out: dict[str, list[str]] = {}
+    for agent in dict.fromkeys(roster):
+        role = "judge" if agent in (JUDGE_AGENT_KEY, REPORTER_AGENT_KEY) else "expert"
+        try:
+            chain = assignment_chain_for(settings, agent, role=role)
+        except Exception:  # noqa: BLE001 — an agent nobody can read is a gap the checks name
+            continue
+        models = [str(a.model) for a in chain if str(a.model or "")]
+        if models:
+            out[agent] = models
+    return out
+
+
+def window_models(settings: Any) -> list[str]:
+    """Every model the job's one window is taken over, read from the settings.
+
+    The agents whose tool answers that one window sizes
+    (``ServiceContainer.get_context_budget``; the judge's own tool calls take
+    it too, ``JudgeAgent._context_budget``): the active profile's analysts and
+    the role entries the run calls, each with every model it may call on the
+    expert role (``assignments_for``), and the judge with every model it
+    really calls, read on the judge role as ``get_judge_llm`` builds it. The
+    product's own budget reads the judge on the expert role, so a global
+    judge model with a smaller window than the expert's makes this check
+    fail rather than agree with it.
+
+    The mediator counts whenever the profile has a debate stage, and the
+    function summariser whenever it is on, each with or without an entry of
+    its own: both are built on the expert role (``get_mediator_llm``,
+    ``get_summarizer_llm``, ``fallback_role="expert"``), so with no entry they
+    call the global expert model, which a team whose analysts all have
+    entries would otherwise leave out. Empty when the settings cannot
+    answer, so the window check fails.
+    """
+    from maljan.agents.composition import active_profile, analyst_keys, role_entries_called
+    from maljan.core.config import JUDGE_AGENT_KEY, MEDIATOR_AGENT_KEY, SUMMARIZER_AGENT_KEY
+    from maljan.core.model_assignments import assignment_chain_for, assignments_for
+
+    agents = [*analyst_keys(settings), *role_entries_called(settings)]
+    if any(getattr(stage, "kind", "") == "debate" for stage in active_profile(settings).stages):
+        agents.append(MEDIATOR_AGENT_KEY)
+    if settings.preprocessing.use_function_summarizer:
+        agents.append(SUMMARIZER_AGENT_KEY)
+    try:
+        chain = [
+            *assignments_for(settings, agents),
+            *assignment_chain_for(settings, JUDGE_AGENT_KEY, role="judge"),
+        ]
+    except Exception:  # noqa: BLE001 — models nobody can read are not assumed
+        return []
+    return list(dict.fromkeys(str(a.model) for a in chain if str(a.model or "")))

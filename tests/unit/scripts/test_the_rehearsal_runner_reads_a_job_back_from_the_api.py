@@ -19,16 +19,23 @@ from typing import Any
 import httpx
 import pytest
 from scripts.rehearsal.checklist import RunRecord
+from scripts.rehearsal.inprocess import claims_from_events
 from scripts.rehearsal.run import (
     SettingsGuard,
     StackClient,
     describe_changes,
     gate_changes,
     gate_expected,
+    gate_models,
     harness_changes,
+    job_window_models,
     profile_stages,
     record_from_stack,
     restore_snapshot,
+    roster_models,
+    run_models,
+    served_outputs,
+    served_windows,
     third_party_off,
     write_results,
 )
@@ -241,6 +248,215 @@ def test_the_profile_s_stages_are_read_from_the_stack_s_settings() -> None:
     stages = profile_stages(_values())
     assert list(stages) == ["triage_pack", "analysis", "debate", "verdict", "report"]
     assert stages["analysis"] == ["static", "dynamic", "network"]
+
+
+# A team of the operator's own: a generic agent in a stage of its own before
+# the built-in static analyst, and an agent with a model entry and a fallback.
+CUSTOM_TEAM: dict[str, Any] = {
+    "core.agents.definitions": {
+        "value": {
+            "my_triage": {"role": "generic", "label": "Triage", "prompt": "Read the sample."},
+            "my_reverser": {"role": "generic", "label": "Reverser", "prompt": "Read the code."},
+        },
+        "source": "ui",
+    },
+    "core.agents.profiles": {
+        "value": {
+            "mine": {
+                "label": "Mine",
+                "stages": [
+                    {"key": "triage_pack", "kind": "triage", "inject_upstream": "none"},
+                    {"key": "first", "kind": "analysis", "agents": ["my_triage"]},
+                    {
+                        "key": "second",
+                        "kind": "analysis",
+                        "agents": ["static", "my_reverser"],
+                        "depends_on": ["first"],
+                    },
+                    {"key": "debate", "kind": "debate", "depends_on": ["second"]},
+                    {"key": "verdict", "kind": "verdict", "agents": ["judge"]},
+                    {"key": "report", "kind": "report", "agents": ["reporter"]},
+                ],
+            }
+        },
+        "source": "ui",
+    },
+    "core.agents.profile": {"value": "mine", "source": "ui"},
+}
+
+
+class TestTheJobsRoster:
+    """The roster the window check reads is the job's own, whatever team it runs."""
+
+    def _custom(self) -> dict[str, dict[str, Any]]:
+        values = _values(**CUSTOM_TEAM)
+        values["core.llm.agents"]["value"]["my_reverser"] = {
+            "provider": "openai",
+            "model": "acme-reverser",
+            "fallbacks": [{"provider": "openai", "model": "acme-reverser-small"}],
+        }
+        return values
+
+    def test_every_agent_of_a_custom_team_is_named_with_its_models(self) -> None:
+        roster = roster_models(self._custom())
+        assert roster["my_triage"] == ["deepseek-v4-flash"]
+        assert roster["static"] == ["deepseek-v4-flash"]
+        assert roster["my_reverser"] == ["acme-reverser", "acme-reverser-small"]
+        assert roster["judge"] == ["deepseek-v4-pro", "deepseek-v4-flash"]
+        assert roster["reporter"] == ["deepseek-v4-flash"]
+        assert roster["mediator"] == ["deepseek-v4-flash"]
+
+    def test_the_rehearsal_s_changes_are_read_over_the_stack_s_settings(self) -> None:
+        changes = {"core.llm.openai.expert_model": "acme-rehearsed"}
+        roster = roster_models(self._custom(), changes)
+        assert roster["my_triage"] == ["acme-rehearsed"]
+        assert roster["my_reverser"] == ["acme-reverser", "acme-reverser-small"]
+
+    def test_settings_nobody_can_read_name_no_roster(self) -> None:
+        broken = _values(**{"core.agents.profile": {"value": "no_such_team", "source": "ui"}})
+        assert roster_models(broken) == {}
+
+    def test_every_roster_model_s_served_window_is_recorded(self) -> None:
+        roster = roster_models(self._custom())
+        windows = served_windows(
+            {"model.static": "deepseek-v4-flash"},
+            None,
+            None,
+            {"acme-reverser": 200_000, "acme-reverser-small": 100_000},
+            roster,
+        )
+        assert windows["acme-reverser"] == 200_000
+        assert windows["acme-reverser-small"] == 100_000
+        assert {"deepseek-v4-flash", "deepseek-v4-pro"} <= set(windows)
+
+    def test_the_job_s_window_is_taken_over_its_analysts_the_judge_and_its_entries(self) -> None:
+        """The judge's entry and its fallback count, the reporter's model does not."""
+        windowed = job_window_models(self._custom())
+        assert windowed == [
+            "deepseek-v4-flash",
+            "acme-reverser",
+            "acme-reverser-small",
+            "deepseek-v4-pro",
+        ]
+        mediator = self._custom()
+        mediator["core.llm.agents"]["value"]["mediator"] = {
+            "provider": "openai",
+            "model": "acme-mediator",
+        }
+        assert "acme-mediator" in job_window_models(mediator)
+
+    def test_the_judge_counts_for_the_window_with_the_model_it_really_calls(self) -> None:
+        """No judge entry: the judge calls the global judge model, not the expert one."""
+        values = _values(
+            **{
+                "core.llm.openai.judge_model": {"value": "acme-small-judge", "source": "ui"},
+                "core.llm.agents": {"value": {}, "source": "ui"},
+            }
+        )
+        assert roster_models(values)["judge"] == ["acme-small-judge"]
+        assert job_window_models(values) == ["deepseek-v4-flash", "acme-small-judge"]
+
+    def test_the_mediator_and_summariser_count_on_the_global_model_without_entries(self) -> None:
+        """Every analyst on an entry of its own: the debate's mediator still calls the expert."""
+        own = {
+            agent: {"provider": "openai", "model": f"acme-{agent}"}
+            for agent in ("static", "dynamic", "network")
+        }
+        values = _values(
+            **{
+                "core.llm.openai.expert_model": {"value": "acme-global", "source": "ui"},
+                "core.llm.agents": {"value": own, "source": "ui"},
+            }
+        )
+        windowed = job_window_models(values)
+        assert {"acme-static", "acme-dynamic", "acme-network"} <= set(windowed)
+        assert "acme-global" in windowed
+        no_debate = _values(
+            **CUSTOM_TEAM,
+            **{
+                "core.llm.openai.expert_model": {"value": "acme-global", "source": "ui"},
+                "core.llm.openai.judge_model": {"value": "acme-judge", "source": "ui"},
+                "core.llm.agents": {"value": own, "source": "ui"},
+            },
+        )
+        profiles = no_debate["core.agents.profiles"]["value"]["mine"]["stages"]
+        no_debate["core.agents.profiles"]["value"]["mine"]["stages"] = [
+            {**stage, "depends_on": ["second"]} if stage["key"] == "verdict" else stage
+            for stage in profiles
+            if stage["kind"] != "debate"
+        ]
+        # my_triage and my_reverser have no entry, so the global model stays in
+        # through them; with them on entries too it leaves with the debate.
+        no_debate["core.llm.agents"]["value"] = {
+            **own,
+            "my_triage": {"provider": "openai", "model": "acme-my-triage"},
+            "my_reverser": {"provider": "openai", "model": "acme-my-reverser"},
+        }
+        assert "acme-global" not in job_window_models(no_debate)
+        summarising = {
+            **no_debate,
+            "core.preprocessing.use_function_summarizer": {"value": True, "source": "ui"},
+        }
+        assert "acme-global" in job_window_models(summarising)
+
+    def test_unreadable_settings_name_no_window_model(self) -> None:
+        broken = _values(**{"core.agents.profile": {"value": "no_such_team", "source": "ui"}})
+        assert job_window_models(broken) == []
+
+    def test_the_guessed_window_refusal_and_the_stub_vet_every_roster_model(self) -> None:
+        values = self._custom()
+        expected = {"model.static": "deepseek-v4-flash"}
+        roster = roster_models(values)
+        assert {"acme-reverser", "acme-reverser-small"} <= set(
+            gate_models(values, expected, roster)
+        )
+        everything = run_models(expected, roster, job_window_models(values))
+        assert {"acme-reverser", "acme-reverser-small", "deepseek-v4-pro"} <= set(everything)
+
+    def test_the_guessed_window_refusal_vets_every_window_model(self) -> None:
+        vetted = gate_models(_values(), {}, None, ["acme-window-only"])
+        assert "acme-window-only" in vetted
+
+    def test_every_roster_model_s_served_maximum_output_is_recorded(self) -> None:
+        roster = roster_models(self._custom())
+        outputs = served_outputs({"model.static": "deepseek-v4-flash"}, None, None, {}, roster)
+        assert set(outputs) == set(served_windows({}, None, None, {}, roster))
+        assert all(isinstance(v, int) and v > 0 for v in outputs.values())
+
+
+def test_the_in_process_run_requires_the_stages_of_its_own_profile() -> None:
+    from scripts.rehearsal.inprocess import _required_stages
+
+    from maljan.core.settings_overrides import build_settings
+
+    core = {
+        key.removeprefix("core."): row["value"]
+        for key, row in _values(**CUSTOM_TEAM).items()
+        if key.startswith("core.") and row.get("value") is not None
+    }
+    stages = _required_stages(build_settings(core))
+    assert stages["first"] == ["my_triage"]
+    assert stages["second"] == ["static", "my_reverser"]
+    assert "analysis" not in stages
+
+
+def test_a_revision_s_claims_are_the_answer_in_force() -> None:
+    events = [
+        {
+            "type": "agent_message",
+            "role": "analyst",
+            "speaker": "my_triage",
+            "claims": [{"claim": "It talks HTTP."}, {"claim": "It reads pe_info."}],
+        },
+        {"type": "agent_message", "role": "negotiator", "speaker": "room", "claims": []},
+        {
+            "type": "agent_message",
+            "role": "reviser",
+            "speaker": "my_triage",
+            "claims": [{"claim": "It talks HTTP."}],
+        },
+    ]
+    assert claims_from_events(events) == {"my_triage": ["It talks HTTP."]}
 
 
 def test_the_gate_sets_a_ceiling_only_where_none_is_set() -> None:

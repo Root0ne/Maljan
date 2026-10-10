@@ -262,6 +262,29 @@ class TestTheAnalyst:
         assert len(blocks) == 2
         assert "TECHNIQUE: T1071.001" in blocks[0] and "TECHNIQUE: NONE" in blocks[1]
 
+    def test_a_later_round_s_revision_restates_the_answer_in_force_as_written(self) -> None:
+        """A later round shows the revision in force in ``CLAIM:`` blocks; every claim stays."""
+        written = (
+            "CLAIM: It talks HTTP.\nEVIDENCE: [ev_0006] iocs\nCONFIDENCE: 0.80\n"
+            "TECHNIQUE: T1071.001\n---\n"
+            "CLAIM: The pe_info answer records what it read from the sample.\n"
+            'EVIDENCE: [ev_0026] pe_info: { "machine": 34404 }\nCONFIDENCE: 0.60\n'
+            "TECHNIQUE: NONE\n---\n"
+            "CLAIM: It is a PE.\nEVIDENCE: [ev_0001] identity\nCONFIDENCE: 0.60\n"
+            "TECHNIQUE: NONE\n---\nDISPUTES: NONE\n"
+        )
+        text = (
+            f"YOUR ORIGINAL REPORT:\n{written}\nPEER REPORTS:\nOTHER REPORT:\n"
+            "CLAIM: Other.\nEVIDENCE: [ev_0009] x\nCONFIDENCE: 0.5\nTECHNIQUE: NONE\n---\n"
+        )
+        blocks = _original_claims(text)
+        assert claims_in("\n".join(blocks)) == claims_in(written)
+        assert "EVIDENCE: [ev_0026] pe_info" in blocks[1]
+        assert "CONFIDENCE: 0.80" in blocks[0] and "TECHNIQUE: T1071.001" in blocks[0]
+        role, reply, _fault = Brain().answer(_request(_REVISION_ISR_FRAMING, text))
+        assert role == "revision"
+        assert reply.note["claims"] == claims_in(written)
+
 
 class TestTheJudgeAndTheReport:
     def test_the_mediator_blocks_once_then_agrees(self) -> None:

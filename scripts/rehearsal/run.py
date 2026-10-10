@@ -250,12 +250,23 @@ def _entries(agents: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
-def gate_models(values: dict[str, dict[str, Any]], expected: dict[str, Any]) -> list[str]:
-    """Every model the operator's configuration can call: each role's, entry's and fallback's."""
+def gate_models(
+    values: dict[str, dict[str, Any]],
+    expected: dict[str, Any],
+    roster: dict[str, list[str]] | None = None,
+    windowed: list[str] | None = None,
+) -> list[str]:
+    """Every model the operator's configuration can call.
+
+    Each role's, entry's and fallback's, every model of the job's roster
+    (``roster_models``) and every model the job's window is taken over
+    (``job_window_models``): a custom agent with no entry runs on a role's
+    model, and the window it is served with is vetted like any other.
+    """
     agents = _value(values, "core.llm.agents", {}) or {}
     models = [str(v) for k, v in expected.items() if k.startswith("model.") and v]
     models += [str(e.get("model")) for e in _entries(agents) if e.get("model")]
-    return sorted(set(models))
+    return sorted(set(models) | set(run_models({}, roster, windowed)))
 
 
 def parse_windows(given: list[str] | None) -> tuple[int | None, dict[str, int]]:
@@ -305,21 +316,67 @@ def resolve_windows(models: list[str], bare: int | None, named: dict[str, int]) 
     return windows
 
 
+def run_models(
+    expected: dict[str, Any],
+    roster: dict[str, list[str]] | None = None,
+    windowed: list[str] | None = None,
+) -> list[str]:
+    """Every model the run may call: the settings' own per role, the roster's and the window's."""
+    return sorted(
+        {str(v) for k, v in expected.items() if k.startswith("model.") and v}
+        | {str(m) for chain in (roster or {}).values() for m in chain if m}
+        | {str(m) for m in windowed or [] if m}
+    )
+
+
 def served_windows(
     expected: dict[str, Any],
     server: StubServer | None,
     bare: int | None,
     named: dict[str, int],
+    roster: dict[str, list[str]] | None = None,
+    windowed: list[str] | None = None,
 ) -> dict[str, int]:
-    """The window the stub serves each model the run names, as the window check reads it."""
+    """The window the stub serves each model the run may call, as the window check reads it.
+
+    The models are ``run_models``, so an agent with an entry of its own is
+    checked against the window its model is served with.
+    """
+    return {
+        model: facts.window
+        for model, facts in _served_facts(expected, server, bare, named, roster, windowed).items()
+    }
+
+
+def served_outputs(
+    expected: dict[str, Any],
+    server: StubServer | None,
+    bare: int | None,
+    named: dict[str, int],
+    roster: dict[str, list[str]] | None = None,
+    windowed: list[str] | None = None,
+) -> dict[str, int]:
+    """The maximum output the stub declares for each model the run may call."""
+    return {
+        model: facts.max_output
+        for model, facts in _served_facts(expected, server, bare, named, roster, windowed).items()
+    }
+
+
+def _served_facts(
+    expected: dict[str, Any],
+    server: StubServer | None,
+    bare: int | None,
+    named: dict[str, int],
+    roster: dict[str, list[str]] | None,
+    windowed: list[str] | None,
+) -> dict[str, Any]:
     from scripts.rehearsal.models import facts_for
 
-    models = sorted({str(v) for k, v in expected.items() if k.startswith("model.") and v})
+    models = run_models(expected, roster, windowed)
     if server is not None:
-        return {model: server.state.facts(model).window for model in models}
-    return {
-        model: facts_for(model, window=named.get(model.lower()) or bare).window for model in models
-    }
+        return {model: server.state.facts(model) for model in models}
+    return {model: facts_for(model, window=named.get(model.lower()) or bare) for model in models}
 
 
 def windows_the_product_cannot_learn(
@@ -546,6 +603,56 @@ def profile_stages(values: dict[str, dict[str, Any]]) -> dict[str, list[str]]:
     it plays no part in the profile.
     """
     from maljan.agents.composition import active_profile
+
+    try:
+        profile = active_profile(_settings_of(values))
+    except Exception:  # noqa: BLE001 — stages nobody can read are not required silently
+        return {}
+    return {str(stage.key): [str(a) for a in stage.agents] for stage in profile.stages}
+
+
+def roster_models(
+    values: dict[str, dict[str, Any]], changes: dict[str, Any] | None = None
+) -> dict[str, list[str]]:
+    """Every agent of the job's roster with its models, read from the settings the job runs with.
+
+    The stack's settings with the rehearsal's ``changes`` over them, built the
+    way the worker builds a job's (``inprocess.agent_models``), so a custom
+    team's agents are named exactly as the built-in ones. Empty when the
+    settings cannot be read: the window check then fails each capped agent
+    for want of its models.
+    """
+    from scripts.rehearsal.inprocess import agent_models
+
+    settings = _job_settings(values, changes)
+    return {} if settings is None else agent_models(settings)
+
+
+def job_window_models(
+    values: dict[str, dict[str, Any]], changes: dict[str, Any] | None = None
+) -> list[str]:
+    """Every model the job's one window is taken over (``inprocess.window_models``).
+
+    Read from the same settings as ``roster_models``; empty when they cannot
+    be read, and the window check then fails for want of them.
+    """
+    from scripts.rehearsal.inprocess import window_models
+
+    settings = _job_settings(values, changes)
+    return [] if settings is None else window_models(settings)
+
+
+def _job_settings(values: dict[str, dict[str, Any]], changes: dict[str, Any] | None) -> Any:
+    """The settings the job runs with: the stack's, the rehearsal's changes over them."""
+    in_force = {**values, **{key: {"value": value} for key, value in (changes or {}).items()}}
+    try:
+        return _settings_of(in_force)
+    except Exception:  # noqa: BLE001 — settings nobody can read name no model
+        return None
+
+
+def _settings_of(values: dict[str, dict[str, Any]]) -> Any:
+    """The settings the stack's values build, a masked secret left out."""
     from maljan.core.settings_overrides import build_settings
 
     core = {
@@ -556,11 +663,7 @@ def profile_stages(values: dict[str, dict[str, Any]]) -> dict[str, list[str]]:
         and row.get("value") is not None
         and row.get("value") != "**********"
     }
-    try:
-        profile = active_profile(build_settings(core))
-    except Exception:  # noqa: BLE001 — stages nobody can read are not required silently
-        return {}
-    return {str(stage.key): [str(a) for a in stage.agents] for stage in profile.stages}
+    return build_settings(core)
 
 
 def harness_changes(provider: str, stub_root: str) -> dict[str, Any]:
@@ -691,6 +794,8 @@ def record_from_stack(
     probe: dict[str, Any] | None = None,
     required_stages: dict[str, list[str]] | None = None,
     gate: dict[str, Any] | None = None,
+    agent_models: dict[str, list[str]] | None = None,
+    window_models: list[str] | None = None,
 ) -> RunRecord:
     """A run's record, read back from the API the way the console reads it."""
     from scripts.rehearsal.inprocess import claims_from_events, empty_evidence_sections
@@ -726,6 +831,8 @@ def record_from_stack(
         expected=expected,
         empty_evidence_sections=empty,
         required_stages=dict(required_stages or {}),
+        agent_models=dict(agent_models or {}),
+        window_models=list(window_models or []),
         gate=dict(gate or {}),
         probe=dict(probe or {}),
         scenario_params=scenario_params,
@@ -812,6 +919,7 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
     records: list[RunRecord] = []
     probe: dict[str, Any] = {}
     gate: dict[str, Any] = {}
+    changes: dict[str, Any] = {}
     try:
         client.login(args.email, password)
         values = client.values()
@@ -821,7 +929,12 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
             if args.configure == "gate":
                 changes = gate_changes(values, stub_root)
                 expected = {**gate_expected(values, changes), **expected}
-                models = gate_models(values, expected)
+                models = gate_models(
+                    values,
+                    expected,
+                    roster_models(values, changes),
+                    job_window_models(values, changes),
+                )
                 windows = resolve_windows(models, bare_window, named_windows)
                 refuse_a_guessed_window(models, windows)
                 for model in windows_the_product_cannot_learn(values, windows):
@@ -849,7 +962,11 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
             if server is not None:
                 # The stub answers the models the run will name, and 404s any other.
                 server.state.served.extend(
-                    str(v) for k, v in expected.items() if k.startswith("model.") and v
+                    run_models(
+                        expected,
+                        roster_models(values, changes),
+                        job_window_models(values, changes),
+                    )
                 )
             gate = describe_changes(values, changes)
             guard.keep(values, list(changes))
@@ -862,9 +979,18 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
         }
         params["mode"] = "stack"
         params["pinned_settings"] = {key: _value(values, key) for key in pinned_setting_keys()}
-        params["served_windows"] = served_windows(
-            expected, server, bare_window if args.configure != "gate" else None, named_windows
+        roster = roster_models(values, changes)
+        windowed = job_window_models(values, changes)
+        facts_of = (
+            expected,
+            server,
+            bare_window if args.configure != "gate" else None,
+            named_windows,
+            roster,
+            windowed,
         )
+        params["served_windows"] = served_windows(*facts_of)
+        params["served_outputs"] = served_outputs(*facts_of)
         if args.scenario == "deadline_hit":
             params["deadline_by"] = "core.job_timeout"
             params["deadline_in"] = brain.deadline_in
@@ -897,6 +1023,8 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
                     probe=probe,
                     required_stages=stages,
                     gate=gate,
+                    agent_models=roster,
+                    window_models=windowed,
                 )
             )
     finally:
