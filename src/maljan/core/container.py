@@ -62,7 +62,7 @@ from maljan.schemas.evidence import EvidenceCounter
 if TYPE_CHECKING:
     from maljan.agents.base_agent import BaseAnalyst
     from maljan.analysis.function_summarizer import FunctionSummarizer
-    from maljan.loaders.binary_chunker import TextChunk
+    from maljan.loaders.binary_chunker import Room, TextChunk
     from maljan.memory.long_term_memory import MemoryStore
     from maljan.pipeline.events import EventSink
     from maljan.providers.base import SandboxProvider, StaticProvider
@@ -1648,18 +1648,22 @@ class ServiceContainer:
                 self._data_cache[key] = cached
             return cached
 
-    def load_chunked(self, sample_id: str, data_type: str) -> list[TextChunk]:
+    def load_chunked(
+        self, sample_id: str, data_type: str, room: Room | None = None
+    ) -> list[TextChunk]:
         """Return a list of TextChunk objects for a sample and data type.
 
         Re-uses the parsed-text cache when available; chunking itself is cheap
-        and stateless so the chunk list is not cached.
+        and stateless so the chunk list is not cached. ``room`` is the
+        analyst's input room (``BaseAnalyst._input_room_chars``), which sizes
+        a chunk where ``chunking.max_tokens_per_chunk`` is unset.
         """
         key = (sample_id, data_type)
         with self._lock:
             cached_text = self._data_cache.get(key)
         if cached_text is not None:
-            return self.loader.chunk_text(data_type, cached_text)
-        return self.loader.load_chunked(sample_id, data_type)
+            return self.loader.chunk_text(data_type, cached_text, room=room)
+        return self.loader.load_chunked(sample_id, data_type, room=room)
 
     def load_data_for_agent(
         self,
@@ -1668,8 +1672,16 @@ class ServiceContainer:
         file_hash: str,
         sandbox_report: dict[str, Any] | None = None,
         sample_path: str | None = None,
+        room: Room | None = None,
+        head_room: Room | None = None,
     ) -> list[TextChunk]:
         """The input text agent ``agent_name`` is handed, as chunks.
+
+        Each source is chunked on its own at ``room``, the agent's input room
+        (``None``: the operator's chunk size, or the unknown-window size). The
+        source the first chunk comes from is chunked at ``head_room`` where it
+        is given: the room its chunk has once the node adds to it
+        (``binary_chunker.head_room``).
 
         Driven by ``AgentDefinition.data_sources``. An empty list means the
         slice the agent's *role* used to get, which is spelled out in
@@ -1686,12 +1698,20 @@ class ServiceContainer:
         definition = self.config.agents.definitions.get(agent_name)
         sources = list(definition.data_sources) if definition is not None else []
         if not sources:
-            return self._legacy_role_data(agent_name, file_hash, sandbox_report)
+            return self._legacy_role_data(agent_name, file_hash, sandbox_report, room, head_room)
 
+        head = head_room if head_room is not None else room
         chunks: list[TextChunk] = []
         for source in sources:
             chunks.extend(
-                self._data_source_chunks(agent_name, source, file_hash, sandbox_report, sample_path)
+                self._data_source_chunks(
+                    agent_name,
+                    source,
+                    file_hash,
+                    sandbox_report,
+                    sample_path,
+                    room if chunks else head,
+                )
             )
         return chunks
 
@@ -1702,6 +1722,7 @@ class ServiceContainer:
         file_hash: str,
         sandbox_report: dict[str, Any] | None,
         sample_path: str | None,
+        room: Room | None = None,
     ) -> list[TextChunk]:
         """One vocabulary entry, resolved. A source with nothing behind it is empty.
 
@@ -1714,39 +1735,58 @@ class ServiceContainer:
             path = sample_path or ""
             if not path:
                 return []
-            return self.loader.chunk_text(agent_name, f"analysis_file_path: {path}")
+            return self.loader.chunk_text(agent_name, f"analysis_file_path: {path}", room=room)
         if source == "sample.chunks":
-            return self.load_chunked(file_hash, agent_name)
+            return self.load_chunked(file_hash, agent_name, room=room)
         if not sandbox_report:
             return []
-        return self._sandbox_slice(agent_name, source, sandbox_report)
+        return self._sandbox_slice(agent_name, source, sandbox_report, room)
 
     def _sandbox_slice(
-        self, agent_name: str, source: str, sandbox_report: dict[str, Any]
+        self,
+        agent_name: str,
+        source: str,
+        sandbox_report: dict[str, Any],
+        room: Room | None = None,
     ) -> list[TextChunk]:
+        """One slice of the sandbox report as the agent reads it, chunked at ``room``.
+
+        A slice handed over as JSON is compact — the same document without the
+        indentation, which was characters of whitespace in every model request
+        and nowhere else. It is model input only; the report the run stores is
+        not this text.
+        """
         import json
+
+        def compact(document: Any) -> str:
+            return json.dumps(document, separators=(",", ":"), default=str)
 
         if source == "sandbox.target":
             return self.loader.chunk_text(
-                agent_name, json.dumps(sandbox_report.get("target", {}), indent=2, default=str)
+                agent_name, compact(sandbox_report.get("target", {})), room=room
             )
         if source == "sandbox.network":
             network = sandbox_report.get("network", {})
             try:
                 text = self.parser_registry.create("network").parse(network)
             except KeyError:
-                text = json.dumps(network, indent=2, default=str)
-            return self.loader.chunk_text(agent_name, text)
+                text = compact(network)
+            return self.loader.chunk_text(agent_name, text, room=room)
         if source == "sandbox.behavior":
             try:
                 text = self.parser_registry.create("dynamic").parse(sandbox_report)
             except KeyError:
-                text = json.dumps(sandbox_report, indent=2, default=str)
-            return self.loader.chunk_text(agent_name, text)
-        return self.loader.chunk_text(agent_name, json.dumps(sandbox_report, indent=2, default=str))
+                text = compact(sandbox_report)
+            return self.loader.chunk_text(agent_name, text, room=room)
+        return self.loader.chunk_text(agent_name, compact(sandbox_report), room=room)
 
     def _legacy_role_data(
-        self, agent_name: str, file_hash: str, sandbox_report: dict[str, Any] | None
+        self,
+        agent_name: str,
+        file_hash: str,
+        sandbox_report: dict[str, Any] | None,
+        room: Room | None = None,
+        head_room: Room | None = None,
     ) -> list[TextChunk]:
         """What the agent's role read before ``data_sources`` existed.
 
@@ -1756,11 +1796,14 @@ class ServiceContainer:
         "sample.chunks"]`` would hand a detonated sample both instead of one.
         """
         role = self.agent_role(agent_name)
+        head = head_room if head_room is not None else room
         if role in PROMPT_ROLES:
-            static_context = self.load_chunked(file_hash, agent_name)
+            static_context = self.load_chunked(file_hash, agent_name, room=head)
             sandbox_chunks: list[TextChunk] = []
             if sandbox_report:
-                sandbox_chunks = self._sandbox_slice(agent_name, "sandbox.full", sandbox_report)
+                sandbox_chunks = self._sandbox_slice(
+                    agent_name, "sandbox.full", sandbox_report, room
+                )
             return [*static_context, *sandbox_chunks]
         if sandbox_report:
             slice_name = {
@@ -1768,8 +1811,8 @@ class ServiceContainer:
                 "network": "sandbox.network",
                 "dynamic": "sandbox.behavior",
             }.get(role, "sandbox.full")
-            return self._sandbox_slice(agent_name, slice_name, sandbox_report)
-        return self.load_chunked(file_hash, agent_name)
+            return self._sandbox_slice(agent_name, slice_name, sandbox_report, head)
+        return self.load_chunked(file_hash, agent_name, room=head)
 
     def _prompt_room_chars(self) -> int | None:
         """What one prompt may carry before the reply room, or ``None`` with no window learned."""

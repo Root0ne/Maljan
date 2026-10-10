@@ -21,6 +21,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from maljan.agents.base_agent import BaseAnalyst
 from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+from maljan.core.config import ChunkingConfig
 from maljan.core.container import ServiceContainer
 from maljan.pipeline.nodes import (
     make_judge_node,
@@ -166,6 +167,8 @@ class TestTheAnalystNode:
         agents = {"static": _Analyst("static", counter)}
         chunks = [_Chunk(f"chunk {i}", index=i, total=3) for i in range(3)]
         container = _container(agents, {"static": chunks})
+        # Chunks that do not fit one: an operator's figure under their joined size.
+        container.config.chunking = ChunkingConfig(max_tokens_per_chunk=1)
 
         update = make_stage_agent_node(ANALYSIS_STAGE, "static", container)(_analysis_state())
 

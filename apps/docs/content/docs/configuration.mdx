@@ -1482,6 +1482,23 @@ The function summariser's prompts are held to the same window room and say
 when they were shortened; the PE loader's markdown lists every import, export
 and string, and the generic MCP provider's prompt names every tool.
 
+**An analyst's chunks.** An input is split into chunks at that same room —
+which also keeps the tool definitions out of it and one tool answer's share
+(an eighth) free — so a chunk reaches the model whole:
+`core.chunking.max_tokens_per_chunk` (was 20,000 tokens) is empty by default.
+Every chunk is a full tool loop, run after the one before it, so an input that
+fits is one chunk: the agent's sources (the sample context and a sandbox slice)
+are joined into one when they fit the room together, and the agent runs one
+loop over all of them, with the prompt a single-chunk input has always had.
+An input that does not fit is chunked as before, at the room. The sample path
+and the upstream findings, which go into the first chunk afterwards, are kept
+out of the room of the source that chunk comes from — never below the 20,000
+tokens a chunk shipped with, so a large upstream block never raises the chunk
+count above the old split's; the other sources keep the whole room. With no window
+learned nothing is derived: a chunk is the 20,000 tokens the setting shipped
+with, and sources are joined only within it, as a tool answer keeps its old
+6,000 characters. A number you set wins, for splitting and joining.
+
 **What the report leaves out, it says.** The markdown report keeps its layout
 bounds — a long table value is cut to fit the page, a long list shows its
 first rows — and every one now says what it left out and where the whole is:
@@ -2556,6 +2573,10 @@ network block without becoming a network analyst:
 | `sandbox.behavior` | The behaviour log, through the dynamic parser. |
 | `sandbox.network` | The network block, through the network parser. |
 | `sandbox.full` | The whole sandbox report. |
+
+A slice handed over as JSON (`sandbox.target`, `sandbox.full`, and the network
+or behaviour block where no parser reads it) is compact JSON — the same
+document without indentation; the report the run stores is unchanged.
 
 A source with nothing behind it contributes nothing — an agent that asked for
 the network block on a sample nobody detonated has no network block, and the

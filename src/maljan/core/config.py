@@ -674,29 +674,30 @@ class ChunkingConfig(BaseModel):
     independently and merge the summaries before ISR construction.
     """
 
-    # Maximum tokens per chunk sent to the LLM.
+    # Tokens per chunk of an analyst's input, at four characters a token.
     #
-    # 2026-07-11 — raised 6000 -> 20000 after the GPU/context upgrade. The old
-    # 6000 was sized for the pre-GPU ~32K-context era; against a real PE it
-    # split the decompiled static text into 27 chunks, and since the static
-    # analyst's per-chunk ReAct loop re-runs ``load_program`` + Ghidra auto-
-    # analysis on EVERY chunk (see static_analyst._ISR_SYSTEM step 1), each of
-    # the 27 chunks burned its full 1200s budget — jobs never finished (live
-    # job 95d88f7e/task 10, 2026-07-11: chunk 1/27 alone hit the hard cap).
-    # llama-server now serves 128K (``-c 131072``); budgeting ~60K for the
-    # static loop's 40 tool observations, ~4K system and ~8K generation leaves
-    # ~56K headroom, so 20K/chunk is safe and collapses that same PE to ~8
-    # chunks. That 60K no longer has to be budgeted by hand: a tool answer is
-    # measured against what the window has left at the moment of the call
-    # (``max_tool_output_chars`` below), and the chunk sitting in the
-    # conversation is part of what it is measured against. Override via
-    # ``CHUNKING__MAX_TOKENS_PER_CHUNK``.
-    max_tokens_per_chunk: Annotated[int, Field(ge=1)] = 20000
+    # ``None``, the default, sizes a chunk from the analyst's own window: what
+    # its prompt has room for before the reply, less the system prompt, the
+    # pack, the run state, the tool definitions and the share one tool answer
+    # is sized from — the room an input is shortened at
+    # (``BaseAnalyst._input_room_chars``, ``max_token_limit``). Sources that
+    # fit that room together are one chunk, so the analyst runs one loop over
+    # all of them. With no window learned nothing is derived: a chunk is the
+    # size this setting shipped with (``UNKNOWN_WINDOW_CHUNK_TOKENS``), as a
+    # tool answer keeps its old constant. A number set here wins over the
+    # derived room, for splitting and for joining.
+    #
+    # Each chunk is a full tool loop, run one after another, so a figure below
+    # the room buys serial loops and nothing else: a fixed 20,000 tokens, the
+    # size once written for a 128K llama-server, split every input above
+    # 80,000 characters on a model whose window is a million tokens.
+    max_tokens_per_chunk: Annotated[int, Field(ge=1)] | None = None
 
     # Overlap between consecutive chunks (in tokens) to preserve context
     overlap_tokens: Annotated[int, Field(ge=0)] = 200
 
-    # If True, skip chunking for data smaller than max_tokens_per_chunk
+    # If True, data inside the chunk size is not split, and sources that fit
+    # it together are joined into one chunk.
     skip_if_fits: bool = True
 
 

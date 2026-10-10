@@ -15,7 +15,7 @@ import os
 import re
 import threading
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
@@ -44,6 +44,14 @@ from maljan.core.container import ServiceContainer
 from maljan.core.exceptions import AnalystError, LLMError, SampleNotOpened
 from maljan.core.logger import logger
 from maljan.core.spend import SpendCeilingStop
+from maljan.loaders.binary_chunker import (
+    SOURCE_SEPARATOR,
+    ChunkStrategy,
+    Room,
+    TextChunk,
+    head_room,
+    joined_when_it_fits,
+)
 from maljan.memory.long_term_memory import build_stored_case
 from maljan.pipeline import triage_pack
 from maljan.pipeline.claim_drops import (
@@ -1942,6 +1950,81 @@ def upstream_findings(stage: Any, state: AnalysisState, container: ServiceContai
     return block
 
 
+def input_room_of(agent: Any) -> Room:
+    """The characters of input ``agent``'s prompt has room for, as the chunker asks it.
+
+    The analyst's own measure (``BaseAnalyst._input_room_chars``): the room its
+    window leaves before the reply, less the prompt around the input and one
+    tool answer's share, or the operator's ``max_token_limit``. The same bound
+    an input is shortened at, so a chunk of this size reaches the model whole.
+    An agent that cannot say has no room to give: ``None``, and the chunker
+    uses the unknown-window size (``UNKNOWN_WINDOW_CHUNK_TOKENS``).
+    """
+    measure = getattr(agent, "_input_room_chars", None)
+
+    def room(text: str) -> int | None:
+        if not callable(measure):
+            return None
+        try:
+            chars = measure(text)
+        except Exception as exc:  # noqa: BLE001 — no measure is no bound, never a lost analyst
+            logger.debug("input room: not measured (%s)", exc)
+            return None
+        return chars if isinstance(chars, int) and not isinstance(chars, bool) else None
+
+    return room
+
+
+def agent_input_room(container: Any, agent_name: str) -> Room:
+    """The input room of agent ``agent_name``, for a caller that holds only its name.
+
+    What a revision path hands ``container.load_chunked`` and
+    ``container.load_data_for_agent`` (``room=``) so its input is chunked
+    where the agent's first analysis chunked it. An agent that cannot be built
+    has no room to give, and the chunker uses the unknown-window size.
+    """
+    try:
+        agent = container.get_agent(agent_name)
+    except Exception as exc:  # noqa: BLE001 — no agent is no measure, never a lost revision
+        logger.debug("input room: agent %r not built (%s)", agent_name, exc)
+        agent = None
+    return input_room_of(agent)
+
+
+def added_to_head(
+    state: AnalysisState, block: str, *, sample_fed: bool, provider_id: str | None
+) -> Callable[[str], int]:
+    """How many characters the node adds to a head chunk of a source's text, asked before chunking.
+
+    The head is measured as it will be shown: the sample path written in for a
+    role whose tools open the sample (``_augment_static_chunks_with_path``, a
+    JSON head written out again indented), then the upstream block
+    (``_with_upstream``). At least the block and its break, which is what a
+    piece of a split source gains: it is no JSON head and takes the block in
+    front of it.
+    """
+    in_front = len(block) + len(SOURCE_SEPARATOR) if block else 0
+
+    def added(text: str) -> int:
+        shown: list = [
+            TextChunk(
+                index=0,
+                total=1,
+                strategy=ChunkStrategy.SLIDING_WINDOW,
+                content=text,
+                char_count=len(text),
+                token_estimate=len(text) // 4,
+                domain="head",
+            )
+        ]
+        if sample_fed:
+            shown = _augment_static_chunks_with_path(shown, state, provider_id=provider_id)
+        shown = _with_upstream(shown, block)
+        return max(len(str(shown[0].content)) - len(text), in_front)
+
+    return added
+
+
 def _with_upstream(chunks: list, block: str) -> list:
     """Put the upstream block into the first chunk, without breaking its shape.
 
@@ -2716,11 +2799,30 @@ def make_stage_agent_node(
             if role in SAMPLE_FED_ROLES:
                 _pin_sample_path(agent, state)
 
+            # A chunk is what this analyst's prompt has room for, measured
+            # by the analyst from its own window once the pack is on it.
+            room = input_room_of(agent)
+            # What goes into the head chunk after it is sized — the sample
+            # path and the upstream block — is kept out of the head source's
+            # room before it is chunked, never below the shipped size.
+            upstream_block = upstream_findings(stage, state, container)
             chunks = container.load_data_for_agent(
                 agent_name,
                 file_hash=state["file_hash"],
                 sandbox_report=sandbox_report,
                 sample_path=_absolute_host_sample_path(state) or None,
+                room=room,
+                head_room=head_room(
+                    room,
+                    added_to_head(
+                        state,
+                        upstream_block,
+                        sample_fed=role in SAMPLE_FED_ROLES,
+                        provider_id=(
+                            agent._resolved.static_provider_id if role in SAMPLE_FED_ROLES else None
+                        ),
+                    ),
+                ),
             )
 
             if role in SAMPLE_FED_ROLES:
@@ -2801,7 +2903,9 @@ def make_stage_agent_node(
                     }
                 )
 
-            chunks = _with_upstream(chunks, upstream_findings(stage, state, container))
+            chunks = _with_upstream(chunks, upstream_block)
+            # Sources that fit the room together are one chunk, and one loop.
+            chunks = joined_when_it_fits(chunks, container.config.chunking, room)
 
             if len(chunks) == 1:
                 # View-decomposition pilot (findings-log §3.6): when enabled,

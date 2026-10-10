@@ -22,9 +22,13 @@ Chunking strategy selection:
   - ALL domains    → sliding-window fallback when domain-specific markers
                       are absent.
 
-Token approximation: 1 token ≈ 4 characters (GPT-4 average). This avoids a
-tiktoken dependency at the cost of ~10–15% estimation error, which is
-acceptable for chunking decisions.
+Chunk size: what the analyst's prompt has room for, measured by the analyst
+from its own window (``BaseAnalyst._input_room_chars``) and handed in as
+``room``. ``chunking.max_tokens_per_chunk``, where an operator set it, wins, at
+1 token ≈ 4 characters (GPT-4 average). With no window learned, the size the
+platform shipped with (``UNKNOWN_WINDOW_CHUNK_TOKENS``).
+Sources that fit the size together are joined into one chunk
+(:func:`joined_when_it_fits`), so an analyst whose input fits runs one loop.
 
 Usage:
     from maljan.loaders.binary_chunker import BinaryChunker
@@ -40,14 +44,115 @@ Usage:
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 
 from maljan.core.config import ChunkingConfig
 from maljan.core.logger import logger
+from maljan.llm.context_window import UNKNOWN_WINDOW_CHUNK_TOKENS
 
 # Characters per token approximation (GPT-4 average)
 _CHARS_PER_TOKEN: int = 4
+
+# How many characters of input the analyst's prompt has room for, asked about
+# the text it would carry; ``None`` when nothing bounds it (no window learned).
+Room = Callable[[str], "int | None"]
+
+# What joins two sources that fit one chunk: the break the upstream block is
+# put in front of a head chunk with.
+SOURCE_SEPARATOR = "\n\n"
+
+# The chunk size this platform shipped with, in characters: what an input is
+# split at with no window learned, and the least the head source is given.
+SHIPPED_CHUNK_CHARS = UNKNOWN_WINDOW_CHUNK_TOKENS * _CHARS_PER_TOKEN
+
+
+def configured_chunk_chars(config: ChunkingConfig | None) -> int | None:
+    """The operator's ``max_tokens_per_chunk`` in characters, or ``None`` where it is unset."""
+    configured = getattr(config, "max_tokens_per_chunk", None)
+    if isinstance(configured, int) and not isinstance(configured, bool) and configured > 0:
+        return configured * _CHARS_PER_TOKEN
+    return None
+
+
+def chunk_chars(config: ChunkingConfig, text: str, room: Room | None) -> int | None:
+    """Characters one chunk of ``text`` may hold, or ``None`` for no bound.
+
+    The operator's ``max_tokens_per_chunk`` where it is set; otherwise the
+    room the analyst's prompt has for ``text``. With no room measured — no
+    window learned, or no analyst to ask — the chunk size the platform shipped
+    with (``UNKNOWN_WINDOW_CHUNK_TOKENS``), as a tool answer keeps its old
+    constant on an unknown window. A prompt with no room left for any input is
+    no bound: the framing alone does not fit, there is nothing to split at,
+    and the prompt that carries the input shortens it and says so
+    (``BaseAnalyst._truncate_input``).
+    """
+    configured = configured_chunk_chars(config)
+    if configured is not None:
+        return configured
+    chars = room(text) if room is not None else None
+    if chars is None:
+        return SHIPPED_CHUNK_CHARS
+    if isinstance(chars, int) and not isinstance(chars, bool) and chars > 0:
+        return chars
+    return None
+
+
+def head_room(room: Room | None, added: Callable[[str], int]) -> Room | None:
+    """The room for the source whose first chunk is added to after it is sized.
+
+    The node puts the sample path and the upstream block into the head chunk
+    once the input is chunked; ``added`` says, for the source's text, how many
+    characters that adds. The head source is chunked at ``room`` less that, so
+    its first chunk still fits once they are in; every other source keeps the
+    whole room. Never below :data:`SHIPPED_CHUNK_CHARS`, the head's size before
+    chunks were sized from the window: where the addition leaves less, the head
+    is chunked as it was then, so the chunk count is never above that one's.
+    A room not measured (``None``, or nothing left) is passed on unchanged.
+    """
+    if room is None:
+        return None
+
+    def measured(text: str) -> int | None:
+        chars = room(text)
+        if not isinstance(chars, int) or isinstance(chars, bool) or chars <= 0:
+            return chars
+        return max(chars - max(0, added(text)), SHIPPED_CHUNK_CHARS)
+
+    return measured
+
+
+def joined_when_it_fits(chunks: list, config: ChunkingConfig, room: Room | None) -> list:
+    """One chunk holding every source in order, when together they fit one; else ``chunks``.
+
+    An agent reads several sources (the sample context and a sandbox slice),
+    each chunked on its own, and every chunk is a full tool loop run after the
+    one before it. Sources the chunk size holds together are one loop. Joined
+    with :data:`SOURCE_SEPARATOR`, each source unchanged; the list is returned
+    as it came when it is one chunk, when the joined text is over the size,
+    when ``skip_if_fits`` is off (chunking forced), or when a chunk is a piece
+    of a source the chunker split (``total`` above 1): pieces are put back
+    together by no one, and a separator inside a source would change it.
+    """
+    if len(chunks) < 2 or getattr(config, "skip_if_fits", True) is False:
+        return chunks
+    if any(getattr(chunk, "total", 1) != 1 for chunk in chunks):
+        return chunks
+    joined = SOURCE_SEPARATOR.join(str(chunk.content) for chunk in chunks)
+    limit = chunk_chars(config, joined, room)
+    if limit is not None and len(joined) > limit:
+        return chunks
+    return [
+        replace(
+            chunks[0],
+            index=0,
+            total=1,
+            content=joined,
+            char_count=len(joined),
+            token_estimate=len(joined) // _CHARS_PER_TOKEN,
+        )
+    ]
 
 
 class ChunkStrategy(Enum):
@@ -140,18 +245,22 @@ class BinaryChunker:
 
     def __init__(self, config: ChunkingConfig) -> None:
         self._config = config
-        self._max_chars = config.max_tokens_per_chunk * _CHARS_PER_TOKEN
         self._overlap_chars = config.overlap_tokens * _CHARS_PER_TOKEN
 
-    def chunk(self, domain: str, text: str) -> list[TextChunk]:
+    def chunk(self, domain: str, text: str, room: Room | None = None) -> list[TextChunk]:
         """Split `text` into LLM-safe chunks for the given domain.
 
-        When `config.skip_if_fits` is True and the text fits in a single
-        chunk, a list with one chunk is returned immediately (no splitting).
+        A chunk holds what :func:`chunk_chars` allows: the operator's
+        ``max_tokens_per_chunk``, else the ``room`` the analyst's prompt has
+        for this text, else the unknown-window size. A prompt with no room
+        left for input is one chunk. When
+        `config.skip_if_fits` is True and the text fits in a single chunk, a
+        list with one chunk is returned immediately (no splitting).
 
         Args:
             domain: One of "static", "dynamic", "network", or any custom domain.
             text: The full parsed text from the data loader.
+            room: The analyst's input room for a text, in characters.
 
         Returns:
             Ordered list of TextChunk objects. Always has at least one element.
@@ -159,12 +268,21 @@ class BinaryChunker:
         if not text:
             return [self._make_single_chunk(domain, "", ChunkStrategy.SLIDING_WINDOW)]
 
-        if self._config.skip_if_fits and len(text) <= self._max_chars:
+        max_chars = chunk_chars(self._config, text, room)
+        if max_chars is None:
+            logger.debug(
+                "Chunking skipped for domain='%s': no room left for input, %d chars whole.",
+                domain,
+                len(text),
+            )
+            return [self._make_single_chunk(domain, text, ChunkStrategy.SLIDING_WINDOW)]
+
+        if self._config.skip_if_fits and len(text) <= max_chars:
             logger.debug(
                 "Chunking skipped for domain='%s': %d chars fits in limit (%d chars).",
                 domain,
                 len(text),
-                self._max_chars,
+                max_chars,
             )
             return [self._make_single_chunk(domain, text, ChunkStrategy.SLIDING_WINDOW)]
 
@@ -179,7 +297,7 @@ class BinaryChunker:
                     strategy.name,
                     len(segments),
                 )
-                return self._pack_segments(domain, segments, strategy)
+                return self._pack_segments(domain, segments, strategy, max_chars)
             logger.debug(
                 "No '%s' boundary markers found in domain='%s'. Falling back to sliding window.",
                 strategy.name,
@@ -187,12 +305,12 @@ class BinaryChunker:
             )
 
         # Sliding window fallback
-        return self._sliding_window(domain, text)
+        return self._sliding_window(domain, text, max_chars)
 
     def merge_summaries(self, summaries: list[str], domain: str = "") -> str:
         """Merge partial chunk summaries into a consolidated analysis context.
 
-        The merged text is still subject to max_tokens_per_chunk — if the
+        The merged text is still subject to the chunk size — if the
         summaries themselves are too large, a second-pass chunk could be run.
         This is not done automatically; callers decide whether to recurse.
 
@@ -229,6 +347,7 @@ class BinaryChunker:
         domain: str,
         segments: list[str],
         strategy: ChunkStrategy,
+        max_chars: int,
     ) -> list[TextChunk]:
         """Pack variable-length segments into max-size bins with overlap.
 
@@ -238,11 +357,11 @@ class BinaryChunker:
         # First, ensure each segment fits; expand oversized ones
         safe_segments: list[str] = []
         for seg in segments:
-            if len(seg) <= self._max_chars:
+            if len(seg) <= max_chars:
                 safe_segments.append(seg)
             else:
                 # Expand oversized segment into sub-windows
-                safe_segments.extend(self._raw_sliding_windows(seg))
+                safe_segments.extend(self._raw_sliding_windows(seg, max_chars))
 
         # Greedily pack segments into bins
         bins: list[str] = []
@@ -250,7 +369,7 @@ class BinaryChunker:
         current_len = 0
 
         for seg in safe_segments:
-            if current_len + len(seg) > self._max_chars and current_parts:
+            if current_len + len(seg) > max_chars and current_parts:
                 bins.append("\n".join(current_parts))
                 # Carry the last `_overlap_chars` characters of the bin we just
                 # closed as overlap — not just the last segment, so the upper
@@ -271,32 +390,32 @@ class BinaryChunker:
 
         return self._bins_to_chunks(domain, bins, strategy)
 
-    def _sliding_window(self, domain: str, text: str) -> list[TextChunk]:
+    def _sliding_window(self, domain: str, text: str, max_chars: int) -> list[TextChunk]:
         """Pure sliding-window split — domain-agnostic fallback."""
-        windows = self._raw_sliding_windows(text)
+        windows = self._raw_sliding_windows(text, max_chars)
         return self._bins_to_chunks(domain, windows, ChunkStrategy.SLIDING_WINDOW)
 
-    def _raw_sliding_windows(self, text: str) -> list[str]:
+    def _raw_sliding_windows(self, text: str, max_chars: int) -> list[str]:
         """Split text into overlapping fixed-size character windows.
 
         Guards against pathological configurations: ``overlap >= max_chars``
         would otherwise create an infinite loop. We clamp the step to at
         least 1/4 of ``max_chars`` and log a warning.
         """
-        step = self._max_chars - self._overlap_chars
-        min_step = max(1, self._max_chars // 4)
+        step = max_chars - self._overlap_chars
+        min_step = max(1, max_chars // 4)
         if step < min_step:
             logger.warning(
                 "BinaryChunker overlap (%d) too large for max_chars (%d); clamping step to %d.",
                 self._overlap_chars,
-                self._max_chars,
+                max_chars,
                 min_step,
             )
             step = min_step
         windows: list[str] = []
         start = 0
         while start < len(text):
-            end = min(start + self._max_chars, len(text))
+            end = min(start + max_chars, len(text))
             windows.append(text[start:end])
             if end == len(text):
                 break

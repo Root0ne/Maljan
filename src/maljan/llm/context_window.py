@@ -256,6 +256,14 @@ FALLBACK_WINDOW_TOKENS = 8192
 # which bounds a stored record rather than a prompt.
 UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS = 6000
 
+# What an analyst's input is chunked at when the window is unknown, in tokens
+# of four characters (``loaders.binary_chunker``). The same rule as the
+# constant above: nothing is derived from a window nobody measured, so the
+# chunk size this platform shipped with applies, and sources are joined only
+# within it. Sending the input whole instead would risk a first request past
+# the window, which loses the analyst before any tool has run.
+UNKNOWN_WINDOW_CHUNK_TOKENS = 20000
+
 # The one thing an operator does about it, named wherever the word ``fallback``
 # is printed.
 UNKNOWN_WINDOW_REMEDY = (

@@ -294,7 +294,8 @@ class TestDataSources:
         assert "whole-report" not in text
 
     def test_each_sandbox_slice_is_its_own_block(self) -> None:
-        assert '"sha256": "abc123"' in self._text(["sandbox.target"])
+        # A slice handed over as JSON is compact: the document, not its indentation.
+        assert '"sha256":"abc123"' in self._text(["sandbox.target"])
         assert "whole-report" not in self._text(["sandbox.target"])
         assert "c2.example" in self._text(["sandbox.network"])
         # The behaviour slice is what the dynamic parser makes of the report,
