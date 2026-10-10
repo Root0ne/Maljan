@@ -64,6 +64,14 @@ Room = Callable[[str], "int | None"]
 SOURCE_SEPARATOR = "\n\n"
 
 
+def configured_chunk_chars(config: ChunkingConfig) -> int | None:
+    """The operator's ``max_tokens_per_chunk`` in characters, or ``None`` where it is unset."""
+    configured = getattr(config, "max_tokens_per_chunk", None)
+    if isinstance(configured, int) and not isinstance(configured, bool) and configured > 0:
+        return configured * _CHARS_PER_TOKEN
+    return None
+
+
 def chunk_chars(config: ChunkingConfig, text: str, room: Room | None) -> int | None:
     """Characters one chunk of ``text`` may hold, or ``None`` for no bound.
 
@@ -76,9 +84,9 @@ def chunk_chars(config: ChunkingConfig, text: str, room: Room | None) -> int | N
     and the prompt that carries the input shortens it and says so
     (``BaseAnalyst._truncate_input``).
     """
-    configured = getattr(config, "max_tokens_per_chunk", None)
-    if isinstance(configured, int) and not isinstance(configured, bool) and configured > 0:
-        return configured * _CHARS_PER_TOKEN
+    configured = configured_chunk_chars(config)
+    if configured is not None:
+        return configured
     chars = room(text) if room is not None else None
     if chars is None:
         return UNKNOWN_WINDOW_CHUNK_TOKENS * _CHARS_PER_TOKEN
@@ -94,10 +102,14 @@ def joined_when_it_fits(chunks: list, config: ChunkingConfig, room: Room | None)
     each chunked on its own, and every chunk is a full tool loop run after the
     one before it. Sources the chunk size holds together are one loop. Joined
     with :data:`SOURCE_SEPARATOR`, each source unchanged; the list is returned
-    as it came when it is one chunk, when the joined text is over the size, or
-    when ``skip_if_fits`` is off (chunking forced).
+    as it came when it is one chunk, when the joined text is over the size,
+    when ``skip_if_fits`` is off (chunking forced), or when a chunk is a piece
+    of a source the chunker split (``total`` above 1): pieces are put back
+    together by no one, and a separator inside a source would change it.
     """
     if len(chunks) < 2 or getattr(config, "skip_if_fits", True) is False:
+        return chunks
+    if any(getattr(chunk, "total", 1) != 1 for chunk in chunks):
         return chunks
     joined = SOURCE_SEPARATOR.join(str(chunk.content) for chunk in chunks)
     limit = chunk_chars(config, joined, room)

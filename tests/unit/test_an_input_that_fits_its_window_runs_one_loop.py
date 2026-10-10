@@ -126,6 +126,10 @@ class TestSourcesThatFitTogetherAreOneChunk:
         config = ChunkingConfig(max_tokens_per_chunk=40)
         assert len(joined_when_it_fits(chunks, config, _room(10))) == 1
 
+    def test_pieces_of_a_split_source_are_never_joined(self) -> None:
+        chunks = [_chunk('{"a": 1,', 0, 2), _chunk(' "b": 2}', 1, 2)]
+        assert joined_when_it_fits(chunks, ChunkingConfig(), _room(1_000)) is chunks
+
     def test_forced_chunking_never_joins(self) -> None:
         chunks = [_chunk("a"), _chunk("b")]
         config = ChunkingConfig(skip_if_fits=False)
@@ -175,6 +179,9 @@ def _container(agent: MagicMock, *, role: str, settings: Settings | None = None)
     container.config.chunking = config.chunking
     container.config.agents.definitions = {}
     container.config.llm.view_decomposition_views = 0
+    # Real numbers: a mock that ints to 1 turns the static retrieval narrowing on.
+    container.config.preprocessing.static_function_rag_top_k = 0
+    container.config.preprocessing.static_function_rag_min_chunks = 6
     container.loader.chunk_text.side_effect = lambda name, text, room=None: chunker.chunk(
         name, text, room=room
     )
@@ -191,6 +198,10 @@ def _container(agent: MagicMock, *, role: str, settings: Settings | None = None)
         setattr(container, name, MethodType(getattr(ServiceContainer, name), container))
     container.active_profile.return_value = paper_profile([role])
     return container
+
+
+def _no_overlap() -> Settings:
+    return Settings(_env_file=None, chunking={"overlap_tokens": 0})
 
 
 def _state(**over: Any) -> dict[str, Any]:
@@ -262,6 +273,49 @@ class TestTheNode:
         (chunks,) = agent.safe_analyze_isr_chunked.call_args[0]
         assert len(chunks) == 3
         assert all(c.char_count <= UNKNOWN_WINDOW_CHUNK_TOKENS * _CHARS_PER_TOKEN for c in chunks)
+
+    def test_an_upstream_block_that_takes_a_full_room_chunk_past_the_room_is_split_whole(
+        self,
+    ) -> None:
+        # The old 80,000-character split cut this input in two, losslessly. Sized
+        # at the room alone it is one chunk, and the block added after sizing
+        # would have taken it past the room, where the prompt shortens it.
+        room = 100_000
+        agent = _agent(room=room)
+        container = _container(agent, role="network", settings=_no_overlap())
+        parsed = "n" * 99_000
+        block = "Upstream findings: " + "u" * 10_000
+        container.parser_registry.create.side_effect = None
+        container.parser_registry.create.return_value.parse.return_value = parsed
+        node = make_stage_agent_node(ANALYSIS_STAGE, "network", container)
+
+        with patch("maljan.pipeline.nodes.upstream_findings", lambda *_a: block):
+            node(_state(sandbox_report={"network": {"hosts": ["203.0.113.9"]}}))
+
+        agent.safe_analyze_isr.assert_not_called()
+        (chunks,) = agent.safe_analyze_isr_chunked.call_args[0]
+        assert all(c.char_count <= room for c in chunks)
+        head = chunks[0].content
+        assert head.startswith(block + "\n\n")
+        assert head[len(block) + 2 :] + "".join(c.content for c in chunks[1:]) == parsed
+
+    def test_a_static_head_written_out_indented_past_the_room_is_split_whole(self) -> None:
+        # The static head is handed over compact and written out again indented
+        # with the sample path in it; where that passes the room, the target is
+        # chunked again at the room less what was added.
+        target = {f"key_{i:05d}": f"value {i}" for i in range(4_000)}
+        compact = json.dumps(target, separators=(",", ":"))
+        room = len(compact) + 100
+        agent = _agent(room=room)
+        container = _container(agent, role="static", settings=_no_overlap())
+        node = make_stage_agent_node(ANALYSIS_STAGE, "static", container)
+
+        node(_state(sandbox_report={"target": target}))
+
+        agent.safe_analyze_isr.assert_not_called()
+        (chunks,) = agent.safe_analyze_isr_chunked.call_args[0]
+        assert all(c.char_count <= room for c in chunks)
+        assert "".join(c.content for c in chunks) == compact
 
     def test_an_operator_figure_decides_the_split(self) -> None:
         agent = _agent(room=1_000_000)
