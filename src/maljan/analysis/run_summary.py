@@ -69,8 +69,9 @@ class NegotiationMetrics:
         max_rounds:          Hard limit configured at startup.
         termination_reason:  Why the loop stopped (consensus / hard_limit /
                              converged / convergence / not_applicable /
-                             mediation_failed / not_mediated), read from the router's own
-                             rules (``pipeline.routing.debate_route``).
+                             mediation_failed / not_mediated / not_revised), read
+                             from the router's own rules
+                             (``pipeline.routing.debate_route``).
         sycophancy_events:   Number of rounds where sycophancy was detected.
         confidence_history:  Per-round mediator confidence scores.
         final_confidence:    Last recorded confidence value; ``None`` when

@@ -10,6 +10,9 @@ Decision priority (highest to lowest), in ``debate_route``:
   3. Convergence — every revision of the round right before this mediation is
      the answer in force again, whitespace aside: another round would argue
      over the same answers. Judge.
+     No change — no analyst was revised in that round (every revision failed,
+     wrote nothing, carried no structured report or was not asked): judge, by
+     consensus where the mediator stated one, otherwise ``not_revised``.
   4. Sycophancy override — if sycophancy AND consensus, force revision.
   5. Genuine LLM consensus (no listed line the mediator marked blocking, or
      left unmarked) — judge.
@@ -112,6 +115,9 @@ MEDIATION_FAILED = "mediation_failed"
 # The last mediation's mediator wrote no answer: the round was not mediated.
 NOT_MEDIATED = "not_mediated"
 NOT_APPLICABLE = "not_applicable"
+# No analyst was revised in the round before this mediation: the round made no
+# change, and the answers in force go to the judge.
+NOT_REVISED = "not_revised"
 # Why a revision round opens.
 SYCOPHANCY = "sycophancy"
 NO_CONSENSUS = "no_consensus"
@@ -121,20 +127,38 @@ def _quiet(*_args: Any, **_kwargs: Any) -> None:
     """A log call that says nothing."""
 
 
-def _round_before(state: Any) -> dict[str, Any] | None:
-    """The record of the revision round right before this mediation, or ``None``.
+def revision_round_before(state: Any, *, mediations: int | None = None) -> dict[str, Any] | None:
+    """The record of the revision round right before mediation ``mediations``, or ``None``.
 
-    That round recorded the mediation count it followed, one less than now. A
-    record of any other round — the last round of an earlier debate stage of
-    the same run — is not this debate's.
+    ``mediations`` counts the mediations held with that one included; it is
+    the state's ``iteration_count`` once the mediation has run, which is what
+    the router reads. That round recorded the mediation count it followed, one
+    less. A record of any other round (the last round of an earlier debate
+    stage of the same run) is not this debate's.
     """
+    held = int(state.get("iteration_count", 0)) if mediations is None else int(mediations)
     rounds = state.get("revision_rounds") or []
     last = rounds[-1] if rounds else None
     if not isinstance(last, dict):
         return None
-    if int(last.get("round", -1)) != int(state.get("iteration_count", 0)) - 1:
+    if int(last.get("round", -1)) != held - 1:
         return None
     return last
+
+
+def revised_in(record: dict[str, Any] | None) -> set[str] | None:
+    """The analysts revised in a revision round's record, or ``None`` when it names none.
+
+    A record written before the round named its revised analysts says nothing
+    about who was revised; the sycophancy check then judges every pair, as it
+    did.
+    """
+    if not isinstance(record, dict):
+        return None
+    names = record.get("revised")
+    if not isinstance(names, list):
+        return None
+    return {str(name) for name in names}
 
 
 def route_within_limit(
@@ -192,7 +216,7 @@ def route_within_limit(
     # whitespace aside: the answers the next mediation would read are the
     # ones this one read. A fact, not a reading of meaning. A round in which
     # no revision stood (every one failed or was not made) is not convergence.
-    revised = _round_before(state)
+    revised = revision_round_before(state)
     if revised is not None and int(revised.get("made") or 0) > 0 and revised.get("identical"):
         say(
             "Debate converged at round %d: every revision of the last round is the "
@@ -200,6 +224,23 @@ def route_within_limit(
             iteration,
         )
         return "judge", CONVERGED
+
+    # No analyst was revised in the round before: every answer this mediation
+    # read is the one the last mediation read. The round made no change, and
+    # another round is not opened because of it. A consensus the mediator
+    # stated over those answers stands as consensus (the sycophancy check
+    # judged no revised answer in it); otherwise the answers in force go to
+    # the judge as they are, and no agreement is claimed.
+    if revised is not None and "made" in revised and int(revised.get("made") or 0) == 0:
+        if consensus:
+            say("Consensus at round %d over answers the last round did not revise.", iteration)
+            return "judge", CONSENSUS
+        say(
+            "No analyst was revised in the round before round %d; the round made no change. "
+            "Routing to judge with the answers in force.",
+            iteration,
+        )
+        return "judge", NOT_REVISED
 
     # A "consensus" that comes with sycophancy is treated as premature: force
     # another revision.

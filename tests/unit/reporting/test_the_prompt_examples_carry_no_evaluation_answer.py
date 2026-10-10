@@ -122,9 +122,11 @@ from maljan.pipeline.mediation_models import (
 from maljan.pipeline.nodes import (
     NO_SANDBOX_DATA_REASON,
     NO_STATIC_FIXTURE_NOTE,
+    NOT_ASKED_TO_REVISE,
     run_quality_note,
     skipped_analysts_reason,
 )
+from maljan.pipeline.routing import NOT_REVISED
 from maljan.pipeline.run_state import NO_LIMIT, budget_line
 from maljan.pipeline.validation import (
     _UNPARSED_ANSWER_MESSAGE,
@@ -1504,6 +1506,7 @@ PROMPTS: dict[str, str] = {
             ),
         ]
     ),
+    "a revision round that made no change": " ".join([NOT_REVISED, NOT_ASKED_TO_REVISE]),
     "a chunk still cut after its question": chunk_cut_unread_sentence("chunk 1 of 2"),
     "mediator structured extraction and its schema": " ".join(
         [

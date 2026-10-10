@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Collection
 
 from maljan.core.logger import logger
 from maljan.schemas.isr_models import AgentISR
@@ -79,6 +80,7 @@ def detect_sycophancy(
     isrs: list[AgentISR],
     threshold: float = SYCOPHANCY_THRESHOLD,
     iteration: int = 0,
+    revised: Collection[str] | None = None,
 ) -> bool:
     """Return True if any pair of agent ISRs exceeds the similarity threshold.
 
@@ -88,6 +90,12 @@ def detect_sycophancy(
         iteration: Negotiation round counter. The first round (iteration<=0)
             never triggers sycophancy because agents have not had a chance to
             converge intentionally yet.
+        revised: The ``agent_id`` of every analyst revised in the round being
+            judged, or ``None`` when the round did not record them (every
+            pair is judged, as before). Two answers neither of which was
+            revised in the round are the answers in force from before it:
+            alike or not, they are not evidence of converging in it, and that
+            pair is not judged. A pair with at least one revised answer is.
 
     Returns:
         True if a pair of summaries is suspiciously similar and content is
@@ -97,6 +105,17 @@ def detect_sycophancy(
         return False
     if len(isrs) < 2:
         return False
+    if revised is not None:
+        unrevised = [isr.agent_id for isr in isrs if isr.agent_id not in revised]
+        if unrevised:
+            logger.info(
+                "Sycophancy check: %s not revised in round %d; their answers in force are "
+                "compared only with an answer revised in it.",
+                ", ".join(unrevised),
+                iteration,
+            )
+        if len(unrevised) == len(isrs):
+            return False
 
     summaries = [isr.to_text_summary() for isr in isrs]
     token_lists = [_tokenize(s) for s in summaries]
@@ -115,6 +134,10 @@ def detect_sycophancy(
 
     for i in range(len(vectors)):
         for j in range(i + 1, len(vectors)):
+            if revised is not None and not (
+                isrs[i].agent_id in revised or isrs[j].agent_id in revised
+            ):
+                continue
             sim = _cosine_similarity(vectors[i], vectors[j])
             logger.debug(
                 "Sycophancy check: %s vs %s — similarity=%.3f",

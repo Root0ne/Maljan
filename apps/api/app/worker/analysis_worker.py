@@ -3147,19 +3147,28 @@ def judge_bundle_record(result: dict) -> dict | None:
             "labels": kept_labels,
             "as_written": True,
         }
-    # The pipeline keeps the bundle as a Python dump, timestamps as datetimes;
-    # the column stores JSON, in STIX's own timestamp form.
+    return {
+        "bundle": judge_bundle_json(bundle),
+        "labels": kept_labels,
+        "as_written": False,
+    }
+
+
+def judge_bundle_json(bundle: dict) -> dict:
+    """The judge's parsed bundle as a JSON column holds it.
+
+    The pipeline keeps the bundle as a Python dump, timestamps as datetimes;
+    a column stores JSON, in STIX's own timestamp form. Both columns that can
+    hold the judge's bundle — its own record, and the report's bundle when no
+    export was made — are written through here.
+    """
     from maljan.schemas.stix_models import Bundle
 
     try:
         as_json = Bundle.model_validate(bundle).model_dump(mode="json")
     except Exception:  # noqa: BLE001 — a record kept in a weaker form, never a failed save
         as_json = json.loads(json.dumps(bundle, default=str))
-    return {
-        "bundle": {"spec_version": "2.1", **as_json},
-        "labels": kept_labels,
-        "as_written": False,
-    }
+    return {"spec_version": "2.1", **as_json}
 
 
 def _extract_mitre(result: dict) -> list | None:
@@ -3699,9 +3708,17 @@ def _report_inputs(
     # (54+ objects with Identity/Indicator/ObservedData/Note/Report
     # SDOs) over the minimal judge bundle. The legacy field is the
     # fallback for callers that pre-date the MalwareReport refactor.
-    stix_bundle_for_persist = pipeline_result.get("stix_bundle_extended") or pipeline_result.get(
-        "stix_output"
-    )
+    stix_bundle_for_persist = pipeline_result.get("stix_bundle_extended")
+    if not stix_bundle_for_persist:
+        # Without the export (a run stopped inside its report node before the
+        # node returned, or an export that was not made) the bundle is the
+        # judge's, which the state keeps with datetimes in it.
+        judge_bundle = pipeline_result.get("stix_output")
+        stix_bundle_for_persist = (
+            judge_bundle_json(judge_bundle)
+            if isinstance(judge_bundle, dict) and judge_bundle
+            else judge_bundle
+        )
     # Ensure STIX 2.1 ``spec_version`` is present on every bundle —
     # the OASIS spec requires it on top-level bundle objects, and
     # downstream tooling (OpenCTI / MISP / TAXII clients) silently
