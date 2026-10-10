@@ -405,6 +405,16 @@ class TestTheHolesAGreenRunCouldHide:
         setattr(record, field, value)
         assert _failed(record) == ["the stopped run kept its run summary and a partial report"]
 
+    def test_a_stopped_job_that_kept_no_spend_or_usage(self) -> None:
+        record = self._stopped_by_the_worker()
+        record.run_summary = {
+            k: v for k, v in record.run_summary.items() if k not in ("tokens", "spend")
+        }
+        record.events = [e for e in record.events if e.get("type") != "model_usage"]
+        assert _failed(record) == ["the stopped run kept its run summary and a partial report"]
+        record.events.append({"type": "model_usage", "data": {"output_tokens": 10}})
+        assert _failed(record) == []
+
     def test_a_job_stopped_by_anything_but_its_job_timeout(self) -> None:
         record = self._stopped_by_the_worker()
         record.job_error = "Cancelled by the operator"

@@ -681,6 +681,20 @@ CHECKS = (
 )
 
 
+def _usage_kept(record: RunRecord) -> bool:
+    """Whether what the stopped run spent is on record: in its run summary or per call."""
+    tokens = record.run_summary.get("tokens") or {}
+    spend = record.run_summary.get("spend")
+    totals = (
+        isinstance(tokens, dict)
+        and int(tokens.get("llm_calls") or 0) > 0
+        and isinstance(spend, dict)
+        and spend.get("spent_usd") is not None
+    )
+    per_call = any(str(e.get("type")) == "model_usage" for e in record.events)
+    return totals or per_call
+
+
 def _check_kept(record: RunRecord) -> Check:
     """A job the worker stopped keeps what it produced: its run summary and a partial report."""
     problems = []
@@ -690,6 +704,8 @@ def _check_kept(record: RunRecord) -> Check:
         )
     if not record.run_summary:
         problems.append("no run summary was stored")
+    if not _usage_kept(record):
+        problems.append("neither the spend and token totals nor the per-call usage were kept")
     if not record.markdown.strip():
         problems.append("no partial report renders")
     return Check(
