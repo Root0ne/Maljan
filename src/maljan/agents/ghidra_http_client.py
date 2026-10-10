@@ -74,6 +74,12 @@ FUNCTION_NAME_ARGUMENTS = ("name", "function_name")
 # it names the function by the name argument, which it holds as nothing.
 NULL_NAME_ENDING = ": null"
 
+# Ghidra's cross-reference tool says the same sentence when no function stands
+# at the address and when one does with no references, so the restatement
+# says both.
+NO_REFERENCES_LEAD = "No references found to function"
+NO_FUNCTION_OR_NO_REFERENCES = "No function at {address}, or no references to the one there"
+
 
 def function_named_by_address(text: str, params: Sequence[str], kwargs: Mapping[str, Any]) -> str:
     """``text`` with the function it speaks of named by the address the call gave.
@@ -85,9 +91,11 @@ def function_named_by_address(text: str, params: Sequence[str], kwargs: Mapping[
     name argument, though: "No callees found for function: null",
     "Function not found: null". Such an answer, from a call that gave an
     address and no name, ends with the address instead: "No callees found
-    for function at 0x1400022c0", "Function not found at 0x1400022c0". Any
-    other answer, and any call that gave a name, is returned exactly as it
-    came.
+    for function at 0x1400022c0", "Function not found at 0x1400022c0". The
+    cross-reference tool's "No references found to function: null", which
+    Ghidra also says for an address no function stands at, becomes
+    ``NO_FUNCTION_OR_NO_REFERENCES``. Any other answer, and any call that gave
+    a name, is returned exactly as it came.
     """
     names = [p for p in FUNCTION_NAME_ARGUMENTS if p in params]
     if "address" not in params or not names:
@@ -98,7 +106,10 @@ def function_named_by_address(text: str, params: Sequence[str], kwargs: Mapping[
     stripped = text.strip()
     if "\n" in stripped or not stripped.endswith(NULL_NAME_ENDING):
         return text
-    return f"{stripped[: -len(NULL_NAME_ENDING)]} at {address}"
+    lead = stripped[: -len(NULL_NAME_ENDING)]
+    if lead == NO_REFERENCES_LEAD:
+        return NO_FUNCTION_OR_NO_REFERENCES.format(address=address)
+    return f"{lead} at {address}"
 
 
 class GhidraHTTPClient:
@@ -326,24 +337,38 @@ class GhidraHTTPClient:
                 )
         except Exception as exc:  # noqa: BLE001 — never fail an analysis over this
             logger.warning("Ghidra switch_program failed for '%s' (non-fatal): %s", name, exc)
-        await self._analyse_loaded_program(name)
 
-    async def _analyse_loaded_program(self, name: str) -> None:
-        """Run Ghidra's auto-analysis on the program a load just imported.
+    async def switch_to(self, name: str) -> bool:
+        """Make the program ``name`` current; whether Ghidra confirmed it.
 
-        Every ``load_program`` imports the file afresh and puts the new program
-        in the place of any program of the same name — one an earlier pass
-        analysed included — and an import is not analysed: its functions come
-        from the file's tables, its code is not disassembled, and no call or
-        code reference is recorded. Callers, callees and cross-references are
-        then empty for every function, which reads as "nothing calls it".
-        Measured on a stored run: ``get_function_callees`` on a function the
-        decompiler showed calling nine others answered "No callees found", and
-        every ``get_xrefs_to`` named only the exception directory's entry.
+        For a load of a path this job already loaded and analysed: the switch
+        stands in for the load, so the analysed program is not replaced by a
+        fresh import. A switch Ghidra does not confirm, or one that failed,
+        answers ``False`` and the caller loads afresh.
+        """
+        from maljan.analysis.ghidra_program import SWITCH_PARAM, SWITCH_PATH, switch_is_confirmed
 
-        Waited for as long as Ghidra takes, since the calls after the load read
-        what the analysis records. Best-effort like the switch: a failed
-        analysis is said in the log and the load's answer stands.
+        try:
+            client = await self._get_http()
+            resp = await client.post(
+                f"{self.base_url}{SWITCH_PATH}",
+                params={SWITCH_PARAM: name},
+                json={},
+                headers={"Content-Type": "application/json"},
+            )
+        except Exception as exc:  # noqa: BLE001 — the caller loads afresh
+            logger.warning("Ghidra switch_program failed for '%s': %s", name, exc)
+            return False
+        return switch_is_confirmed(resp.text, name)
+
+    async def analyse_program(self, name: str) -> bool:
+        """Run Ghidra's auto-analysis on the program ``name``; whether Ghidra confirmed it.
+
+        A load imports the file without analysing it, and with no analysis no
+        call or code reference is recorded: callers, callees and
+        cross-references read empty for every function. Waited for as long as
+        Ghidra takes, since the calls after the load read what the analysis
+        records. A failed analysis is logged and answers ``False``.
         """
         from maljan.analysis.ghidra_program import ANALYSIS_PATH, analysis_is_confirmed
 
@@ -356,15 +381,18 @@ class GhidraHTTPClient:
                 headers={"Content-Type": "application/json"},
                 timeout=None,
             )
-            if not analysis_is_confirmed(resp.text):
-                logger.warning(
-                    "Ghidra run_analysis did not confirm '%s' (%s) — callers, callees and "
-                    "cross-references may be empty for its functions.",
-                    name,
-                    resp.text[:160],
-                )
         except Exception as exc:  # noqa: BLE001 — never fail an analysis over this
             logger.warning("Ghidra run_analysis failed for '%s' (non-fatal): %s", name, exc)
+            return False
+        if analysis_is_confirmed(resp.text):
+            return True
+        logger.warning(
+            "Ghidra run_analysis did not confirm '%s' (%s); callers, callees and "
+            "cross-references may be empty for its functions.",
+            name,
+            resp.text[:160],
+        )
+        return False
 
     def _tag_description(self, path: str, description: str) -> str:
         """Prefix the description with a category tag; the text itself is kept whole."""

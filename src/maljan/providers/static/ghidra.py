@@ -229,9 +229,12 @@ def prepare_sample(
     a refused token — raises too, with a sentence naming Ghidra's address and
     token rather than the samples path, and is not remembered.
     A load that opens the program makes it the current one, and Ghidra's
-    auto-analysis runs on it: the load imported it afresh, and an import holds
-    no call or code reference for the agent's callers, callees and
-    cross-references to read.
+    auto-analysis runs on it, waited for without a limit: an import holds no
+    call or code reference for the agent's callers, callees and
+    cross-references to read. The job notes the analysed program on its Ghidra
+    provider (``ghidra_program.JobPrograms``); a later load of the same path in
+    the job, here or the model's own ``load_program``, is a switch to it, and
+    only a switch Ghidra does not confirm loads and analyses afresh.
 
     Then, with ``preprocessing.use_sink_reachability`` on, the pre-pass:
     the whole call graph, and the functions that reach
@@ -258,11 +261,6 @@ def prepare_sample(
 
     import httpx
 
-    from maljan.analysis.ghidra_program import (
-        SWITCH_PARAM,
-        SWITCH_PATH,
-        program_name_from_load,
-    )
     from maljan.providers.server_guard import deployment_call_budget
 
     ghidra = cfg.static.ghidra
@@ -270,35 +268,79 @@ def prepare_sample(
     token = ghidra.auth_token.get_secret_value()
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     call_budget = deployment_call_budget(cfg)
+    programs = _job_programs(provider)
     with httpx.Client(timeout=call_budget if call_budget > 0 else None, headers=headers) as http:
-        loaded = _load(http, base, file_path, ghidra_address(ghidra.url), logger_)
-        name = program_name_from_load(loaded.text)
-        if not name:
-            # A failed load answers **200**, so raise_for_status sees nothing
-            # wrong. Carrying on would hand the model a Ghidra with no program,
-            # or with whichever program is still current: every call after it
-            # answers about nothing, or about a different binary. This is
-            # Ghidra's own answer about the file, so it is remembered.
-            said = load_failure(loaded.text)
-            failure = sample_not_opened(said[0] if said else loaded.text)
-            _remember_failure(provider, file_path, failure)
-            logger_.error("%s", failure)
-            raise failure
-        # Loading is not looking. `load_program` sets Ghidra's current program
-        # only when nothing is current yet, so from the second sample of a
-        # container's lifetime onwards the switch is what makes it this one.
-        try:
-            http.post(f"{base}{SWITCH_PATH}", params={SWITCH_PARAM: name}, json={})
-        except httpx.HTTPError as exc:
-            logger_.warning("Ghidra switch_program failed for '%s' (non-fatal): %s", name, exc)
-        # Nor is loading analysing. The load imported the file afresh, in the
-        # place of any program of its name an earlier pass analysed, and an
-        # import records no call or code reference: callers, callees and
-        # cross-references would be empty for every function.
-        _analyse(http, base, name, logger_)
+        noted = programs.get(file_path) if programs is not None else None
+        if noted is not None and _switched(http, base, noted.name, logger_):
+            # This job already loaded and analysed the path: a load now would
+            # import it afresh, unanalysed, in the analysed program's place.
+            pass
+        else:
+            if noted is not None and programs is not None:
+                programs.forget(file_path)
+            _open_and_analyse(http, base, file_path, ghidra.url, logger_, provider)
         if not getattr(cfg.preprocessing, "use_sink_reachability", False):
             return ""
         return _sink_priority_hint(cfg, http, base, file_path, logger_)
+
+
+def _open_and_analyse(
+    http: Any, base: str, file_path: str, url: str, log: Any, provider: Any
+) -> str:
+    """Load the job's sample, make it current and analyse it; the program's name.
+
+    A load that opened nothing raises :class:`SampleNotOpened` (remembered on
+    ``provider``). An analysis Ghidra confirmed is noted on the job's
+    programs, so later loads of the path in this job are a switch.
+    """
+    from maljan.analysis.ghidra_program import program_name_from_load
+
+    loaded = _load(http, base, file_path, ghidra_address(url), log)
+    name = program_name_from_load(loaded.text)
+    if not name:
+        # A failed load answers **200**, so raise_for_status sees nothing
+        # wrong. Carrying on would hand the model a Ghidra with no program,
+        # or with whichever program is still current: every call after it
+        # answers about nothing, or about a different binary. This is
+        # Ghidra's own answer about the file, so it is remembered.
+        said = load_failure(loaded.text)
+        failure = sample_not_opened(said[0] if said else loaded.text)
+        _remember_failure(provider, file_path, failure)
+        log.error("%s", failure)
+        raise failure
+    # Loading is not looking. `load_program` sets Ghidra's current program
+    # only when nothing is current yet, so from the second sample of a
+    # container's lifetime onwards the switch is what makes it this one.
+    _switched(http, base, name, log)
+    # Nor is loading analysing: an import records no call or code reference,
+    # so callers, callees and cross-references would read empty.
+    if _analyse(http, base, name, log):
+        programs = _job_programs(provider)
+        if programs is not None:
+            programs.note(file_path, name, loaded.text)
+    return name
+
+
+def _switched(http: Any, base: str, name: str, log: Any) -> bool:
+    """Make ``name`` Ghidra's current program; whether Ghidra confirmed it."""
+    import httpx
+
+    from maljan.analysis.ghidra_program import SWITCH_PARAM, SWITCH_PATH, switch_is_confirmed
+
+    try:
+        resp = http.post(f"{base}{SWITCH_PATH}", params={SWITCH_PARAM: name}, json={})
+    except httpx.HTTPError as exc:
+        log.warning("Ghidra switch_program failed for '%s' (non-fatal): %s", name, exc)
+        return False
+    return switch_is_confirmed(str(getattr(resp, "text", "")), name)
+
+
+def _job_programs(provider: Any) -> Any:
+    """The job's note of the programs it loaded and analysed, from its Ghidra provider."""
+    from maljan.analysis.ghidra_program import JobPrograms
+
+    programs = getattr(provider, "programs", None)
+    return programs if isinstance(programs, JobPrograms) else None
 
 
 def _load(http: Any, base: str, file_path: str, address: str, log: Any) -> Any:
@@ -334,24 +376,35 @@ def _load(http: Any, base: str, file_path: str, address: str, log: Any) -> Any:
     raise AssertionError("unreachable")  # pragma: no cover
 
 
-def _analyse(http: Any, base: str, name: str, log: Any) -> None:
-    """Ghidra's auto-analysis of the program just opened. Best-effort: a failure is logged."""
+def _analyse(http: Any, base: str, name: str, log: Any) -> bool:
+    """Ghidra's auto-analysis of the program just opened; whether Ghidra confirmed it.
+
+    Waited for as long as Ghidra takes, whatever the deployment's call budget:
+    the calls after it read what the analysis records. A failure is logged.
+    """
     import httpx
 
     from maljan.analysis.ghidra_program import ANALYSIS_PATH, analysis_is_confirmed
 
     try:
-        resp = http.post(f"{base}{ANALYSIS_PATH}", params={"program": name}, json={"program": name})
+        resp = http.post(
+            f"{base}{ANALYSIS_PATH}",
+            params={"program": name},
+            json={"program": name},
+            timeout=None,
+        )
     except httpx.HTTPError as exc:
         log.warning("Ghidra run_analysis failed for '%s' (non-fatal): %s", name, exc)
-        return
-    if not analysis_is_confirmed(getattr(resp, "text", "")):
-        log.warning(
-            "Ghidra run_analysis did not confirm '%s' (%s); callers, callees and "
-            "cross-references may be empty for its functions.",
-            name,
-            str(getattr(resp, "text", ""))[:160],
-        )
+        return False
+    if analysis_is_confirmed(str(getattr(resp, "text", ""))):
+        return True
+    log.warning(
+        "Ghidra run_analysis did not confirm '%s' (%s); callers, callees and "
+        "cross-references may be empty for its functions.",
+        name,
+        str(getattr(resp, "text", ""))[:160],
+    )
+    return False
 
 
 def _sink_priority_hint(cfg: Settings, http: Any, base: str, file_path: str, log: Any) -> str:
@@ -436,6 +489,11 @@ class GhidraStaticProvider(StaticProvider):
         # The sentence each path this provider could not open was stopped
         # with, so a later loop of the job is stopped before it calls Ghidra.
         self._sample_failures: dict[str, str] = {}
+        # The programs this job loaded and analysed, by path: a later load of
+        # one is a switch, so the analysed program is not replaced.
+        from maljan.analysis.ghidra_program import JobPrograms
+
+        self.programs = JobPrograms()
         self._toolkit: Any = None
         self._all_tools: list[Any] = []
         self.tools: list[Any] = []
@@ -497,6 +555,9 @@ class GhidraStaticProvider(StaticProvider):
                 "already attached; closing the stale toolkit before re-attaching."
             )
             self._close_toolkit()
+            from maljan.analysis.ghidra_program import JobPrograms
+
+            self.programs = JobPrograms()
         self._job = job
         if not self._cfg.enabled:
             logger.info("Ghidra MCP is disabled in config.")
@@ -658,8 +719,18 @@ class GhidraStaticProvider(StaticProvider):
         error is remembered, so a held path that already failed raises without
         a call; a request that got no answer from Ghidra is not. With no held
         path the model's own call runs as it was made.
+
+        A held path this job already loaded and analysed (``programs``) is not
+        loaded again: the load would import it afresh, unanalysed, in the
+        analysed program's place. The call is a switch to the noted program,
+        answered with the load's own recorded answer. With no note, or a
+        switch Ghidra does not confirm (Ghidra restarted, the program gone),
+        the load is made, then the switch and Ghidra's auto-analysis, waited
+        for without a limit, and an analysis Ghidra confirmed is noted.
         """
         from langchain_core.tools import StructuredTool
+
+        from maljan.analysis.ghidra_program import program_name_from_load
 
         inner = getattr(tool, "coroutine", None)
         if inner is None:
@@ -681,12 +752,24 @@ class GhidraStaticProvider(StaticProvider):
                     pinned,
                 )
                 kwargs["file"] = pinned
+            programs = _job_programs(provider)
+            client = getattr(provider, "_toolkit", None)
+            noted = programs.get(pinned) if programs is not None else None
+            if noted is not None:
+                switch = getattr(client, "switch_to", None)
+                if callable(switch) and await switch(noted.name):
+                    return str(noted.answer)
+                programs.forget(pinned)
             answer = str(await inner(**kwargs))
             # The job's own sample did not open. Every Ghidra call after this
             # one would answer "No program loaded", or about whichever program
             # is still current, for as long as the model kept asking.
             said = load_failure(answer)
             if said is None:
+                name = program_name_from_load(answer)
+                analyse = getattr(client, "analyse_program", None)
+                if name and callable(analyse) and await analyse(name) and programs is not None:
+                    programs.note(pinned, name, answer)
                 return answer
             words, from_ghidra = said
             if from_ghidra:

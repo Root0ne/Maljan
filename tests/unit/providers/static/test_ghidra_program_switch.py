@@ -24,7 +24,6 @@ import json
 from typing import Any
 
 from maljan.analysis.ghidra_program import (
-    ANALYSIS_PATH,
     SWITCH_PARAM,
     SWITCH_PATH,
     program_name_from_load,
@@ -117,7 +116,7 @@ class TestTheClientFollowsALoadWithASwitch:
                 "/load_program", "POST", [{"name": "file", "source": "body"}], {"file": "/x/b.exe"}
             )
         )
-        assert _paths(http) == ["/load_program", SWITCH_PATH, ANALYSIS_PATH]
+        assert _paths(http) == ["/load_program", SWITCH_PATH]
         assert http.calls[1][2] == {SWITCH_PARAM: "b.exe"}, "the switch must be query-encoded"
         assert "success" in out, "the caller still receives the load response"
 

@@ -33,6 +33,8 @@ sync pre-pass, sync attribution pass).
 from __future__ import annotations
 
 import json
+import threading
+from dataclasses import dataclass
 from typing import Any
 
 #: The endpoint that actually moves Ghidra's attention, and the parameter name
@@ -86,13 +88,51 @@ ANALYSIS_PATH = "/run_analysis"
 
 
 def analysis_is_confirmed(response_text: str) -> bool:
-    """Whether a ``/run_analysis`` response says the analysis ran.
-
-    Like :func:`switch_is_confirmed`, it decides what to log, not what to
-    raise.
-    """
+    """Whether a ``/run_analysis`` response says the analysis ran."""
     try:
         payload = json.loads(response_text)
     except (TypeError, ValueError):
         return False
     return isinstance(payload, dict) and payload.get("success") is True
+
+
+@dataclass(frozen=True)
+class OpenedProgram:
+    """A program one job loaded and analysed: its name, and the load's own answer."""
+
+    name: str
+    answer: str
+
+
+class JobPrograms:
+    """The programs this job has loaded *and* analysed on Ghidra, by the path loaded.
+
+    Every ``load_program`` imports the file afresh, in the place of any program
+    of the same name, and an import is not analysed: callers, callees and
+    cross-references then read empty, and the program it replaced stays in
+    Ghidra's memory. So a job loads and analyses a path once and notes it here;
+    a later load of the same path is a switch to the noted program, answered
+    with the load's own answer, and a switch that fails (Ghidra restarted, the
+    program gone) forgets the note so the next load is made afresh.
+
+    One per job: it lives on the job's Ghidra provider and is handed to the
+    triage pack's pass, never shared between jobs. Safe across the job's
+    threads.
+    """
+
+    def __init__(self) -> None:
+        self._opened: dict[str, OpenedProgram] = {}
+        self._lock = threading.Lock()
+
+    def get(self, path: str) -> OpenedProgram | None:
+        with self._lock:
+            return self._opened.get(path)
+
+    def note(self, path: str, name: str, answer: str) -> None:
+        if path and name:
+            with self._lock:
+                self._opened[path] = OpenedProgram(name=name, answer=answer)
+
+    def forget(self, path: str) -> None:
+        with self._lock:
+            self._opened.pop(path, None)

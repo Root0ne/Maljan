@@ -567,6 +567,10 @@ class GhidraPasses:
     call_timeout: float | None = None
     unavailable: str = ""
     transport: Any = field(default=None, repr=False)
+    # The job's note of the programs it loaded and analysed
+    # (``ghidra_program.JobPrograms``): the program this pass analyses is
+    # noted, so an agent's later load of the same path is a switch to it.
+    programs: Any = field(default=None, repr=False)
     _http: Any = field(default=None, init=False, repr=False)
     _program: str = field(default="", init=False)
     _image_base: int | None = field(default=None, init=False)
@@ -652,6 +656,9 @@ class GhidraPasses:
             "POST", "/run_analysis", "the auto-analysis of the job's sample", json={"program": name}
         )
         _raise_on_error(analysed, "the auto-analysis of the job's sample")
+        note = getattr(self.programs, "note", None)
+        if callable(note):
+            note(self.sample_path, name, json.dumps(loaded))
         info = self._request(
             "GET",
             "/get_current_program_info",
