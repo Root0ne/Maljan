@@ -582,3 +582,29 @@ class TestTheFieldMayStandAnywhere:
         assert (mark.blocking, mark.marked, mark.unread) == (True, True, False)
         assert mark.reason == "the ledger refutes it"
         assert analysts_to_revise([line], NAMES) == (["static"], "")
+
+
+class TestAPeerIsNamedAsItsReportIsHeaded:
+    def test_plain_words_that_spell_an_analyst_key_name_no_peer(self) -> None:
+        line = (
+            "[analysts: dynamic] DYNAMIC Claim 1 says the string is static, the network "
+            "traffic dynamic. [blocking: x]"
+        )
+
+        _feedback, peers = contested_input(
+            "dynamic", FINDING, [line], NAMES, {n: f"{n} first" for n in NAMES}, IN_FORCE
+        )
+
+        assert peers == {}
+
+    def test_the_heading_forms_name_a_peer(self) -> None:
+        line = (
+            "[analysts: dynamic] DYNAMIC differs from Static Analyst and from NETWORK. "
+            "[blocking: x]"
+        )
+
+        _feedback, peers = contested_input(
+            "dynamic", FINDING, [line], NAMES, {n: f"{n} first" for n in NAMES}, IN_FORCE
+        )
+
+        assert set(peers) == {"static", "network"}

@@ -27,7 +27,7 @@ size are left out.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -79,17 +79,38 @@ def _name_pattern(name: str) -> re.Pattern[str]:
     )
 
 
-def _mentions(line: str, agent_names: Iterable[str]) -> list[tuple[str, list[int] | None]]:
+def _heading_pattern(name: str) -> re.Pattern[str]:
+    """An analyst named as the platform heads its report: ``STATIC``, ``Static Analyst``.
+
+    The key in capitals, as a token, or its words followed by the word
+    ``analyst`` in any case. A lower-case word that spells a key ("the string
+    is static") is not a name.
+    """
+    parts = [part for part in re.split(r"[_\-\s]+", name) if part]
+    sep = r"[_\-\s]+"
+    upper = sep.join(re.escape(part.upper()) for part in parts)
+    words = sep.join(re.escape(part) for part in parts)
+    return re.compile(
+        r"(?<![0-9A-Za-z_])(?:" + upper + r"|(?i:" + words + sep + r"analyst))(?![0-9A-Za-z_])"
+    )
+
+
+def _mentions(
+    line: str,
+    agent_names: Iterable[str],
+    pattern: Callable[[str], re.Pattern[str]] = _name_pattern,
+) -> list[tuple[str, list[int] | None]]:
     """``(agent, claim numbers or None)`` for each time the line names an analyst.
 
     Longer names are read first, so a name inside a longer one is not read
     again. ``None`` is a mention that cites no claim number right after it.
+    ``pattern`` is how a name is recognised (``_name_pattern`` by default).
     """
     names = sorted({str(n) for n in agent_names if str(n).strip()}, key=len, reverse=True)
     taken: list[tuple[int, int]] = []
     found: list[tuple[str, list[int] | None]] = []
     for name in names:
-        for match in _name_pattern(name).finditer(line):
+        for match in pattern(name).finditer(line):
             span = match.span()
             if any(span[0] < end and start < span[1] for start, end in taken):
                 continue
@@ -390,6 +411,7 @@ def contested_input(
     ledger id they cite.
     """
     mine = points_naming(name, blocking, participants)
+    # A peer the prose names counts only in its report heading's form.
     head_at = finding.rfind(_LISTED_HEAD)
     tail_at = finding.rfind(_CONFIDENCE_TAIL)
     if 0 <= head_at < tail_at:
@@ -407,7 +429,9 @@ def contested_input(
         }
         # The names the line's prose gives, the field itself left out.
         in_prose: set[str] = set()
-        for peer, numbers in _mentions(_ANALYSTS_FIELD.sub(" ", line), participants):
+        for peer, numbers in _mentions(
+            _ANALYSTS_FIELD.sub(" ", line), participants, _heading_pattern
+        ):
             in_prose.add(peer)
             if peer == name:
                 continue
