@@ -26,6 +26,7 @@ import json
 import re
 from collections.abc import Awaitable, Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from fractions import Fraction
 from functools import cache, lru_cache
 from typing import Any, get_args, get_origin
 
@@ -1475,6 +1476,133 @@ def name_stem_families() -> dict[str, int]:
     return dict(_name_stem_families())
 
 
+# The words the vendored data describes a technique with: the stems of its
+# card's requirements and indicators (``data/attck_technique_cards.json``,
+# written from the ATT&CK definitions) and of the API catalogue's rule for it
+# (``data/api_attck_map_v1.json``), the texts :func:`_procedure_sources` reads,
+# a phrase that says what the technique is not left out
+# (``_NEGATED_PHRASE_RE``). A stem weighs one over the number of technique
+# families whose texts write it: a stem one family's texts alone write weighs
+# 1, one that four families write ("string") a quarter, and one more
+# families write than ``DESCRIPTION_MAX_FAMILIES`` nothing ("file", "process",
+# "command"). A sentence describes the technique by these words when it writes
+# at least ``DESCRIPTION_STEMS_NEEDED`` distinct stems of them and their
+# weights add up to ``DESCRIPTION_WEIGHT_NEEDED``: two words of the technique's
+# own, or more that it shares with few others. One word alone is not enough:
+# a card names the objects it acts on (a file's "header" under Masquerade File
+# Type), and a sentence names the same object for another reason. Measured on
+# every stored claim of five runs and a hand-labelled sample of them; a test
+# pins where the cuts fall (``description_stem_families``).
+DESCRIPTION_MAX_FAMILIES = 6
+DESCRIPTION_STEMS_NEEDED = 2
+DESCRIPTION_WEIGHT_NEEDED = Fraction(1)
+
+
+# The inflections a description word loses before two are compared, the first
+# that fits, four letters kept: a verb's and a noun's own endings only. An agent
+# noun keeps its "-er" ("header" is not "head", "decoder" not "decode").
+_DESCRIPTION_ENDINGS = (("ings", ""), ("ing", ""), ("ions", ""), ("ion", ""), ("ies", "y"),
+                        ("es", ""), ("ed", ""), ("s", ""))  # fmt: skip
+
+
+def _description_stem(word: str) -> str:
+    """``word`` lower-cased without its inflection and its silent "e": a card writes
+    "a decode loop", "decodes" and "decoded", "a delayed delete" and "deletion"."""
+    stem = word.lower()
+    for ending, replaced in _DESCRIPTION_ENDINGS:
+        if (
+            stem.endswith(ending)
+            and len(stem) - len(ending) >= 4
+            and not (ending == "s" and stem.endswith("ss"))
+        ):
+            stem = stem[: -len(ending)] + replaced
+            break
+    return stem[:-1] if stem.endswith("e") and len(stem) >= 5 else stem
+
+
+@lru_cache(maxsize=1)
+def _description_stopwords() -> frozenset[str]:
+    """The words no description is compared by: the catalogue index's stopwords
+    (``was``, ``which``, ``used``) and a name's filler words."""
+    from maljan.memory.attck_index import _STOPWORDS
+
+    return frozenset(_STOPWORDS | _NAME_FILLER_WORDS)
+
+
+def _description_stems(text: str) -> set[str]:
+    """The description stems of ``text``'s words of three letters or more.
+
+    A call, a class, a program or a module is no description word: it names a
+    procedure, and a procedure word counts only as :func:`_names_a_procedure`
+    reads it (written as something run or called, in a sentence that does not
+    say it was not seen). "The string table holds cmd.exe" names an object.
+    """
+    stopwords = _description_stopwords()
+    modules = _module_exports()
+    return {
+        _description_stem(word)
+        for word in re.findall(r"[A-Za-z0-9_]+", text)
+        if len(word) >= 3
+        and word.lower() not in stopwords
+        and not _PROCEDURE_SHAPE_RE.search(word)
+        and not _is_a_program_name(word.lower(), modules)
+    }
+
+
+@lru_cache(maxsize=1)
+def _description_stems_by_id() -> tuple[dict[str, frozenset[str]], dict[str, int]]:
+    """Every technique's description stems by id, and how many technique families'
+    texts write each stem. Read once."""
+    stems_by_id: dict[str, frozenset[str]] = {}
+    families: dict[str, set[str]] = {}
+    for technique_id, texts in _procedure_sources().items():
+        stems: set[str] = set()
+        for text in texts:
+            stems |= _description_stems(_NEGATED_PHRASE_RE.sub(" ", text))
+        stems_by_id[technique_id] = frozenset(stems)
+        for stem in stems:
+            families.setdefault(stem, set()).add(_family(technique_id))
+    return stems_by_id, {stem: len(found) for stem, found in families.items()}
+
+
+def description_stem_families() -> dict[str, int]:
+    """How many technique families' vendored texts write each description stem."""
+    return dict(_description_stems_by_id()[1])
+
+
+@cache
+def description_weights(technique_id: str) -> dict[str, Fraction]:
+    """The stems a claim may describe ``technique_id`` by, each with its weight.
+
+    The id's own texts and, for a sub-technique, its parent's (as the name check
+    reads the parent's name); for a parent, its sub-techniques' too, since a
+    sentence that describes a sub-technique describes its parent.
+    """
+    from maljan.memory.attck_loader import sub_technique_entries
+
+    stems_by_id, families = _description_stems_by_id()
+    tid = str(technique_id or "").strip().upper()
+    ids = [tid, _family(tid)] if "." in tid else [tid]
+    if "." not in tid:
+        ids.extend(entry.technique_id for entry in sub_technique_entries(tid))
+    return {
+        stem: Fraction(1, families[stem])
+        for one in ids
+        for stem in stems_by_id.get(one, frozenset())
+        if 0 < families.get(stem, 0) <= DESCRIPTION_MAX_FAMILIES
+    }
+
+
+def described_by_its_words(text: str, technique_id: str) -> bool:
+    """Whether ``text`` writes enough of the words the vendored data describes
+    ``technique_id`` with, by their number and their weight (see above)."""
+    weights = description_weights(technique_id)
+    if not weights:
+        return False
+    hits = [weights[stem] for stem in _description_stems(text) if stem in weights]
+    return len(hits) >= DESCRIPTION_STEMS_NEEDED and sum(hits) >= DESCRIPTION_WEIGHT_NEEDED
+
+
 def _joined_word_places(text: str, stems: Collection[str]) -> list[tuple[int, int]]:
     """Where an identifier of joined words writes one of ``stems`` that the names of one
     technique family only hold (see above)."""
@@ -1529,14 +1657,18 @@ def _names_a_procedure(text: str, technique_id: str, stems: Collection[str]) -> 
 
 def _shares_a_name_term(text: str, technique_id: str, attck: Any) -> bool:
     """Whether ``text`` shares a term with the technique's capability terms, catalogue
-    name or tactic phrase: the reading the does-not-describe question had before
-    procedure words were read."""
+    name or tactic phrase, or writes enough of the words the vendored data
+    describes it with (:func:`described_by_its_words`)."""
     _name, stems, forms = _name_terms(technique_id, attck)
     pattern = behaviour_pattern(technique_id, attck)
-    return (pattern is not None and pattern.search(text) is not None) or any(
-        _stem(word) in stems or word.lower() in forms
-        for word in re.findall(r"[A-Za-z0-9]+", text)
-        if len(word) >= 3
+    return (
+        (pattern is not None and pattern.search(text) is not None)
+        or any(
+            _stem(word) in stems or word.lower() in forms
+            for word in re.findall(r"[A-Za-z0-9]+", text)
+            if len(word) >= 3
+        )
+        or described_by_its_words(text, technique_id)
     )
 
 
@@ -1557,7 +1689,12 @@ def claim_does_not_describe_violation(
     Security Software Discovery) as something the sample does shares a term
     with it too, and so does an identifier whose joined words write a stem of
     the name one technique family's names hold ("BeingDebugged" under Debugger
-    Evasion) (:func:`_names_a_procedure`). Only a sentence that shares none of
+    Evasion) (:func:`_names_a_procedure`). So does a sentence that writes two
+    or more of the words the technique's card and API rule describe it with,
+    weighed by how few technique families write them, its sub-techniques'
+    words read for a parent ("strings XOR-encoded, decoded at run time from
+    their blobs" under Obfuscated Files or Information;
+    :func:`described_by_its_words`). Only a sentence that shares none of
     them is asked about, once: "accesses the PEB to bypass sandboxing" under OS
     Credential Dumping. What the analyst answers stands, and a technique kept
     after the question is published as the analyst stated it. Nothing is
