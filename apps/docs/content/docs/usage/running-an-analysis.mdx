@@ -93,7 +93,10 @@ submit rather than a failed job minutes later. Unknown keys pass through.
 three kinds of job that could only fail later:
 
 - **A model no probe has reached.** With `llm.require_probe` on (the default),
-  every model an agent of the team names must have answered a connection test.
+  every model the job calls must have answered a connection test: every agent
+  of the team and every agent it can ask, the mediator and summariser when they
+  run, and the judge and the reporter on the global judge model unless they
+  have an entry.
   See [a model is probed before a job may name
   it](/configuration/#a-model-is-probed-before-a-job-may-name-it).
 - **A static provider that is not ready.** Ghidra does not degrade, so a team

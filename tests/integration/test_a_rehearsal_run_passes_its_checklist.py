@@ -312,3 +312,71 @@ def test_a_window_taken_over_fewer_models_than_the_job_calls_still_fails(
         "the smallest window the stub serves the job's models is deepseek-v3 65536" in detail
         for detail in failed.values()
     ), failed
+
+
+# The shipped lead team: the lead on an entry of its own (deepseek-v4-flash),
+# the specialists it asks through ``ask_<key>`` on no entry, so on the global
+# expert model, here deepseek-v3 with its 65,536-token window. The judge keeps
+# the rehearsal's own entry.
+def _lead_team_run(tmp_path: Path) -> Any:
+    rehearsal = Rehearsal(
+        scenario="normal",
+        provider="openai",
+        work_dir=tmp_path / "lead-team",
+        job_timeout_s=JOB_DEADLINE_S,
+        extra={
+            "agents.profile": "team_lead",
+            "llm.openai.expert_model": "deepseek-v3",
+            "llm.agents": {
+                "lead": {"provider": "openai", "model": "deepseek-v4-flash"},
+                "judge": {"provider": "openai", "model": "deepseek-v4-pro", "effort": "max"},
+            },
+        },
+    )
+    return asyncio.run(rehearse(rehearsal))
+
+
+@pytest.mark.usefixtures("small_judge_priced")
+def test_a_lead_team_s_window_counts_the_specialists_it_asks(tmp_path: Path) -> None:
+    """The specialists sit in no stage, and their model sizes the job's window all the same."""
+    record = _lead_team_run(tmp_path)
+
+    failed = {c.name: c.detail for c in check_run(record) if not c.ok}
+    window = record.run_summary["truncation"]["context_window"]
+
+    assert "deepseek-v3" in record.window_models
+    assert window["tokens"] == 65536
+    assert "window in force as the provider serves it" not in failed, failed
+    # The stub's script is the default team's: it writes no lead answer that
+    # carries the report's configuration and communications facts, and the
+    # rehearsal expects a mediator call a team with no debate never makes.
+    # Neither is about the window.
+    assert set(failed) <= {
+        "every report section written or accounted for",
+        "settings in force as configured",
+    }, failed
+
+
+@pytest.mark.usefixtures("small_judge_priced")
+def test_a_lead_team_window_that_leaves_the_specialists_out_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A product window over the stages' agents alone is named by the gate."""
+    from maljan.agents import composition
+
+    real = composition.called_assignments
+
+    def _stages_only(settings: Any, stages: Any = None) -> list[Any]:
+        team = set(composition.analyst_keys(settings)) | {"judge", "reporter", "mediator"}
+        return [a for a in real(settings, stages) if a.agent in team]
+
+    monkeypatch.setattr(composition, "called_assignments", _stages_only)
+    record = _lead_team_run(tmp_path)
+
+    failed = {c.name: c.detail for c in check_run(record) if not c.ok}
+
+    assert record.run_summary["truncation"]["context_window"]["tokens"] == 1048576
+    assert any(
+        "the smallest window the stub serves the job's models is deepseek-v3 65536" in detail
+        for detail in failed.values()
+    ), failed

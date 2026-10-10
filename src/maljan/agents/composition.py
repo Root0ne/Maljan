@@ -105,60 +105,73 @@ def analyst_keys(settings: Settings) -> list[str]:
     return list(active_profile(settings).analysis_agents)
 
 
-def role_entries_called(settings: Settings, stages: Sequence[Any] | None = None) -> list[str]:
-    """The roles with no definition whose own ``llm.agents`` entry a run calls.
+def called_assignments(settings: Settings, stages: Sequence[Any] | None = None) -> list[Any]:
+    """Every model a job of ``stages`` calls, each read as its builder reads it.
 
-    The mediator runs in a debate stage and the function summariser while
-    ``preprocessing.use_function_summarizer`` is on. Only a role with an entry
-    of its own is named: with none it runs on the global expert model, and
-    what is asked about a run's models — the probe gate, the window — asks
-    about it exactly as it did before the role could have one. ``stages``
-    defaults to the active profile's.
-    """
-    from maljan.core.config import MEDIATOR_AGENT_KEY, SUMMARIZER_AGENT_KEY
+    The one answer to "what will this run call", which the job-start probe
+    gate checks whole and the context window is taken over
+    (:func:`window_assignments`):
 
-    entries = settings.llm.agents
-    run_stages = list(active_profile(settings).stages if stages is None else stages)
-    called: list[str] = []
-    if MEDIATOR_AGENT_KEY in entries and any(
-        getattr(stage, "kind", "") == "debate" for stage in run_stages
-    ):
-        called.append(MEDIATOR_AGENT_KEY)
-    if SUMMARIZER_AGENT_KEY in entries and settings.preprocessing.use_function_summarizer:
-        called.append(SUMMARIZER_AGENT_KEY)
-    return called
-
-
-def window_assignments(settings: Settings) -> list[Any]:
-    """Every model the job's one context window is taken over, each read as its builder reads it.
-
-    One window sizes every tool answer of the job, the judge's own tool calls
-    included, so it has to fit the tightest model any of those agents calls:
-
-    * every analyst of the active profile, on the expert role;
-    * the mediator whenever the profile has a debate stage, and the function
-      summariser whenever ``preprocessing.use_function_summarizer`` is on, each
-      on the expert role with or without an entry of its own
-      (``get_mediator_llm``, ``get_summarizer_llm``) — with none they call the
-      global expert model;
+    * every agent of the analysis stages and every agent they can ask, and so
+      on (:func:`reachable_agents`) — a lead's specialists sit in no stage —
+      each on the expert role (``get_agent_llm``);
+    * the mediator whenever a debate stage exists, and the function summariser
+      whenever ``preprocessing.use_function_summarizer`` is on, each on the
+      expert role with or without an entry of its own (``get_mediator_llm``,
+      ``get_summarizer_llm``) — with none they call the global expert model;
     * the judge on the judge role (``get_judge_llm``): its own entry, or else
-      the global judge model, never the expert one.
+      the global judge model, never the expert one — every team has exactly
+      one verdict stage;
+    * the reporter on the judge role whenever a report stage exists
+      (``get_reporter_llm``, the narrative and the composer).
 
     Each agent's fallbacks are in, because a model the run falls back to is a
-    model the run calls (``assignment_chain_for``).
+    model the run calls (``assignment_chain_for``). ``stages`` defaults to the
+    active profile's.
     """
-    from maljan.core.config import JUDGE_AGENT_KEY, MEDIATOR_AGENT_KEY, SUMMARIZER_AGENT_KEY
+    from maljan.core.config import (
+        JUDGE_AGENT_KEY,
+        MEDIATOR_AGENT_KEY,
+        REPORTER_AGENT_KEY,
+        SUMMARIZER_AGENT_KEY,
+    )
     from maljan.core.model_assignments import assignment_chain_for, assignments_for
 
-    agents = list(analyst_keys(settings))
-    if any(getattr(stage, "kind", "") == "debate" for stage in active_profile(settings).stages):
+    run_stages = list(active_profile(settings).stages if stages is None else stages)
+    kinds = {str(getattr(stage, "kind", "")) for stage in run_stages}
+    analysts = [
+        str(agent)
+        for stage in run_stages
+        if getattr(stage, "kind", "") == "analysis"
+        for agent in stage.agents
+    ]
+    agents = reachable_agents(settings, analysts)
+    if "debate" in kinds:
         agents.append(MEDIATOR_AGENT_KEY)
     if settings.preprocessing.use_function_summarizer:
         agents.append(SUMMARIZER_AGENT_KEY)
-    return [
+    called = [
         *assignments_for(settings, agents),
         *assignment_chain_for(settings, JUDGE_AGENT_KEY, role="judge"),
     ]
+    if "report" in kinds:
+        called += assignment_chain_for(settings, REPORTER_AGENT_KEY, role="judge")
+    return called
+
+
+def window_assignments(settings: Settings, stages: Sequence[Any] | None = None) -> list[Any]:
+    """Every model the job's one context window is taken over: the called set but the reporter.
+
+    One window sizes every tool answer of the job, the judge's own tool calls
+    included, so it has to fit the tightest model any agent that takes a tool
+    answer under it calls (:func:`called_assignments`). The reporter is the one
+    called role it leaves out: the narrative and the composer make no tool
+    call under the job's budget, and the composer sizes each section's evidence
+    on its own models' windows (``ServiceContainer.get_report_composer``).
+    """
+    from maljan.core.config import REPORTER_AGENT_KEY
+
+    return [a for a in called_assignments(settings, stages) if a.agent != REPORTER_AGENT_KEY]
 
 
 def stages(settings: Settings) -> list[Any]:
@@ -292,13 +305,15 @@ def reachable_agents(settings: Settings, named: Sequence[str]) -> list[str]:
     """
     definitions = settings.agents.definitions
     reached = list(dict.fromkeys(str(key) for key in named))
+    seen = set(reached)
     pending = list(reached)
     while pending:
         definition = definitions.get(pending.pop())
         for ref in getattr(definition, "tools", None) or []:
             callee = str(getattr(ref, "agent", "") or "")
-            if getattr(ref, "kind", "") != "agent" or not callee or callee in reached:
+            if getattr(ref, "kind", "") != "agent" or not callee or callee in seen:
                 continue
+            seen.add(callee)
             reached.append(callee)
             pending.append(callee)
     return reached

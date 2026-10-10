@@ -59,6 +59,16 @@ def _entry(model: str, *fallbacks: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _lead_team() -> list[str]:
+    """The shipped lead team's lead and every specialist it can ask."""
+    from maljan.agents.composition import analyst_keys, reachable_agents
+
+    settings = _settings({"agents.profile": "team_lead"})
+    team = reachable_agents(settings, analyst_keys(settings))
+    assert len(team) > 1
+    return team
+
+
 def _container(settings: Any) -> Any:
     from maljan.core.container import ServiceContainer
 
@@ -178,10 +188,7 @@ class TestTheJobsWindow:
         assert _window(settings) == 65536
 
     def test_the_summariser_counts_on_the_global_expert_model_without_an_entry(self) -> None:
-        from maljan.agents.composition import analyst_keys
-
-        lead = _deepseek("deepseek-v3", "deepseek-v4-pro", **{"agents.profile": "team_lead"})
-        own = {agent: _entry("deepseek-v4-flash") for agent in analyst_keys(lead)}
+        own = {agent: _entry("deepseek-v4-flash") for agent in _lead_team()}
         values = {
             "agents.profile": "team_lead",
             "llm.agents": {**own, "judge": _entry("deepseek-v4-pro")},
@@ -190,6 +197,39 @@ class TestTheJobsWindow:
         assert _window(_deepseek("deepseek-v3", "deepseek-v4-pro", **values)) == 1048576
         summarising = {**values, "preprocessing.use_function_summarizer": True}
         assert _window(_deepseek("deepseek-v3", "deepseek-v4-pro", **summarising)) == 65536
+
+    def test_a_lead_s_specialists_count_on_the_global_expert_model_without_entries(self) -> None:
+        """The lead asks specialists that sit in no stage; each runs on the global expert model."""
+        settings = _deepseek(
+            "deepseek-v3",
+            "deepseek-v4-pro",
+            **{"agents.profile": "team_lead", "llm.agents": {"lead": _entry("deepseek-v4-pro")}},
+        )
+
+        assert _window(settings) == 65536
+
+    def test_a_lead_team_with_every_agent_on_a_larger_entry_takes_the_larger_window(
+        self,
+    ) -> None:
+        own = {agent: _entry("deepseek-v4-flash") for agent in _lead_team()}
+        settings = _deepseek(
+            "deepseek-v3", "deepseek-v4-pro", **{"agents.profile": "team_lead", "llm.agents": own}
+        )
+
+        assert _window(settings) == 1048576
+
+    def test_a_specialist_s_own_entry_on_a_smaller_window_narrows_it(self) -> None:
+        team = _lead_team()
+        specialist = next(agent for agent in team if agent != "lead")
+        own = {agent: _entry("deepseek-v4-flash") for agent in team}
+        own[specialist] = _entry("deepseek-v3")
+        settings = _deepseek(
+            "deepseek-v4-flash",
+            "deepseek-v4-flash",
+            **{"agents.profile": "team_lead", "llm.agents": own},
+        )
+
+        assert _window(settings) == 65536
 
     def test_an_analyst_s_fallback_counts(self) -> None:
         settings = _deepseek(
@@ -246,19 +286,69 @@ class TestTheWindowsModels:
         assert len(_questions(settings, window_assignments(settings))) == 1
 
     def test_a_hostile_roster_is_read_in_linear_time(self) -> None:
+        """A chain of agents each asking the next is walked once, each model asked once."""
         import time
+        from types import SimpleNamespace
 
         from maljan.agents.composition import window_assignments
         from maljan.llm.context_window import _questions
 
         def _timed(count: int) -> float:
+            definitions = {
+                f"a{i}": {
+                    "role": "generic",
+                    "prompt": "p",
+                    "tools": [{"kind": "agent", "agent": f"a{i + 1}"}] if i + 1 < count else [],
+                }
+                for i in range(count)
+            }
             entries = {f"a{i}": _entry(f"model-{i}") for i in range(count)}
-            settings = _deepseek("deepseek-v4-flash", "deepseek-v3", **{"llm.agents": entries})
-            chain = window_assignments(settings) * count
+            settings = _deepseek(
+                "deepseek-v4-flash",
+                "deepseek-v3",
+                **{"agents.definitions": definitions, "llm.agents": entries},
+            )
+            stages = [SimpleNamespace(kind="analysis", agents=["a0"])]
             started = time.perf_counter()
-            _questions(settings, [*chain, *entries])
-            return time.perf_counter() - started
+            chain = window_assignments(settings, stages)
+            _questions(settings, chain * 10)
+            elapsed = time.perf_counter() - started
+            assert len(chain) == count + 1
+            return elapsed
 
         small, large = _timed(200), _timed(2000)
 
         assert large < small * 30 + 0.05
+
+
+class TestAnEntryTheRegistryCannotBuild:
+    def test_it_is_read_as_the_role_s_global_model_as_the_builder_builds_it(self) -> None:
+        from maljan.core.model_assignments import assignment_chain_for
+
+        settings = _deepseek(
+            "deepseek-v4-flash",
+            "deepseek-v3",
+            **{"llm.agents": {"judge": {"provider": "no-such-provider", "model": "x"}}},
+        )
+
+        chain = assignment_chain_for(settings, "judge", role="judge")
+
+        assert [a.model for a in chain] == ["deepseek-v3"]
+        assert _judge_cap(settings).tokens < 65536
+
+    def test_a_provider_registered_later_is_read_as_built(self) -> None:
+        from maljan.core.model_assignments import assignment_chain_for
+        from maljan.llm.registry import _PROVIDER_REGISTRY
+
+        settings = _deepseek(
+            "deepseek-v4-flash",
+            "deepseek-v3",
+            **{"llm.agents": {"judge": {"provider": "acme-plugged", "model": "acme-judge"}}},
+        )
+        _PROVIDER_REGISTRY["acme-plugged"] = object
+        try:
+            chain = assignment_chain_for(settings, "judge", role="judge")
+        finally:
+            _PROVIDER_REGISTRY.pop("acme-plugged", None)
+
+        assert [a.model for a in chain] == ["acme-judge"]

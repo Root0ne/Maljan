@@ -1758,24 +1758,19 @@ def output_cap_for(
     return OutputCap(tokens, f"llm.{setting} is 0, so derived: {said}")
 
 
-def _questions(settings: Any, agents: Sequence[Any]) -> list[dict[str, Any]]:
+def _questions(settings: Any, assignments: Sequence[Any]) -> list[dict[str, Any]]:
     """The distinct windows this run has to learn, one per pair, in order.
 
-    ``agents`` names agents, each read with every model it may call on the
-    expert role (``assignments_for``), or holds model assignments already read
-    on the role their builder reads them on (``composition.window_assignments``).
+    ``assignments`` are models already read on the role their builder reads
+    them on (``composition.window_assignments``): an agent's name alone says
+    nothing about that role, so none is taken here.
     Deduplicated on ``(provider, endpoint, model)`` — the cache's own key —
     because that is the question, and a team of five agents on one endpoint is
     one question asked once. Asked per agent instead, a dead endpoint cost a
     run four full plans and twelve requests before it could start.
     """
-    from maljan.core.model_assignments import assignments_for
-
     asked: dict[tuple[str, str, str], dict[str, Any]] = {}
-    read: list[Any] = []
-    for item in agents:
-        read.extend(assignments_for(settings, [item]) if isinstance(item, str) else [item])
-    for assignment in read:
+    for assignment in assignments:
         declared, is_default = declared_window(settings, assignment.provider)
         asked.setdefault(
             (assignment.provider, assignment.endpoint, assignment.model),
@@ -1791,26 +1786,31 @@ def _questions(settings: Any, agents: Sequence[Any]) -> list[dict[str, Any]]:
     return list(asked.values())
 
 
-def window_for_settings(settings: Any, agents: Sequence[Any], *, probe: bool = True) -> WindowFact:
-    """The window one run may count on, across every model its agents call.
+def window_for_settings(
+    settings: Any, assignments: Sequence[Any], *, probe: bool = True
+) -> WindowFact:
+    """The window one run may count on, across the models ``assignments`` name.
 
     The smallest of them, because one cap is handed to every tool server the
     job opens and a cap sized for the roomiest model would overflow the
     tightest. A run whose agents all sit on one endpoint — the ordinary shape —
     asks one question and gets one answer.
     """
-    facts = [learn_window(probe=probe, **question) for question in _questions(settings, agents)]
+    facts = [
+        learn_window(probe=probe, **question) for question in _questions(settings, assignments)
+    ]
     if not facts:
         return unknown_window("this run names no model")
     return min(facts, key=lambda fact: fact.tokens)
 
 
 async def awindow_for_settings(
-    settings: Any, agents: Sequence[Any], *, probe: bool = True
+    settings: Any, assignments: Sequence[Any], *, probe: bool = True
 ) -> WindowFact:
     """:func:`window_for_settings` on the caller's loop."""
     facts = [
-        await alearn_window(probe=probe, **question) for question in _questions(settings, agents)
+        await alearn_window(probe=probe, **question)
+        for question in _questions(settings, assignments)
     ]
     if not facts:
         return unknown_window("this run names no model")
@@ -2202,11 +2202,11 @@ class ContextBudget:
 
 
 def budget_for_settings(
-    settings: Any, agents: Sequence[Any], *, probe: bool = True
+    settings: Any, assignments: Sequence[Any], *, probe: bool = True
 ) -> ContextBudget:
-    """This run's context budget, window learned and reply room reserved."""
+    """This run's context budget over ``assignments``, window learned and reply room reserved."""
     return ContextBudget(
-        window_for_settings(settings, agents, probe=probe),
+        window_for_settings(settings, assignments, probe=probe),
         reply_tokens=generation_reserve(settings),
     )
 

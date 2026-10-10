@@ -458,16 +458,39 @@ def agent_models(settings: Any) -> dict[str, list[str]]:
     return out
 
 
+def _asked_agents(settings: Any, named: list[str]) -> list[str]:
+    """``named`` and every agent they ask through an ``agent`` tool reference, and so on.
+
+    A lead's specialists sit in no stage: the lead reaches them through
+    ``ask_<key>``, and each runs its own loop on its own model, its tool
+    answers sized on the job's one window. Walked here from the definitions
+    themselves rather than through the product's closure, so a product set
+    that leaves them out is a set this check disagrees with.
+    """
+    definitions = settings.agents.definitions
+    reached = list(dict.fromkeys(named))
+    seen = set(reached)
+    pending = list(reached)
+    while pending:
+        for ref in getattr(definitions.get(pending.pop()), "tools", None) or []:
+            callee = str(getattr(ref, "agent", "") or "")
+            if getattr(ref, "kind", "") == "agent" and callee and callee not in seen:
+                seen.add(callee)
+                reached.append(callee)
+                pending.append(callee)
+    return reached
+
+
 def window_models(settings: Any) -> list[str]:
     """Every model the job's one window is taken over, read from the settings.
 
     The agents whose tool answers that one window sizes
     (``ServiceContainer.get_context_budget``; the judge's own tool calls take
     it too, ``JudgeAgent._context_budget``): the active profile's analysts and
-    the role entries the run calls, each with every model it may call on the
-    expert role (``assignments_for``), and the judge with every model it
-    really calls, read on the judge role as ``get_judge_llm`` builds it. Read
-    here independently of the product's own set
+    every agent they can ask (``_asked_agents``), each with every model it may
+    call on the expert role (``assignments_for``), and the judge with every
+    model it really calls, read on the judge role as ``get_judge_llm`` builds
+    it. Read here independently of the product's own set
     (``composition.window_assignments``), so a product window taken over a
     narrower set than this one makes the check fail rather than agree with it.
 
@@ -479,16 +502,23 @@ def window_models(settings: Any) -> list[str]:
     entries would otherwise leave out. Empty when the settings cannot
     answer, so the window check fails.
     """
-    from maljan.agents.composition import active_profile, analyst_keys, role_entries_called
+    from maljan.agents.composition import active_profile
     from maljan.core.config import JUDGE_AGENT_KEY, MEDIATOR_AGENT_KEY, SUMMARIZER_AGENT_KEY
     from maljan.core.model_assignments import assignment_chain_for, assignments_for
 
-    agents = [*analyst_keys(settings), *role_entries_called(settings)]
-    if any(getattr(stage, "kind", "") == "debate" for stage in active_profile(settings).stages):
-        agents.append(MEDIATOR_AGENT_KEY)
-    if settings.preprocessing.use_function_summarizer:
-        agents.append(SUMMARIZER_AGENT_KEY)
     try:
+        profile = active_profile(settings)
+        analysts = [
+            str(agent)
+            for stage in profile.stages
+            if stage.kind == "analysis"
+            for agent in stage.agents
+        ]
+        agents = _asked_agents(settings, analysts)
+        if any(getattr(stage, "kind", "") == "debate" for stage in profile.stages):
+            agents.append(MEDIATOR_AGENT_KEY)
+        if settings.preprocessing.use_function_summarizer:
+            agents.append(SUMMARIZER_AGENT_KEY)
         chain = [
             *assignments_for(settings, agents),
             *assignment_chain_for(settings, JUDGE_AGENT_KEY, role="judge"),

@@ -24,6 +24,7 @@ from maljan.agents.composition import (
 )
 from maljan.agents.registry import AgentRegistry as _AgentRegistry
 from maljan.core.config import Settings, ToolRef
+from maljan.core.model_assignments import assignments_for
 
 # ``resolve_agent("network")``/``resolve_agent("static")`` import their built-in
 # role modules directly, bypassing ``AgentRegistry.discover_agents()``'s fixed
@@ -106,7 +107,9 @@ class _Container:
         self._truncation_ledger = TruncationLedger()
         from maljan.llm.context_window import budget_for_settings
 
-        self._context_budget = budget_for_settings(cfg, ["static"], probe=False)
+        self._context_budget = budget_for_settings(
+            cfg, assignments_for(cfg, ["static"]), probe=False
+        )
 
     def get_agent_llm(self, name: str) -> Any:
         return self.llm

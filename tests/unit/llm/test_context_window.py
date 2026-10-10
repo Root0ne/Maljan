@@ -22,6 +22,7 @@ from typing import Any
 import httpx
 import pytest
 
+from maljan.core.model_assignments import assignments_for
 from maljan.llm import context_window as cw
 
 
@@ -272,7 +273,9 @@ class TestTheProbeCanReachNothingThatGenerates:
         settings = Settings(
             _env_file=None, llm={"openai": {"base_url": "http://127.0.0.1:8080/v1"}}
         )
-        sent = _sent_by(lambda: cw.window_for_settings(settings, ["static", "judge"]))
+        sent = _sent_by(
+            lambda: cw.window_for_settings(settings, assignments_for(settings, ["static", "judge"]))
+        )
         _nothing_but_metadata(sent, ("settings",))
         cw.forget_learned_windows()
 
@@ -390,7 +393,9 @@ class TestOneQuestionPerEndpointAndModel:
 
         settings = Settings(_env_file=None, llm={"openai": {"base_url": "http://127.0.0.1:1/v1"}})
         asked = _sent_by(
-            lambda: cw.window_for_settings(settings, ["static", "dynamic", "network", "judge"])
+            lambda: cw.window_for_settings(
+                settings, assignments_for(settings, ["static", "dynamic", "network", "judge"])
+            )
         )
         assert len({str(request.url) for request in asked}) == len(asked)
         assert len(asked) <= len(cw.PROBE_PATHS)
@@ -399,8 +404,12 @@ class TestOneQuestionPerEndpointAndModel:
         from maljan.core.config import Settings
 
         settings = Settings(_env_file=None, llm={"openai": {"base_url": "http://127.0.0.1:1/v1"}})
-        first = _sent_by(lambda: cw.window_for_settings(settings, ["static"]))
-        again = _sent_by(lambda: cw.window_for_settings(settings, ["static"]))
+        first = _sent_by(
+            lambda: cw.window_for_settings(settings, assignments_for(settings, ["static"]))
+        )
+        again = _sent_by(
+            lambda: cw.window_for_settings(settings, assignments_for(settings, ["static"]))
+        )
         assert first, "the first job asked"
         assert again == [], "the second job asked again"
 
@@ -408,11 +417,13 @@ class TestOneQuestionPerEndpointAndModel:
         from maljan.core.config import Settings
 
         settings = Settings(_env_file=None, llm={"openai": {"base_url": "http://127.0.0.1:1/v1"}})
-        _sent_by(lambda: cw.window_for_settings(settings, ["static"]))
+        _sent_by(lambda: cw.window_for_settings(settings, assignments_for(settings, ["static"])))
         for key in list(cw._learned):  # noqa: SLF001 - the age is the thing under test
             stale = time.monotonic() - cw.WINDOW_CACHE_SECONDS - 1.0
             cw._learned[key] = (stale, cw._learned[key][1])  # noqa: SLF001
-        assert _sent_by(lambda: cw.window_for_settings(settings, ["static"])), "never asked again"
+        assert _sent_by(
+            lambda: cw.window_for_settings(settings, assignments_for(settings, ["static"]))
+        ), "never asked again"
 
 
 class TestTheOllamaWindowIsBothNumbers:
@@ -427,7 +438,9 @@ class TestTheOllamaWindowIsBothNumbers:
         from maljan.core.config import Settings
 
         settings = Settings(_env_file=None, llm={"provider": "ollama"})
-        asked = _sent_by(lambda: cw.window_for_settings(settings, ["static"]))
+        asked = _sent_by(
+            lambda: cw.window_for_settings(settings, assignments_for(settings, ["static"]))
+        )
         assert [request.url.path for request in asked] == ["/api/show"]
 
     def test_a_model_that_holds_less_than_is_asked_for_wins(self) -> None:
@@ -601,12 +614,19 @@ class TestAWindowThatMovedUnderUs:
         from maljan.core.config import Settings
 
         settings = Settings(_env_file=None, llm={"openai": {"base_url": "http://127.0.0.1:1/v1"}})
-        _sent_by(lambda: cw.window_for_settings(settings, ["static"]))
-        assert _sent_by(lambda: cw.window_for_settings(settings, ["static"])) == []
+        _sent_by(lambda: cw.window_for_settings(settings, assignments_for(settings, ["static"])))
+        assert (
+            _sent_by(
+                lambda: cw.window_for_settings(settings, assignments_for(settings, ["static"]))
+            )
+            == []
+        )
 
         cw.note_provider_error("maximum context length is 32768 tokens")
 
-        assert _sent_by(lambda: cw.window_for_settings(settings, ["static"])), "never asked again"
+        assert _sent_by(
+            lambda: cw.window_for_settings(settings, assignments_for(settings, ["static"]))
+        ), "never asked again"
 
 
 class TestARefusalIsNotASilence:
