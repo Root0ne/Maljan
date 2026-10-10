@@ -573,6 +573,9 @@ class GhidraPasses:
     # opened is not imported again.
     sample_open: Any = field(default=None, repr=False)
     sample_notes: Any = field(default=None, repr=False)
+    # The server in the job's note (``sample_open.server_note_key``): Ghidra's
+    # address, as the agents' and the load before the loop's own opens name it.
+    note_key: str = ""
     _http: Any = field(default=None, init=False, repr=False)
     _program: str = field(default="", init=False)
     _image_base: int | None = field(default=None, init=False)
@@ -644,7 +647,6 @@ class GhidraPasses:
         this pass always did.
         """
         from maljan.analysis.ghidra_program import (
-            NOTE_KEY,
             SWITCH_PARAM,
             SWITCH_PATH,
             program_name_from_load,
@@ -669,7 +671,7 @@ class GhidraPasses:
             notes = self.sample_notes
             if not isinstance(notes, SampleNotes):
                 notes = SampleNotes()
-            opener = SampleOpener(NOTE_KEY, self.sample_open, notes)
+            opener = SampleOpener(self.note_key, self.sample_open, notes)
             answer = opener.open(self.sample_path, call)
             # An open is noted only once the declared analysis answered: an
             # opened program with none noted was not analysed, and this pass

@@ -78,14 +78,18 @@ class GhidraHTTPClient:
         max_output_chars: int = 0,
         truncation_ledger: Any | None = None,
         context_budget: Any | None = None,
-        unbounded_tools: frozenset[str] = frozenset(),
+        long_running_tools: frozenset[str] = frozenset(),
+        explicit_call_timeout: float = 0.0,
     ):
         self.base_url = base_url.rstrip("/")
-        # The tools whose calls wait as long as Ghidra takes rather than the
-        # client's own request timeout: the analysis tool the server's block
-        # declares (``sample_open.analyse_tool``), whose answer the calls after
-        # it read.
-        self._unbounded_tools = frozenset(t for t in unbounded_tools if t)
+        # The rule every tool server's guard applies (``ServerGuard.call_timeout``),
+        # for this client's own transport: a long-running tool (the open and
+        # analysis tools the server's block declares, ``sample_open``) waits as
+        # long as Ghidra takes, unless the operator set a per-call budget
+        # (``mcp.breaker.call_timeout_seconds``); every other call keeps the
+        # client's own request timeout.
+        self._long_running = frozenset(t for t in long_running_tools if t)
+        self._explicit_call_timeout = max(0.0, float(explicit_call_timeout or 0.0))
         # Callers pass a plain string (``SecretStr.get_secret_value()`` already
         # unwrapped at the config boundary); stored plain here too, since this
         # client builds the header string itself.
@@ -224,7 +228,9 @@ class GhidraHTTPClient:
 
         tool = path.lstrip("/").replace("/", "_")
         client = await self._get_http()
-        timeout: Any = None if tool in self._unbounded_tools else httpx.USE_CLIENT_DEFAULT
+        timeout: Any = httpx.USE_CLIENT_DEFAULT
+        if tool in self._long_running:
+            timeout = self._explicit_call_timeout or None
         try:
             if method == "POST":
                 resp = await client.post(

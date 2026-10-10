@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_core.tools import BaseTool
 
-from maljan.analysis.ghidra_program import NOTE_KEY
 from maljan.core.exceptions import SampleNotOpened
 from maljan.core.logger import logger
 from maljan.core.settings_overrides import redact_url
@@ -24,6 +23,8 @@ from maljan.providers.base import (
     StaticProvider,
 )
 from maljan.providers.registry import register_static_provider
+from maljan.providers.sample_open import long_running_tools, server_note_key
+from maljan.providers.server_guard import explicit_call_timeout
 from maljan.tools.errors import SERVER_WORDS_LIMIT
 
 if TYPE_CHECKING:
@@ -278,7 +279,10 @@ def prepare_sample(
             file_path,
             getattr(ghidra, "sample_open", None),
             sample_notes_of(provider),
-            open_call=lambda arguments: _load(http, base, arguments, address, logger_).text,
+            key=server_note_key(ghidra, f"provider {id(provider)}"),
+            open_call=lambda tool, arguments: (
+                _load(http, base, tool, arguments, address, logger_).text
+            ),
         )
         if not program_name_from_load(answer):
             # A failed load answers **200**, so raise_for_status sees nothing
@@ -314,6 +318,7 @@ def open_ghidra_sample(
     spec: Any,
     notes: Any,
     *,
+    key: str,
     open_call: Any = None,
 ) -> str:
     """Open ``file_path`` on Ghidra over its REST API; the open's answer.
@@ -323,9 +328,11 @@ def open_ghidra_sample(
     is a select answered from the note. With nothing declared, the file is
     loaded and made current, as before there was a declaration: Ghidra sets
     its current program only when none is current, so a load alone leaves it
-    reading another binary. ``open_call`` answers the open tool's calls in
-    the caller's own way (the load before the loop retries a connection and
-    raises when Ghidra did not answer).
+    reading another binary (the one place Ghidra's own load tool is named:
+    the behaviour before any declaration). ``open_call(tool, arguments)``
+    answers the open tool's calls in the caller's own way (the load before the
+    loop retries a connection and raises when Ghidra did not answer). ``key``
+    names the server in the job's note (``sample_open.server_note_key``).
     """
     from maljan.analysis.ghidra_program import (
         SWITCH_PARAM,
@@ -336,13 +343,16 @@ def open_ghidra_sample(
     from maljan.providers.sample_open import SampleOpener, declared
 
     if declared(spec):
-        overrides = {spec.open_tool: open_call} if open_call is not None else {}
+        tool = spec.open_tool
+        overrides = (
+            {tool: lambda arguments: open_call(tool, arguments)} if open_call is not None else {}
+        )
         call = rest_tool_call(http, base, overrides=overrides)
-        return SampleOpener(NOTE_KEY, spec, notes).open(file_path, call)
+        return SampleOpener(key, spec, notes).open(file_path, call)
     loaded = (
-        open_call({"file": file_path})
+        open_call(UNDECLARED_LOAD_TOOL, {"file": file_path})
         if open_call is not None
-        else rest_tool_call(http, base)("load_program", {"file": file_path})
+        else rest_tool_call(http, base)(UNDECLARED_LOAD_TOOL, {"file": file_path})
     )
     name = program_name_from_load(loaded)
     if name:
@@ -350,7 +360,14 @@ def open_ghidra_sample(
     return str(loaded)
 
 
-def _load(http: Any, base: str, arguments: dict[str, Any], address: str, log: Any) -> Any:
+# Ghidra's load tool, as the load is made when the block declares no open
+# tool: the behaviour from before there was a declaration.
+UNDECLARED_LOAD_TOOL = "load_program"
+
+
+def _load(
+    http: Any, base: str, tool: str, arguments: dict[str, Any], address: str, log: Any
+) -> Any:
     """The load of the job's sample, or :class:`SampleNotOpened` when Ghidra gave no answer.
 
     A request that did not reach Ghidra is made once more before it counts: a
@@ -363,7 +380,7 @@ def _load(http: Any, base: str, arguments: dict[str, Any], address: str, log: An
 
     for attempt in (1, 2):
         try:
-            loaded = http.post(f"{base}/load_program", json=dict(arguments))
+            loaded = http.post(f"{base}/{tool}", json=dict(arguments))
             loaded.raise_for_status()
             return loaded
         except httpx.HTTPStatusError as exc:
@@ -553,7 +570,8 @@ class GhidraStaticProvider(StaticProvider):
                 max_output_chars=max_chars,
                 truncation_ledger=job.truncation_ledger,
                 context_budget=job.context_budget,
-                unbounded_tools=_analysis_tools(self._cfg),
+                long_running_tools=long_running_tools(getattr(self._cfg, "sample_open", None)),
+                explicit_call_timeout=explicit_call_timeout(get_settings_or_none()),
             )
 
             self._run_async(client.initialize())
@@ -677,7 +695,7 @@ class GhidraStaticProvider(StaticProvider):
         tools = wrap_open_tool(
             tools,
             tools,
-            server=NOTE_KEY,
+            server=server_note_key(getattr(self, "_cfg", None), f"provider {id(self)}"),
             spec=getattr(getattr(self, "_cfg", None), "sample_open", None),
             notes=getattr(self, "sample_notes", None),
         )
@@ -773,6 +791,7 @@ class GhidraStaticProvider(StaticProvider):
             min_instructions=self._pre.function_hash_min_instructions,
             sample_open=getattr(self._cfg, "sample_open", None),
             sample_notes=getattr(self, "sample_notes", None),
+            note_key=server_note_key(self._cfg, f"provider {id(self)}"),
         )
 
     async def probe(self) -> ProviderProbe:
@@ -882,7 +901,11 @@ class GhidraStaticProvider(StaticProvider):
         self._close_toolkit()
 
 
-def _analysis_tools(cfg: Any) -> frozenset[str]:
-    """The analysis tool a server's block declares, whose calls wait as long as it takes."""
-    named = getattr(getattr(cfg, "sample_open", None), "analyse_tool", "")
-    return frozenset({named}) if named else frozenset()
+def get_settings_or_none() -> Any:
+    """The deployment's settings, or ``None`` where none can be read (a probe, a test)."""
+    try:
+        from maljan.core.config import get_settings
+
+        return get_settings()
+    except Exception:  # noqa: BLE001 - no settings means no operator budget
+        return None

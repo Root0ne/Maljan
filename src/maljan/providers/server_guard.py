@@ -119,6 +119,9 @@ class ServerGuard:
         self.explicit_call_timeout = bool(explicit_call_timeout)
         self._declared: dict[str, float] = {}
         self._long_running: frozenset[str] = frozenset()
+        # The tools the server's settings block declares to open and analyse a
+        # sample (``sample_open``), held as long-running like a manifest's.
+        self._opening: frozenset[str] = frozenset()
         self._on_open = on_open
         self._clock = clock
         self._lock = threading.Lock()
@@ -143,10 +146,20 @@ class ServerGuard:
             self._declared = declared
             self._long_running = frozenset(long_running)
 
-    def long_running(self, tool: str) -> bool:
-        """Whether the server's manifest declares ``tool`` long-running with no wall clock."""
+    def declare_sample_open(self, spec: Any) -> None:
+        """Hold the tools ``spec`` (a block's ``sample_open``) declares to open and analyse a
+        sample as long-running, as a manifest's own declaration is held."""
+        from maljan.providers.sample_open import long_running_tools
+
+        opening = long_running_tools(spec)
         with self._lock:
-            return tool in self._long_running
+            self._opening = opening
+
+    def long_running(self, tool: str) -> bool:
+        """Whether ``tool`` runs with no wall clock: by the server's manifest, or by the
+        open and analysis tools its settings block declares (``sample_open``)."""
+        with self._lock:
+            return tool in self._long_running or tool in self._opening
 
     def call_timeout(self, tool: str) -> float | None:
         """How long one call of ``tool`` may take before it is a transport failure, or ``None``.
@@ -294,19 +307,37 @@ def _resting_answer(tool: str, message: str) -> str:
 
 
 def guard_from_settings(
-    server: str, cfg: Any, on_open: Callable[[dict[str, Any]], None] | None = None
+    server: str,
+    cfg: Any,
+    on_open: Callable[[dict[str, Any]], None] | None = None,
+    sample_open: Any = None,
 ) -> ServerGuard:
-    """A guard for ``server`` with the thresholds ``cfg.mcp.breaker`` sets."""
+    """A guard for ``server`` with the thresholds ``cfg.mcp.breaker`` sets.
+
+    ``sample_open`` is the server's own block's declaration: its open and
+    analysis tools are held long-running.
+    """
     breaker = getattr(getattr(cfg, "mcp", None), "breaker", None)
-    return ServerGuard(
+    guard = ServerGuard(
         server,
         failures_to_open=int(getattr(breaker, "failures_to_open", 3)),
         cooldown_seconds=float(getattr(breaker, "cooldown_seconds", 60.0)),
         max_concurrent_calls=int(getattr(breaker, "max_concurrent_calls", 4)),
         call_timeout_seconds=deployment_call_budget(cfg),
         on_open=on_open,
-        explicit_call_timeout=float(getattr(breaker, "call_timeout_seconds", 0.0) or 0.0) > 0,
+        explicit_call_timeout=explicit_call_timeout(cfg) > 0,
     )
+    guard.declare_sample_open(sample_open)
+    return guard
+
+
+def explicit_call_timeout(cfg: Any) -> float:
+    """The per-call budget an operator set (``mcp.breaker.call_timeout_seconds``), or ``0``.
+
+    Only an operator's number bounds a long-running tool.
+    """
+    breaker = getattr(getattr(cfg, "mcp", None), "breaker", None)
+    return max(0.0, float(getattr(breaker, "call_timeout_seconds", 0.0) or 0.0))
 
 
 def deployment_call_budget(cfg: Any) -> float:

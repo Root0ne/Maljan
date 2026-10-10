@@ -26,6 +26,8 @@ from maljan.providers.sample_open import SampleNotes
 from maljan.providers.static.ghidra import GhidraStaticProvider
 
 HELD = "/data/samples/.work/s.exe"
+# Ghidra in the job's note: its address (``sample_open.server_note_key``).
+KEY = "http http://ghidra.invalid"
 LOADED = json.dumps({"success": True, "program": "s.exe"})
 SWITCHED = json.dumps({"success": True, "switched_to": "s.exe"})
 ANALYSED = json.dumps({"success": True, "total_functions": 150, "program": "s.exe"})
@@ -79,7 +81,8 @@ def _provider(ghidra: _Ghidra, notes: SampleNotes | None = None) -> tuple[Any, A
     if notes is not None:
         provider.sample_notes = notes
     client = GhidraHTTPClient(
-        base_url="http://ghidra.invalid", unbounded_tools=frozenset({"run_analysis"})
+        base_url="http://ghidra.invalid",
+        long_running_tools=frozenset({"load_program", "run_analysis"}),
     )
     client._http = httpx.AsyncClient(transport=httpx.MockTransport(ghidra.handler))
     tools = [client._create_langchain_tool(entry) for entry in SCHEMA]
@@ -94,6 +97,37 @@ def _loads(load: Any, times: int) -> list[str]:
         return [str(await load.ainvoke({"file": "/invented.exe"})) for _ in range(times)]
 
     return asyncio.run(go())
+
+
+class TestTheClientKeepsTheGuardsRule:
+    """The declared open and analysis tools wait as long as Ghidra takes, as on every server."""
+
+    def _timeouts(self, explicit: float) -> dict[str, Any]:
+        from maljan.providers.sample_open import long_running_tools
+
+        ghidra = _Ghidra()
+        client = GhidraHTTPClient(
+            base_url="http://ghidra.invalid",
+            long_running_tools=long_running_tools(GHIDRA_SAMPLE_OPEN),
+            explicit_call_timeout=explicit,
+        )
+        client._http = httpx.AsyncClient(
+            transport=httpx.MockTransport(ghidra.handler), timeout=60.0
+        )
+        for entry in SCHEMA:
+            asyncio.run(
+                client._call_endpoint(entry["path"], "POST", entry["params"], {"program": "s"})
+            )
+        return {r.url.path: r.extensions["timeout"]["read"] for r in ghidra.requests}
+
+    def test_no_deadline_for_the_declared_tools_and_the_client_s_own_for_the_rest(self) -> None:
+        read = self._timeouts(0.0)
+        assert read["/load_program"] is None and read["/run_analysis"] is None
+        assert read["/switch_program"] == 60.0
+
+    def test_an_operator_s_budget_bounds_the_declared_tools(self) -> None:
+        read = self._timeouts(900.0)
+        assert read["/run_analysis"] == 900.0
 
 
 class TestTheModelsLoad:
@@ -111,7 +145,7 @@ class TestTheModelsLoad:
         assert json.loads(ghidra.requests[0].content) == {"file": HELD}
         assert json.loads(ghidra.requests[3].content) == {"program": "s.exe"}
         assert said == LOADED
-        assert provider.sample_notes.get("ghidra", HELD).name == "s.exe"
+        assert provider.sample_notes.get(KEY, HELD).name == "s.exe"
 
     def test_every_later_load_is_a_switch_answered_with_the_load_s_answer(self) -> None:
         ghidra = _Ghidra()
@@ -126,7 +160,7 @@ class TestTheModelsLoad:
         provider, load = _provider(ghidra)
         _loads(load, 2)
         assert ghidra.paths().count("/load_program") == 2
-        assert provider.sample_notes.get("ghidra", HELD) is None
+        assert provider.sample_notes.get(KEY, HELD) is None
 
 
 class TestOneNoteForEveryPath:
@@ -141,6 +175,7 @@ class TestOneNoteForEveryPath:
             transport=httpx.MockTransport(pass_ghidra.handler),
             sample_open=GHIDRA_SAMPLE_OPEN,
             sample_notes=notes,
+            note_key=KEY,
         )
         assert passes.open() == "s.exe"
         assert pass_ghidra.paths()[:3] == ["/load_program", "/switch_program", "/run_analysis"]
@@ -170,7 +205,7 @@ class TestOneNoteForEveryPath:
         from maljan.analysis import function_hash_attribution as hashes
 
         notes = SampleNotes()
-        notes.note("ghidra", HELD, "s.exe", LOADED)
+        notes.note(KEY, HELD, "s.exe", LOADED)
         ghidra = _Ghidra(get_bulk_function_hashes=json.dumps({"functions": []}))
         real = httpx.Client
 
@@ -185,6 +220,7 @@ class TestOneNoteForEveryPath:
             min_instructions=1,
             sample_open=GHIDRA_SAMPLE_OPEN,
             sample_notes=notes,
+            note_key=KEY,
         )
         assert "/load_program" not in ghidra.paths()
         assert ghidra.paths()[0] == "/switch_program"

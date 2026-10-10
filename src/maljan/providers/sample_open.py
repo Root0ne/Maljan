@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import posixpath
 import threading
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
@@ -35,13 +36,20 @@ from typing import Any
 from maljan.core.logger import logger
 
 __all__ = [
+    "REMOTE_TRANSPORTS",
     "OpenedSample",
     "SampleNotes",
     "SampleOpener",
     "declared",
     "is_refusal",
+    "long_running_tools",
+    "normalised_path",
+    "server_note_key",
     "wrap_open_tool",
 ]
+
+# How much of a server's own words a refusal handed on carries, each.
+SAID_LIMIT = 500
 
 # How often a coroutine waiting for another's first open of the same path looks again.
 LOCK_POLL_SECONDS = 0.05
@@ -74,20 +82,51 @@ class SampleNotes:
 
     def get(self, server: str, path: str) -> OpenedSample | None:
         with self._guard:
-            return self._opened.get((server, path))
+            return self._opened.get((server, normalised_path(path)))
 
     def note(self, server: str, path: str, name: str, answer: str) -> None:
         if path:
             with self._guard:
-                self._opened[(server, path)] = OpenedSample(name=name or path, answer=answer)
+                self._opened[(server, normalised_path(path))] = OpenedSample(
+                    name=name or path, answer=answer
+                )
 
     def forget(self, server: str, path: str) -> None:
         with self._guard:
-            self._opened.pop((server, path), None)
+            self._opened.pop((server, normalised_path(path)), None)
 
     def lock(self, server: str, path: str) -> threading.Lock:
         with self._guard:
-            return self._locks.setdefault((server, path), threading.Lock())
+            return self._locks.setdefault((server, normalised_path(path)), threading.Lock())
+
+
+# The transports that reach a running server at an address: every handle that
+# names the same address speaks to the same server, and to what it opened.
+REMOTE_TRANSPORTS = frozenset({"http", "streamable-http", "sse"})
+
+
+def normalised_path(path: str) -> str:
+    """``path`` as one spelling: separators, ``.``/``..`` segments and doubled slashes read off."""
+    text = str(path or "").strip().replace("\\", "/")
+    return posixpath.normpath(text) if text else ""
+
+
+def server_note_key(config: Any, instance: str = "") -> str:
+    """The server a note belongs to: its address, or its command and the process ``instance``.
+
+    Two handles to one remote server (a registry handle, a static provider's,
+    a handle for another loop) name the same address and share a note. A
+    local server is a process per handle, which holds only what that process
+    opened, so ``instance`` names the process.
+    """
+    transport = str(getattr(config, "transport", "") or "stdio")
+    url = str(getattr(config, "url", "") or "").strip().rstrip("/")
+    if transport in REMOTE_TRANSPORTS and url:
+        return f"{transport} {url}"
+    command = " ".join(
+        [str(getattr(config, "command", "") or ""), *map(str, getattr(config, "args", None) or [])]
+    )
+    return f"stdio {command.strip()} ({instance})"
 
 
 def declared(spec: Any) -> bool:
@@ -144,15 +183,16 @@ class SampleOpener:
         )
         self.notes.forget(self.server, path)
 
-    def _selected_after_open(self, name: str, selected: Any) -> bool:
-        """Whether the select after a fresh open answered; a refused one is said and not noted.
+    def _refused_after_open(self, name: str, opened: str, selected: Any) -> str | None:
+        """The answer for a select refused right after a fresh open, or ``None`` when it answered.
 
         What the server reads next is then not known to be what it opened, so
-        neither analysis nor note follows; the open's own answer is still
-        handed on, and the next open tries again.
+        neither analysis nor note follows, and the open is handed on as failed:
+        the select's refusal, with the open's own answer beside it, so the
+        ledger and the model see that the open did not take.
         """
         if not is_refusal(selected):
-            return True
+            return None
         logger.warning(
             "%s: %s of %s after opening it was refused (%s); the open is not noted",
             self.server,
@@ -160,7 +200,15 @@ class SampleOpener:
             name,
             str(selected)[:160],
         )
-        return False
+        return json.dumps(
+            {
+                "tool_error": "select_refused_after_open",
+                "tool": self.spec.select_tool,
+                "detail": f"{self.spec.select_tool} refused what {self.spec.open_tool} opened: "
+                f"{str(selected)[:SAID_LIMIT]}; {self.spec.open_tool} answered: "
+                f"{str(opened)[:SAID_LIMIT]}",
+            }
+        )
 
     def _after_analysis(self, path: str, name: str, opened: str, analysed: Any) -> str:
         if analysed is not None and is_refusal(analysed):
@@ -207,8 +255,9 @@ class SampleOpener:
             name = _opened_name(opened, self.spec.name_field, path)
             if self.spec.select_tool:
                 selected = await call(self.spec.select_tool, self._select_args(name))
-                if not self._selected_after_open(name, selected):
-                    return opened
+                refused = self._refused_after_open(name, opened, selected)
+                if refused is not None:
+                    return refused
             analysed = (
                 await call(self.spec.analyse_tool, self._analyse_args(name))
                 if self.spec.analyse_tool
@@ -242,8 +291,9 @@ class SampleOpener:
             name = _opened_name(opened, self.spec.name_field, path)
             if self.spec.select_tool:
                 selected = call(self.spec.select_tool, self._select_args(name))
-                if not self._selected_after_open(name, selected):
-                    return opened
+                refused = self._refused_after_open(name, opened, selected)
+                if refused is not None:
+                    return refused
             analysed = (
                 call(self.spec.analyse_tool, self._analyse_args(name))
                 if self.spec.analyse_tool
@@ -283,6 +333,17 @@ def wrap_open_tool(
     raw = by_name.get(spec.open_tool)
     if raw is None or not any(getattr(t, "name", "") == spec.open_tool for t in tools):
         return list(tools)
+    missing = [t for t in (spec.select_tool, spec.analyse_tool) if t and t not in by_name]
+    if missing:
+        # A declaration naming a tool the server does not offer is said, and
+        # the open is offered as it is rather than failing every open.
+        logger.warning(
+            "%s: sample_open names %s, which the server does not offer; %s is offered as it is",
+            server,
+            ", ".join(missing),
+            spec.open_tool,
+        )
+        return list(tools)
     opener = SampleOpener(server, spec, notes)
 
     async def call(tool: str, arguments: dict[str, Any]) -> Any:
@@ -319,3 +380,16 @@ def wrap_open_tool(
         logger.warning("%s: %s offered as it is (%s).", server, spec.open_tool, exc)
         return list(tools)
     return [wrapped if getattr(t, "name", "") == spec.open_tool else t for t in tools]
+
+
+def long_running_tools(spec: Any) -> frozenset[str]:
+    """The tools a server's ``sample_open`` declares to open and to analyse a sample.
+
+    Treated as tools the server's own manifest marks long-running
+    (``server_guard.ServerGuard``): an import of a large file and its analysis
+    take as long as they take, and a client deadline would only abandon a call
+    the server is still working on, to be made again by the next open.
+    """
+    if not declared(spec):
+        return frozenset()
+    return frozenset(t for t in (spec.open_tool, spec.analyse_tool) if t)

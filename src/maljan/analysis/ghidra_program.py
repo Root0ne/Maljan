@@ -81,12 +81,6 @@ def switch_is_confirmed(response_text: str, expected: str) -> bool:
     return payload.get("switched_to") == expected
 
 
-#: The name the job's note (``providers.sample_open``) holds Ghidra's opens
-#: under, for every path that speaks to it: the static provider's tools, the
-#: load before the loop, the triage pass and the function-hash pass.
-NOTE_KEY = "ghidra"
-
-
 def rest_tool_call(
     http: Any, base: str, *, overrides: dict[str, Any] | None = None
 ) -> Callable[[str, dict[str, Any]], str]:

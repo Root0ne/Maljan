@@ -73,6 +73,7 @@ def fetch_bulk_function_hashes(
     timeout: float = 120.0,
     sample_open: Any = None,
     sample_notes: Any = None,
+    note_key: str = "",
 ) -> list[tuple[str, str]]:
     """Return ``(func_name, func_hash)`` for the binary's meaningful functions.
 
@@ -110,7 +111,9 @@ def fetch_bulk_function_hashes(
             # whichever binary the container looked at first — attributing this
             # sample to another sample's functions, silently and plausibly.
             if declared(sample_open):
-                if not _opened_for_hashes(http, base, file_path, sample_open, sample_notes):
+                if not _opened_for_hashes(
+                    http, base, file_path, sample_open, sample_notes, note_key
+                ):
                     return []
             else:
                 try:
@@ -285,7 +288,9 @@ def to_report_dicts(results: list[FamilyHashAttribution]) -> list[dict[str, Any]
     ]
 
 
-def _opened_for_hashes(http: Any, base: str, file_path: str, spec: Any, notes: Any) -> bool:
+def _opened_for_hashes(
+    http: Any, base: str, file_path: str, spec: Any, notes: Any, key: str
+) -> bool:
     """Open the sample for the hash pass through the general opener; whether it is current.
 
     The make-current step is not optional cleanup: a load only becomes
@@ -295,11 +300,11 @@ def _opened_for_hashes(http: Any, base: str, file_path: str, spec: Any, notes: A
     select and analysis answered, so a path it did not note is not known to be
     current, and attribution is skipped with a warning.
     """
-    from maljan.analysis.ghidra_program import NOTE_KEY, rest_tool_call
+    from maljan.analysis.ghidra_program import rest_tool_call
     from maljan.providers.sample_open import SampleOpener
     from maljan.providers.static.ghidra import sample_notes_of
 
-    opener = SampleOpener(NOTE_KEY, spec, sample_notes_of(notes))
+    opener = SampleOpener(key, spec, sample_notes_of(notes))
     try:
         answer = opener.open(file_path, rest_tool_call(http, base))
     except Exception as exc:  # noqa: BLE001 - a transport failure is the same as no load

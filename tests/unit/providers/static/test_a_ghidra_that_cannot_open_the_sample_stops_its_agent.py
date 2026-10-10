@@ -314,7 +314,7 @@ class TestTheLoadIsAPrecondition:
         prepare_sample(_settings(sink=False), "ghidra", CONTAINER_PATH, provider=provider)
         prepare_sample(_settings(sink=False), "ghidra", CONTAINER_PATH, provider=provider)
         assert http.paths == ["load_program", "switch_program", "run_analysis", "switch_program"]
-        noted = provider.sample_notes.get("ghidra", CONTAINER_PATH)
+        noted = provider.sample_notes.get("http http://ghidra.invalid", CONTAINER_PATH)
         assert noted is not None and noted.name == "abc.exe" and noted.answer == LOADED
 
     def test_a_refused_switch_loads_and_analyses_afresh(
@@ -323,17 +323,17 @@ class TestTheLoadIsAPrecondition:
         http = _HttpClient(LOADED)
         monkeypatch.setattr("httpx.Client", http)
         provider = _provider()
-        provider.sample_notes.note("ghidra", CONTAINER_PATH, "abc.exe", LOADED)
+        provider.sample_notes.note("http http://ghidra.invalid", CONTAINER_PATH, "abc.exe", LOADED)
         http.switch_refused = True
         prepare_sample(_settings(sink=False), "ghidra", CONTAINER_PATH, provider=provider)
         assert http.paths == ["switch_program", "load_program", "switch_program", "run_analysis"]
         # The analysis was confirmed, so the path is noted again.
-        assert provider.sample_notes.get("ghidra", CONTAINER_PATH) is not None
+        assert provider.sample_notes.get("http http://ghidra.invalid", CONTAINER_PATH) is not None
 
     def test_a_job_s_note_is_its_own(self) -> None:
         first, second = _provider(), _provider()
-        first.sample_notes.note("ghidra", CONTAINER_PATH, "abc.exe", LOADED)
-        assert second.sample_notes.get("ghidra", CONTAINER_PATH) is None
+        first.sample_notes.note("http http://ghidra.invalid", CONTAINER_PATH, "abc.exe", LOADED)
+        assert second.sample_notes.get("http http://ghidra.invalid", CONTAINER_PATH) is None
 
     def test_with_nothing_declared_the_load_is_made_current_and_not_analysed(
         self, monkeypatch: pytest.MonkeyPatch

@@ -284,16 +284,21 @@ class ServerHandle:
         # handle; a handle built outside one has none and offers its open tool
         # as it is.
         self.sample_notes: Any = None
-        # The name this handle's opens are noted under: its server's key, or,
-        # for a handle a static provider starts beside the registry's (its own
-        # session), a name of its own.
-        self.note_key = name
         _LIVE_HANDLES.add(self)
         _register_retirement_hook()
 
     @property
     def is_open(self) -> bool:
         return self._toolkit is not None
+
+    @property
+    def note_key(self) -> str:
+        """The server this handle's opens are noted under (``sample_open.server_note_key``):
+        its address for a remote server, shared by every handle to it; its command and
+        this handle's own process for a local one."""
+        from maljan.providers.sample_open import server_note_key
+
+        return server_note_key(self.config, f"handle {id(self)}")
 
     @property
     def label(self) -> str:
@@ -1142,7 +1147,9 @@ class ServerRegistry:
                 method(record)
 
         for name, handle in self._handles.items():
-            handle.guard = guard_from_settings(name, cfg, on_open=_on_open)
+            handle.guard = guard_from_settings(
+                name, cfg, on_open=_on_open, sample_open=getattr(handle.config, "sample_open", None)
+            )
         # The job's own bound-hit ledger and the job's own tool-output limit,
         # put on every toolkit this registry opens. Both used to be left to the
         # caller: every attach but the static provider's passed neither, so the
@@ -1260,11 +1267,9 @@ class ServerRegistry:
                 # The same server to the job: a rest one loop's calls earned
                 # is a rest for every loop's.
                 replica.guard = handle.guard
-                # Its own session, and for a local server its own process: a
-                # path the first handle's server opened is not open in it.
-                from maljan.providers.sample_open import SampleNotes
-
-                replica.sample_notes = SampleNotes()
+                # The job's note: a remote server's opens are noted under its
+                # address, a local process's under its own handle.
+                replica.sample_notes = handle.sample_notes
                 self._loop_handles[key] = replica
                 logger.info(
                     "mcp server '%s' is attached on another loop; the caller gets "

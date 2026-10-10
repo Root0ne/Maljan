@@ -162,7 +162,7 @@ class TestOnceAPath:
             ("study", {"handle": "h1"}),
         ]
         assert json.loads(said) == {"opened": True, "handle": "h1"}
-        assert handle.sample_notes.get("invented", PATH).name == "h1"
+        assert handle.sample_notes.get(handle.note_key, PATH).name == "h1"
 
     def test_a_later_open_is_a_select_answered_from_the_note(
         self, caplog: pytest.LogCaptureFixture
@@ -200,14 +200,29 @@ class TestOnceAPath:
             "study",
         ]
 
-    def test_a_select_refused_right_after_the_open_is_not_noted(self) -> None:
+    def test_a_select_refused_right_after_the_open_hands_on_the_refusal(self) -> None:
+        from maljan.providers.sample_open import is_refusal
+
         server = _Server()
         handle = _handle(server)
         server.pick_refused = True
         said = _open(handle)
-        assert json.loads(said) == {"opened": True, "handle": "h1"}
+        # The open did not take: the select's refusal, with the open's answer beside it.
+        assert is_refusal(said)
+        answer = json.loads(said)
+        assert answer["tool"] == "pick" and '"handle": "h1"' in answer["detail"]
+        assert "not open: h1" in answer["detail"]
         assert server.names() == ["open_thing", "pick"]
-        assert handle.sample_notes.get("invented", PATH) is None
+        assert handle.sample_notes.get(handle.note_key, PATH) is None
+
+    def test_a_declaration_naming_a_tool_the_server_lacks_offers_the_open_as_it_is(
+        self,
+    ) -> None:
+        server = _Server()
+        spec = SPEC.model_copy(update={"analyse_tool": "absent_tool"})
+        handle = _handle(server, spec)
+        (tool,) = [t for t in handle.tools() if t.name == "open_thing"]
+        assert tool is next(t for t in handle._all_tools if t.name == "open_thing")
 
     def test_an_analysis_the_server_refused_is_not_noted(self) -> None:
         server = _Server(study_refused=True)
@@ -215,7 +230,7 @@ class TestOnceAPath:
         _open(handle)
         _open(handle)
         assert server.names().count("open_thing") == 2
-        assert handle.sample_notes.get("invented", PATH) is None
+        assert handle.sample_notes.get(handle.note_key, PATH) is None
 
     def test_a_refused_open_is_answered_and_not_noted(self) -> None:
         server = _Server()
@@ -223,7 +238,7 @@ class TestOnceAPath:
         said = _open(handle, "/nowhere")
         assert json.loads(said) == {"error": "no such file"}
         assert server.names() == ["open_thing"]
-        assert handle.sample_notes.get("invented", "/nowhere") is None
+        assert handle.sample_notes.get(handle.note_key, "/nowhere") is None
 
     def test_a_select_and_analysis_tool_the_model_is_not_offered_are_still_called(self) -> None:
         server = _Server()
@@ -306,3 +321,109 @@ class TestTheNoteIsTheJobs:
 
         first, second = ServerRegistry(Settings()), ServerRegistry(Settings())
         assert first.sample_notes is not second.sample_notes
+
+
+class TestOneServerOneNote:
+    """The note belongs to the server and the sample, whichever handle or spelling asks."""
+
+    def _remote(self) -> MCPServerConfig:
+        return MCPServerConfig(
+            transport="streamable-http", url="http://decompiler.invalid:9000/mcp/", sample_open=SPEC
+        )
+
+    def test_two_handles_to_one_remote_server_share_a_note(self) -> None:
+        server = _Server()
+        notes = SampleNotes()
+        first = ServerHandle("invented", self._remote())
+        second = ServerHandle("invented-too", self._remote())
+        for handle in (first, second):
+            handle._all_tools = server.tools()
+            handle.sample_notes = notes
+        assert (
+            first.note_key
+            == second.note_key
+            == "streamable-http http://decompiler.invalid:9000/mcp"
+        )
+        _open(first)
+        _open(second)
+        assert server.names() == ["open_thing", "pick", "study", "pick"]
+
+    def test_two_local_processes_keep_their_own_notes(self) -> None:
+        cfg = MCPServerConfig(command="decompiler-mcp", args=["--stdio"], sample_open=SPEC)
+        first, second = ServerHandle("a", cfg), ServerHandle("a", cfg)
+        assert first.note_key != second.note_key
+        assert first.note_key.startswith("stdio decompiler-mcp --stdio")
+
+    def test_two_spellings_of_one_path_share_a_note(self) -> None:
+        server = _Server()
+        handle = _handle(server)
+        _open(handle, "/samples/a.bin")
+        _open(handle, "/samples//sub/../a.bin")
+        assert server.names().count("open_thing") == 1
+
+
+class TestTheDeclaredToolsHaveNoClientDeadline:
+    """An open or analysis the block declares is held long-running, as a manifest's own is.
+
+    The deployment's derived budget (capa's) would cut a long analysis, the
+    opener would note nothing, and every later open would import and analyse
+    again, to be cut again.
+    """
+
+    def _guard(self, explicit: float = 0.0) -> Any:
+        from maljan.providers.server_guard import guard_from_settings
+
+        cfg = Settings.model_validate(
+            {
+                "static": {"capa": {"timeout_seconds": 1}},
+                "mcp": {"breaker": {"call_timeout_seconds": explicit}},
+            }
+        )
+        return guard_from_settings("invented", cfg, sample_open=SPEC)
+
+    def test_the_declared_open_and_analysis_wait_as_long_as_they_take(self) -> None:
+        guard = self._guard()
+        assert guard.call_timeout("study") is None
+        assert guard.call_timeout("open_thing") is None
+        assert guard.call_timeout("look") is not None
+        assert guard.call_timeout("pick") is not None
+
+    def test_an_operator_s_own_budget_bounds_them(self) -> None:
+        guard = self._guard(explicit=5.0)
+        assert guard.call_timeout("study") is not None
+
+    def test_an_analysis_that_outlasts_the_deployment_budget_is_noted(self) -> None:
+        """The analysis takes longer than the derived budget and its grace, and still answers."""
+        from maljan.providers import server_guard
+
+        guard = self._guard()
+        budget = guard.call_timeout("look")
+        assert budget is not None
+        server = _Server()
+        clock = {"now": 0.0}
+
+        async def slow_study(handle: str = "") -> str:
+            server.calls.append(("study", {"handle": handle}))
+            clock["now"] += budget * 3  # three times what any other call may take
+            deadline = guard.call_timeout("study")
+            if deadline is not None and clock["now"] > deadline:
+                return json.dumps({"tool_error": "timeout", "detail": "cut at the deadline"})
+            return json.dumps({"studied": handle})
+
+        tools = [t for t in server.tools() if t.name != "study"]
+        tools.append(
+            StructuredTool.from_function(
+                coroutine=slow_study,
+                name="study",
+                description="study",
+                args_schema=_Handle,
+                infer_schema=False,
+            )
+        )
+        handle = ServerHandle("invented", MCPServerConfig(sample_open=SPEC))
+        handle._all_tools = tools
+        handle.sample_notes = SampleNotes()
+        handle.guard = guard
+        _open(handle)
+        assert handle.sample_notes.get(handle.note_key, PATH) is not None
+        assert server_guard.CALL_TIMEOUT_GRACE_SECONDS > 0

@@ -77,9 +77,6 @@ class GenericMCPStaticProvider(StaticProvider):
         self._prompt_fragment_text = prompt_fragment_text
         self._job = StaticJobContext()
         self.tools: list[Any] = []
-        # Its own session beside any registry handle of the same server, so
-        # its opens are noted under a name of its own.
-        self._handle.note_key = f"static provider {self._handle.name}"
 
     @property
     def sample_notes(self) -> Any:
