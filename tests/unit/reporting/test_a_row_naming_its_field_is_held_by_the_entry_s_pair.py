@@ -33,21 +33,21 @@ from maljan.pipeline.validation import (
 from maljan.schemas.evidence import LedgerEntry
 
 DECODER = {
-    "tool": "decode_string_blobs",
+    "tool": "example_decoder",
     "blobs": [
         {
-            "scheme": "xor8_rolling_header",
+            "scheme": "example_scheme",
             "parameters": {"seed": "0x5a17c0de", "first_key": "0x2b", "step": 1},
             "text": "example text",
         }
     ],
 }
-OTHER = {"tool": "decode_string_blobs", "blobs": [{"parameters": {"seed": "0x0badf00d"}}]}
+OTHER = {"tool": "example_decoder", "blobs": [{"parameters": {"seed": "0x0badf00d"}}]}
 
 
 def _entry(entry_id: str, output: str) -> LedgerEntry:
     return LedgerEntry(
-        id=entry_id, agent="pipeline", server="pipeline", tool="decode_string_blobs", output=output
+        id=entry_id, agent="pipeline", server="pipeline", tool="example_decoder", output=output
     )
 
 
@@ -80,7 +80,7 @@ class TestAFieldNameAndItsValueAreHeld:
         assert _codes(_items("seed 0x5a17c0de", "first_key 0x2b")) == []
 
     def test_the_value_alone_still_stands(self) -> None:
-        assert _codes(_items("0x5a17c0de", "xor8_rolling_header")) == []
+        assert _codes(_items("0x5a17c0de", "example_scheme")) == []
 
     def test_an_equals_sign_or_a_colon_between_them_stands(self) -> None:
         assert _codes(_items("seed=0x5a17c0de", "first_key: 0x2b", "SEED 0x5A17C0DE")) == []
