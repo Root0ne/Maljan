@@ -7,6 +7,8 @@ The rules, in the order the router applies them:
   to the judge;
 - a revision round whose every revision is the answer in force again,
   whitespace aside, means the debate converged: it ends;
+- a revision round in which no analyst was revised made no change: it ends,
+  by consensus where the mediator stated one and as ``not_revised`` otherwise;
 - the sycophancy check sends an agreement it flags back to revise, as it did;
 - consensus ends it: the confidence meets the threshold and no listed line is
   one the mediator marked blocking or left unmarked;
@@ -85,10 +87,14 @@ class TestARoundOfIdenticalAnswers:
 
         assert debate_route(state, max_rounds=5)[1] == "converged"
 
-    def test_a_round_whose_every_revision_failed_is_not_convergence(self) -> None:
+    def test_a_round_whose_every_revision_failed_is_not_convergence_and_ends_unrevised(
+        self,
+    ) -> None:
+        # No revision stood, so the round made no change: the answers in force
+        # go to the judge, and no agreement is claimed for them.
         state = _state(revision_rounds=[_round(identical=False, made=0)])
 
-        assert debate_route(state, max_rounds=5)[0] == "revision"
+        assert debate_route(state, max_rounds=5) == ("judge", "not_revised")
 
     def test_a_round_with_a_changed_answer_goes_on_while_a_line_stands(self) -> None:
         assert debate_route(_state(), max_rounds=5)[0] == "revision"

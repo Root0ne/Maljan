@@ -100,7 +100,14 @@ class TestTheRoundRecord:
         )
 
         assert update["revision_rounds"] == [
-            {"round": 2, "stage": "debate", "made": 2, "identical": True}
+            {
+                "round": 2,
+                "stage": "debate",
+                "made": 2,
+                "identical": True,
+                "revised": NAMES,
+                "not_revised": {},
+            }
         ]
 
     def test_one_reworded_answer_is_not_identical(self) -> None:
@@ -113,7 +120,14 @@ class TestTheRoundRecord:
         )
 
         assert update["revision_rounds"] == [
-            {"round": 2, "stage": "debate", "made": 2, "identical": False}
+            {
+                "round": 2,
+                "stage": "debate",
+                "made": 2,
+                "identical": False,
+                "revised": NAMES,
+                "not_revised": {},
+            }
         ]
 
 

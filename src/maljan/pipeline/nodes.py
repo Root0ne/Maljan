@@ -79,6 +79,7 @@ from maljan.pipeline.outcome import (
     verdict_for_run,
     verdict_reading,
 )
+from maljan.pipeline.routing import revised_in, revision_round_before
 from maljan.pipeline.run_state import render_run_state
 from maljan.pipeline.sandbox_status import NOT_RUN as SANDBOX_NOT_RUN
 from maljan.pipeline.sandbox_status import sandbox_status
@@ -3478,8 +3479,26 @@ def make_negotiation_node(
                 **_debate_record(stage, started),
             }
 
-        # Sycophancy detector skips the first round internally.
-        syco = detect_sycophancy(current_isrs, iteration=iteration) if current_isrs else False
+        # Sycophancy detector skips the first round internally. It judges only
+        # pairs with an answer revised in the round right before this
+        # mediation: an analyst whose revision was not made, or not asked,
+        # holds the answer it held before that round.
+        revised_names = revised_in(revision_round_before(state, mediations=iteration + 1))
+        syco = (
+            detect_sycophancy(
+                current_isrs,
+                iteration=iteration,
+                revised=None
+                if revised_names is None
+                else {
+                    isr.agent_id
+                    for name, isr in (state.get("isr_reports") or {}).items()
+                    if name in revised_names
+                },
+            )
+            if current_isrs
+            else False
+        )
 
         def _judge_evidence() -> list[dict[str, Any]]:
             """The judges' tool calls, drained from every cached role.
@@ -3730,6 +3749,11 @@ def _home_stage(container: ServiceContainer, name: str) -> Any:
     return None
 
 
+# Why an analyst's answer in force stood through a revision round it was not
+# asked to revise in.
+NOT_ASKED_TO_REVISE = "not asked: no data to revise"
+
+
 def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any:
     """Factory: creates the revision node where all agents revise concurrently."""
 
@@ -3775,6 +3799,9 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 **_debate_record(stage, started),
             }
 
+        # The analysts this round did not ask: they had no data to revise.
+        not_asked: set[str] = set()
+
         async def _revise_one(name: str) -> tuple[str, AgentISR]:
             # Same guard the analyst node applies before the initial pass. It
             # was missing here, so every negotiation round re-ran the analysts
@@ -3789,6 +3816,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
             # Measured 2026-07-29 with CAPE unreachable: the sycophancy
             # detector flagged static vs dynamic at sim=1.000.
             if _revision_input_is_absent(state, container, name):
+                not_asked.add(name)
                 # Declining to revise is the point; deleting is not (BUG 12).
                 # An analyst that made claims on round 0 keeps them — whatever
                 # the guard now says about round 1, those claims were made
@@ -3885,11 +3913,16 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         # answer in force again, word for word: the router's convergence test.
         made = 0
         identical = True
+        # Who was revised in this round, and why each other analyst was not:
+        # the sycophancy check judges only the answers revised in the round.
+        revised_names: list[str] = []
+        not_revised: dict[str, str] = {}
 
         def _keep_the_answer_in_force(
             name: str, why: str, status: str = "", report: str = ""
         ) -> None:
             """A revision that was not made leaves the answer in force standing, whole."""
+            not_revised[name] = NOT_ASKED_TO_REVISE if name in not_asked else why
             kept = kept_isrs.get(name)
             if kept is None:
                 kept = _empty_isr(name, revision_round=iteration)
@@ -3983,8 +4016,14 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 in_force_text = kept_texts.get(name) or original_reports.get(name, "")
                 revised[name] = revised_text
                 revised_isrs[name] = isr
-                made += 1
-                identical = identical and answer_unchanged(in_force_text, revised_text)
+                if name in not_asked:
+                    # Its answer from before the round, handed back unasked:
+                    # not a revision, and not counted as one.
+                    not_revised[name] = NOT_ASKED_TO_REVISE
+                else:
+                    made += 1
+                    revised_names.append(name)
+                    identical = identical and answer_unchanged(in_force_text, revised_text)
                 dropped_here = dropped_values(
                     kept_isrs.get(name), isr, revised_text, revision_round=iteration
                 )
@@ -4055,8 +4094,17 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 "stage": stage_key_of(stage, "debate"),
                 "made": made,
                 "identical": bool(made) and identical,
+                "revised": revised_names,
+                "not_revised": not_revised,
             }
         ]
+        if not made:
+            logger.warning(
+                "The round-%d revision round made no change: no analyst was revised (%s); "
+                "the answers in force stand.",
+                int(iteration),
+                "; ".join(f"{name}: {why}" for name, why in not_revised.items()) or "none asked",
+            )
         # The round's own time, added to the debate stage's.
         out.update(_debate_record(stage, started))
         return out
