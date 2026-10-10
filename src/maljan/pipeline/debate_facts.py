@@ -412,7 +412,6 @@ def contested_input(
     blocking: Sequence[str],
     participants: Sequence[str],
     reports: Mapping[str, str],
-    isr_reports: Mapping[str, Any],
     labels: Mapping[str, str] | None = None,
 ) -> tuple[str, dict[str, str]]:
     """``(mediator feedback, peer reports)`` for a named analyst's revision.
@@ -423,10 +422,10 @@ def contested_input(
     with every claim number and ledger id they cite.
 
     The peers shown are the ones those lines name in their field, and every
-    peer whose key or label (``labels``) the lines write, in any case or form,
-    in the participants' order: a peer the prose may mean is shown rather than
-    left out. Each is shown whole, as the mediator read its claims
-    (``peer_as_read``); no claim is picked out of it.
+    peer whose key or label (``labels``) the lines write, in any case or form:
+    a peer the prose may mean is shown rather than left out. Each is shown
+    exactly as a round that asks every analyst shows it, its answer in force
+    from ``reports`` whole, in ``reports``' order; no claim is picked out of it.
     """
     mine = points_naming(name, blocking, participants)
     head_at = finding.rfind(_LISTED_HEAD)
@@ -453,29 +452,4 @@ def contested_input(
         shown.update(
             peer for peer, patterns in spellings.items() if any(p.search(line) for p in patterns)
         )
-    return feedback, {
-        str(p): peer_as_read(str(reports.get(str(p), "")), _isr_of(isr_reports, str(p)))
-        for p in participants
-        if str(p) in shown and str(p) != name
-    }
-
-
-def _isr_of(isr_reports: Mapping[str, Any], name: str) -> Any:
-    for key, isr in isr_reports.items():
-        if str(key).lower() == name.lower():
-            return isr
-    return None
-
-
-def peer_as_read(report: str, isr: Any) -> str:
-    """A peer as the mediator read its claims: its whole ISR summary, or its report.
-
-    The summary is the mediation prompt's own ``[ISR]`` entry
-    (``AgentISR.to_text_summary``), every claim numbered, marked and
-    evidenced as the mediator saw it, its disputes included. A peer whose ISR
-    holds no claim has no such entry in the mediation prompt and is shown its
-    answer in force whole.
-    """
-    if isr is None or not getattr(isr, "claims", None):
-        return report
-    return f"[ISR] {isr.to_text_summary()}"
+    return feedback, {k: v for k, v in reports.items() if k != name and str(k) in shown}
