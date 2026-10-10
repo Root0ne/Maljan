@@ -492,7 +492,12 @@ def _function_index_text() -> str:
                         {"function": "0x402000", "through": "StartThing", "call": "0x402010"}
                     ],
                     "starts_threads": [
-                        {"function": "0x403000", "through": "StartThing", "call": "0x401110"}
+                        {"function": "0x403000", "through": "StartThing", "call": "0x401110"},
+                        {
+                            "function": "0x404000",
+                            "through": "CreateRemoteThread",
+                            "call": "0x401120",
+                        },
                     ],
                     "address_taken_by": ["0x404000"],
                     "takes_address_of": ["0x405000"],
@@ -1893,7 +1898,11 @@ PROMPTS: dict[str, str] = {
     ),
     "a Ghidra answer about a function asked by address": " ".join(
         function_named_by_address(said, ["name", "address"], {"address": "0x401000"})
-        for said in ("No callees found for function: null", "Function not found: null")
+        for said in (
+            "No callees found for function: null",
+            "Function not found: null",
+            "No references found to function: null",
+        )
     ),
     "static provider sentence when its tools did not attach": absent_provider_fragment("Ghidra")[
         len(STATIC_EVIDENCE_INSTRUCTIONS) :

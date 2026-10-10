@@ -576,7 +576,12 @@ Each row holds, with the entry id that states each cell:
   fills; `CreateThread`, `CreateRemoteThread`, `CreateRemoteThreadEx`,
   `_beginthreadex`, `_beginthread`, `SHCreateThread`) whose start-routine
   argument holds a code address (x64: the register a `lea` or a register copy
-  set in the straight-line code before the call; x86: the word pushed). Any
+  set in the straight-line code before the call, only a 64-bit copy carrying
+  it; x86: the word pushed, read only while nothing but pushes and `pop r32`
+  moved the stack or wrote into it since the last call, so a junk push dropped
+  by `add esp`, a `pushad` or a store to `[esp+x]` leaves the start absent).
+  A thread started through `CreateRemoteThread` or `CreateRemoteThreadEx` is
+  said to run in another process. Any
   other function start an instruction takes as a value is an address taken
   (`takes_address_of`, `address_taken_by`). Neither is a call: a started
   function keeps "called by 0", and the row line says the start beside it. The
@@ -3089,25 +3094,34 @@ platform sent, not the one the model wrote. An agent stopped this way is
 recorded once, by its stage, with the reason "stopped: its static provider
 could not open the job's sample", and is left out of the debate's rounds.
 
-The load before the loop imports the sample into Ghidra once more than the
-model's own `load_program` does: about a second and a half and one more copy
-of the program in the container's memory for a small binary. Nothing closes
-the superseded copy yet; a large sample that shows memory growth is where
-that would be added.
+Ghidra closes no program a load replaces, so each import past the first
+leaves one more copy of the program in the container's memory for the life of
+its process. The note below keeps that to at most one import per sample per
+job (none beyond the triage pass's when it ran).
 
-Every load, the one before the loop and each `load_program` the model makes,
-is followed by the switch to the program it opened and by Ghidra's
-auto-analysis of it (`/run_analysis`, waited for as long as Ghidra takes). A
-load imports the file afresh, in the place of any program of the same name an
-earlier pass analysed, and an import is not analysed: its functions come from
-the file's tables and no call or code reference is recorded, so callers,
-callees and cross-references were empty for every function, which read as
-"nothing calls it". A failed analysis is logged and the load's answer stands.
+A load imports the file afresh, in the place of any program of the same name,
+and an import is not analysed: its functions come from the file's tables and
+no call or code reference is recorded, so callers, callees and
+cross-references read empty for every function, which read as "nothing calls
+it". The stored runs show each `load_program` a model made replacing the
+program the triage pass had analysed. So a job loads and analyses its sample
+once: the first load (the triage pass's, the one before the loop, or the
+model's) is followed by the switch and Ghidra's auto-analysis
+(`/run_analysis`, waited for without a limit), and the analysed program is
+noted on the job's Ghidra provider (`ghidra_program.JobPrograms`, one per job,
+never shared). Every later load of the same path in the job, before the loop
+or the model's own, is a `/switch_program` to the noted program, and the
+model's call is answered with the load's own recorded answer. Only a switch
+Ghidra does not confirm (after a restart, the program gone) forgets the note
+and loads, switches and analyses afresh. An analysis Ghidra did not confirm is
+logged and not noted, so the next load tries again.
 A Ghidra tool that takes a function by name or by address is sent only the
 arguments the call set, so a call with an address alone queries the address;
 its one-line answer, which Ghidra ends with the empty name ("No callees found
 for function: null", "Function not found: null"), ends with the address the
-call gave instead.
+call gave instead. The cross-reference tool's "No references found to
+function: null", which Ghidra also says for an address no function stands at,
+becomes "No function at 0x…, or no references to the one there".
 
 **A model that fails as a provider.** An agent's entry under `llm.agents` may
 name an ordered list of models (`fallbacks`), held as one model object

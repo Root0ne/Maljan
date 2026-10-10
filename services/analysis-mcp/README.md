@@ -288,7 +288,9 @@ of its own, never a caller or callee: where a call of a thread-starting API (an
 import or a slot the hash resolution fills: `CreateThread`,
 `CreateRemoteThread`, `CreateRemoteThreadEx`, `_beginthreadex`, `_beginthread`,
 `SHCreateThread`) has a code address in its start-routine argument (x64: the
-register the code set it in, in straight-line code; x86: the word pushed), the
+register the code set it in, in straight-line code; x86: the word pushed,
+while nothing else moved the stack since the last call; a remote API's thread
+is said to run in another process), the
 row states `started_as_thread_by` / `starts_threads` with the API and the call
 site; any other function start an instruction takes as a value is
 `address_taken_by` / `takes_address_of`, and the answer lists both whole under
