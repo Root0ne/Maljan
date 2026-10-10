@@ -272,6 +272,25 @@ class TestTheRouter:
 
         assert debate_route(state, max_rounds=5) == ("revision", SYCOPHANCY)
 
+    def test_sycophancy_below_agreement_still_opens_the_devil_s_advocate_round(self) -> None:
+        state = _routed_state(_mediator(revise=[], lines=[]), consensus=False, syco=True)
+
+        assert debate_route(state, max_rounds=5) == ("revision", NO_CONSENSUS)
+        assert debate_route(state, max_rounds=5, sycophancy_check=False) == (
+            "revision",
+            NO_CONSENSUS,
+        )
+
+    def test_the_devil_s_advocate_round_asks_every_analyst_with_its_directive(self) -> None:
+        from maljan.pipeline.sycophancy_detector import DEVIL_ADVOCATE_DIRECTIVE
+
+        _update, agents = _revise(_mediator(revise=[], lines=[]), syco=True)
+
+        assert all(agents[name].safe_revise_isr.call_count == 1 for name in NAMES)
+        args, _kw = agents["network"].safe_revise_isr.call_args
+        assert args[3].startswith(DEVIL_ADVOCATE_DIRECTIVE)
+        assert set(args[2]) == {"static", "all_tools_static_r2", "dynamic"}
+
 
 # ---------------------------------------------------------------------------
 # The revision round

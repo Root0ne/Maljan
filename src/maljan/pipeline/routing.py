@@ -17,8 +17,9 @@ Decision priority (highest to lowest), in ``debate_route``:
   5. Genuine LLM consensus (no listed line the mediator marked blocking, or
      left unmarked) — judge.
      No contested point — the mediator's final block was read and lists no
-     blocking line, so it names no analyst to revise: judge
-     (``no_contested_point``). A round would ask nobody.
+     blocking line, so it names no analyst to revise, and no sycophancy was
+     detected: judge (``no_contested_point``). A round would ask nobody.
+     With sycophancy detected the devil's-advocate round runs as before.
   6. Adaptive termination — statistical confidence convergence, with no
      contradiction standing → judge.
   7. Default → revision.
@@ -263,9 +264,12 @@ def route_within_limit(
 
     # The mediator's block was read and names nobody in a contested point
     # (``AgentArgument.revise == []``): a revision round asks only the analysts
-    # it names, so it would ask nobody. Not read (``None``) is not this.
+    # it names, so it would ask nobody. Not read (``None``) is not this, and
+    # neither is a mediation with sycophancy detected: its devil's-advocate
+    # round asks every analyst, as it always did.
     if (
-        bool(last)
+        not syco
+        and bool(last)
         and getattr(last, "agent_name", "") == "Mediator"
         and getattr(last, "revise", None) == []
     ):
