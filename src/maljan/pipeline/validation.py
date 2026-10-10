@@ -1480,39 +1480,41 @@ def name_stem_families() -> dict[str, int]:
 # card's requirements and indicators (``data/attck_technique_cards.json``,
 # written from the ATT&CK definitions) and of the API catalogue's rule for it
 # (``data/api_attck_map_v1.json``), the texts :func:`_procedure_sources` reads,
-# a phrase that says what the technique is not left out
+# each text one phrase, a part that says what the technique is not left out
 # (``_NEGATED_PHRASE_RE``). A stem weighs one over the number of technique
 # families whose texts write it: a stem one family's texts alone write weighs
 # 1, one that four families write ("string") a quarter, and one more
 # families write than ``DESCRIPTION_MAX_FAMILIES`` nothing ("file", "process",
 # "command"). A sentence describes the technique by these words when it writes
-# at least ``DESCRIPTION_STEMS_NEEDED`` distinct stems of them and their
-# weights add up to ``DESCRIPTION_WEIGHT_NEEDED``: two words of the technique's
-# own, or more that it shares with few others. One word alone is not enough:
-# a card names the objects it acts on (a file's "header" under Masquerade File
-# Type), and a sentence names the same object for another reason. Measured on
-# every stored claim of five runs and a hand-labelled sample of them; a test
-# pins where the cuts fall (``description_stem_families``).
+# at least ``DESCRIPTION_STEMS_NEEDED`` distinct stems of one phrase and their
+# weights add up to ``DESCRIPTION_WEIGHT_NEEDED``: two words the data writes
+# together for the technique, not two words of its whole vocabulary. One word
+# alone is not enough: a card names the objects it acts on (a file's "header"
+# under Masquerade File Type), and a sentence names the same object for
+# another reason. A stem more than six technique families write is the shared
+# vocabulary of the catalogue (fourteen families write "data"), not
+# what one technique is described by.
 DESCRIPTION_MAX_FAMILIES = 6
 DESCRIPTION_STEMS_NEEDED = 2
 DESCRIPTION_WEIGHT_NEEDED = Fraction(1)
 
 
 # The inflections a description word loses before two are compared, the first
-# that fits, four letters kept: a verb's and a noun's own endings only. An agent
-# noun keeps its "-er" ("header" is not "head", "decoder" not "decode").
-_DESCRIPTION_ENDINGS = (("ings", ""), ("ing", ""), ("ions", ""), ("ion", ""), ("ies", "y"),
-                        ("es", ""), ("ed", ""), ("s", ""))  # fmt: skip
+# that fits, four letters kept (three for a plural "s": "urls" is "url"): a
+# verb's and a noun's own endings only. An agent noun keeps its "-er"
+# ("header" is not "head", "decoder" not "decode").
+_DESCRIPTION_ENDINGS = (("ings", "", 4), ("ing", "", 4), ("ions", "", 4), ("ion", "", 4),
+                        ("ies", "y", 4), ("es", "", 4), ("ed", "", 4), ("s", "", 3))  # fmt: skip
 
 
 def _description_stem(word: str) -> str:
     """``word`` lower-cased without its inflection and its silent "e": a card writes
     "a decode loop", "decodes" and "decoded", "a delayed delete" and "deletion"."""
     stem = word.lower()
-    for ending, replaced in _DESCRIPTION_ENDINGS:
+    for ending, replaced, kept in _DESCRIPTION_ENDINGS:
         if (
             stem.endswith(ending)
-            and len(stem) - len(ending) >= 4
+            and len(stem) - len(ending) >= kept
             and not (ending == "s" and stem.endswith("ss"))
         ):
             stem = stem[: -len(ending)] + replaced
@@ -1522,15 +1524,26 @@ def _description_stem(word: str) -> str:
 
 @lru_cache(maxsize=1)
 def _description_stopwords() -> frozenset[str]:
-    """The words no description is compared by: the catalogue index's stopwords
-    (``was``, ``which``, ``used``) and a name's filler words."""
+    """The words no description is compared by: the vendored generic English
+    stopword list (``data/english_stopwords_v1.json``: ``very``, ``few``,
+    ``made``), the catalogue index's stopwords and a name's filler words."""
+    from maljan.core.paths import resolve_data
     from maljan.memory.attck_index import _STOPWORDS
 
-    return frozenset(_STOPWORDS | _NAME_FILLER_WORDS)
+    try:
+        document = json.loads(resolve_data(ENGLISH_STOPWORDS_FILE).read_text(encoding="utf-8"))
+        english = {str(word).lower() for word in document.get("words") or []}
+    except (OSError, ValueError, AttributeError) as exc:
+        logger.warning("validation: the English stopword list could not be read (%s).", exc)
+        english = set()
+    return frozenset(english | _STOPWORDS | _NAME_FILLER_WORDS)
 
 
-def _description_stems(text: str) -> set[str]:
-    """The description stems of ``text``'s words of three letters or more.
+ENGLISH_STOPWORDS_FILE = "data/english_stopwords_v1.json"
+
+
+def _description_words(text: str) -> Iterator[tuple[str, re.Match[str]]]:
+    """Each description word of ``text`` with its stem, three letters or more.
 
     A call, a class, a program or a module is no description word: it names a
     procedure, and a procedure word counts only as :func:`_names_a_procedure`
@@ -1539,40 +1552,49 @@ def _description_stems(text: str) -> set[str]:
     """
     stopwords = _description_stopwords()
     modules = _module_exports()
-    return {
-        _description_stem(word)
-        for word in re.findall(r"[A-Za-z0-9_]+", text)
-        if len(word) >= 3
-        and word.lower() not in stopwords
-        and not _PROCEDURE_SHAPE_RE.search(word)
-        and not _is_a_program_name(word.lower(), modules)
-    }
+    for match in re.finditer(r"[A-Za-z0-9_]+", text):
+        word = match.group(0)
+        lowered = word.lower()
+        if (
+            len(word) >= 3
+            and lowered not in stopwords
+            and not _PROCEDURE_SHAPE_RE.search(word)
+            and not _is_a_program_name(lowered, modules)
+        ):
+            yield _description_stem(word), match
+
+
+def _description_stems(text: str) -> set[str]:
+    """The description stems of ``text`` (:func:`_description_words`)."""
+    return {stem for stem, _match in _description_words(text)}
 
 
 @lru_cache(maxsize=1)
-def _description_stems_by_id() -> tuple[dict[str, frozenset[str]], dict[str, int]]:
-    """Every technique's description stems by id, and how many technique families'
-    texts write each stem. Read once."""
-    stems_by_id: dict[str, frozenset[str]] = {}
+def _description_phrases_by_id() -> tuple[dict[str, tuple[frozenset[str], ...]], dict[str, int]]:
+    """Every technique's phrases as sets of description stems, by id, and how many
+    technique families' texts write each stem. Read once."""
+    phrases_by_id: dict[str, tuple[frozenset[str], ...]] = {}
     families: dict[str, set[str]] = {}
     for technique_id, texts in _procedure_sources().items():
-        stems: set[str] = set()
-        for text in texts:
-            stems |= _description_stems(_NEGATED_PHRASE_RE.sub(" ", text))
-        stems_by_id[technique_id] = frozenset(stems)
-        for stem in stems:
+        phrases = tuple(
+            frozenset(_description_stems(_NEGATED_PHRASE_RE.sub(" ", text))) for text in texts
+        )
+        phrases_by_id[technique_id] = phrases
+        for stem in frozenset().union(*phrases):
             families.setdefault(stem, set()).add(_family(technique_id))
-    return stems_by_id, {stem: len(found) for stem, found in families.items()}
+    return phrases_by_id, {stem: len(found) for stem, found in families.items()}
 
 
 def description_stem_families() -> dict[str, int]:
     """How many technique families' vendored texts write each description stem."""
-    return dict(_description_stems_by_id()[1])
+    return dict(_description_phrases_by_id()[1])
 
 
 @cache
-def description_weights(technique_id: str) -> dict[str, Fraction]:
-    """The stems a claim may describe ``technique_id`` by, each with its weight.
+def description_phrases(technique_id: str) -> tuple[dict[str, Fraction], ...]:
+    """The phrases a claim may describe ``technique_id`` by: each a map of its
+    weighed stems to their weights, a phrase with fewer than
+    ``DESCRIPTION_STEMS_NEEDED`` of them left out.
 
     The id's own texts and, for a sub-technique, its parent's (as the name check
     reads the parent's name); for a parent, its sub-techniques' too, since a
@@ -1580,27 +1602,101 @@ def description_weights(technique_id: str) -> dict[str, Fraction]:
     """
     from maljan.memory.attck_loader import sub_technique_entries
 
-    stems_by_id, families = _description_stems_by_id()
+    phrases_by_id, families = _description_phrases_by_id()
     tid = str(technique_id or "").strip().upper()
     ids = [tid, _family(tid)] if "." in tid else [tid]
     if "." not in tid:
         ids.extend(entry.technique_id for entry in sub_technique_entries(tid))
-    return {
-        stem: Fraction(1, families[stem])
-        for one in ids
-        for stem in stems_by_id.get(one, frozenset())
-        if 0 < families.get(stem, 0) <= DESCRIPTION_MAX_FAMILIES
-    }
+    found: list[dict[str, Fraction]] = []
+    for one in ids:
+        for phrase in phrases_by_id.get(one, ()):
+            weighed = {
+                stem: Fraction(1, families[stem])
+                for stem in phrase
+                if 0 < families.get(stem, 0) <= DESCRIPTION_MAX_FAMILIES
+            }
+            if len(weighed) >= DESCRIPTION_STEMS_NEEDED and weighed not in found:
+                found.append(weighed)
+    return tuple(found)
+
+
+def description_weights(technique_id: str) -> dict[str, Fraction]:
+    """Every weighed stem of :func:`description_phrases`, with its weight."""
+    return {stem: w for phrase in description_phrases(technique_id) for stem, w in phrase.items()}
+
+
+# A negating word, and where the clause a description word sits in begins: a
+# description word after a negating word of its own clause ("and nothing is
+# decoded", "no export walk") is no hit, whatever the absence reader makes of it.
+_DESCRIPTION_CLAUSE_NEGATED_RE = re.compile(
+    r"\b(?:no|not|never|nothing|none|neither|nor|without|cannot)\b|n't\b", re.IGNORECASE
+)
+_DESCRIPTION_CLAUSE_START_RE = re.compile(
+    r"[.;:!?,(]|\b(?:and|but|while|whereas|although|though)\b", re.IGNORECASE
+)
+
+
+def _negated_in_its_clause(text: str) -> Callable[[int], bool]:
+    """For ``text``, whether a negating word stands before a position in its clause.
+
+    The clause starts and the negating words are read once, so each word asks
+    two bisections.
+    """
+    starts = [found.end() for found in _DESCRIPTION_CLAUSE_START_RE.finditer(text)]
+    negations = [found.start() for found in _DESCRIPTION_CLAUSE_NEGATED_RE.finditer(text)]
+
+    def negated(at: int) -> bool:
+        cut = bisect.bisect_right(starts, at)
+        begin = starts[cut - 1] if cut else 0
+        return bisect.bisect_left(negations, begin) < bisect.bisect_left(negations, at)
+
+    return negated
 
 
 def described_by_its_words(text: str, technique_id: str) -> bool:
-    """Whether ``text`` writes enough of the words the vendored data describes
-    ``technique_id`` with, by their number and their weight (see above)."""
-    weights = description_weights(technique_id)
-    if not weights:
+    """Whether ``text`` writes enough of the words one phrase of the vendored data
+    describes ``technique_id`` with, by their number and their weight (see above).
+
+    Read as a procedure word is read: nothing counts in a sentence that says the
+    behaviour was not seen, run or used (``_NOT_SEEN_RE``), and a word named to
+    say it is absent ("no string is encoded", "without a decode loop") is no
+    hit (:func:`_named_as_absent`), nor is one after a negating word of its own
+    clause ("and nothing is decoded"). The absence reading is asked of the
+    clause a word stands in (it reads no further), once per word of the
+    technique's phrases and clause, so a long answer costs its length.
+    """
+    phrases = description_phrases(technique_id)
+    if not phrases:
         return False
-    hits = [weights[stem] for stem in _description_stems(text) if stem in weights]
-    return len(hits) >= DESCRIPTION_STEMS_NEEDED and sum(hits) >= DESCRIPTION_WEIGHT_NEEDED
+    text = _read_dashes(text)
+    if _NOT_SEEN_RE.search(text):
+        return False
+    vocabulary = {stem for phrase in phrases for stem in phrase}
+    negated = _negated_in_its_clause(text)
+    breaks = [(found.start(), found.end()) for found in _CLAUSE_BREAK_RE.finditer(text)]
+    break_ends = [end for _start, end in breaks]
+    break_starts = [start for start, _end in breaks]
+    written: set[str] = set()
+    asked: set[tuple[str, int]] = set()
+    for stem, match in _description_words(text):
+        start, end = match.span()
+        if stem in written or stem not in vocabulary or negated(start):
+            continue
+        cut = bisect.bisect_right(break_ends, start)
+        begin = break_ends[cut - 1] if cut else 0
+        if (stem, begin) in asked:
+            continue
+        asked.add((stem, begin))
+        after = bisect.bisect_left(break_starts, end)
+        finish = break_starts[after] if after < len(break_starts) else len(text)
+        clause = text[begin:finish]
+        if not _named_as_absent(clause, start - begin, end - begin):
+            written.add(stem)
+    for phrase in phrases:
+        hits = [weight for stem, weight in phrase.items() if stem in written]
+        if len(hits) >= DESCRIPTION_STEMS_NEEDED and sum(hits) >= DESCRIPTION_WEIGHT_NEEDED:
+            return True
+    return False
 
 
 def _joined_word_places(text: str, stems: Collection[str]) -> list[tuple[int, int]]:
