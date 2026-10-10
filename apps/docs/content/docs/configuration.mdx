@@ -1031,8 +1031,9 @@ prompt already fills, so for each model of the reporter's list, in order:
 It is never more than the model's maximum — its declared maximum output, or
 the window it serves when it declares none — and a value held at it says so;
 the reasoning room is inside that bound too. Sized at the declared maximum
-alone, a model whose maximum output reaches its window (a 200,000-token
-window under DeepSeek's 393,216) was given the whole window as its answer, and
+alone, a model whose window is at or below its declared maximum output (for
+example a `context_size` set to 200,000 under DeepSeek's 393,216) was given the
+whole window as its answer, and
 the narrative was recorded as degraded and sections as not written. With
 nothing set, a section on DeepSeek's `deepseek-flash` with a 1,048,576-token
 window may write 262,144 tokens and the remaining 786,432 hold its evidence;
@@ -1082,7 +1083,7 @@ Appendix B prints it as `narrative:round`. The worker log prints one line per se
 '…' output budget: …"), and the run summary prints the derivation beside the
 section's wait ("Output budget of `composer:section`: 262144 tokens — the
 smallest of a quarter (262144) of the model's 1048576-token context window
-(declared), the model's declared maximum output of 393216"). A fixed budget dropped a live report's
+(probed), the model's declared maximum output of 393216"). A fixed budget dropped a live report's
 section when the model's answer outgrew it. The run summary keeps one
 `composer:section` row, the wait last sized: written one after another, that
 is the last section's, sized from the pace measured over the sections before
