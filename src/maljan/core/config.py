@@ -878,21 +878,6 @@ class MemoryConfig(BaseModel):
     top_k: Annotated[int, Field(ge=1)] = 3
     qdrant: QdrantMemoryConfig = Field(default_factory=QdrantMemoryConfig)
 
-    # Read-only views of the old flat names, for the one reader that has not
-    # moved to the factory yet (``ServiceContainer.get_memory_store``); they
-    # go when it does.
-    @property
-    def qdrant_url(self) -> str:
-        return self.qdrant.url
-
-    @property
-    def qdrant_collection(self) -> str:
-        return self.qdrant.collection
-
-    @property
-    def qdrant_api_key(self) -> SecretStr | None:
-        return self.qdrant.api_key
-
     @model_validator(mode="before")
     @classmethod
     def _legacy_flat_keys(cls, data: Any) -> Any:

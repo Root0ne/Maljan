@@ -1,12 +1,12 @@
 """The one place a long-term-memory store is built from the settings.
 
-Every caller that needs the configured store asks here: the enrichment
-worker, the API's purge, ``/health``, the function-hash attribution steps and
-the command line. None of them names a backend. A backend registers under
-the id ``memory.backend`` selects, with the builder that makes its store
-and, when it has settings, the model they are read with: they live under
-``memory.<id>.*``, the catalogue lists them, and the settings store saves
-them like any other key. What a backend cannot
+Every caller that needs the configured store asks here: the analysis
+container, the enrichment worker, the API's purge, ``/health``, the
+function-hash attribution steps and the command line. None of them names a
+backend. A backend registers under the id ``memory.backend`` selects, with
+the builder that makes its store and, when it has settings, the model they
+are read with: they live under ``memory.<id>.*``, the catalogue lists them,
+and the settings store saves them like any other key. What a backend cannot
 do it says through the ``MemoryStore`` interface (``function_hash_store``
 answering ``None``), and every caller degrades the same way for it.
 

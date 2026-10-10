@@ -780,31 +780,17 @@ class ServiceContainer:
     # ------------------------------------------------------------------
 
     def get_memory_store(self) -> MemoryStore:
+        """The store ``memory.backend`` selects, built once by the factory every caller uses."""
         with self._lock:
             if self._memory_store_cache is None:
-                backend = self.config.memory.backend
-                if backend == "qdrant":
-                    from maljan.memory.qdrant_store import QdrantStore
+                from maljan.memory.store_factory import build_memory_store, configured_backend
 
-                    self._memory_store_cache = QdrantStore(
-                        url=self.config.memory.qdrant_url,
-                        collection=self.config.memory.qdrant_collection,
-                        api_key=(
-                            self.config.memory.qdrant_api_key.get_secret_value()
-                            if self.config.memory.qdrant_api_key
-                            else None
-                        ),
-                    )
-                    logger.info(
-                        "LTM backend: QdrantStore (url=%s, collection=%s)",
-                        self.config.memory.qdrant_url,
-                        self.config.memory.qdrant_collection,
-                    )
-                else:
-                    from maljan.memory.in_memory_store import InMemoryStore
-
-                    self._memory_store_cache = InMemoryStore()
-                    logger.info("LTM backend: InMemoryStore (in-process, non-persistent).")
+                self._memory_store_cache = build_memory_store(self.config)
+                logger.info(
+                    "LTM backend: %s (%s).",
+                    configured_backend(self.config),
+                    type(self._memory_store_cache).__name__,
+                )
             return self._memory_store_cache
 
     def remember_the_run(self) -> bool:

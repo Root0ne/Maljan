@@ -725,3 +725,44 @@ class TestTheJudgeReadsAndHoldsThroughTheConfiguredBackend:
         assert store._collection == "maljan_function_hashes_v1"
         assert (sample_id, family, functions) == ("this", "FamilyB", [("f1", "h1"), ("f2", "h2")])
         assert asked == ["/mirror/s.bin"]
+
+
+class TestTheContainerStoreIsTheFactorys:
+    """The store a run writes its case to is the one every other caller builds."""
+
+    @staticmethod
+    def _container_store(config: Any) -> Any:
+        from maljan.core.container import ServiceContainer
+
+        container = ServiceContainer(config)
+        first = container.get_memory_store()
+        assert container.get_memory_store() is first  # built once per container
+        return first
+
+    def test_for_every_registered_backend(self, third_backend: Any) -> None:
+        configs = {
+            "memory": _settings("memory"),
+            "qdrant": _settings("qdrant"),
+            "third": third_backend,
+        }
+        assert set(configs) == set(store_factory.memory_backends())
+        for backend, config in configs.items():
+            ours = self._container_store(config)
+            theirs = store_factory.build_memory_store(config)
+            assert type(ours) is type(theirs), backend
+            if isinstance(ours, QdrantStore):
+                assert (ours._url, ours._collection, ours._function_hash_collection) == (
+                    theirs._url,
+                    theirs._collection,
+                    theirs._function_hash_collection,
+                )
+            if backend == "third":
+                assert (
+                    ours.readiness()
+                    == theirs.readiness()
+                    == ("third backend ready at http://third:1")
+                )
+
+    def test_the_container_reaches_qdrant_with_the_configured_key(self) -> None:
+        self._container_store(_settings("qdrant"))
+        assert [(c.url, c.api_key) for c in _FakeQdrant.built] == [(URL, "k")]

@@ -3239,7 +3239,8 @@ memory and a minute and a half on the first analysis.
 
 One factory builds the store `memory.backend` selects
 (`maljan.memory.store_factory.build_memory_store`), and every caller uses it:
-the enrichment worker, the API's purge and its dry run, `/health?deep=true`,
+the analysis container (the store a run writes its case to), the enrichment
+worker, the API's purge and its dry run, `/health?deep=true`,
 the function-hash attribution steps and the command line. No caller names a
 backend. Each backend implements the one `MemoryStore` interface — store,
 retrieve, count, clear, `purge_low_quality` (with `dry_run=True` counting what
