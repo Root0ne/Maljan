@@ -283,8 +283,19 @@ function calls, the calls it makes through slots the hash resolution fills
 (the slot each hashed name is stored to, read in straight-line code), the
 names its hashes resolve to, how many plain and decoded
 strings it refers to, its callers and callees, and how many artefacts its
-callees hold, counted per callee. Each cell names the tool whose answer states
-it. The answer joins `pe_info`, `resolve_api_hashes` and `decode_string_blobs`
+callees hold, counted per callee. A function started on a thread is a relation
+of its own, never a caller or callee: where a call of a thread-starting API (an
+import or a slot the hash resolution fills: `CreateThread`,
+`CreateRemoteThread`, `CreateRemoteThreadEx`, `_beginthreadex`, `_beginthread`,
+`SHCreateThread`) has a code address in its start-routine argument (x64: the
+register the code set it in, in straight-line code; x86: the word pushed,
+while nothing else moved the stack since the last call; a remote API's thread
+is said to run in another process), the
+row states `started_as_thread_by` / `starts_threads` with the API and the call
+site; any other function start an instruction takes as a value is
+`address_taken_by` / `takes_address_of`, and the answer lists both whole under
+`thread_starts` and `addresses_taken`. Each cell names the tool whose answer
+states it. The answer joins `pe_info`, `resolve_api_hashes` and `decode_string_blobs`
 over the same file, run in-process, and FLOSS's rows when FLOSS ran on the
 file in this server. Each source not joined is stated under `absent` with its
 reason: capa always (it is not run here; the triage pack's own
@@ -300,8 +311,9 @@ by each function's own distinct artefacts, then by address. An `address` is
 hexadecimal, with or without `0x`; a value at or above the image base is tried
 first as a virtual address, then as an offset. `row` then holds the row of the
 function that starts at the address or holds it, `address_read` which reading
-answered and whether the address is the start or inside, and `callers` and
-`callees` its neighbours; an address no function starts at or holds, or text
+answered and whether the address is the start or inside, `callers` and
+`callees` its neighbours, and its thread starts and addresses taken where the
+code shows one; an address no function starts at or holds, or text
 that is not an address, is a `no:` sentence. Names the sample wrote (imports,
 resolved names, exports) are quoted and escaped as the pack writes recovered
 strings;

@@ -311,6 +311,38 @@ def _resolved(n: int) -> tuple[Image, dict[str, Any]]:
     return image, {"hashes": ("ev_0020", {"hits": hits})}
 
 
+def _threads(n: int) -> tuple[Image, dict[str, Any]]:
+    """Function 0 resolves one name into a slot and starts each of ``n`` functions on a
+    thread through it; each of those takes the address of the first of them.
+
+    Every started function is a thread start of the one starter, and the first
+    started function's address is taken by every other: the relations are
+    built per instruction and per call, never per pair of functions.
+    """
+    head = 17
+
+    def body(i: int, start: int, at: Callable[[int], int], data: int) -> bytes:
+        if i == 0:
+            out = bytearray(b"\xba" + struct.pack("<I", 0x7EADBEEF))
+            out += _call(start + 5, at(1))
+            out += b"\x48\x89\x05" + struct.pack("<i", data - (start + head))
+            for k in range(n):
+                here = start + len(out)
+                out += b"\x4c\x8d\x05" + struct.pack("<i", at(2 + k) - (here + 7))
+                out += b"\xff\x15" + struct.pack("<i", data - (here + 13))
+            return bytes(out) + b"\xc3"
+        if i == 1:
+            return b"\x31\xc0\xc3"
+        return _lea(start, at(2)) + b"\xc3"
+
+    image = _image([head + 13 * n + 1, 4] + [8] * n, body, [bytes(8)])
+    hit = {
+        "readings": [{"set": "exports", "name": "CreateThread"}],
+        "occurrences": [{"rva": hex(TEXT_RVA)}],
+    }
+    return image, {"hashes": ("ev_0020", {"hits": [hit]})}
+
+
 # -- the tests ----------------------------------------------------------------
 
 
@@ -371,6 +403,16 @@ class TestEveryShapeFinishes:
         assert answer["calls_unnamed"] == {}
         assert sum(len(row["slot_calls"]) for row in answer["rows"]) == 2_000
 
+    def test_many_thread_starts_and_one_address_taken_by_every_function(self) -> None:
+        _, answer = _timed(_threads, 2_000)
+        assert len(answer["thread_starts"]) == 2_000
+        assert {pair["through"] for pair in answer["thread_starts"]} == {"CreateThread"}
+        assert len(answer["addresses_taken"]) == 1_999
+        starter = next(r for r in answer["rows"] if r["offset"] == hex(TEXT_RVA))
+        assert len(starter["starts_threads"]) == 2_000 and starter["callees"] == [
+            hex(BASE + TEXT_RVA + 17 + 13 * 2_000 + 1)
+        ]
+
     def test_one_place_repeated_many_times_is_one_cell(self) -> None:
         image, _ = _cycle(10)
         place = {"rva": hex(TEXT_RVA + 2), "function": hex(TEXT_RVA)}
@@ -422,6 +464,11 @@ class TestTheCostGrowsWithTheFunctionsAndTheCalls:
     def test_overlapping_table_ranges(self) -> None:
         low, high = _ratio(_overlapping, 2_000)
         print("overlapping table ranges:", round(low, 3), round(high, 3))
+        assert high < low * 20
+
+    def test_many_thread_starts_and_addresses_taken(self) -> None:
+        low, high = _ratio(_threads, 2_000)
+        print("thread starts and addresses taken:", round(low, 3), round(high, 3))
         assert high < low * 20
 
     def test_many_sections_and_many_calls(self) -> None:

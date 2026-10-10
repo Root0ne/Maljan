@@ -1235,7 +1235,10 @@ def function_index(path: str, address: str = "", carved_path: str = "") -> dict[
     makes through slots the hash resolution fills, the names its hashes
     resolve to, how many plain and decoded strings it refers to, its
     callers and callees, and how many artefacts its callees hold (counted per
-    callee). Each cell names the tool whose answer states it. Joined here:
+    callee). A function another starts on a thread (a code address in the
+    start-routine argument of a thread-starting API) and a function whose
+    address is taken as a value are stated as such, never as a caller or a
+    callee. Each cell names the tool whose answer states it. Joined here:
     ``pe_info``, ``resolve_api_hashes`` and ``decode_string_blobs`` over the
     same file, and FLOSS's rows when FLOSS ran on it in this server; each
     source not joined, capa always, is stated under ``absent`` with its reason.

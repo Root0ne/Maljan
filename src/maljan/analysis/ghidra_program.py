@@ -33,6 +33,7 @@ sync pre-pass, sync attribution pass).
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import Any
 
 #: The endpoint that actually moves Ghidra's attention, and the parameter name
@@ -49,19 +50,16 @@ def program_name_from_load(response_text: str) -> str | None:
     ``None`` has nothing to switch to and must not guess: switching to a name
     derived from the *requested* path would paper over a load that did not
     happen, which is the same silent-wrong-answer this module exists to stop.
+    Read with the general opener's one reader of answer fields
+    (``providers.sample_open.answer_field``), so the name the stop reads is the
+    name the opener sends.
     """
-    try:
-        payload: Any = json.loads(response_text)
-    except (TypeError, ValueError):
+    from maljan.providers.sample_open import answer_field, answer_object
+
+    payload = answer_object(response_text)
+    if payload is None or payload.get("success") is not True:
         return None
-    if not isinstance(payload, dict):
-        return None
-    if payload.get("success") is not True:
-        return None
-    name = payload.get("program")
-    if not isinstance(name, str) or not name.strip():
-        return None
-    return name
+    return answer_field(payload, "program")
 
 
 def switch_is_confirmed(response_text: str, expected: str) -> bool:
@@ -78,3 +76,36 @@ def switch_is_confirmed(response_text: str, expected: str) -> bool:
     if not isinstance(payload, dict) or payload.get("success") is not True:
         return False
     return payload.get("switched_to") == expected
+
+
+def rest_tool_call(
+    http: Any, base: str, *, overrides: dict[str, Any] | None = None
+) -> Callable[[str, dict[str, Any]], str]:
+    """A function that calls one Ghidra tool by name over its REST API, for the general opener.
+
+    ``POST /<tool>`` with the arguments both in the query and in the JSON
+    body, since Ghidra's endpoints read some from one and some from the other,
+    waited for as long as Ghidra takes (an analysis is the slow one, and what
+    follows reads what it records). A request that failed answers a
+    ``tool_error`` marker, which the opener reads as a refusal. ``overrides``
+    answers named tools in the caller's own way.
+    """
+    import httpx
+
+    def call(tool: str, arguments: dict[str, Any]) -> str:
+        override = (overrides or {}).get(tool)
+        if override is not None:
+            return str(override(arguments))
+        try:
+            resp = http.post(
+                f"{base}/{tool}", params=dict(arguments), json=dict(arguments), timeout=None
+            )
+        except httpx.HTTPError as exc:
+            failed = {"tool_error": "request_failed", "tool": tool, "type": type(exc).__name__}
+            return json.dumps(failed)
+        status = int(getattr(resp, "status_code", 200) or 200)
+        if status >= 400:
+            return json.dumps({"tool_error": "http_status", "tool": tool, "status": str(status)})
+        return str(getattr(resp, "text", ""))
+
+    return call

@@ -2796,6 +2796,100 @@ CLI at, or an HTTP sidecar on another host that is handed paths rather than
 uploads. `ruleset` is held to the rule corpora instead: the repository's `data`
 tree and whatever `MALJAN_YARA_RULES_DIR` and `MALJAN_SIGMA_RULES_DIR` name.
 
+### A server whose open resets its analysis
+
+Some analysis servers reset what they have analysed when their "open the
+sample" tool is called again: Ghidra's `load_program` imports the file afresh in
+the place of the analysed program, and a disassembler's open may drop its
+analysis the same way. A model that opens the sample before each question then
+reads a program with no call or code reference. Each server's settings block,
+built-in or added, may declare which of its tools opens a sample under
+`sample_open`, and nothing in the platform names a server or a tool:
+
+| key | meaning |
+| :-- | :-- |
+| `open_tool` | the tool that opens a sample; empty declares nothing |
+| `path_argument` | the argument the path goes in (required with `open_tool`) |
+| `name_field` | the field of the open's JSON answer that names what was opened; empty means the path |
+| `select_tool` | the tool that selects a sample already open (optional) |
+| `select_argument` | the argument the opened name goes in |
+| `analyse_tool` | the tool that runs or awaits the server's analysis after the first open (optional) |
+| `analyse_argument` | the argument the opened name goes in; empty calls it with none |
+
+With `open_tool` set, the platform keeps a note per job and per server of each
+path once it has been opened, and analysed where `analyse_tool` is named. A
+later open of the same path, by a model or by one of the platform's own passes,
+is answered from the note with the first open's own answer and logged as such;
+where `select_tool` is named it is sent first, and only a select the server
+refuses (it restarted, the program is gone) opens and analyses the path afresh
+and writes the note again. An open the server refused, or an analysis it did
+not confirm, is not noted, so the next open tries again; a select refused right
+after a fresh open is handed on as a failed open, the select's refusal with the
+open's own answer beside it (on Ghidra, the loop stops with a sentence saying
+Ghidra refused to make the loaded sample current, and the next loop loads it
+again: nothing is remembered for the job). A lock per path makes two first opens at once
+import once. The select and analysis tools are called even when the model is
+not offered them, and a declaration naming a tool the server does not offer is
+logged and leaves the open tool as it is.
+
+The note belongs to one job and is never shared with another. Within the job it
+is kept per server, not per handle: every handle to a remote server (`http`,
+`streamable-http`, `sse`) shares it, the server named by its scheme, host, port
+and path with the host lower-cased and the default port written, so two
+spellings of one address are one server. `localhost`, `127.0.0.1` and `::1` are
+kept apart, since three listeners may answer them (at most one more open). What
+may select another backend behind one address (the query, the userinfo, the
+credential sent) adds an opaque number to the key, never the value or a digest
+of it, since keys reach the log; a local
+(`stdio`) server is a process per handle and keeps its own, each process named
+by a number never reused. A note is also keyed by the open tool's other
+arguments, so an open with other options (a loader, a base address) is another
+note. When an open is noted under a name the server gave, any other note of the
+same server under that name is dropped: a server that names programs by file
+name replaced it. A forwarded open the server answered drops the server's notes
+under the name its answer gives, or all of the server's notes when it gives
+none, for the same reason.
+
+**A path is read once.** The opener reads the path it is asked to open in one
+way, and that one spelling is both the note's key and the argument every
+declared tool is sent. Nothing is tidied that the server might read
+differently, and nothing is refused either: a path with a backslash, a percent
+sign (an encoding), a control character, surrounding blanks, a doubled
+separator, a `.` or `..` segment or a trailing slash, or a relative path, is
+forwarded to the server exactly as written and never noted, so no note can be
+borrowed or poisoned through it. The job's own copy of the sample on that
+server (the mirror a static provider pins) is platform data: it is compared
+exactly, whatever characters it holds, a relative name is read against it only
+where the job holds one, and any other path (another file, a carved payload) is
+forwarded and not noted. Nothing read from a tool's answer, the `name_field`
+included, decides which note answers: it is what the select and analysis tools
+are sent, and the name under which an older note of the same server is dropped.
+The platform's own copies of a sample are named by its SHA-256 plus the
+upload's suffix only when that suffix is plain (`[A-Za-z0-9._-]`), so every
+path a tool is handed is plain.
+
+The declared open and analysis tools are held as long-running, exactly as a
+tool the server's own `capabilities` manifest marks `long_running`: an import
+of a large file and its analysis take as long as they take, so they get no
+client deadline unless `mcp.breaker.call_timeout_seconds` is set. A deadline
+would only cut a call the server is still working on, the open would not be
+noted, and every later open would import and analyse again; an operator who
+sets that budget accepts that a cut analysis is opened again by the next open.
+
+**Declared tools must refuse in a structured way.** A refusal is read by the
+platform's one rule for failed tool answers: an MCP `isError` result, a
+`{"error": …}` answer, or an HTTP error. A refusal written as plain text
+("Program not found") reads as success, so a refused select would be answered
+from the note while the server holds nothing.
+
+Ghidra's block ships declaring `load_program` (path argument `file`, name field
+`program`), `switch_program` (argument `program`) and `run_analysis` (argument
+`program`); its client applies the same long-running rule to them. A
+stored Ghidra block that never set `sample_open` carries that declaration; one
+an operator set, empty included, is kept as set. The fields are in the settings
+schema and catalogue now; the server editor's form for them is a follow-up, and
+until then a registry server's declaration is written in its JSON.
+
 ### A tool server that keeps failing is rested
 
 Per job and per tool server, three settings under **Tool servers → Resilience**:

@@ -30,6 +30,7 @@ def _passes(fake: FakeGhidra) -> GhidraPasses:
         token="t",
         sample_path="/data/samples/.work/s.exe",
         transport=httpx.MockTransport(fake.handler),
+        note_key="remote http://ghidra.invalid:80",
     )
 
 

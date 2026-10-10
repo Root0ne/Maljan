@@ -279,12 +279,31 @@ class ServerHandle:
         # built outside a registry — a probe, a test — has none and sends
         # every call as it always did.
         self.guard: Any = None
+        # The job's note of the paths this server opened
+        # (``providers.sample_open``), set by the registry that owns the
+        # handle; a handle built outside one has none and offers its open tool
+        # as it is.
+        self.sample_notes: Any = None
+        # This handle's own process, for a local server's note key; a number
+        # never reused, unlike an object's id.
+        from maljan.providers.sample_open import new_instance
+
+        self._note_instance = new_instance()
         _LIVE_HANDLES.add(self)
         _register_retirement_hook()
 
     @property
     def is_open(self) -> bool:
         return self._toolkit is not None
+
+    @property
+    def note_key(self) -> str:
+        """The server this handle's opens are noted under (``sample_open.server_note_key``):
+        its address for a remote server, shared by every handle to it; its command and
+        this handle's own process for a local one."""
+        from maljan.providers.sample_open import server_note_key
+
+        return server_note_key(self.config, self._note_instance)
 
     @property
     def label(self) -> str:
@@ -969,15 +988,26 @@ class ServerHandle:
         it, so the reason and the remedy reach the operator and the degraded
         block. A server that answered no manifest is offered whole, as before.
         """
+        from maljan.providers.sample_open import wrap_open_tool
+
         allowed = self.config.tools
         withheld = self.capabilities.unusable() if self.capabilities else frozenset()
         keep = None if allowed is None else set(allowed)
-        return [
+        offered = [
             tool
             for tool in self._all_tools
             for name in (str(getattr(tool, "name", "")),)
             if name not in withheld and (keep is None or name in keep)
         ]
+        # A server that declares its open tool has that tool answered through
+        # the job's note: a path opened once is not opened again.
+        return wrap_open_tool(
+            offered,
+            self._all_tools,
+            server=self.note_key,
+            spec=getattr(self.config, "sample_open", None),
+            notes=self.sample_notes,
+        )
 
     def withheld_reasons(self) -> list[str]:
         """The degradation reasons for the tools this host cannot run.
@@ -1092,12 +1122,19 @@ class ServerRegistry:
         truncation_ledger: Any | None = None,
         context_budget: Any | None = None,
         event_sink: Any | None = None,
+        sample_notes: Any | None = None,
     ) -> None:
+        from maljan.providers.sample_open import SampleNotes
         from maljan.providers.server_guard import guard_from_settings
 
         self._handles = {
             name: ServerHandle(name, config) for name, config in cfg.mcp.servers.items()
         }
+        # The job's note of the paths each server opened, for the servers
+        # that declare their open tool; one per job, given to every handle.
+        self.sample_notes = sample_notes if sample_notes is not None else SampleNotes()
+        for handle in self._handles.values():
+            handle.sample_notes = self.sample_notes
         # Every rest this job gave a server, in the order the breakers opened;
         # the judge node reads it into the run summary. Written from whichever
         # loop's call tripped the breaker, so appended under the lock.
@@ -1115,7 +1152,9 @@ class ServerRegistry:
                 method(record)
 
         for name, handle in self._handles.items():
-            handle.guard = guard_from_settings(name, cfg, on_open=_on_open)
+            handle.guard = guard_from_settings(
+                name, cfg, on_open=_on_open, sample_open=getattr(handle.config, "sample_open", None)
+            )
         # The job's own bound-hit ledger and the job's own tool-output limit,
         # put on every toolkit this registry opens. Both used to be left to the
         # caller: every attach but the static provider's passed neither, so the
@@ -1233,6 +1272,9 @@ class ServerRegistry:
                 # The same server to the job: a rest one loop's calls earned
                 # is a rest for every loop's.
                 replica.guard = handle.guard
+                # The job's note: a remote server's opens are noted under its
+                # address, a local process's under its own handle.
+                replica.sample_notes = handle.sample_notes
                 self._loop_handles[key] = replica
                 logger.info(
                     "mcp server '%s' is attached on another loop; the caller gets "

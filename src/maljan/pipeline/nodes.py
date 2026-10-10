@@ -1323,6 +1323,7 @@ def _ghidra_passes_step(container: ServiceContainer, state: AnalysisState) -> An
         GHIDRA_SWITCHED_OFF,
         GhidraPasses,
     )
+    from maljan.providers.sample_open import server_note_key
     from maljan.providers.server_guard import deployment_call_budget
 
     cfg = container.config
@@ -1344,8 +1345,11 @@ def _ghidra_passes_step(container: ServiceContainer, state: AnalysisState) -> An
             token=ghidra.auth_token.get_secret_value(),
             sample_path=str(path),
             call_timeout=budget if budget > 0 else None,
+            sample_open=getattr(ghidra, "sample_open", None),
+            sample_notes=getattr(container, "sample_notes", None),
+            note_key=server_note_key(ghidra),
         )
-    return GhidraPasses(unavailable=reason)
+    return GhidraPasses(unavailable=reason, note_key=server_note_key(ghidra))
 
 
 def _pack_left_out(entries: list[Any], container: ServiceContainer) -> dict[str, Any] | None:

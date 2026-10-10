@@ -1461,13 +1461,13 @@ def mcp_server_annotations(
     order: int = 0,
     provider_owned: bool = False,
 ) -> dict[str, Annotation]:
-    """The fourteen leaves of an ``MCPServerConfig`` block, described for ``label``.
+    """The twenty-one leaves of an ``MCPServerConfig`` block, described for ``label``.
 
     Every MCP server in the settings has the same nine transport/tool-selection
     knobs, plus five tool-server fields (``cwd``, ``env_allow``, ``tools``,
-    ``agents``, ``label``); writing them out six times invites drift between
-    blocks that must behave identically. The per-field wording is fixed, the
-    server's name is the only variable.
+    ``agents``, ``label``) and the seven of ``sample_open``; writing them out
+    six times invites drift between blocks that must behave identically. The
+    per-field wording is fixed, the server's name is the only variable.
 
     ``provider_owned`` marks a block whose ``tools``/``agents``/``label`` a
     static or sandbox provider (Ghidra, radare2, the CAPE MCP sidecar)
@@ -1565,6 +1565,47 @@ def mcp_server_annotations(
             advanced=True,
         ),
     }
+
+    sample_open = f"{prefix}.sample_open"
+    for leaf, title, description in (
+        (
+            "open_tool",
+            "open tool",
+            "The tool that opens a sample, for a server whose open resets what it has "
+            "analysed when called again. Set, a job opens each path once on this "
+            "server and answers a later open of it from the job's note. Empty "
+            "declares nothing.",
+        ),
+        ("path_argument", "open tool's path argument", "The argument the path goes in."),
+        (
+            "name_field",
+            "opened name field",
+            "The field of the open's JSON answer that names what was opened, given to "
+            "the select and analysis tools; empty means the path itself.",
+        ),
+        (
+            "select_tool",
+            "select tool",
+            "The tool that selects a sample already open. Sent before a later open is "
+            "answered from the note; a select the server refuses opens it afresh. "
+            "Empty answers from the note directly.",
+        ),
+        ("select_argument", "select tool's argument", "The argument the opened name goes in."),
+        (
+            "analyse_tool",
+            "analysis tool",
+            "The tool that runs or awaits the server's analysis after the first open; "
+            "an open is noted only once it answered. Empty runs none.",
+        ),
+        (
+            "analyse_argument",
+            "analysis tool's argument",
+            "The argument the opened name goes in; empty calls the tool with none.",
+        ),
+    ):
+        entries[f"{sample_open}.{leaf}"] = ann(
+            f"{label} {title}", description, subgroup="Opening the sample", advanced=True
+        )
 
     if provider_owned:
         entries[f"{prefix}.tools"] = owned_ann(

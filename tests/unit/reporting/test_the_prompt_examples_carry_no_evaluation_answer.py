@@ -485,6 +485,26 @@ def _function_index_text() -> str:
             "callees": ["0x403000", "0x404000"],
             "indirect": {"artefacts": 3, "through": 2},
             **({"names": ["anexport"], "entry_point": True} if i == 0 else {}),
+            # The relations that are no call, in the row of the second function.
+            **(
+                {
+                    "started_as_thread_by": [
+                        {"function": "0x402000", "through": "StartThing", "call": "0x402010"}
+                    ],
+                    "starts_threads": [
+                        {"function": "0x403000", "through": "StartThing", "call": "0x401110"},
+                        {
+                            "function": "0x404000",
+                            "through": "CreateRemoteThread",
+                            "call": "0x401120",
+                        },
+                    ],
+                    "address_taken_by": ["0x404000"],
+                    "takes_address_of": ["0x405000"],
+                }
+                if i == 1
+                else {}
+            ),
         }
         for i in range(3)
     ]
@@ -728,7 +748,11 @@ def _ghidra_pass_failures() -> str:
                 return httpx.Response(answer)
             return httpx.Response(200, json=answer)
 
-        return GhidraPasses(base_url="http://g.invalid", transport=httpx.MockTransport(handler))
+        return GhidraPasses(
+            base_url="http://g.invalid",
+            transport=httpx.MockTransport(handler),
+            note_key="remote http://g.invalid:80",
+        )
 
     opened = {"/get_current_program_info": {"image_base": "1000"}}
     cases = [

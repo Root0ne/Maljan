@@ -78,6 +78,15 @@ class GenericMCPStaticProvider(StaticProvider):
         self._job = StaticJobContext()
         self.tools: list[Any] = []
 
+    @property
+    def sample_notes(self) -> Any:
+        """The job's note of the paths this provider's server opened (``providers.sample_open``)."""
+        return self._handle.sample_notes
+
+    @sample_notes.setter
+    def sample_notes(self, notes: Any) -> None:
+        self._handle.sample_notes = notes
+
     def _build_handle(self, name: str, cfg: MCPServerConfig) -> ServerHandle:
         """Wrap a directly-supplied config in a handle, honouring ``server_command``.
 

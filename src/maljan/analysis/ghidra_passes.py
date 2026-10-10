@@ -567,6 +567,17 @@ class GhidraPasses:
     call_timeout: float | None = None
     unavailable: str = ""
     transport: Any = field(default=None, repr=False)
+    # What the Ghidra block declares for opening a sample, and the job's note
+    # of the paths it opened (``providers.sample_open``): the pass opens the
+    # sample through the same opener as the agents, so a path one of them
+    # opened is not imported again.
+    sample_open: Any = field(default=None, repr=False)
+    sample_notes: Any = field(default=None, repr=False)
+    # The server in the job's note (``sample_open.server_note_key``): Ghidra's
+    # address, as the agents' and the load before the loop's own opens name it.
+    # Given by every caller: a pass noting under a name of its own would miss
+    # the job's note.
+    note_key: str = field(kw_only=True)
     _http: Any = field(default=None, init=False, repr=False)
     _program: str = field(default="", init=False)
     _image_base: int | None = field(default=None, init=False)
@@ -629,29 +640,85 @@ class GhidraPasses:
             raise
         return self._program
 
-    def _open(self) -> None:
-        from maljan.analysis.ghidra_program import SWITCH_PARAM, SWITCH_PATH, program_name_from_load
-        from maljan.tools.errors import error_parts
+    def _open_sample(self) -> str:
+        """The load of the job's sample through the general opener; the load's answer.
 
+        With the tools the Ghidra block declares, the sample is loaded, made
+        current and analysed once per job, or answered from the job's note.
+        With none declared, it is loaded, made current and analysed here, as
+        this pass always did.
+        """
+        from maljan.analysis.ghidra_program import (
+            SWITCH_PARAM,
+            SWITCH_PATH,
+            program_name_from_load,
+        )
+        from maljan.providers.sample_open import SampleNotes, SampleOpener, declared
+
+        def call(tool: str, arguments: dict[str, Any]) -> str:
+            try:
+                answer = self._request(
+                    "POST",
+                    f"/{tool}",
+                    f"the {tool} call",
+                    params=dict(arguments),
+                    json=dict(arguments),
+                    timeout=None,
+                )
+            except GhidraPassFailed as failure:
+                return json.dumps({"tool_error": "request_failed", "detail": str(failure)})
+            return json.dumps(answer) if isinstance(answer, (dict, list)) else str(answer)
+
+        if declared(self.sample_open):
+            notes = self.sample_notes
+            if not isinstance(notes, SampleNotes):
+                notes = SampleNotes()
+            opener = SampleOpener(self.note_key, self.sample_open, notes)
+            answer = opener.open(self.sample_path, call, held=self.sample_path)
+            # An open is noted only once the declared analysis answered: an
+            # opened program with none noted was not analysed, and this pass
+            # reads what the analysis records.
+            if (
+                self.sample_open.analyse_tool
+                and program_name_from_load(answer)
+                and opener.name_of(self.sample_path) is None
+            ):
+                raise GhidraPassFailed(
+                    "Ghidra did not confirm the auto-analysis of the job's sample"
+                )
+            return answer
         loaded = self._request(
             "POST", "/load_program", "the load of the job's sample", json={"file": self.sample_path}
         )
-        name = program_name_from_load(json.dumps(loaded) if isinstance(loaded, dict) else "")
+        answer = json.dumps(loaded) if isinstance(loaded, dict) else str(loaded)
+        name = program_name_from_load(answer)
+        if name:
+            self._request(
+                "POST",
+                SWITCH_PATH,
+                "the switch to the job's sample",
+                params={SWITCH_PARAM: name},
+                json={},
+            )
+            analysed = self._request(
+                "POST",
+                "/run_analysis",
+                "the auto-analysis of the job's sample",
+                json={"program": name},
+            )
+            _raise_on_error(analysed, "the auto-analysis of the job's sample")
+        return answer
+
+    def _open(self) -> None:
+        from maljan.analysis.ghidra_program import program_name_from_load
+        from maljan.tools.errors import error_parts
+
+        answer = self._open_sample()
+        name = program_name_from_load(answer)
         if not name:
-            parts = error_parts(loaded) if isinstance(loaded, dict) else None
-            words = parts[1] if parts else str(loaded)[:200]
+            parts = error_parts(answer)
+            words = parts[1] if parts else str(answer)[:200]
             raise GhidraPassFailed(f"Ghidra did not open the job's sample: {words}")
-        self._request(
-            "POST",
-            SWITCH_PATH,
-            "the switch to the job's sample",
-            params={SWITCH_PARAM: name},
-            json={},
-        )
-        analysed = self._request(
-            "POST", "/run_analysis", "the auto-analysis of the job's sample", json={"program": name}
-        )
-        _raise_on_error(analysed, "the auto-analysis of the job's sample")
         info = self._request(
             "GET",
             "/get_current_program_info",

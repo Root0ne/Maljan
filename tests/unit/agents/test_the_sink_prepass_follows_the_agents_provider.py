@@ -50,7 +50,7 @@ class _Client:
     def __exit__(self, *exc: object) -> None:
         return None
 
-    def post(self, url: str, json: Any = None, params: Any = None) -> _Resp:  # noqa: A002
+    def post(self, url: str, json: Any = None, params: Any = None, **_kw: Any) -> _Resp:  # noqa: A002
         self.paths.append(url.rsplit("/", 1)[-1])
         if url.endswith("/load_program"):
             return _Resp('{"success": true, "program": "x.exe"}')
