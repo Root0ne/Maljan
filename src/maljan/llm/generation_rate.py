@@ -643,6 +643,52 @@ def generated_piece(chunk: Any) -> bool:
     return isinstance(extra, dict) and any(bool(value) for value in extra.values())
 
 
+def _generated_chars(message: Any) -> int:
+    """The characters of the answer one streamed chunk carries: text, reasoning and tool input."""
+    total = 0
+    content = getattr(message, "content", None)
+    if isinstance(content, str):
+        total += len(content)
+    elif isinstance(content, list):
+        for block in content:
+            if isinstance(block, str):
+                total += len(block)
+            elif isinstance(block, dict):
+                for key in ("text", "thinking", "partial_json"):
+                    value = block.get(key)
+                    if isinstance(value, str):
+                        total += len(value)
+    for call in getattr(message, "tool_call_chunks", None) or []:
+        args = call.get("args") if isinstance(call, dict) else None
+        if isinstance(args, str):
+            total += len(args)
+    return total
+
+
+# Where a stream's first chunk keeps the prompt usage its provider reported
+# before the answer streamed (Anthropic's ``message_start``,
+# ``anthropic_provider.with_reported_prompt_usage``).
+PROMPT_USAGE_KEY = "prompt_usage_reported"
+
+# Set on an exception a streamed call raised after its provider reported its
+# prompt usage: ``_CallProgress.streamed_usage``.
+STREAM_USAGE_ATTRIBUTE = "maljan_stream_usage"
+
+
+def note_streamed(exc: BaseException, progress: Any) -> None:
+    """Put on ``exc`` what its call streamed before it failed: its pieces and reported usage.
+
+    The pieces as :func:`note_pieces` puts them, and the usage the provider
+    reported while it streamed (:meth:`_CallProgress.streamed_usage`), where
+    it reported any. Never raises.
+    """
+    with contextlib.suppress(Exception):
+        note_pieces(exc, int(getattr(progress, "pieces", 0) or 0))
+        reported = progress.streamed_usage()
+        if reported is not None and getattr(exc, STREAM_USAGE_ATTRIBUTE, None) is None:
+            exc.maljan_stream_usage = reported  # type: ignore[attr-defined]
+
+
 def _cap_of(llm: Any, kwargs: dict[str, Any]) -> int:
     """The output cap one call of ``llm`` is sent with, or 0 where it has none."""
     for name in _CAP_NAMES:
@@ -688,6 +734,31 @@ class _CallProgress:
         # From the first chunk on, those are the count, and the same pieces
         # reported again through the run manager are not counted twice.
         self.streamed = False
+        # What the provider reported while the answer streamed: the prompt
+        # usage a stream's opening event states (``PROMPT_USAGE_KEY``), the
+        # output its closing usage states, and the characters of the answer
+        # that arrived, for a failed attempt's charge (``llm.transient``).
+        self.prompt_usage: dict[str, Any] | None = None
+        self.output_reported: int | None = None
+        self.output_chars = 0
+
+    def _take(self, chunk: Any) -> None:
+        """The usage and the answer characters one chunk carries. Never raises."""
+        with contextlib.suppress(Exception):
+            message = getattr(chunk, "message", chunk)
+            metadata = getattr(message, "response_metadata", None)
+            prompt = metadata.get(PROMPT_USAGE_KEY) if isinstance(metadata, dict) else None
+            usage = getattr(message, "usage_metadata", None)
+            chars = _generated_chars(message)
+            with self._lock:
+                if isinstance(prompt, dict) and self.prompt_usage is None:
+                    self.prompt_usage = dict(prompt)
+                if isinstance(usage, dict) and int(usage.get("output_tokens") or 0) > 0:
+                    # A closing usage states the whole answer's output so far.
+                    self.output_reported = max(
+                        self.output_reported or 0, int(usage.get("output_tokens") or 0)
+                    )
+                self.output_chars += chars
 
     def _piece(self) -> None:
         now = float(self._clock())
@@ -699,14 +770,37 @@ class _CallProgress:
 
     def streamed_chunk(self, chunk: Any) -> None:
         self.streamed = True
+        self._take(chunk)
         if generated_piece(chunk):
             self._piece()
 
     def reported_piece(self, token: Any, chunk: Any = None) -> None:
         if self.streamed:
             return
+        if chunk is not None:
+            self._take(chunk)
+        elif isinstance(token, str):
+            with self._lock:
+                self.output_chars += len(token)
         if generated_piece(chunk) if chunk is not None else bool(token):
             self._piece()
+
+    def streamed_usage(self) -> dict[str, Any] | None:
+        """What the provider reported of this call while it streamed, or ``None`` where nothing.
+
+        ``{"prompt": usage, "output_tokens": n | None, "output_chars": n}``:
+        the prompt usage the stream's opening event stated, in LangChain's
+        usage shape; the output its closing usage stated, ``None`` where none
+        arrived; and the characters of the answer that streamed.
+        """
+        with self._lock:
+            if self.prompt_usage is None:
+                return None
+            return {
+                "prompt": dict(self.prompt_usage),
+                "output_tokens": self.output_reported,
+                "output_chars": self.output_chars,
+            }
 
     def generation(self) -> tuple[int, float] | None:
         """``(units, seconds)`` from the first generated piece to the last, or ``None``.
@@ -1096,7 +1190,7 @@ def _deadline_members(base: Any) -> dict[str, Any]:
                             raise
                         break
             except BaseException as exc:
-                note_pieces(exc, deadline.progress.pieces)
+                note_streamed(exc, deadline.progress)
                 if not task.done():
                     task.cancel()
                     await asyncio.wait({task})
@@ -1171,7 +1265,7 @@ def _deadline_members(base: Any) -> dict[str, Any]:
                 deadline.record_unfinished()
                 raise
             except BaseException as exc:
-                note_pieces(exc, deadline.progress.pieces)
+                note_streamed(exc, deadline.progress)
                 deadline.record_unfinished()
                 raise
             finally:
@@ -1221,7 +1315,7 @@ def _deadline_members(base: Any) -> dict[str, Any]:
             if "error" in outcome:
                 deadline.record_unfinished()
                 error = outcome["error"]
-                note_pieces(error, deadline.progress.pieces)
+                note_streamed(error, deadline.progress)
                 if deadline.progress.pieces > 0 and _transport_read_timeout(error):
                     raise deadline.silence_ended(time.monotonic(), error) from error
                 raise error
@@ -1302,7 +1396,7 @@ def _deadline_members(base: Any) -> dict[str, Any]:
                 deadline.record_unfinished()
                 raise
             except BaseException as exc:
-                note_pieces(exc, deadline.progress.pieces)
+                note_streamed(exc, deadline.progress)
                 deadline.record_unfinished()
                 raise
             finally:

@@ -65,6 +65,24 @@ Ownership is the job's own â€” the same rule the job's report endpoint applies â
 and an entry whose output was dropped to the per-agent byte budget comes back
 with an empty `output` and the rest of its record intact.
 
+`GET /jobs/{job_id}/usage` is what the job's model calls used and cost so far,
+totalled from its `model_usage` events (one per call, committed as the call is
+recorded): `calls`, and `retries` and `failed_attempts`, which are records but
+not calls; `tokens`, the run summary's own block (`input_tokens`,
+`output_tokens`, `cached_input_tokens`, `cache_write_input_tokens`,
+`reasoning_tokens`, a provider-reported `cost`, each part with the calls that
+reported it, and `per_agent`); and `spend`, the sum of what the job's spend
+meter charged each call and failed attempt when it was settled, as each record
+carries it (`priced_usd`, `price_source`, `estimated_usd` for a charge by stated
+estimate), so a price changed later does not change it. A record written before
+records carried their charge is priced again by the meter's code at the current
+`llm.model_prices` over the vendored table and counted in `repriced_calls`
+(`repriced_usd`). `spend` also gives `spent_usd`, `prices_from`,
+`estimated_calls`, `estimated_usd`, `unreported_calls`, `unpriced_models`,
+`spent_is_at_least` where a call could not be priced, and `per_agent`. It
+answers during a run and after a worker that died before its run summary. Only the job's owner reads it, as for the events endpoint: another
+account's job is not found, to an admin as to anyone else.
+
 ### The run summary
 
 A finished report carries `run_summary`, and five of its keys describe the run

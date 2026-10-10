@@ -164,6 +164,15 @@ TAIL_CALLS = {"verdict": "verdict", "report section": "report", "narrative": "re
 # model's input this job measured read from the provider's cache.
 AT_CACHED_SHARE = "at_cached_share"
 
+# Set on a stated estimate of a call's output alone, handed beside the usage
+# its provider did report (a stream broken after its prompt usage arrived):
+# the call is priced on both, and only the output's part is an estimate.
+OUTPUT_ESTIMATED = "output_estimated"
+
+# What a charge says was estimated (``estimated_part`` on its record).
+ESTIMATED_WHOLE = "input and output"
+ESTIMATED_OUTPUT = "output"
+
 # What the run summary names a price the provider reported with its answer.
 PROVIDER_REPORTED = "provider-reported"
 
@@ -619,6 +628,11 @@ def _clean(model: str) -> str:
     return name.rsplit("/", 1)[-1]
 
 
+def price_key(model: str) -> str:
+    """The name the spend block keys a model by (``prices_from``, ``unpriced_models``)."""
+    return _clean(model) or "(unnamed model)"
+
+
 def _untagged(name: str) -> str:
     return name.split(":", 1)[0]
 
@@ -811,11 +825,11 @@ class SpendMeter:
             usage = {**usage, "cache_write_1h_input_tokens": usage["cache_write_input_tokens"]}
         return in_force.cost(usage), in_force.source
 
-    def _cost(self, usage: Mapping[str, Any] | None, model: str) -> float | None:
+    def _cost(self, usage: Mapping[str, Any] | None, model: str) -> tuple[float, str] | None:
         if usage is None:
             self._note_unreported()
             return None
-        name = _clean(model) or "(unnamed model)"
+        name = price_key(model)
         charged = self._charged(usage, model)
         if charged is None:
             self._note_unpriced(name)
@@ -823,7 +837,7 @@ class SpendMeter:
         cost, source = charged
         with self._lock:
             self._priced_from.setdefault(name, set()).add(source)
-        return cost
+        return cost, source
 
     def _measure_locked(self, usage: Mapping[str, Any], name: str, group: str) -> None:
         out = int(usage.get("output_tokens") or 0)
@@ -881,17 +895,29 @@ class SpendMeter:
         call: str = "",
         *,
         estimated: Mapping[str, Any] | None = None,
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """One recorded call, from the token ledger; ``call`` is what the ledger names it.
 
         ``estimated`` is the stated estimate a call that reported no usage
         carried (its prompt priced as uncached input and its generated pieces
         as output). It is charged against the ceiling and counted apart as
         estimated; the call's reported figures stay absent.
+
+        An ``estimated`` carrying :data:`OUTPUT_ESTIMATED` beside ``usage`` is
+        an estimate of the output alone: the call is priced on the reported
+        usage with that output, and the output's share of the cost is counted
+        as estimated.
+
+        Returns what the call was charged, as its record keeps it
+        (``priced_usd``, ``price_source``, and for a charge by estimate
+        ``estimated_usd`` and ``estimated_part``), or ``None`` where nothing
+        was charged: no usage and no estimate, a model with no price, or a
+        failure here.
         """
         if usage is None and estimated:
-            self._settle_estimate(estimated, model)
-            return
+            return self._settle_estimate(estimated, model)
+        if usage is not None and estimated and estimated.get(OUTPUT_ESTIMATED):
+            return self._settle_output_estimate(usage, estimated, model)
         try:
             name = _clean(model)
             if usage and name:
@@ -912,16 +938,20 @@ class SpendMeter:
                             self._count_answer_locked(usage, name, f"tail:{tail}")
                         else:
                             self._count_answer_locked(usage, name, "single")
-            cost = self._cost(usage, model)
-            if cost is not None:
-                with self._lock:
-                    self._settled += cost
+            charged = self._cost(usage, model)
+            if charged is None:
+                return None
+            cost, source = charged
+            with self._lock:
+                self._settled += cost
+            return {"priced_usd": cost, "price_source": source}
         except Exception as exc:  # noqa: BLE001 — telemetry never costs a run
             logger.debug("spend not settled (%s).", exc)
+            return None
 
-    def _settle_estimate(self, estimated: Mapping[str, Any], model: str) -> None:
+    def _settle_estimate(self, estimated: Mapping[str, Any], model: str) -> dict[str, Any] | None:
         try:
-            name = _clean(model) or "(unnamed model)"
+            name = price_key(model)
             figures = {
                 "input_tokens": int(estimated.get("input_tokens") or 0),
                 "output_tokens": int(estimated.get("output_tokens") or 0),
@@ -947,7 +977,7 @@ class SpendMeter:
             charged = self._charged(figures, model)
             if charged is None:
                 self._note_unpriced(name)
-                return
+                return None
             cost, source = charged
             with self._lock:
                 self._priced_from.setdefault(name, set()).add(source)
@@ -955,8 +985,46 @@ class SpendMeter:
                 self._estimated_calls += 1
                 self._estimated_usd += cost
                 self._estimated_source = said
+            return {
+                "priced_usd": cost,
+                "price_source": source,
+                "estimated_usd": cost,
+                "estimated_part": ESTIMATED_WHOLE,
+            }
         except Exception as exc:  # noqa: BLE001 — telemetry never costs a run
             logger.debug("estimated spend not settled (%s).", exc)
+            return None
+
+    def _settle_output_estimate(
+        self, usage: Mapping[str, Any], estimated: Mapping[str, Any], model: str
+    ) -> dict[str, Any] | None:
+        """A call priced on its reported usage and an estimate of its output alone."""
+        try:
+            name = price_key(model)
+            output = max(0, int(estimated.get("output_tokens") or 0))
+            whole = {**usage, "output_tokens": output}
+            charged = self._charged(whole, model)
+            unanswered = self._charged({**usage, "output_tokens": 0}, model)
+            if charged is None or unanswered is None:
+                self._note_unpriced(name)
+                return None
+            cost, source = charged
+            by_estimate = max(0.0, cost - unanswered[0])
+            with self._lock:
+                self._priced_from.setdefault(name, set()).add(source)
+                self._settled += cost
+                self._estimated_calls += 1
+                self._estimated_usd += by_estimate
+                self._estimated_source = str(estimated.get("source") or "")
+            return {
+                "priced_usd": cost,
+                "price_source": source,
+                "estimated_usd": by_estimate,
+                "estimated_part": ESTIMATED_OUTPUT,
+            }
+        except Exception as exc:  # noqa: BLE001 — telemetry never costs a run
+            logger.debug("estimated spend not settled (%s).", exc)
+            return None
 
     def note_loop(self, key: Any, turns: list[Any], model: str = "") -> None:
         """What a running loop's turns so far cost, counted until the ledger has them.

@@ -1596,7 +1596,24 @@ the row is committed as soon as the worker's loop runs the publish, normally
 milliseconds after the call is recorded, not with the next batch; a worker
 killed inside that window loses that one call's row. It is a record, not
 progress, so it is kept off the live socket and the 1,000-entry replay stream
-and read back through `GET /jobs/{id}/events`. It lives exactly as long as the
+and read back through `GET /jobs/{id}/events`, which merges it into a page the
+stream answers, in `seq` order, so it is there while the stream lives as well
+as after. While the job runs, a usage event numbered past the last progress
+event a page holds comes with the next page, so a resume never skips a progress
+event still on its way. `GET /jobs/{id}/usage` totals the job's `model_usage` events: tokens
+in and out, cache reads and writes, reasoning and priced spend, per agent,
+built by the run summary's own code. Each record carries what the job's spend
+meter charged it when it was settled (`priced_usd`), failed attempts included,
+and the total sums those, so cost is readable during a run and after a worker
+that died, and a price changed later does not move it; a record from before
+records carried their charge is priced at the current `llm.model_prices` and
+counted in `repriced_calls`. A failed attempt is charged as the provider bills
+it: an Anthropic stream that breaks mid-answer is charged the input and cache
+reads and writes its opening event reported, and the output its closing usage
+reported or, where none arrived, an estimate from the characters that streamed;
+its record's `estimated_part` says `output`, and `estimated_usd` is that part's
+cost. A stream that broke before anything arrived, with no usage reported, is
+charged nothing. It lives exactly as long as the
 rest of the feed: `events.retention_days` (30) after the run. The run summary,
 which a completed or stopped run stores with its report, keeps the totals for
 good; the `model_usage` rows matter for a run whose worker died before it

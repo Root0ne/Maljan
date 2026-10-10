@@ -419,17 +419,37 @@ def _answer(text: str) -> dict[str, Any]:
     )
 
 
-def _text_then_overloaded() -> bytes:
+WORDS = ("CLAIM:", " it", " reads", " the")
+
+
+def _text_then_overloaded(
+    usage: dict[str, Any] | None = None,
+    *,
+    words: tuple[str, ...] = WORDS,
+    closing_output: int | None = None,
+) -> bytes:
     opening = {**_answer(""), "content": [], "stop_reason": None}
+    if usage is not None:
+        opening["usage"] = usage
     parts = [
         _event("message_start", {"message": opening}),
         _event("content_block_start", {"index": 0, "content_block": {"type": "text", "text": ""}}),
     ]
-    for word in ("CLAIM:", " it", " reads", " the"):
+    for word in words:
         parts.append(
             _event(
                 "content_block_delta",
                 {"index": 0, "delta": {"type": "text_delta", "text": word}},
+            )
+        )
+    if closing_output is not None:
+        parts.append(
+            _event(
+                "message_delta",
+                {
+                    "delta": {"stop_reason": None, "stop_sequence": None},
+                    "usage": {"output_tokens": closing_output},
+                },
             )
         )
     error = {"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}}
@@ -437,15 +457,10 @@ def _text_then_overloaded() -> bytes:
     return "".join(parts).encode()
 
 
-def test_an_anthropic_stream_cut_by_an_error_is_charged_its_pieces(
-    server: ThreadingHTTPServer,
-) -> None:
+def _broken_then_answered(server: ThreadingHTTPServer, broken: bytes) -> _Spend:
     from maljan.llm.anthropic_provider import AnthropicProvider
 
-    server.script = [  # type: ignore[attr-defined]
-        _text_then_overloaded(),
-        streamed(_answer("answered")),
-    ]
+    server.script = [broken, streamed(_answer("answered"))]  # type: ignore[attr-defined]
     host, port = server.server_address[:2]
     settings = Settings(_env_file=None, llm={"anthropic": {"api_key": "test-value"}})
     model = AnthropicProvider(settings).build_model(
@@ -454,14 +469,94 @@ def test_an_anthropic_stream_cut_by_an_error_is_charged_its_pieces(
     spend = _Spend()
     ledger = TokenLedger(spend=spend)
     attach_retry_recorder(model, ledger, "static")
-
     answer = asyncio.run(model.ainvoke("hello"))
-
     assert "answered" in str(answer.content)
     assert len(_rows(ledger)) == 1
+    return spend
+
+
+def test_a_broken_anthropic_stream_is_charged_the_prompt_usage_it_reported(
+    server: ThreadingHTTPServer,
+) -> None:
+    """``message_start`` stated the input; only the output that streamed is estimated."""
+    from maljan.core.spend import OUTPUT_ESTIMATED
+    from maljan.llm.context_window import CHARS_PER_TOKEN
+    from maljan.llm.transient import FAILED_STREAM_OUTPUT_ESTIMATE
+
+    opening = {
+        "input_tokens": 40,
+        "output_tokens": 1,
+        "cache_read_input_tokens": 900,
+        "cache_creation_input_tokens": 60,
+    }
+    spend = _broken_then_answered(server, _text_then_overloaded(opening))
     ((usage, _model_name, _call, estimated),) = spend.failed_attempts()
-    assert usage is None
-    assert estimated["output_tokens"] >= 2, "the text pieces that streamed before the error"
+    assert usage == {
+        "input_tokens": 1000,
+        "cached_input_tokens": 900,
+        "cache_write_input_tokens": 60,
+    }
+    streamed_chars = len("".join(WORDS))
+    assert estimated == {
+        "output_tokens": -(-streamed_chars // CHARS_PER_TOKEN),
+        "source": FAILED_STREAM_OUTPUT_ESTIMATE,
+        OUTPUT_ESTIMATED: True,
+    }
+
+
+def test_a_broken_stream_s_closing_usage_is_its_output(server: ThreadingHTTPServer) -> None:
+    spend = _broken_then_answered(
+        server, _text_then_overloaded({"input_tokens": 40, "output_tokens": 1}, closing_output=12)
+    )
+    ((usage, _model_name, _call, estimated),) = spend.failed_attempts()
+    assert usage == {"input_tokens": 40, "output_tokens": 12}
+    assert estimated is None
+
+
+def test_a_stream_broken_before_its_answer_is_charged_its_prompt_alone(
+    server: ThreadingHTTPServer,
+) -> None:
+    spend = _broken_then_answered(
+        server, _text_then_overloaded({"input_tokens": 40, "output_tokens": 1}, words=())
+    )
+    ((usage, _model_name, _call, estimated),) = spend.failed_attempts()
+    assert usage == {"input_tokens": 40, "output_tokens": 0}
+    assert estimated is None
+
+
+def test_an_output_estimate_is_priced_beside_the_reported_prompt() -> None:
+    """The record says which part is estimated, and only that part counts as estimated."""
+    from maljan.core.spend import OUTPUT_ESTIMATED, SpendMeter
+
+    prices = {"m1": {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 4.0}}
+    meter = SpendMeter(None, prices)
+    ledger = TokenLedger(spend=meter)
+    heard: list[dict[str, Any]] = []
+    ledger.on_call = heard.append
+    ledger.charge_failed_attempt(
+        {"input_tokens": 1_000_000},
+        agent="static",
+        model="m1",
+        call=FAILED_ATTEMPT_CALL,
+        estimated={"output_tokens": 500_000, "source": "streamed", OUTPUT_ESTIMATED: True},
+    )
+    (row,) = heard
+    assert row["reported"] is True
+    assert row["input_tokens"] == 1_000_000
+    assert row["priced_usd"] == pytest.approx(3.0)
+    assert row["estimated_usd"] == pytest.approx(2.0)
+    assert row["estimated_part"] == "output"
+    assert row["estimated"][OUTPUT_ESTIMATED] is True
+    assert meter.spent() == pytest.approx(3.0)
+
+
+def test_an_openai_stream_broken_before_any_chunk_is_charged_nothing() -> None:
+    spend = _Spend()
+    ledger = TokenLedger(spend=spend)
+    model = _model([_status(503), "CLAIM: x"])
+    attach_retry_recorder(model, ledger, "static")
+    model.invoke("hello")
+    assert spend.failed_attempts() == []
 
 
 def test_the_pieces_are_kept_on_the_error() -> None:

@@ -420,11 +420,21 @@ class RetryRecorder(BaseCallbackHandler):
         model's input this job measured read from the cache (as uncached input,
         said to overstate, where none is measured), and the pieces that
         streamed as output.
+
+        A stream whose provider reported the call's prompt usage before the
+        answer began (Anthropic's ``message_start``: input, cache reads and
+        writes) is charged that usage as reported, and its output as the
+        closing usage stated it where one arrived; otherwise the output is
+        estimated from the characters that streamed, at ``CHARS_PER_TOKEN``,
+        and only the output is stated as estimated (``estimated_part``). A
+        stream that reported nothing and streamed nothing is charged nothing.
         """
         with contextlib.suppress(Exception):
             usage = _usage_carried(exc)
             if usage is not None:
                 self._charge(usage, None)
+                return
+            if self._charge_streamed(exc):
                 return
             pieces = int(getattr(exc, PIECES_ATTRIBUTE, 0) or 0)
             if pieces <= 0:
@@ -441,6 +451,46 @@ class RetryRecorder(BaseCallbackHandler):
                 AT_CACHED_SHARE: True,
             }
             self._charge(None, estimate)
+
+    def _charge_streamed(self, exc: BaseException) -> bool:
+        """Charge a failed stream by the usage its provider reported; whether it reported any."""
+        from types import SimpleNamespace
+
+        from maljan.core.spend import OUTPUT_ESTIMATED
+        from maljan.core.token_ledger import turn_usage
+        from maljan.llm.context_window import CHARS_PER_TOKEN
+        from maljan.llm.generation_rate import STREAM_USAGE_ATTRIBUTE
+
+        streamed = getattr(exc, STREAM_USAGE_ATTRIBUTE, None)
+        if not isinstance(streamed, dict) or not isinstance(streamed.get("prompt"), dict):
+            return False
+        reported = turn_usage(
+            SimpleNamespace(usage_metadata=streamed["prompt"], response_metadata={})
+        )
+        if reported is None:
+            return False
+        reported.pop("output_tokens", None)
+        reported.pop("reasoning_tokens", None)
+        output = streamed.get("output_tokens")
+        if isinstance(output, int) and output > 0:
+            self._charge({**reported, "output_tokens": output}, None)
+            return True
+        chars = int(streamed.get("output_chars") or 0)
+        pieces = int(getattr(exc, PIECES_ATTRIBUTE, 0) or 0)
+        estimated_output = -(-chars // CHARS_PER_TOKEN) if chars > 0 else pieces
+        if estimated_output <= 0:
+            # Nothing of the answer arrived: the prompt as reported, no output.
+            self._charge({**reported, "output_tokens": 0}, None)
+            return True
+        self._charge(
+            reported,
+            {
+                "output_tokens": estimated_output,
+                "source": FAILED_STREAM_OUTPUT_ESTIMATE,
+                OUTPUT_ESTIMATED: True,
+            },
+        )
+        return True
 
     def _charge(self, usage: dict[str, int] | None, estimated: dict[str, Any] | None) -> None:
         """Settle one failed attempt, through the ledger so its record is kept with the calls."""
@@ -464,6 +514,10 @@ class RetryRecorder(BaseCallbackHandler):
 FAILED_ATTEMPT_CALL = "failed attempt"
 FAILED_ATTEMPT_ESTIMATE = (
     "estimated: the attempt failed after its answer began, before the provider reported usage"
+)
+FAILED_STREAM_OUTPUT_ESTIMATE = (
+    "output estimated from the characters that streamed: the stream broke before the provider "
+    "reported its output; its input and cache figures are the provider's"
 )
 
 # Set on an exception a model call raised after some of its answer streamed:
