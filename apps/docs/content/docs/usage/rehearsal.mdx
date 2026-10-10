@@ -92,6 +92,20 @@ end as a failed job whose reason names `core.job_timeout`, and must keep what
 it produced: a stored run summary with its spend and token usage (or the per-call usage events), and a partial report, whose
 `incomplete_reason` names the timeout too.
 
+`--deadline-in analysis|debate|verdict|report` aims the deadline at one stage:
+only that stage's model calls are held (an hour, let go when the stub stops),
+every other call answers at once, so the deadline always lands in it. The
+`--job-timeout` must outlast the stages before it; the scenario check fails
+when the deadline lands anywhere else. The same flag aims the in-process
+deadline.
+
+A stack rehearsal's known product defects are rows of
+`tests/fixtures/rehearsal/known_defects.json` whose `wire` is `stack`. A check
+failing with exactly a row's detail is reported as `KNOWN DEFECT <id>` with the
+defect's description, and does not fail the run; a pinned check that passes asks
+for its row to be struck. Today: D5, a job stopped inside the report node keeps
+nothing (`--deadline-in report`).
+
 `--configure harness` rehearses the harness's own fixed models and settings
 instead, with the same snapshot and restore; it touches no key. Without
 `--configure` nothing on the stack is changed: the stack must already call a

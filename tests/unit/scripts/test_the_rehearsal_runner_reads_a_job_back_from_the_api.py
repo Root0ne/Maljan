@@ -397,6 +397,7 @@ def _args(tmp_path: Path, **extra: Any) -> Any:
         "repeat": 1,
         "timeout": 5.0,
         "job_timeout": None,
+        "deadline_in": None,
         "stub_host": "127.0.0.1",
         "redis_url": "",
     }
@@ -517,3 +518,61 @@ def test_a_deadline_rehearsal_names_the_job_timeout_it_sets(
     with pytest.raises(SystemExit, match=said):
         _run_with(api, args, monkeypatch)
     assert not any(call.startswith("PATCH") for call in api.seen)
+
+
+def test_a_stack_run_failing_as_a_known_defect_is_reported_as_that_defect(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts.rehearsal.run import KNOWN_DEFECTS_FILE
+
+    row = next(
+        r for r in json.loads(KNOWN_DEFECTS_FILE.read_text())["pins"] if r.get("wire") == "stack"
+    )
+    record = RunRecord(
+        scenario=row["scenario"],
+        job_status="failed",
+        job_error="Stopped by the job timeout (40 s, core.job_timeout)",
+        stub_log=[
+            {"role": "analyst", "status": 200, "delay": 0.0, "model": "m"},
+            {"role": "composer", "status": 200, "delay": 3600.0, "waiting": True, "model": "m"},
+        ],
+        probe={"ok": True, "detail": "x"},
+        scenario_params={
+            "mode": "stack",
+            "deadline_by": "core.job_timeout",
+            "deadline_in": row["deadline_in"],
+            "slow_roles": ["composer", "narrative"],
+            "slow_seconds": 3600.0,
+        },
+        elapsed_s=50.0,
+    )
+    from scripts.rehearsal import run
+
+    real = run.check_run
+
+    def pinned(rec: RunRecord) -> list[Any]:
+        from scripts.rehearsal.checklist import Check
+
+        return [
+            Check(c.name, False, row["detail"]) if c.name == row["check"] else c for c in real(rec)
+        ]
+
+    import unittest.mock
+
+    with unittest.mock.patch.object(run, "check_run", pinned):
+        code = write_results([record], tmp_path)
+    shown = capsys.readouterr().out
+    assert f"KNOWN DEFECT {row['id']}" in shown
+    result = json.loads((tmp_path / f"{row['scenario']}-run1.json").read_text())
+    assert result["known_defects"][0]["id"] == row["id"]
+    others = [c for c in result["checks"] if not c["ok"] and c["name"] != row["check"]]
+    assert code == (1 if others else 0)
+
+
+def test_an_in_process_run_never_reads_the_stack_s_known_defects() -> None:
+    from scripts.rehearsal.run import known_stack_defects
+
+    record = RunRecord(
+        scenario="deadline_hit", job_status="failed", scenario_params={"deadline_in": "report"}
+    )
+    assert known_stack_defects(record) == {}

@@ -245,6 +245,35 @@ class TestTheAnthropicMessagesApi:
         finally:
             server.stop()
 
+    def test_a_held_call_is_listed_while_held_and_let_go_when_the_stub_stops(self) -> None:
+        import threading
+
+        import anthropic
+
+        server, _ = _stub(wire.Reply(text="late", delay=600.0))
+        failures: list[BaseException] = []
+
+        def ask() -> None:
+            try:
+                _anthropic(server, retries=0).messages.create(
+                    model=HAIKU, max_tokens=50, messages=USER
+                )
+            except anthropic.APIError as exc:
+                failures.append(exc)
+
+        caller = threading.Thread(target=ask)
+        caller.start()
+        deadline = time.monotonic() + 10
+        while not server.state.waiting and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert [c.get("waiting") for c in server.state.calls()] == [True]
+        started = time.monotonic()
+        server.stop()
+        caller.join(timeout=15)
+        assert time.monotonic() - started < 10
+        assert not caller.is_alive() and failures
+        assert server.state.log[-1]["stop"] == "stopped"
+
     def test_a_redacted_block_replays_as_received(self) -> None:
         server, _ = _stub(wire.Reply(text="answer", thinking="weighing", redacted=True))
         try:

@@ -284,6 +284,19 @@ def instance_of(role: str, request: wire.Request) -> str:
     return role
 
 
+# The roles each pipeline stage's model calls answer as. ``deadline_hit``
+# aimed at a stage holds only these calls, so the deadline lands in it.
+STAGE_ROLES: dict[str, frozenset[str]] = {
+    "analysis": frozenset({"analyst"}),
+    "debate": frozenset({"mediator", "mediator_extract", "revision"}),
+    "verdict": frozenset({"judge", "technique_question"}),
+    "report": frozenset({"narrative", "composer"}),
+}
+# How long a call of the aimed-at stage is held: longer than any deadline a
+# rehearsal sets, so the run is still in that stage when its deadline fires.
+STAGE_HOLD_S = 3600.0
+
+
 class Brain:
     """Answers every request of one run; state is per run (``reset``)."""
 
@@ -292,14 +305,23 @@ class Brain:
         scenario: str = "normal",
         loop_steps: int | None = None,
         slow_seconds: float | None = None,
+        deadline_in: str | None = None,
     ) -> None:
         if scenario not in SCENARIOS:
             raise ValueError(f"unknown scenario {scenario!r}; one of {sorted(SCENARIOS)}")
+        if deadline_in and (scenario != "deadline_hit" or deadline_in not in STAGE_ROLES):
+            raise ValueError(
+                f"deadline_in {deadline_in!r} aims deadline_hit at one of {sorted(STAGE_ROLES)}"
+            )
         self.scenario = scenario
+        self.deadline_in = deadline_in or ""
+        self.slow_roles = STAGE_ROLES[deadline_in] if deadline_in else frozenset()
         self.loop_steps = (
             loop_steps if loop_steps is not None else (12 if scenario == "long_loop" else 2)
         )
         default_slow = {"slow_model": 1.0, "deadline_hit": 2.0}.get(scenario, 0.0)
+        if deadline_in:
+            default_slow = STAGE_HOLD_S
         self.slow_seconds = slow_seconds if slow_seconds is not None else default_slow
         self._lock = threading.Lock()
         self.reset()
@@ -320,7 +342,7 @@ class Brain:
         if self.scenario == "redacted_thinking" and request.api == "anthropic" and reply.thinking:
             reply.redacted = True
             reply.note = {**reply.note, "redacted": True}
-        reply.delay = self.slow_seconds
+        reply.delay = self.slow_seconds if not self.slow_roles or role in self.slow_roles else 0.0
         return role, reply, fault
 
     def _fault_for(self, role: str, request: wire.Request) -> str:

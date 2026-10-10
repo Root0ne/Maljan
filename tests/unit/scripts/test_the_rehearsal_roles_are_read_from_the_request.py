@@ -124,6 +124,22 @@ class TestTheScenarios:
         with pytest.raises(ValueError, match="unknown scenario"):
             Brain(scenario="no-such")
 
+    def test_a_deadline_aimed_at_a_stage_holds_only_that_stage_s_calls(self) -> None:
+        brain = Brain(scenario="deadline_hit", deadline_in="debate")
+        mediator = _request(MEDIATOR_SYSTEM_HEAD, "--- STATIC ---")
+        analyst = _request("You are the static analyst.", PACK, tools=[PE_INFO])
+        assert brain.answer(mediator)[1].delay >= 600
+        assert brain.answer(analyst)[1].delay == 0.0
+
+    @pytest.mark.parametrize(
+        ("scenario", "stage"), [("normal", "report"), ("deadline_hit", "no-such-stage")]
+    )
+    def test_a_deadline_is_aimed_only_from_deadline_hit_at_a_known_stage(
+        self, scenario: str, stage: str
+    ) -> None:
+        with pytest.raises(ValueError, match="aims deadline_hit"):
+            Brain(scenario=scenario, deadline_in=stage)
+
     @pytest.mark.parametrize(
         ("scenario", "check"),
         [

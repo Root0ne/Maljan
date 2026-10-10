@@ -665,6 +665,9 @@ def _check_scenario(record: RunRecord) -> Check:
         want = int(record.scenario_params.get("loop_steps") or 0)
         ok = bool(steps) and (not want or max(steps) >= want)
         return Check(name, ok, f"analyst loop steps {steps}, asked for {want or 'many'}")
+    stage = str(record.scenario_params.get("deadline_in") or "")
+    if scenario == "deadline_hit" and stage:
+        return _check_deadline_in(record, name, stage)
     if scenario in ("slow_model", "deadline_hit"):
         delay = float(record.scenario_params.get("slow_seconds") or 0)
         slow = [e for e in log if float(e.get("delay") or 0) >= delay > 0]
@@ -679,6 +682,33 @@ def _check_scenario(record: RunRecord) -> Check:
     hit = sorted({str(e.get("role")) for e in faulted})
     detail = f"{len(faulted)} faulted first calls of {', '.join(hit)}"
     return Check(name, True, detail)
+
+
+def _check_deadline_in(record: RunRecord, name: str, stage: str) -> Check:
+    """The deadline aimed at ``stage`` landed there: only its calls were held, the last one too."""
+    roles = set(record.scenario_params.get("slow_roles") or [])
+    delay = float(record.scenario_params.get("slow_seconds") or 0)
+    log = [e for e in record.stub_log if e.get("role")]
+    held = [e for e in log if e.get("role") in roles]
+    others = [e for e in log if e.get("role") not in roles]
+    problems = []
+    if not roles or delay <= 0:
+        problems.append(f"no call of the {stage} stage was set to be held")
+    if not held:
+        problems.append(f"the run never reached the {stage} stage")
+    if any(float(e.get("delay") or 0) < delay for e in held):
+        problems.append(f"a {stage} call was not held")
+    if any(float(e.get("delay") or 0) > 0 for e in others):
+        problems.append(f"a call outside the {stage} stage was held")
+    last = str(log[-1].get("role")) if log else "none"
+    if log and last not in roles:
+        problems.append(f"the last call was {last}, outside the {stage} stage")
+    detail = "; ".join(problems) or (
+        f"the deadline landed in the {stage} stage: {len(held)} {stage} call(s) held "
+        f"{delay:.0f}s, the last call ({last}) among them; {len(others)} other call(s) "
+        "not held"
+    )
+    return Check(name, not problems, detail)
 
 
 CHECKS = (
@@ -700,18 +730,25 @@ CHECKS = (
 )
 
 
-def _usage_kept(record: RunRecord) -> bool:
-    """Whether what the stopped run spent is on record: in its run summary or per call."""
-    tokens = record.run_summary.get("tokens") or {}
+def _usage_problems(record: RunRecord) -> list[str]:
+    """What the stopped run did not keep of what it spent: its spend, and its token totals.
+
+    The per-call usage events stand for both. A run none of whose calls was
+    answered spent nothing and counts no tokens: its run summary then holds
+    a spend record and no token totals, as the product writes it.
+    """
+    if any(str(e.get("type")) == "model_usage" for e in record.events):
+        return []
+    answered = [e for e in record.stub_log if e.get("status") == 200 and not e.get("waiting")]
+    tokens = record.run_summary.get("tokens")
     spend = record.run_summary.get("spend")
-    totals = (
-        isinstance(tokens, dict)
-        and int(tokens.get("llm_calls") or 0) > 0
-        and isinstance(spend, dict)
-        and spend.get("spent_usd") is not None
-    )
-    per_call = any(str(e.get("type")) == "model_usage" for e in record.events)
-    return totals or per_call
+    problems = []
+    if not (isinstance(spend, dict) and spend.get("spent_usd") is not None):
+        problems.append("no spend was kept")
+    calls = int(tokens.get("llm_calls") or 0) if isinstance(tokens, dict) else 0
+    if answered and calls <= 0:
+        problems.append(f"no token totals were kept for {len(answered)} answered call(s)")
+    return problems
 
 
 def _check_kept(record: RunRecord) -> Check:
@@ -723,8 +760,7 @@ def _check_kept(record: RunRecord) -> Check:
         )
     if not record.run_summary:
         problems.append("no run summary was stored")
-    if not _usage_kept(record):
-        problems.append("neither the spend and token totals nor the per-call usage were kept")
+    problems += _usage_problems(record)
     if not record.markdown.strip():
         problems.append("no partial report renders")
     return Check(

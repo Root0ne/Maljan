@@ -74,6 +74,9 @@ class Rehearsal:
     first_token_seconds: float = 0.0
     loop_steps: int | None = None
     slow_seconds: float | None = None
+    # The stage ``deadline_hit`` aims its deadline at (``roles.STAGE_ROLES``):
+    # only that stage's calls are held, so the deadline lands in it.
+    deadline_in: str | None = None
     # The deadline the whole run is held to, standing in for the worker's job
     # timeout; ``None`` holds it to none (``deadline_hit`` sets its own).
     job_timeout_s: float | None = None
@@ -290,6 +293,7 @@ async def rehearse(rehearsal: Rehearsal) -> RunRecord:
         scenario=rehearsal.scenario,
         loop_steps=rehearsal.loop_steps,
         slow_seconds=rehearsal.slow_seconds,
+        deadline_in=rehearsal.deadline_in,
     )
     state = StubState(
         brain=brain,
@@ -338,7 +342,7 @@ async def rehearse(rehearsal: Rehearsal) -> RunRecord:
                 status, error = "failed", f"{type(exc).__name__}: {exc}"
             finally:
                 await app.aclose()
-            log = list(state.log)
+            log = state.calls()
         elapsed = time.monotonic() - started
         # Read while the run's settings are still installed: the product's own
         # readers below would otherwise build a default Settings of their own.
@@ -376,6 +380,9 @@ async def rehearse(rehearsal: Rehearsal) -> RunRecord:
             "loop_steps": brain.loop_steps,
             "slow_seconds": brain.slow_seconds,
             "job_timeout_s": rehearsal.deadline_s,
+            "deadline_in": brain.deadline_in,
+            "slow_roles": sorted(brain.slow_roles),
+            "mode": "in_process",
         },
         elapsed_s=elapsed,
     )

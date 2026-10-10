@@ -132,3 +132,20 @@ def test_two_normal_runs_are_identical(tmp_path: Path, wire: str) -> None:
         record = asyncio.run(rehearse(rehearsal))
         signatures.append(signature(record, check_run(record)))
     assert compare(signatures) == []
+
+
+@pytest.mark.parametrize("wire", WIRES)
+def test_a_deadline_aimed_at_the_report_stage_lands_there(tmp_path: Path, wire: str) -> None:
+    """The in-process deadline stops the run inside the report stage, every time.
+
+    Against the stack the same aim stops the worker inside its report node,
+    where a stopped run keeps nothing today (``known_defects.json``, D5).
+    """
+    rehearsal = Rehearsal(
+        scenario="deadline_hit", provider=wire, deadline_in="report", work_dir=tmp_path / "dl"
+    )
+    record = asyncio.run(rehearse(rehearsal))
+    failed = {c.name: c.detail for c in check_run(record) if not c.ok}
+    assert failed == {}
+    held = [e for e in record.stub_log if e.get("waiting")]
+    assert held and held[-1]["role"] in ("composer", "narrative")

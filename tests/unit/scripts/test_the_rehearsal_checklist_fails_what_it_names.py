@@ -396,6 +396,44 @@ class TestTheHolesAGreenRunCouldHide:
         record.job_status = "completed"
         assert _failed(record) == ["job ended at its deadline as a failed job"]
 
+    def _aimed_at(self, stage: str, roles: list[str]) -> RunRecord:
+        record = _record(
+            scenario="deadline_hit",
+            job_status="failed",
+            job_error="the run passed its 12s deadline",
+        )
+        record.scenario_params = {
+            "slow_seconds": 3600.0,
+            "deadline_in": stage,
+            "slow_roles": roles,
+        }
+        for entry in record.stub_log:
+            entry["delay"] = 3600.0 if entry.get("role") in roles else 0.0
+        last = next(e for e in reversed(record.stub_log) if e.get("role") in roles)
+        record.stub_log.remove(last)
+        record.stub_log.append({**last, "waiting": True})
+        return record
+
+    def test_a_deadline_aimed_at_a_stage_landed_there(self) -> None:
+        record = self._aimed_at("report", ["composer", "narrative"])
+        assert _failed(record) == []
+
+    def test_a_deadline_aimed_at_a_stage_the_run_never_reached(self) -> None:
+        record = self._aimed_at("report", ["composer", "narrative"])
+        held = ("composer", "narrative")
+        record.stub_log = [e for e in record.stub_log if e.get("role") not in held]
+        failed = {c.name: c.detail for c in check_run(record) if not c.ok}
+        assert (
+            "the run never reached the report stage" in failed["the deadline_hit scenario happened"]
+        )
+
+    def test_a_deadline_aimed_at_a_stage_that_landed_after_it(self) -> None:
+        record = self._aimed_at("analysis", ["analyst"])
+        judge = next(e for e in record.stub_log if e.get("role") == "judge")
+        record.stub_log.append({**judge, "delay": 0.0})
+        failed = {c.name: c.detail for c in check_run(record) if not c.ok}
+        assert "the last call was judge" in failed["the deadline_hit scenario happened"]
+
     def _stopped_by_the_worker(self) -> RunRecord:
         note = "Stopped by the job timeout (20 s, core.job_timeout) 21 s into the run"
         record = _record(scenario="deadline_hit", job_status="failed", job_error=note)
@@ -430,8 +468,23 @@ class TestTheHolesAGreenRunCouldHide:
             k: v for k, v in record.run_summary.items() if k not in ("tokens", "spend")
         }
         record.events = [e for e in record.events if e.get("type") != "model_usage"]
-        assert _failed(record) == ["the stopped run kept its run summary and a partial report"]
+        kept = check_run(record)
+        assert [c.detail for c in kept if not c.ok] == [
+            "no spend was kept; no token totals were kept for "
+            f"{sum(1 for e in record.stub_log if e.get('status') == 200)} answered call(s)"
+        ]
         record.events.append({"type": "model_usage", "data": {"output_tokens": 10}})
+        assert _failed(record) == []
+
+    def test_a_stopped_job_with_no_answered_call_keeps_a_spend_and_no_token_totals(
+        self,
+    ) -> None:
+        record = self._stopped_by_the_worker()
+        for entry in record.stub_log:
+            entry["waiting"] = True
+        record.run_summary["tokens"] = None
+        record.run_summary["spend"] = {"spent_usd": 0.0}
+        record.events = [e for e in record.events if e.get("type") != "model_usage"]
         assert _failed(record) == []
 
     def test_a_job_stopped_by_anything_but_its_job_timeout(self) -> None:

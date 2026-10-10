@@ -77,6 +77,10 @@ class StubState:
     served: list[str] = field(default_factory=list)
     log: list[dict[str, Any]] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
+    # The calls held in their delay right now, logged once they answer.
+    waiting: list[dict[str, Any]] = field(default_factory=list)
+    # Set when the stub stops: a call held in its delay is let go at once.
+    stopping: threading.Event = field(default_factory=threading.Event)
     signer: validate.Signer = field(default_factory=validate.Signer)
     cache: validate.PromptCache = field(default_factory=validate.PromptCache)
     # Where each request body is written, one file per request; ``None`` keeps none.
@@ -84,6 +88,28 @@ class StubState:
 
     def facts(self, model: str) -> ModelFacts:
         return facts_for(model, window=self.window, slots=self.slots)
+
+    def calls(self) -> list[dict[str, Any]]:
+        """Every call logged, then every call still held in its delay (``waiting``)."""
+        with self.lock:
+            held = [{**entry, "waiting": True} for entry in self.waiting]
+            return [*self.log, *held]
+
+    async def hold(self, entry: dict[str, Any], seconds: float) -> bool:
+        """Hold a call ``seconds``; ``False`` when the stub stopped first."""
+        with self.lock:
+            self.waiting.append(entry)
+        try:
+            deadline = time.monotonic() + seconds
+            while time.monotonic() < deadline:
+                if self.stopping.is_set():
+                    return False
+                await asyncio.sleep(min(0.2, max(0.0, deadline - time.monotonic())))
+            return True
+        finally:
+            with self.lock:
+                if entry in self.waiting:
+                    self.waiting.remove(entry)
 
     def record(self, entry: dict[str, Any]) -> None:
         with self.lock:
@@ -186,8 +212,10 @@ def build_app(state: StubState) -> Any:
             entry["section"] = composer_section(request)
         reply = wire.cut_to(reply, request.max_tokens)
         entry.update(reply.note)
-        if reply.delay > 0:
-            await asyncio.sleep(reply.delay)
+        if reply.delay > 0 and not await state.hold(entry, reply.delay):
+            entry.update(status=503, stop="stopped", input_tokens=0, output_tokens=0)
+            state.record(entry)
+            return _error(api, 503, "the stub stopped while this call was held")
         if reply.status != 200:
             entry.update(status=reply.status, stop="error", input_tokens=0, output_tokens=0)
             state.record(entry)
@@ -280,7 +308,7 @@ def build_app(state: StubState) -> Any:
 
     async def log(http: HttpRequest) -> Any:
         with state.lock:
-            return JSONResponse(list(state.log))
+            return JSONResponse(state.calls())
 
     async def reset(http: HttpRequest) -> Any:
         with state.lock:
@@ -343,6 +371,7 @@ class StubServer:
         return self
 
     def stop(self) -> None:
+        self.state.stopping.set()
         self._server.should_exit = True
         self._thread.join(timeout=10)
         try:

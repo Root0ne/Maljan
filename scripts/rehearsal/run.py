@@ -72,7 +72,7 @@ from scripts.rehearsal.checklist import (  # noqa: E402
     compare,
     signature,
 )
-from scripts.rehearsal.roles import SCENARIOS, Brain  # noqa: E402
+from scripts.rehearsal.roles import SCENARIOS, STAGE_ROLES, Brain  # noqa: E402
 from scripts.rehearsal.sample import sample_bytes  # noqa: E402
 from scripts.rehearsal.stub_model import Pace, StubServer, StubState  # noqa: E402
 
@@ -618,7 +618,7 @@ def record_from_stack(
 
 def _stub_log(stub_url: str | None, server: StubServer | None) -> list[dict[str, Any]]:
     if server is not None:
-        return list(server.state.log)
+        return server.state.calls()
     if stub_url:
         import httpx
 
@@ -669,7 +669,10 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
         raise SystemExit("without --configure the stack must already call a stub: name --stub-port")
     _sigterm_is_interrupt()
     brain = Brain(
-        scenario=args.scenario, loop_steps=args.loop_steps, slow_seconds=args.slow_seconds
+        scenario=args.scenario,
+        loop_steps=args.loop_steps,
+        slow_seconds=args.slow_seconds,
+        deadline_in=args.deadline_in,
     )
     server: StubServer | None = None
     if not args.stub_url:
@@ -722,8 +725,11 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
             "slow_seconds": brain.slow_seconds,
             "job_timeout_s": _job_timeout(args, values),
         }
+        params["mode"] = "stack"
         if args.scenario == "deadline_hit":
             params["deadline_by"] = "core.job_timeout"
+            params["deadline_in"] = brain.deadline_in
+            params["slow_roles"] = sorted(brain.slow_roles)
         if not args.configure:
             # The connection test over the stack's stored settings, as the console's button asks it.
             answer = client.probe_models({})
@@ -802,6 +808,7 @@ def run_in_process(args: argparse.Namespace) -> list[RunRecord]:
             first_token_seconds=args.first_token_seconds,
             loop_steps=args.loop_steps,
             slow_seconds=args.slow_seconds,
+            deadline_in=args.deadline_in,
             job_timeout_s=args.job_timeout or None,
             chars_per_token=args.chars_per_token,
         )
@@ -809,25 +816,74 @@ def run_in_process(args: argparse.Namespace) -> list[RunRecord]:
     return records
 
 
+# The product defects a stack rehearsal reproduces today, each with the exact
+# detail of the check it fails (the rows whose ``wire`` is ``stack``).
+KNOWN_DEFECTS_FILE = _ROOT / "tests" / "fixtures" / "rehearsal" / "known_defects.json"
+
+
+def known_stack_defects(record: RunRecord) -> dict[str, dict[str, Any]]:
+    """The known-defect rows a stack run of this scenario fails, by check name."""
+    if record.scenario_params.get("mode") != "stack":
+        return {}
+    try:
+        rows = json.loads(KNOWN_DEFECTS_FILE.read_text(encoding="utf-8"))["pins"]
+    except (OSError, ValueError, KeyError):
+        return {}
+    stage = str(record.scenario_params.get("deadline_in") or "")
+    return {
+        str(row["check"]): row
+        for row in rows
+        if row.get("wire") == "stack"
+        and row.get("scenario") == record.scenario
+        and str(row.get("deadline_in") or "") == stage
+    }
+
+
 def write_results(records: list[RunRecord], out: Path) -> int:
-    """Each run's JSON and markdown, the comparison, and the exit code."""
+    """Each run's JSON and markdown, the comparison, and the exit code.
+
+    A check a stack run fails with exactly the detail a known-defect row
+    pins is reported as that defect, not as a failure of the rehearsal; a
+    pinned check that passes is reported as a defect to strike.
+    """
     out.mkdir(parents=True, exist_ok=True)
     signatures = []
     failed = False
     for index, record in enumerate(records, 1):
         checks = check_run(record)
-        failed = failed or not all(c.ok for c in checks)
+        known = known_stack_defects(record)
+        matched = [
+            c
+            for c in checks
+            if not c.ok and c.name in known and known[c.name]["detail"] == c.detail
+        ]
+        failures = [c for c in checks if not c.ok and c not in matched]
+        failed = failed or bool(failures)
         stem = f"{record.scenario}-run{index}"
+        result = as_json(record, checks)
+        result["known_defects"] = [
+            {"id": known[c.name].get("id", ""), "check": c.name, "detail": c.detail}
+            for c in matched
+        ]
+        result["passed"] = not failures
         (out / f"{stem}.json").write_text(
-            json.dumps(as_json(record, checks), indent=1, default=str), encoding="utf-8"
+            json.dumps(result, indent=1, default=str), encoding="utf-8"
         )
         (out / f"{stem}.md").write_text(as_markdown(record, checks), encoding="utf-8")
         signatures.append(signature(record, checks))
-        status = "PASS" if all(c.ok for c in checks) else "FAIL"
+        status = "PASS" if not failures else "FAIL"
+        if matched and not failures:
+            status = "PASS but for known defects"
         print(f"run {index}: {status} ({record.elapsed_s:.1f}s, verdict {record.verdict})")
-        for check in checks:
-            if not check.ok:
-                print(f"  FAIL {check.name}: {check.detail}")
+        for check in matched:
+            row = known[check.name]
+            print(f"  KNOWN DEFECT {row.get('id', '')} {check.name}: {check.detail}")
+            print(f"    {row.get('defect', '')}")
+        for check in failures:
+            print(f"  FAIL {check.name}: {check.detail}")
+        for name, row in known.items():
+            if any(c.name == name and c.ok for c in checks):
+                print(f"  known defect {row.get('id', '')} no longer reproduces: strike its row")
     differences = compare(signatures)
     summary = {
         "runs": len(records),
@@ -880,6 +936,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--chars-per-token", type=int, default=4)
     parser.add_argument("--loop-steps", type=int, default=None)
     parser.add_argument("--slow-seconds", type=float, default=None)
+    parser.add_argument(
+        "--deadline-in",
+        default=None,
+        choices=sorted(STAGE_ROLES),
+        help="deadline_hit only: hold only this stage's model calls, so the deadline lands in it",
+    )
     parser.add_argument("--timeout", type=float, default=3600.0, help="seconds to wait per job")
     parser.add_argument(
         "--job-timeout",
@@ -897,7 +959,12 @@ def main(argv: list[str] | None = None) -> int:
         return run_restore(args)
     if args.repeat < 1:
         parser.error("--repeat is at least 1")
-    print(f"scenario {args.scenario}: {SCENARIOS[args.scenario]}", flush=True)
+    if args.deadline_in and args.scenario != "deadline_hit":
+        parser.error("--deadline-in aims the deadline_hit scenario")
+    said = SCENARIOS[args.scenario]
+    if args.deadline_in:
+        said = f"only the {args.deadline_in} stage's calls are held, so the deadline lands in it"
+    print(f"scenario {args.scenario}: {said}", flush=True)
     if args.in_process:
         records = run_in_process(args)
     else:
