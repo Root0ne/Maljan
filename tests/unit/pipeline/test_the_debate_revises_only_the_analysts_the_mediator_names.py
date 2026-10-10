@@ -518,3 +518,38 @@ class TestTheNamesStayOutOfModelInput:
 
         assert str([read]) == str([legacy]) == str([unread])
         assert "revise" not in str([read]) and "revise" not in repr(unread)
+
+
+class TestTheFieldMayStandAnywhere:
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "[analysts: network] NETWORK calls the host live. [not blocking: wording only]",
+            "NETWORK calls the host live. [not blocking: wording only] [analysts: network]",
+            "NETWORK calls the host live [analysts: network]. [not blocking: wording only]",
+        ],
+    )
+    def test_a_not_blocking_mark_is_read_wherever_the_field_stands(self, line: str) -> None:
+        from maljan.pipeline.debate_facts import read_marks
+
+        (mark,) = read_marks([line])
+
+        assert (mark.blocking, mark.marked, mark.unread) == (False, True, False)
+        assert mark.line == line
+        assert read_analysts_field(line) == ["network"]
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "[analysts: static] STATIC says no mutex. [blocking: the ledger refutes it]",
+            "STATIC says no mutex. [blocking: the ledger refutes it] [analysts: static]",
+        ],
+    )
+    def test_a_blocking_mark_is_read_wherever_the_field_stands(self, line: str) -> None:
+        from maljan.pipeline.debate_facts import read_marks
+
+        (mark,) = read_marks([line])
+
+        assert (mark.blocking, mark.marked, mark.unread) == (True, True, False)
+        assert mark.reason == "the ledger refutes it"
+        assert analysts_to_revise([line], NAMES) == (["static"], "")

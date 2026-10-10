@@ -64,6 +64,10 @@ _ANY_MARK = re.compile(
 # written a mark the parser could not read.
 _MARK_OPENING = re.compile(r"\[\s*(?:not\s+)?blocking\b", re.IGNORECASE)
 
+# The field the mediator writes on a listed line: the analysts who must
+# revise over it, by the names their reports are headed with.
+_ANALYSTS_FIELD = re.compile(r"\[\s*analysts?\s*:(?P<names>[^\[\]]*)\]", re.IGNORECASE)
+
 # The head of the facts a revision round is told, after the mediator's feedback.
 LEDGER_FACTS_HEAD = "The evidence ledger states these counts for the lines the mediator listed:"
 
@@ -232,8 +236,10 @@ def read_marks(lines: Iterable[str]) -> list[Mark]:
     marks: list[Mark] = []
     for line in lines:
         text = str(line)
-        kinds = {_kind(m) for m in _ANY_MARK.finditer(text)}
-        match = _MARK.search(text)
+        # The [analysts: ...] field is no part of the mark, wherever it stands.
+        marked = _ANALYSTS_FIELD.sub(" ", text)
+        kinds = {_kind(m) for m in _ANY_MARK.finditer(marked)}
+        match = _MARK.search(marked)
         reason = (match.group("reason") or "").strip() if match is not None else ""
         if len(kinds) > 1:
             marks.append(Mark(line=text, blocking=True, marked=True, unread=True))
@@ -247,7 +253,7 @@ def read_marks(lines: Iterable[str]) -> list[Mark]:
                     line=text,
                     blocking=True,
                     marked=False,
-                    unread=bool(_MARK_OPENING.search(text)),
+                    unread=bool(_MARK_OPENING.search(marked)),
                 )
             )
         else:
@@ -266,9 +272,6 @@ def with_ledger_facts(directive: str, facts: Sequence[str]) -> str:
     return f"{directive}\n\n{block}" if directive else block
 
 
-# The field the mediator opens a listed line with: the analysts who must
-# revise over it, by the names their reports are headed with.
-_ANALYSTS_FIELD = re.compile(r"\[\s*analysts?\s*:(?P<names>[^\[\]]*)\]", re.IGNORECASE)
 # What separates two names in the field.
 _NAME_SEPARATOR = re.compile(r"\s*(?:,|;|&|\band\b)\s*", re.IGNORECASE)
 # The word a report heading closes a name with.
