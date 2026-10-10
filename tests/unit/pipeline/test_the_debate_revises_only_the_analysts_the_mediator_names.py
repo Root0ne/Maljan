@@ -741,3 +741,53 @@ class TestTheMentionsOfALineAreReadInLinearTime:
         found = _claims_named("ALL_TOOLS_STATIC_R2 Claim 2 and STATIC Claim 1", NAMES)
 
         assert found == [("all_tools_static_r2", ["2"]), ("static", ["1"])]
+
+
+class TestAFieldOfManyNamesIsReadInLinearTime:
+    @staticmethod
+    def _line(count: int) -> str:
+        return (
+            f"[analysts: {', '.join(f'a{i}' for i in range(count))}] STATIC says x. [blocking: y]"
+        )
+
+    def test_thirty_two_thousand_names_take_about_ten_times_three_thousand_two_hundred(
+        self,
+    ) -> None:
+        import time
+
+        def cost(count: int) -> float:
+            line = self._line(count)
+            best = float("inf")
+            for _ in range(3):
+                began = time.perf_counter()
+                named, note = analysts_to_revise([line], NAMES)
+                best = min(best, time.perf_counter() - began)
+            assert named is None and f"{count} name(s)" in note
+            return best
+
+        small, large = cost(3200), cost(32000)
+
+        # Linear is about 10x; the list scans this replaces were about 100x.
+        assert large < 30 * small
+
+    def test_each_distinct_readable_name_is_quoted_once(self) -> None:
+        line = "[analysts: ghidra, Ghidra, GHIDRA, capa, ghidra] STATIC says x. [blocking: y]"
+
+        _named, note = analysts_to_revise([line, line], NAMES)
+
+        assert note.count("'ghidra'") == 1 and note.count("'capa'") == 1
+        assert "4 name(s)" in note
+
+    def test_the_note_grows_only_with_the_distinct_readable_names(self) -> None:
+        names = [f"a{i}" for i in range(32000)]
+        repeated = ", ".join(names[:10] * 3200)
+        unreadable = ", ".join("@" * 500 + str(i) for i in range(1000))
+
+        _named, few = analysts_to_revise(
+            [f"[analysts: {repeated}, {unreadable}] STATIC says x. [blocking: y]"], NAMES
+        )
+        _named, many = analysts_to_revise([self._line(32000)], NAMES)
+
+        fixed = len(analysts_field_unknown_note([]))
+        assert len(few) < fixed + 10 * 40 + 60
+        assert len(many) < fixed + sum(len(n) + 4 for n in names) + 20

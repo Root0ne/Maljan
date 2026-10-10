@@ -314,12 +314,20 @@ def _readable_name(written: str) -> str | None:
 def analysts_field_unknown_note(written: Sequence[str]) -> str:
     """Why a round asked every analyst: blocking lines named names outside the debate.
 
-    It counts the names, quotes each one only as an analyst key, and counts
-    the ones that cannot be read as one, so no name is quoted whole.
+    It counts the distinct names, quotes each distinct one that reads as an
+    analyst key once, in that form, and counts the ones that cannot be read
+    as one, so no name is quoted whole and the sentence grows only with the
+    distinct analyst keys written.
     """
-    names = list(dict.fromkeys(str(w) for w in written))
-    readable = list(dict.fromkeys(k for w in names if (k := _readable_name(w)) is not None))
-    unreadable = sum(1 for w in names if _readable_name(w) is None)
+    names = dict.fromkeys(str(w) for w in written)
+    readable: dict[str, None] = {}
+    unreadable = 0
+    for name in names:
+        key = _readable_name(name)
+        if key is None:
+            unreadable += 1
+        else:
+            readable[key] = None
     quoted = f": {', '.join(repr(k) for k in readable)}" if readable else ""
     unread = f"; {unreadable} of them cannot be read as an analyst name" if unreadable else ""
     return (
@@ -334,13 +342,13 @@ def read_analysts_field(line: str) -> list[str] | None:
 
     ``None`` is a line with no such field, or with fields that hold no name.
     """
-    names: list[str] = []
+    names: dict[str, None] = {}
     for match in _ANALYSTS_FIELD.finditer(str(line)):
         for part in _NAME_SEPARATOR.split(match.group("names")):
             name = part.strip().strip("*_`'\"").strip()
-            if name and name not in names:
-                names.append(name)
-    return names or None
+            if name:
+                names[name] = None
+    return list(names) or None
 
 
 def _key(name: str) -> str:
