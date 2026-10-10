@@ -64,7 +64,7 @@ Room = Callable[[str], "int | None"]
 SOURCE_SEPARATOR = "\n\n"
 
 
-def configured_chunk_chars(config: ChunkingConfig) -> int | None:
+def configured_chunk_chars(config: ChunkingConfig | None) -> int | None:
     """The operator's ``max_tokens_per_chunk`` in characters, or ``None`` where it is unset."""
     configured = getattr(config, "max_tokens_per_chunk", None)
     if isinstance(configured, int) and not isinstance(configured, bool) and configured > 0:

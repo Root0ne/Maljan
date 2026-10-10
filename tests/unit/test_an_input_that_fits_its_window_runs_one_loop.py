@@ -16,13 +16,14 @@ document, without the indentation.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import MethodType
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from maljan.agents.base_agent import BaseAnalyst
+from maljan.agents.base_agent import INPUT_NOTICE_ROOM, BaseAnalyst
 from maljan.core.config import ChunkingConfig, Settings
 from maljan.core.container import ServiceContainer
 from maljan.llm import context_window as cw
@@ -35,6 +36,7 @@ from maljan.loaders.binary_chunker import (
     joined_when_it_fits,
 )
 from maljan.pipeline.nodes import agent_input_room, make_stage_agent_node
+from maljan.schemas.isr_models import AgentISR
 from tests.stages import ANALYSIS_STAGE, paper_profile
 
 
@@ -392,6 +394,26 @@ class _Analyst(BaseAnalyst):
 # local llama-server deployments (64K and 128K) the benchmark runs used.
 WINDOWS = sorted({*_load_table().values(), 65_536, 131_072})
 
+# The reverser's tool definitions as its first chunk request sent them: 179
+# tools of the Ghidra, analysis, knowledge and VirusTotal servers.
+REVERSER_TOOLS = json.loads(
+    (
+        Path(__file__).parents[1] / "fixtures" / "tools" / "reverser_ghidra_tool_definitions.json"
+    ).read_text(encoding="utf-8")
+)
+REVERSER_SYSTEM = 7_786
+
+
+def _reverser(window: int) -> tuple[_Analyst, cw.ContextBudget]:
+    """The reverser's framing on ``window``: its system prompt, its tools, a pack at its bound."""
+    agent = _Analyst(llm=None, name="all_tools_reverser_ghidra")  # type: ignore[arg-type]
+    budget = cw.ContextBudget(cw.WindowFact(window, cw.DECLARED, "test"))
+    agent._context_budget = lambda: budget  # type: ignore[method-assign]
+    agent._system_prompt = lambda *a, **k: "s" * REVERSER_SYSTEM  # type: ignore[method-assign]
+    agent.tools = list(REVERSER_TOOLS)
+    agent.facts_block = "p" * int(budget.tool_budget_chars() * cw.ANSWER_SHARE)
+    return agent, budget
+
 
 @pytest.mark.parametrize("window", WINDOWS)
 def test_on_every_known_window_a_chunk_fits_beside_its_prompt(window: int) -> None:
@@ -417,6 +439,53 @@ def test_on_every_known_window_a_chunk_fits_beside_its_prompt(window: int) -> No
     assert room + framing + int(budget.tool_budget_chars() * cw.ANSWER_SHARE) <= (
         budget.tool_budget_chars()
     )
+
+
+class TestALaterChunkFitsBesideTheEarlierCalls:
+    """A chunk's prompt — header, earlier chunks' calls, chunk — is measured as one."""
+
+    def _run(self, block_chars: int) -> tuple[_Analyst, list[str], int, str]:
+        agent, _budget = _reverser(65_536)
+        cfg = Settings(_env_file=None, chunking={"overlap_tokens": 0})
+        text = "".join(f"line {i:06d}\n" for i in range(9_000))
+        prompts: list[str] = []
+
+        def analyze_isr(prompt: str) -> AgentISR:
+            prompts.append(prompt)
+            return AgentISR(agent_id=agent.name, domain="static", claims=[], dissent_items=[])
+
+        agent.analyze_isr = analyze_isr  # type: ignore[method-assign]
+        agent._validate_isr = lambda isr, *_a, **_k: isr  # type: ignore[method-assign]
+        agent._apply_consistency_gate = lambda isr, *_a: isr  # type: ignore[method-assign]
+        block = "Earlier chunks of this same input were already analysed.\n" + "c" * block_chars
+        with (
+            patch("maljan.agents.base_agent.get_settings", lambda: cfg),
+            patch(
+                "maljan.agents.base_agent.earlier_chunks_block",
+                lambda entries: block if prompts else "",
+            ),
+        ):
+            room = agent._input_room_chars(text)
+            assert room is not None
+            chunks = BinaryChunker(cfg.chunking).chunk("static", text, room=agent._input_room_chars)
+            agent.safe_analyze_isr_chunked(chunks)
+            measured = [agent._input_room_chars(p) for p in prompts]
+        assert measured and all(m == room for m in measured)
+        return agent, prompts, room, text
+
+    def test_every_chunk_prompt_fits_the_room_and_nothing_is_lost(self) -> None:
+        _agent_, prompts, room, text = self._run(block_chars=20_000)
+        # The room kept for a shortened input's notice holds a chunk's header instead.
+        assert all(len(p) <= room + INPUT_NOTICE_ROOM for p in prompts)
+        assert len(prompts[0]) < room + INPUT_NOTICE_ROOM
+        bodies = [p.split("\n\n", 1)[1] for p in prompts]
+        bodies = [b.split("\n\n", 1)[1] if b.startswith("Earlier chunks") else b for b in bodies]
+        assert "".join(bodies) == text
+
+    def test_a_later_chunk_is_cut_and_the_rest_runs_after_it(self) -> None:
+        _agent_, prompts, room, text = self._run(block_chars=20_000)
+        sized = -(-len(text) // room)
+        assert len(prompts) > sized
 
 
 # ---------------------------------------------------------------------------
