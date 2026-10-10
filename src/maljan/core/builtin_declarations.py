@@ -442,7 +442,8 @@ def _reversing(tools: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
 _ADDRESS = {"address": "address"}
 
 # Ghidra's tools the code names: the open/select/analyse tools of its
-# ``sample_open`` (long-running, ``providers.sample_open.long_running_tools``),
+# ``sample_open`` (the open and the analysis long-running, as
+# ``providers.sample_open.long_running_tools`` holds them),
 # the program and listing tools of ``analysis.evidence_roots``, the function
 # tools of ``reporting.ledger_report`` and ``reporting.figures``, the load tool
 # of ``agents.static_analyst``, the passes of ``analysis.ghidra_passes`` and
@@ -454,11 +455,7 @@ _GHIDRA_TOOLS: dict[str, dict[str, Any]] = _reversing(
             "long_running": True,
             "arguments": {"path": "file"},
         },
-        "switch_program": {
-            "kind": "select_sample",
-            "long_running": True,
-            "arguments": {"program": "program"},
-        },
+        "switch_program": {"kind": "select_sample", "arguments": {"program": "program"}},
         "run_analysis": {
             "kind": "analyse_sample",
             "long_running": True,

@@ -2905,8 +2905,94 @@ Ghidra's block ships declaring `load_program` (path argument `file`, name field
 `program`); its client applies the same long-running rule to them. A
 stored Ghidra block that never set `sample_open` carries that declaration; one
 an operator set, empty included, is kept as set. The fields are in the settings
-schema and catalogue now; the server editor's form for them is a follow-up, and
-until then a registry server's declaration is written in its JSON.
+schema and catalogue, and in the server editor's **Declaration** section.
+
+### What a server declares about its tools
+
+`sample_open` is one part of a server's **declaration**: the facts the platform
+needs about a server and its tools, written as data on the server's own block
+rather than in code against a tool's name, so a server you plug in is read
+exactly like a built-in one. Every block has the same fields: an `mcp.servers`
+entry, the `static.ghidra` and `static.r2` provider blocks and the CAPE MCP
+block (`sandbox.cape2.mcp`). In the console they are the **Declaration** section
+of a server card (closed by default), and in the catalogue the advanced
+**Declaration** subgroup of each provider block.
+
+| key | meaning |
+| :-- | :-- |
+| `sample_open` | which tool opens a sample, and which select and analyse it (above) |
+| `sample_mount` | the absolute path inside the server that the worker's copy of the sample is mounted at; empty when the server reads the worker's own filesystem |
+| `error_patterns` | how the server's plain-text answers say "error": a list of `{match, code, remediation, tools}`; `match` is a regular expression held against the whole answer, `code` the error code (`tool_failed`, `bad_argument` …), `remediation` what would make the call succeed, `tools` the tools it applies to (empty: all) |
+| `roles` | what the server is for: `reputation`, `decompiler`, `disassembler`, `sandbox`, `rule_scanner`, `strings`, `reference`, `capture`, or any word of your own |
+| `prompt_fragment` | the workflow text shown to an agent only while the server's tools are attached |
+| `required_env_allow` | the environment names the server cannot run without |
+| `reads_staged_sample` | whether the server's path-taking tools read the sample the platform staged |
+| `tool_facts` | per tool name, what its answer is and where its facts sit (below) |
+
+Each entry of `tool_facts` describes one tool:
+
+| key | meaning |
+| :-- | :-- |
+| `kind` | what kind of fact the answer is (required) |
+| `asserts_techniques` | the tool's technique id is a statement about this sample (a rule that matched it); needs `techniques` |
+| `source` | the name a corroboration row gives an asserting tool (`capa`, `yara`, `sigma` …) |
+| `long_running` | the tool's work grows with the sample and has no wall clock of its own |
+| `rows` | the path of the answer's rows |
+| `places` | per kind of place (`offset`, `rva`, `address`, `addresses`, `call_site`, `function`, `pid` …), the path inside a row that holds one |
+| `values` | per kind of value (`text`, `rule`, `namespace`, `value`, `command_line` …), the path inside a row that holds one |
+| `techniques` | where the answer names ATT&CK ids: a list of `{path, format}`, `format` being `attck` (an id or a decorated label) or `sigma_tag` (`attack.t1055.012`) |
+| `reputation` | for a reputation lookup: `service` (the name it is attributed to), the paths `stats`, `malicious`, `total`, `labels`, `detections`, `engines`, and `text_pattern`, a regular expression with a `malicious` (and optionally `total`) group for an answer written in prose |
+| `arguments` | per role (`path`, `hash`, `address`, `program` …), the argument a call gives it in |
+| `reader` | a named reader for an answer shape the paths cannot express (`floss`, `capa`, `flows` …); empty reads the paths |
+| `report_sections` | the report sections whose writer is shown this tool's answers |
+| `words` | words a statement may use to name this tool's entry |
+
+**Paths** are JSON-pointer-like: `/strings/*/offset` is the `offset` of every
+item of `strings`; `*` is every item of a list or every value of an object at
+that level, a number is one item, `~1` writes a `/` inside a key and `~0` a
+`~`. `**` is any depth (`/**/attck` is every `attck` key wherever it sits), at
+most once in a path and never in a path read inside a row (`places`, `values`),
+so every read is linear in the size of the answer. A path that names nothing
+reads as absent.
+
+**Vocabulary.** `kind`, `roles`, `source`, `reader`, a technique `format`, a
+place or value name and an error `code` are open: any lowercase word of letters,
+digits and underscores is accepted, so a new kind of tool needs no release to
+be declared. The built-ins use these kinds: `identity`, `signing`,
+`binary_info`, `archive_listing`, `strings`, `decoded_strings`, `iocs`,
+`rule_match`, `command_match`, `reference`, `capabilities`, `reputation`,
+`indicator_reputation`, `submission`, `submission_status`, `status`,
+`api_hash_resolution`, `crypto_constants`, `function_index`, `transform`,
+`carve`, `unpack`, `sample_delivery`, `pcap`, `packet_overview`, `dns`, `http`,
+`open_sample`, `select_sample`, `analyse_sample`, `program_info`,
+`import_listing`, `export_listing`, `function_list`, `segments`, `decompile`,
+`disassembly`, `function_analysis`, `xrefs`, `callers`, `callees`,
+`behaviour_scan`, `call_chains`, `anti_analysis_scan`, `emulation`, `dataflow`,
+`code_gaps`, `function_hash`, `function_hashes`, `call_graph`, `command`,
+`function_matches`, and for the sandbox report `sandbox_report`,
+`sandbox_processes`, `network_flows`, `sandbox_signatures`,
+`sandbox_dropped_files`, `sandbox_registry`, `sandbox_api_calls`,
+`sandbox_mutexes`, `sandbox_services`, `sandbox_channels`, `sandbox_items`,
+`sandbox_status` and `sandbox_sections`.
+
+**What ships.** The built-in servers (`analysis`, `knowledge`, `network`,
+`threatintel`, `virustotal`), Ghidra, radare2, the CAPE MCP block and the
+platform's in-process tools (the triage pack's steps, the sandbox report tools
+and the evidence-only capa/YARA provider) ship declarations that say what the
+code holds today: `threatintel` and `virustotal` carry the `reputation` role,
+the three file-reading sidecars `reads_staged_sample`, Ghidra its mount
+`/data/samples` and its workflow text, radare2 its workflow text and the error
+sentences r2mcp writes as plain answers. A built-in's stored block takes the
+shipped value of any field it never set, and one the operator set, empty
+included, is kept; a save stores only the fields that differ from the shipped
+value, so the declaration keeps following later releases. A server you add
+starts with no declaration, and a tool of yours that shares a built-in tool's
+name never takes the built-in's: a tool is always looked up by its server and
+its name together.
+
+Nothing reads the declaration yet besides `sample_open`: the consumers move
+onto it one by one, each with the same output for the built-ins, and this
+section says when one does.
 
 ### A tool server that keeps failing is rested
 
