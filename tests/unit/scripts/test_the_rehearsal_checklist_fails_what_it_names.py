@@ -31,6 +31,14 @@ from scripts.rehearsal.checklist import _stub_cost as stub_cost
 
 MODEL = "deepseek-v4-flash"
 NOW = time.time()
+WINDOW = 1_000_000
+
+
+def _cap_from(window: int, source: str) -> str:
+    return (
+        "llm.expert_max_tokens is 0, so derived: 8192 tokens — the smallest of a quarter of "
+        f"the model's {window}-token context window ({source}), the documented fallback of 8192"
+    )
 
 
 def _log(n: int, role: str, **extra: Any) -> dict[str, Any]:
@@ -136,6 +144,19 @@ def _record(**changes: Any) -> RunRecord:
                 "output_tokens": 100 * calls,
             },
             "budget": {"static": {"max_steps": 40, "timeout_s": 900, "steps_used": 3}},
+            "truncation": {
+                "context_window": {
+                    "tokens": WINDOW,
+                    "source": "declared",
+                    "detail": "the window this deployment's settings name for the endpoint",
+                }
+            },
+            "generation": {
+                "output_caps": {
+                    "static": {"tokens": 8192, "derivation": _cap_from(WINDOW, "declared")},
+                    "judge": {"tokens": 9000, "derivation": "9000 tokens — set to 9000"},
+                }
+            },
             "degradation_reasons": [],
         },
         malware_report=_report(),
@@ -155,6 +176,7 @@ def _record(**changes: Any) -> RunRecord:
         required_stages={"analysis": ["static"], "report": ["reporter"]},
         empty_evidence_sections=[],
         probe={"ok": True, "detail": "answered"},
+        scenario_params={"served_windows": {MODEL: WINDOW}},
     )
     usd, _ = priced_usage(record)
     record.run_summary["spend"] = {"spent_usd": round(usd, 6)}
@@ -436,7 +458,10 @@ class TestTheHolesAGreenRunCouldHide:
         assert _failed(record) == ["verdict stated by the judge"]
 
     def test_a_run_too_close_to_its_deadline(self) -> None:
-        record = _record(elapsed_s=95.0, scenario_params={"job_timeout_s": 100})
+        record = _record(
+            elapsed_s=95.0,
+            scenario_params={"job_timeout_s": 100, "served_windows": {MODEL: WINDOW}},
+        )
         assert _failed(record) == ["finished inside its deadline"]
 
     @pytest.mark.parametrize("scenario", ["schema_break", "empty_answer", "server_error_once"])
@@ -472,7 +497,7 @@ class TestTheHolesAGreenRunCouldHide:
         )
         for entry in record.stub_log:
             entry["delay"] = 2.0
-        record.scenario_params = {"slow_seconds": 2.0}
+        record.scenario_params.update({"slow_seconds": 2.0})
         record.elapsed_s = 13.0
         assert _failed(record) == []
         record.job_status = "completed"
@@ -679,3 +704,56 @@ class TestABrokenStreamIsChargedItsReportedPrompt:
         record.events.pop()
         record.run_summary["spend"] = {"spent_usd": round(priced_usage(record)[0], 6)}
         assert "tokens and spend as the provider reported them" not in _failed(record)
+
+
+class TestTheWindowInForce:
+    """The window the product sized each model with must be the one the stub serves."""
+
+    NAME = "window in force as the provider serves it"
+
+    def _detail(self, record: RunRecord) -> str:
+        (check,) = [c for c in check_run(record) if c.name == self.NAME]
+        return "" if check.ok else check.detail
+
+    def test_the_served_window_passes(self) -> None:
+        assert self._detail(_record()) == ""
+
+    def test_the_fallback_window_fails(self) -> None:
+        record = _record()
+        record.run_summary["truncation"]["context_window"] = {
+            "tokens": 8192,
+            "source": "fallback",
+            "detail": "no endpoint reported a window and the model is not in the table",
+        }
+        record.run_summary["generation"]["output_caps"]["static"]["derivation"] = (
+            "llm.expert_max_tokens is 0, so derived: 8192 tokens — the documented fallback: "
+            "no window was learned for the model"
+        )
+        assert _failed(record) == [self.NAME]
+        assert self._detail(record) == (
+            "the analysts' window is the 8192-token fallback (no endpoint reported a window and "
+            f"the model is not in the table); the stub serves {MODEL} {WINDOW}; output caps "
+            "derived from no window: static"
+        )
+
+    def test_a_window_other_than_the_served_one_fails(self) -> None:
+        record = _record()
+        record.run_summary["truncation"]["context_window"]["tokens"] = 200_000
+        assert "the analysts' window is 200000 tokens (declared)" in self._detail(record)
+        record = _record()
+        record.run_summary["generation"]["output_caps"]["static"]["derivation"] = _cap_from(
+            200_000, "probed"
+        )
+        assert "static's output cap was derived from a 200000-token window" in self._detail(record)
+
+    def test_nothing_to_compare_fails(self) -> None:
+        record = _record()
+        record.scenario_params = {}
+        assert self._detail(record) == "the windows the stub served were not recorded"
+
+    def test_no_window_recorded_passes_only_under_the_operator_s_own_cap(self) -> None:
+        record = _record()
+        record.run_summary["truncation"]["context_window"] = {}
+        assert "records no window" in self._detail(record)
+        record.expected["settings.preprocessing.max_tool_output_chars"] = 6000
+        assert self._detail(record) == ""

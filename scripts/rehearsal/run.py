@@ -305,6 +305,39 @@ def resolve_windows(models: list[str], bare: int | None, named: dict[str, int]) 
     return windows
 
 
+def served_windows(
+    expected: dict[str, Any],
+    server: StubServer | None,
+    bare: int | None,
+    named: dict[str, int],
+) -> dict[str, int]:
+    """The window the stub serves each model the run names, as the window check reads it."""
+    from scripts.rehearsal.models import facts_for
+
+    models = sorted({str(v) for k, v in expected.items() if k.startswith("model.") and v})
+    if server is not None:
+        return {model: server.state.facts(model).window for model in models}
+    return {
+        model: facts_for(model, window=named.get(model.lower()) or bare).window for model in models
+    }
+
+
+def windows_the_product_cannot_learn(
+    values: dict[str, dict[str, Any]], windows: dict[str, int]
+) -> list[str]:
+    """The models given a window here that the product itself has no way to learn.
+
+    No ``core.llm.openai.context_size`` and no row of the product's own table:
+    a hosted OpenAI-compatible API reports no window, so the product sizes
+    the paid run on its fallback while the stub serves the named window.
+    """
+    from maljan.llm.context_window import table_window
+
+    if _value(values, "core.llm.openai.context_size", 0):
+        return []
+    return sorted(model for model in windows if table_window(model) is None)
+
+
 def refuse_a_guessed_window(models: list[str], windows: dict[str, int]) -> None:
     """Refuse a gate whose models' windows nothing documents, unless ``--window`` names them.
 
@@ -791,6 +824,13 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
                 models = gate_models(values, expected)
                 windows = resolve_windows(models, bare_window, named_windows)
                 refuse_a_guessed_window(models, windows)
+                for model in windows_the_product_cannot_learn(values, windows):
+                    print(
+                        f"WARNING: the product cannot learn {model}'s window (no "
+                        "core.llm.openai.context_size, no table row): the paid run would be "
+                        "sized on its fallback, and the window check fails",
+                        flush=True,
+                    )
                 if server is not None:
                     server.state.windows = windows
             else:
@@ -823,6 +863,10 @@ def run_against_stack(args: argparse.Namespace) -> list[RunRecord]:
             "job_timeout_s": _job_timeout(args, values),
         }
         params["mode"] = "stack"
+        params["pinned_settings"] = {key: _value(values, key) for key in pinned_setting_keys()}
+        params["served_windows"] = served_windows(
+            expected, server, bare_window if args.configure != "gate" else None, named_windows
+        )
         if args.scenario == "deadline_hit":
             params["deadline_by"] = "core.job_timeout"
             params["deadline_in"] = brain.deadline_in
@@ -930,6 +974,15 @@ def detail_matches(pinned: str, detail: str) -> bool:
     return re.fullmatch(pattern, detail) is not None
 
 
+def pinned_setting_keys() -> list[str]:
+    """The settings any stack known-defect row is held to, read from the stack per run."""
+    try:
+        rows = json.loads(KNOWN_DEFECTS_FILE.read_text(encoding="utf-8"))["pins"]
+    except (OSError, ValueError, KeyError):
+        return []
+    return sorted({str(k) for row in rows for k in (row.get("settings") or {})})
+
+
 def known_stack_defects(record: RunRecord) -> dict[str, dict[str, Any]]:
     """The known-defect rows a stack run of this scenario fails, by check name."""
     if record.scenario_params.get("mode") != "stack":
@@ -939,12 +992,21 @@ def known_stack_defects(record: RunRecord) -> dict[str, dict[str, Any]]:
     except (OSError, ValueError, KeyError):
         return {}
     stage = str(record.scenario_params.get("deadline_in") or "")
+    held = record.scenario_params.get("pinned_settings") or {}
     return {
         str(row["check"]): row
         for row in rows
         if row.get("wire") == "stack"
         and row.get("scenario") == record.scenario
         and str(row.get("deadline_in") or "") == stage
+        # A row naming a provider is that provider's configuration's alone,
+        # and a row naming settings holds only where the stack held them so
+        # (an unset value and 0 alike).
+        and str(row.get("api") or record.api) == record.api
+        and all(
+            (held.get(key) or None) == (value or None)
+            for key, value in (row.get("settings") or {}).items()
+        )
     }
 
 

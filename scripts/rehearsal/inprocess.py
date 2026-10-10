@@ -390,6 +390,10 @@ async def rehearse(rehearsal: Rehearsal) -> RunRecord:
             "deadline_in": brain.deadline_in,
             "slow_roles": sorted(brain.slow_roles),
             "mode": "in_process",
+            "served_windows": {
+                model: state.facts(model).window
+                for model in sorted(set(MODELS[rehearsal.provider].values()))
+            },
         },
         elapsed_s=elapsed,
     )

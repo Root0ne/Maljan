@@ -25,6 +25,9 @@ pass.
   prompt usage was reported, has one per-call usage record whose charge is
   that usage priced, a broken stream's estimated output the only part that
   may differ, and the job's usage totals (stack runs) are those records;
+* the window the product sized each model with (the run summary's
+  analysts' window and each output cap's derivation) is the window the stub
+  serves it, never a fallback;
 * the STIX bundles and the markdown are rendered;
 * no claim is lost: every claim the stub's analysts wrote is in an answer in
   force or recorded as dropped, and every claim in force is discussed in the
@@ -689,6 +692,107 @@ def _totals_problems(record: RunRecord, recorded: float) -> list[str]:
     return problems
 
 
+# The model group whose model each agent of the run summary's output caps runs on.
+_AGENT_GROUP = {
+    "static": "static",
+    "dynamic": "static",
+    "network": "static",
+    "judge": "judge",
+    "mediator": "mediator",
+    "reporter": "reporter",
+}
+# The run summary's word for a window nothing reported (``context_window.FALLBACK``).
+_FALLBACK_SOURCE = "fallback"
+_WINDOW_SAID = re.compile(r"(\d+)-token context window \((\w+)\)")
+_NO_WINDOW_SAID = "no window was learned"
+# The operator's own tool-answer cap, under which the product consults no window.
+_OWN_TOOL_CAP = "settings.preprocessing.max_tool_output_chars"
+
+
+def _check_window(record: RunRecord) -> Check:
+    """The window the product sized each model with is the window the stub serves it.
+
+    Read from the run summary: the analysts' window (``truncation.context_window``,
+    its tokens and where they were learned) and each agent's output cap
+    derivation. A window the product fell back to, or one other than the
+    stub's documented or named window, sizes the paid run's prompts and caps
+    for a model that does not exist.
+    """
+    name = "window in force as the provider serves it"
+    served = {
+        str(k).lower(): int(v)
+        for k, v in (record.scenario_params.get("served_windows") or {}).items()
+    }
+    if not served:
+        return Check(name, False, "the windows the stub served were not recorded")
+    problems: list[str] = []
+
+    def model_of(group: str) -> str:
+        configured = str(record.expected.get(f"model.{group}") or "").lower()
+        if configured in served:
+            return configured
+        # Nothing configured to compare: the model the group's calls carried.
+        carried = Counter(
+            str(e.get("model") or "").lower()
+            for e in record.stub_log
+            if e.get("role") in ROLE_GROUPS.get(group, set())
+        )
+        return carried.most_common(1)[0][0] if carried else ""
+
+    analyst = model_of("static")
+    truncation = record.run_summary.get("truncation") or {}
+    window = truncation.get("context_window") if isinstance(truncation, dict) else None
+    said = ""
+    if not isinstance(window, dict) or not window:
+        if not record.expected.get(_OWN_TOOL_CAP):
+            problems.append("the run summary records no window the analysts were sized with")
+    else:
+        tokens = int(window.get("tokens") or 0)
+        source = str(window.get("source") or "")
+        wanted = served.get(analyst)
+        said = f"{analyst} sized at {tokens} tokens ({source})"
+        if source == _FALLBACK_SOURCE:
+            problems.append(
+                f"the analysts' window is the {tokens}-token fallback "
+                f"({window.get('detail') or 'nothing reported one'}); the stub serves "
+                f"{analyst or 'their model'} {wanted if wanted else 'an unrecorded window'}"
+            )
+        elif wanted is None:
+            problems.append(f"no window was recorded as served to {analyst or 'the analysts'}")
+        elif tokens != wanted:
+            problems.append(
+                f"the analysts' window is {tokens} tokens ({source}); the stub serves "
+                f"{analyst} {wanted}"
+            )
+    caps = (record.run_summary.get("generation") or {}).get("output_caps") or {}
+    unlearned: list[str] = []
+    for agent in sorted(caps):
+        group = _AGENT_GROUP.get(str(agent))
+        derivation = str((caps[agent] or {}).get("derivation") or "")
+        if _NO_WINDOW_SAID in derivation:
+            unlearned.append(str(agent))
+            continue
+        found = _WINDOW_SAID.search(derivation)
+        if not found or group is None:
+            continue
+        model = model_of(group)
+        tokens, source = int(found.group(1)), found.group(2)
+        if source == _FALLBACK_SOURCE:
+            unlearned.append(str(agent))
+        elif model in served and tokens != served[model]:
+            problems.append(
+                f"{agent}'s output cap was derived from a {tokens}-token window ({source}); "
+                f"the stub serves {model} {served[model]}"
+            )
+    if unlearned:
+        problems.append(f"output caps derived from no window: {', '.join(unlearned)}")
+    detail = "; ".join(problems) or (
+        f"{said or 'the operator set the tool-answer cap'}; every output cap from the served "
+        "window or a declared maximum"
+    )
+    return Check(name, not problems, detail)
+
+
 def _check_rendered(record: RunRecord) -> Check:
     problems = []
     for name, bundle in (("judge", record.stix_bundle), ("extended", record.stix_extended)):
@@ -933,6 +1037,7 @@ CHECKS = (
     _check_sections,
     _check_narrative,
     _check_tokens,
+    _check_window,
     _check_rendered,
     _check_claims,
     _check_settings,

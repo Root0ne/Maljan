@@ -103,7 +103,11 @@ A stack rehearsal's known product defects are rows of
 `tests/fixtures/rehearsal/known_defects.json` whose `wire` is `stack`. A check
 failing with exactly a row's detail is reported as `KNOWN DEFECT <id>` with the
 defect's description, and does not fail the run; a pinned check that passes asks
-for its row to be struck. None is pinned today.
+for its row to be struck. A row naming an `api` holds only for that provider's
+configuration, and one naming `settings` only where the stack holds them so. Pinned today: D8, the DeepSeek-shaped gate without
+`core.llm.openai.context_size`, whose window check fails because the product
+sizes every DeepSeek V4 role on the 8,192-token fallback window (the vendored
+table holds no DeepSeek V4 window yet).
 
 `--configure harness` rehearses the harness's own fixed models and settings
 instead, with the same snapshot and restore; it touches no key. Without
@@ -238,6 +242,12 @@ closed: what it cannot confirm is a failure.
   - No record is left over, none is uncharged, and none repriced.
 - The run summary's spend equals the records' charges, and that usage priced
   plus the stated output estimates.
+- The window in force: the window the product sized each model with (the run
+  summary's analysts' window and each output cap's derivation) is the window
+  the stub serves it, never the product's fallback. A gate that names
+  `--window` for a model the product cannot learn a window for (no
+  `core.llm.openai.context_size`, no table row) warns before it starts, and
+  this check then fails: the paid run would be sized on 8,192 tokens.
 - The STIX bundles and the markdown are rendered.
 - No claim is lost: every claim the model wrote is in an answer in force or
   recorded as dropped, and every claim in force is discussed in the report's

@@ -482,6 +482,16 @@ def test_a_documented_window_needs_no_window_named() -> None:
 
 
 class TestTheWindowIsNamedPerModel:
+    def test_a_window_the_product_cannot_learn_is_named(self) -> None:
+        from scripts.rehearsal.run import windows_the_product_cannot_learn
+
+        windows = {"deepseek-v4-pro": PROVIDER_WINDOW, "deepseek-chat": 65536}
+        assert windows_the_product_cannot_learn(_values(), windows) == ["deepseek-v4-pro"]
+        declared = _values(
+            **{"core.llm.openai.context_size": {"value": PROVIDER_WINDOW, "source": "ui"}}
+        )
+        assert windows_the_product_cannot_learn(declared, windows) == []
+
     def test_model_equals_n_is_that_model_s_window_and_repeats(self) -> None:
         from scripts.rehearsal.run import parse_windows, resolve_windows
 
@@ -671,11 +681,43 @@ def test_a_stack_run_failing_as_a_known_defect_is_reported_as_that_defect(
     assert code == (1 if others else 0)
 
 
-def test_no_known_defect_is_pinned_today() -> None:
-    from scripts.rehearsal.run import KNOWN_DEFECTS_FILE
+def test_the_one_known_defect_pinned_today_is_d8_on_the_openai_stack() -> None:
+    from scripts.rehearsal.run import KNOWN_DEFECTS_FILE, detail_matches, known_stack_defects
 
     pinned = json.loads(KNOWN_DEFECTS_FILE.read_text())
-    assert pinned["pins"] == [] and pinned["observations"] == []
+    assert pinned["observations"] == []
+    (row,) = pinned["pins"]
+    assert (row["id"], row["wire"], row["api"], row["scenario"]) == (
+        "D8",
+        "stack",
+        "openai",
+        "normal",
+    )
+    seen = (
+        "the analysts' window is the 8192-token fallback (no endpoint reported a window and the "
+        "model is not in the table); the stub serves deepseek-v4-flash 1048576; output caps "
+        "derived from no window: dynamic, judge, mediator, network, static"
+    )
+    assert detail_matches(row["detail"], seen)
+    assert row["settings"] == {"core.llm.openai.context_size": 0}
+
+    def record(api: str, context_size: Any) -> RunRecord:
+        params = {
+            "mode": "stack",
+            "pinned_settings": {"core.llm.openai.context_size": context_size},
+        }
+        return RunRecord(scenario="normal", job_status="completed", api=api, scenario_params=params)
+
+    assert list(known_stack_defects(record("openai", 0))) == [row["check"]]
+    assert list(known_stack_defects(record("openai", None))) == [row["check"]]
+    assert known_stack_defects(record("openai", 1_048_576)) == {}
+    assert known_stack_defects(record("anthropic", 0)) == {}
+
+
+def test_the_settings_a_pin_names_are_read_from_the_stack() -> None:
+    from scripts.rehearsal.run import pinned_setting_keys
+
+    assert pinned_setting_keys() == ["core.llm.openai.context_size"]
 
 
 def test_an_in_process_run_never_reads_the_stack_s_known_defects() -> None:
