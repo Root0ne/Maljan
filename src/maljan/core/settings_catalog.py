@@ -143,7 +143,10 @@ def _field_type(leaf: Leaf) -> tuple[FieldType, list[str] | None, bool]:
         return "str", None, nullable
     origin = get_origin(tp)
     if origin in (list, set, tuple):
-        return "list", None, nullable
+        # A list of objects (a server's error patterns) is edited as JSON; the
+        # list widget is one string per line.
+        items = get_args(tp)
+        return ("json" if items and _is_model(items[0]) else "list"), None, nullable
     if origin is dict:
         _, val = get_args(tp) or (None, None)
         return ("json" if _is_model(val) else "dict"), None, nullable

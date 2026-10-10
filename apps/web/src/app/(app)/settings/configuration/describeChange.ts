@@ -146,6 +146,15 @@ const SERVER_FIELDS = [
   "env_allow",
   "label",
   "agents",
+  // The server's declaration (`maljan.core.tool_declarations`).
+  "sample_open",
+  "sample_mount",
+  "error_patterns",
+  "roles",
+  "prompt_fragment",
+  "required_env_allow",
+  "reads_staged_sample",
+  "tool_facts",
 ] as const;
 
 function hasToken(v: unknown): boolean {

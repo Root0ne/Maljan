@@ -1,0 +1,62 @@
+import { describe, expect, it } from "vitest";
+import {
+  readEnvNames,
+  readErrorPatterns,
+  readMount,
+  readRoles,
+  readToolFacts,
+  showJson,
+  splitWords,
+} from "../declarationFields";
+
+describe("the server editor's declaration readers", () => {
+  it("reads roles as lowercase words, comma- or line-separated, any word accepted", () => {
+    expect(readRoles("reputation, my_own_role\nsandbox,")).toEqual({
+      value: ["reputation", "my_own_role", "sandbox"],
+      error: null,
+    });
+    expect(readRoles("Reputation").error).toMatch(/not a role word: Reputation/);
+    expect(readRoles("").value).toEqual([]);
+  });
+
+  it("reads environment names one per line and names a bad one", () => {
+    expect(readEnvNames("MY_DIR\nOTHER").value).toEqual(["MY_DIR", "OTHER"]);
+    expect(readEnvNames("NOT-A-NAME").error).toMatch(/NOT-A-NAME/);
+  });
+
+  it("reads a mount as an absolute path or nothing", () => {
+    expect(readMount(" /data/in ").value).toBe("/data/in");
+    expect(readMount("").value).toBe("");
+    expect(readMount("data/in").error).toMatch(/absolute path/);
+  });
+
+  it("reads error patterns as a list of objects with a match", () => {
+    expect(readErrorPatterns("").value).toEqual([]);
+    const ok = readErrorPatterns('[{"match": "No file .*", "code": "tool_failed"}]');
+    expect(ok.value).toEqual([{ match: "No file .*", code: "tool_failed" }]);
+    expect(readErrorPatterns("[{").error).toMatch(/not valid JSON/);
+    expect(readErrorPatterns('{"match": "x"}').error).toMatch(/expected a list/);
+    expect(readErrorPatterns('[{"code": "tool_failed"}]').error).toMatch(/pattern 1 needs a match/);
+    expect(readErrorPatterns('[{"match": "x", "code": "Bad Code"}]').error).toMatch(/lowercase word/);
+  });
+
+  it("reads tool declarations as an object of tools each with a kind word", () => {
+    expect(readToolFacts("").value).toEqual({});
+    const ok = readToolFacts('{"scan": {"kind": "rule_match", "rows": "/hits/*"}}');
+    expect(ok.value).toEqual({ scan: { kind: "rule_match", rows: "/hits/*" } });
+    expect(readToolFacts("[]").error).toMatch(/keyed by tool name/);
+    expect(readToolFacts('{"scan": {}}').error).toMatch(/scan: kind is a lowercase word/);
+    expect(readToolFacts('{"scan": {"kind": "Rule Match"}}').error).toMatch(/scan: kind/);
+  });
+
+  it("shows nothing declared as an empty box and a value as pretty JSON", () => {
+    expect(showJson(undefined)).toBe("");
+    expect(showJson([])).toBe("");
+    expect(showJson({})).toBe("");
+    expect(showJson({ a: { kind: "strings" } })).toContain('"kind": "strings"');
+  });
+
+  it("splits words without keeping empty entries", () => {
+    expect(splitWords(" a ,\n\n b ")).toEqual(["a", "b"]);
+  });
+});
