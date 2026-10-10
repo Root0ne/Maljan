@@ -357,6 +357,25 @@ class TestTheHolesAGreenRunCouldHide:
         record = _record(elapsed_s=95.0, scenario_params={"job_timeout_s": 100})
         assert _failed(record) == ["finished inside its deadline"]
 
+    @pytest.mark.parametrize("scenario", ["schema_break", "empty_answer", "server_error_once"])
+    def test_a_section_marked_where_the_fault_cannot_reach_it(self, scenario: str) -> None:
+        record = _record(scenario=scenario)
+        record.malware_report["technical_analysis"].pop("payloads")
+        record.run_summary["degradation_reasons"] = [
+            "report section 'payloads' is not written: its answer broke the schema"
+        ]
+        failed = {c.name: c.detail for c in check_run(record) if not c.ok}
+        detail = failed["every report section written or accounted for"]
+        assert detail.startswith(
+            f"payloads (marked not written, which the {scenario} fault cannot cause)"
+        )
+
+    def test_a_cut_at_the_cap_may_mark_every_section_it_reaches(self) -> None:
+        from scripts.rehearsal.checklist import FAULT_REACHES, WRITTEN_SECTIONS
+
+        assert FAULT_REACHES["cut_at_cap"] >= WRITTEN_SECTIONS
+        assert "schema_break" not in FAULT_REACHES
+
     def test_a_fault_scenario_where_no_fault_happened(self) -> None:
         assert _failed(_record(scenario="cut_at_cap")) == ["the cut_at_cap scenario happened"]
 

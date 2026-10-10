@@ -91,6 +91,15 @@ EVIDENCE_EMPTY = frozenset(
 CLEAN_SCENARIOS = frozenset(
     {"normal", "cross_loop", "long_loop", "slow_model", "redacted_thinking"}
 )
+# The sections a fault scenario's fault can keep from being written, which
+# may then be marked not written. Every other section of ``WRITTEN_SECTIONS``
+# is written in the scenario too: a fault on a section's first call is asked
+# again, and a fault on another role's call never reaches it. An answer cut
+# at its cap with only thinking is not asked again in the same form, so the
+# cut reaches every section the composer is asked for. Measured on both wires.
+FAULT_REACHES: dict[str, frozenset[str]] = {
+    "cut_at_cap": WRITTEN_SECTIONS | EMPTY_ON_PURPOSE,
+}
 
 # The stub's roles, by the agent whose model, effort and budget they spend.
 ROLE_GROUPS: dict[str, set[str]] = {
@@ -359,6 +368,16 @@ def _check_sections(record: RunRecord) -> Check:
             f"{s} (not written in a run with no fault: {statuses[s]})"
             for s in sorted(WRITTEN_SECTIONS)
             if statuses[s] != "written"
+        ]
+    else:
+        # A section lost is already named; one marked must be one the fault reaches.
+        reaches = FAULT_REACHES.get(record.scenario, frozenset())
+        lost += [
+            f"{s} ({status}, which the {record.scenario} fault cannot cause)"
+            for s, status in statuses.items()
+            if not status.startswith("LOST")
+            and s not in reaches
+            and (s in WRITTEN_SECTIONS and status != "written" or status == "marked not written")
         ]
     counts = Counter(status.split(":")[0] for status in statuses.values())
     detail = ", ".join(f"{n} {status}" for status, n in sorted(counts.items()))
