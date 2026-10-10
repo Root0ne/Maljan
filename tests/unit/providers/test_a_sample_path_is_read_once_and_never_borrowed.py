@@ -284,6 +284,51 @@ class TestANoteFollowsTheServersNames:
         _open(tool, a)
         assert server.names() == ["open_thing", "pick", "study"]
 
+    def test_a_forwarded_open_drops_the_note_its_program_name_replaced(self) -> None:
+        """A forwarded spelling of another file is opened under the same name and replaces it."""
+        a, b = "/samples/a/payload.bin", "/samples/b//payload.bin"
+        server = _Server(name_for={a: "payload.bin", b: "payload.bin"})
+        notes = SampleNotes()
+        tool = _open_tool(server, notes, None)
+        _open(tool, a)
+        assert notes.get(SERVER, a) is not None
+        _open(tool, b)  # forwarded: a doubled separator keys nothing
+        assert notes.get(SERVER, a) is None
+        server.calls.clear()
+        _open(tool, a)
+        assert server.names() == ["open_thing", "pick", "study"]
+
+    def test_a_forwarded_open_with_no_readable_name_drops_every_note_of_the_server(
+        self,
+    ) -> None:
+        calls: list[str] = []
+
+        def call(tool: str, arguments: dict[str, Any]) -> str:
+            calls.append(tool)
+            return "opened" if arguments.get("where") == "x.bin" else json.dumps({"handle": "h"})
+
+        notes = SampleNotes()
+        opener = SampleOpener(SERVER, SPEC, notes)
+        opener.open(HELD, call)
+        opener.open(OTHER, call, {"arch": "arm"})
+        notes.note("someone else", HELD, "h", "{}")
+        opener.open("x.bin", call)  # relative: forwarded; its answer names nothing
+        assert notes.get(SERVER, HELD) is None
+        assert notes.get(SERVER, OTHER, {"arch": "arm"}) is None
+        assert notes.get("someone else", HELD) is not None
+
+    def test_a_forwarded_open_the_server_refused_drops_nothing(self) -> None:
+        def call(tool: str, arguments: dict[str, Any]) -> str:
+            if arguments.get("where") == "x.bin":
+                return json.dumps({"error": "no such file"})
+            return json.dumps({"handle": "h"})
+
+        notes = SampleNotes()
+        opener = SampleOpener(SERVER, SPEC, notes)
+        opener.open(HELD, call)
+        opener.open("x.bin", call)
+        assert notes.get(SERVER, HELD) is not None
+
     def test_an_open_with_other_options_is_another_note(self) -> None:
         calls: list[tuple[str, dict[str, Any]]] = []
 

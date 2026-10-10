@@ -369,18 +369,55 @@ class TestOneServerOneNote:
         assert server.names() == ["open_thing", "pick", "study", "open_thing"]
         assert server.calls[-1] == ("open_thing", {"where": "/samples//sub/../a.bin"})
 
-    def test_loopback_spellings_name_one_server(self) -> None:
+    def test_transports_to_one_address_name_one_server(self) -> None:
         from maljan.providers.sample_open import server_note_key
 
         keys = {
             server_note_key(MCPServerConfig(transport=transport, url=url))
             for transport, url in (
-                ("http", "http://localhost:8089"),
+                ("http", "http://127.0.0.1:8089"),
                 ("streamable-http", "http://127.0.0.1:8089/"),
-                ("sse", "http://[::1]:8089"),
+                ("sse", "HTTP://127.0.0.1:8089"),
             )
         }
-        assert keys == {"remote http://loopback:8089"}
+        assert keys == {"remote http://127.0.0.1:8089"}
+
+    def test_loopback_spellings_are_kept_apart(self) -> None:
+        """Three listeners may answer them; keeping them apart costs one more open at most."""
+        from maljan.providers.sample_open import server_note_key
+
+        keys = {
+            server_note_key(MCPServerConfig(transport="http", url=url))
+            for url in ("http://localhost:8089", "http://127.0.0.1:8089", "http://[::1]:8089")
+        }
+        assert len(keys) == 3
+
+    def test_what_selects_a_backend_is_an_opaque_number_never_the_secret(self) -> None:
+        from pydantic import SecretStr
+
+        from maljan.providers.sample_open import server_note_key
+
+        token_a = "tenant-a-" + "x" * 20
+        token_b = "tenant-b-" + "y" * 20
+
+        def key(url: str, token: str = "") -> str:
+            return server_note_key(
+                MCPServerConfig(transport="http", url=url, auth_token=SecretStr(token))
+            )
+
+        base = "http://gateway.invalid:9000/mcp"
+        a, b = key(base, token_a), key(base, token_b)
+        assert a != b and a == key(base, token_a)
+        assert key(base + "?server=one") != key(base + "?server=two")
+        assert key("http://alice:pw@gateway.invalid:9000/mcp") != key(base)
+        assert key(base) == "remote http://gateway.invalid:9000/mcp"
+        import hashlib
+
+        for said in (a, b, key("http://alice:pw@gateway.invalid:9000/mcp?server=one")):
+            assert "tenant" not in said and "alice" not in said and "pw" not in said
+            assert "server=one" not in said
+            for secret in (token_a, token_b):
+                assert hashlib.sha256(secret.encode()).hexdigest()[:8] not in said
 
     def test_a_default_port_is_written(self) -> None:
         from maljan.providers.sample_open import server_note_key

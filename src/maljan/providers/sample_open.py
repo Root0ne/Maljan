@@ -33,6 +33,7 @@ function that calls one tool by name.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import itertools
 import json
 import posixpath
@@ -137,6 +138,22 @@ class SampleNotes:
                 del self._opened[other]
             self._opened[key] = OpenedSample(name=named, answer=answer)
 
+    def drop_named(self, server: str, name: str | None) -> None:
+        """Drop the server's notes under ``name``, or all of its notes when ``name`` is ``None``.
+
+        For an open the opener forwarded: the server opened something under
+        that name and replaced the program a note of it named, so the note
+        would answer for a program the server no longer holds. With the name
+        unread, every note of the server may be stale.
+        """
+        with self._guard:
+            for key in [
+                k
+                for k, v in self._opened.items()
+                if k[0] == server and (name is None or v.name == name)
+            ]:
+                del self._opened[key]
+
     def forget(self, server: str, path: str, arguments: dict[str, Any] | None = None) -> None:
         with self._guard:
             self._opened.pop((server, path, _options_key(arguments)), None)
@@ -152,13 +169,19 @@ class SampleNotes:
 # names the same address speaks to the same server, and to what it opened.
 REMOTE_TRANSPORTS = frozenset({"http", "streamable-http", "sse"})
 
-# The hosts that name this machine itself, read as one.
-_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
 # Each handle or provider that starts a local server process gets one of these:
 # a process holds only what it opened, and a number never reused names it.
 _INSTANCES = itertools.count(1)
+
+# What selects a backend behind one address besides the address itself (the
+# query, the userinfo, the credential sent), each distinct combination named
+# by an opaque number for this process's life. The note's key carries only the
+# number: a key is written into log lines, so neither a secret nor any digest
+# of one is ever part of it. The map is held in memory only, keyed by digests.
+_BACKENDS: dict[tuple[str, ...], int] = {}
+_BACKENDS_LOCK = threading.Lock()
 
 
 def new_instance() -> str:
@@ -166,30 +189,52 @@ def new_instance() -> str:
     return f"process {next(_INSTANCES)}"
 
 
+def _backend_ordinal(*selectors: str) -> int:
+    """The opaque number of one combination of backend selectors, or ``0`` for none."""
+    if not any(selectors):
+        return 0
+    digest = tuple(hashlib.sha256(s.encode("utf-8")).hexdigest() for s in selectors)
+    with _BACKENDS_LOCK:
+        if digest not in _BACKENDS:
+            _BACKENDS[digest] = len(_BACKENDS) + 1
+        return _BACKENDS[digest]
+
+
+def _secret_text(value: Any) -> str:
+    getter = getattr(value, "get_secret_value", None)
+    return str(getter() if callable(getter) else value or "")
+
+
 def server_note_key(config: Any, instance: str = "") -> str:
     """The server a note belongs to: its address, or its command and the process ``instance``.
 
-    A remote server is keyed by its scheme, host, port and path, the host read
-    as one name for this machine whichever loopback spelling names it, the
-    default port written, and the transport left out: every handle to one
-    server (a registry handle, a static provider's, a handle for another
-    loop) shares a note. A local server is a process per handle, which holds
-    only what that process opened, so ``instance`` (``new_instance``) names
-    the process.
+    A remote server is keyed by its scheme, host, port and path, the host
+    lower-cased and the default port written, and the transport left out:
+    every handle to one server (a registry handle, a static provider's, a
+    handle for another loop) shares a note. Loopback spellings are kept apart
+    (``localhost``, ``127.0.0.1`` and ``::1`` may be three listeners), at the
+    cost of at most one more open. What may select another backend behind one
+    address (the query, the userinfo, the credential sent) adds an opaque
+    number (``_backend_ordinal``), never the value. A local server is a
+    process per handle, which holds only what that process opened, so
+    ``instance`` (``new_instance``) names the process.
     """
     transport = str(getattr(config, "transport", "") or "stdio")
     url = str(getattr(config, "url", "") or "").strip()
+    credential = _secret_text(getattr(config, "auth_token", ""))
     if transport in REMOTE_TRANSPORTS and url:
         try:
             parts = urlsplit(url)
             port = parts.port
         except ValueError:
-            return f"remote {url.rstrip('/')}"
+            return f"remote (an address not read, backend {_backend_ordinal(url, credential)})"
         scheme = (parts.scheme or "http").lower()
         host = (parts.hostname or "").lower()
-        host = "loopback" if host in _LOOPBACK_HOSTS else host
         port = port or _DEFAULT_PORTS.get(scheme, 0)
-        return f"remote {scheme}://{host}:{port}{parts.path.rstrip('/')}"
+        userinfo = parts.netloc.rpartition("@")[0] if "@" in parts.netloc else ""
+        address = f"remote {scheme}://{host}:{port}{parts.path.rstrip('/')}"
+        ordinal = _backend_ordinal(parts.query, userinfo, credential)
+        return f"{address} (backend {ordinal})" if ordinal else address
     parts_ = [str(getattr(config, "command", "") or "")]
     parts_ += [str(a) for a in getattr(config, "args", None) or []]
     return f"stdio {' '.join(parts_).strip()} ({instance})"
@@ -323,6 +368,13 @@ class SampleOpener:
             path_refusal(path) or "it is not the job's own sample",
         )
 
+    def _after_forward(self, answer: str) -> str:
+        """After a forwarded open the server answered, drop the notes it may have replaced."""
+        if not is_refusal(answer):
+            name = answer_field(answer, self.spec.name_field) if self.spec.name_field else None
+            self.notes.drop_named(self.server, name)
+        return answer
+
     def _from_note(self, path: str, noted: OpenedSample) -> str:
         logger.info(ANSWERED_FROM_NOTE, self.server, self.spec.open_tool, path, noted.name)
         return noted.answer
@@ -401,7 +453,9 @@ class SampleOpener:
         key = open_key(path, held)
         if key is None:
             self._forwarded(path)
-            return str(await call(self.spec.open_tool, self._open_args(path, arguments)))
+            return self._after_forward(
+                str(await call(self.spec.open_tool, self._open_args(path, arguments)))
+            )
         lock = self.notes.lock(self.server, key, arguments)
         # Taken without blocking the loop, and so that a call cancelled while
         # it waits never holds the lock: the holder may be another coroutine
@@ -447,7 +501,9 @@ class SampleOpener:
         key = open_key(path, held)
         if key is None:
             self._forwarded(path)
-            return str(call(self.spec.open_tool, self._open_args(path, arguments)))
+            return self._after_forward(
+                str(call(self.spec.open_tool, self._open_args(path, arguments)))
+            )
         with self.notes.lock(self.server, key, arguments):
             noted = self.notes.get(self.server, key, arguments)
             if noted is not None:
