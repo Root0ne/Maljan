@@ -174,6 +174,13 @@ class _Function:
     # directly, or through a register a load from the slot set in straight-line
     # code. Named after the walk where the hash resolution fills the slot.
     slot_calls: dict[int, int] = field(default_factory=dict)
+    # The code addresses an instruction of this function takes as a value
+    # (``lea``, an x86 immediate), never a call's target.
+    taken: set[int] = field(default_factory=set)
+    # Each call through an import or a slot made with a code address in an
+    # argument: ``(call site, ("import", name) or ("slot", slot), {argument: address})``,
+    # the argument counted from 1.
+    passes: list[tuple[int, tuple[str, Any], dict[int, int]]] = field(default_factory=list)
 
 
 @dataclass
@@ -186,6 +193,11 @@ class _Graph:
     # Each straight-line run of code that holds a hashed name, as its events
     # (``_SlotReading``), for the slots the resolution fills.
     runs: list[list[tuple[Any, ...]]] = field(default_factory=list)
+    # The thread starts the code shows, ``(starter, started, API name, call site)``,
+    # and, by function, the function starts it takes the address of otherwise.
+    # Filled once the slots' names are known (``_relations``).
+    thread_starts: list[tuple[int, int, str, int]] = field(default_factory=list)
+    taken: dict[int, set[int]] = field(default_factory=dict)
 
 
 # -- reading the code -------------------------------------------------------
@@ -356,6 +368,11 @@ class _Reader:
         # The registers that hold an address taken in the run, for a store of
         # one to a frame slot.
         self.addressed: dict[int, int] = {}
+        # The registers that hold a code address taken in the run, and (x86)
+        # what each word pushed since the last call holds: a code address, or
+        # ``None`` for anything else. A call's arguments are read from them.
+        self.code_held: dict[int, int] = {}
+        self.code_pushed: list[int | None] = []
         # The bytes pushed (less those popped) since the run began: an
         # ``[rsp+x]`` store's offset is read against the stack pointer the run
         # began with.
@@ -462,10 +479,12 @@ class _Reader:
                         self.add(target, _CALL_TARGETS)
             elif callee is not None and self.attributing:
                 function.imports.add(str(callee[1]))
+                self._passed(function, rva, ("import", str(callee[1])))
             if self.attributing and callee is None:
                 slot = self._through(code, at, rva, ins)
                 if slot is not None:
                     function.slot_calls[slot] = function.slot_calls.get(slot, 0) + 1
+                    self._passed(function, rva, ("slot", slot))
                 else:
                     function.unnamed_calls += 1
             elif self.attributing and callee is not None and callee[0] == "function":
@@ -494,13 +513,39 @@ class _Reader:
                         self.events.append(("hash", names, place))
                         self.holds_hash = True
                         hashed.append((names, place))
-        self._read_events(code, at, rva, ins, hashed)
+        taken = self._read_events(code, at, rva, ins, hashed)
+        if taken is not None and taken != function.start and taken in self.known:
+            function.taken.add(taken)
         if ins.kind != "call":
             data_target = _data_address(self.image, code, at, ins, rva + ins.length)
             if data_target is not None:
                 function.data_refs.add(data_target)
         if ins.kind == "stop":
             self._end_run()
+
+    def _passed(self, function: _Function, rva: int, callee: tuple[str, Any]) -> None:
+        """Record a call through an import or a slot that carries a code address as an argument.
+
+        x64: the address taken into ``rcx``, ``rdx``, ``r8`` or ``r9`` in the
+        straight-line run before the call (arguments 1 to 4). x86: a word
+        pushed since the last call, the last pushed being argument 1. An
+        argument placed any other way is not read, and the call is recorded
+        with what was read, or not at all.
+        """
+        if self.image.is64:
+            arguments = {
+                number: self.code_held[register]
+                for number, register in enumerate(_ARGUMENT_REGISTERS, start=1)
+                if register in self.code_held
+            }
+        else:
+            arguments = {
+                number: value
+                for number, value in enumerate(reversed(self.code_pushed), start=1)
+                if value is not None
+            }
+        if arguments:
+            function.passes.append((rva, callee, arguments))
 
     def _slot_of(self, code: bytes, at: int, rva: int, ins: Instruction) -> int | None:
         """The slot an instruction's memory operand names, by offset, or ``None``."""
@@ -536,7 +581,7 @@ class _Reader:
         rva: int,
         ins: Instruction,
         hashed: Sequence[tuple[tuple[str, ...], int]] = (),
-    ) -> None:
+    ) -> int | None:
         """What one instruction adds to the straight-line run.
 
         A call, tied to the one function-name hash live in an argument (x64:
@@ -545,9 +590,16 @@ class _Reader:
         taken, unless the instruction holds a hashed value; a store or an
         overwrite of the return register; the slot a register is loaded from;
         and where each hashed value is live.
+
+        Returns the code address the instruction takes as a value (``lea``,
+        or an x86 ``push``/``mov`` of an immediate in an executable section),
+        or ``None``; the register it lands in (or, pushed, the word) holds it
+        for the call's arguments.
         """
         is64 = self.image.is64
         if ins.kind == "call":
+            self.code_held.clear()
+            self.code_pushed.clear()
             arguments = (
                 [self.live[r] for r in _ARGUMENT_REGISTERS if r in self.live] if is64 else []
             )
@@ -566,7 +618,7 @@ class _Reader:
             # A call may overwrite every volatile register: an address one held
             # is no longer known to be there.
             self.addressed.clear()
-            return
+            return None
         shape = _slot_shape(code, at, is64, ins.length)
         slot = None
         if shape is not None:
@@ -578,13 +630,31 @@ class _Reader:
             )
         moved = _register_copy(code, at, is64)
         carried = self.live.get(moved[1]) if moved is not None else None
+        carried_code = self.code_held.get(moved[1]) if moved is not None else None
         frame = self._frame_events(code, at, rva, ins, hashed)
         for register in ins.writes:
             self.loaded.pop(register, None)
             self.live.pop(register, None)
             self.addressed.pop(register, None)
+            self.code_held.pop(register, None)
         if carried is not None and moved is not None:
             self.live[moved[0]] = carried
+        if carried_code is not None and moved is not None:
+            self.code_held[moved[0]] = carried_code
+        taken: int | None = None
+        if (
+            shape is not None
+            and shape[0] == "address"
+            and slot is not None
+            and self._section(slot) is not None
+        ):
+            taken = slot
+            if shape[1] is not None:
+                self.code_held[shape[1]] = slot
+        if ins.kind == "push":
+            self.code_pushed.append(taken if shape is not None and shape[1] is None else None)
+        elif not is64 and 0x58 <= code[at] <= 0x5F and self.code_pushed:
+            self.code_pushed.pop()
         for held in hashed:
             if ins.kind == "push" or (not is64 and _stack_store(code, at)):
                 self.stacked.append(held)
@@ -603,6 +673,7 @@ class _Reader:
         self._move_frame(code, at, ins)
         if 0 in ins.writes:
             self.events.append(("overwrite",))
+        return taken
 
     def _move_frame(self, code: bytes, at: int, ins: Instruction) -> None:
         """Follow what one instruction does to the frame's base registers.
@@ -710,6 +781,8 @@ class _Reader:
         self.live.clear()
         self.stacked.clear()
         self.addressed.clear()
+        self.code_held.clear()
+        self.code_pushed.clear()
         self.pushed = 0
 
     def _tail_call(self, function: _Function, target: int) -> bool:
@@ -1361,6 +1434,7 @@ def index_image(
                 rows.add(start, "slot", name, hash_id, (slot, named_at))
             else:
                 function.unnamed_calls += count
+    _relations(graph, filled)
 
     def place(where: list[int], kind: str, value: str, source: str, what: str) -> None:
         if not where:
@@ -1441,6 +1515,23 @@ def index_image(
         for start, function in sorted(graph.functions.items())
         if start not in rows.cells and function.callees
     }
+    # The relations that are no call, whole: every thread start the code shows
+    # and every function start taken as a value, rows or not.
+    if graph.thread_starts:
+        data["thread_starts"] = [
+            {
+                "starter": hex(base + starter),
+                "started": hex(base + started),
+                "through": name,
+                "call": hex(base + site),
+            }
+            for starter, started, name, site in graph.thread_starts
+        ]
+    if graph.taken:
+        data["addresses_taken"] = {
+            hex(base + taker): [hex(base + t) for t in sorted(targets)]
+            for taker, targets in sorted(graph.taken.items())
+        }
     if ranges_into is not None:
         ranges_into.update(function_ranges(image, graph.functions))
     data["function_lists"] = function_lists
@@ -1448,6 +1539,45 @@ def index_image(
     if addresses:
         data.update(_asked(image, graph, placer, rows, names, entry_points, addresses))
     return data
+
+
+# The APIs that start a thread at a routine they are given, with the argument
+# (counted from 1) that routine travels in, as each API's documentation states it.
+THREAD_START_ARGUMENT: dict[str, int] = {
+    "CreateThread": 3,
+    "CreateRemoteThread": 4,
+    "CreateRemoteThreadEx": 4,
+    "_beginthreadex": 3,
+    "_beginthread": 1,
+    "SHCreateThread": 1,
+}
+
+
+def _relations(graph: _Graph, filled: Mapping[int, tuple[str, int]]) -> None:
+    """The thread starts and the addresses taken, once the slots' names are known.
+
+    A thread start is a call of a thread-starting API (an import, or a slot the
+    hash resolution fills) whose start-routine argument the code set to a code
+    address. Any other function start an instruction takes as a value is an
+    address taken. Neither is a call, and neither is a callee.
+    """
+    for start, function in graph.functions.items():
+        started: set[int] = set()
+        for site, (kind, value), arguments in function.passes:
+            if kind == "import":
+                name = _short_import(str(value))
+            else:
+                named = filled.get(int(value))
+                name = named[0] if named else ""
+            position = THREAD_START_ARGUMENT.get(name)
+            target = arguments.get(position) if position is not None else None
+            if target is not None:
+                graph.thread_starts.append((start, target, name, site))
+                started.add(target)
+        taken = function.taken - started
+        if taken:
+            graph.taken[start] = taken
+    graph.thread_starts.sort()
 
 
 def function_ranges(image: Image, starts: Iterable[int]) -> dict[str, list[list[str]]]:
@@ -1527,9 +1657,31 @@ def _answer(
         for callee in function.callees:
             if callee != start:
                 callers.setdefault(callee, set()).add(start)
+    starts_of: dict[int, list[tuple[int, int, str, int]]] = {}
+    started_by: dict[int, list[tuple[int, int, str, int]]] = {}
+    for pair in graph.thread_starts:
+        starts_of.setdefault(pair[0], []).append(pair)
+        started_by.setdefault(pair[1], []).append(pair)
+    taken_by: dict[int, set[int]] = {}
+    for taker, targets in graph.taken.items():
+        for target in targets:
+            taken_by.setdefault(target, set()).add(taker)
 
     def va(rva: int) -> str:
         return hex(base + rva)
+
+    def thread(other: int, name: str, site: int) -> dict[str, str]:
+        return {"function": va(other), "through": name, "call": va(site)}
+
+    def relations(start: int, row: dict[str, Any]) -> None:
+        if starts_of.get(start):
+            row["starts_threads"] = [thread(t, n, s) for _f, t, n, s in starts_of[start]]
+        if started_by.get(start):
+            row["started_as_thread_by"] = [thread(f, n, s) for f, _t, n, s in started_by[start]]
+        if graph.taken.get(start):
+            row["takes_address_of"] = [va(t) for t in sorted(graph.taken[start])]
+        if taken_by.get(start):
+            row["address_taken_by"] = [va(t) for t in sorted(taken_by[start])]
 
     def row_of(start: int, cells: Mapping[tuple[str, str], _Cell]) -> dict[str, Any]:
         held = graph.functions.get(start)
@@ -1555,6 +1707,7 @@ def _answer(
             "callees": [va(c) for c in sorted(held.callees if held else ())],
             "indirect": {"artefacts": reached, "through": through},
         }
+        relations(start, row)
         if names.get(start):
             row["names"] = list(dict.fromkeys(names[start]))
         if start in entries:
@@ -1679,6 +1832,9 @@ PER_CALLEE = "counted per callee"
 # How a row names the calls it makes through slots the hash resolution fills.
 SLOT_CALLS_SAID = "calls through slots the hash resolution fills"
 
+# Said after a thread start or an address taken: neither is counted as a caller or a callee.
+NOT_A_CALL = "(no call: not counted among the callers or callees)"
+
 _ADDRESS = re.compile(r"0x[0-9a-f]{1,16}")
 
 
@@ -1776,6 +1932,7 @@ def row_parts(row: Mapping[str, Any], entry_id: str) -> str:
     parts.append(
         f"called by {callers}, calls {callees} {'function' if callees == 1 else 'functions'}"
     )
+    parts.extend(relation_parts(row))
     indirect = row.get("indirect") or {}
     reached, through = int(indirect.get("artefacts") or 0), int(indirect.get("through") or 0)
     if reached:
@@ -1784,6 +1941,39 @@ def row_parts(row: Mapping[str, Any], entry_id: str) -> str:
             f"{'artefact' if reached == 1 else 'artefacts'} of their own, {PER_CALLEE}"
         )
     return "; ".join(parts)
+
+
+def _threads_said(cells: Any, verb: str) -> str | None:
+    said = [
+        f"{c.get('function')} through {sample_text(c.get('through'))} (call at {c.get('call')})"
+        for c in cells or []
+        if isinstance(c, Mapping)
+    ]
+    return f"{verb} {', '.join(said)} {NOT_A_CALL}" if said else None
+
+
+def relation_parts(row: Mapping[str, Any]) -> list[str]:
+    """What a row says of the relations that are no call: thread starts and addresses taken.
+
+    Nothing for a row that holds none, so a row built before these were read
+    reads as it did.
+    """
+    parts = [
+        said
+        for said in (
+            _threads_said(row.get("started_as_thread_by"), "started as a thread by"),
+            _threads_said(row.get("starts_threads"), "starts a thread at"),
+        )
+        if said
+    ]
+    for key, verb in (
+        ("address_taken_by", "its address is taken as a value by"),
+        ("takes_address_of", "takes as a value the address of"),
+    ):
+        listed = [str(a) for a in row.get(key) or [] if isinstance(a, str)]
+        if listed:
+            parts.append(f"{verb} {', '.join(listed)} {NOT_A_CALL}")
+    return parts
 
 
 # -- the analysis server's tool --------------------------------------------------
@@ -1929,10 +2119,16 @@ def served_index(path: str | Path, address: Any = None) -> dict[str, Any]:
         out["row"] = row_line(asked, THIS_ANSWER)
         out["callers"] = list(asked.get("callers") or [])
         out["callees"] = list(asked.get("callees") or [])
+        for key in _RELATION_KEYS:
+            if asked.get(key):
+                out[key] = list(asked[key])
     else:
         out["row"] = str(asked)
     return out
 
+
+# A row's relations that are no call, each present only where the code shows one.
+_RELATION_KEYS = ("started_as_thread_by", "starts_threads", "address_taken_by", "takes_address_of")
 
 _SERVED_KEYS = (
     "tool",
