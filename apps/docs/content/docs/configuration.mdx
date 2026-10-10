@@ -946,7 +946,7 @@ anything. In order:
 |---|---|
 | `declared` | `core.llm.ollama.num_ctx`, which the provider sends with every call, or `core.llm.openai.context_size` where an operator has set it. It does **not** short-circuit the probe: where a window was also probed, the smaller of the two wins, so a model that holds less than `num_ctx` asks for — and a `context_size` left behind by a server restarted smaller — cannot overflow the real window |
 | `probed` | llama.cpp `GET /props` (`default_generation_settings.n_ctx`, then `n_ctx_per_seq`); an OpenAI-compatible `GET /v1/models` (`max_model_len` for vLLM, `context_length` for OpenRouter); Ollama `POST /api/show` (`model_info.<arch>.context_length`, with a Modelfile `num_ctx` winning); Text Generation Inference `GET /info` (`max_total_tokens`) |
-| `table` | `data/model_context_windows_v1.json`, keyed by model-id family, for the vendor APIs that publish a window without serving it |
+| `table` | `data/model_context_windows_v1.json`, keyed by model-id family, for the vendor APIs that publish a window without serving it, and for a vendor API that serves it when that probe failed (DeepSeek's `deepseek-flash`, `deepseek-v4-flash` and `deepseek-v4-pro` at 1,048,576, documented as 1M on DeepSeek's Models & Pricing page; each row's page and the day it was read are under `window_sources`) |
 | `fallback` | nothing answered, and **nothing is derived from it**: one tool answer is capped at the documented 6,000 characters — exactly what this platform did before the window was learned at all — and every surface says the window is unknown |
 
 No generation call is ever made — the probe reads metadata endpoints only, a
@@ -992,8 +992,9 @@ which derives each agent's cap in three cases (`context_window.derived_reply`): 
 output is declared — by the probe's model list (`max_output_tokens`,
 `max_completion_tokens`, OpenRouter's `top_provider.max_completion_tokens`) or
 by a vendored `max_output` row, each carrying the vendor page it is documented
-on (gpt-4o and gpt-4o-mini 16,384, gpt-4.1 32,768, DeepSeek's `deepseek-flash`
-and `deepseek-v4-pro` 393,216, written 384K on DeepSeek's Models & Pricing page)
+on (gpt-4o and gpt-4o-mini 16,384, gpt-4.1 32,768, DeepSeek's `deepseek-flash`,
+its legacy name `deepseek-v4-flash` and `deepseek-v4-pro` 393,216, written 384K
+on DeepSeek's Models & Pricing page)
 — the smaller of that and a
 quarter of the window; for a runtime we run — one that answered the window
 probe as a runtime: llama.cpp `/props`, Ollama `/api/show` or TGI `/info` — a

@@ -159,3 +159,53 @@ class TestAMillionTokenWindow:
         prompt, degradations = _compose_one(composer)
         assert "The sample writes example value 4." in prompt
         assert not [reason for reason in degradations if "window" in reason]
+
+
+class TestAFailedProbeOnDeepSeek:
+    """A DeepSeek window probe that fails lands on the vendored table, for every role."""
+
+    @staticmethod
+    def _caps() -> tuple[Any, dict[str, int]]:
+        from maljan.core.model_assignments import assignment_chain_for
+        from maljan.llm import context_window
+
+        settings = Settings(_env_file=None)  # type: ignore[call-arg]
+        settings.llm.provider = "openai"
+        settings.llm.openai.base_url = "https://api.deepseek.com"
+        settings.llm.openai.expert_model = "deepseek-v4-flash"
+        settings.llm.openai.judge_model = "deepseek-v4-pro"
+        settings.llm.openai.disable_thinking = True
+        settings.reporting.composer_enabled = True
+        container = ServiceContainer(settings, mock=False)
+        registry = MagicMock()
+        registry.build_model_for_agent.return_value = FakeMessagesListChatModel(responses=[])
+        container._llm_registry = registry  # type: ignore[assignment]
+        failed = context_window.unknown_window("the window probe timed out")
+        context_window.forget_learned_windows()
+        try:
+            with patch("maljan.llm.context_window.probe_window", return_value=failed):
+                judge = assignment_chain_for(settings, "judge", role="judge")[0]
+                window = context_window.window_for_assignment(settings, judge)
+                caps = {
+                    "static": container._output_cap("expert_max_tokens", "static"),
+                    "judge": container._output_cap("judge_max_tokens", "judge", role="judge"),
+                    "mediator": int(container._expert_token_cap("mediator").tokens),
+                    "narrative": container.get_narrative_agent().output_cap,
+                    "composer": container.get_report_composer().output_cap,
+                }
+        finally:
+            context_window.forget_learned_windows()
+        return window, caps
+
+    def test_the_window_is_the_table_s(self) -> None:
+        from maljan.llm.context_window import TABLE
+
+        window, _caps = self._caps()
+
+        assert (window.tokens, window.source) == (1048576, TABLE)
+        assert "the window probe timed out" in window.detail
+
+    def test_every_role_derives_its_cap_from_it(self) -> None:
+        _window, caps = self._caps()
+
+        assert caps == dict.fromkeys(caps, 1048576 // 4)
