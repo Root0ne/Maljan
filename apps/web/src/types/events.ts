@@ -57,6 +57,11 @@ export type WSEventType =
   /* An agent's model list moved on to its next model because the one before
    * failed as a provider; once per switch, whether or not deltas stream. */
   | "model_fallback"
+  /* A tool loop cleared its oldest tool answers to evidence-id references:
+   * agent, turn, how many answers, the request's characters before and
+   * after, and why (`refused` or `window`). See
+   * maljan/agents/tool_answer_clearing.py. */
+  | "tool_answers_cleared"
   /* One model call's usage as the job's token ledger recorded it: agent,
    * model, call and the figures its provider reported. Committed to the
    * job's stored events (`GET /jobs/{id}/events` replays it), never sent on

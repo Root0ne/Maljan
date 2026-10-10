@@ -86,6 +86,13 @@ from maljan.agents.static_analyst import (
     _reframe_static_raw_data,
     _tool_use_line,
 )
+from maljan.agents.tool_answer_clearing import (
+    READ_EVIDENCE_DESCRIPTION,
+    UNKNOWN_EVIDENCE_REMEDIATION,
+    cleared_reference,
+    read_again_note,
+    unknown_evidence_message,
+)
 from maljan.agents.tool_fence import FENCE_STATEMENT as _FENCE_STATEMENT
 from maljan.agents.tool_fence import fenced as _fenced
 from maljan.agents.tool_pinning import (
@@ -1786,6 +1793,15 @@ PROMPTS: dict[str, str] = {
     "the line an r2 answer carries when the adapter ran af first": _r2.af_ran_note("0x401000"),
     "the function map block": _function_map_text(),
     "the function index as the pack, the run state and the map say it": _function_index_text(),
+    "a cleared tool answer's reference and the tool that reads it again": " ".join(
+        [
+            cleared_reference("ev_0001", 12_345),
+            unknown_evidence_message("ev_0002"),
+            read_again_note("ev_0001"),
+            READ_EVIDENCE_DESCRIPTION,
+            UNKNOWN_EVIDENCE_REMEDIATION,
+        ]
+    ),
     "a tool answer the conversation had no room for, as told and as recorded": " ".join(
         [no_room_sentence(12_345), not_shown_record(12_345), FUNCTION_NOT_SHOWN]
     ),

@@ -3343,6 +3343,53 @@ conversation weighs before every model turn, and what it hands out is charged
 as it goes so a turn that calls several tools spends one turn's room between
 them. See [Configuration](/configuration/) for the numbers.
 
+**Old answers cleared when the window refuses.** A tool loop sends its whole
+conversation on every turn, so what the caps above bound is each answer, not
+what the loop reads again. Two things clear the oldest tool answers, each
+replaced by one line naming the evidence id the recorder stamped on it and how
+to read it again — and both only where the request would otherwise end the
+loop:
+
+- **A refusal.** When the provider refuses a request as over its window (the
+  same errors the `window_full` ending reads), one batch is cleared and the
+  turn is sent again — again only while each resend is refused and something
+  is still clearable. Otherwise the loop ends as it did before: with what it
+  gathered, or by failing its agent where nothing had answered. A loop that
+  ends at `no_room` ends the same way.
+- **A prompt past the agent's own window.** A request whose prompt alone is
+  past the window the agent's own model serves (its built window, else its
+  assignment's — never the job's smallest) is refused by every server, so it is
+  cleared before it is sent. A prompt between the window less the output cap
+  and the window is sent as before.
+
+A clear takes the oldest answers until the request weighs what no clear can
+take (the framing, the pack, the definitions, the agent's own turns and
+reasoning, its newest answers) plus half of the room between that and the
+point — the refused request, or the window — so the loop has room to go on.
+A cleared answer stays cleared under the same line on every later turn. Never
+cleared: the newest turn's answers, an answer without the recorder's stamp, the
+system prompt, the task and its pack, the run-state block, the agent's own
+turns and the reasoning a provider requires back on them (DeepSeek's
+`reasoning_content`). There is no setting to clear earlier: priced on run 7's
+reverser, clearing a loop that would have gone on cost more than it saved on
+Claude Haiku 5.5 and on DeepSeek, because the first clear changes the tool list
+and the provider reads that whole request again uncached.
+
+`read_evidence` answers an id with the output the ledger keeps for it, sized by
+the job's guardrail. It is filed as a repeat of that entry and shown under its
+id, so the ledger, the byte budget and the run's corpus hold the answer once and
+no second citable id exists. Before the request that carries a loop's first
+clear the tool is nowhere — not in the loop's graph, the request or the
+no-tool-call question — so a loop that never clears sends what it always sent;
+the graph is built again with it before that request. On a prefix-bound Claude
+model that change of tool list makes every earlier thinking block stale, and
+the provider's recovery drops them. The nudge and the salvage after the loop
+send the cleared answers as the loop last sent them and bind the tools the loop
+last offered. Each clear is in the agent's log and is published as
+`tool_answers_cleared` (agent, turn, answers, characters before and after, and
+`refused` or `window`). The judge's tool loop does not clear. The code is
+`maljan.agents.tool_answer_clearing`.
+
 **An answer wider than the prompt allows.** Before any of that, a tool result
 over that limit meets the output guardrail, which
 now has three outcomes rather than two. A JSON object is **shortened as a
@@ -3465,6 +3512,7 @@ and the console draws the running analysis from them.
 | `validation_feedback` | `pipeline/validation.retry_with_feedback` | `stage`, `agent`, `code`, `message`, `retry_index`, `state`, `path`; `answer_kept` on an unread answer's question: one sentence saying where the answer is kept (`run_summary.validation.unparsed_answers`, one masked row per answer with its analyst and round), never the answer |
 | `judge_question` | the judge's ReAct loop | `stage`, `text`, `addressed_to` |
 | `budget_tick` / `stage_ended_at_cap` | the budget meter | see *The evidence ledger* |
+| `tool_answers_cleared` | an analyst's tool loop, on each clear of its oldest tool answers | `stage`, `agent`, `turn`, `answers`, `chars_before`, `chars_after`, `why` (`refused` or `window`) |
 | `tool_server_rested` | a tool server's guard, when its breaker opens | `server`, `failures`, `cooldown_s`, `reason` |
 | `enrichment_complete` | the enrichment worker, after the run | `report_id`, `domains_enriched`, `ips_enriched`, `similar_samples` |
 | `completed` / `error` / `cancelled` | the worker | the outcome |

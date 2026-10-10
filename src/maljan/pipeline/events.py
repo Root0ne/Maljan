@@ -128,6 +128,13 @@ MODEL_FALLBACK = "model_fallback"
 # The worker writes each one to the job's event record as it arrives, so what a
 # run spent survives a process that dies before its run summary is built.
 MODEL_USAGE = "model_usage"
+# A tool loop cleared its oldest tool answers to ledger references
+# (``agents.tool_answer_clearing``): the agent, the model turn, how many
+# answers, what the request weighed before and after in characters, and why —
+# ``refused`` (the provider refused the request as over its window and the
+# turn is sent again) or ``window`` (the prompt alone is past the agent's own
+# window). Telemetry; the clear itself is what the model reads.
+TOOL_ANSWERS_CLEARED = "tool_answers_cleared"
 BUDGET_TICK_EVERY = 5
 CAPS: tuple[str, ...] = ("steps", "time", "repeats", "no_room", "spend", "budget_seconds")
 
@@ -169,6 +176,33 @@ def emit_budget_tick(
             "ledger_entries": max(0, int(ledger_entries)),
             "tool_definition_chars": max(0, int(tool_definition_chars)),
             "final": bool(final),
+        },
+    )
+
+
+def emit_tool_answers_cleared(
+    sink: EventSink | None,
+    *,
+    agent: str,
+    stage: str,
+    turn: int,
+    answers: int,
+    chars_before: int,
+    chars_after: int,
+    why: str,
+) -> None:
+    """One clear of a tool loop's oldest answers, as ``TOOL_ANSWERS_CLEARED`` describes it."""
+    emit(
+        sink,
+        TOOL_ANSWERS_CLEARED,
+        {
+            "agent": str(agent),
+            "stage": str(stage),
+            "turn": max(0, int(turn)),
+            "answers": max(0, int(answers)),
+            "chars_before": max(0, int(chars_before)),
+            "chars_after": max(0, int(chars_after)),
+            "why": str(why),
         },
     )
 

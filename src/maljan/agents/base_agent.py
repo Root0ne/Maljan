@@ -39,6 +39,12 @@ from maljan.agents.claim_headings import (
     count_claims_begun,
 )
 from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT, KEEP_REPLY
+from maljan.agents.tool_answer_clearing import (
+    CLEARED_FOR_REFUSAL,
+    Clearing,
+    ToolAnswerClearing,
+    read_evidence_tool,
+)
 from maljan.analysis.sandbox_sections import item_index_of
 from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError, SampleNotOpened
@@ -353,15 +359,16 @@ def _message_chars(m: object) -> int:
     return total
 
 
-def _reported_request_chars(messages: list, per_token: int) -> int:
-    """What the server said the conversation weighs, in the budget's characters.
+def _reported_request(messages: list, per_token: int) -> tuple[int, int]:
+    """What the server said the conversation weighs, and the turn that carries the count.
 
     The last assistant turn that carries usage is the answer to a request the
     server counted in full: ``input_tokens`` is everything before that turn,
     tool definitions and template included. That count converted at the
     budget's rate, plus the measured size of that turn and of everything after
     it, is what the next request weighs as far as anything reported can say.
-    Zero where no turn carries a count, and the measure alone then answers.
+    ``(0, -1)`` where no turn carries a count, and the measure alone then
+    answers; otherwise ``(characters, index of that turn)``.
     """
     for index in range(len(messages) - 1, -1, -1):
         message = messages[index]
@@ -373,11 +380,19 @@ def _reported_request_chars(messages: list, per_token: int) -> int:
         except (AttributeError, TypeError, ValueError):
             prompt = 0
         if prompt > 0:
-            return prompt * max(1, per_token) + sum(_message_chars(m) for m in messages[index:])
-    return 0
+            after = sum(_message_chars(m) for m in messages[index:])
+            return prompt * max(1, per_token) + after, index
+    return 0, -1
 
 
-def request_chars(messages: list, definition_chars: int, per_token: int) -> int:
+def _reported_request_chars(messages: list, per_token: int) -> int:
+    """What the server said the conversation weighs, in the budget's characters; see ``_reported_request``."""
+    return _reported_request(messages, per_token)[0]
+
+
+def request_chars(
+    messages: list, definition_chars: int, per_token: int, cleared_chars: int = 0
+) -> int:
     """What a tool loop's next request weighs, in the budget's characters.
 
     The messages as the server will see them, plus the definitions of the
@@ -385,9 +400,14 @@ def request_chars(messages: list, definition_chars: int, per_token: int) -> int:
     server itself reported for the last request plus what came after it. One
     rule for every loop that sizes itself against the window — the analysts'
     and the judge's.
+
+    ``cleared_chars`` is what this request newly cleared ahead of the turn the
+    server last counted (``tool_answer_clearing``): that count still holds it,
+    so it comes off the reported figure; the measure already sees the clear.
     """
     measured = sum(_message_chars(m) for m in messages) + max(0, int(definition_chars))
-    return max(measured, _reported_request_chars(messages, per_token))
+    reported = _reported_request_chars(messages, per_token) - max(0, int(cleared_chars))
+    return max(measured, reported)
 
 
 def counted_window_tokens(budget: Any) -> int:
@@ -873,6 +893,33 @@ def _model_that_closes_off_truncated_calls(llm: Any, tools: list, repair: Any) -
     if not isinstance(bound, RunnableBinding):
         return llm
     return bound | RunnableLambda(repair)
+
+
+class OfferReadAgainFirst(Exception):  # noqa: N818 — a signal, not a failure
+    """Raised by the refresher before the request that would carry a loop's first clear.
+
+    The loop's graph knows nothing of ``read_evidence`` until then; the loop
+    catches this, builds its graph again with the tool, and sends the turn
+    again, so the request that carries the first clear offers the tool that
+    reads a cleared answer.
+    """
+
+
+def _stored_answer_of(recorder: Any) -> Callable[[str], str | None]:
+    """What the read-again tool reads: an entry's stored output in this loop's ledger.
+
+    A repeat's id reads the entry that holds its answer (``holder_of``).
+    ``None`` for an id this loop did not file.
+    """
+
+    def stored(entry_id: str) -> str | None:
+        holder = recorder.holder_of(entry_id)
+        for entry in reversed(list(recorder.entries)):
+            if str(entry.id).lower() == str(holder).lower():
+                return str(entry.output or "")
+        return None
+
+    return stored
 
 
 def _loop_binding(loop_model: Any, llm: Any) -> Any | None:
@@ -3736,7 +3783,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             self.logger.debug("%s: the context budget is unavailable (%s).", self.name, exc)
             return None
 
-    def _note_conversation(self, messages: list) -> None:
+    def _note_conversation(self, messages: list, cleared_chars: int = 0) -> None:
         """Tell the job's budget what this loop's next request will weigh.
 
         Called from the run-state refresher, which already runs before every
@@ -3755,6 +3802,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         content that tokenises worse than the rate assumes, and the template
         the server wraps every message in, are in the server's count and in
         nobody else's.
+
+        ``cleared_chars`` is what this request newly cleared ahead of the turn
+        the server last counted (:func:`request_chars`).
         """
         budget = self._context_budget()
         if budget is None:
@@ -3767,6 +3817,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                     int(getattr(self, "_tool_definition_chars", 0) or 0)
                     + self._replayed_run_state_chars(),
                     int(getattr(budget, "chars_per_token", CHARS_PER_TOKEN) or CHARS_PER_TOKEN),
+                    cleared_chars,
                 ),
             )
         except Exception as exc:  # noqa: BLE001 — a budget is never worth a lost loop
@@ -3886,6 +3937,15 @@ class BaseAnalyst(BudgetMeter, ABC):
             return []
         tool = items_tool(report, _answer_sizer(container), normalised_by_of(container))
         return stamp_source([tool], SANDBOX_FAMILY)
+
+    def _answer_sizer(self) -> Any | None:
+        """The job's tool-answer guardrail (``ServerRegistry.answer_sizer``), or ``None`` without a job."""
+        try:
+            registry = self._server_registry()
+            return None if registry is None else registry.answer_sizer()
+        except Exception as exc:  # noqa: BLE001 — an answer read again unsized is still an answer
+            self.logger.debug("%s: no answer guardrail for read_evidence (%s).", self.name, exc)
+            return None
 
     def _profile_excluded_servers(self) -> str:
         """The servers the active profile withholds, as ``for_agent``'s argument."""
@@ -4127,6 +4187,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         spend_slot: Any = None,
         held_binding: Any = None,
         turn_holds: dict[int, int | None] | None = None,
+        clearing: ToolAnswerClearing | None = None,
+        on_clear: Callable[[Clearing], None] | None = None,
+        offered: Callable[[], bool] | None = None,
+        ticked: list[int] | None = None,
     ) -> Any:
         """The per-turn hook that regenerates the run-state block's budget line.
 
@@ -4149,11 +4213,20 @@ class BaseAnalyst(BudgetMeter, ABC):
         the cap each turn was sent with, keyed by its place among the
         conversation's model turns (1 for the first), so the turn the loop
         keeps is checked against its own cap, not against a later turn's.
+
+        ``clearing`` is the loop's ``ToolAnswerClearing``, or ``None`` where
+        neither the window nor the operator gives a point to clear at: the
+        request is then the conversation as it always was. ``on_clear`` is
+        told of each new clear, before the request is measured; ``offered``
+        says whether the loop offers ``read_evidence`` yet
+        (:meth:`_cleared_request`). ``ticked`` is the meter's last tick, kept by
+        the loop so a graph built again goes on from it rather than ticking twice.
         """
         ledger = budget if budget is not None else LoopBudget(max_steps, timeout, started)
         from maljan.pipeline.events import BUDGET_TICK_EVERY
 
-        ticked: list[int] = [0]
+        if ticked is None:
+            ticked = [0]
 
         def refresh(state: Any) -> list[BaseMessage]:
             messages = state.get("messages") if isinstance(state, dict) else None
@@ -4184,7 +4257,13 @@ class BaseAnalyst(BudgetMeter, ABC):
             # provider sends them again (``anthropic_history``): counted in
             # every measure of this request, never hidden.
             self._note_replayed_run_state(messages, sent)
-            self._note_conversation(sent)
+            # The oldest tool answers cleared to references, in a batch, where
+            # the request is past the point in force (``tool_answer_clearing``);
+            # the answers already cleared stay cleared, under the same text.
+            cleared_chars = 0
+            if clearing is not None:
+                sent, cleared_chars = self._cleared_request(clearing, sent, on_clear, offered)
+            self._note_conversation(sent, cleared_chars)
             # The spend ceiling's word on the turn about to be sent: held to
             # what the spend it may use pays for, or not sent, and then the
             # loop's salvage writes the answer from what was gathered.
@@ -4222,6 +4301,140 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         return refresh
 
+    def _clearing_per_token(self) -> int:
+        """The characters a token is counted at by this job's budget."""
+        budget = self._context_budget()
+        try:
+            return max(
+                1, int(getattr(budget, "chars_per_token", CHARS_PER_TOKEN) or CHARS_PER_TOKEN)
+            )
+        except (TypeError, ValueError):
+            return CHARS_PER_TOKEN
+
+    def _own_window_tokens(self) -> int | None:
+        """The window this agent's own model serves, in tokens, or ``None`` where none is known.
+
+        The window recorded on the built model (``context_window.built_window``,
+        a declared or probed fact), else the smallest window of the models the
+        agent's assignment may call, as ``context_window`` learns it without a
+        request; never the job's smallest window, which another agent's model
+        may set, and never the fallback for a window nobody reported.
+        """
+        from maljan.llm.context_window import FALLBACK, built_window, window_for_assignment
+
+        fact = built_window(getattr(self, "llm", None))
+        if fact is not None:
+            return int(fact.tokens)
+        try:
+            from maljan.core.model_assignments import assignment_chain_for
+
+            cfg = get_settings()
+            windows = [
+                window_for_assignment(cfg, assignment, probe=False)
+                for assignment in assignment_chain_for(cfg, self.name)
+            ]
+        except Exception as exc:  # noqa: BLE001 — no window is no point, never a lost loop
+            self.logger.debug("%s: its own window is not known (%s).", self.name, exc)
+            return None
+        known = [int(w.tokens) for w in windows if w.source != FALLBACK and int(w.tokens) > 0]
+        return min(known) if known else None
+
+    def _tool_answer_clearing(self) -> ToolAnswerClearing:
+        """This loop's clearing: after a refusal, and before a prompt past the agent's own window.
+
+        A provider's refusal of a request as over its window clears whatever
+        else is known. The window point is the window the agent's own model
+        serves (:meth:`_own_window_tokens`), in the budget's characters: a
+        prompt past it is refused by every server.
+        """
+        window = self._own_window_tokens()
+        return ToolAnswerClearing(
+            window_chars=window * self._clearing_per_token() if window else None
+        )
+
+    def _cleared_request(
+        self,
+        clearing: ToolAnswerClearing,
+        sent: list[Any],
+        on_clear: Callable[[Clearing], None] | None,
+        offered: Callable[[], bool] | None = None,
+    ) -> tuple[list[Any], int]:
+        """``sent`` with the loop's clears in place, and the characters newly cleared.
+
+        Where a clear is due and the loop does not offer ``read_evidence`` yet
+        (``offered``), raises :class:`OfferReadAgainFirst` instead: the loop
+        builds its graph again with the tool and sends the turn again. Never
+        raises otherwise.
+        """
+        per_token = self._clearing_per_token()
+
+        def reported(messages: list[Any]) -> tuple[int, int]:
+            return _reported_request(messages, per_token)
+
+        extra = self._definitions_sent() + self._replayed_run_state_chars()
+        try:
+            if offered is not None and not offered():
+                due = clearing.due(
+                    sent, extra_chars=extra, measure=_message_chars, reported=reported
+                )
+            else:
+                due = False
+        except Exception as exc:  # noqa: BLE001 — a clear never costs a turn
+            self.logger.debug("%s: tool answers not cleared (%s).", self.name, exc)
+            return sent, 0
+        if due:
+            raise OfferReadAgainFirst()
+        try:
+            fitted = clearing.fit(
+                sent,
+                extra_chars=extra,
+                measure=_message_chars,
+                reported=reported,
+                turn=sum(1 for m in sent if is_model_turn(m)) + 1,
+            )
+        except Exception as exc:  # noqa: BLE001 — a clear never costs a turn
+            self.logger.debug("%s: tool answers not cleared (%s).", self.name, exc)
+            return sent, 0
+        if fitted.clearing is not None and on_clear is not None:
+            try:
+                on_clear(fitted.clearing)
+            except Exception as exc:  # noqa: BLE001 — a record never costs a turn
+                self.logger.debug("%s: a clear was not recorded (%s).", self.name, exc)
+        return fitted.messages, fitted.freed_before_report
+
+    def _note_clearing(self, clearing: Clearing) -> None:
+        """Say one clear in the agent's log and as a ``tool_answers_cleared`` event."""
+        why = (
+            "the model server refused the request as over its window"
+            if clearing.why == CLEARED_FOR_REFUSAL
+            else "the request's prompt is past the model's own window"
+        )
+        self.logger.info(
+            "%s: cleared %d old tool answer(s) to ledger references at turn %d, because %s: "
+            "the request went from %d to %d characters of context (clearing starts past %d and "
+            "clears to %d).",
+            self.name,
+            clearing.answers,
+            clearing.turn,
+            why,
+            clearing.chars_before,
+            clearing.chars_after,
+            clearing.point_chars,
+            clearing.target_chars,
+        )
+        from maljan.pipeline.events import emit_tool_answers_cleared
+
+        emit_tool_answers_cleared(
+            self._event_sink(),
+            agent=str(self.name),
+            stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
+            turn=clearing.turn,
+            answers=clearing.answers,
+            chars_before=clearing.chars_before,
+            chars_after=clearing.chars_after,
+            why=clearing.why,
+        )
+
     def execute_tool_loop(self, prompt_messages: list) -> str:
         """Run the tool loop (``_run_tool_loop``) and let go of its run-state copies.
 
@@ -4235,6 +4448,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         finally:
             self._replayed_blocks = {}
             self._replay_upto = None
+            self._offered_after_clear: list[Any] = []
 
     def _run_tool_loop(self, prompt_messages: list) -> str:
         """Executes a tool-calling ReAct loop if tools are available.
@@ -4448,20 +4662,74 @@ class BaseAnalyst(BudgetMeter, ABC):
         # with, read back for the kept last turn's cut check.
         held_binding = _loop_binding(loop_model, self.llm)
         turn_holds: dict[int, int | None] = {}
-        agent_executor = create_react_agent(
-            loop_model,
-            recorded,
-            prompt=self._run_state_refresher(
-                max_steps,
-                timeout,
-                budget.started,
-                budget=budget,
-                recorder=recorder,
-                spend_slot=spend_key,
-                held_binding=held_binding,
-                turn_holds=turn_holds,
-            ),
-        )
+        # Old tool answers cleared to references (``tool_answer_clearing``),
+        # and the tool that reads one again. Until the request that carries
+        # the loop's first clear, the tool is nowhere: not in the graph, the
+        # request or any list a model reads. Before that request the graph is
+        # built again with it (``_offer_read_again``), from public calls only.
+        self._offered_after_clear = []
+        clearing: ToolAnswerClearing | None = self._tool_answer_clearing()
+        read_tool = record_tools(
+            [read_evidence_tool(_stored_answer_of(recorder), self._answer_sizer())],
+            recorder,
+            repeats,
+            repairs,
+            self._context_budget(),
+            on_question=self._count_question,
+        )[0]
+        graph: dict[str, Any] = {}
+        # The meter's last tick, one for the loop however often its graph is built.
+        ticked: list[int] = [0]
+
+        def _executor(model: Any, binding: Any) -> Any:
+            return create_react_agent(
+                model,
+                recorded,
+                prompt=self._run_state_refresher(
+                    max_steps,
+                    timeout,
+                    budget.started,
+                    budget=budget,
+                    recorder=recorder,
+                    spend_slot=spend_key,
+                    held_binding=binding,
+                    turn_holds=turn_holds,
+                    clearing=clearing,
+                    on_clear=self._note_clearing,
+                    offered=lambda: bool(self._offered_after_clear),
+                    ticked=ticked,
+                ),
+            )
+
+        def _offer_read_again() -> bool:
+            """Build the loop's graph again with ``read_evidence``; whether it now has it."""
+            if self._offered_after_clear:
+                return True
+            try:
+                offered_tools = [*recorded, read_tool]
+                model = _model_that_closes_off_truncated_calls(
+                    self.llm, offered_tools, _close_off_truncated_calls
+                )
+                recorded.append(read_tool)
+                graph["executor"] = _executor(model, _loop_binding(model, self.llm))
+            except Exception as exc:  # noqa: BLE001 — said, and today's ending follows
+                if recorded and recorded[-1] is read_tool:
+                    recorded.pop()
+                if clearing is not None:
+                    clearing.enabled = False
+                self.logger.warning(
+                    "%s: read_evidence could not be offered (%s: %s); old tool answers are not "
+                    "cleared in this loop.",
+                    self.name,
+                    type(exc).__name__,
+                    exc,
+                )
+                return False
+            self._tool_definition_chars = tool_definition_chars(recorded)
+            self._offered_after_clear = [read_tool]
+            return True
+
+        graph["executor"] = _executor(loop_model, held_binding)
 
         # Whether the server, rather than the budget, said the window was full.
         window_full = False
@@ -4665,12 +4933,13 @@ class BaseAnalyst(BudgetMeter, ABC):
                 # What the steps have left after the turns ``start`` already
                 # spent; the first pass has spent none.
                 steps = None if max_steps is None else max(1, max_steps - steps_used(start))
-                stream: Any = agent_executor.astream(
+                stream: Any = graph["executor"].astream(
                     {"messages": start},
                     {"recursion_limit": recursion_limit(steps)},
                     stream_mode="values",
                 )
                 finished = False
+                resend = False
                 async with contextlib.aclosing(stream) as snapshots:
                     try:
                         async for snapshot in snapshots:
@@ -4792,25 +5061,58 @@ class BaseAnalyst(BudgetMeter, ABC):
                     except Exception as exc:
                         # The server saying the window is full is this
                         # conversation out of room, whatever the budget
-                        # believed: the tool phase ends the way it does when
-                        # the budget sees it first, and what was gathered is
-                        # salvaged rather than lost with the analyst. Only
-                        # then. A failure that is not a provider's full-window
-                        # answer, or one met before any tool ran — the framing
-                        # alone does not fit, which is a configuration fault —
-                        # has nothing to salvage and fails the agent as it
-                        # always did.
-                        if not (window_full_error(exc) and answers_held(recorder.entries)):
+                        # believed. Where old tool answers are left to clear,
+                        # one batch is cleared and the turn is sent again
+                        # (``tool_answer_clearing``) — again only while each
+                        # resend is refused and something is left. Otherwise
+                        # the tool phase ends the way it does when the budget
+                        # sees it first, and what was gathered is salvaged
+                        # rather than lost with the analyst. Only then. A
+                        # failure that is not a provider's full-window answer,
+                        # or one met before any tool ran — the framing alone
+                        # does not fit, which is a configuration fault — has
+                        # nothing to salvage and fails the agent as it always
+                        # did.
+                        if isinstance(exc, OfferReadAgainFirst) or isinstance(
+                            exc.__cause__, OfferReadAgainFirst
+                        ):
+                            # The request about to be sent carries the loop's
+                            # first clear: the graph is built again with the
+                            # tool that reads a cleared answer, and the turn
+                            # is sent again; without it no clear is made.
+                            _offer_read_again()
+                            resend = True
+                        elif not window_full_error(exc):
                             raise
-                        nonlocal window_full
-                        window_full = True
-                        note_a_window_that_moved(exc)
-                        self.logger.warning(
-                            "%s ReAct loop ended: the model server reported its context "
-                            "window full (%s); synthesising from what it gathered.",
-                            self.name,
-                            type(exc).__name__,
-                        )
+                        elif (
+                            clearing is not None
+                            and clearing.enabled
+                            and clearing.refused(list(latest.get("messages") or []), _message_chars)
+                            and _offer_read_again()
+                        ):
+                            resend = True
+                            self.logger.warning(
+                                "%s: the model server refused the request as over its context "
+                                "window (%s); clearing old tool answers and sending it again.",
+                                self.name,
+                                type(exc).__name__,
+                            )
+                        elif not answers_held(recorder.entries):
+                            raise
+                        else:
+                            nonlocal window_full
+                            window_full = True
+                            note_a_window_that_moved(exc)
+                            self.logger.warning(
+                                "%s ReAct loop ended: the model server reported its context "
+                                "window full (%s); synthesising from what it gathered.",
+                                self.name,
+                                type(exc).__name__,
+                            )
+                if resend:
+                    # Outside the closed stream: the graph runs again from the
+                    # conversation as it stood, its next request cleared.
+                    return await _one_pass(list(latest.get("messages") or []), spoken, pace)
                 return finished
 
             try:
@@ -5103,6 +5405,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         # keeps the turn whole: taking a call off it would rebuild the turn the
         # API needs back as it was received, and the tool-reply completion
         # answers each unrun call with a reply saying it did not run.
+        # A turn sent after the loop (the nudge, the salvage) sends the
+        # answers the loop cleared as the loop last sent them.
+        if clearing is not None:
+            msgs = clearing.apply(msgs)
         kept, unrun = without_unanswered_calls(msgs)
         # The loop is over: a turn sent after it (the nudge, the salvage)
         # carries every block the loop's turns were sent with.
@@ -5621,6 +5927,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         except Exception as exc:  # noqa: BLE001 — the bare tools are the fallback's fallback
             self.logger.debug("%s: tools bound unpinned for the nudge (%s).", self.name, exc)
             pinned = tools
+        # And the read-again tool, where the loop offered it after a clear
+        # (``_offer_read_again``): the transcript was produced against it too.
+        pinned = [*pinned, *(getattr(self, "_offered_after_clear", None) or [])]
         try:
             return bind(pinned, tool_choice="none")
         except Exception as exc:  # noqa: BLE001 — a model that cannot bind has no fallback

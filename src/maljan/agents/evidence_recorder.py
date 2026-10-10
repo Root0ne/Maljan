@@ -280,6 +280,10 @@ class EvidenceRecorder:
             wanted = str(by_id[wanted].repeated_of)
         return wanted
 
+    def filed(self, entry_id: str) -> bool:
+        """Whether this loop filed an entry under this id."""
+        return str(entry_id or "").strip() in self._by_id
+
     def entry_failed(self, entry_id: str) -> bool:
         """Whether the entry with this id recorded a failure.
 
@@ -1021,6 +1025,11 @@ def _record_tool(
     # is being given two accounts of the same tool. The guardrail that shortens
     # an answer reserves room for the sentence naming exactly these.
     narrowing = narrowing_arguments(accepted)
+    # The read-again tool (``agents.tool_answer_clearing``): its answer is
+    # another entry's, filed as a repeat of it.
+    from maljan.agents.tool_answer_clearing import READS_EVIDENCE
+
+    reads_evidence = bool((getattr(tool, "metadata", None) or {}).get(READS_EVIDENCE))
 
     def _the_room_is_gone(kwargs: dict[str, Any]) -> str | None:
         """The line a call gets once this agent's conversation has no room left.
@@ -1178,6 +1187,45 @@ def _record_tool(
         """The arguments as the model wrote them, when this call was closed off."""
         return repairs.take(name, kwargs) if repairs is not None else None
 
+    def _read_again(
+        kwargs: dict[str, Any],
+        started: float,
+        wall_clock: float,
+        text: str,
+        repeated: str | None,
+        cut: int | None,
+    ) -> str | None:
+        """A read-again answer, filed and shown as a repeat of the entry it reads; ``None`` if unfiled.
+
+        The way a repeated decompilation is filed: the entry is a repeat of
+        the one that holds the answer, keeping only a note, so the ledger, the
+        byte budget and the run's corpus hold the answer once and no second
+        citable id exists; the model reads the answer under the original id.
+        """
+        from maljan.agents.tool_answer_clearing import read_again_note
+
+        wanted = str(kwargs.get("evidence_id") or "").strip().lower()
+        holder = recorder.holder_of(wanted)
+        if not recorder.filed(holder):
+            return None
+        recorder.record(
+            tool=name,
+            args=kwargs,
+            server=server,
+            output=read_again_note(holder),
+            ok=not recorder.entry_failed(holder),
+            started_at=wall_clock,
+            duration_ms=int((time.monotonic() - started) * 1000),
+            repeated_of=holder,
+            cut=cut,
+        )
+        _note(kwargs, holder)
+        shortened = shortened_notice(text, narrowing=narrowing)
+        failed = recorder.entry_failed(holder)
+        return f"[{holder}]\n{fenced(holder, text)}{shortened}" + _steering(
+            kwargs, repeated, failed=failed
+        )
+
     def _stamp(
         kwargs: dict[str, Any],
         started: float,
@@ -1189,6 +1237,10 @@ def _record_tool(
     ) -> str:
         text = result_text(value)
         raw = _was_repaired(kwargs)
+        if reads_evidence and not_shown is None:
+            read = _read_again(kwargs, started, wall_clock, text, repeated, cut)
+            if read is not None:
+                return read
         # The function a decompile answered with, and the entry that already
         # holds it: a call given an address inside a function an earlier call
         # read is answered with that same function, and is a repeat of it
