@@ -1629,6 +1629,9 @@ class ServiceContainer:
                     turn_share=float(config.llm.fallback_turn_share),
                     budget_note=budget_note,
                     window_tokens=window_tokens,
+                    windows_by_model={
+                        label: window for label, (_tokens, _why, window) in budgets.items()
+                    },
                 )
                 self._report_composer_cache.event_sink = self.event_sink
             return self._report_composer_cache

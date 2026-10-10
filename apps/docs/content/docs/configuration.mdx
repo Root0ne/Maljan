@@ -1158,12 +1158,16 @@ room. With an operator's own `composer_section_max_tokens`, where the
 reporter's provider has been told to keep reasoning out
 (`llm.ollama.disable_thinking` or `llm.openai.disable_thinking`), the
 composer's model is capped at that value alone; where it has not, the cap is
-that value plus the reporter's own output cap (`judge_max_tokens`, else the
-model's declared maximum, else derived) for the reasoning, and the sum is held
-at the model's maximum. Each model of the reporter's list is capped by its
-own provider's switch, and the wait is sized from the largest cap: the platform
+that value plus the reporter's own output cap (`judge_max_tokens`, else
+derived) for the reasoning, and the sum is held at the model's maximum. Each
+model of the reporter's list is capped by its own provider's switch, and the
+wait is sized from the largest cap: the platform
 cannot tell a reasoning tag from its name, and sending `think: false` to a
-model that does not reason is an error on Ollama. A section the cap cut is
+model that does not reason is an error on Ollama. A section's evidence room is
+what every model of the list leaves, each by its own window less its own cap;
+where one model's cap does not fit beside a call's prompt, that call is held
+to the least any model of the list may write, never past a model's own cap.
+A section the cap cut is
 recorded as cut at that cap, not as a schema failure. On Ollama every output
 cap — this one, `judge_max_tokens`, `expert_max_tokens` — now reaches the
 server as `num_predict`, which `ChatOllama` otherwise drops, so a thinking

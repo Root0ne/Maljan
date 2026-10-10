@@ -161,6 +161,65 @@ class TestAMillionTokenWindow:
         assert not [reason for reason in degradations if "window" in reason]
 
 
+class TestAMixedFallbackList:
+    """Each model of the reporter's list is sized by its own window and its own cap."""
+
+    @staticmethod
+    def _composer() -> Any:
+        from maljan.core.config import REPORTER_AGENT_KEY, AgentLLMConfig, ModelChoice
+
+        settings = Settings(_env_file=None)  # type: ignore[call-arg]
+        settings.llm.openai.disable_thinking = True
+        settings.llm.agents[REPORTER_AGENT_KEY] = AgentLLMConfig(
+            provider="openai",
+            model="deepseek-flash",
+            base_url="https://api.deepseek.com",
+            fallbacks=[
+                ModelChoice(provider="openai", model="qwen", base_url="http://127.0.0.1:8080/v1")
+            ],
+        )
+        settings.reporting.composer_enabled = True
+        container = ServiceContainer(settings, mock=False)
+        registry = MagicMock()
+        registry.build_model_for_agent.return_value = FakeMessagesListChatModel(responses=[])
+        container._llm_registry = registry  # type: ignore[assignment]
+
+        def window(provider: str, **asked: Any) -> WindowFact:
+            if asked.get("model") == "qwen":
+                return WindowFact(65536, "probed", "llama.cpp /props reported 65,536 tokens")
+            return _fact(1048576)
+
+        with patch("maljan.llm.context_window.learn_window", side_effect=window):
+            return container.get_report_composer()
+
+    def test_each_model_keeps_its_own_cap(self) -> None:
+        composer = self._composer()
+
+        assert sorted(composer.caps_by_model.values()) == [16384, 262144]
+
+    def test_the_evidence_room_fits_every_model_of_the_list(self) -> None:
+        composer = self._composer()
+
+        assert composer._room_chars() == (65536 - 16384) * CHARS_PER_TOKEN
+
+    def test_a_prompt_every_model_holds_beside_its_cap_is_not_held(self) -> None:
+        from langchain_core.messages import HumanMessage
+
+        composer = self._composer()
+
+        assert composer._call_bound([HumanMessage(content="x" * 3000)]) is None
+
+    def test_a_prompt_one_model_cannot_hold_holds_the_call_for_every_model(self) -> None:
+        from langchain_core.messages import HumanMessage
+
+        composer = self._composer()
+        # 150,000 characters: 50,000 tokens, which leaves the local model
+        # 15,536 of its 65,536 — below its own 16,384.
+        bound = composer._call_bound([HumanMessage(content="x" * 150000)])
+
+        assert bound == 65536 - 50000
+
+
 class TestAListThatCannotBeBudgeted:
     def test_the_reporter_takes_the_judge_roles_cap_and_says_so(self) -> None:
         container = _container(200000, DEEPSEEK)
