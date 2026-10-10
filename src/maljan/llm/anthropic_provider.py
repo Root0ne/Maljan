@@ -40,6 +40,7 @@ description of the model — and nothing else:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import threading
 from pathlib import Path
@@ -217,6 +218,58 @@ def with_unforced_structured_output(chat_class: Any) -> Any:
     return unforced
 
 
+_PROMPT_USAGE_CLASSES: dict[type, type] = {}
+
+
+def with_reported_prompt_usage(chat_class: Any) -> Any:
+    """``chat_class`` whose stream's first chunk keeps the prompt usage Anthropic reported.
+
+    ``message_start`` reports the call's input and its cache reads and writes
+    before any of the answer streams; langchain-anthropic drops it and keeps
+    only ``message_delta``'s usage, which a stream broken mid-answer never
+    sends. It is kept on that chunk's ``response_metadata`` under
+    ``generation_rate.PROMPT_USAGE_KEY``, in LangChain's usage shape with no
+    output counted (``message_start``'s output figure is a placeholder), so a
+    failed attempt is charged the prompt the provider counted
+    (``llm.transient``). Nothing else reads it, and nothing sent changes.
+    """
+    if not isinstance(chat_class, type) or not hasattr(
+        chat_class, "_make_message_chunk_from_anthropic_event"
+    ):
+        return chat_class
+    cached = _PROMPT_USAGE_CLASSES.get(chat_class)
+    if cached is not None:
+        return cached
+    base: Any = chat_class
+
+    def _make_message_chunk_from_anthropic_event(self: Any, event: Any, **kwargs: Any) -> Any:
+        message, block = base._make_message_chunk_from_anthropic_event(self, event, **kwargs)
+        if message is not None and getattr(event, "type", "") == "message_start":
+            usage = getattr(getattr(event, "message", None), "usage", None)
+            if usage is not None:
+                with contextlib.suppress(Exception):
+                    from langchain_anthropic.chat_models import _create_usage_metadata
+
+                    from maljan.llm.generation_rate import PROMPT_USAGE_KEY
+
+                    reported: dict[str, Any] = dict(_create_usage_metadata(usage))
+                    reported["output_tokens"] = 0
+                    reported["total_tokens"] = int(reported.get("input_tokens") or 0)
+                    reported.pop("output_token_details", None)
+                    message.response_metadata[PROMPT_USAGE_KEY] = reported
+        return message, block
+
+    kept = type(
+        chat_class.__name__,
+        (chat_class,),
+        {"_make_message_chunk_from_anthropic_event": _make_message_chunk_from_anthropic_event},
+    )
+    kept.__module__ = __name__
+    kept.__qualname__ = chat_class.__qualname__
+    _PROMPT_USAGE_CLASSES[chat_class] = kept
+    return kept
+
+
 _LOOP_BOUND_CLASSES: dict[type, type] = {}
 
 
@@ -370,7 +423,9 @@ class AnthropicProvider:
             with_transient_retries(
                 with_preserved_thinking(
                     with_unforced_structured_output(
-                        with_sized_request_timeout(with_loop_bound_async_client(ChatAnthropic))
+                        with_sized_request_timeout(
+                            with_reported_prompt_usage(with_loop_bound_async_client(ChatAnthropic))
+                        )
                     ),
                     str(getattr(settings, "prompt_cache_ttl", "5m") or "5m"),
                 )

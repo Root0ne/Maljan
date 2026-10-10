@@ -1605,7 +1605,13 @@ meter charged it when it was settled (`priced_usd`), failed attempts included,
 and the total sums those, so cost is readable during a run and after a worker
 that died, and a price changed later does not move it; a record from before
 records carried their charge is priced at the current `llm.model_prices` and
-counted in `repriced_calls`. It lives exactly as long as the
+counted in `repriced_calls`. A failed attempt is charged as the provider bills
+it: an Anthropic stream that breaks mid-answer is charged the input and cache
+reads and writes its opening event reported, and the output its closing usage
+reported or, where none arrived, an estimate from the characters that streamed;
+its record's `estimated_part` says `output`, and `estimated_usd` is that part's
+cost. A stream that broke before anything arrived, with no usage reported, is
+charged nothing. It lives exactly as long as the
 rest of the feed: `events.retention_days` (30) after the run. The run summary,
 which a completed or stopped run stores with its report, keeps the totals for
 good; the `model_usage` rows matter for a run whose worker died before it

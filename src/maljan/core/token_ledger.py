@@ -301,7 +301,10 @@ RETRY_RECORD = "retry"
 # What a record says the job's spend meter charged for it, as the meter
 # settled it: what it cost, where the price came from, and for a charge by
 # stated estimate what the estimate cost.
-CHARGE_PARTS: tuple[str, ...] = ("priced_usd", "price_source", "estimated_usd")
+CHARGE_PARTS: tuple[str, ...] = ("priced_usd", "price_source", "estimated_usd", "estimated_part")
+
+# The charge parts that are text; the rest are US dollars.
+_CHARGE_TEXT = frozenset({"price_source", "estimated_part"})
 
 
 def _with_charge(
@@ -314,17 +317,25 @@ def _with_charge(
 
     The charge is the meter's own figure at the moment the call was settled,
     so a total summed from the records is what the run spent whatever prices
-    are in force when it is read. Absent where nothing was charged.
+    are in force when it is read; ``estimated_part`` says which part of it,
+    if any, is an estimate (``input and output``, or ``output`` where the
+    provider reported the input). Absent where nothing was charged.
     """
-    if usage is None and estimated:
-        row["estimated"] = {
+    from maljan.core.spend import OUTPUT_ESTIMATED
+
+    output_only = bool(estimated and estimated.get(OUTPUT_ESTIMATED))
+    if estimated and (usage is None or output_only):
+        block: dict[str, Any] = {
             "input_tokens": int(estimated.get("input_tokens") or 0),
             "output_tokens": int(estimated.get("output_tokens") or 0),
             "source": str(estimated.get("source") or ""),
         }
+        if output_only:
+            block[OUTPUT_ESTIMATED] = True
+        row["estimated"] = block
     for part in CHARGE_PARTS:
         value = (charged or {}).get(part)
-        if part == "price_source":
+        if part in _CHARGE_TEXT:
             if value is not None:
                 row[part] = str(value)
         elif isinstance(value, int | float) and not isinstance(value, bool):

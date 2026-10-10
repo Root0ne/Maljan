@@ -22,7 +22,7 @@ import pytest
 
 from app.services.job_events import read_events
 from maljan.analysis.run_summary import spend_blocks, usage_totals
-from maljan.core.spend import SpendMeter
+from maljan.core.spend import OUTPUT_ESTIMATED, SpendMeter
 from maljan.core.token_ledger import TokenLedger
 from maljan.llm.transient import FAILED_ATTEMPT_CALL
 from maljan.pipeline.events import MODEL_USAGE
@@ -391,6 +391,15 @@ def _synthetic_job() -> tuple[TokenLedger, SpendMeter, list[dict[str, Any]]]:
         call=FAILED_ATTEMPT_CALL,
         estimated={"input_tokens": 2_000, "output_tokens": 30, "source": "estimated"},
     )
+    # A stream that broke after its provider reported the prompt: only the
+    # output that streamed is estimated.
+    ledger.charge_failed_attempt(
+        {"input_tokens": 2_500, "cached_input_tokens": 2_000},
+        agent="judge",
+        model="m1",
+        call=FAILED_ATTEMPT_CALL,
+        estimated={"output_tokens": 40, "source": "streamed", OUTPUT_ESTIMATED: True},
+    )
     ledger.add(
         {"input_tokens": 3_000, "output_tokens": 900, "cost": 0.0123},
         agent="judge",
@@ -420,8 +429,12 @@ class TestEachRecordCarriesItsCharge:
     def test_a_call_charged_by_estimate_says_so(self) -> None:
         _ledger, _meter, published = _synthetic_job()
         by_estimate = [p for p in published if "estimated" in p]
-        assert len(by_estimate) == 2
-        assert all(p["estimated_usd"] == p["priced_usd"] > 0 for p in by_estimate)
+        assert len(by_estimate) == 3
+        whole = [p for p in by_estimate if p["estimated_part"] == "input and output"]
+        assert len(whole) == 2
+        assert all(p["estimated_usd"] == p["priced_usd"] > 0 for p in whole)
+        (output_only,) = [p for p in by_estimate if p["estimated_part"] == "output"]
+        assert 0 < output_only["estimated_usd"] < output_only["priced_usd"]
 
     def test_an_uncharged_call_carries_no_charge(self) -> None:
         _ledger, _meter, published = _synthetic_job()
@@ -437,7 +450,7 @@ class TestTheTotalsMatchTheRunSummary:
         totals = usage_totals(published, lambda: SpendMeter(None, PRICES))
         assert totals["calls"] == 6
         assert totals["retries"] == 1
-        assert totals["failed_attempts"] == 2
+        assert totals["failed_attempts"] == 3
         assert totals["tokens"] == spend_blocks(ledger.snapshot())["tokens"]
 
     def test_the_spend_is_what_the_run_s_meter_settled(self) -> None:
@@ -485,7 +498,7 @@ class TestTheTotalsMatchTheRunSummary:
         agents = totals["spend"]["per_agent"]
         assert set(agents) == {"static", "judge", "reporter"}
         assert agents["reporter"]["unpriced_models"] == {"unpriced-x": 1}
-        assert agents["judge"]["estimated_calls"] == 2
+        assert agents["judge"]["estimated_calls"] == 3
         assert sum(row["spent_usd"] for row in agents.values()) == pytest.approx(
             totals["spend"]["spent_usd"]
         )
