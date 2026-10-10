@@ -967,7 +967,13 @@ A run whose agents sit on different models takes the **smallest** of their
 windows, because one cap is handed to every tool server the job opens. The
 models an agent falls back to count as models it sits on: a fallback with a
 smaller window than the first model governs the cap, because the turn it
-answers reads the same conversation.
+answers reads the same conversation. The agents counted are the ones whose
+tool answers the cap sizes, each on the model it really calls: every analyst;
+the mediator whenever the team has a debate stage and the function summariser
+whenever it is on, each on its own `llm.agents` entry or else the global expert
+model; and the judge on its own entry, or else the global **judge** model
+(`core.llm.<provider>.judge_model`), never the expert one. A global judge model
+with a smaller window than the analysts' therefore sizes the whole job.
 
 Where to see what applied: the Settings page prints the detected window beside
 the field, with the source word itself, and `run_summary.truncation` records
@@ -1010,6 +1016,10 @@ applies and the sentence says the window is unknown. The reply reserve follows
 the same rule, bounded by an operator's generation cap where one is set; so
 does the report stage, below. A value above 0 is
 the operator's and is used as set; a stored setting keeps its value. Each
+agent's cap is derived over the models its own model is built from: its
+`llm.agents` entry and that entry's fallbacks, the smallest of them, or else
+the global model of its role. The judge's cap follows `llm.agents.judge` when
+one is set, and the global judge model only without one. Each
 derivation is logged and recorded in `run_summary.generation.output_caps`
 (`{agent: {tokens, derivation}}`), and the judge's is printed beside the
 verdict wait. 0 no longer means unbounded.
