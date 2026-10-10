@@ -160,6 +160,10 @@ STAGE_CALL_KINDS: dict[str, tuple[str, ...]] = {
 # each one is.
 TAIL_CALLS = {"verdict": "verdict", "report section": "report", "narrative": "report"}
 
+# Set on a stated estimate whose prompt is to be priced at the share of the
+# model's input this job measured read from the provider's cache.
+AT_CACHED_SHARE = "at_cached_share"
+
 # What the run summary names a price the provider reported with its answer.
 PROVIDER_REPORTED = "provider-reported"
 
@@ -922,6 +926,24 @@ class SpendMeter:
                 "input_tokens": int(estimated.get("input_tokens") or 0),
                 "output_tokens": int(estimated.get("output_tokens") or 0),
             }
+            said = str(estimated.get("source") or "")
+            if estimated.get(AT_CACHED_SHARE):
+                # The prompt priced at the share of this model's input the job
+                # measured read from the provider's cache, where it measured
+                # one; otherwise priced as uncached, and said to overstate.
+                with self._lock:
+                    share = self._cache_share_locked(name)
+                if share:
+                    figures["cached_input_tokens"] = round(figures["input_tokens"] * share)
+                    said += (
+                        f"; its prompt priced with {share:.0%} read from the cache, the share "
+                        "this job measured for the model"
+                    )
+                else:
+                    said += (
+                        "; its prompt priced as uncached input, which overstates a prompt the "
+                        "provider read from its cache"
+                    )
             charged = self._charged(figures, model)
             if charged is None:
                 self._note_unpriced(name)
@@ -932,7 +954,7 @@ class SpendMeter:
                 self._settled += cost
                 self._estimated_calls += 1
                 self._estimated_usd += cost
-                self._estimated_source = str(estimated.get("source") or "")
+                self._estimated_source = said
         except Exception as exc:  # noqa: BLE001 — telemetry never costs a run
             logger.debug("estimated spend not settled (%s).", exc)
 

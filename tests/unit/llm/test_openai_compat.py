@@ -188,6 +188,45 @@ class TestTheSelfHeal:
         assert built[0] is not None, "the first attempt carried the extras"
         assert not built[1], "the retry carried none of them"
 
+    def test_the_healed_model_keeps_the_job_s_retry_recorder(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.core.token_ledger import TokenLedger
+        from maljan.llm.transient import attach_retry_recorder, recorder_of
+
+        built: list[Any] = []
+
+        class _Chat:
+            def __init__(self, **kwargs: Any) -> None:
+                self.extra_body = kwargs.get("extra_body")
+                self.callbacks: list[Any] = []
+                built.append(self)
+
+            def invoke(self, *args: Any, **kwargs: Any) -> Any:
+                if self.extra_body:
+                    raise TestTheSelfHeal._bad_request("Unsupported parameter(s): n_predict")
+                return "ok"
+
+            async def ainvoke(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover
+                return self.invoke(*args, **kwargs)
+
+        import langchain_openai
+
+        monkeypatch.setattr(langchain_openai, "ChatOpenAI", _Chat)
+        ledger = TokenLedger()
+        provider = OpenAIProvider(_settings("https://heals.example.com/v1", "llama_cpp"))
+        model = attach_retry_recorder(
+            provider.build_model("m", 0.0, max_tokens=512), ledger, "static"
+        )
+
+        assert model.invoke("hi") == "ok"
+
+        original, healed = built
+        assert recorder_of(healed) is not None
+        assert recorder_of(healed).ledger is ledger
+        assert recorder_of(healed).agent == "static"
+        assert recorder_of(original) is not recorder_of(healed)
+
     def test_the_endpoint_is_remembered_so_it_heals_once(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -584,22 +584,25 @@ class TestTheMediatorsOwnBlockWinsOverTheExtractor:
 
 class TestTheBlockQuestionSurvivesADroppedConnection:
     def test_a_connection_error_is_retried_rather_than_read_as_no_block(self) -> None:
+        """Asked again by the model itself, as every provider's model asks (``llm.transient``)."""
         import openai
+
+        from maljan.llm.transient import with_transient_retries
 
         class _Flaky(_ScriptedModel):
             dropped = False
 
-            async def ainvoke(self, messages, **kw):
+            async def ainvoke(self, messages, config=None, **kw):
                 if len(self.sent) == 1 and not self.dropped:
                     self.dropped = True
                     raise openai.APIConnectionError(request=MagicMock())
                 return await super().ainvoke(messages, **kw)
 
-        model = _Flaky(
+        model = with_transient_retries(_Flaky)(
             "All aligned.\nagreement_confidence: 1.0",
             "CONTRADICTIONS:\n- static: x — ev_0004\nagreement_confidence: 0.9",
         )
-        with patch("maljan.agents.base_agent.asyncio.sleep", AsyncMock(return_value=None)):
+        with patch("maljan.llm.transient.asyncio.sleep", AsyncMock(return_value=None)):
             argument, is_consensus = _mediate_with(model)
 
         assert model.dropped is True

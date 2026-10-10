@@ -213,7 +213,7 @@ class TestATransientProviderAnswerIsRetried:
             return "ok"
 
         assert await retry_on_connection_error(_rate_limited, what="x") == "ok"
-        assert waits == [5]
+        assert len(waits) == 1 and 5 <= waits[0] <= 5.5, "never shorter than asked"
 
     @pytest.mark.asyncio
     async def test_an_unreasonable_retry_after_falls_back_to_the_backoff(
@@ -237,7 +237,9 @@ class TestATransientProviderAnswerIsRetried:
             return "ok"
 
         assert await retry_on_connection_error(_rate_limited, what="x") == "ok"
-        assert waits == [1], "the helper's own backoff, not the provider's hour"
+        assert len(waits) == 1 and 0.5 <= waits[0] <= 1.5, (
+            "the helper's own jittered backoff, not the provider's hour"
+        )
 
     @pytest.mark.asyncio
     async def test_a_retry_after_date_is_honoured_as_a_delay(
@@ -264,7 +266,7 @@ class TestATransientProviderAnswerIsRetried:
             return "ok"
 
         assert await retry_on_connection_error(_rate_limited, what="x") == "ok"
-        assert waits and 4 <= waits[0] <= 6, waits
+        assert waits and 4 <= waits[0] <= 6.6, waits
 
     @pytest.mark.asyncio
     async def test_a_date_in_the_past_falls_back_to_the_backoff(
@@ -290,7 +292,7 @@ class TestATransientProviderAnswerIsRetried:
             return "ok"
 
         assert await retry_on_connection_error(_rate_limited, what="x") == "ok"
-        assert waits == [1]
+        assert len(waits) == 1 and 0.5 <= waits[0] <= 1.5
 
     def test_the_log_line_carries_no_provider_body(self) -> None:
         """A provider that quotes the request back has quoted the key back."""
@@ -353,14 +355,15 @@ class TestATransientProviderAnswerIsRetried:
 
 class TestTheCallSitesActuallyUseIt:
     """A helper nobody calls is not a fix. These assert the wiring, because the
-    previous policy failed exactly by being written down and not applied."""
+    previous policy failed exactly by being written down and not applied.
+
+    The judge's and the mediator's calls are retried by their model
+    (``llm.transient``) and carry no wrapper of their own
+    (``test_the_judge_retries_through_its_model_once``)."""
 
     @pytest.mark.parametrize(
         ("module", "needle"),
         [
-            ("maljan.agents.judge_agent", "Mediator fast path"),
-            ("maljan.agents.judge_agent", "Judge verdict"),
-            ("maljan.agents.judge_agent", "Judge no-tools path"),
             ("maljan.reporting.composer", "ReportComposer structured"),
             ("maljan.reporting.composer", "ReportComposer raw"),
             ("maljan.reporting.narrative_agent", "NarrativeAgent structured"),

@@ -1252,8 +1252,11 @@ def window_full_error(exc: BaseException) -> bool:
     raises.
     """
     try:
-        package = type(exc).__module__.split(".", 1)[0]
-        if package not in _PROVIDER_PACKAGES:
+        # The whole class line: LangChain raises its own subclasses of the
+        # SDK's errors (a 500 from ``ChatOpenAI`` is ``langchain_openai``'s
+        # ``OpenAIAPIError``), whose own module names no provider.
+        packages = {(klass.__module__ or "").split(".", 1)[0] for klass in type(exc).__mro__}
+        if not packages & _PROVIDER_PACKAGES:
             return False
         text = str(exc).lower()
         if not any(signature in text for signature in _WINDOW_FULL_SIGNATURES):

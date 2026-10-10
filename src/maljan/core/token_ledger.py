@@ -33,7 +33,7 @@ answered because the first one failed as a provider — is kept with its reason.
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 
@@ -287,6 +287,10 @@ def call_record(
     return row
 
 
+# The ``call`` of a record that is a retry of a model request, not a call.
+RETRY_RECORD = "retry"
+
+
 class TokenLedger:
     """Thread-safe tally of what one run's model calls spent, per agent and per model."""
 
@@ -298,6 +302,9 @@ class TokenLedger:
         self._total = _Tally()
         self._agents: dict[str, _Tally] = {}
         self._fallbacks: list[dict[str, str]] = []
+        # One row per failed attempt a provider was asked again after
+        # (``maljan.llm.transient``), filed under the call that then answered.
+        self._retries: list[dict[str, str]] = []
         self._unreported: list[dict[str, str]] = []
         # Told of every recorded call as it is recorded, with the call's own
         # figures (``call_record``): the worker commits each one to the job's
@@ -316,6 +323,7 @@ class TokenLedger:
         fallback: str = "",
         call: str = "",
         estimated: dict[str, Any] | None = None,
+        retries: Sequence[str] = (),
     ) -> None:
         """One call: its reported usage, or ``None`` when the provider reported none.
 
@@ -323,7 +331,8 @@ class TokenLedger:
         report section — and is recorded for a call that reported no usage.
         ``estimated`` is a stated estimate of a call that reported none (an
         answer ended while it streamed): it is handed to the spend meter only,
-        and the call stays one that reported no usage here.
+        and the call stays one that reported no usage here. ``retries`` are
+        the failed attempts made before this call answered, one line each.
         """
         with self._lock:
             if usage is None:
@@ -354,14 +363,68 @@ class TokenLedger:
                     tally.cost_calls += 1
             if fallback:
                 self._fallbacks.append({"agent": agent, "model": model, "reason": fallback})
+            for reason in retries:
+                self._retries.append({"agent": agent, "model": model, "reason": str(reason)})
         if self.spend is not None:
             self.spend.settle(usage, model, call, estimated=estimated)
+        self._tell(call_record(usage, agent=agent, model=model, call=call))
+
+    def _tell(self, row: dict[str, Any]) -> None:
+        """Hand one record to the listener (``on_call``), where one listens. Never raises."""
         listener = self.on_call
         if listener is not None:
             try:
-                listener(call_record(usage, agent=agent, model=model, call=call))
+                listener(row)
             except Exception:  # noqa: BLE001 — recording never raises
                 pass
+
+    def add_retry(self, *, agent: str = "", model: str = "", reason: str = "") -> None:
+        """One retry of a model request after a transient provider failure (``llm.transient``).
+
+        Written when the retry is decided, so a call that is then lost, or
+        handed to the next model of a list, is counted as one that answers is.
+        Not a call: no call count moves. Handed to the listener as a record of
+        its own (``call`` is :data:`RETRY_RECORD`), so a worker that is killed
+        afterwards keeps it.
+        """
+        with self._lock:
+            self._retries.append({"agent": agent, "model": model, "reason": str(reason)})
+        self._tell(
+            {
+                "agent": str(agent),
+                "model": str(model),
+                "call": RETRY_RECORD,
+                "reported": False,
+                "reason": str(reason),
+            }
+        )
+
+    def charge_failed_attempt(
+        self,
+        usage: dict[str, Any] | None,
+        *,
+        agent: str = "",
+        model: str = "",
+        call: str = "",
+        estimated: dict[str, Any] | None = None,
+    ) -> None:
+        """One failed attempt the provider billed: settled on the spend meter, and recorded.
+
+        Not a call: no call count moves. The record carries the usage the error
+        reported, or the stated estimate it was charged at
+        (``estimated``), and goes to the listener so a worker killed
+        afterwards keeps what the attempt cost.
+        """
+        if self.spend is not None:
+            self.spend.settle(usage, model, call, estimated=estimated)
+        row = call_record(usage, agent=agent, model=model, call=call)
+        if usage is None and estimated:
+            row["estimated"] = {
+                "input_tokens": int(estimated.get("input_tokens") or 0),
+                "output_tokens": int(estimated.get("output_tokens") or 0),
+                "source": str(estimated.get("source") or ""),
+            }
+        self._tell(row)
 
     @property
     def input_tokens(self) -> int:
@@ -386,6 +449,10 @@ class TokenLedger:
             out.pop("models", None)
             out["agents"] = {name: tally.as_dict() for name, tally in sorted(self._agents.items())}
             out["fallbacks"] = [dict(row) for row in self._fallbacks]
+            # Present only when a provider was asked again, so a run without
+            # one reads as it always did.
+            if self._retries:
+                out["retries"] = [dict(row) for row in self._retries]
             # Which calls reported no usage, one row each, present only when
             # one did: ``unreported_calls`` is their count.
             if self._unreported:
@@ -412,6 +479,7 @@ def record_response_usage(
     try:
         from maljan.llm.fallback import turn_model
         from maljan.llm.stream_watch import estimated_usage
+        from maljan.llm.transient import retries_of
 
         answered_by, fallback = turn_model(response, model)
         usage = turn_usage(response)
@@ -425,7 +493,27 @@ def record_response_usage(
             # stated estimate for the spend ceiling; the reported figures stay
             # absent.
             estimated=None if usage is not None else estimated_usage(response),
+            retries=retries_of(response),
         )
+    except Exception:  # noqa: BLE001 — telemetry must never break analysis
+        return
+
+
+def record_lost_retries(
+    ledger: TokenLedger | None, exc: BaseException | None, *, agent: str = "", model: str = ""
+) -> None:
+    """The retries a lost call made before it was given up, onto ``ledger``. Never raises.
+
+    Only the ones no recorder of the job took (``llm.transient``): those are
+    rows already, written when each retry was decided.
+    """
+    if ledger is None or exc is None:
+        return
+    try:
+        from maljan.llm.transient import retries_given_up
+
+        for reason in retries_given_up(exc):
+            ledger.add_retry(agent=agent, model=model, reason=reason)
     except Exception:  # noqa: BLE001 — telemetry must never break analysis
         return
 

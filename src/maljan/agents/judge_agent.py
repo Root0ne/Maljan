@@ -56,7 +56,6 @@ from maljan.agents.base_agent import (
     nudge_turns,
     recursion_limit,
     request_chars,
-    retry_on_connection_error,
     run_on_agent_loop,
     synthesis_budget_chars,
 )
@@ -87,6 +86,7 @@ from maljan.llm.context_window import (
     window_full_error,
 )
 from maljan.llm.generation_rate import GenerationRates, ModelCallDeadline, model_name_of
+from maljan.llm.transient import as_call
 from maljan.memory.attck_loader import technique_label
 from maljan.memory.long_term_memory import a_past_case_technique
 from maljan.memory.technique_cards import technique_card_lines
@@ -1922,11 +1922,7 @@ class JudgeAgent(BudgetMeter):
             held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
             try:
                 response = await asyncio.wait_for(
-                    retry_on_connection_error(
-                        lambda: self.llm.ainvoke(messages_pre, **held),
-                        what="Judge no-tools path",
-                        log=self.logger,
-                    ),
+                    as_call("Judge no-tools path", self.llm.ainvoke(messages_pre, **held)),
                     timeout=None if no_tools_timeout is None else float(no_tools_timeout),
                 )
                 self._record_usage(response, call="no-tools answer")
@@ -2574,10 +2570,8 @@ class JudgeAgent(BudgetMeter):
                     response = None
                 else:
                     response = await asyncio.wait_for(
-                        retry_on_connection_error(
-                            lambda: self.llm.ainvoke(direct_messages, **fast_held),
-                            what="Mediator fast path",
-                            log=self.logger,
+                        as_call(
+                            "Mediator fast path", self.llm.ainvoke(direct_messages, **fast_held)
                         ),
                         timeout=fast_timeout,
                     )
@@ -2827,11 +2821,7 @@ class JudgeAgent(BudgetMeter):
         held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
         try:
             response = await asyncio.wait_for(
-                retry_on_connection_error(
-                    lambda: self.llm.ainvoke(messages, **held),
-                    what="Mediator asked once more",
-                    log=self.logger,
-                ),
+                as_call("Mediator asked once more", self.llm.ainvoke(messages, **held)),
                 timeout=timeout,
             )
             self._record_usage(response, call="mediation")
@@ -2909,14 +2899,11 @@ class JudgeAgent(BudgetMeter):
             return reasoning_text
         held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
         try:
-            # Retried on a dropped connection as the fast path is: a socket that
-            # closed is not an answer that left the block out.
+            # A provider saying "not now" is asked again inside the model call
+            # (``llm.transient``): a socket that closed is not an answer that
+            # left the block out.
             response = await asyncio.wait_for(
-                retry_on_connection_error(
-                    lambda: self.llm.ainvoke(turns, **held),
-                    what="Mediator block question",
-                    log=self.logger,
-                ),
+                as_call("Mediator block question", self.llm.ainvoke(turns, **held)),
                 timeout,
             )
             self._record_usage(response, call="mediation block question")
@@ -3070,11 +3057,7 @@ class JudgeAgent(BudgetMeter):
             bound = self._spend_admits("verdict", turns, slot=verdict_slot)
             held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
             try:
-                answer = await retry_on_connection_error(
-                    lambda: self.llm.ainvoke(turns, **held),
-                    what="Judge verdict",
-                    log=self.logger,
-                )
+                answer = await as_call("Judge verdict", self.llm.ainvoke(turns, **held))
                 self._record_usage(answer, call="verdict")
             finally:
                 self._spend_release(verdict_slot)
@@ -3545,11 +3528,7 @@ class JudgeAgent(BudgetMeter):
             if structured:
                 try:
                     runnable = self.llm.with_structured_output(TechniqueAnswer, include_raw=True)
-                    result = await retry_on_connection_error(
-                        lambda: runnable.ainvoke(messages),
-                        what="Judge technique question",
-                        log=self.logger,
-                    )
+                    result = await as_call("Judge technique question", runnable.ainvoke(messages))
                 except (TimeoutError, asyncio.CancelledError):
                     raise
                 except Exception as exc:  # noqa: BLE001 — refused schema: asked once in text
@@ -3583,11 +3562,7 @@ class JudgeAgent(BudgetMeter):
                 self._spend_admits(
                     "technique question", messages, slot=question_slot, holdable=False
                 )
-            answer = await retry_on_connection_error(
-                lambda: self.llm.ainvoke(messages),
-                what="Judge technique question",
-                log=self.logger,
-            )
+            answer = await as_call("Judge technique question", self.llm.ainvoke(messages))
             self._record_usage(answer, call=TECHNIQUE_QUESTION_CALL)
             record_judge_response(getattr(self, "truncation_ledger", None), answer, cap=cap)
             return answer, None

@@ -277,9 +277,13 @@ class OllamaProvider:
         # No request sends a tool call without a ``tool`` message after it,
         # whatever the history it was built from (``maljan.llm.tool_replies``).
         from maljan.llm.tool_replies import with_answered_tool_calls
+        from maljan.llm.transient import with_transient_retries
 
+        # A server saying "not now" is asked again, a whole request at a time,
+        # by the policy every provider's model uses (``maljan.llm.transient``).
         chat_class = with_answered_tool_calls(
-            with_sized_request_timeout(with_watched_streams(ChatOllama)), "ollama"
+            with_transient_retries(with_sized_request_timeout(with_watched_streams(ChatOllama))),
+            "ollama",
         )
         built = chat_class(
             model=model,

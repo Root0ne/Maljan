@@ -1773,6 +1773,9 @@ PROMPTS: dict[str, str] = {
     "a tool answer the conversation had no room for, as told and as recorded": " ".join(
         [no_room_sentence(12_345), not_shown_record(12_345), FUNCTION_NOT_SHOWN]
     ),
+    "analyst cut-at-cap question for an answer cut while still reasoning": (
+        analyst_cut_violation(4096, "").message
+    ),
     "analyst cut-at-cap question naming a chunk": analyst_cut_violation(
         4096, "CLAIM: The file opens a window.\nCLAIM: The fi", chunk="chunk 1 of 2"
     ).message,

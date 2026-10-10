@@ -1123,9 +1123,11 @@ class OpenAIProvider:
         # ReAct budget). 1800s (2026-07-13) stays >= the longest agent
         # ``wait_for`` hard cap: the deep-analysis restore raised static's
         # per-chunk budget to 1500s (hard cap timeout+30 = 1530s), plus decode
-        # headroom on a cold-cache local 35B. ``max_retries=0`` keeps a single
-        # attempt regardless of size — the daemon-thread cap in
-        # ``execute_tool_loop`` is the only retry policy we want.
+        # headroom on a cold-cache local 35B. ``max_retries=0`` stops the SDK
+        # retrying underneath Maljan: its own retries would make a *stalled*
+        # request three times over its timeout, and would stack on Maljan's
+        # retry. A provider saying "not now" is asked again by the one policy
+        # (``maljan.llm.transient``), which never retries a stall.
         from maljan.llm.registry import PROVIDER_REQUEST_TIMEOUT_SECONDS
 
         build_kwargs.setdefault("request_timeout", PROVIDER_REQUEST_TIMEOUT_SECONDS)
@@ -1139,6 +1141,7 @@ class OpenAIProvider:
                 build_kwargs["http_async_client"] = private
 
         from maljan.llm.generation_rate import with_sized_request_timeout
+        from maljan.llm.transient import with_transient_retries
 
         # Every request carries a timeout sized for its own output cap once the
         # model's pace is measured; the client's stands until then.
@@ -1153,6 +1156,9 @@ class OpenAIProvider:
             # reaches them the way the model's own does. Its answer is read
             # as a stream and joined into the one it would have sent whole.
             chat_class = with_streamed_llama_answers(with_per_request_llama_cap(chat_class))
+        # A provider saying "not now" is asked again, a whole request at a
+        # time, as the Anthropic provider's model is (``maljan.llm.transient``).
+        chat_class = with_transient_retries(chat_class)
         # Last, over the dialect's own changes: no request sends a tool call
         # without its reply, whatever the history it was built from — the one
         # rule every provider applies (``maljan.llm.tool_replies``).
@@ -1366,6 +1372,11 @@ def _with_standard_retry(
             from maljan.llm.generation_rate import carry_rate_meter
 
             carry_rate_meter(model_obj, replacement)
+            # And the job's retry recorder, so the healed model's retries are
+            # rows and its failed attempts charged, as the original's were.
+            from maljan.llm.transient import carry_retry_recorder
+
+            carry_retry_recorder(model_obj, replacement)
             healed.append(replacement)
         _close_sync_client(model_obj)
         _announce_healed(model_obj, replacement)
