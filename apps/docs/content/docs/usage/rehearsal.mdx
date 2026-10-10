@@ -215,7 +215,16 @@ closed: what it cannot confirm is a failure.
 - The narrative was written by the model.
 - The token totals are the provider-reported usage, call for call, and no call
   is unreported.
-- The spend equals that usage priced from the vendored table.
+- Each call has its per-call usage record (the `model_usage` events, and
+  `GET /jobs/{id}/usage` on the stack), one for every answered call and one for
+  every charged failed attempt. Each record carries the call's usage, and its
+  charge (`priced_usd`) equals that usage priced from the vendored table.
+  - A stream broken after the Anthropic `message_start` is charged the prompt
+    usage that event reported. Only its output part may be an estimate
+    (`estimated_part` `output`), and nothing else differs.
+  - No record is left over, none is uncharged, and none repriced.
+- The run summary's spend equals the records' charges, and that usage priced
+  plus the stated output estimates.
 - The STIX bundles and the markdown are rendered.
 - No claim is lost: every claim the model wrote is in an answer in force or
   recorded as dropped, and every claim in force is discussed in the report's

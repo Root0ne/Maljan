@@ -204,6 +204,15 @@ class StackClient:
                 return out
             since = max(seqs)
 
+    def usage(self, job_id: str) -> dict[str, Any]:
+        """The job's usage totals (``GET /jobs/{id}/usage``), or the error that kept them."""
+        try:
+            answer = self._http.get(f"/jobs/{job_id}/usage")
+            answer.raise_for_status()
+            return dict(answer.json())
+        except Exception as exc:  # noqa: BLE001 — an unread total fails the spend check
+            return {"error": f"{type(exc).__name__}: {exc}"}
+
     def report(self, job_id: str) -> dict[str, Any] | None:
         answer = self._http.get(f"/reports/job/{job_id}")
         if answer.status_code == 404:
@@ -612,6 +621,7 @@ def record_from_stack(
         probe=dict(probe or {}),
         scenario_params=scenario_params,
         incomplete_reason=str(report.get("incomplete_reason") or ""),
+        usage_totals=client.usage(job_id),
         elapsed_s=elapsed,
     )
 

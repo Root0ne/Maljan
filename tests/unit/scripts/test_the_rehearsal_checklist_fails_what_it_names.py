@@ -26,6 +26,8 @@ from scripts.rehearsal.checklist import (
     section_statuses,
     signature,
 )
+from scripts.rehearsal.checklist import _price_rows as price_rows
+from scripts.rehearsal.checklist import _stub_cost as stub_cost
 
 MODEL = "deepseek-v4-flash"
 NOW = time.time()
@@ -62,6 +64,27 @@ def _stub_log() -> list[dict[str, Any]]:
     for n, section in enumerate(COMPOSED, 4):
         log.append(_log(n, "composer", section=section, content=True, deliberately_empty=False))
     return log
+
+
+def _usage_event(entry: dict[str, Any], **extra: Any) -> dict[str, Any]:
+    """The per-call usage record the product writes for one answered stub call."""
+    data = {
+        "agent": entry["role"],
+        "model": entry["model"],
+        "call": "loop turn",
+        "reported": True,
+        "input_tokens": entry["input_tokens"],
+        "output_tokens": entry["output_tokens"],
+        "cached_input_tokens": entry["cache_read_tokens"],
+        "priced_usd": stub_cost(entry, price_rows()),
+        "price_source": "vendored table",
+    }
+    data.update(extra)
+    return {"type": "model_usage", "data": data}
+
+
+def _usage_events(log: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [_usage_event(e) for e in log if e.get("status") == 200]
 
 
 def _report() -> dict[str, Any]:
@@ -125,6 +148,7 @@ def _record(**changes: Any) -> RunRecord:
             {"type": "stage_finished", "stage": "analysis"},
             {"type": "stage_started", "stage": "report"},
             {"type": "stage_finished", "stage": "report"},
+            *_usage_events(log),
         ],
         stub_log=log,
         expected={"model.static": MODEL, "effort.static": "high", "max_steps": 40},
@@ -188,6 +212,10 @@ class TestTheHolesAGreenRunCouldHide:
         record = _record()
         record.malware_report["technical_analysis"].pop("discovery")
         record.stub_log = [e for e in record.stub_log if e.get("section") != "discovery"]
+        record.events = [
+            *(e for e in record.events if e.get("type") != "model_usage"),
+            *_usage_events(record.stub_log),
+        ]
         record.run_summary["tokens"].update(
             llm_calls=len(record.stub_log),
             input_tokens=1000 * len(record.stub_log),
@@ -302,6 +330,60 @@ class TestTheHolesAGreenRunCouldHide:
     def test_spend_that_is_not_the_usage_priced(self) -> None:
         record = _record()
         record.run_summary["spend"]["spent_usd"] *= 2
+        assert _failed(record) == ["tokens and spend as the provider reported them"]
+
+    def test_an_answered_call_with_no_usage_record(self) -> None:
+        record = _record()
+        first = next(e for e in record.events if e.get("type") == "model_usage")
+        record.events.remove(first)
+        (check,) = [c for c in check_run(record) if not c.ok]
+        assert check.name == "tokens and spend as the provider reported them"
+        assert "per-call usage record(s), the model answered" in check.detail
+        assert "no usage record carries its reported usage" in check.detail
+
+    def test_a_usage_record_charged_apart_from_its_usage(self) -> None:
+        record = _record()
+        usage = next(e for e in record.events if e.get("type") == "model_usage")
+        usage["data"]["priced_usd"] *= 1.5
+        assert _failed(record) == ["tokens and spend as the provider reported them"]
+
+    def test_a_usage_record_with_no_charge(self) -> None:
+        record = _record()
+        usage = next(e for e in record.events if e.get("type") == "model_usage")
+        del usage["data"]["priced_usd"]
+        assert _failed(record) == ["tokens and spend as the provider reported them"]
+
+    def test_an_answered_call_charged_by_estimate(self) -> None:
+        record = _record()
+        usage = next(e for e in record.events if e.get("type") == "model_usage")
+        usage["data"].update(estimated_usd=0.0001, estimated_part="output")
+        assert _failed(record) == ["tokens and spend as the provider reported them"]
+
+    def test_a_usage_record_no_call_accounts_for(self) -> None:
+        record = _record()
+        record.events.append(_usage_event(_log(99, "judge", input_tokens=7, output_tokens=3)))
+        assert _failed(record) == ["tokens and spend as the provider reported them"]
+
+    def test_a_retry_record_is_not_a_call(self) -> None:
+        record = _record()
+        record.events.append(
+            {"type": "model_usage", "data": {"call": "retry", "reported": False, "reason": "x"}}
+        )
+        assert _failed(record) == []
+
+    def test_usage_totals_that_are_not_the_records(self) -> None:
+        record = _record()
+        spent = record.run_summary["spend"]["spent_usd"]
+        calls = len(record.stub_log)
+        record.usage_totals = {"calls": calls, "spend": {"spent_usd": spent, "repriced_calls": 0}}
+        assert _failed(record) == []
+        record.usage_totals["spend"]["spent_usd"] = spent * 2
+        assert _failed(record) == ["tokens and spend as the provider reported them"]
+        record.usage_totals = {"calls": calls - 1, "spend": {"spent_usd": spent}}
+        assert _failed(record) == ["tokens and spend as the provider reported them"]
+        record.usage_totals = {"calls": calls, "spend": {"spent_usd": spent, "repriced_calls": 2}}
+        assert _failed(record) == ["tokens and spend as the provider reported them"]
+        record.usage_totals = {"error": "HTTPStatusError: 404"}
         assert _failed(record) == ["tokens and spend as the provider reported them"]
 
     def test_a_run_summary_with_no_spend(self) -> None:
@@ -512,3 +594,88 @@ class TestRepeatedRuns:
         second.markdown = "# Report\n\nVerdict: Suspicious\n"
         signatures = [signature(r, check_run(r)) for r in (first, second)]
         assert any("run 2 differs from run 1 in verdict" in d for d in compare(signatures))
+
+
+class TestABrokenStreamIsChargedItsReportedPrompt:
+    """A stream broken after ``message_start`` is charged its prompt, the output estimated."""
+
+    @staticmethod
+    def _broken(estimated_output: float = 0.00002, **record_extra: Any) -> RunRecord:
+        record = _record(scenario="stream_error", api="anthropic")
+        broken = _log(
+            len(record.stub_log) + 1,
+            "analyst",
+            api="anthropic",
+            stream=True,
+            fault="stream_error",
+            stream_error=True,
+            input_tokens=4000,
+            output_tokens=300,
+            cache_read_tokens=1000,
+        )
+        record.stub_log.append(broken)
+        prompt = stub_cost(broken, price_rows(), prompt_only=True)
+        data = {
+            "agent": "static",
+            "model": MODEL,
+            "call": "failed attempt",
+            "reported": True,
+            "input_tokens": 4000,
+            "cached_input_tokens": 1000,
+            "output_tokens": 0,
+            "priced_usd": prompt + estimated_output,
+            "price_source": "vendored table",
+            "estimated_usd": estimated_output,
+            "estimated_part": "output",
+            "estimated": {"input_tokens": 0, "output_tokens": 12, "source": "streamed"},
+        }
+        data.update(record_extra)
+        record.events.append({"type": "model_usage", "data": data})
+        usd, _ = priced_usage(record)
+        record.run_summary["spend"] = {
+            "spent_usd": round(usd + float(data["estimated_usd"]), 6),
+            "estimated_usd": round(float(data["estimated_usd"]), 6),
+        }
+        return record
+
+    @staticmethod
+    def _detail(record: RunRecord) -> str:
+        (check,) = [c for c in check_run(record) if c.name.startswith("tokens and spend")]
+        return check.detail if not check.ok else ""
+
+    def test_its_prompt_priced_and_its_output_estimated_passes(self) -> None:
+        record = self._broken()
+        assert "tokens and spend as the provider reported them" not in _failed(record)
+        # The estimate may be any size: it is the output the client never received.
+        record = self._broken(estimated_output=0.004)
+        assert "tokens and spend as the provider reported them" not in _failed(record)
+
+    def test_a_prompt_charged_apart_from_its_reported_usage_fails(self) -> None:
+        record = self._broken(input_tokens=4000)
+        data = record.events[-1]["data"]
+        data["priced_usd"] += 0.001
+        record.run_summary["spend"]["spent_usd"] += 0.001
+        assert "beyond its estimate" in self._detail(record)
+
+    def test_a_whole_estimate_fails(self) -> None:
+        record = self._broken(estimated_part="input and output")
+        assert "only 'output' may be estimated" in self._detail(record)
+
+    def test_a_broken_stream_left_uncharged_fails(self) -> None:
+        record = self._broken()
+        record.events.pop()
+        record.run_summary["spend"]["spent_usd"] = round(priced_usage(record)[0], 6)
+        record.run_summary["spend"].pop("estimated_usd")
+        assert "0 failed-attempt record(s), 1 broken stream(s)" in self._detail(record)
+
+    def test_the_summary_s_estimate_must_be_the_records(self) -> None:
+        record = self._broken()
+        record.run_summary["spend"]["estimated_usd"] = 0.0
+        assert "the records' output estimates" in self._detail(record)
+
+    def test_an_openai_broken_stream_reports_nothing_and_is_owed_nothing(self) -> None:
+        record = self._broken()
+        record.stub_log[-1]["api"] = "openai"
+        record.events.pop()
+        record.run_summary["spend"] = {"spent_usd": round(priced_usage(record)[0], 6)}
+        assert "tokens and spend as the provider reported them" not in _failed(record)

@@ -21,7 +21,10 @@ pass.
 * the narrative came from a model answer;
 * the run summary's token totals are the provider-reported usage call for
   call, no call is unreported, and its spend equals that usage priced from
-  the vendored table;
+  the vendored table; every answered call, and every broken stream whose
+  prompt usage was reported, has one per-call usage record whose charge is
+  that usage priced, a broken stream's estimated output the only part that
+  may differ, and the job's usage totals (stack runs) are those records;
 * the STIX bundles and the markdown are rendered;
 * no claim is lost: every claim the stub's analysts wrote is in an answer in
   force or recorded as dropped, and every claim in force is discussed in the
@@ -123,8 +126,15 @@ BODY_FIELDS = (
 
 # The share of a run's deadline it must finish inside.
 DEADLINE_MARGIN_SHARE = 0.2
-# Faults whose answer never reached the client whole: no usage is owed for them.
-_UNBILLED = {"stream_error"}
+# The fault whose streamed answer breaks off before it ends. No answer
+# reached the client, so it is no call; on the Anthropic wire its
+# ``message_start`` had already reported the prompt's usage, and the provider
+# bills that prompt: the product charges it as a failed attempt, the output
+# it never received estimated.
+_BROKEN = "stream_error"
+# The relative difference a recorded charge may have from the stub's usage
+# priced here: rounding of the same table's prices, nothing more.
+_PRICE_TOLERANCE = 0.005
 
 
 @dataclass
@@ -165,6 +175,9 @@ class RunRecord:
     # The stored report's own note that it was kept from a run that did not
     # finish; empty on a completed run's report and where no report was stored.
     incomplete_reason: str = ""
+    # The job's usage totals as ``GET /jobs/{id}/usage`` answered them (stack
+    # runs); empty where the run was not read from the API.
+    usage_totals: dict[str, Any] = field(default_factory=dict)
     elapsed_s: float = 0.0
 
 
@@ -411,31 +424,190 @@ def _price_rows() -> dict[str, Any]:
     return table_prices()
 
 
+def _billed(record: RunRecord) -> list[dict[str, Any]]:
+    """The calls the model answered whole: each one a call the run must count and charge."""
+    return [e for e in _answered(record) if e.get("fault") != _BROKEN]
+
+
+def _broken_and_reported(record: RunRecord) -> list[dict[str, Any]]:
+    """The broken streams whose prompt usage the stub reported before the break."""
+    return [
+        e
+        for e in _answered(record)
+        if e.get("fault") == _BROKEN and e.get("api") == "anthropic" and e.get("stream")
+    ]
+
+
+def _stub_cost(entry: dict[str, Any], rows: dict[str, Any], *, prompt_only: bool = False) -> float:
+    """What one stub call's reported usage costs at the vendored prices; ``-1`` when unpriced."""
+    price = rows.get(str(entry.get("model") or "").lower())
+    if price is None:
+        return -1.0
+    when = datetime.fromtimestamp(float(entry.get("at") or 0), tz=UTC)
+    usage = {
+        "input_tokens": int(entry.get("input_tokens") or 0),
+        "cached_input_tokens": int(entry.get("cache_read_tokens") or 0),
+        "cache_write_input_tokens": int(entry.get("cache_write_5m_tokens") or 0)
+        + int(entry.get("cache_write_1h_tokens") or 0),
+        "cache_write_1h_input_tokens": int(entry.get("cache_write_1h_tokens") or 0),
+        "output_tokens": 0 if prompt_only else int(entry.get("output_tokens") or 0),
+    }
+    return float(price.at(when).cost(usage))
+
+
 def priced_usage(record: RunRecord) -> tuple[float, list[str]]:
-    """What the stub's reported usage costs at the vendored prices, and the models unpriced."""
+    """What the stub's reported usage costs at the vendored prices, and the models unpriced.
+
+    Every call answered whole, at its whole usage, and every broken stream
+    that reported its prompt's usage, at that prompt alone: the output part
+    of a broken stream is the product's estimate and is added from its record.
+    """
     rows = _price_rows()
     total = 0.0
     unpriced: list[str] = []
-    for entry in _answered(record):
-        if entry.get("fault") in _UNBILLED:
-            continue
-        model = str(entry.get("model") or "").lower()
-        price = rows.get(model)
-        if price is None:
+    for entry, prompt_only in [(e, False) for e in _billed(record)] + [
+        (e, True) for e in _broken_and_reported(record)
+    ]:
+        cost = _stub_cost(entry, rows, prompt_only=prompt_only)
+        if cost < 0:
+            model = str(entry.get("model") or "").lower()
             if model not in unpriced:
                 unpriced.append(model)
             continue
-        when = datetime.fromtimestamp(float(entry.get("at") or 0), tz=UTC)
-        usage = {
-            "input_tokens": int(entry.get("input_tokens") or 0),
-            "cached_input_tokens": int(entry.get("cache_read_tokens") or 0),
-            "cache_write_input_tokens": int(entry.get("cache_write_5m_tokens") or 0)
-            + int(entry.get("cache_write_1h_tokens") or 0),
-            "cache_write_1h_input_tokens": int(entry.get("cache_write_1h_tokens") or 0),
-            "output_tokens": int(entry.get("output_tokens") or 0),
-        }
-        total += price.at(when).cost(usage)
+        total += cost
     return total, unpriced
+
+
+def usage_records(record: RunRecord) -> list[dict[str, Any]]:
+    """The run's per-call usage records (``model_usage`` events), retries decided left out."""
+    from maljan.core.token_ledger import RETRY_RECORD
+
+    out = []
+    for event in record.events:
+        if str(event.get("type")) != "model_usage":
+            continue
+        data = event.get("data")
+        row = dict(data) if isinstance(data, dict) else dict(event)
+        if str(row.get("call") or "") != RETRY_RECORD:
+            out.append(row)
+    return out
+
+
+def _figure(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value)
+
+
+def _close(a: float, b: float) -> bool:
+    return abs(a - b) <= 1e-9 + _PRICE_TOLERANCE * max(abs(a), abs(b))
+
+
+def _take(rows: list[dict[str, Any]], key: tuple[int, ...], key_of: Any) -> dict[str, Any] | None:
+    for index, row in enumerate(rows):
+        if key_of(row) == key:
+            return rows.pop(index)
+    return None
+
+
+def _record_problems(record: RunRecord) -> tuple[list[str], float]:
+    """Each per-call record held to the stub call it records; and the estimated part summed.
+
+    One record for every call answered whole, carrying that call's usage and
+    a charge equal to it priced from the vendored table; one failed-attempt
+    record for every broken stream whose prompt usage was reported, carrying
+    that prompt's usage and a charge whose part beyond the prompt priced is
+    its stated output estimate (``estimated_part`` ``output``) and nothing
+    else. No other record, and no record without a charge.
+    """
+    from maljan.core.spend import ESTIMATED_OUTPUT
+    from maljan.llm.transient import FAILED_ATTEMPT_CALL
+
+    rows = _price_rows()
+    problems: list[str] = []
+    estimated = 0.0
+    records = usage_records(record)
+    calls = [r for r in records if str(r.get("call") or "") != FAILED_ATTEMPT_CALL]
+    failed = [r for r in records if str(r.get("call") or "") == FAILED_ATTEMPT_CALL]
+    billed = _billed(record)
+    broken = _broken_and_reported(record)
+    if len(calls) != len(billed):
+        problems.append(
+            f"{len(calls)} per-call usage record(s), the model answered {len(billed)} call(s)"
+        )
+    if len(failed) != len(broken):
+        problems.append(
+            f"{len(failed)} failed-attempt record(s), {len(broken)} broken stream(s) "
+            "reported their prompt's usage"
+        )
+
+    def record_key(row: dict[str, Any]) -> tuple[int, ...]:
+        return (
+            int(row.get("input_tokens") or 0),
+            int(row.get("output_tokens") or 0),
+            int(row.get("cached_input_tokens") or 0),
+        )
+
+    def prompt_key(row: dict[str, Any]) -> tuple[int, ...]:
+        return (int(row.get("input_tokens") or 0), int(row.get("cached_input_tokens") or 0))
+
+    unmatched = list(calls)
+    for entry in billed:
+        key = (
+            int(entry.get("input_tokens") or 0),
+            int(entry.get("output_tokens") or 0),
+            int(entry.get("cache_read_tokens") or 0),
+        )
+        row = _take(unmatched, key, record_key)
+        label = f"call {entry.get('n', '?')} ({entry.get('role', '')})"
+        if row is None:
+            problems.append(f"{label}: no usage record carries its reported usage {key}")
+            continue
+        charged = _figure(row.get("priced_usd"))
+        cost = _stub_cost(entry, rows)
+        if charged is None:
+            problems.append(f"{label}: its usage record carries no charge")
+        elif cost >= 0 and not _close(charged, cost):
+            problems.append(
+                f"{label}: charged {charged:.8f} USD, its reported usage priced {cost:.8f} USD"
+            )
+        if row.get("estimated_part") or _figure(row.get("estimated_usd")):
+            problems.append(f"{label}: charged by estimate though its usage was reported")
+    unmatched_failed = list(failed)
+    for entry in broken:
+        prompt_of = (int(entry.get("input_tokens") or 0), int(entry.get("cache_read_tokens") or 0))
+        row = _take(unmatched_failed, prompt_of, prompt_key)
+        label = f"broken call {entry.get('n', '?')} ({entry.get('role', '')})"
+        if row is None:
+            problems.append(
+                f"{label}: no failed-attempt record carries its reported prompt {prompt_of}"
+            )
+            continue
+        charged = _figure(row.get("priced_usd"))
+        by_estimate = _figure(row.get("estimated_usd"))
+        prompt = _stub_cost(entry, rows, prompt_only=True)
+        if charged is None or by_estimate is None:
+            problems.append(f"{label}: its record carries no charge or no estimated part")
+            continue
+        if str(row.get("estimated_part") or "") != ESTIMATED_OUTPUT:
+            problems.append(
+                f"{label}: estimated part {row.get('estimated_part')!r}, "
+                f"only {ESTIMATED_OUTPUT!r} may be estimated"
+            )
+        if by_estimate < 0 or by_estimate > charged:
+            problems.append(f"{label}: estimated {by_estimate:.8f} of {charged:.8f} USD")
+        elif prompt >= 0 and not _close(charged - by_estimate, prompt):
+            problems.append(
+                f"{label}: charged {charged - by_estimate:.8f} USD beyond its estimate, "
+                f"its reported prompt priced {prompt:.8f} USD"
+            )
+        estimated += by_estimate
+    for row in unmatched + unmatched_failed:
+        problems.append(
+            f"a usage record no answered or charged call accounts for: {row.get('call')!r} "
+            f"by {row.get('agent')!r}, {record_key(row)}"
+        )
+    return problems, estimated
 
 
 def _check_tokens(record: RunRecord) -> Check:
@@ -447,7 +619,7 @@ def _check_tokens(record: RunRecord) -> Check:
     unreported = int(tokens.get("unreported_calls") or 0)
     sent = int(tokens.get("input_tokens") or 0)
     got = int(tokens.get("output_tokens") or 0)
-    billed = [e for e in _answered(record) if e.get("fault") not in _UNBILLED]
+    billed = _billed(record)
     problems = []
     if unreported:
         problems.append(f"{unreported} call(s) unreported")
@@ -462,19 +634,59 @@ def _check_tokens(record: RunRecord) -> Check:
     usd, unpriced = priced_usage(record)
     if unpriced:
         problems.append(f"no vendored price for {', '.join(unpriced)}")
+    per_call, estimated = _record_problems(record)
+    problems += per_call
+    owed = usd + estimated
+    recorded = sum(_figure(r.get("priced_usd")) or 0.0 for r in usage_records(record))
     spend = summary.get("spend")
     spent_said = ""
     if isinstance(spend, dict) and spend.get("spent_usd") is not None:
         spent = float(spend.get("spent_usd") or 0.0)
-        if abs(spent - usd) > 1e-6 + 0.005 * max(usd, spent):
-            problems.append(f"spend {spent:.6f} USD, the usage priced comes to {usd:.6f} USD")
+        if abs(spent - owed) > 1e-6 + _PRICE_TOLERANCE * max(owed, spent):
+            problems.append(f"spend {spent:.6f} USD, the usage priced comes to {owed:.6f} USD")
+        if abs(spent - recorded) > 1e-6 + _PRICE_TOLERANCE * max(recorded, spent):
+            problems.append(
+                f"spend {spent:.6f} USD, the per-call records charged {recorded:.6f} USD"
+            )
+        said_estimate = float(spend.get("estimated_usd") or 0.0)
+        if abs(said_estimate - estimated) > 1e-6:
+            problems.append(
+                f"spend estimated {said_estimate:.6f} USD, the records' output estimates "
+                f"come to {estimated:.6f} USD"
+            )
         spent_said = f", spend {spent:.6f} USD"
+        if estimated:
+            spent_said += f" of which {estimated:.6f} USD is the estimated output of broken streams"
     else:
         problems.append("the run summary carries no spend to compare with the usage priced")
+    problems += _totals_problems(record, recorded)
     detail = "; ".join(problems) or (
-        f"{calls} calls, {sent} input and {got} output tokens, {usd:.6f} USD priced{spent_said}"
+        f"{calls} calls, {sent} input and {got} output tokens, {owed:.6f} USD priced{spent_said}"
     )
     return Check("tokens and spend as the provider reported them", not problems, detail)
+
+
+def _totals_problems(record: RunRecord, recorded: float) -> list[str]:
+    """``GET /jobs/{id}/usage``, where the run was read from the API, held to the records."""
+    totals = record.usage_totals
+    if not totals:
+        return []
+    if totals.get("error"):
+        return [f"the job's usage totals could not be read: {totals['error']}"]
+    problems = []
+    held = totals.get("spend")
+    spend: dict[str, Any] = held if isinstance(held, dict) else {}
+    said = _figure(spend.get("spent_usd"))
+    if said is None or abs(said - recorded) > 1e-6 + _PRICE_TOLERANCE * max(said, recorded):
+        problems.append(f"the job's usage totals say {said} USD, the records {recorded:.6f} USD")
+    if int(spend.get("repriced_calls") or 0):
+        problems.append(f"the job's usage totals repriced {spend['repriced_calls']} call(s)")
+    if int(totals.get("calls") or 0) != len(_billed(record)):
+        problems.append(
+            f"the job's usage totals count {totals.get('calls')} call(s), "
+            f"the model answered {len(_billed(record))}"
+        )
+    return problems
 
 
 def _check_rendered(record: RunRecord) -> Check:

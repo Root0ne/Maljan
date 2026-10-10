@@ -287,6 +287,8 @@ class _Api:
                 {"seq": 3, "type": "stage_finished", "data": {"stage": "analysis"}},
             ]
             return httpx.Response(200, json={"events": events, "count": 3})
+        if path == f"/jobs/{JOB}/usage":
+            return httpx.Response(200, json={"calls": 0, "spend": {"spent_usd": 0.0}})
         if path == f"/reports/job/{JOB}":
             return httpx.Response(
                 200,
@@ -330,6 +332,7 @@ def test_submits_waits_and_reads_the_job_back_from_its_events() -> None:
     assert record.claims_in_force == {"static": ["It talks HTTP."]}
     assert record.stix_bundle == {"type": "bundle", "objects": [{}]}
     assert record.markdown.startswith("# Report")
+    assert record.usage_totals == {"calls": 0, "spend": {"spent_usd": 0.0}}
 
 
 def test_a_job_still_running_when_the_wait_runs_out_is_cancelled() -> None:
