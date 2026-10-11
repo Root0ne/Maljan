@@ -597,6 +597,7 @@ def _choice_sources(
     from maljan.llm.provider_base import provider_names
     from maljan.memory.store_factory import memory_backends
     from maljan.providers.registry import sandbox_provider_ids, static_provider_ids
+    from maljan.providers.sandbox.readers import choosable_reader_ids
 
     return {
         # Declared for completeness and for the agent definitions.
@@ -614,6 +615,7 @@ def _choice_sources(
         "profiles": list(profiles),
         "memory_backends": list(memory_backends()),
         "llm_providers": provider_names(),
+        "sandbox_report_readers": choosable_reader_ids(),
     }
 
 

@@ -1,16 +1,16 @@
 """The job's sandbox report as sections of items, each item with an id a claim can cite.
 
-The report the run holds — the CAPE-shaped dict every sandbox reader takes,
-whichever sandbox produced it (``providers.cape_view``) — is read into fixed
-sections: the processes, their API calls, the file operations, the registry
-operations, the network rows, the signatures, the dropped files, the mutexes,
-the executed commands, the services, the generic events, the per-process API
-counts, the platform channels, the screenshots, and the blocks a raw CAPE
-report adds (its extracted configurations and payloads, the resolved API
-names, the Suricata alerts and the process dumps; its process tree gives
-parent links, not items of its own). Nothing is summarised,
-ranked or labelled: an item is one row of the report, answered with the
-report's own fields and the path it came from.
+The report the run holds — the neutral sandbox report's document
+(``schemas.sandbox_document``), whichever sandbox and reader produced it — is
+read into fixed sections, each from the document's parts by name: the
+processes, their API calls, the file operations, the registry operations, the
+network rows, the signatures, the dropped files, the mutexes, the executed
+commands, the services, the generic events, the per-process API counts, the
+platform channels, the screenshots, the configurations and payloads the
+sandbox extracted, the resolved API names, the intrusion detection alerts and
+the process dumps (the process tree gives parent links, not items of its
+own). Nothing is summarised, ranked or labelled: an item is one row of the
+report, answered with the report's own fields and the path it came from.
 
 Each item has an id that is stable for one report:
 
@@ -26,10 +26,10 @@ Each item has an id that is stable for one report:
   the ``sandbox_network`` view lists them in, so its rows and the items agree).
 
 A section the report does not carry has no count but a ``no:`` sentence
-saying why: the report lists it as unavailable from its sandbox (a Triage
-report has no registry timeline and no API calls), or the report holds none
-of the lists the section is read from, or the reader that produced the
-report can fill none of them (``schemas.sandbox_report.normaliser_reading``).
+saying why: the report lists it as unavailable from its sandbox (a sandbox
+that records no registry timeline or no API calls says so), or the report
+holds none of the lists the section is read from, or the reader that produced
+the report can fill none of them (``schemas.sandbox_report.normaliser_reading``).
 A carried section with no rows counts zero; that is what the sandbox reported.
 
 An item id is read only where it is cited: in brackets, or in a citing field
@@ -55,6 +55,7 @@ from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from maljan.schemas.sandbox_document import place, place_path
 from maljan.schemas.sandbox_report import SECTION_IDS, section_id
 
 # The tool name of the pack's index entry, and of the query tool beside it.
@@ -77,12 +78,20 @@ SECTION_PREFIXES: dict[str, str] = {
     "apistats": "apistat",
     "channels": "chan",
     "screenshots": "shot",
-    "cape": "cape",
+    "extracted": "ext",
     "resolved_apis": "rapi",
     "alerts": "alert",
     "procdumps": "dump",
 }
-SECTION_OF_PREFIX: dict[str, str] = {prefix: name for name, prefix in SECTION_PREFIXES.items()}
+# The section names and id prefixes an earlier index wrote for a section the
+# platform has since renamed, read as the section they meant: a run recorded
+# before the rename still has its citations checked against its own index.
+LEGACY_SECTION_NAMES: dict[str, str] = {"cape": "extracted"}
+LEGACY_PREFIXES: dict[str, str] = {"cape": "extracted"}
+SECTION_OF_PREFIX: dict[str, str] = {
+    **LEGACY_PREFIXES,
+    **{prefix: name for name, prefix in SECTION_PREFIXES.items()},
+}
 
 # An item id as a claim writes it. The process form takes the pid, a repeat's
 # ``.k`` and the positional ``p<n>`` of a process with no pid.
@@ -92,26 +101,28 @@ SECTION_OF_PREFIX: dict[str, str] = {prefix: name for name, prefix in SECTION_PR
 # after it: ``http://h/?a=net:4`` and ``C:\Users\x\file:3`` hold no item.
 ITEM_ID_RE = re.compile(
     r"(?<![\w./\\@:\-?#&=%])(?:proc:(?:\d{1,20}(?:\.\d{1,9})?|p\d{1,9})"
-    r"|(?:" + "|".join(p for p in SECTION_PREFIXES.values() if p != "proc") + r"):\d{1,12})"
+    r"|(?:"
+    + "|".join(p for p in (*SECTION_PREFIXES.values(), *LEGACY_PREFIXES) if p != "proc")
+    + r"):\d{1,12})"
     r"(?![\w:]|\.\d)",
     re.IGNORECASE,
 )
 
 
-# The ``behavior.summary`` lists each summary-read section is read from, in order.
+# The behaviour summary's parts each summary-read section is read from, in order.
 _SUMMARY_LISTS: dict[str, tuple[str, ...]] = {
     "files": (
-        "files",
-        "read_files",
-        "write_files",
-        "delete_files",
-        "modified_files",
-        "wrote_files",
+        "summary.files",
+        "summary.read_files",
+        "summary.write_files",
+        "summary.delete_files",
+        "summary.modified_files",
+        "summary.wrote_files",
     ),
-    "registry": ("keys", "read_keys", "write_keys", "delete_keys"),
-    "mutexes": ("mutexes",),
-    "commands": ("executed_commands",),
-    "services": ("created_services", "started_services"),
+    "registry": ("registry", "summary.read_keys", "summary.write_keys", "summary.delete_keys"),
+    "mutexes": ("summary.mutexes",),
+    "commands": ("summary.executed_commands",),
+    "services": ("summary.created_services", "summary.started_services"),
 }
 
 # The network lists, in the order ``sandbox_tools.sandbox_network`` lists them.
@@ -132,9 +143,8 @@ _PID_FIELDS: dict[str, tuple[str, ...]] = {
     "procdumps": ("pid", "process_id"),
 }
 
-# The raw CAPE blocks the model does not carry, as the reader declarations name
-# them (``schemas.sandbox_report.CAPE_RAW_BLOCKS``).
-RAW_PROCESSTREE = "raw.behavior.processtree"
+# The form's process tree, which gives parent links (``schemas.sandbox_report``).
+PROCESS_TREE = "process_tree"
 
 # The model list fields (``schemas.sandbox_report.REPORT_LIST_FIELDS``) each
 # section is read from, for a report a known normaliser produced.
@@ -143,12 +153,14 @@ SECTION_FIELDS: dict[str, tuple[str, ...]] = {
     "api_calls": ("processes.calls",),
     "files": (
         "summary.files",
+        "summary.read_files",
         "summary.write_files",
+        "summary.delete_files",
         "summary.modified_files",
         "summary.wrote_files",
         "file_writes",
     ),
-    "registry": ("registry",),
+    "registry": ("registry", "summary.read_keys", "summary.write_keys", "summary.delete_keys"),
     "network": tuple(f"network.{kind}" for kind in NETWORK_KINDS),
     "signatures": ("signatures",),
     "dropped": ("dropped_files",),
@@ -159,10 +171,10 @@ SECTION_FIELDS: dict[str, tuple[str, ...]] = {
     "apistats": ("apistats",),
     "channels": ("channels",),
     "screenshots": ("screenshots",),
-    "cape": ("raw.CAPE",),
-    "resolved_apis": ("raw.behavior.summary.resolved_apis",),
-    "alerts": ("raw.suricata.alerts",),
-    "procdumps": ("raw.procdump",),
+    "extracted": ("extracted",),
+    "resolved_apis": ("resolved_apis",),
+    "alerts": ("ids_alerts",),
+    "procdumps": ("procdumps",),
 }
 
 # The ``no:`` sentences.
@@ -170,9 +182,7 @@ NO_UNAVAILABLE = "no: the report lists `{name}` as unavailable from its sandbox"
 NO_LISTS = "no: the report holds none of {paths}"
 NO_LIST = "no: the report holds no `{path}`"
 NO_NORMALISED = "no: the {provider} report as normalised here carries no `{section}`"
-NO_OVERVIEW = (
-    "no: the {provider} report, read from the Triage overview alone, carries no `{section}`"
-)
+NO_PARTIAL = "no: the {provider} report, {how}, carries no `{section}`"
 NO_PID_ROWS = "no: the `{section}` rows name no process"
 
 
@@ -182,21 +192,23 @@ class _Reader:
 
     provider: str
     fills: frozenset[str]
-    overview_only: bool
-    # Rendered from the normalised model rather than handed over as raw CAPE.
+    # How the reader read part of what its sandbox gives, empty where it read all.
+    partial: str
+    # Laid out from the form's fields rather than as the source published its rows.
     rendered: bool
 
     def no(self, section: str) -> str:
-        said = NO_OVERVIEW if self.overview_only else NO_NORMALISED
-        return said.format(provider=self.provider, section=section)
+        if self.partial:
+            return NO_PARTIAL.format(provider=self.provider, how=self.partial, section=section)
+        return NO_NORMALISED.format(provider=self.provider, section=section)
 
 
 def _reader(normalised_by: Sequence[str] | None) -> _Reader | None:
     """The reader ``(provider, source_format[, read_from])`` names, or ``None`` when unknown.
 
     ``read_from`` is what the reader read (``SandboxReport.read_from``,
-    ``schemas.sandbox_report.reader_of``): the Triage overview alone or with
-    its task reports, a CAPE report's own dict or the model.
+    ``schemas.sandbox_report.reader_of``): part of what its sandbox gives or
+    all of it, a source as published or the form laid out.
     """
     if not normalised_by or len(normalised_by) not in (2, 3):
         return None
@@ -209,7 +221,7 @@ def _reader(normalised_by: Sequence[str] | None) -> _Reader | None:
     return _Reader(
         provider=provider or source_format,
         fills=reading.fills,
-        overview_only=reading.overview_only,
+        partial=reading.partial,
         rendered=reading.rendered,
     )
 
@@ -306,11 +318,7 @@ class Sections:
     ) -> None:
         self.report = report
         self._reading = _reader(normalised_by)
-        behavior = report.get("behavior")
-        self._behavior: Mapping[str, Any] = behavior if isinstance(behavior, Mapping) else {}
-        summary = self._behavior.get("summary")
-        self._summary: Mapping[str, Any] = summary if isinstance(summary, Mapping) else {}
-        unavailable = report.get("unavailable")
+        unavailable = place(report, "unavailable")
         # By the platform's section ids; a report stored before they were
         # normalised is read through the legacy words (``section_id``).
         self._unavailable = (
@@ -349,22 +357,28 @@ class Sections:
     def _list(self, value: Any) -> list[Any] | None:
         return value if isinstance(value, list) else None
 
+    def _part(self, name: str) -> list[Any] | None:
+        """The part ``name`` of the report where it is a list."""
+        return self._list(place(self.report, name))
+
     def _read_summary(self, section: Section) -> None:
-        keys = _SUMMARY_LISTS[section.name]
-        for key in keys:
-            rows = self._list(self._summary.get(key))
+        names = _SUMMARY_LISTS[section.name]
+        for name in names:
+            rows = self._part(name)
             if rows is not None:
-                section.parts.append(_Part(key, f"behavior.summary.{key}", rows))
+                path = place_path(name)
+                section.parts.append(_Part(path.rsplit(".", 1)[-1], path, rows))
         if section.name == "files":
-            for key in ("file_writes", "files_written"):
-                rows = self._list(self.report.get(key))
-                if rows is not None:
-                    section.parts.append(_Part(key, key, rows))
-                    break
+            rows = self._part("file_writes")
+            # A document written before the parts were declared may name the list so.
+            key = "file_writes" if rows is not None else "files_written"
+            rows = rows if rows is not None else self._list(self.report.get(key))
+            if rows is not None:
+                section.parts.append(_Part(key, key, rows))
         if not section.parts:
-            paths = [f"behavior.summary.{key}" for key in keys]
+            paths = [place_path(name) for name in names]
             if section.name == "files":
-                paths.append("file_writes")
+                paths.append(place_path("file_writes"))
             section.no = (
                 NO_LIST.format(path=paths[0])
                 if len(paths) == 1
@@ -372,11 +386,12 @@ class Sections:
             )
 
     def _read_processes(self, section: Section) -> None:
-        rows = self._list(self._behavior.get("processes"))
+        rows = self._part("processes")
+        path = place_path("processes")
         if rows is None:
-            section.no = NO_LIST.format(path="behavior.processes")
+            section.no = NO_LIST.format(path=path)
             return
-        section.parts.append(_Part("processes", "behavior.processes", rows))
+        section.parts.append(_Part("processes", path, rows))
         seen: dict[str, int] = {}
         holders: dict[str, list[str]] = {}
         own: list[str | None] = []
@@ -413,10 +428,10 @@ class Sections:
 
     def _tree_parents(self) -> dict[str, str]:
         """Each pid the process tree nests under exactly one parent, to that parent; one walk."""
-        tree = self._list(self._behavior.get("processtree"))
+        tree = self._part("process_tree")
         if not tree:
             return {}
-        if self._reading is not None and RAW_PROCESSTREE not in self._reading.fills:
+        if self._reading is not None and PROCESS_TREE not in self._reading.fills:
             return {}
         parents: dict[str, set[str]] = {}
         stack: list[tuple[Any, str | None]] = [(node, None) for node in tree]
@@ -438,17 +453,17 @@ class Sections:
         A report rendered from the normalised model carries both, and only the
         per-process lists say which process made a call.
         """
-        flat = self._list(self._behavior.get("calls"))
+        flat = self._part("calls")
         processes = self.sections.get("processes")
-        rows = self._list(self._behavior.get("processes"))
+        rows = self._part("processes")
         nested = rows is not None and any(
             isinstance(row, Mapping) and self._list(row.get("calls")) for row in rows
         )
         if not nested or rows is None or processes is None or not processes.ids:
             if flat is not None:
-                section.parts.append(_Part("calls", "behavior.calls", flat))
+                section.parts.append(_Part("calls", place_path("calls"), flat))
             elif rows is None:
-                paths = _listed(["behavior.calls", "behavior.processes"])
+                paths = _listed([place_path("calls"), place_path("processes")])
                 section.no = NO_LISTS.format(paths=paths)
             return
         for position, row in enumerate(rows):
@@ -457,54 +472,57 @@ class Sections:
                 section.parts.append(
                     _Part(
                         "calls",
-                        f"behavior.processes[{position}].calls",
+                        f"{place_path('processes')}[{position}].calls",
                         calls,
                         process=processes.ids[position],
                     )
                 )
 
     def _read_network(self, section: Section) -> None:
-        network = self.report.get("network")
-        if not isinstance(network, Mapping):
+        if not isinstance(self.report.get("network"), Mapping):
             section.no = NO_LIST.format(path="network")
             return
         for kind in NETWORK_KINDS:
-            rows = self._list(network.get(kind))
+            rows = self._part(f"network.{kind}")
             if rows is not None:
-                section.parts.append(_Part(kind, f"network.{kind}", rows))
+                section.parts.append(_Part(kind, place_path(f"network.{kind}"), rows))
 
     def _read_signatures(self, section: Section) -> None:
-        rows = self._list(self.report.get("signatures"))
+        rows = self._part("signatures")
         if rows is None:
-            section.no = NO_LIST.format(path="signatures")
+            section.no = NO_LIST.format(path=place_path("signatures"))
             return
-        section.parts.append(_Part("signatures", "signatures", rows))
+        section.parts.append(_Part("signatures", place_path("signatures"), rows))
 
     def _read_dropped(self, section: Section) -> None:
-        for key in ("dropped", "dropped_files"):
+        path = place_path("dropped_files")
+        # A document written before the parts were declared may name the list so.
+        for key in (path, "dropped_files"):
             rows = self._list(self.report.get(key))
             if rows is not None:
                 section.parts.append(_Part(key, key, rows))
                 return
-        section.no = NO_LISTS.format(paths=_listed(["dropped", "dropped_files"]))
+        section.no = NO_LISTS.format(paths=_listed([path, "dropped_files"]))
 
     def _read_events(self, section: Section) -> None:
-        rows = self._list(self._behavior.get("generic"))
+        rows = self._part("generic_events")
+        path = place_path("generic_events")
         if rows is None:
-            section.no = NO_LIST.format(path="behavior.generic")
+            section.no = NO_LIST.format(path=path)
             return
-        section.parts.append(_Part("generic", "behavior.generic", rows))
+        section.parts.append(_Part(path.rsplit(".", 1)[-1], path, rows))
 
     def _read_apistats(self, section: Section) -> None:
-        stats = self._behavior.get("apistats")
+        stats = place(self.report, "apistats")
+        path = place_path("apistats")
         if not isinstance(stats, Mapping):
-            section.no = NO_LIST.format(path="behavior.apistats")
+            section.no = NO_LIST.format(path=path)
             return
         rows = [{"pid": str(pid), "counts": counts} for pid, counts in stats.items()]
-        section.parts.append(_Part("apistats", "behavior.apistats", rows))
+        section.parts.append(_Part("apistats", path, rows))
 
     def _read_channels(self, section: Section) -> None:
-        channels = self.report.get("channels")
+        channels = place(self.report, "channels")
         if not isinstance(channels, Mapping):
             section.no = NO_LIST.format(path="channels")
             return
@@ -514,48 +532,45 @@ class Sections:
                 section.parts.append(_Part(name, f"channels[{len(section.parts)}]", rows))
 
     def _read_screenshots(self, section: Section) -> None:
-        rows = self._list(self.report.get("screenshots"))
+        rows = self._part("screenshots")
         if rows is None:
             section.no = NO_LIST.format(path="screenshots")
             return
         section.parts.append(_Part("screenshots", "screenshots", rows))
 
-    def _read_cape(self, section: Section) -> None:
-        """The ``CAPE`` block: its lists (configurations, payloads) by name, or the list it is."""
-        block = self.report.get("CAPE")
+    def _read_extracted(self, section: Section) -> None:
+        """What the sandbox extracted: its lists (configurations, payloads) by name, or the list."""
+        block = place(self.report, "extracted")
+        path = place_path("extracted")
         if isinstance(block, list):
-            section.parts.append(_Part("CAPE", "CAPE", block))
+            section.parts.append(_Part(path, path, block))
             return
         if isinstance(block, Mapping):
             for key in sorted(str(k) for k in block):
                 rows = self._list(block.get(key))
                 if rows is not None:
-                    section.parts.append(_Part(key, f"CAPE.{key}", rows))
+                    section.parts.append(_Part(key, f"{path}.{key}", rows))
             if section.parts:
                 return
-        section.no = NO_LIST.format(path="CAPE")
+        section.no = NO_LIST.format(path=path)
+
+    def _read_one(self, section: Section, name: str) -> None:
+        """A section read from the one part ``name``, its rows as they are."""
+        rows = self._part(name)
+        path = place_path(name)
+        if rows is None:
+            section.no = NO_LIST.format(path=path)
+            return
+        section.parts.append(_Part(path.rsplit(".", 1)[-1], path, rows))
 
     def _read_resolved_apis(self, section: Section) -> None:
-        rows = self._list(self._summary.get("resolved_apis"))
-        if rows is None:
-            section.no = NO_LIST.format(path="behavior.summary.resolved_apis")
-            return
-        section.parts.append(_Part("resolved_apis", "behavior.summary.resolved_apis", rows))
+        self._read_one(section, "resolved_apis")
 
     def _read_alerts(self, section: Section) -> None:
-        suricata = self.report.get("suricata")
-        rows = self._list(suricata.get("alerts")) if isinstance(suricata, Mapping) else None
-        if rows is None:
-            section.no = NO_LIST.format(path="suricata.alerts")
-            return
-        section.parts.append(_Part("alerts", "suricata.alerts", rows))
+        self._read_one(section, "ids_alerts")
 
     def _read_procdumps(self, section: Section) -> None:
-        rows = self._list(self.report.get("procdump"))
-        if rows is None:
-            section.no = NO_LIST.format(path="procdump")
-            return
-        section.parts.append(_Part("procdump", "procdump", rows))
+        self._read_one(section, "procdumps")
 
     # -- items -----------------------------------------------------------
 
@@ -926,7 +941,8 @@ class ItemIndex:
             return None
         counts: dict[str, int] = {}
         found = cls(counts)
-        for name, row in sections.items():
+        for stated, row in sections.items():
+            name = LEGACY_SECTION_NAMES.get(stated, stated)
             if name not in SECTION_PREFIXES or not isinstance(row, Mapping):
                 continue
             items = row.get("items")

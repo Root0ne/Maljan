@@ -1,5 +1,9 @@
 """The job's sandbox report, as tools instead of one wall of JSON.
 
+The report is the neutral sandbox report's document
+(``schemas.sandbox_document``), whichever sandbox and reader produced it; each
+tool reads its parts by name (``place``), never by a sandbox's own key.
+
 The dynamic analyst has always been handed the whole report as text, chunked
 to fit and truncated where it did not. That is the wrong shape for a model
 that wants three specific things: what ran, what it talked to, and what the
@@ -32,6 +36,7 @@ from typing import TYPE_CHECKING, Any
 from maljan.core.logger import logger
 from maljan.pipeline.sandbox_status import NOT_RUN, sandbox_status
 from maljan.providers.call_arguments import pick_argument
+from maljan.schemas.sandbox_document import place
 from maljan.utils.marked_cut import marked_cut
 
 if TYPE_CHECKING:
@@ -89,13 +94,13 @@ def _no_report(report: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _report_of(container: Any) -> dict[str, Any] | None:
-    """The job's sandbox report as the CAPE-shaped dict every reader expects.
+    """The job's sandbox report as the neutral report's document every reader reads.
 
     ``container.sandbox_report`` is set by ``app.arun`` alongside
     ``sample_format``, for the same reason: agents are built lazily, from nodes
-    that do not all carry the graph state. A ``SandboxReport`` model assigned
-    there instead of a dict is rendered through ``cape_view`` so both forms
-    read identically here.
+    that do not all carry the graph state. A ``SandboxReport`` assigned there
+    instead of its document is laid out (``schemas.sandbox_document``) so both
+    forms read identically here.
     """
     report = getattr(container, "sandbox_report", None)
     if report is None:
@@ -103,17 +108,18 @@ def _report_of(container: Any) -> dict[str, Any] | None:
     if isinstance(report, dict):
         return report
     try:
-        from maljan.providers.cape_view import to_cape_shaped_dict
+        from maljan.schemas.sandbox_document import sandbox_document
 
-        return to_cape_shaped_dict(report)
+        return sandbox_document(report)
     except Exception as exc:  # noqa: BLE001 — an unreadable report is an empty one
-        logger.warning("sandbox tools: could not render the report (%s).", exc)
+        logger.warning("sandbox tools: could not lay out the report (%s).", type(exc).__name__)
         return None
 
 
-def _behavior(report: dict[str, Any]) -> dict[str, Any]:
-    behavior = report.get("behavior")
-    return behavior if isinstance(behavior, dict) else {}
+def _list_at(report: dict[str, Any], name: str) -> list[Any] | None:
+    """The part ``name`` of the report where it is a list, else ``None``."""
+    value = place(report, name)
+    return value if isinstance(value, list) else None
 
 
 def sandbox_report_section(
@@ -122,9 +128,10 @@ def sandbox_report_section(
     """One top-level section of the report, bounded.
 
     The escape hatch for a section the other tools do not model — ``target``,
-    ``static``, ``cti``, whatever a particular sandbox publishes. The section
-    names are listed in the answer when the requested one is absent, so a model
-    that guessed wrong can correct itself in one turn instead of guessing again.
+    ``cti``, ``extracted``, ``memory``, ``ids`` or any block a sandbox published
+    with no place of its own, under its own name. The section names are listed
+    in the answer when the requested one is absent, so a model that guessed
+    wrong can correct itself in one turn instead of guessing again.
     """
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
@@ -167,7 +174,7 @@ def sandbox_processes(
     """
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
-    processes = _behavior(report).get("processes")
+    processes = place(report, "processes")
     rows: list[dict[str, Any]] = []
     page, meta = _page(processes if isinstance(processes, list) else [], offset, limit)
     if page:
@@ -200,13 +207,12 @@ def sandbox_network(
     """
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
-    network = report.get("network")
-    if not isinstance(network, dict):
+    if not isinstance(report.get("network"), dict):
         return {"dns": [], "hosts": [], "http": [], "tcp": [], "udp": []}
     out: dict[str, Any] = {}
     for key in NETWORK_VIEW_KINDS:
-        rows = network.get(key)
-        if isinstance(rows, list):
+        rows = _list_at(report, f"network.{key}")
+        if rows is not None:
             page, meta = _page(rows, offset, limit)
             out[key] = [_with_resolver_fact(row) for row in page]
             if meta:
@@ -272,12 +278,12 @@ def sandbox_signatures(
     """The sandbox's own signature hits, with their severity.
 
     Reported as what they are — one detection engine's opinion — not folded
-    into the verdict. A CAPE signature firing is evidence the agent weighs
+    into the verdict. A sandbox signature firing is evidence the agent weighs
     alongside everything else it found.
     """
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
-    signatures = report.get("signatures")
+    signatures = place(report, "signatures")
     rows: list[dict[str, Any]] = []
     page, meta = _page(signatures if isinstance(signatures, list) else [], offset, limit)
     if page:
@@ -309,8 +315,9 @@ def sandbox_dropped_files(
     """Files the sample wrote, with the hashes the sandbox computed for them."""
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
-    dropped = report.get("dropped")
+    dropped = place(report, "dropped_files")
     if not isinstance(dropped, list):
+        # A document written before the parts were declared named the list so.
         dropped = report.get("dropped_files")
     rows: list[dict[str, Any]] = []
     page, meta = _page(dropped if isinstance(dropped, list) else [], offset, limit)
@@ -402,16 +409,15 @@ _SERVICE_ARGS = ("ServiceName", "lpServiceName", "DisplayName", "BinaryPathName"
 def _calls(report: dict[str, Any]) -> list[dict[str, Any]]:
     """Every API call the report recorded, however it filed them.
 
-    CAPE publishes a flat ``behavior.calls`` and also one list per process;
-    a report that has both would double-count, so the flat list wins when it
-    is there.
+    A report may carry a flat call list and also one list per process; a
+    report that has both would double-count, so the flat list wins when it is
+    there.
     """
-    behavior = _behavior(report)
-    flat = behavior.get("calls")
+    flat = place(report, "calls")
     if isinstance(flat, list) and flat:
         return [row for row in flat if isinstance(row, dict)]
     out: list[dict[str, Any]] = []
-    for proc in behavior.get("processes") or []:
+    for proc in _list_at(report, "processes") or []:
         if isinstance(proc, dict):
             out.extend(row for row in (proc.get("calls") or []) if isinstance(row, dict))
     return out
@@ -430,9 +436,9 @@ def _argument(call: dict[str, Any], names: tuple[str, ...]) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
-def _summary_list(report: dict[str, Any], key: str) -> list[str]:
-    rows = _behavior(report).get("summary")
-    values = rows.get(key) if isinstance(rows, dict) else None
+def _summary_list(report: dict[str, Any], name: str) -> list[str]:
+    """The text entries of the behaviour summary's part ``name``."""
+    values = place(report, name)
     return [str(v) for v in values if isinstance(v, str)] if isinstance(values, list) else []
 
 
@@ -491,7 +497,7 @@ def sandbox_registry_ops(
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
     rows: dict[str, dict[str, Any]] = {}
-    for key in _summary_list(report, "keys"):
+    for key in _summary_list(report, "registry"):
         rows.setdefault(key, {"key": key, "operation": "access", "value": None})
     for call in _calls(report):
         api = str(call.get("api") or "")
@@ -527,15 +533,13 @@ def _calls_by_process(report: dict[str, Any]) -> list[tuple[str, dict[str, Any]]
     """Every API call with the pid that made it, ``""`` when the report lost it.
 
     The same walk as :func:`_calls`, keeping the process each nested list
-    belongs to; a flat ``behavior.calls`` carries its pid on the row or not at
-    all.
+    belongs to; a flat call list carries its pid on the row or not at all.
     """
-    behavior = _behavior(report)
-    flat = behavior.get("calls")
+    flat = place(report, "calls")
     if isinstance(flat, list) and flat:
         return [(str(row.get("pid") or ""), row) for row in flat if isinstance(row, dict)]
     out: list[tuple[str, dict[str, Any]]] = []
-    for proc in behavior.get("processes") or []:
+    for proc in _list_at(report, "processes") or []:
         if isinstance(proc, dict):
             pid = str(proc.get("pid") or "")
             out.extend((pid, row) for row in (proc.get("calls") or []) if isinstance(row, dict))
@@ -568,10 +572,9 @@ def sandbox_api_calls(
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
 
-    behavior = _behavior(report)
     names_by_pid = {
         str(proc.get("pid")): str(proc.get("process_name") or proc.get("name") or "")
-        for proc in behavior.get("processes") or []
+        for proc in _list_at(report, "processes") or []
         if isinstance(proc, dict)
     }
     wanted_process = (process or "").strip().lower()
@@ -587,7 +590,7 @@ def sandbox_api_calls(
 
     counts: dict[str, int] = {}
     callers: dict[str, set[str]] = {}
-    apistats = behavior.get("apistats")
+    apistats = place(report, "apistats")
     if isinstance(apistats, dict):
         for pid, stats in apistats.items():
             if not _is_wanted(str(pid)) or not isinstance(stats, dict):
@@ -646,7 +649,7 @@ def sandbox_mutexes(
     """
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
-    names: list[str] = list(_summary_list(report, "mutexes"))
+    names: list[str] = list(_summary_list(report, "summary.mutexes"))
     for call in _calls(report):
         if str(call.get("api") or "").lower() not in _MUTEX_APIS:
             continue
@@ -669,10 +672,10 @@ def sandbox_services_and_tasks(
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
     services: list[str] = [
-        *_summary_list(report, "created_services"),
-        *_summary_list(report, "started_services"),
+        *_summary_list(report, "summary.created_services"),
+        *_summary_list(report, "summary.started_services"),
     ]
-    commands: list[str] = list(_summary_list(report, "executed_commands"))
+    commands: list[str] = list(_summary_list(report, "summary.executed_commands"))
     tasks: list[str] = [cmd for cmd in commands if "schtasks" in cmd.lower()]
     for call in _calls(report):
         api = str(call.get("api") or "").lower()
@@ -698,13 +701,13 @@ def sandbox_channels(
     """The platform-namespaced channels a non-Windows guest publishes.
 
     ``android.permissions``, ``linux.systemd``, ``macos.launchd`` and whatever
-    else a sandbox has to say that the CAPE-shaped fields have no home for.
+    else a sandbox has to say that the report's other parts have no home for.
     Called with no name it lists what exists, which is how an agent discovers a
     channel it did not know to ask for.
     """
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
-    channels = report.get("channels")
+    channels = place(report, "channels")
     if not isinstance(channels, dict):
         return {"channels": [], "rows": []}
     available = sorted(str(k) for k in channels)
@@ -952,11 +955,11 @@ def items_tool(
 
         ``section`` is one of ``processes``, ``api_calls``, ``files``,
         ``registry``, ``network``, ``signatures``, ``dropped``, ``mutexes``,
-        ``commands``, ``services``, ``events``, ``apistats``, ``channels`` or
-        ``screenshots``, and for a raw CAPE report ``cape`` (its extracted
-        configurations and payloads), ``resolved_apis``, ``alerts`` (Suricata)
-        and ``procdumps``; the pack's sandbox section index gives each one's
-        item count, or why the report does not carry it. Each item comes
+        ``commands``, ``services``, ``events``, ``apistats``, ``channels``,
+        ``screenshots``, ``extracted`` (the configurations and payloads the
+        sandbox extracted), ``resolved_apis``, ``alerts`` (an intrusion
+        detection engine's) or ``procdumps``; the pack's sandbox section index
+        gives each one's item count, or why the report does not carry it. Each item comes
         with its id (proc:<pid> for a process, <prefix>:<n> for the n-th item
         of any other section), the report list it came from and the report's
         own fields. ``pid`` (a number) keeps the items of that process id, in

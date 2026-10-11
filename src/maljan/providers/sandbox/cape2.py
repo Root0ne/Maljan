@@ -21,7 +21,11 @@ from maljan.core.settings_overrides import redact_url
 from maljan.core.undeclared_tools import categories_of
 from maljan.providers.base import ProviderProbe, SandboxCapabilities, SandboxProvider
 from maljan.providers.registry import register_sandbox_provider
-from maljan.schemas.sandbox_report import cape_report_to_sandbox_report
+from maljan.providers.sandbox.readers import required_reader
+
+# The registered report reader (``providers.sandbox.readers``) this provider's
+# reports are read by.
+_READER = "cape2"
 
 if TYPE_CHECKING:
     from maljan.core.config import SandboxCape2Config, Settings
@@ -79,7 +83,7 @@ class CAPE2SandboxProvider(SandboxProvider):
             can_fetch_report=True,
             can_fetch_pcap=True,
             provides_tools=bool(self._cfg.mcp.enabled),
-            report_format="cape2",
+            report_format=_READER,
             degrade_on_failure=True,
         )
 
@@ -244,8 +248,8 @@ class CAPE2SandboxProvider(SandboxProvider):
         from maljan.schemas.sandbox_report import SandboxRun
 
         result = self._get_client().fetch_report(task_id)
-        report = cape_report_to_sandbox_report(
-            result.report, provider="cape2", source_format="cape2", task_id=str(task_id)
+        report = required_reader(_READER).read(
+            result.report, provider=self.id, task_id=str(task_id)
         )
         return SandboxRun(
             task_id=str(task_id),

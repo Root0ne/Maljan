@@ -18,7 +18,7 @@ class NetworkParser(BaseParser):
         """Sifts through network JSON logs for C2 and exfiltration indicators.
 
         Supports two shapes:
-          * dict — CAPEv2 ``network`` block (dns/http/tcp/hosts/domains keys)
+          * dict — the sandbox report document's ``network`` section (dns/http/tcp/hosts/domains)
           * list — Zeek (Bro) connection log
         """
         if isinstance(raw_data, dict):

@@ -14,7 +14,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from langchain_core.tools import BaseTool
 
@@ -50,7 +50,9 @@ class SandboxCapabilities:
     can_fetch_pcap: bool = False
     accepts_uploaded_report: bool = False
     provides_tools: bool = False
-    report_format: Literal["cape2", "cuckoo", "triage", "mock", "generic"] = "generic"
+    # The id of the registered report reader (``providers.sandbox.readers``)
+    # this provider's reports are read by.
+    report_format: str = "generic"
     degrade_on_failure: bool = True
 
 
@@ -789,7 +791,11 @@ class SandboxProvider(ABC):
         from maljan.core.report_formats import format_named
 
         found = format_named(run.report.source_format, formats)
-        return found.signature_scale if found is not None else None
+        if found is not None:
+            return found.signature_scale
+        # No declaration under the reader's id: the scale the reader set on
+        # the report from its own declaration, if any.
+        return run.report.signature_scale
 
     def dynamic_tools(self) -> list[BaseTool]:
         return []

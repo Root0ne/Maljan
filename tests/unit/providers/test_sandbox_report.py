@@ -11,7 +11,7 @@ separately from the CAPE round trip covered in
     without a report is not a run);
   * ``cape_report_to_sandbox_report`` carries the input dict through as
     ``raw`` untouched — the same object, not a copy — because that identity is
-    what lets ``to_cape_shaped_dict`` short-circuit later.
+    what lets ``sandbox_document`` short-circuit later.
 """
 
 from __future__ import annotations
@@ -84,7 +84,7 @@ def test_report_raw_preserves_identity_for_a_dict():
 def test_report_raw_rejects_a_non_dict():
     # The wrap validator's other half: identity is not the same as "accepts
     # anything". A bare ``SkipValidation`` would let a string or ``None``
-    # through, and ``to_cape_shaped_dict`` would hand it to every consumer as
+    # through, and ``sandbox_document`` would hand it to every consumer as
     # if it were the CAPE dict.
     with pytest.raises(ValidationError):
         SandboxReport(provider="cape2", source_format="cape2", raw="not-a-dict")  # type: ignore[arg-type]

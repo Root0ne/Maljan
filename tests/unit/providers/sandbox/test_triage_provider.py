@@ -319,11 +319,11 @@ def test_fetch_maps_overview_and_task_report_into_a_sandbox_report():
 
 
 def test_the_rendered_dict_names_what_this_sandbox_cannot_provide():
-    from maljan.providers.cape_view import to_cape_shaped_dict
+    from maljan.schemas.sandbox_document import sandbox_document
     from maljan.schemas.sandbox_report import triage_overview_to_sandbox_report
 
     overview = json.loads((FIX / "triage_overview.json").read_text(encoding="utf-8"))
-    rendered = to_cape_shaped_dict(triage_overview_to_sandbox_report(overview))
+    rendered = sandbox_document(triage_overview_to_sandbox_report(overview))
     assert rendered["behavior"]["apistats"] == {}
     assert "apistats" in rendered["unavailable"]
 
@@ -369,8 +369,8 @@ def test_the_mapped_network_survives_the_real_parsers_not_as_na():
     """The mapping is only proven correct once real consumers, not the
     mapper's own assertions, read real domains and IPs out of it."""
     from maljan.parsers.network_parser import NetworkParser
-    from maljan.providers.cape_view import to_cape_shaped_dict
     from maljan.reporting.ledger_projection import network_from_sandbox_report
+    from maljan.schemas.sandbox_document import sandbox_document
     from maljan.schemas.sandbox_report import triage_overview_to_sandbox_report
 
     overview = json.loads((FIX / "triage_overview.json").read_text(encoding="utf-8"))
@@ -378,7 +378,7 @@ def test_the_mapped_network_survives_the_real_parsers_not_as_na():
     report = triage_overview_to_sandbox_report(
         overview, task_reports={"behavioral1": task}, task_id="260904-abcdefgh1"
     )
-    rendered = to_cape_shaped_dict(report)
+    rendered = sandbox_document(report)
 
     parsed = NetworkParser().parse(rendered["network"])
     assert "update-relay-c9f2.net" in parsed

@@ -216,12 +216,15 @@ def test_a_cape_shaped_body_goes_through_the_cape_reader_untouched():
     provider = _provider(lambda r: httpx.Response(200, json=body), cfg)
     run = provider.fetch("T-9")
     assert run.report.source_format == "cape2"
-    from maljan.providers.cape_view import to_cape_shaped_dict
+    from maljan.schemas.sandbox_document import sandbox_document
+    from tests.unit.providers._document import as_published
 
-    assert to_cape_shaped_dict(run.report) is run.report.raw, "identity, as for every CAPE source"
+    assert as_published(sandbox_document(run.report), body), (
+        "as published, as for every CAPE source"
+    )
 
 
-def test_a_real_cape_fixture_goes_through_the_cape_reader_by_identity():
+def test_a_real_cape_fixture_goes_through_the_cape_reader_as_published():
     """The committed/real CAPE fixture, not a hand-rolled minimal body."""
     from tests.unit.providers._cape_fixture import first_cape_report
 
@@ -231,9 +234,10 @@ def test_a_real_cape_fixture_goes_through_the_cape_reader_by_identity():
     provider = _provider(lambda r: httpx.Response(200, json=body), cfg)
     run = provider.fetch("T-9")
     assert run.report.source_format == "cape2"
-    from maljan.providers.cape_view import to_cape_shaped_dict
+    from maljan.schemas.sandbox_document import sandbox_document
+    from tests.unit.providers._document import as_published
 
-    assert to_cape_shaped_dict(run.report) is run.report.raw
+    assert as_published(sandbox_document(run.report), body)
 
 
 def test_a_triage_shaped_body_goes_through_the_triage_reader():

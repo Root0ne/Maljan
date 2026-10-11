@@ -13,9 +13,10 @@ through code written against its name. A declaration says:
   string or number (not empty text) a path names wins, anything else is absent;
 * ``target_sha256_paths``: where the report's claimed target sha256 sits; the
   first non-empty string or number a path names wins;
-* ``reader``: which of the platform's report readers reads a report of this
-  format into the internal sandbox report (``cape2``, ``cuckoo``, ``triage``),
-  empty for a format no reader reads yet;
+* ``reader``: the id of the registered report reader
+  (``providers.sandbox.readers``) that reads a report of this format into the
+  neutral sandbox report (``cape2``, ``cuckoo`` and ``triage`` ship, and an
+  operator registers more), empty for a format no reader reads yet;
 * ``signature_scale``: what a signature's severity number means, as the rung
   of the five-word severity ladder each score from 1 up names; absent where the
   format documents no scale;
@@ -56,8 +57,11 @@ UNKNOWN_FORMAT = "unknown"
 FORMAT_NAME_MAX = 32
 FORMAT_NAME_PATTERN = rf"^[a-z][a-z0-9_]{{0,{FORMAT_NAME_MAX - 1}}}$"
 
-# The platform's report readers, by the id a declaration names one with.
-ReaderId = Literal["cape2", "cuckoo", "triage"]
+# A registered report reader's id, as a declaration names it: a lowercase word,
+# or empty for a format no reader reads yet. Whether a reader is registered
+# under it is asked where the format is read, so a declaration naming a reader
+# an installed package adds is never refused while the settings load.
+READER_ID_PATTERN = rf"^(|[a-z][a-z0-9_]{{0,{FORMAT_NAME_MAX - 1}}})$"
 
 ValueType = Literal["object", "array", "string", "number", "boolean", "null"]
 SeverityRung = Literal["Critical", "High", "Medium", "Low", "Informational"]
@@ -168,7 +172,7 @@ class ReportFormat(BaseModel):
     detect: list[list[FieldTest]] = Field(default_factory=list)
     task_id_paths: list[str] = Field(default_factory=list)
     target_sha256_paths: list[str] = Field(default_factory=list)
-    reader: ReaderId | Literal[""] = ""
+    reader: str = Field(default="", pattern=READER_ID_PATTERN)
     signature_scale: SignatureScale | None = None
     display_name: str = Field(default="", max_length=64)
 

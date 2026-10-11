@@ -25,7 +25,7 @@ from maljan.loaders.sandbox_client import SubmissionResult
 from maljan.pipeline.builder import build_graph
 from maljan.pipeline.events import EventSink
 from maljan.pipeline.state import AnalysisState
-from maljan.providers.cape_view import to_cape_shaped_dict
+from maljan.schemas.sandbox_document import sandbox_document
 
 
 def _remember_the_secrets_of(config: Settings) -> None:
@@ -202,7 +202,9 @@ class MaljanApp:
 
         # Best-effort MIME from the sandbox file block when we couldn't
         # read the bytes ourselves.
-        target = (sandbox_report or {}).get("target", {})
+        from maljan.schemas.sandbox_document import place
+
+        target = place(sandbox_report, "target", {})
         if isinstance(target, dict):
             sb_file = target.get("file") if isinstance(target.get("file"), dict) else {}
             mt = sb_file.get("type") if isinstance(sb_file, dict) else None
@@ -247,8 +249,10 @@ class MaljanApp:
         self.container.sandbox_signature_scale = scale.record() if scale is not None else None
 
     async def _submit_to_sandbox(self, sample_path: str | None) -> dict[str, Any] | None:
-        """Submit sample to sandbox and return normalized report.
+        """Submit sample to sandbox and return the neutral report's document.
 
+        The document every consumer reads (``schemas.sandbox_document``), laid
+        out from the ``SandboxReport`` the provider's registered reader filled.
         Returns None if no sample_path is provided or if submission fails.
         """
         # Which reader produced this job's report, for the sandbox sections;
@@ -274,7 +278,7 @@ class MaljanApp:
                     logger.error("Attached sandbox report unusable: %s", exc)
                     return None
                 self._note_the_reader(provider, run)
-                return to_cape_shaped_dict(run.report)
+                return sandbox_document(run.report)
             logger.info("Submitting sample to sandbox: %s", sample_path)
 
             # Every provider call below is synchronous: the Triage provider
@@ -306,7 +310,7 @@ class MaljanApp:
                     sample_sha256=run.sample_sha256,
                     sample_name=run.sample_name,
                     status=run.status,
-                    report=to_cape_shaped_dict(run.report),
+                    report=sandbox_document(run.report),
                     error=run.error,
                     normalized=run.report,
                 )

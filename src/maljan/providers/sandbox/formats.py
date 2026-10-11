@@ -1,10 +1,9 @@
 """Name the sandbox format behind a report payload, and the sample in front of one.
 
-``sniff_format`` is used by the upload route and the upload provider to name
-an attached report's format from the declared formats
-(``maljan.core.report_formats``). Kept a pure function over a plain ``dict``
-— no I/O, no provider imports — so both call sites can use it without a
-dependency on each other.
+``sniff_format`` names an attached report's format from the registry's
+formats (``providers.sandbox.readers.sandbox_formats``: the declared formats
+of ``maljan.core.report_formats`` and the registered readers). Kept a pure
+function over a plain ``dict`` — no I/O — so every call site can use it.
 
 ``detect_sample_format`` and ``option_for_format`` are the submit-side pair:
 what a sample on disk is, and which of the operator's per-format settings that
@@ -66,14 +65,18 @@ def cape_platform(platform: str) -> str:
 
 
 def sniff_format(payload: dict[str, Any], formats: Iterable[ReportFormat] | None = None) -> str:
-    """Name the format that produced ``payload``: the first declared format that recognises it.
+    """Name the format that produced ``payload``: the first format that recognises it.
 
-    ``formats`` are the effective declarations (``report_formats.effective_formats``
-    over ``sandbox.report_formats``); ``None`` reads the built-ins alone. The
-    built-ins try Triage first (``analysis`` plus a non-empty ``tasks``), then
-    CAPE (a ``CAPE`` block or a version string naming it), then Cuckoo (the
-    generic ``info`` + ``behavior`` shape CAPE inherited). ``"unknown"`` where
-    none recognises it.
+    ``formats`` are the formats to try (``readers.sandbox_formats`` over
+    ``sandbox.report_formats``); ``None`` tries the registry's formats with no
+    operator declaration. The shipped declarations try Triage first
+    (``analysis`` plus a non-empty ``tasks``), then CAPE (a ``CAPE`` block or a
+    version string naming it), then Cuckoo (the generic ``info`` + ``behavior``
+    shape CAPE inherited). ``"unknown"`` where none recognises it.
     """
+    if formats is None:
+        from maljan.providers.sandbox.readers import sandbox_formats
+
+        formats = sandbox_formats()
     found = sniff(payload, formats)
     return found.name if found is not None else UNKNOWN_FORMAT

@@ -1,12 +1,14 @@
-"""The neutral sandbox report every sandbox adapter produces.
+"""The neutral sandbox report every sandbox reader produces.
 
-Today ``SubmissionResult.report`` *is* the raw CAPEv2 JSON, and nine
-consumers (extractors, parsers, the attribution and persistence layers) read
-CAPE-shaped keys directly out of it. ``SandboxReport`` is the vocabulary a
-sandbox-agnostic pipeline reads instead; :func:`cape_report_to_sandbox_report`
-is the one-way reader that fills it from a CAPE/Cuckoo-shaped dict, and
-``maljan.providers.cape_view.to_cape_shaped_dict`` is the renderer that turns
-it back into the dict today's consumers already know how to read.
+``SandboxReport`` is the one form every consumer reads, whichever sandbox
+produced the report: the target and its hashes, the processes and their tree,
+the behaviour and API calls, the signatures (with the scale their format
+declares), the network flows, DNS and HTTP, the dropped files, the extracted
+configurations and payloads, the memory and process dumps, the IDS alerts,
+the sections the sandbox cannot produce, and the ``channels`` and ``extras``
+for anything with no declared place of its own. The readers that fill it are
+registered (``providers.sandbox.readers``); the document every consumer reads
+is laid out from it by ``schemas.sandbox_document``.
 
 Every model here is deliberately permissive: ``model_config =
 ConfigDict(extra="ignore")`` so an unexpected sandbox field never breaks
@@ -18,12 +20,27 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Literal, cast
+from typing import Any, cast
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, ValidatorFunctionWrapHandler, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    ValidatorFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+)
 
-from maljan.core.report_formats import reader_display_name
+from maljan.core.report_formats import SignatureScale, reader_display_name
+from maljan.schemas.sandbox_document import (
+    SUMMARY_KEYS as _DOCUMENT_SUMMARY_KEYS,
+)
+from maljan.schemas.sandbox_document import (
+    decompose,
+    renamed,
+)
 
 
 def _int(value: Any) -> int:
@@ -50,16 +67,33 @@ def _dict_identity_or_validate(value: Any, handler: ValidatorFunctionWrapHandler
     """Return ``value`` unchanged when it is already a dict; otherwise validate normally.
 
     This is the narrow fix a bare ``SkipValidation[dict[str, Any]]`` does not
-    give: identity (``rendered is raw``) is what ``to_cape_shaped_dict``'s
-    short circuit depends on, but ``SkipValidation`` accepts *anything* —
-    a string, a list, ``None`` — and would hand it to every consumer as if it
-    were the CAPE dict. A dict still passes through untouched (same object,
-    no pydantic-core rebuild); anything else still goes through the ordinary
+    give: a source's own blocks are held by identity (a report's ``raw``, the
+    parts a reader keeps as published), but ``SkipValidation`` accepts
+    *anything* — a string, a list, ``None`` — and would hand it on as if it
+    were a report. A dict still passes through untouched (same object, no
+    pydantic-core rebuild); anything else still goes through the ordinary
     ``dict[str, Any]`` validator and still raises ``ValidationError``.
     """
     if isinstance(value, dict):
         return value
     return cast("dict[str, Any]", handler(value))
+
+
+def _without_empty(
+    model: BaseModel, handler: SerializerFunctionWrapHandler, fields: tuple[str, ...]
+) -> Any:
+    """The model's dump without the ``fields`` that hold nothing.
+
+    The places a reader fills only for some sandboxes: a report stored before
+    they existed, and a report from a reader that never fills them, dump as
+    they always did.
+    """
+    dumped = handler(model)
+    if isinstance(dumped, dict):
+        for name in fields:
+            if name in dumped and not dumped[name]:
+                del dumped[name]
+    return dumped
 
 
 class SandboxTarget(BaseModel):
@@ -73,6 +107,14 @@ class SandboxTarget(BaseModel):
     file_type: str = ""
     mime_type: str = ""
     size: int = 0
+    # The other digests a sandbox computed for the sample, where it says.
+    sha1: str = ""
+    sha512: str = ""
+    ssdeep: str = ""
+
+    @model_serializer(mode="wrap")
+    def _dump(self, handler: SerializerFunctionWrapHandler) -> Any:
+        return _without_empty(self, handler, ("sha1", "sha512", "ssdeep"))
 
 
 class SandboxProcess(BaseModel):
@@ -86,6 +128,13 @@ class SandboxProcess(BaseModel):
     command_line: str = ""
     first_seen: str = ""
     calls: list[dict[str, Any]] = Field(default_factory=list)
+    # The fields the sandbox wrote on the process that the fields above do not
+    # hold, under the sandbox's own names: read, never dropped.
+    extra: dict[str, Any] = Field(default_factory=dict)
+
+    @model_serializer(mode="wrap")
+    def _dump(self, handler: SerializerFunctionWrapHandler) -> Any:
+        return _without_empty(self, handler, ("extra",))
 
 
 class SandboxSignatureRow(BaseModel):
@@ -98,6 +147,12 @@ class SandboxSignatureRow(BaseModel):
     severity: int = 0
     marks: list[Any] = Field(default_factory=list)
     ttp_tags: list[str] = Field(default_factory=list)
+    # The signature's other fields, under the sandbox's own names.
+    extra: dict[str, Any] = Field(default_factory=dict)
+
+    @model_serializer(mode="wrap")
+    def _dump(self, handler: SerializerFunctionWrapHandler) -> Any:
+        return _without_empty(self, handler, ("extra",))
 
 
 class SandboxNetwork(BaseModel):
@@ -127,12 +182,15 @@ class SandboxNetwork(BaseModel):
 class SandboxReport(BaseModel):
     """The sandbox-agnostic report. ``provider``/``source_format`` are the one
     thing every reader needs and nothing can infer, so they are the two
-    required fields; everything else defaults to empty."""
+    required fields; everything else defaults to empty.
+
+    ``source_format`` is the id of the registered reader that read the report
+    (``providers.sandbox.readers``)."""
 
     model_config = ConfigDict(extra="ignore")
 
     provider: str
-    source_format: Literal["cape2", "cuckoo", "triage", "mock", "generic"]
+    source_format: str = Field(min_length=1)
     task_id: str = ""
     target: SandboxTarget = Field(default_factory=SandboxTarget)
     processes: list[SandboxProcess] = Field(default_factory=list)
@@ -190,6 +248,57 @@ class SandboxReport(BaseModel):
     # to dicts only.
     summary: dict[str, list[str]] = Field(default_factory=dict)
     file_writes: list[str] = Field(default_factory=list)
+    # The places a reader fills where its sandbox has them. ``process_tree``
+    # is the process tree as the sandbox nests it (each node's ``children``);
+    # ``resolved_apis`` the API names the sample resolved at run time;
+    # ``extracted`` the configurations and payloads the sandbox extracted, a
+    # list, or lists by name, as the sandbox groups them; ``procdumps`` the
+    # process dumps; ``memory`` the regions of process memory the sandbox
+    # recorded; ``ids_alerts`` the alerts an intrusion detection engine raised
+    # on the run's traffic.
+    process_tree: list[dict[str, Any]] = Field(default_factory=list)
+    resolved_apis: list[str] = Field(default_factory=list)
+    extracted: list[Any] | dict[str, Any] = Field(default_factory=list)
+    procdumps: list[dict[str, Any]] = Field(default_factory=list)
+    memory: list[dict[str, Any]] = Field(default_factory=list)
+    ids_alerts: list[dict[str, Any]] = Field(default_factory=list)
+    # Every block the reader read that has no place above, under the source's
+    # own name and nested as the source nests it in the document's sections
+    # (``schemas.sandbox_document``): kept, never dropped, and read by the
+    # section tool and the whole-report slice. Held for the run in hand (the
+    # document carries it) and left out of a dump.
+    extras: dict[str, Any] = Field(default_factory=dict, exclude=True)
+    # True for a report the mock sandbox read from a recorded fixture: an
+    # observation of some earlier detonation, not of this run
+    # (``pipeline.sandbox_status``).
+    recorded_fixture: bool = False
+    # What a signature's severity number means in this report: the scale the
+    # report's format declares, set by the reader that read it. Held for the
+    # run in hand and left out of a dump.
+    signature_scale: SignatureScale | None = Field(default=None, exclude=True)
+    # A reader that keeps its source's own arrangement (``schemas.
+    # sandbox_document.decompose``): each place as the source published it, and
+    # the order of the keys of each of the document's sections. ``None``: the
+    # document is laid out from the fields above. Held for the run in hand and
+    # left out of a dump.
+    published: dict[str, Any] = Field(default_factory=dict, exclude=True)
+    arrangement: dict[str, list[str]] | None = Field(default=None, exclude=True)
+
+    @model_serializer(mode="wrap")
+    def _dump(self, handler: SerializerFunctionWrapHandler) -> Any:
+        return _without_empty(self, handler, _FILLED_ONLY)
+
+
+# The fields a report dumps only where they hold something.
+_FILLED_ONLY: tuple[str, ...] = (
+    "process_tree",
+    "resolved_apis",
+    "extracted",
+    "procdumps",
+    "memory",
+    "ids_alerts",
+    "recorded_fixture",
+)
 
 
 class SandboxRun(BaseModel):
@@ -219,21 +328,11 @@ class SandboxRun(BaseModel):
     error: str = ""
 
 
-_SUMMARY_KEYS: tuple[str, ...] = (
-    "files",
-    "write_files",
-    "modified_files",
-    "wrote_files",
-    # The three channels an agent asks about when it is hunting persistence
-    # and host artefacts. They were passed over while the report's dynamic
-    # section was recomputed from ``behavior`` inside the report builder; now
-    # that an agent has to ask, a channel the render drops is a question the
-    # agent cannot get an answer to.
-    "mutexes",
-    "executed_commands",
-    "created_services",
-    "started_services",
-)
+# The behaviour summary's lists the model holds, as the document names them
+# (``schemas.sandbox_document.SUMMARY_KEYS``): the file, mutex, command and
+# service lists an agent hunting persistence and host artefacts reads, and the
+# read, write and delete lists beside them.
+_SUMMARY_KEYS: tuple[str, ...] = _DOCUMENT_SUMMARY_KEYS
 
 # Blocks a CAPE guest other than Windows publishes, and the namespaced channel
 # each one lands in. ``behavior.processes`` is shared across every guest and
@@ -337,24 +436,17 @@ REPORT_LIST_FIELDS: tuple[str, ...] = (
     "screenshots",
     *(f"summary.{key}" for key in _SUMMARY_KEYS),
     "file_writes",
+    "process_tree",
+    "resolved_apis",
+    "extracted",
+    "procdumps",
+    "memory",
+    "ids_alerts",
 )
 
 # What :func:`cape_report_to_sandbox_report` can fill: every list field, each
 # read from the report's own block of that name.
 CAPE_NORMALISER_FILLS: frozenset[str] = frozenset(REPORT_LIST_FIELDS)
-
-# The blocks of a raw CAPE report the model has no field for. A CAPE or mock
-# report reaches its readers as its own dict (``providers.cape_view``), so
-# these are there to read; a report rendered from the model never has them.
-CAPE_RAW_BLOCKS: tuple[str, ...] = (
-    "raw.CAPE",
-    "raw.behavior.processtree",
-    "raw.behavior.summary.resolved_apis",
-    "raw.suricata.alerts",
-    "raw.procdump",
-)
-# The source formats whose report reaches its readers as the raw dict.
-RAW_SOURCE_FORMATS = frozenset({"cape2", "mock"})
 
 
 def report_fills(report: SandboxReport) -> frozenset[str]:
@@ -376,6 +468,12 @@ def report_fills(report: SandboxReport) -> frozenset[str]:
             for kind in ("dns", "http", "tcp", "udp", "hosts", "domains", "tls", "icmp")
         },
         **{f"summary.{key}": report.summary.get(key) for key in _SUMMARY_KEYS},
+        "process_tree": report.process_tree,
+        "resolved_apis": report.resolved_apis,
+        "extracted": report.extracted,
+        "procdumps": report.procdumps,
+        "memory": report.memory,
+        "ids_alerts": report.ids_alerts,
     }
     return frozenset(name for name, value in held.items() if value)
 
@@ -385,14 +483,24 @@ class Reading:
     """What one reader can fill, and how its report reaches the sections."""
 
     fills: frozenset[str]
-    # The Triage reader given the overview and no behavioural task report.
-    overview_only: bool = False
-    # Rendered from the model (``cape_view``) rather than the raw report dict.
+    # How the reader read less than the whole of what its sandbox can give,
+    # as the clause a section's ``no:`` sentence says it in (``read from its
+    # overview alone``); empty where it read everything.
+    partial: str = ""
+    # Laid out from the form's own fields (``schemas.sandbox_document``), where
+    # a pid or parent of 0 is the form's "not stated", rather than as the
+    # source published its rows.
     rendered: bool = True
 
+    @property
+    def overview_only(self) -> bool:
+        """Whether the reader read part of what its sandbox gives (``partial``)."""
+        return bool(self.partial)
 
-# What a CAPE or mock report reached its readers as (``reader_of``): its own
-# dict, or the model rendered, when the report carried no raw dict.
+
+# What a report read by a reader that keeps its source's arrangement reached
+# its readers as (``reader_of``): as its source published it, or laid out from
+# the form's fields, when the report was built without a source.
 READ_FROM_RAW = "raw"
 READ_FROM_MODEL = "model"
 # What the Triage reader read (``SandboxReport.read_from``).
@@ -403,68 +511,84 @@ READ_FROM_TASKS = "tasks"
 def reader_of(report: SandboxReport) -> tuple[str, str, str]:
     """``(provider, source_format, read_from)`` of the reader behind ``report``.
 
-    ``read_from`` is the report's own where its reader set it; for a CAPE or
-    mock report, whether it reaches its readers as its raw dict
-    (``providers.cape_view`` hands it over only when it has one).
+    ``read_from`` is the report's own where its reader set it; for a reader
+    that keeps its source's arrangement, whether the report reaches its
+    readers as its source published it (``raw``) or laid out from the form
+    (``model``, a report built with no source).
     """
     read_from = report.read_from
-    if not read_from and report.source_format in RAW_SOURCE_FORMATS:
-        read_from = READ_FROM_RAW if report.raw else READ_FROM_MODEL
+    if not read_from:
+        if keeps_its_source(report):
+            read_from = READ_FROM_RAW
+        else:
+            from maljan.providers.sandbox.readers import report_reader
+
+            reader = report_reader(report.source_format)
+            if reader is not None and reader.keeps_source_arrangement:
+                read_from = READ_FROM_MODEL
     return report.provider, report.source_format, read_from
+
+
+def keeps_its_source(report: SandboxReport) -> bool:
+    """Whether ``report``'s document is its source's own arrangement: a source with any block."""
+    return bool(report.arrangement and report.arrangement.get(""))
 
 
 def normaliser_reading(
     source_format: str, provider: str = "", read_from: str = ""
 ) -> Reading | None:
-    """What the reader behind ``(source_format, read_from)`` can fill, or ``None`` when unknown.
+    """What the registered reader ``source_format`` names can fill, or ``None`` when unknown.
 
-    The CAPE reader for a CAPE, Cuckoo or mock report, with the raw blocks
-    where the report reaches its readers as its own dict (a CAPE or mock
-    report with no raw dict is rendered from the model); the Triage reader for
-    a Triage one, by what it read (``read_from``: the overview alone, or with
-    the behavioural task reports; where that is not said, by whether the
-    provider is one that fetches them); the REST mapping for a generic one
-    (``providers.sandbox.rest_mapping.REST_MAPPING_FILLS``).
+    Each reader declares it (``ReportReader.reading``), by what it read
+    (``read_from``) and, where that is not said, by the provider.
     """
-    fmt = str(source_format or "").strip().lower()
-    read = str(read_from or "").strip().lower()
-    if fmt in RAW_SOURCE_FORMATS:
-        if read == READ_FROM_MODEL:
-            return Reading(CAPE_NORMALISER_FILLS)
-        return Reading(CAPE_NORMALISER_FILLS | frozenset(CAPE_RAW_BLOCKS), rendered=False)
-    if fmt == "cuckoo":
-        return Reading(CAPE_NORMALISER_FILLS)
-    if fmt == "triage":
-        if not read:
-            # Not said: the providers that fetch task reports are taken to have.
-            read = (
-                READ_FROM_TASKS
-                if str(provider or "").strip().lower() in TRIAGE_TASK_READERS
-                else READ_FROM_OVERVIEW
-            )
-        if read == READ_FROM_OVERVIEW:
-            return Reading(TRIAGE_OVERVIEW_FILLS, overview_only=True)
-        return Reading(TRIAGE_NORMALISER_FILLS)
-    if fmt == "generic":
-        from maljan.providers.sandbox.rest_mapping import REST_MAPPING_FILLS
+    from maljan.providers.sandbox.readers import report_reader
 
-        return Reading(REST_MAPPING_FILLS)
-    return None
+    reader = report_reader(str(source_format or "").strip().lower())
+    if reader is None:
+        return None
+    return reader.reading(str(read_from or "").strip().lower(), str(provider or "").strip().lower())
+
+
+# The words a CAPE report gives four of its blocks, and the document's word
+# for each (``schemas.sandbox_document.PLACES``): the CAPE reader's
+# declaration, read by its reader and nowhere else.
+CAPE_RENAMES: dict[str, str] = {
+    "CAPE": "extracted",
+    "procdump": "procdumps",
+    "procmemory": "memory",
+    "suricata": "ids",
+}
+
+
+def _block(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _extracted(value: Any) -> list[Any] | dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    return list(value) if isinstance(value, list) else []
 
 
 def cape_report_to_sandbox_report(
     raw: dict[str, Any],
     *,
     provider: str,
-    source_format: Literal["cape2", "cuckoo", "triage", "mock", "generic"] = "cape2",
+    source_format: str = "cape2",
     task_id: str = "",
+    keep_arrangement: bool = True,
 ) -> SandboxReport:
-    """Read a CAPE/Cuckoo-shaped report into the neutral model, keeping ``raw``.
+    """Read a CAPE/Cuckoo-shaped report into the neutral form.
 
-    Deliberately lossless in one direction only: everything the neutral model
-    names is copied out, and the original dict is carried whole in ``raw`` so
-    ``to_cape_shaped_dict`` can hand today's consumers the very object they
-    would have received before the provider layer existed.
+    Every place the form names is filled from the report's own block of that
+    name. With ``keep_arrangement`` (the CAPE, Cuckoo and mock readers) the
+    report also keeps its source's arrangement: each place as the report
+    published it, every block with no place under its own name, and the order
+    of both (``schemas.sandbox_document.decompose``), so the document laid out
+    from the form is the report itself, its four renamed blocks
+    (:data:`CAPE_RENAMES`) under the document's words. The original dict is
+    carried whole in ``raw``.
     """
     behavior_field, net_field, target_field = (
         raw.get("behavior"),
@@ -503,6 +627,11 @@ def cape_report_to_sandbox_report(
         for s in (raw.get("signatures") or [])
         if isinstance(s, dict)
     ]
+    published: dict[str, Any] = {}
+    extras: dict[str, Any] = {}
+    arrangement: dict[str, list[str]] | None = None
+    if keep_arrangement:
+        published, extras, arrangement = decompose(renamed(raw, CAPE_RENAMES))
     return SandboxReport(
         provider=provider,
         source_format=source_format,
@@ -517,6 +646,9 @@ def cape_report_to_sandbox_report(
             file_type=str(file_block.get("type") or ""),
             mime_type=str(file_block.get("type") or ""),
             size=_int(file_block.get("size")),
+            sha1=str(target.get("sha1") or file_block.get("sha1") or ""),
+            sha512=str(target.get("sha512") or file_block.get("sha512") or ""),
+            ssdeep=str(target.get("ssdeep") or file_block.get("ssdeep") or ""),
         ),
         processes=processes,
         apistats={
@@ -547,6 +679,15 @@ def cape_report_to_sandbox_report(
         raw=raw,
         summary={key: _as_str_list(summary_raw.get(key)) for key in _SUMMARY_KEYS},
         file_writes=_as_str_list(raw.get("file_writes") or raw.get("files_written")),
+        process_tree=_rows(behavior.get("processtree")),
+        resolved_apis=_as_str_list(summary_raw.get("resolved_apis")),
+        extracted=_extracted(raw.get("CAPE")),
+        procdumps=_rows(raw.get("procdump")),
+        memory=_rows(raw.get("procmemory")),
+        ids_alerts=_rows(_block(raw.get("suricata")).get("alerts")),
+        extras=extras,
+        published=published,
+        arrangement=arrangement,
     )
 
 
@@ -741,11 +882,16 @@ def _flow_attribution(
 
 # What :func:`triage_overview_to_sandbox_report` can fill: the process list,
 # the signatures, the dumped files, the flows split into TCP and UDP with a
-# host row per destination, and the DNS and HTTP requests with their names.
-# Every other list it leaves empty whatever the report holds. Given the
-# overview alone it fills the signatures and nothing else: the processes, the
-# dumped files and the network are read from the task reports.
-TRIAGE_OVERVIEW_FILLS: frozenset[str] = frozenset({"signatures"})
+# host row per destination, the DNS and HTTP requests with their names, and
+# what the sandbox extracted. Every other list it leaves empty whatever the
+# report holds. Given the overview alone it fills the signatures and the
+# extracted items and nothing else: the processes, the dumped files and the
+# network are read from the task reports.
+TRIAGE_OVERVIEW_FILLS: frozenset[str] = frozenset({"signatures", "extracted"})
+# The overview's blocks and a signature's fields the reader reads into places
+# of their own; every other one is kept under its own name.
+_TRIAGE_OVERVIEW_READ: frozenset[str] = frozenset({"sample", "signatures", "extracted"})
+_TRIAGE_SIGNATURE_READ: frozenset[str] = frozenset({"name", "desc", "score", "indicators", "ttp"})
 # The providers that hand this reader task reports to read, for a report that
 # does not say what was read (``read_from``, which a fetched run states).
 TRIAGE_TASK_READERS: frozenset[str] = frozenset({"triage"})
@@ -760,6 +906,7 @@ TRIAGE_NORMALISER_FILLS: frozenset[str] = frozenset(
         "network.dns",
         "network.domains",
         "network.http",
+        "extracted",
     }
 )
 
@@ -825,14 +972,22 @@ def triage_overview_to_sandbox_report(
         for proc in task.get("processes") or []:
             if not isinstance(proc, dict):
                 continue
+            pid_key = "procid" if proc.get("procid") else "pid"
+            ppid_key = "procid_parent" if proc.get("procid_parent") else "ppid"
+            name_key = "image" if proc.get("image") else "name"
+            read = {pid_key, ppid_key, name_key, "cmd", "started"}
             processes.append(
                 SandboxProcess(
-                    pid=_int(proc.get("procid") or proc.get("pid")),
-                    ppid=_int(proc.get("procid_parent") or proc.get("ppid")),
-                    name=str(proc.get("image") or proc.get("name") or ""),
+                    pid=_int(proc.get(pid_key)),
+                    ppid=_int(proc.get(ppid_key)),
+                    name=str(proc.get(name_key) or ""),
                     command_line=str(proc.get("cmd") or ""),
                     first_seen=str(proc.get("started") or ""),
                     calls=[],
+                    # What the task report says of the process beyond those
+                    # (the guest's own pid and parent, the sample mark, when
+                    # it ended), under its own names.
+                    extra={k: v for k, v in proc.items() if k not in read},
                 )
             )
         dumped_field = task.get("dumped")
@@ -916,6 +1071,9 @@ def triage_overview_to_sandbox_report(
             file_type=str(sample.get("kind") or ""),
             mime_type=str(sample.get("kind") or ""),
             size=_int(sample.get("size")),
+            sha1=str(sample.get("sha1") or ""),
+            sha512=str(sample.get("sha512") or ""),
+            ssdeep=str(sample.get("ssdeep") or ""),
         ),
         processes=processes,
         apistats={},
@@ -927,10 +1085,17 @@ def triage_overview_to_sandbox_report(
                 severity=_int(s.get("score")),
                 marks=list(s.get("indicators") or []),
                 ttp_tags=_as_str_list(s.get("ttp")),
+                extra={k: v for k, v in s.items() if k not in _TRIAGE_SIGNATURE_READ},
             )
             for s in (overview.get("signatures") or [])
             if isinstance(s, dict)
         ],
+        # The configurations, droppers and credentials Triage extracted, as
+        # its overview lists them.
+        extracted=_rows(overview.get("extracted")),
+        # The overview's other blocks (the analysis tags, the task list, the
+        # per-target summaries, the report version), under their own names.
+        extras={k: v for k, v in overview.items() if k not in _TRIAGE_OVERVIEW_READ},
         network=network,
         dropped_files=dropped_files,
         registry=[],

@@ -30,7 +30,7 @@ from maljan.providers.base import ProviderProbe, SandboxCapabilities, SandboxPro
 from maljan.providers.errors import ProviderError
 from maljan.providers.registry import register_sandbox_provider
 from maljan.providers.sandbox.limits import read_capped, stream_to_file_capped
-from maljan.providers.sandbox.rest_mapping import apply_mapping, compile_mapping
+from maljan.providers.sandbox.rest_mapping import compile_mapping
 from maljan.providers.sandbox.triage import (
     _BACKOFF_FACTOR,
     _MAX_INTERVAL_SECONDS,
@@ -98,13 +98,14 @@ class RestSandboxProvider(SandboxProvider):
         mapping: CompiledMapping,
         formats: Iterable[ReportFormat] = (),
     ) -> None:
-        from maljan.core.report_formats import effective_formats
+        from maljan.providers.sandbox.readers import sandbox_formats
 
         self._cfg = cfg
         self._mapping = mapping
-        # The effective format declarations (``sandbox.report_formats`` over the
-        # built-ins), which name the sandbox a report's lineage sentence states.
-        self._formats = effective_formats(formats)
+        # The registry's formats (``sandbox.report_formats`` over the built-ins,
+        # and the registered readers), which name the sandbox a report's
+        # lineage sentence states and the scale its signatures are read on.
+        self._formats = sandbox_formats(formats)
         self._http: httpx.Client | None = None
         # Instance attributes, not module functions, so a test can drive the
         # clock and the sleeps without patching the stdlib.
@@ -277,17 +278,19 @@ class RestSandboxProvider(SandboxProvider):
     def signature_scale(
         self, run: SandboxRun, formats: Iterable[ReportFormat] | None = None
     ) -> SignatureScale | None:
-        """The mapping's declared scale for a report read through it, else the format's."""
-        if run.report.source_format == "generic":
-            return self._cfg.report.signature_scale()
-        return super().signature_scale(run, formats)
+        """The scale the report's format declares; where no format declares the
+        report's reader (the mapping reader's), the scale these settings declare,
+        else the reader's own."""
+        from maljan.core.report_formats import format_named
+
+        found = format_named(run.report.source_format, formats)
+        if found is not None:
+            return found.signature_scale
+        return self._cfg.report.signature_scale() or run.report.signature_scale
 
     def fetch(self, task_id: str) -> SandboxRun:
-        from maljan.schemas.sandbox_report import (
-            SandboxRun,
-            cape_report_to_sandbox_report,
-            triage_overview_to_sandbox_report,
-        )
+        from maljan.providers.sandbox.readers import required_reader, sandbox_format_named
+        from maljan.schemas.sandbox_report import SandboxRun
 
         # Streamed rather than fetched whole: a report is the one
         # body a sandbox legitimately sends by the hundreds of megabytes, and
@@ -307,26 +310,19 @@ class RestSandboxProvider(SandboxProvider):
         if not isinstance(payload, dict):
             raise ProviderError("Sandbox report is not a JSON object.")
 
-        fmt = self._cfg.report.format
-        if fmt == "triage":
-            from maljan.core.report_formats import format_named
-
-            declared = format_named(fmt, self._formats)
-            report = triage_overview_to_sandbox_report(
-                payload,
-                provider="rest",
-                task_id=str(task_id),
-                marked_by=(declared.display_name or declared.name) if declared else "",
-            )
-        elif fmt in ("cape2", "cuckoo"):
-            # The same readers the report-upload provider uses, so a CAPE-shaped
-            # body reaches the nine raw-CAPE consumers by identity here too.
-            report = cape_report_to_sandbox_report(
-                payload, provider="rest", source_format=fmt, task_id=str(task_id)
-            )
-        else:
-            result = apply_mapping(self._mapping, payload, provider="rest", task_id=str(task_id))
-            report = result.report
+        # The registered reader ``report.format`` names reads the body, the
+        # same reader the report-upload provider uses for that format; the
+        # mapping reader reads it through ``sandbox.rest.mapping`` with the
+        # scale the mapping declares.
+        reader_id = self._cfg.report.format
+        report = required_reader(reader_id).read(
+            payload,
+            provider=self.id,
+            task_id=str(task_id),
+            fmt=sandbox_format_named(reader_id, self._formats),
+            mapping=self._mapping,
+            signature_scale=self._cfg.report.signature_scale(),
+        )
         return SandboxRun(
             task_id=str(task_id),
             sample_sha256=report.target.sha256,

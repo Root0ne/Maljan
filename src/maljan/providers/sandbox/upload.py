@@ -6,7 +6,9 @@ bytes as if they had come from a live detonation. It never submits anything
 and never reaches the network — the report is already evidence. It is read as
 the format the upload row recorded when the route accepted it, so the format
 the console shows for the row is the one the run reads; a blob handed over
-with no recorded format is sniffed against the declared formats.
+with no recorded format is sniffed against the registry's formats
+(``providers.sandbox.readers.sandbox_formats``), and read by the registered
+reader its format names.
 """
 
 from __future__ import annotations
@@ -14,19 +16,16 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
-from maljan.core.report_formats import ReportFormat, effective_formats, format_named, sniff
+from maljan.core.report_formats import ReportFormat, sniff
 from maljan.providers.base import SandboxCapabilities, SandboxProvider
 from maljan.providers.errors import ProviderError
 from maljan.providers.registry import register_sandbox_provider
-from maljan.schemas.sandbox_report import (
-    cape_report_to_sandbox_report,
-    triage_overview_to_sandbox_report,
-)
+from maljan.providers.sandbox.readers import report_reader, sandbox_format_named, sandbox_formats
 
 if TYPE_CHECKING:
-    from maljan.core.config import SandboxUploadConfig, Settings
+    from maljan.core.config import RestMappingConfig, SandboxUploadConfig, Settings
     from maljan.core.report_formats import SignatureScale
     from maljan.schemas.sandbox_report import SandboxRun
 
@@ -54,8 +53,16 @@ class UploadSandboxProvider(SandboxProvider):
     description = "No detonation here: an operator attaches a report from another sandbox."
     settings_intro = "Which report formats an operator may attach, and how large they may be."
 
-    def __init__(self, cfg: SandboxUploadConfig, formats: Iterable[ReportFormat] = ()) -> None:
+    def __init__(
+        self,
+        cfg: SandboxUploadConfig,
+        formats: Iterable[ReportFormat] = (),
+        mapping: RestMappingConfig | None = None,
+    ) -> None:
         self._cfg = cfg
+        # The JSONPath mapping a format read by the mapping reader is read
+        # through (``sandbox.rest.mapping``).
+        self._mapping = mapping
         self._blob: bytes | None = None
         self._filename = "report.json"
         # M3 (final review): the ledger ruling says report_format is computed
@@ -66,16 +73,16 @@ class UploadSandboxProvider(SandboxProvider):
         # capabilities falls back to "generic" exactly as before — the real
         # error still surfaces from attach_report()/fetch() when read.
         # The reader of the pending blob's format, which is what report_format names.
-        self._sniffed_format: Literal["cape2", "cuckoo", "triage"] | None = None
-        # The declared format the pending blob is read as, for its signature scale.
-        self._declared: ReportFormat | None = None
+        self._sniffed_format: str | None = None
+        # The format the pending blob is read as, for its signature scale.
+        self._declared: Any = None
         # The format the upload row recorded for the pending blob, if any.
         self._recorded: str | None = None
-        self._formats = effective_formats(formats)
+        self._formats = sandbox_formats(formats)
 
     @classmethod
     def from_settings(cls, cfg: Settings) -> UploadSandboxProvider:
-        return cls(cfg.sandbox.upload, cfg.sandbox.report_formats)
+        return cls(cfg.sandbox.upload, cfg.sandbox.report_formats, cfg.sandbox.rest.mapping)
 
     @property
     def capabilities(self) -> SandboxCapabilities:
@@ -102,7 +109,7 @@ class UploadSandboxProvider(SandboxProvider):
         blob rather than layering state on top of it.
         """
         self._blob, self._filename, self._recorded = blob, filename, report_format
-        found: ReportFormat | None
+        found: Any
         if report_format is not None:
             found = self._recorded_format(report_format)
         else:
@@ -116,13 +123,14 @@ class UploadSandboxProvider(SandboxProvider):
         self._declared = found
         self._sniffed_format = (found.reader or None) if found is not None else None
 
-    def _recorded_format(self, name: str) -> ReportFormat:
-        """The declaration of the format an upload row recorded, refused in words where unusable."""
-        found = format_named(name, self._formats)
+    def _recorded_format(self, name: str) -> Any:
+        """The format an upload row recorded, refused in words where unusable."""
+        found = sandbox_format_named(name, self._formats)
         if found is None:
             raise ProviderError(
                 f"The attached sandbox report was accepted as format {name!r}, which is no "
-                "longer declared in sandbox.report_formats; declare it again to read it."
+                "longer declared in sandbox.report_formats nor registered as a reader; "
+                "declare it again to read it."
             )
         if name not in set(self._cfg.allowed_formats):
             raise ProviderError(
@@ -130,9 +138,9 @@ class UploadSandboxProvider(SandboxProvider):
                 "sandbox.upload.allowed_formats no longer accepts "
                 f"({', '.join(sorted(self._cfg.allowed_formats))}); add it again to read it."
             )
-        if not found.reader:
+        if report_reader(found.reader) is None:
             raise ProviderError(
-                f"The attached sandbox report's format {name!r} is declared without a "
+                f"The attached sandbox report's format {name!r} names no registered "
                 "reader; no analysis can read it yet."
             )
         return found
@@ -178,12 +186,10 @@ class UploadSandboxProvider(SandboxProvider):
             else sniff(payload, self._formats)
         )
         if found is None:
-            # Never a legitimate target regardless of ``allowed_formats``:
-            # ``SandboxReport.source_format`` has no "unknown" member, so
-            # letting this through to ``cape_report_to_sandbox_report`` would
-            # surface a raw pydantic ValidationError instead of a clean,
-            # worded refusal — even if an operator misconfigured the allow
-            # list to include it.
+            # Never a legitimate target regardless of ``allowed_formats``: no
+            # reader is registered for a payload nothing recognises, so this
+            # is a worded refusal rather than a reader failing on it — even if
+            # an operator misconfigured the allow list to include it.
             raise ProviderError(
                 "Could not recognise the uploaded report's sandbox format; accepted "
                 f"formats are {', '.join(sorted(self._cfg.allowed_formats))}."
@@ -193,26 +199,17 @@ class UploadSandboxProvider(SandboxProvider):
                 f"Uploaded report sniffed as {found.name!r}; accepted formats are "
                 f"{', '.join(sorted(self._cfg.allowed_formats))}."
             )
-        # The declared format names the reader; the format's own name is never
-        # branched on here.
-        fmt = found.reader
-        if not fmt:
+        # The format names the registered reader that reads it; the format's
+        # own name is never branched on here. An uploaded report is the report
+        # alone: whatever a live sandbox fetches beside it (a task report, a
+        # capture) did not ride along, and the reader reads what it was given.
+        reader = report_reader(found.reader)
+        if reader is None:
             raise ProviderError(
-                f"Uploaded report sniffed as {found.name!r}, a format declared without a "
-                "reader; no analysis can read it yet."
+                f"Uploaded report sniffed as {found.name!r}, a format that names no "
+                "registered reader; no analysis can read it yet."
             )
-        if fmt == "triage":
-            # An uploaded Triage report is an overview.json alone — no
-            # per-task behavioural reports rode along with it, so
-            # ``task_reports`` stays empty and processes/network are thinner
-            # than a fetched run's. Still every key the mapper can fill from
-            # the overview itself: target, signatures, cti, unavailable.
-            # A disputed lineage row names its sandbox as the matched format declares it.
-            report = triage_overview_to_sandbox_report(
-                payload, provider="upload", marked_by=found.display_name or found.name
-            )
-        else:
-            report = cape_report_to_sandbox_report(payload, provider="upload", source_format=fmt)
+        report = reader.read(payload, provider=self.id, fmt=found, mapping=self._mapping)
         return SandboxRun(
             task_id=report.task_id or "uploaded",
             sample_sha256=report.target.sha256,

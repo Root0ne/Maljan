@@ -23,7 +23,8 @@ export type ChoicesFrom =
   | "mcp_servers"
   | "agent_roles"
   | "profiles"
-  | "memory_backends";
+  | "memory_backends"
+  | "sandbox_report_readers";
 
 export type Editor = "server_map" | "rest_sandbox" | "agent_definitions" | "stages";
 

@@ -295,7 +295,7 @@ def test_a_task_id_or_hash_is_a_string_or_a_number_and_anything_else_is_absent()
         ({"detect": [[{"path": "/a", "types": ["map"]}]]}, "literal_error"),
         ({"task_id_paths": ["/**/a/**/b"]}, "holds it 2 times"),
         ({"target_sha256_paths": [""]}, "names nothing"),
-        ({"reader": "acme"}, "literal_error"),
+        ({"reader": "Not A Reader"}, "string_pattern_mismatch"),
         ({"signature_scale": {"name": "x", "rungs": []}}, "at least 1"),
         ({"signature_scale": {"name": "x", "rungs": ["Severe"]}}, "literal_error"),
         ({"signature_scale": {"name": " ", "rungs": ["Low"]}}, "needs a name"),
@@ -350,7 +350,7 @@ def test_a_declared_format_without_a_reader_is_refused_in_words() -> None:
     provider = _provider([{**INVENTED, "reader": ""}], ["acme"])
     provider.set_pending_blob(json.dumps(_acme_payload()).encode())
     assert provider.capabilities.report_format == "generic"
-    with pytest.raises(ProviderError, match="declared without a reader"):
+    with pytest.raises(ProviderError, match="names no registered reader"):
         provider.fetch("uploaded")
 
 
@@ -375,7 +375,7 @@ def test_a_recorded_format_no_longer_declared_is_refused_in_words() -> None:
 
 def test_a_recorded_format_now_declared_without_a_reader_is_refused_in_words() -> None:
     provider = _provider([{**INVENTED, "reader": ""}], ["acme"])
-    with pytest.raises(ProviderError, match="declared without a reader"):
+    with pytest.raises(ProviderError, match="names no registered reader"):
         provider.set_pending_blob(json.dumps(_acme_payload()).encode(), report_format="acme")
 
 

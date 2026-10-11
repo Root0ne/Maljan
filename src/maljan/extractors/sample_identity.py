@@ -50,7 +50,9 @@ def _infer_platform(
 
     # Sandbox fallback when file_type is "unknown", cross-platform, or a
     # generic container.
-    target = (sandbox_report or {}).get("target", {})
+    from maljan.schemas.sandbox_document import place
+
+    target = place(sandbox_report, "target", {})
     if isinstance(target, dict):
         sandbox_os = str(target.get("os") or target.get("platform") or "").lower()
         for needle, platform in _SANDBOX_OS_HINTS:

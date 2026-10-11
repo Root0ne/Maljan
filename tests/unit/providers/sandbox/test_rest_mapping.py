@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 
 from maljan.core.config import RestMappingConfig
-from maljan.providers.cape_view import to_cape_shaped_dict
 from maljan.providers.errors import ProviderConfigurationError
 from maljan.providers.sandbox.rest_mapping import (
     CHANNELS,
@@ -17,6 +16,7 @@ from maljan.providers.sandbox.rest_mapping import (
     compile_mapping,
 )
 from maljan.reporting.ledger_projection import network_from_sandbox_report
+from maljan.schemas.sandbox_document import sandbox_document
 from maljan.schemas.sandbox_report import section_id
 from tests.unit._ledger_helpers import sandbox_view
 
@@ -240,7 +240,7 @@ def test_the_xyz_golden_renders_through_the_tools_an_agent_calls():
     payload = json.loads((GOLDEN / "xyz_report.json").read_text(encoding="utf-8"))
     compiled = compile_mapping(XYZ_MAPPING)
     result = apply_mapping(compiled, payload, provider="rest", task_id="xyz-1")
-    cape_shaped = to_cape_shaped_dict(result.report)
+    cape_shaped = sandbox_document(result.report)
 
     expected = json.loads((GOLDEN / "xyz_sandbox_view.json").read_text(encoding="utf-8"))
     assert sandbox_view(cape_shaped) == expected

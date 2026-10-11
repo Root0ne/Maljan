@@ -36,6 +36,7 @@ class Annotation(TypedDict):
             "profiles",
             "memory_backends",
             "llm_providers",
+            "sandbox_report_readers",
         ]
     ]
     editor: NotRequired[Literal["server_map", "rest_sandbox", "agent_definitions", "stages"]]
@@ -2357,12 +2358,16 @@ ANNOTATIONS.update(
         "sandbox.rest.report.path": _rest(
             "Report path", "Path the finished report is fetched from; {task_id} is substituted."
         ),
-        "sandbox.rest.report.format": _rest(
-            "Report format",
-            "Shape of the fetched report. cape2, cuckoo and triage reuse the mappers the "
-            "report-upload provider already uses; generic maps the response with the "
-            "JSONPaths below.",
-        ),
+        "sandbox.rest.report.format": {
+            **_rest(
+                "Report format",
+                "The registered report reader that reads the fetched report: each one is "
+                "the reader the report-upload provider uses for that format, and an "
+                "installed package can register more; generic maps the response with the "
+                "JSONPaths below.",
+            ),
+            "choices_from": "sandbox_report_readers",
+        },
         "sandbox.rest.report.pcap_path": _rest(
             "PCAP path", "Optional capture path; empty means this sandbox publishes no PCAP."
         ),

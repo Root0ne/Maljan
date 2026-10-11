@@ -1829,6 +1829,8 @@ class ServiceContainer:
     ) -> list[TextChunk]:
         """One slice of the sandbox report as the agent reads it, chunked at ``room``.
 
+        ``sandbox_report`` is the neutral sandbox report's document
+        (``schemas.sandbox_document``), each slice one of its parts by name.
         A slice handed over as JSON is compact — the same document without the
         indentation, which was characters of whitespace in every model request
         and nowhere else. It is model input only; the report the run stores is
@@ -1836,12 +1838,14 @@ class ServiceContainer:
         """
         import json
 
+        from maljan.schemas.sandbox_document import place
+
         def compact(document: Any) -> str:
             return json.dumps(document, separators=(",", ":"), default=str)
 
         if source == "sandbox.target":
             return self.loader.chunk_text(
-                agent_name, compact(sandbox_report.get("target", {})), room=room
+                agent_name, compact(place(sandbox_report, "target", {})), room=room
             )
         if source == "sandbox.network":
             network = sandbox_report.get("network", {})
