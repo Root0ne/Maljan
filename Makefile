@@ -93,8 +93,10 @@ docker-build:
 docker-up:
 	cd docker && POSTGRES_PORT=$${POSTGRES_PORT:-5433} docker compose up -d
 
+# `--profile '*'` so a down also stops the optional services (ghidra, qdrant)
+# whatever COMPOSE_PROFILES says now.
 docker-down:
-	cd docker && docker compose down
+	cd docker && docker compose --profile '*' down
 
 docker-logs:
 	cd docker && docker compose logs -f
@@ -119,7 +121,7 @@ dev-up:
 
 dev-down:
 	set -a; [ -f bootstrap.env ] && . ./bootstrap.env; set +a; \
-	docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml down
+	docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml --profile '*' down
 
 dev-logs:
 	set -a; [ -f bootstrap.env ] && . ./bootstrap.env; set +a; \

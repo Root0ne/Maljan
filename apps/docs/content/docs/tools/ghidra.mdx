@@ -4,10 +4,10 @@ description: "The decompiler-backed static provider and its container."
 ---
 
 Ghidra is the decompiler-backed static provider, served by Ghidra MCP. The
-compose stack's optional `ghidra` profile builds and runs the `ghidra-mcp`
-service from `external/ghidra-mcp`, which `make setup` (or `make external`)
-reconstructs: `COMPOSE_PROFILES=ghidra` and a `GHIDRA_MCP_AUTH_TOKEN` in
-`docker/.env` turn it on.
+compose stack's `ghidra` profile, which the shipped `docker/.env` turns on,
+builds and runs the `ghidra-mcp` service from `external/ghidra-mcp`, which
+`make setup` (or `make external`) reconstructs. A deployment without Ghidra
+takes `ghidra` out of `COMPOSE_PROFILES`.
 
 ## Connect it
 

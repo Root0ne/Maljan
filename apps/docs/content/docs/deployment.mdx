@@ -19,9 +19,9 @@ applies both.
 | :-- | :-- | :-- |
 | `postgres` | `postgres:16-alpine` | Relational store. Healthchecked with `pg_isready`. |
 | `redis` | `redis:7-alpine` | Queue, events, rate-limit counters. Password-protected; the healthcheck asserts an actual `PONG`. |
-| `qdrant` | `qdrant/qdrant:v1.18.2` | Vector store, pinned to match the client version. Optional: runs only with the `qdrant` profile, and refuses to start without `QDRANT_API_KEY`. |
+| `qdrant` | `qdrant/qdrant:v1.18.2` | Vector store, pinned to match the client version. Runs under the `qdrant` profile, which the shipped `docker/.env` turns on; without `QDRANT_API_KEY` it restarts, logging the variable to set. |
 | `minio` | `minio/minio:latest` | Sample storage, with its own console. |
-| `ghidra-mcp` | built from `external/ghidra-mcp` | A static analyser. Optional: runs (and is built) only with the `ghidra` profile, and refuses to bind without `GHIDRA_MCP_AUTH_TOKEN`. Capped at 6 GB memory and swap, because the JVM's own limit does not bound the container. `GHIDRA_JAVA_OPTS`, `GHIDRA_MEM_LIMIT` and `GHIDRA_RESTART` in `docker/.env` change the JVM options, the cap and the restart policy; see *Running Ghidra lighter* in [configuration.md](/configuration/). |
+| `ghidra-mcp` | built from `external/ghidra-mcp` | A static analyser. Runs (and is built) under the `ghidra` profile, which the shipped `docker/.env` turns on; without `GHIDRA_MCP_AUTH_TOKEN` it refuses to bind and restarts. Capped at 6 GB memory and swap, because the JVM's own limit does not bound the container. `GHIDRA_JAVA_OPTS`, `GHIDRA_MEM_LIMIT` and `GHIDRA_RESTART` in `docker/.env` change the JVM options, the cap and the restart policy; see *Running Ghidra lighter* in [configuration.md](/configuration/). |
 | `migrate` | `maljan-backend` | One-shot `alembic upgrade head`. Runs to completion before the API and the worker start; on an upgrade, migrate before restarting either, since a stored built-in team written before a seeding revision loads under a renamed key until the revision has run. |
 | `backend-api` | `maljan-backend` | The FastAPI service. |
 | `backend-worker` | `maljan-backend` | The arq worker. Capped at 8 GB memory and swap; `WORKER_RSS_RESTART_MB` makes it exit between jobs before it gets there, and `restart: unless-stopped` brings it back. |
@@ -37,26 +37,33 @@ tool server or a vector store: a job whose team needs a static provider that is
 not ready is refused with the agent and the address, and a memory backend that
 is unavailable is reported and the run goes on without it.
 
-### Optional services
+### Running without Ghidra or Qdrant
 
-`ghidra-mcp` and `qdrant` run only under their Compose profile. Turn them on
-per command (`docker compose --profile ghidra --profile qdrant up -d`) or for
-every command with `COMPOSE_PROFILES=ghidra,qdrant` in `docker/.env`, which
-`make dev-up` and `make docker-up` read too. A stack without either starts and
-runs a job: select the static analyser you do run (radare2, capa and YARA, a
-tool server of your own through `generic_mcp`, or `none`) as
-`core.static.provider`, and `memory` as `core.memory.backend` to keep long-term
-memory in process. `core.static.provider` still ships as `ghidra`, switched
-off, so a team that names it runs without Ghidra's tools until it is attached.
+`ghidra-mcp` and `qdrant` run under the Compose profiles `ghidra` and `qdrant`.
+The shipped `docker/.env.example` turns both on (`COMPOSE_PROFILES=ghidra,qdrant`),
+so a default install runs them exactly as before; a `docker/.env` copied before
+this line existed needs it added, or neither starts on the next `up`. `make
+docker-down` and `make dev-down` stop every profile's services whatever the
+line says.
+
+To run without one, take its name out of `COMPOSE_PROFILES` (an empty value
+runs neither); its token is then not needed, and nothing else waits for it. The
+stack starts and runs a job once two settings follow: select the static
+analyser you do run (radare2, capa and YARA, a tool server of your own through
+`generic_mcp`, or `none`) as `core.static.provider`, and, without Qdrant, set
+`core.memory.backend` to `memory`. The shipped backend is `qdrant`, so until
+then every run reports long-term memory unavailable and goes on without it.
 
 ## Required secrets
 
-Every secret a service of the default stack needs is declared with `:?`, so the
-stack refuses to start — with the variable named — while any is missing. There
-is no baked-in default for any of them. The optional services' tokens are not
-among them, since Compose reads every service's variables whether its profile
-is on or not: each of those services refuses to start without its own token
-instead, and no other service is stopped by it.
+Every secret the core services need is declared with `:?`, so the stack
+refuses to start — with the variable named — while any is missing. There is no
+baked-in default for any of them. Ghidra's and Qdrant's tokens are not guarded
+that way, since Compose reads every service's variables whether its profile is
+on or not and a guard would stop a stack that runs neither: with its profile on
+and its token missing, that one container exits, restarts under its restart
+policy (`docker ps` shows it "Restarting") and logs the variable to set, and no
+other service is stopped by it.
 
 | Variable | Used by |
 | :-- | :-- |
@@ -68,8 +75,8 @@ instead, and no other service is stopped by it.
 
 | Variable, with its profile on | Used by |
 | :-- | :-- |
-| `QDRANT_API_KEY` (`qdrant`) | `QDRANT__SERVICE__API_KEY` on Qdrant; it does not start without one. |
-| `GHIDRA_MCP_AUTH_TOKEN` (`ghidra`) | The bearer token the Ghidra MCP container requires; it does not bind without one. |
+| `QDRANT_API_KEY` (`qdrant`) | `QDRANT__SERVICE__API_KEY` on Qdrant; without one it exits and restarts. |
+| `GHIDRA_MCP_AUTH_TOKEN` (`ghidra`) | The bearer token the Ghidra MCP container requires; without one it refuses to bind and restarts. |
 
 Optional knobs with defaults: `BIND_ADDRESS` (`127.0.0.1`), the published
 ports, `RUN_MIGRATIONS_ON_STARTUP`, `CORS_ORIGINS`, `COOKIE_SECURE`,

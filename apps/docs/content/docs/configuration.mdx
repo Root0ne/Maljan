@@ -2934,8 +2934,15 @@ writes. A `generic_mcp` server reached over http, sse or streamable-http that
 declares no mount is taken to see the samples directory at `/data/samples` as
 well; one over stdio reads the worker's filesystem. The directories the worker
 sweeps of stale copies, the ones a sample's delete clears and the sample roots
-it hands the sidecars are every configured provider's mirror directory and
-every declared `work_dir`, so a server you add is cleaned up like a built-in.
+it hands the sidecars are the shipped mirror directories (`.work`, `r2-work`)
+and the mirror directory of each static provider the settings select and
+switch on, so a server you add is cleaned up like a built-in. A directory is
+used only when it is a plain child of the samples directory, never a symbolic
+link, that the worker created (it writes a `.maljan-mirror` marker into it) or
+a shipped one: a `work_dir` naming a folder of your own corpus is refused, the
+job's copy for that server is not made, and nothing in the folder is changed.
+Only files named as the worker names a copy (the SHA-256 and a plain suffix)
+are ever removed.
 
 | key | meaning |
 | :-- | :-- |

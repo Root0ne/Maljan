@@ -269,3 +269,35 @@ def test_no_service_is_handed_a_samples_path_named_for_one_tool(tmp_path):
     ]
     for name, service in services.items():
         assert "GHIDRA_CONTAINER_SAMPLES_PATH" not in (service.get("environment") or {}), name
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="docker not installed")
+def test_the_shipped_env_file_runs_ghidra_and_qdrant_as_before(tmp_path):
+    """Optional means an operator may take a profile out, not that it is off by default."""
+    compose_dir = tmp_path / "docker"
+    compose_dir.mkdir()
+    copy = compose_dir / "docker-compose.yml"
+    shutil.copy(ROOT / "docker" / "docker-compose.yml", copy)
+    out = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "--env-file",
+            str(ROOT / "docker" / ".env.example"),
+            "-f",
+            str(copy),
+            "config",
+        ],
+        env={**REQUIRED_ENV, **OPTIONAL_ENV, "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    services = yaml.safe_load(out)["services"]
+    assert {"ghidra-mcp", "qdrant"} <= set(services)
+
+
+def test_a_down_stops_the_optional_services_too():
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    downs = [line for line in makefile.splitlines() if line.rstrip().endswith(" down")]
+    assert downs and all("--profile '*'" in line for line in downs), downs
