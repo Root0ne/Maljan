@@ -3132,7 +3132,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3182,7 +3182,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3492,7 +3492,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Far\\Plugins\\FTP\\Hosts",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3502,7 +3502,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Far2\\Plugins\\FTP\\Hosts",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3512,7 +3512,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Far Manager\\Plugins\\FTP\\Hosts",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3522,7 +3522,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Far\\SavedDialogHistory\\FTPHost",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3532,7 +3532,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Far2\\SavedDialogHistory\\FTPHost",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3542,7 +3542,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Far Manager\\SavedDialogHistory\\FTPHost",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3572,12 +3572,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{5E6C858F-0E22-4760-9AFE-EA3317B67173}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3687,7 +3687,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{5E6C858F-0E22-4760-9AFE-EA3317B67173}\\PropertyBag",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3697,7 +3697,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList\\S-1-5-21-1795187001-776152809-4276559823-1000",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3707,7 +3707,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\KnownFolderSettings",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3717,7 +3717,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{3EB685DB-65F9-4CF6-A03A-E3EF65729F3D}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3827,7 +3827,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{3EB685DB-65F9-4CF6-A03A-E3EF65729F3D}\\PropertyBag",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3837,17 +3837,17 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\SessionInfo\\1",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\SessionInfo\\1\\KnownFolders",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3857,7 +3857,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\User Shell Folders",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3867,7 +3867,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{62AB5D82-FDC1-4DC3-A9DD-070D1D495D97}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3977,7 +3977,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{62AB5D82-FDC1-4DC3-A9DD-070D1D495D97}\\PropertyBag",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3987,7 +3987,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3997,7 +3997,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{F1B32785-6FBA-4FCF-9D55-7B8E7F157091}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4107,7 +4107,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{F1B32785-6FBA-4FCF-9D55-7B8E7F157091}\\PropertyBag",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4122,7 +4122,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{F7F1ED05-9F6D-47A2-AAAE-29D317C6F066}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4232,7 +4232,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{F7F1ED05-9F6D-47A2-AAAE-29D317C6F066}\\PropertyBag",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4242,7 +4242,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4252,7 +4252,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{905E63B6-C1BF-494E-B29C-65B732D3D21A}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4362,7 +4362,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{905e63b6-c1bf-494e-b29c-65b732d3d21a}\\PropertyBag",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4372,7 +4372,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4482,7 +4482,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\\PropertyBag",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4617,7 +4617,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Sota\\FFFTP\\Options",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4627,7 +4627,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\CoffeeCup Software\\Internet\\Profiles",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4637,7 +4637,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\FTPWare\\COREFTP\\Sites",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4652,7 +4652,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\FTP Explorer\\Profiles",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4667,7 +4667,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Cryer\\WebSitePublisher",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4677,7 +4677,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\ExpanDrive\\Sessions",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4692,7 +4692,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\NCH Software\\ClassicFTP\\FTPAccounts",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4702,7 +4702,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\NCH Software\\ClassicFTP\\FTPAccounts",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4712,7 +4712,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\NCH Software\\Fling\\Accounts",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4722,7 +4722,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\NCH Software\\Fling\\Accounts",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4732,7 +4732,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\FTPClient\\Sites",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4742,7 +4742,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\FTPClient\\Sites",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4752,7 +4752,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\SoftX.org\\FTPClient\\Sites",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4762,7 +4762,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\SoftX.org\\FTPClient\\Sites",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4772,7 +4772,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\LeapWare",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4782,7 +4782,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\LeapWare",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4792,7 +4792,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Martin Prikryl",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4802,7 +4802,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Martin Prikryl",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4812,7 +4812,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\South River Technologies\\WebDrive\\Connections",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4822,7 +4822,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\South River Technologies\\WebDrive\\Connections",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4842,7 +4842,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\AceBIT",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4852,7 +4852,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\AceBIT",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4862,7 +4862,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\TypeLib\\{CB1F2C0F-8094-4AAC-BCF5-41A64E27F777}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4872,7 +4872,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\TypeLib\\{9EA55529-E122-4757-BC79-E4825F80732C}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4907,7 +4907,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{B4BFCC3A-DB2C-424C-B029-7FE99A87C641}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5017,7 +5017,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{B4BFCC3A-DB2C-424C-B029-7FE99A87C641}\\PropertyBag",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5032,7 +5032,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5042,7 +5042,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\5.0\\Cache",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5052,17 +5052,17 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\5.0\\Cache",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\5.0\\Cache\\Extensible Cache",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{352481E8-33BE-4251-BA85-6007CAEDCF9D}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5172,7 +5172,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{352481E8-33BE-4251-BA85-6007CAEDCF9D}\\PropertyBag",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5187,7 +5187,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\Explorer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5197,7 +5197,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\Explorer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5207,7 +5207,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{2B0F765D-C0E9-4171-908E-08A611B84FF6}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5317,7 +5317,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{2B0F765D-C0E9-4171-908E-08A611B84FF6}\\PropertyBag",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5332,7 +5332,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\5.0\\Cache\\Content",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5352,7 +5352,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\5.0\\Cache\\Cookies",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5372,7 +5372,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{D9DC8A3B-B784-432E-A781-5A1130A75963}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5482,7 +5482,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{D9DC8A3B-B784-432E-A781-5A1130A75963}\\PropertyBag",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5497,7 +5497,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\5.0\\Cache\\History",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5522,12 +5522,12 @@
       },
       {
         "key": "HKEY_USERS\\.DEFAULT",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\User Shell Folders",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5547,7 +5547,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\5.0\\Cache\\Extensible Cache",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5557,7 +5557,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Adobe\\Common",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5587,7 +5587,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{FDD39AD0-238F-46AF-ADB4-6C85480369C7}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5697,7 +5697,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{FDD39AD0-238F-46AF-ADB4-6C85480369C7}\\PropertyBag",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5707,7 +5707,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Robo-FTP 3.7\\FTPServers",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5717,7 +5717,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Robo-FTP 3.7\\FTPServers",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5737,7 +5737,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\crypt32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5752,37 +5752,37 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Cryptography\\OID",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Cryptography\\OID\\EncodingType 0",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CertDllOpenStoreProv",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CertDllOpenStoreProv\\#16",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CertDllOpenStoreProv\\Ldap",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Cryptography\\OID\\EncodingType 1",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Cryptography\\OID\\EncodingType 1\\CertDllOpenStoreProv",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5792,7 +5792,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\SystemCertificates\\MY\\PhysicalStores",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5802,17 +5802,17 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\SystemCertificates\\MY",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\My\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\My\\Certificates",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5822,7 +5822,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\My\\CRLs",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5832,7 +5832,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\My\\CTLs",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5842,7 +5842,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\My\\Keys",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5852,7 +5852,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\LinasFTP\\Site Manager",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5862,7 +5862,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\SimonTatham\\PuTTY\\Sessions",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5872,7 +5872,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\SimonTatham\\PuTTY\\Sessions",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5882,7 +5882,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\CoffeeCup Software",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5892,7 +5892,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\CoffeeCup Software",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5907,7 +5907,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Nico Mak Computing\\WinZip\\FTP",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5917,7 +5917,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Nico Mak Computing\\WinZip\\FTP",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5927,7 +5927,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Nico Mak Computing\\WinZip\\mru\\jobs",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5937,7 +5937,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Nico Mak Computing\\WinZip\\mru\\jobs",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6007,7 +6007,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Poco Systems Inc",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6017,7 +6017,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Poco Systems Inc",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6027,7 +6027,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\IncrediMail",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6037,7 +6037,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\IncrediMail",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6067,7 +6067,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Internet Account Manager\\Accounts",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6077,7 +6077,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Identities",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6102,7 +6102,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Office\\Outlook\\OMI Account Manager\\Accounts",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6112,7 +6112,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Windows Messaging Subsystem\\Profiles\\Microsoft Outlook Internet Settings",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6122,7 +6122,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Windows Messaging Subsystem\\Profiles\\Outlook",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {

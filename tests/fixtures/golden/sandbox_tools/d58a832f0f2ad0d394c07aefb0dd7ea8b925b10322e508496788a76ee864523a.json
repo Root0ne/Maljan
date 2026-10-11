@@ -3796,7 +3796,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\OLE\\AppCompat",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3811,12 +3811,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\AppID\\schtasks.exe",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Classes\\AppID\\schtasks.exe",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3866,7 +3866,7 @@
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\Windows\\Windows Error Reporting\\Consent",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3876,7 +3876,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\Windows Error Reporting\\Consent",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4451,7 +4451,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\DataCollection",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4491,7 +4491,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\Setup",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {

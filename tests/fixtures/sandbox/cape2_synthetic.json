@@ -205,6 +205,68 @@
             "id": 14
           },
           {
+            "timestamp": "2000-01-01 00:00:01,660",
+            "category": "registry",
+            "api": "RegCreateKeyExW",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {"name": "Registry", "value": "0x80000001"},
+              {"name": "SubKey", "value": "Software\\Synthetic\\Existing"},
+              {"name": "Class", "value": ""},
+              {"name": "Access", "value": "0x000f003f"},
+              {"name": "Handle", "value": "0x0000011c"},
+              {"name": "FullName", "value": "HKEY_CURRENT_USER\\Software\\Synthetic\\Existing"},
+              {"name": "Disposition", "value": "2"}
+            ],
+            "repeated": 0,
+            "id": 15
+          },
+          {
+            "timestamp": "2000-01-01 00:00:01,670",
+            "category": "registry",
+            "api": "NtCreateKey",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {"name": "KeyHandle", "value": "0x00000120"},
+              {"name": "DesiredAccess", "value": "0x000f003f"},
+              {"name": "ObjectAttributes", "value": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Synthetic\\NativeExisting"},
+              {"name": "Disposition", "value": "2"}
+            ],
+            "repeated": 0,
+            "id": 16
+          },
+          {
+            "timestamp": "2000-01-01 00:00:01,680",
+            "category": "registry",
+            "api": "NtCreateKey",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {"name": "KeyHandle", "value": "0x00000124"},
+              {"name": "DesiredAccess", "value": "0x000f003f"},
+              {"name": "ObjectAttributes", "value": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Synthetic\\NativeNew"},
+              {"name": "Disposition", "value": "1"}
+            ],
+            "repeated": 0,
+            "id": 17
+          },
+          {
+            "timestamp": "2000-01-01 00:00:01,690",
+            "category": "registry",
+            "api": "RegDeleteValueW",
+            "status": false,
+            "return": "0x00000002",
+            "arguments": [
+              {"name": "Handle", "value": "0x00000108"},
+              {"name": "ValueName", "value": "Missing"},
+              {"name": "FullName", "value": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\Missing"}
+            ],
+            "repeated": 0,
+            "id": 18
+          },
+          {
             "timestamp": "2000-01-01 00:00:01,700",
             "category": "filesystem",
             "api": "NtCreateFile",

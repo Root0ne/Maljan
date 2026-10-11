@@ -48,7 +48,7 @@ def read_golden(directory: Path, stem: str) -> Any:
 
 
 def skip_absent_fixture(detail: str) -> None:
-    """Skip this golden case because its source is not on this machine."""
+    """Skip this golden case because its source was not read in this session."""
     pytest.skip(f"{ABSENT_FIXTURE_REASON}: {detail}")
 
 
@@ -69,7 +69,7 @@ def absent_fixture_summary(count: int) -> str:
     noun = "test" if count == 1 else "tests"
     return (
         f"{count} golden {noun} skipped: {ABSENT_FIXTURE_REASON} "
-        "(their source reports are not on this machine, so these goldens were not compared)"
+        "(their source reports were not read in this session, so these goldens were not compared)"
     )
 
 

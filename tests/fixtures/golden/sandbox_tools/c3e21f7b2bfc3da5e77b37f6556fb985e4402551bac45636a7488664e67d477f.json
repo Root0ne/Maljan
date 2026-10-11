@@ -3470,12 +3470,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\interface\\{aa5b6a80-b834-11d0-932f-00a0c90dcaa9}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Classes\\interface\\{aa5b6a80-b834-11d0-932f-00a0c90dcaa9}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3545,12 +3545,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\TenantRestrictions\\Payload",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\windows\\CurrentVersion\\Internet Settings",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3560,7 +3560,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3590,7 +3590,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\WinHttp",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3600,7 +3600,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\windows\\CurrentVersion\\Internet Settings",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3610,7 +3610,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\WinSock2\\Parameters",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3630,7 +3630,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\System",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3640,7 +3640,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Command Processor",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3680,7 +3680,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Command Processor",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {

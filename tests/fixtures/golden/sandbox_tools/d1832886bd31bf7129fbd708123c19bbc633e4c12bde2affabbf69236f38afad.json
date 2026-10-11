@@ -4410,7 +4410,7 @@
     "registry": [
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Ole\\AppCompat",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4755,7 +4755,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\XAML",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4765,7 +4765,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\PLM",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4805,7 +4805,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Appx",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5380,7 +5380,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\InprocHandler32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5390,7 +5390,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\InprocHandler",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5410,7 +5410,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\LocalServer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5575,7 +5575,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -5895,7 +5895,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Accent",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5905,7 +5905,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\Personalization",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5915,7 +5915,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Accent",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -6320,7 +6320,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Scaling",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6330,7 +6330,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Mrt\\_Merged",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6445,7 +6445,7 @@
       },
       {
         "key": "HKEY_USERS",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6565,7 +6565,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{b03c2205-f02e-4d77-80df-e1747afdd39c}\\InprocHandler32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6575,7 +6575,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{b03c2205-f02e-4d77-80df-e1747afdd39c}\\InprocHandler",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6595,7 +6595,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{b03c2205-f02e-4d77-80df-e1747afdd39c}\\LocalServer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6610,12 +6610,12 @@
       },
       {
         "key": "HKEY_USERS\\S-1-5-21-1795187001-776152809-4276559823-1000\\Software\\Microsoft\\Windows NT\\CurrentVersion\\HostActivityManager",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\HostActivityManager\\Volatile",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -6625,7 +6625,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\CoreUI\\Navigation\\ActivationPolicy",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6845,7 +6845,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{11659a23-5884-4d1b-9cf6-67d6f4f90b36}\\InprocHandler32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6855,7 +6855,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{11659a23-5884-4d1b-9cf6-67d6f4f90b36}\\InprocHandler",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6875,7 +6875,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{11659a23-5884-4d1b-9cf6-67d6f4f90b36}\\LocalServer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6920,7 +6920,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -7210,7 +7210,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Control Panel\\Colors",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -7275,7 +7275,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{144C71F2-7F10-4AB2-BB07-C38F5B9AE05E}\\InprocHandler32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -7285,7 +7285,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{144C71F2-7F10-4AB2-BB07-C38F5B9AE05E}\\InprocHandler",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -7305,7 +7305,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{144C71F2-7F10-4AB2-BB07-C38F5B9AE05E}\\LocalServer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -8575,12 +8575,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\CurrentVersion\\AppModel\\Repository\\Families\\MicrosoftWindows.Client.CBS_cw5n1h2txyewy",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\CurrentVersion\\AppModel\\Repository\\Families\\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\\MicrosoftWindows.Client.CBS_1000.19061.1000.0_x64__cw5n1h2txyewy",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -9165,52 +9165,52 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\AppDataLow\\Software\\Microsoft\\IME\\15.0\\IMEJP\\MSIME",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\InputMethod\\CandidateWindow\\CHS\\1",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\IME\\15.0\\IMETC",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Input\\Settings",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\InputMethod\\Settings\\CHS",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Input\\TIPC",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\InputMethod\\CandidateWindow\\CHS\\2",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\InputMethod\\Settings\\CHT",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\StigRegKey\\Typing\\DesktopNearCaretKeyboardEnabled",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\TabletTip\\1.7",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -10325,7 +10325,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Clipboard",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -10580,7 +10580,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\Dwm",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -11460,7 +11460,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\CurrentVersion\\AppModel\\SystemAppData\\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\\PSR",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -11725,7 +11725,7 @@
       },
       {
         "key": "\\REGISTRY\\A\\{f4f18712-f6bd-bc79-90d3-e4d3ab67ef08}\\LocalState",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -12400,7 +12400,7 @@
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\Windows\\CurrentVersion\\WinTrust\\Trust Providers\\Software Publishing",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13185,7 +13185,7 @@
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\SystemCertificates\\CA",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13195,17 +13195,17 @@
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\SystemCertificates\\CA\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\SystemCertificates\\CA\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\SystemCertificates\\CA\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13215,22 +13215,22 @@
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Policies\\Microsoft\\SystemCertificates\\CA",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Policies\\Microsoft\\SystemCertificates\\CA\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Policies\\Microsoft\\SystemCertificates\\CA\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Policies\\Microsoft\\SystemCertificates\\CA\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13240,7 +13240,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\SystemCertificates\\CA",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13250,7 +13250,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\CA\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13285,7 +13285,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\CA\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13300,27 +13300,27 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\CA\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\SystemCertificates\\CA",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\CA\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\CA\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\CA\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13330,7 +13330,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\EnterpriseCertificates\\CA",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13340,17 +13340,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\CA\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\CA\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\CA\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13360,7 +13360,7 @@
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\SystemCertificates\\Disallowed",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13370,37 +13370,37 @@
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\SystemCertificates\\Disallowed\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\SystemCertificates\\Disallowed\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\SystemCertificates\\Disallowed\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Policies\\Microsoft\\SystemCertificates\\Disallowed",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Policies\\Microsoft\\SystemCertificates\\Disallowed\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Policies\\Microsoft\\SystemCertificates\\Disallowed\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Policies\\Microsoft\\SystemCertificates\\Disallowed\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13410,7 +13410,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\SystemCertificates\\Disallowed",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13420,17 +13420,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\Disallowed\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\Disallowed\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\Disallowed\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13445,22 +13445,22 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\SystemCertificates\\Disallowed",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\Disallowed\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\Disallowed\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\Disallowed\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13470,7 +13470,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\EnterpriseCertificates\\Disallowed",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13480,17 +13480,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\Disallowed\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\Disallowed\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\Disallowed\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13500,7 +13500,7 @@
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\SystemCertificates\\Root",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13515,17 +13515,17 @@
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\SystemCertificates\\Root\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\SystemCertificates\\Root\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\SystemCertificates\\Root\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13540,7 +13540,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\SystemCertificates\\Root",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13550,7 +13550,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\ROOT\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13675,17 +13675,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\ROOT\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\ROOT\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\SystemCertificates\\AuthRoot",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13695,7 +13695,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13840,32 +13840,32 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\SystemCertificates\\Root",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\Root\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\Root\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\Root\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13875,7 +13875,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\EnterpriseCertificates\\Root",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13885,22 +13885,22 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\Root\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\Root\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\Root\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\SystemCertificates\\SmartCardRoot",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13910,22 +13910,22 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\SmartCardRoot\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\SmartCardRoot\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\SmartCardRoot\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\SystemCertificates\\SmartCardRoot",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13935,17 +13935,17 @@
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\SystemCertificates\\SmartCardRoot\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\SystemCertificates\\SmartCardRoot\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\SystemCertificates\\SmartCardRoot\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13955,7 +13955,7 @@
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\SystemCertificates\\TrustedPeople",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -13965,37 +13965,37 @@
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\SystemCertificates\\TrustedPeople\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\SystemCertificates\\TrustedPeople\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\SystemCertificates\\TrustedPeople\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Policies\\Microsoft\\SystemCertificates\\TrustedPeople",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Policies\\Microsoft\\SystemCertificates\\TrustedPeople\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Policies\\Microsoft\\SystemCertificates\\TrustedPeople\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Policies\\Microsoft\\SystemCertificates\\TrustedPeople\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -14005,7 +14005,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\SystemCertificates\\TrustedPeople",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -14015,37 +14015,37 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\TrustedPeople\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\TrustedPeople\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\TrustedPeople\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\SystemCertificates\\TrustedPeople",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\TrustedPeople\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\TrustedPeople\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\TrustedPeople\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -14055,7 +14055,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\EnterpriseCertificates\\TrustedPeople",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -14065,17 +14065,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\TrustedPeople\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\TrustedPeople\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\TrustedPeople\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -14085,7 +14085,7 @@
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\SystemCertificates\\trust",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -14095,37 +14095,37 @@
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\SystemCertificates\\trust\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\SystemCertificates\\trust\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\SystemCertificates\\trust\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Policies\\Microsoft\\SystemCertificates\\trust",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Policies\\Microsoft\\SystemCertificates\\trust\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Policies\\Microsoft\\SystemCertificates\\trust\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\.DEFAULT\\Software\\Policies\\Microsoft\\SystemCertificates\\trust\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -14135,7 +14135,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\SystemCertificates\\trust",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -14145,37 +14145,37 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\trust\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\trust\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\trust\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\SystemCertificates\\trust",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\trust\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\trust\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\trust\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -14185,7 +14185,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\EnterpriseCertificates\\trust",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -14195,17 +14195,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\Trust\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\Trust\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\Trust\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -14705,12 +14705,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -15195,7 +15195,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{ead1a538-3bb4-45d9-b6c9-dc167e21d959}\\InprocHandler32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -15205,7 +15205,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{ead1a538-3bb4-45d9-b6c9-dc167e21d959}\\InprocHandler",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -15225,7 +15225,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{ead1a538-3bb4-45d9-b6c9-dc167e21d959}\\LocalServer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -15250,7 +15250,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -15270,7 +15270,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\DeviceAccess",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -15480,12 +15480,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\activity",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -15695,7 +15695,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\appDiagnostics",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -15890,7 +15890,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\appointments",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -16010,7 +16010,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\bluetooth\\CapabilityHandlers\\{89AA9BF2-38EE-4444-8AE5-8CA90AAC64F6}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -16120,7 +16120,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\bluetooth",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -16315,7 +16315,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\bluetoothSync",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -16435,7 +16435,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\broadFileSystemAccess",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -16555,7 +16555,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\cellularData\\CapabilityHandlers\\{C1B22BC2-5EE5-4A3E-BA37-A188922BC827}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -16675,7 +16675,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\cellularData",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -16870,7 +16870,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\chat",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -17065,7 +17065,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\contacts",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -17185,7 +17185,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\documentsLibrary",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -17380,7 +17380,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\email",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -17575,7 +17575,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\gazeInput",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -17695,7 +17695,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\humanInterfaceDevice\\CapabilityHandlers\\{40b8879a-9b26-42fd-8fec-00c32f8443be}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -17730,7 +17730,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\humanInterfaceDevice",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -17850,7 +17850,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\location\\CapabilityHandlers\\{0d9948a9-e79f-4a06-8784-c32583d034f2}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -17885,7 +17885,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\LocationAndSensors",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -18035,7 +18035,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\location",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -18265,7 +18265,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\microphone\\CapabilityHandlers\\{870AF99C-171D-4f9e-AF0D-E63DF40C2BC9}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -18375,7 +18375,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\microphone",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -18570,7 +18570,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\phoneCall",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -18765,7 +18765,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\phoneCallHistory",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -18885,7 +18885,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\picturesLibrary",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -19080,7 +19080,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\radios",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -19200,7 +19200,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\sensors.custom\\CapabilityHandlers\\{cb0eed72-a1ee-4df3-94c8-b1022bf900b4}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -19235,7 +19235,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\sensors.custom",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -19355,7 +19355,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\serialCommunication\\CapabilityHandlers\\{4eeb9b7c-0f47-4fae-a284-a0ec40c5719a}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -19390,7 +19390,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\serialCommunication",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -19510,7 +19510,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\sms\\CapabilityHandlers\\{02783ae2-02a6-4403-a482-e08bf20ffd06}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -19655,7 +19655,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\usb\\CapabilityHandlers\\{b07a5d8d-67f8-438f-b69d-4372fbe1dbb7}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -19690,7 +19690,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\usb",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -19885,7 +19885,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\userAccountInformation",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -20080,7 +20080,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\userDataTasks",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -20275,7 +20275,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\userNotificationListener",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -20395,7 +20395,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\videosLibrary",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -20515,7 +20515,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\webcam\\CapabilityHandlers\\{bb32d5df-dbe0-4776-82b3-0dc0d48afc81}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -20710,7 +20710,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\webcam",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -20830,7 +20830,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\wifiData\\CapabilityHandlers\\{16A78C67-DCE5-45E9-A45E-7A051B50C09E}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -20870,7 +20870,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\wifiData",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -20990,7 +20990,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\wiFiDirect\\CapabilityHandlers\\{e04d75b6-ee0a-48a9-acd5-e39e0b1bb434}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21025,7 +21025,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\wiFiDirect",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21130,7 +21130,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\accessoryManager\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21145,7 +21145,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\activity\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21155,7 +21155,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\appDiagnostics\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21165,7 +21165,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\appointments\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21185,7 +21185,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\appointmentsSystem\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21210,7 +21210,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\backgroundSpatialPerception\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21225,7 +21225,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\bluetooth\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21245,7 +21245,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\bluetooth.genericAttributeProfile\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21270,7 +21270,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\bluetooth.rfcomm\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21295,7 +21295,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\bluetoothAdapter\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21310,7 +21310,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\bluetoothSync\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21330,7 +21330,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\broadFilesystemAccess\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21340,7 +21340,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\cellularData\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21360,7 +21360,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\cellularDeviceControl\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21375,7 +21375,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\chat\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21395,7 +21395,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\chatSystem\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21420,7 +21420,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\comPort\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21435,7 +21435,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\contacts\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21455,7 +21455,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\contactsSystem\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21470,7 +21470,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\documentsLibrary\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21480,7 +21480,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\email\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21500,7 +21500,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\emailSystem\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21515,7 +21515,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\gazeInput\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21535,7 +21535,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\graphicsCaptureWithoutBorder\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21550,7 +21550,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\humanInterfaceDevice\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21570,7 +21570,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\internetClient\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21595,7 +21595,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\internetClientServer\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21620,7 +21620,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\kinectAudio\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21645,7 +21645,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\kinectVision\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21660,7 +21660,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\location\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21670,7 +21670,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\locationHistory\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21690,7 +21690,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\lowLevel\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21705,7 +21705,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\microphone\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21725,7 +21725,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\optical\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21750,7 +21750,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\packageManagement\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21775,7 +21775,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\packageQuery\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21790,7 +21790,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\phoneCall\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21800,7 +21800,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\phoneCallHistory\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21820,7 +21820,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\phoneCallHistoryPublic\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21845,7 +21845,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\phoneCallHistorySystem\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21870,7 +21870,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\phoneCallSystem\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21885,7 +21885,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\picturesLibrary\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21905,7 +21905,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\pointOfService\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21930,7 +21930,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\preemptiveCamera\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21955,7 +21955,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\privateNetworkClientServer\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21980,7 +21980,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\proximity\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -21995,7 +21995,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\radios\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -22005,7 +22005,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\sensors.custom\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -22015,7 +22015,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\serialCommunication\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -22025,7 +22025,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\sms\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -22045,7 +22045,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\smsSend\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -22060,7 +22060,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\usb\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -22070,7 +22070,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\userAccountInformation\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -22080,7 +22080,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\userDataTasks\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -22100,7 +22100,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\userDataTasksSystem\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -22115,7 +22115,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\userNotificationListener\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -22125,7 +22125,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\videosLibrary\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -22135,7 +22135,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\webcam\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -22155,7 +22155,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\wiFiControl\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -22170,7 +22170,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\wifiData\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -22180,7 +22180,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\Capabilities\\wiFiDirect\\Apps\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -22190,12 +22190,12 @@
       },
       {
         "key": "HKEY_USERS\\S-1-5-21-1795187001-776152809-4276559823-1000\\Software\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\S-1-5-21-1795187001-776152809-4276559823-1000\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\activity\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -22205,12 +22205,12 @@
       },
       {
         "key": "HKEY_USERS\\S-1-5-21-1795187001-776152809-4276559823-1000\\Software\\Microsoft\\Windows\\CurrentVersion\\DeviceAccess\\S-1-15-2-134502191-3953742252-124095842-3485755127-143709258-1237261841-1400245445\\{9D9E0118-1807-4F2E-96E4-2CE57142E196}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\S-1-5-21-1795187001-776152809-4276559823-1000\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\appDiagnostics\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -22220,12 +22220,12 @@
       },
       {
         "key": "HKEY_USERS\\S-1-5-21-1795187001-776152809-4276559823-1000\\Software\\Microsoft\\Windows\\CurrentVersion\\DeviceAccess\\S-1-15-2-134502191-3953742252-124095842-3485755127-143709258-1237261841-1400245445\\{2297E4E2-5DBE-466D-A12B-0F8286F0D9CA}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\S-1-5-21-1795187001-776152809-4276559823-1000\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\appointments\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -22235,7 +22235,7 @@
       },
       {
         "key": "HKEY_USERS\\S-1-5-21-1795187001-776152809-4276559823-1000\\Software\\Microsoft\\Windows\\CurrentVersion\\DeviceAccess\\S-1-15-2-134502191-3953742252-124095842-3485755127-143709258-1237261841-1400245445\\{D89823BA-7180-4B81-B50C-7E471E6121A3}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -22430,7 +22430,7 @@
       },
       {
         "key": "HKEY_USERS\\S-1-5-21-1795187001-776152809-4276559823-1000\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\backgroundSpatialPerception\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -22445,7 +22445,7 @@
       },
       {
         "key": "HKEY_USERS\\S-1-5-21-1795187001-776152809-4276559823-1000\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\bluetoothSync\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -22455,12 +22455,12 @@
       },
       {
         "key": "HKEY_USERS\\S-1-5-21-1795187001-776152809-4276559823-1000\\Software\\Microsoft\\Windows\\CurrentVersion\\DeviceAccess\\S-1-15-2-134502191-3953742252-124095842-3485755127-143709258-1237261841-1400245445\\LooselyCoupled",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\S-1-5-21-1795187001-776152809-4276559823-1000\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\broadFilesystemAccess\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -22470,7 +22470,7 @@
       },
       {
         "key": "HKEY_USERS\\S-1-5-21-1795187001-776152809-4276559823-1000\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\cellularData\\ksystemsharehostenUS_kbyyjmwk2spaw",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -22565,7 +22565,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\WinTrust\\Trust Providers\\Software Publishing",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -22590,7 +22590,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\SystemCertificates\\CA",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -22600,37 +22600,37 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\CA\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\CA\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\CA\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\SystemCertificates\\CA",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\CA\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\CA\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\CA\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -22640,7 +22640,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\SystemCertificates\\Disallowed",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -22650,37 +22650,37 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\Disallowed\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\Disallowed\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\Disallowed\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\SystemCertificates\\Disallowed",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\Disallowed\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\Disallowed\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\Disallowed\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -22690,7 +22690,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\SystemCertificates\\Root",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -22705,17 +22705,17 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\Root\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\Root\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\Root\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -22725,7 +22725,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\SystemCertificates\\SmartCardRoot",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -22735,17 +22735,17 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\SmartCardRoot\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\SmartCardRoot\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\SmartCardRoot\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -22755,7 +22755,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\SystemCertificates\\TrustedPeople",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -22765,37 +22765,37 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\TrustedPeople\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\TrustedPeople\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\TrustedPeople\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\SystemCertificates\\TrustedPeople",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\TrustedPeople\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\TrustedPeople\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\TrustedPeople\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -22805,7 +22805,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\SystemCertificates\\trust",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -22815,37 +22815,37 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\trust\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\trust\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\trust\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\SystemCertificates\\trust",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\trust\\Certificates",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\trust\\CRLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\trust\\CTLs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -23265,7 +23265,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\kingsoft\\Office\\6.0\\plugins\\officespace\\flogin\\proactivelySkipVistorModeHours",
-        "operation": "delete",
+        "operation": "query",
         "value": null
       },
       {
@@ -23275,12 +23275,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\kingsoft\\Office\\6.0\\plugins\\officespace\\flogin\\lastSkipVistorModeTime",
-        "operation": "delete",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\kingsoft\\Office\\6.0\\plugins\\officespace\\flogin\\proactivelyShorttermSkip",
-        "operation": "delete",
+        "operation": "query",
         "value": null
       },
       {
@@ -23750,7 +23750,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Desktop\\NameSpace",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -23825,7 +23825,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MyComputer\\NameSpace",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -24040,12 +24040,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\exefile\\CurVer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\exefile\\CurVer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26165,7 +26165,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\TreatAs",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26210,12 +26210,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\InprocHandler32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\InprocHandler32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26225,12 +26225,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\InprocHandler",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\InprocHandler",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26250,12 +26250,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\LocalServer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{c53e07ec-25f3-4093-aa39-fc67ea22e99d}\\LocalServer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26290,7 +26290,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\PropertySystem\\SystemPropertyHandlers",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26300,7 +26300,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\PropertySystem\\PropertyHandlers\\.exe",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26480,7 +26480,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26490,7 +26490,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26500,12 +26500,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\0",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\0",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26515,7 +26515,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\0",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26530,12 +26530,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\1",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\1",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26545,7 +26545,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\1",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26560,7 +26560,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\ZoneMap\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26585,12 +26585,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\2",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\2",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26600,7 +26600,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\2",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26615,12 +26615,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\3",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\3",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26630,7 +26630,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\3",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26645,12 +26645,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\4",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\4",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26660,7 +26660,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\4",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26675,7 +26675,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26685,7 +26685,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26695,17 +26695,17 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\0",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\0",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26715,7 +26715,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\0",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26725,12 +26725,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\1",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\1",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26740,7 +26740,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\1",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26750,12 +26750,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\2",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\2",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26765,7 +26765,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\2",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26775,12 +26775,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\3",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\3",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26790,7 +26790,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\3",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26800,12 +26800,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\4",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\4",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -26815,7 +26815,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\4",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -27110,7 +27110,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\0",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -27120,7 +27120,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\exefile\\shell\\open\\command",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -27135,12 +27135,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\exefile\\shell\\open\\DropTarget",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\exefile\\shell\\open\\DropTarget",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -27175,7 +27175,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\ShellCompatibility\\ProgIDs\\exefile",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -27295,22 +27295,22 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\TreatAs",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\InprocHandler32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\InprocHandler",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\CLSID\\{95E15D0A-66E6-93D9-C53C-76E6219D3341}\\LocalServer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -27425,12 +27425,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\TenantRestrictions\\Payload",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\Tcpip\\Parameters",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -27905,7 +27905,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\CLSID\\{20D04FE0-3AEA-1069-A2D8-08002B30309D}\\ShellFolder",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -27985,7 +27985,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\.pdf\\ShellEx\\{8895b1c6-b41f-4c1c-a562-0d564250836f}",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -27995,7 +27995,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Classes\\.pdf\\ShellEx\\{8895b1c6-b41f-4c1c-a562-0d564250836f}",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -28025,7 +28025,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Classes\\CLSID\\{A3DA03D4-2B35-4072-83DC-5E5631AF019D}",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -28035,7 +28035,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Classes\\CLSID\\{A3DA03D4-2B35-4072-83DC-5E5631AF019D}\\InProcServer32",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -28060,7 +28060,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Classes\\.zip\\ShellEx\\{8895b1c6-b41f-4c1c-a562-0d564250836f}",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -28070,7 +28070,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Classes\\.rar\\ShellEx\\{8895b1c6-b41f-4c1c-a562-0d564250836f}",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -28080,7 +28080,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Classes\\.7z\\ShellEx\\{8895b1c6-b41f-4c1c-a562-0d564250836f}",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -28090,7 +28090,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Classes\\AppID\\{B02DA394-9290-4FA5-80B7-17A47A357F2C}",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -28100,7 +28100,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\PreviewHandlers",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -28455,7 +28455,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\TypeLib\\{00020430-0000-0000-C000-000000000046}\\2.0\\0\\win64",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -28465,7 +28465,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\kingsoft\\Office\\6.0\\plugins\\pdfwspv",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -28480,7 +28480,7 @@
       },
       {
         "key": "HKEY_CLASSES_ROOT\\AppID\\{E734B12F-9D7C-47B4-8EAD-CDC253A967D8}",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -28585,7 +28585,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{D726464B-98F1-4627-86CD-4A082A1E5307}\\TreatAs",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -28610,7 +28610,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{D726464B-98F1-4627-86CD-4A082A1E5307}\\InprocHandler32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -28620,7 +28620,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{D726464B-98F1-4627-86CD-4A082A1E5307}\\InprocHandler",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -28715,7 +28715,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{607C052E-2B08-4548-BD1D-EB7665A34788}\\InprocHandler32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -28725,7 +28725,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{607C052E-2B08-4548-BD1D-EB7665A34788}\\InprocHandler",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -28745,7 +28745,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{607C052E-2B08-4548-BD1D-EB7665A34788}\\LocalServer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -28760,7 +28760,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\WindowsUpdate\\Orchestrator",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -28965,7 +28965,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -28975,7 +28975,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\WindowsUpdate\\UpdatePolicy\\GPCache",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -29045,7 +29045,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -29280,12 +29280,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Wosc\\Client\\Persistent",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Wosc\\Client\\Persistent\\ClientState",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -29295,7 +29295,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Wosc\\Client\\Persistent\\ClientState\\ASAPCP",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -29420,7 +29420,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Wosc\\Client\\Persistent\\ClientState\\CORTANAUWP",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -29545,7 +29545,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Wosc\\Client\\Persistent\\ClientState\\CTAC",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -29670,7 +29670,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Wosc\\Client\\Persistent\\ClientState\\DBUPDATEBL",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -29795,7 +29795,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Wosc\\Client\\Persistent\\ClientState\\DXDB",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -29920,7 +29920,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Wosc\\Client\\Persistent\\ClientState\\FCON",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -30045,7 +30045,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Wosc\\Client\\Persistent\\ClientState\\FSS",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -30170,7 +30170,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Wosc\\Client\\Persistent\\ClientState\\GAMEINPUT",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -30355,7 +30355,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{11F11442-3359-410C-875E-D21984507B62}\\InprocHandler32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -30365,7 +30365,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{11F11442-3359-410C-875E-D21984507B62}\\InprocHandler",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -30385,7 +30385,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{11F11442-3359-410C-875E-D21984507B62}\\LocalServer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -30400,7 +30400,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Wosc\\Client\\Persistent\\ClientState\\IRISCLIENT",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -30585,7 +30585,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Wosc\\Client\\Persistent\\ClientState\\KNOWNGAMELIST",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -30710,7 +30710,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Wosc\\Client\\Persistent\\ClientState\\MITIGATION",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -30835,7 +30835,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Wosc\\Client\\Persistent\\ClientState\\MLMOD",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -30960,7 +30960,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Wosc\\Client\\Persistent\\ClientState\\MUSE",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -31085,7 +31085,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Wosc\\Client\\Persistent\\ClientState\\RECYCLEANDTRADEIN",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -31210,7 +31210,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Wosc\\Client\\Persistent\\ClientState\\SCCINSTALLSVC",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -31335,7 +31335,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Wosc\\Client\\Persistent\\ClientState\\STORAGEGROVELER",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -31460,7 +31460,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Wosc\\Client\\Persistent\\ClientState\\WOSC",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -31675,7 +31675,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\WindowsSelfhost\\OneSettings",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -31685,7 +31685,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\WindowsUpdate",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -31695,7 +31695,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\PreviewBuilds",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -31840,7 +31840,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\WindowsUpdate\\UX\\Settings",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -31910,7 +31910,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\current\\device\\Update",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -31925,7 +31925,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\WaaSAssessment\\Cache\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -31950,7 +31950,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\%DiagtrackRegistryRoot%\\TestHooks\\Volatile",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -31960,7 +31960,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\%DiagtrackRegistryRoot%\\TestHooks",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -31970,7 +31970,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -31980,7 +31980,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SQMClient",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -31990,22 +31990,22 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\WindowsSelfhost\\FIDs",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsSelfHost\\FIDs\\ByFID",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsSelfHost\\FIDs\\Unknown",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Flighting\\Build",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -32030,7 +32030,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\WindowsSelfHost\\FIDs\\AllFlights",
-        "operation": "delete",
+        "operation": "access",
         "value": null
       },
       {
@@ -49935,7 +49935,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SQMClient",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -49950,7 +49950,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -49975,7 +49975,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Reliability Analysis\\RAC",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -49990,7 +49990,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\rempl\\irplugin",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -50025,7 +50025,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\DataCollection",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -50040,7 +50040,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Hardware\\Description\\System\\CentralProcessor\\0",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -50560,7 +50560,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\WindowsSelfhost\\ClientState",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -50905,7 +50905,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Wosc\\Client\\Persistent\\ClientState\\",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -51515,7 +51515,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{A6FF50C0-56C0-71CA-5732-BED303A59628}\\InprocHandler32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -51525,7 +51525,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{A6FF50C0-56C0-71CA-5732-BED303A59628}\\InprocHandler",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -51545,7 +51545,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{A6FF50C0-56C0-71CA-5732-BED303A59628}\\LocalServer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -51715,7 +51715,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\TokenBroker\\Extensions\\Windows.Internal.Security.Authentication.Aad.AadWamExtension",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -51735,7 +51735,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\TokenBroker\\Extensions\\Windows.Internal.Security.Authentication.OnlineId.MicrosoftAccountWAMExtension",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -51755,7 +51755,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\TokenBroker\\Extensions\\Windows.Internal.Security.Authentication.XboxLive.XboxLiveTokenBrokerExtension",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -51855,7 +51855,7 @@
       },
       {
         "key": "HKEY_USERS\\S-1-5-21-1795187001-776152809-4276559823-1000\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\TokenBroker\\TestHooks",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -52065,7 +52065,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\Defaults\\Provider Types\\Type 024",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -52085,12 +52085,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\Tcpip6\\Parameters\\Interfaces",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -52110,12 +52110,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces\\\\{bdbc2f92-10e2-489a-87f6-3baa81222dfe}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\Dnscache\\\\InterfaceSpecificParameters\\{bdbc2f92-10e2-489a-87f6-3baa81222dfe}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -52165,7 +52165,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\Tcpip6\\Parameters\\Interfaces\\\\{bdbc2f92-10e2-489a-87f6-3baa81222dfe}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -52185,12 +52185,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces\\\\{62c568d8-8570-11ee-89bd-806e6f6e6963}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\Dnscache\\\\InterfaceSpecificParameters\\{62c568d8-8570-11ee-89bd-806e6f6e6963}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -52240,7 +52240,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\Tcpip6\\Parameters\\Interfaces\\\\{62c568d8-8570-11ee-89bd-806e6f6e6963}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -52250,7 +52250,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Services\\Tcpip6\\Parameters\\Interfaces\\{bdbc2f92-10e2-489a-87f6-3baa81222dfe}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -52260,7 +52260,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Services\\Tcpip\\Parameters\\Interfaces\\{bdbc2f92-10e2-489a-87f6-3baa81222dfe}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -52280,12 +52280,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\Tcpip6\\Parameters\\Interfaces\\{bdbc2f92-10e2-489a-87f6-3baa81222dfe}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces\\{bdbc2f92-10e2-489a-87f6-3baa81222dfe}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -52295,7 +52295,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Services\\Tcpip6\\Parameters\\Interfaces\\{62c568d8-8570-11ee-89bd-806e6f6e6963}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -52305,7 +52305,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Services\\Tcpip\\Parameters\\Interfaces\\{62c568d8-8570-11ee-89bd-806e6f6e6963}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -52320,7 +52320,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\Tcpip6\\Parameters\\Interfaces\\{62c568d8-8570-11ee-89bd-806e6f6e6963}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -52330,7 +52330,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces\\{62c568d8-8570-11ee-89bd-806e6f6e6963}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -52340,12 +52340,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\Dnscache\\InterfaceSpecificParameters",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Services\\Dnscache\\InterfaceSpecificParameters\\{BDBC2F92-10E2-489A-87F6-3BAA81222DFE}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -52360,7 +52360,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\NetBT\\Parameters",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -52505,7 +52505,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Tracing",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
@@ -52615,7 +52615,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\rasman\\parameters",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -52660,12 +52660,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\AppID\\d1832886bd31bf7129fb.exe",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Classes\\AppID\\d1832886bd31bf7129fb.exe",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -52675,22 +52675,22 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Interface\\{00000134-0000-0000-C000-000000000046}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Classes\\Interface\\{00000134-0000-0000-C000-000000000046}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\WOW6432Node\\Interface\\{00000134-0000-0000-C000-000000000046}\\ProxyStubClsid32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\WOW6432Node\\Interface\\{00000134-0000-0000-C000-000000000046}\\ProxyStubClsid32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {

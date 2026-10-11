@@ -343,6 +343,8 @@ _REGISTRY_OPS: dict[str, str] = {
     "ntcreatekey": "create",
     "regdeletekeya": "delete",
     "regdeletekeyw": "delete",
+    "regdeletekeyexa": "delete",
+    "regdeletekeyexw": "delete",
     "regdeletevaluea": "delete",
     "regdeletevaluew": "delete",
     "ntdeletekey": "delete",
@@ -353,15 +355,25 @@ _REGISTRY_OPS: dict[str, str] = {
     "regopenkeyexa": "query",
     "regopenkeyexw": "query",
     "ntopenkey": "query",
+    "ntopenkeyex": "query",
 }
 
-# The argument names each reader takes its value from, most wanted first: a
-# call's own argument order never decides. A registry key is a full path before
-# a subkey and a subkey before the bare hive handle (``Registry``), which is
-# the key only for a call that names nothing else; a value is what was written
-# or, for a query, what was read (``Data``, or ``Information`` for the native
-# value query); a service is its name, under
-# either spelling, before its display name or the binary it runs.
+# What a call says it did, where the operation its API names is only what it
+# may do: for each such operation, the argument the outcome is filed under and
+# what each recorded value means. A create call opens the key when it already
+# exists and says so in its disposition (1 created a new key, 2 opened an
+# existing one), and a key only opened was read, not created. A call that
+# records no outcome, or one this table does not know, keeps its API's
+# operation.
+_REGISTRY_OUTCOMES: dict[str, tuple[str, dict[int, str]]] = {
+    "create": ("Disposition", {1: "create", 2: "query"}),
+}
+
+# A write the call itself reports as failed (``status`` false) changed
+# nothing: the key was reached and that is all, so it is recorded as bare
+# access, which any read or write of the key replaces.
+_FAILED_WRITE = "access"
+
 # What one operation on a key says, against another on the same key: the bare
 # fact of access least, a read more, a write most.
 _REGISTRY_OP_WEIGHT: dict[str, int] = {
@@ -372,6 +384,13 @@ _REGISTRY_OP_WEIGHT: dict[str, int] = {
     "delete": 2,
 }
 
+# The argument names each reader takes its value from, most wanted first: a
+# call's own argument order never decides. A registry key is a full path before
+# a subkey and a subkey before the bare hive handle (``Registry``), which is
+# the key only for a call that names nothing else; a value is what was written
+# or, for a query, what was read (``Data``, or ``Information`` for the native
+# value query); a service is its name, under either spelling, before its
+# display name or the binary it runs.
 _REGISTRY_KEY_ARGS = ("FullName", "KeyName", "ObjectAttributes", "SubKey", "Registry")
 _REGISTRY_VALUE_ARGS = ("Buffer", "Data", "ValueData", "Value", "Information")
 _MUTEX_APIS = frozenset({"ntcreatemutant", "ntopenmutant", "createmutexa", "createmutexw"})
@@ -417,6 +436,22 @@ def _summary_list(report: dict[str, Any], key: str) -> list[str]:
     return [str(v) for v in values if isinstance(v, str)] if isinstance(values, list) else []
 
 
+def _registry_operation(call: dict[str, Any], operation: str) -> str:
+    """What ``call`` did to its key: its API's operation, as the call's own outcome refines it."""
+    if operation != "query" and call.get("status") is False:
+        return _FAILED_WRITE
+    outcome = _REGISTRY_OUTCOMES.get(operation)
+    if outcome is None:
+        return operation
+    name, meanings = outcome
+    recorded = _argument(call, (name,))
+    try:
+        code = int(recorded, 0)
+    except ValueError:
+        return operation
+    return meanings.get(code, operation)
+
+
 def sandbox_registry_ops(
     report: dict[str, Any] | None, limit: int = 0, offset: int = 0
 ) -> dict[str, Any]:
@@ -429,7 +464,12 @@ def sandbox_registry_ops(
     the bare fact of access — and for the same reason a read never replaces a
     write: a key created, modified or deleted and then read stays the write,
     with what was written, and a read that saw no value leaves an earlier
-    read's value standing. Between writes the later one stands.
+    read's value standing. Between writes the later one in the report's order
+    stands; that order is the report's process by process, not time.
+
+    A call's own outcome refines what its API may do (``_REGISTRY_OUTCOMES``):
+    a create that opened an existing key is a read. A write the call reports as
+    failed is bare access, without the value it did not write.
     """
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
@@ -438,13 +478,16 @@ def sandbox_registry_ops(
         rows.setdefault(key, {"key": key, "operation": "access", "value": None})
     for call in _calls(report):
         api = str(call.get("api") or "")
-        operation = _REGISTRY_OPS.get(api.lower())
-        if operation is None:
+        listed = _REGISTRY_OPS.get(api.lower())
+        if listed is None:
             continue
         key = _argument(call, _REGISTRY_KEY_ARGS)
         if not key:
             continue
+        operation = _registry_operation(call, listed)
         value = _argument(call, _REGISTRY_VALUE_ARGS) or None
+        if operation == _FAILED_WRITE:
+            value = None
         before = rows.get(key)
         if before is not None:
             if _REGISTRY_OP_WEIGHT[operation] < _REGISTRY_OP_WEIGHT[before["operation"]]:

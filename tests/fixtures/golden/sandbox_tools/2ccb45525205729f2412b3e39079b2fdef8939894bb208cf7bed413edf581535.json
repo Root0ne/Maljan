@@ -2450,7 +2450,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\Windows_upnphostWindows",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {

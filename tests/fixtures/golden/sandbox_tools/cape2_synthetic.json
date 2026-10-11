@@ -271,7 +271,7 @@
   "sandbox_processes": {
     "processes": [
       {
-        "call_count": 14,
+        "call_count": 18,
         "command_line": "",
         "first_seen": "2000-01-01 00:00:00,000",
         "name": "synthetic.exe",
@@ -347,6 +347,26 @@
         "value": null
       },
       {
+        "key": "HKEY_CURRENT_USER\\Software\\Synthetic\\Existing",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Synthetic\\NativeExisting",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Synthetic\\NativeNew",
+        "operation": "create",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\Missing",
+        "operation": "access",
+        "value": null
+      },
+      {
         "key": "HKEY_CURRENT_USER\\Software\\Synthetic\\Interval",
         "operation": "modify",
         "value": "300"
@@ -357,7 +377,7 @@
         "value": null
       }
     ],
-    "total": 13
+    "total": 17
   },
   "sandbox_services_and_tasks": {
     "commands": [

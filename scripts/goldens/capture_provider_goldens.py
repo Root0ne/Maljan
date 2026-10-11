@@ -80,7 +80,10 @@ def write_golden(directory: Path, stem: str, payload: Any) -> Path:
 
     The other form is removed, so a golden that crosses the limit either way
     is never left behind in both. The gzip header carries no name or time, so
-    the same answer writes the same bytes.
+    the same answer writes the same bytes with the same zlib build; another
+    deflate implementation (zlib-ng, for one) can write other bytes for the
+    same answer, which the suite does not see, since it compares parsed JSON,
+    but git shows as a change.
     """
     text = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
     data = text.encode("utf-8")

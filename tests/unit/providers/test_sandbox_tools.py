@@ -248,6 +248,127 @@ class TestRegistryOps:
 
         assert (row["operation"], row["value"]) == ("delete", None)
 
+    @staticmethod
+    def _create(api: str, disposition: str | None, status: bool = True) -> dict[str, Any]:
+        arguments = [
+            {"name": "Registry", "value": "0x80000001"},
+            {"name": "SubKey", "value": "Software\\Example"},
+            {"name": "FullName", "value": "HKEY_CURRENT_USER\\Software\\Example"},
+        ]
+        if disposition is not None:
+            arguments.append({"name": "Disposition", "value": disposition})
+        call = {"api": api, "status": status, "arguments": arguments}
+        return {"behavior": {"processes": [{"calls": [call]}]}}
+
+    def test_a_create_that_opened_an_existing_key_is_a_read(self) -> None:
+        for api in ("RegCreateKeyExW", "RegCreateKeyExA", "NtCreateKey"):
+            [row] = sandbox_tools.sandbox_registry_ops(self._create(api, "2"))["registry"]
+
+            assert row["operation"] == "query", api
+
+    def test_a_create_that_made_a_new_key_is_a_create(self) -> None:
+        for api in ("RegCreateKeyExW", "RegCreateKeyExA", "NtCreateKey"):
+            [row] = sandbox_tools.sandbox_registry_ops(self._create(api, "1"))["registry"]
+
+            assert row["operation"] == "create", api
+
+    def test_a_create_with_no_known_outcome_keeps_its_api_s_operation(self) -> None:
+        for disposition in (None, "", "1701304", "not a number"):
+            report = self._create("RegCreateKeyExW", disposition)
+
+            [row] = sandbox_tools.sandbox_registry_ops(report)["registry"]
+
+            assert row["operation"] == "create", disposition
+
+    def test_an_opened_key_does_not_outrank_a_later_write(self) -> None:
+        report = self._create("RegCreateKeyExW", "2")
+        report["behavior"]["processes"][0]["calls"].append(
+            {
+                "api": "RegSetValueExW",
+                "status": True,
+                "arguments": [
+                    {"name": "Buffer", "value": "x"},
+                    {"name": "FullName", "value": "HKEY_CURRENT_USER\\Software\\Example"},
+                ],
+            }
+        )
+
+        [row] = sandbox_tools.sandbox_registry_ops(report)["registry"]
+
+        assert (row["operation"], row["value"]) == ("modify", "x")
+
+    def test_a_failed_write_is_bare_access_without_its_value(self) -> None:
+        report = self._create("RegCreateKeyExW", "1", status=False)
+        report["behavior"]["processes"][0]["calls"].append(
+            {
+                "api": "RegDeleteValueA",
+                "status": False,
+                "return": "0x00000002",
+                "arguments": [
+                    {"name": "Handle", "value": "0x00000120"},
+                    {"name": "ValueName", "value": "Example"},
+                    {"name": "FullName", "value": "HKEY_CURRENT_USER\\Software\\Run\\Example"},
+                ],
+            }
+        )
+
+        rows = sandbox_tools.sandbox_registry_ops(report)["registry"]
+
+        assert [(row["operation"], row["value"]) for row in rows] == [
+            ("access", None),
+            ("access", None),
+        ]
+
+    def test_a_read_replaces_a_failed_write(self) -> None:
+        report = self._calls(("RegSetValueExW", "never written"), ("RegQueryValueExW", "seen"))
+        report["behavior"]["processes"][0]["calls"][0]["status"] = False
+
+        [row] = sandbox_tools.sandbox_registry_ops(report)["registry"]
+
+        assert (row["operation"], row["value"]) == ("query", "seen")
+
+    def test_a_failed_read_is_still_a_read(self) -> None:
+        report = self._calls(("NtQueryValueKey", None))
+        report["behavior"]["processes"][0]["calls"][0]["status"] = False
+
+        [row] = sandbox_tools.sandbox_registry_ops(report)["registry"]
+
+        assert row["operation"] == "query"
+
+    def test_the_extended_open_and_delete_calls_are_read(self) -> None:
+        open_ex = {
+            "api": "NtOpenKeyEx",
+            "status": True,
+            "arguments": [
+                {"name": "KeyHandle", "value": "0x00000130"},
+                {"name": "ObjectAttributes", "value": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Opened"},
+            ],
+        }
+        delete_ex = {
+            "api": "RegDeleteKeyExW",
+            "status": True,
+            "arguments": [
+                {"name": "Handle", "value": "0x00000134"},
+                {"name": "SubKey", "value": "Deleted"},
+                {"name": "FullName", "value": "HKEY_CURRENT_USER\\Software\\Deleted"},
+            ],
+        }
+        report = {"behavior": {"processes": [{"calls": [open_ex, delete_ex]}]}}
+
+        rows = sandbox_tools.sandbox_registry_ops(report)["registry"]
+
+        assert [(row["key"], row["operation"]) for row in rows] == [
+            ("HKEY_LOCAL_MACHINE\\SOFTWARE\\Opened", "query"),
+            ("HKEY_CURRENT_USER\\Software\\Deleted", "delete"),
+        ]
+
+    def test_every_outcome_refines_a_listed_operation_into_a_weighed_one(self) -> None:
+        listed = set(sandbox_tools._REGISTRY_OPS.values())
+        for operation, (_name, meanings) in sandbox_tools._REGISTRY_OUTCOMES.items():
+            assert operation in listed
+            assert set(meanings.values()) <= set(sandbox_tools._REGISTRY_OP_WEIGHT)
+        assert sandbox_tools._FAILED_WRITE in sandbox_tools._REGISTRY_OP_WEIGHT
+
     def test_every_operation_the_table_names_has_a_weight(self) -> None:
         operations = set(sandbox_tools._REGISTRY_OPS.values()) | {"access"}
         assert operations <= set(sandbox_tools._REGISTRY_OP_WEIGHT)
