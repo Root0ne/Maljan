@@ -3243,7 +3243,8 @@ sent; the platform answers it with a tool error in the structured shape
 resting and when it will be tried again. A timeout counts: every call is sent
 with a deadline — the larger of the tool's budget in the server's own
 `capabilities` manifest and the server's own budget (`call_timeout_seconds`
-on its block, 300 for every built-in, or `core.mcp.breaker.call_timeout_seconds`
+on its block; for a block that declares none, every built-in, the longest
+budget configured, capa's, as before; or `core.mcp.breaker.call_timeout_seconds`
 for every server where set), plus thirty seconds —
 and a call still waiting when its caller's own budget runs out counts too.
 After the cooldown one call is let through, and a success ends the rest; that
@@ -4382,8 +4383,9 @@ is assembled from what the run gathered rather than recomputed beside it:
   recorded it, while every name read before is still read; a draft rule's
   body is printed as it compiles; an ATT&CK lookup (`/techniques/…`,
   `/tactics/…`, `/software/…`, `/matrices/…`), and a link the report itself
-  holds (one of its references, which come from the lookup services the run
-  asked, or a link one of its reputation records carries), with no query and
+  holds (one of its references, which are the operator's lookups and those of
+  the lookup services the run asked, or a link one of its reputation records
+  carries), with no query and
   no dot segment, backslash, `@` or second `//` on its decoded path, after a
   sentence's trailing punctuation is trimmed, and kept exactly as matched,
   stays a link unless the run's indicator is in it; a report stored before

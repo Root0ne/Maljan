@@ -1398,9 +1398,12 @@ ANNOTATIONS: dict[str, Annotation] = {
     "reporting.reference_urls": {
         "title": "Sample lookups every report links to",
         "description": (
-            "URL templates naming {sha256}, {md5} or {sha1}, each starting with https://, "
-            "linked under References on every report. A tool server's own lookups (its "
-            "declared reference URLs) are linked only on a run that asked that server."
+            "Each a URL template naming {sha256}, {md5} or {sha1} and starting with "
+            "https:// (url), the name it is linked under (source) and its note, as JSON, "
+            "linked under References on every report. Shipped with VirusTotal's and "
+            "MalwareBazaar's lookups; remove one and it is no longer linked. A tool "
+            "server's own lookups (its declared reference URLs) are linked only on a run "
+            "that asked that server."
         ),
         "subgroup": "Report content",
     },
@@ -1690,8 +1693,10 @@ def mcp_server_annotations(
             "How long one call of this server's tools may go unanswered before it counts "
             "as a server that did not answer, before thirty seconds of grace. A tool the "
             "server's capabilities manifest gives a longer budget gets that one. Zero sends "
-            "its calls with no deadline of their own. Every built-in server declares 300; "
-            "mcp.breaker.call_timeout_seconds, where set, applies to every server instead.",
+            "its calls with no deadline of their own. Empty (every built-in) takes the "
+            "deployment's floor: the longest of core.static.capa.timeout_seconds and "
+            "core.static.yara.timeout_seconds. mcp.breaker.call_timeout_seconds, where "
+            "set, applies to every server instead.",
             subgroup="Connection",
             advanced=True,
         ),
@@ -2143,7 +2148,9 @@ ANNOTATIONS.update(
                 "thirty seconds of grace are added either way, so a tool that gives up at its "
                 "own budget answers with its own timeout error first. Set, it applies to "
                 "every server. Zero, the default, gives each server the budget its own "
-                "block declares (its call_timeout_seconds; 300 for every built-in). "
+                "block declares (its call_timeout_seconds), and a server that declares none "
+                "the longest of core.static.capa.timeout_seconds and "
+                "core.static.yara.timeout_seconds (300, and 900 on a slow host, still fits). "
                 "A call cut short by its caller's own budget while it waited on the server "
                 "counts as unanswered too."
             ),

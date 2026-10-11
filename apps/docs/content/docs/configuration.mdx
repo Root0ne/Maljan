@@ -1307,7 +1307,8 @@ for as long as their caller asks (the triage pack passes
 `core.triage.budget_seconds`), and their manifest declares none and marks them
 `long_running`. A model's call of either is waited for with no client deadline
 unless you set `core.mcp.breaker.call_timeout_seconds`; every other call waits
-the `call_timeout_seconds` its server's block declares (300 for every built-in); a timeout or a
+the `call_timeout_seconds` its server's block declares, or, where it declares
+none (every built-in), the deployment's floor; a timeout or a
 cancellation of such a call is not counted by the breaker; a call the client
 gives up on, or a job that ends, is cancelled at the server, which kills the
 tool's child process with its process group; and a second call of the same
@@ -1318,8 +1319,9 @@ documented derivation constant; the Ghidra sink pre-pass — run for every agent
 whose own static provider is Ghidra, the static analyst, a clone of it and a
 generic agent given Ghidra's tools alike, as the provider's own open and call
 graph — waits one call's budget per request (Ghidra's block's
-`call_timeout_seconds`, 300 shipped, or `core.mcp.breaker.call_timeout_seconds`
-where set), or as long as Ghidra takes when that budget is zero.
+`call_timeout_seconds` where declared, else the deployment's floor, or
+`core.mcp.breaker.call_timeout_seconds` where set), or as long as Ghidra takes
+when that budget is zero.
 
 **The spend ceiling.** `core.llm.max_spend_usd_per_job` is the most one job may
 spend on its models, in US dollars. It has no default: while it is empty a job
@@ -1613,11 +1615,14 @@ a killed worker's claim expires within 90 s instead of lingering.
 
 ### The evidence budget
 
-`reporting.reference_urls` (empty by default) lists sample lookup URL
-templates (`https://`, naming `{sha256}`, `{md5}` or `{sha1}`) linked under
-References on every report. A tool server's own lookups (its declared
-`reference_urls`) are linked only on a run that asked that server, so a run
-that never used a lookup service publishes no link to it.
+`reporting.reference_urls` lists the sample lookups linked under References
+on every report, first: each a URL template (`url`: `https://`, naming
+`{sha256}`, `{md5}` or `{sha1}`), the name it is linked under (`source`) and
+its `note`. It ships with VirusTotal's and MalwareBazaar's lookups, the two
+every report has linked; remove one and it is no longer linked. A tool
+server's own lookups (its declared `reference_urls`) are linked besides, only
+on a run that asked that server. A report keeps its own links live in the
+Markdown.
 
 `reporting.evidence_budget_bytes` (512 KiB by default) is how many bytes of
 tool output one agent may keep in the evidence ledger. Entries past it still
@@ -3012,7 +3017,7 @@ are ever removed.
 | `reads_staged_sample` | whether the server's path-taking tools read the sample the platform staged |
 | `platform_owned` | whether the server is the platform's own, whose answers are the platform's code |
 | `auto_name_prefixes` | the prefixes its decompiler writes before an address when it names a function itself (`FUN_`, `fcn.`); every server's join the shipped ones (`FUN_`, `fcn.`, `sub_`, `func.`, `loc.`, `LAB_`) wherever a function's auto-name is read as its address |
-| `reference_urls` | sample lookup URL templates, `https://` and naming `{sha256}`, `{md5}` or `{sha1}`; a report links them, under the name its lookup's record gives (else the server's label), only when the run recorded an entry from this server. `reporting.reference_urls` holds the operator's own templates, linked on every report |
+| `reference_urls` | sample lookup URL templates, `https://` and naming `{sha256}`, `{md5}` or `{sha1}`; a report links them, under the name its lookup's record gives (else the server's label), only when the run recorded an entry from this server. `reporting.reference_urls` holds the lookups linked on every report (shipped with VirusTotal's and MalwareBazaar's) |
 | `tool_facts` | per tool name, what its answer is and where its facts sit (below) |
 
 Each entry of `tool_facts` describes one tool, under its own name on its own
@@ -3306,8 +3311,8 @@ Per job and per tool server, three settings under **Tool servers → Resilience*
 |---|---|---|
 | `core.mcp.breaker.failures_to_open` | 3 | The number of attempts the platform already gives a model call that drops its connection before calling it a failure. No recorded live run had a tool server fail at the transport, so it is a judgement, not a measurement. |
 | `core.mcp.breaker.cooldown_seconds` | 60 | A judgement: long enough for a sidecar being restarted to come back, short against the analysts' own loop budgets. |
-| `core.mcp.breaker.call_timeout_seconds` | 0 (per server) | Set, the budget of every call to every server. Zero gives each server the `call_timeout_seconds` its own block declares (every built-in server and provider block declares 300, the budget every server had when it was derived from capa's shipped `core.static.capa.timeout_seconds`; zero on a block sends its calls with no deadline of their own). A tool whose server declares a longer budget in its manifest gets that, a long-running tool none unless this is set, and thirty seconds of grace are added either way. |
-| `<server block>.call_timeout_seconds` | 300 | Each server's own budget per call (an `mcp.servers` entry, `static.ghidra`, `static.r2`, `sandbox.cape2.mcp`), read when `core.mcp.breaker.call_timeout_seconds` is zero: the per-call budget every server had before each declared its own. Ghidra's REST requests (open, call graph, anti-analysis scan) and radare2's open before the loop wait it too. |
+| `core.mcp.breaker.call_timeout_seconds` | 0 (per server) | Set, the budget of every call to every server. Zero gives each server the `call_timeout_seconds` its own block declares, and a server that declares none (every built-in) the deployment's floor: the longest of `core.static.capa.timeout_seconds` and `core.static.yara.timeout_seconds` (300 by default, 900 on a slow host), as every server got before. A tool whose server declares a longer budget in its manifest gets that, a long-running tool none unless this is set, and thirty seconds of grace are added either way. |
+| `<server block>.call_timeout_seconds` | empty | Each server's own budget per call (an `mcp.servers` entry, `static.ghidra`, `static.r2`, `sandbox.cape2.mcp`), read when `core.mcp.breaker.call_timeout_seconds` is zero; zero sends its calls with no deadline of their own, empty takes the deployment's floor. Ghidra's REST requests (open, call graph, anti-analysis scan) and radare2's open before the loop wait it too. |
 | `core.mcp.breaker.max_concurrent_calls` | 4 | A judgement: the shipped teams run their analysts one after another, and four lets one analyst's parallel tool calls through while bounding a team that fans out. `0` leaves the calls uncapped, as every server was before. |
 
 An unanswered call is either a transport failure — a timeout, a refused or

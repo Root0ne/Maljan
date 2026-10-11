@@ -352,12 +352,13 @@ def server_call_budget(cfg: Any, block: Any) -> float:
     ``core.mcp.breaker.call_timeout_seconds`` when an operator set it, for
     every server. Otherwise the ``call_timeout_seconds`` the server's own
     block declares (``MCPServerConfig``; zero sends its calls with no deadline
-    of their own); a block that names none, or no block, gets the shipped
-    default every built-in server declares (``config.DEFAULT_CALL_TIMEOUT_SECONDS``).
-    A tool that declares a longer budget of its own gets that one
-    (:meth:`ServerGuard.call_timeout`).
+    of their own). A block that declares none (every built-in), or no block,
+    gets the deployment's floor exactly as it was derived before servers
+    declared their own (``core.legacy_tool_tables.legacy_call_floor``), so
+    stored settings keep every server's budget. A tool that declares a longer
+    budget of its own gets that one (:meth:`ServerGuard.call_timeout`).
     """
-    from maljan.core.config import DEFAULT_CALL_TIMEOUT_SECONDS
+    from maljan.core.legacy_tool_tables import legacy_call_floor
 
     explicit = explicit_call_timeout(cfg)
     if explicit > 0:
@@ -365,4 +366,4 @@ def server_call_budget(cfg: Any, block: Any) -> float:
     declared = getattr(block, "call_timeout_seconds", None) if block is not None else None
     if isinstance(declared, int | float) and not isinstance(declared, bool):
         return max(0.0, float(declared))
-    return DEFAULT_CALL_TIMEOUT_SECONDS
+    return legacy_call_floor(cfg)

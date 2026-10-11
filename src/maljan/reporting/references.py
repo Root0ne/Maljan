@@ -4,8 +4,9 @@ A tool server, a provider block or an in-process source declares the URL
 templates it can look a sample up at (``reference_urls``: ``{sha256}``,
 ``{md5}``, ``{sha1}``, ``core.tool_declarations``). A report links a source's
 lookups only when the run recorded an entry from that source: a run that never
-asked a service publishes no link to it. The operator's own templates
-(``reporting.reference_urls``) are linked on every report.
+asked a service publishes no link to it. The operator's own lookups
+(``reporting.reference_urls``, shipped with the two every report linked
+before) are linked on every report, first.
 
 Read once, when the report is built, from the live declarations; the links are
 stored with the report (``MalwareReport.references``), so a re-render reads
@@ -91,14 +92,16 @@ def declared_references(
     hashes: Any,
     *,
     declared: ToolDeclarations | None = None,
-    operator: Iterable[str] = (),
+    operator: Iterable[Any] = (),
 ) -> list[ExternalReference]:
-    """The sample lookups a report links to, in the order the sources are declared.
+    """The sample lookups a report links to: the operator's first, then each used source's.
 
-    Each source that declares ``reference_urls`` and that the run recorded an
-    entry from gives one link per template it could fill; then each of the
-    operator's templates (``operator``) gives one, named by its host. A link
-    already given is not given twice.
+    Each of the operator's lookups (``operator``: a template, or an object with
+    ``url``, ``source`` and ``note``) gives one link, named by its ``source``
+    (else the template's host) with its ``note`` (else "Sample lookup"); then
+    each source that declares ``reference_urls`` and that the run recorded an
+    entry from gives one link per template it could fill, in the order the
+    sources are declared. A link already given is not given twice.
     """
     from maljan.reporting.models import ExternalReference
 
@@ -110,6 +113,18 @@ def declared_references(
         declared = declarations()
     refs: list[ExternalReference] = []
     given: set[str] = set()
+    for lookup in operator:
+        template = str(lookup if isinstance(lookup, str) else getattr(lookup, "url", ""))
+        url = filled(template, hashes)
+        if url and url not in given:
+            given.add(url)
+            name = "" if isinstance(lookup, str) else str(getattr(lookup, "source", "") or "")
+            note = "" if isinstance(lookup, str) else str(getattr(lookup, "note", "") or "")
+            refs.append(
+                ExternalReference(
+                    source=name or _host(url), url=url, note=note or SAMPLE_LOOKUP_NOTE
+                )
+            )
     for held in declared.sources():
         if not held.reference_urls or str(held.source) not in used:
             continue
@@ -119,9 +134,4 @@ def declared_references(
             if url and url not in given:
                 given.add(url)
                 refs.append(ExternalReference(source=name, url=url, note=SAMPLE_LOOKUP_NOTE))
-    for template in operator:
-        url = filled(template, hashes)
-        if url and url not in given:
-            given.add(url)
-            refs.append(ExternalReference(source=_host(url), url=url, note=SAMPLE_LOOKUP_NOTE))
     return refs

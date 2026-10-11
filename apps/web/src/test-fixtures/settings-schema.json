@@ -2369,9 +2369,9 @@
      "group": "static",
      "key": "core.static.ghidra.call_timeout_seconds",
      "maximum": null,
-     "minimum": 0.0,
+     "minimum": null,
      "namespace": "core",
-     "nullable": false,
+     "nullable": true,
      "order": 0,
      "path": "static.ghidra.call_timeout_seconds",
      "probe": null,
@@ -2381,7 +2381,7 @@
      "secret": false,
      "subgroup": "Connection",
      "title": "Ghidra MCP call budget (seconds)",
-     "type": "float"
+     "type": "json"
     },
     {
      "advanced": false,
@@ -3523,9 +3523,9 @@
      "group": "static",
      "key": "core.static.r2.call_timeout_seconds",
      "maximum": null,
-     "minimum": 0.0,
+     "minimum": null,
      "namespace": "core",
-     "nullable": false,
+     "nullable": true,
      "order": 0,
      "path": "static.r2.call_timeout_seconds",
      "probe": null,
@@ -3535,7 +3535,7 @@
      "secret": false,
      "subgroup": "Connection",
      "title": "radare2 MCP call budget (seconds)",
-     "type": "float"
+     "type": "json"
     },
     {
      "advanced": false,
@@ -4953,9 +4953,9 @@
      "group": "sandbox",
      "key": "core.sandbox.cape2.mcp.call_timeout_seconds",
      "maximum": null,
-     "minimum": 0.0,
+     "minimum": null,
      "namespace": "core",
-     "nullable": false,
+     "nullable": true,
      "order": 0,
      "path": "sandbox.cape2.mcp.call_timeout_seconds",
      "probe": null,
@@ -4965,7 +4965,7 @@
      "secret": false,
      "subgroup": "Connection",
      "title": "CAPE MCP call budget (seconds)",
-     "type": "float"
+     "type": "json"
     },
     {
      "advanced": false,
@@ -9832,7 +9832,7 @@
      "secret": false,
      "subgroup": "Report content",
      "title": "Sample lookups every report links to",
-     "type": "list"
+     "type": "json"
     },
     {
      "advanced": false,

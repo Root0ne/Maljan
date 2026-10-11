@@ -499,7 +499,7 @@ class MalwareReportBuilder:
         from maljan.core.config import get_settings
         from maljan.reporting.references import declared_references
 
-        operator: list[str] = []
+        operator: list[Any] = []
         try:
             operator = list(get_settings().reporting.reference_urls)
         except Exception as exc:  # noqa: BLE001 — a reference is never worth a report

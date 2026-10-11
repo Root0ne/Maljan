@@ -238,8 +238,15 @@ class TestItsSampleLookup:
             install_settings(previous)
             declared_reading.forget()
         url = LOOKUP.replace("{sha256}", SHA256)
-        assert [(ref.source, ref.url) for ref in report.references] == [("Acme Scan", url)]
-        assert f"]({url})" in MarkdownRenderer().render(report)
+        # After the shipped lookups every report links.
+        assert [(ref.source, ref.url) for ref in report.references] == [
+            ("VirusTotal", f"https://www.virustotal.com/gui/file/{SHA256}"),
+            ("MalwareBazaar", f"https://bazaar.abuse.ch/sample/{SHA256}/"),
+            ("Acme Scan", url),
+        ]
+        markdown = MarkdownRenderer().render(report)
+        for ref in report.references:
+            assert f"]({ref.url})" in markdown
 
     def test_a_run_that_never_asked_a_service_links_none(self) -> None:
         from maljan.core.tool_declarations import ToolDeclarations
@@ -266,6 +273,31 @@ class TestItsSampleLookup:
         assert [(ref.source, ref.url) for ref in linked] == [
             ("samples.example", f"https://samples.example/{'b' * 32}")
         ]
+
+    def test_under_default_settings_a_new_report_links_what_dev_linked(self) -> None:
+        from tests.unit.reporting.test_builder import _build
+
+        report = _build()
+        assert [(r.source, r.url, r.note) for r in report.references] == [
+            ("VirusTotal", f"https://www.virustotal.com/gui/file/{SHA256}", "VT detection summary"),
+            ("MalwareBazaar", f"https://bazaar.abuse.ch/sample/{SHA256}/", "Sample lookup"),
+        ]
+
+    def test_a_run_that_asked_virustotal_links_it_once(self) -> None:
+        from maljan.core.config import Settings as _Settings
+        from maljan.core.tool_declarations import ToolDeclarations
+        from maljan.reporting.references import declared_references
+
+        settings = _Settings()
+        declared = ToolDeclarations.from_settings(settings)
+        hashes = SimpleNamespace(sha256=SHA256, md5=None, sha1=None)
+        asked = [{"source": "mcp:virustotal", "server": "virustotal", "tool": "get_file_report"}]
+        linked = declared_references(
+            asked, hashes, declared=declared, operator=settings.reporting.reference_urls
+        )
+        assert [ref.source for ref in linked] == ["VirusTotal", "MalwareBazaar"]
+        removed = declared_references(asked, hashes, declared=declared, operator=[])
+        assert [ref.url for ref in removed] == [f"https://www.virustotal.com/gui/file/{SHA256}"]
 
     def test_a_link_of_a_service_the_report_does_not_hold_is_defanged(self) -> None:
         from maljan.reporting.renderers.markdown import _KEPT_LINKS, _defanged_text, _Kept

@@ -436,8 +436,22 @@ class TestTheCallDeadline:
     )
     def test_every_built_in_server_keeps_the_budget_it_had(self, server: str) -> None:
         settings = Settings()
-        assert settings.mcp.servers[server].call_timeout_seconds == 300.0
+        assert settings.mcp.servers[server].call_timeout_seconds is None
         assert guard_from_settings(server, settings).call_timeout("any") == 330.0
+
+    @pytest.mark.parametrize(
+        "server", ["analysis", "knowledge", "network", "threatintel", "virustotal"]
+    )
+    def test_settings_stored_on_dev_keep_every_servers_budget(self, server: str) -> None:
+        """A capa budget raised to 900 s gave every server 900 s, and still does."""
+        from maljan.providers.server_guard import server_call_budget
+
+        settings = Settings.model_validate({"static": {"capa": {"timeout_seconds": 900}}})
+        assert guard_from_settings(server, settings).call_timeout("any") == 930.0
+        for block in (settings.static.ghidra, settings.static.r2, settings.sandbox.cape2.mcp):
+            assert server_call_budget(settings, block) == 900.0
+        settings.static.yara.timeout_seconds = 1200
+        assert guard_from_settings(server, settings).call_timeout("any") == 1230.0
 
     def test_the_built_in_provider_blocks_keep_it_too(self) -> None:
         from maljan.providers.server_guard import server_call_budget
@@ -446,19 +460,13 @@ class TestTheCallDeadline:
         for block in (settings.static.ghidra, settings.static.r2, settings.sandbox.cape2.mcp):
             assert server_call_budget(settings, block) == 300.0
 
-    def test_a_rule_tools_settings_no_longer_move_another_servers_deadline(self) -> None:
-        settings = Settings()
-        settings.static.capa.timeout_seconds = 900
-        settings.static.yara.timeout_seconds = 1200
-        assert guard_from_settings("network", settings).call_timeout("extract_dns") == 330.0
-
-    def test_each_server_gets_the_budget_its_own_block_declares(self) -> None:
-        settings = Settings()
+    def test_a_declared_budget_overrides_the_floor(self) -> None:
+        settings = Settings.model_validate({"static": {"capa": {"timeout_seconds": 900}}})
         settings.mcp.servers["network"].call_timeout_seconds = 45
         settings.mcp.servers["knowledge"].call_timeout_seconds = 0
         assert guard_from_settings("network", settings).call_timeout("t") == 75.0
         assert guard_from_settings("knowledge", settings).call_timeout("t") is None
-        assert guard_from_settings("analysis", settings).call_timeout("t") == 330.0
+        assert guard_from_settings("analysis", settings).call_timeout("t") == 930.0
 
     def test_a_longer_budget_the_server_declares_wins(self) -> None:
         settings = Settings()

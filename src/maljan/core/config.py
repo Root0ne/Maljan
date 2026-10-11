@@ -1259,14 +1259,6 @@ GHIDRA_SAMPLE_OPEN = SampleOpenConfig(
 )
 
 
-# How long one call to a tool server may go unanswered, before the grace,
-# unless the server's block declares otherwise or an operator sets
-# ``mcp.breaker.call_timeout_seconds`` (``providers.server_guard``). Every
-# built-in server and provider block declares this value: the per-call budget
-# every server got before each server declared its own (capa's shipped 300 s).
-DEFAULT_CALL_TIMEOUT_SECONDS = 300.0
-
-
 class MCPServerConfig(BaseModel):
     """Configuration for a single MCP server connection.
 
@@ -1303,9 +1295,12 @@ class MCPServerConfig(BaseModel):
     # How long one call of this server's tools may go unanswered before it is
     # a transport failure, before the grace (``providers.server_guard``); a tool
     # the server's manifest gives a longer budget gets that one. Zero sends its
-    # calls with no deadline of their own. ``mcp.breaker.call_timeout_seconds``,
-    # where an operator set it, applies to every server instead.
-    call_timeout_seconds: Annotated[float, Field(ge=0.0)] = DEFAULT_CALL_TIMEOUT_SECONDS
+    # calls with no deadline of their own. Unset (``None``, every built-in), the
+    # server gets the deployment's floor as it always did
+    # (``core.legacy_tool_tables.legacy_call_floor``).
+    # ``mcp.breaker.call_timeout_seconds``, where an operator set it, applies to
+    # every server instead.
+    call_timeout_seconds: Annotated[float, Field(ge=0.0)] | None = None
     # Which tool opens a sample, and which select and analyse one; empty
     # declares nothing. See ``SampleOpenConfig``.
     sample_open: SampleOpenConfig = Field(default_factory=SampleOpenConfig)
@@ -3852,6 +3847,47 @@ class SandboxConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class ReferenceLookup(BaseModel):
+    """One sample lookup a report links to: a URL template, its name and its note.
+
+    Written as a bare template it is linked under the template's host and the
+    note "Sample lookup".
+    """
+
+    url: str
+    source: str = ""
+    note: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _a_bare_template(cls, value: Any) -> Any:
+        return {"url": value} if isinstance(value, str) else value
+
+    @field_validator("url")
+    @classmethod
+    def _url_is_a_template(cls, value: str) -> str:
+        check_reference_urls([value])
+        return value
+
+
+# The lookups every report linked before they were data (``reporting.builder``
+# wrote these two for every sample): shipped as the defaults of
+# ``reporting.reference_urls`` so a report under default settings links what
+# it always linked; an operator removes either by editing the list.
+DEFAULT_REFERENCE_LOOKUPS: tuple[ReferenceLookup, ...] = (
+    ReferenceLookup(
+        url="https://www.virustotal.com/gui/file/{sha256}",
+        source="VirusTotal",
+        note="VT detection summary",
+    ),
+    ReferenceLookup(
+        url="https://bazaar.abuse.ch/sample/{sha256}/",
+        source="MalwareBazaar",
+        note="Sample lookup",
+    ),
+)
+
+
 class ReportingConfig(BaseModel):
     """Comprehensive malware report generation settings.
 
@@ -3909,10 +3945,14 @@ class ReportingConfig(BaseModel):
     # a live report when the model's answer outgrew it.
     composer_section_max_tokens: Annotated[int, Field(ge=0)] = 0
     composer_per_section_timeout: Annotated[int, Field(ge=1)] = 120
-    # Sample lookup URL templates (``{sha256}``, ``{md5}``, ``{sha1}``) every
-    # report links to, whatever the run used. A tool server's own lookups
-    # (its declared ``reference_urls``) are linked only on a run that asked it.
-    reference_urls: list[str] = Field(default_factory=list)
+    # The sample lookups every report links to, whatever the run used: each a
+    # URL template (``{sha256}``, ``{md5}``, ``{sha1}``), the name it is linked
+    # under and its note. Shipped with the two every report linked before, as
+    # data an operator may remove; a tool server's own lookups (its declared
+    # ``reference_urls``) are linked besides, only on a run that asked it.
+    reference_urls: list[ReferenceLookup] = Field(
+        default_factory=lambda: [lookup.model_copy() for lookup in DEFAULT_REFERENCE_LOOKUPS]
+    )
     # Server-side HTML→PDF export.
     html_export_enabled: bool = True
 
@@ -3936,11 +3976,6 @@ class ReportingConfig(BaseModel):
     # large window that wants the whole of it kept raises this, and pays for it
     # in a JSONB column rather than in the model's context.
     evidence_budget_bytes: Annotated[int, Field(ge=0)] = 524288
-
-    @field_validator("reference_urls")
-    @classmethod
-    def _references_are_templates(cls, value: list[str]) -> list[str]:
-        return check_reference_urls(value)
 
     # How much of a run's tool output is kept in memory, for the length of the
     # job, so a grounding check can ask what the run SAW rather than what the
