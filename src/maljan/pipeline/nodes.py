@@ -1000,6 +1000,10 @@ def _augment_static_chunks_with_path(
 # single round trip; a server that has not answered in this long is one the
 # run goes on without, and the entry says so.
 REPUTATION_TIMEOUT_S = 60.0
+# Why the pack made no reputation lookup: the servers declaring one are all
+# disabled (named, in the order the pack would ask them), or none declares one.
+NO_LOOKUP_ENABLED = "no reputation server is enabled ({servers}); no lookup was made"
+NO_LOOKUP_DECLARED = "no server declares a reputation lookup; no lookup was made"
 
 
 def _withheld_servers(container: ServiceContainer) -> set[str] | None:
@@ -1068,9 +1072,7 @@ def _reputation_lookup(container: ServiceContainer, sha256: str) -> Any:
             declared = ", ".join(dict.fromkeys(lookup.server for lookup in lookups))
             return _skip(
                 recorder,
-                f"no reputation server is enabled ({declared}); no lookup was made"
-                if declared
-                else "no server declares a reputation lookup; no lookup was made",
+                NO_LOOKUP_ENABLED.format(servers=declared) if declared else NO_LOOKUP_DECLARED,
             )
         withheld = _withheld_servers(container)
         usable = (

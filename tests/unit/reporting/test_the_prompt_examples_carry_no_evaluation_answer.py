@@ -105,6 +105,7 @@ from maljan.analysis.evidence_roots import roots_phrase as _roots_phrase
 from maljan.analysis.function_summarizer import SHORTENED_NOTE as SUMMARISER_SHORTENED_NOTE
 from maljan.analysis.function_summarizer import SUMMARY_CUT_NOTE, SUMMARY_FENCE_STATEMENT
 from maljan.analysis.pcap_summary import CaptureRead
+from maljan.core.reputation import read_answer
 from maljan.extractors.capability_matrix import (
     NOT_ASKED_UNKNOWN_ID,
     TechniqueQuestion,
@@ -132,6 +133,8 @@ from maljan.pipeline.mediation_models import (
     mediator_no_answer_note,
 )
 from maljan.pipeline.nodes import (
+    NO_LOOKUP_DECLARED,
+    NO_LOOKUP_ENABLED,
     NO_SANDBOX_DATA_REASON,
     NO_STATIC_FIXTURE_NOTE,
     NOT_ASKED_TO_REVISE,
@@ -263,7 +266,7 @@ from maljan.reporting.renderers.stix_renderer import (
     seen_in_reason,
     yes_because,
 )
-from maljan.schemas.evidence import LedgerEntry, not_shown_record
+from maljan.schemas.evidence import LedgerEntry, build_entry, not_shown_record
 from maljan.schemas.isr_models import (
     ABSENCE_TECHNIQUE_MARKER,
     JUDGE_ONLY_TECHNIQUE_MARKER,
@@ -686,6 +689,61 @@ def _deobfuscation_sentences() -> str:
             ghidra_passes.GHIDRA_HAS_NO_COPY,
             triage_pack.PASS_ROOM_SENTENCE.format(shown=1, total=2),
             triage_pack.SCAN_CHECKS_SHORT,
+        ]
+    )
+
+
+def _reputation_lines() -> str:
+    """The pack's reputation lines from a declared lookup's read record, and why none was made."""
+    from maljan.core.tool_declarations import ToolFacts
+
+    facts = ToolFacts.model_validate(
+        {
+            "kind": "reputation",
+            "display_name": "A service",
+            "reputation": {
+                "stats": "/stats",
+                "malicious": "/stats/bad",
+                "labels": ["/names/*"],
+                "detections": "/engines",
+                "text_patterns": [r"(?P<malicious>\d+)/(?P<total>\d+) flagged"],
+            },
+        }
+    )
+    counted = {"stats": {"bad": 2, "good": 5}, "names": ["n1", "n2"], "engines": ["e1", "e1"]}
+    entries = [
+        build_entry(
+            entry_id=f"ev_000{i}",
+            seq=i,
+            agent="pipeline",
+            tool="a_lookup",
+            args={},
+            server="a_server",
+            output=output,
+            source="mcp:a_server",
+        )
+        for i, output in enumerate((json.dumps(counted), "3/9 flagged", "unknown hash"), 1)
+    ]
+    for entry in entries:
+        entry.reputation = read_answer(
+            facts, output=entry.output, structured=entry.structured, server="a_server"
+        ).stored()
+        entry.facts = {"v": 1, "kind": "reputation"}
+    failed = LedgerEntry(
+        id="ev_0004",
+        tool="a_lookup",
+        ok=False,
+        error="x",
+        seq=4,
+        source="mcp:a_server",
+        facts={"v": 1, "kind": "reputation"},
+    )
+    return " ".join(
+        [
+            triage_pack.pack_block([*entries, failed], 0),
+            NO_LOOKUP_ENABLED.format(servers="a_server, b_server"),
+            NO_LOOKUP_DECLARED,
+            triage_pack.reason_sentence(triage_pack.failure_reason(triage_pack.REPUTATION_STEP)),
         ]
     )
 
@@ -2248,6 +2306,9 @@ PROMPTS: dict[str, str] = {
             _FENCE_STATEMENT,
             _fenced("ev_0001", "line one\n<<a line of the answer"),
         ]
+    ),
+    "the pack's reputation lines from any declared lookup, and why none was made": (
+        _reputation_lines()
     ),
     "evidence roots beside the layers, and why a cited entry gives none": " ".join(
         [
