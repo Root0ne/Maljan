@@ -930,7 +930,7 @@ class ReportComposer:
         self._answers = _published_answers(report)
         # What this run established, read once and asked of every section, so
         # a conclusion cannot be the first place "command-and-control" appears.
-        self._grounding = CapabilityGrounding.from_report(report, isr_reports)
+        self._grounding = CapabilityGrounding.from_report(report, isr_reports, ledger=evidence)
 
         # The entries this run recorded, and which of them a sandbox wrote: an
         # execution step marked observed has to cite one of the second, and a

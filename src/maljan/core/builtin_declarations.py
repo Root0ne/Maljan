@@ -230,6 +230,7 @@ READERS: dict[str, str] = {
     "unpacked_image": "an unpacked program written out as a file of its own",
     "flow_table": "flows and DNS queries with their endpoints, from a capture or a sandbox",
     "dns_query_lines": "a text answer holding one DNS query per line",
+    "packet_lines": "a text answer holding one captured packet per line, with its endpoints",
     "report_items": "sandbox report items, each with an id and the fields that place it",
 }
 
@@ -388,7 +389,7 @@ _NETWORK_TOOLS: dict[str, dict[str, Any]] = {
     },
     "extract_http": {"kind": "http", "arguments": {"path": "pcap_path"}},
     "pcap_summary": _PCAP_SUMMARY,
-    "read_pcap_summary": {**_PCAP_SUMMARY, "kind": "packet_overview"},
+    "read_pcap_summary": {**_PCAP_SUMMARY, "kind": "packet_overview", "reader": "packet_lines"},
 }
 
 # The threat-intel sidecar answers in prose. The live sidecar writes

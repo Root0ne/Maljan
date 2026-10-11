@@ -1,167 +1,154 @@
-"""No module of the reading half compares an entry's tool against a literal tool name.
+"""No module of the reading half reads an entry's tool by a tool's name.
 
 The reading half (``pipeline/``, ``analysis/``, ``agents/``) reads what an
-entry is from its tool's declared kind (``core.declared_reading``). A
-comparison of an entry's tool (``entry.tool``, a ``tool`` or ``tool_name``
-variable, ``_tool(entry)``, ``bare_name(...)``, ``.get("tool")``) with a
-string literal, a collection of literals, or a module constant holding them
-fails here. The legacy record of the old tables lives in
-``core.legacy_tool_tables``, outside these packages.
+entry is from its tool's declared kind (``core.declared_reading``). The
+detection is shared with the report's guard (``tests/tool_name_reads.py``): it
+follows a tool read through locals, string methods, f-strings, ``getattr``,
+subscripts, ``.get`` and dict tables, and fails on a comparison, a membership
+test, a ``match`` or a lookup against anything that is not itself a tool read,
+and on an import of a legacy table module. The legacy record of the old tables
+lives in ``core.legacy_tool_tables``, read only by ``core.declared_reading``,
+outside these packages.
 
-``STILL_BY_NAME`` lists the comparisons whose own change is another branch's
-(the one reputation path; the triage pack's own steps, which the pack writes
-itself), each with its reason. The list may only shrink: a new comparison, or
-one moved, fails.
+``STILL_BY_NAME`` holds, as a multiset, the reads whose own change is another
+branch's (the one reputation path; the triage pack's own steps, which the pack
+writes itself; name-text heuristics for an undeclared listing tool), each with
+its reason. Its counts may only shrink: a new read, a moved one, or one more of
+the same, fails.
 """
 
 from __future__ import annotations
 
-import ast
-import re
 from collections import Counter
 from pathlib import Path
+
+import pytest
+
+from tests.tool_name_reads import NAME_READ_SNIPPETS, findings
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGES = ("pipeline", "analysis", "agents")
 
-_TOOL_NAMES = frozenset({"tool", "tool_name"})
-_TOOL_CALLS = frozenset({"_tool", "_base_tool_name", "bare_name"})
-# A constant imported from elsewhere that names tools: ``INDEX_TOOL``, ``PASS_TOOLS``.
-_TOOL_CONSTANT = re.compile(r"^(?:[A-Z][A-Z0-9_]*_)?TOOLS?$")
-
-# (module, the comparison as written) -> why it is still by name.
 _REPUTATION = "the reputation tables; the one reputation path replaces them"
 _PACK_STEP = (
-    "the triage pack reading the entry its own step just wrote, by that step's name; "
-    "the pack as a declared step list replaces it"
+    "the triage pack reading or rendering the entry its own step just wrote, by that step's "
+    "name; the pack as a declared step list replaces it"
 )
-STILL_BY_NAME: dict[tuple[str, str], str] = {
-    ("pipeline/run_state.py", "e.tool in ('get_file_report', 'check_hash', 'reputation')"): (
-        _REPUTATION
+_LISTING_WORDS = (
+    "a name-text heuristic for a tool that lists code (decompile, disassemble, function), "
+    "kept for an undeclared tool; the prompts-and-wording group replaces it"
+)
+
+# ((module, what, code), count) -> why it is still by name.
+STILL_BY_NAME: dict[tuple[str, str, str], tuple[int, str]] = {
+    (
+        "pipeline/run_state.py",
+        "compares",
+        "e.tool in ('get_file_report', 'check_hash', 'reputation')",
+    ): (1, _REPUTATION),
+    (
+        "pipeline/triage_pack.py",
+        "imports",
+        "from maljan.core.legacy_tool_tables import FILE_ASSESSMENT_TOOLS",
+    ): (1, _REPUTATION),
+    ("pipeline/triage_pack.py", "compares", "entry.tool in ('get_file_report', 'check_hash')"): (
+        1,
+        _REPUTATION,
     ),
-    ("pipeline/triage_pack.py", "entry.tool in ('get_file_report', 'check_hash')"): _REPUTATION,
-    ("pipeline/triage_pack.py", "tool in _REPUTATION_TOOLS"): _REPUTATION,
-    ("pipeline/triage_pack.py", "tool == 'pack'"): _PACK_STEP,
-    ("pipeline/triage_pack.py", "entry.tool == 'capa'"): _PACK_STEP,
-    ("pipeline/triage_pack.py", "entry.tool != 'capa'"): _PACK_STEP,
-    ("pipeline/triage_pack.py", "e.tool == INDEX_TOOL"): _PACK_STEP,
-    ("pipeline/triage_pack.py", "entry.tool == INDEX_TOOL"): _PACK_STEP,
-    ("pipeline/triage_pack.py", "entry.tool != INDEX_TOOL"): _PACK_STEP,
-    ("pipeline/triage_pack.py", "made[-1].tool == artefact_index.TOOL"): _PACK_STEP,
-    ("pipeline/triage_pack.py", "entry.tool != sandbox_sections.SECTIONS_TOOL"): _PACK_STEP,
-    ("pipeline/triage_pack.py", "entry.tool == ANTI_ANALYSIS_TOOL"): _PACK_STEP,
-    ("pipeline/triage_pack.py", "entry.tool == crypto_constants.TOOL"): _PACK_STEP,
-    ("pipeline/triage_pack.py", "entry.tool in PASS_TOOLS"): _PACK_STEP,
-    ("pipeline/triage_pack.py", "entry.tool not in PASS_TOOLS"): _PACK_STEP,
+    ("pipeline/triage_pack.py", "looks", "_ESTABLISHED.get(tool)"): (1, _PACK_STEP),
+    ("pipeline/triage_pack.py", "looks", "_GROUP_LABELS.get(entry.tool, entry.tool)"): (
+        2,
+        _PACK_STEP,
+    ),
+    ("pipeline/triage_pack.py", "looks", "_RENDERERS.get(entry.tool)"): (1, _PACK_STEP),
+    ("pipeline/triage_pack.py", "looks", "_SHORTER_RENDERERS.get(entry.tool)"): (1, _PACK_STEP),
+    ("pipeline/triage_pack.py", "compares", "entry.tool in PASS_TOOLS"): (4, _PACK_STEP),
+    ("pipeline/triage_pack.py", "compares", "entry.tool not in PASS_TOOLS"): (1, _PACK_STEP),
+    ("pipeline/triage_pack.py", "compares", "entry.tool == 'capa'"): (1, _PACK_STEP),
+    ("pipeline/triage_pack.py", "compares", "entry.tool != 'capa'"): (1, _PACK_STEP),
+    ("pipeline/triage_pack.py", "compares", "entry.tool == crypto_constants.TOOL"): (1, _PACK_STEP),
+    ("pipeline/triage_pack.py", "compares", "entry.tool == ANTI_ANALYSIS_TOOL"): (1, _PACK_STEP),
+    ("pipeline/triage_pack.py", "compares", "entry.tool == INDEX_TOOL"): (2, _PACK_STEP),
+    ("pipeline/triage_pack.py", "compares", "entry.tool != INDEX_TOOL"): (1, _PACK_STEP),
+    ("pipeline/triage_pack.py", "compares", "e.tool == INDEX_TOOL"): (1, _PACK_STEP),
+    ("pipeline/triage_pack.py", "compares", "entry.tool != sandbox_sections.SECTIONS_TOOL"): (
+        1,
+        _PACK_STEP,
+    ),
+    ("pipeline/triage_pack.py", "compares", "made[-1].tool == artefact_index.TOOL"): (
+        1,
+        _PACK_STEP,
+    ),
+    ("pipeline/nodes.py", "looks", "_FORMAT_TOOLS.get(tool)"): (
+        1,
+        "the pack's own format step chosen for the routed format; the declared step list "
+        "replaces it",
+    ),
+    ("pipeline/function_claims.py", "compares", "'disassembl' not in tool"): (1, _LISTING_WORDS),
+    ("pipeline/function_claims.py", "compares", "'function' not in tool"): (1, _LISTING_WORDS),
+    ("pipeline/function_claims.py", "compares", "'string' in lowered"): (1, _LISTING_WORDS),
+    ("pipeline/function_claims.py", "compares", "'floss' in lowered"): (1, _LISTING_WORDS),
+    ("pipeline/validation.py", "compares", "'decompil' not in tool"): (1, _LISTING_WORDS),
+    ("agents/function_map.py", "compares", "'decompil' in tool"): (1, _LISTING_WORDS),
+    ("agents/function_map.py", "compares", "'disassembl' in tool.lower()"): (1, _LISTING_WORDS),
+    ("agents/function_map.py", "compares", "'function' in tool.lower()"): (1, _LISTING_WORDS),
+    ("agents/evidence_recorder.py", "compares", "'decompil' in str(tool or '').lower()"): (
+        1,
+        _LISTING_WORDS,
+    ),
+    ("agents/evidence_recorder.py", "compares", "name != tool"): (
+        1,
+        "a repaired call matched to the note the same call left, by the tool name it gave",
+    ),
+    ("analysis/ghidra_program.py", "looks", "(overrides or {}).get(tool)"): (
+        1,
+        "the Ghidra REST opener's endpoint overrides, keyed by its caller (the Ghidra adapter)",
+    ),
 }
 
 
-def _module_constants(tree: ast.Module) -> dict[str, bool]:
-    """Module-level names bound to a string or a collection of strings."""
-    out: dict[str, bool] = {}
-    for node in tree.body:
-        targets: list[ast.expr] = []
-        value: ast.expr | None = None
-        if isinstance(node, ast.Assign):
-            targets, value = list(node.targets), node.value
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            targets, value = [node.target], node.value
-        for target in targets:
-            if isinstance(target, ast.Name) and value is not None and _literal(value, {}):
-                out[target.id] = True
-    return out
-
-
-def _literal(node: ast.expr, constants: dict[str, bool]) -> bool:
-    if isinstance(node, ast.Constant):
-        return isinstance(node.value, str) and bool(node.value)
-    if isinstance(node, ast.Tuple | ast.List | ast.Set):
-        return bool(node.elts) and all(_literal(e, constants) for e in node.elts)
-    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-        if node.func.id in ("frozenset", "set", "tuple") and len(node.args) == 1:
-            return _literal(node.args[0], constants)
-    if isinstance(node, ast.Name):
-        return constants.get(node.id, False) or bool(_TOOL_CONSTANT.match(node.id))
-    if isinstance(node, ast.Attribute):
-        return bool(_TOOL_CONSTANT.match(node.attr))
-    return False
-
-
-def _names_a_tool(node: ast.expr) -> bool:
-    if isinstance(node, ast.Attribute):
-        return node.attr in _TOOL_NAMES
-    if isinstance(node, ast.Name):
-        return node.id in _TOOL_NAMES
-    if isinstance(node, ast.Call):
-        func = node.func
-        if isinstance(func, ast.Name) and func.id in _TOOL_CALLS:
-            return True
-        if isinstance(func, ast.Attribute) and func.attr == "get" and node.args:
-            first = node.args[0]
-            return isinstance(first, ast.Constant) and first.value in _TOOL_NAMES
-        if isinstance(func, ast.Name) and func.id == "str" and node.args:
-            return _names_a_tool(node.args[0])
-    if isinstance(node, ast.BoolOp):
-        return any(_names_a_tool(v) for v in node.values)
-    return False
-
-
-def _compares_a_tool(node: ast.Compare, constants: dict[str, bool]) -> bool:
-    """Whether ``node`` compares a tool with a literal name.
-
-    A word looked for inside a tool's name (``'decompil' in tool``) is a
-    reading of the name's text, not a comparison with a tool name.
-    """
-    sides = [node.left, *node.comparators]
-    if (
-        len(node.ops) == 1
-        and isinstance(node.ops[0], ast.In | ast.NotIn)
-        and isinstance(node.left, ast.Constant)
-        and _names_a_tool(node.comparators[0])
-    ):
-        return False
-    return any(_names_a_tool(s) for s in sides) and any(_literal(s, constants) for s in sides)
-
-
-def _comparisons() -> Counter[tuple[str, str]]:
-    found: Counter[tuple[str, str]] = Counter()
+def _found() -> Counter[tuple[str, str, str]]:
+    held: Counter[tuple[str, str, str]] = Counter()
     for package in PACKAGES:
         for path in sorted((ROOT / "src" / "maljan" / package).rglob("*.py")):
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            constants = _module_constants(tree)
             module = path.relative_to(ROOT / "src" / "maljan").as_posix()
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Compare):
-                    continue
-                if _compares_a_tool(node, constants):
-                    found[(module, ast.unparse(node))] += 1
-    return found
+            for finding in findings(path.read_text(encoding="utf-8"), module):
+                held[(module, finding.what.split()[0], finding.text)] += 1
+    return held
 
 
-def test_no_module_of_the_reading_half_compares_a_tool_with_a_literal_name() -> None:
-    unexpected = sorted(set(_comparisons()) - set(STILL_BY_NAME))
-    assert not unexpected, unexpected
+def test_no_module_of_the_reading_half_reads_a_tool_by_its_name() -> None:
+    found = _found()
+    over = {
+        key: (count, STILL_BY_NAME.get(key, (0, ""))[0])
+        for key, count in found.items()
+        if count > STILL_BY_NAME.get(key, (0, ""))[0]
+    }
+    assert not over, over
 
 
-def test_the_list_of_comparisons_still_by_name_only_shrinks() -> None:
-    stale = sorted(set(STILL_BY_NAME) - set(_comparisons()))
+def test_the_reads_still_by_name_only_shrink() -> None:
+    found = _found()
+    stale = {key: allowed for key, (allowed, _) in STILL_BY_NAME.items() if found[key] < allowed}
     assert not stale, stale
 
 
-def test_the_guard_sees_each_way_a_tool_is_compared() -> None:
-    source = (
-        "TOOLS = ('a', 'b')\n"
-        "def f(entry, tool):\n"
-        "    return (entry.tool == 'x', tool in TOOLS, _tool(entry) in ('y',),\n"
-        "            entry.get('tool') != 'z', str(entry.tool or '') == 'w',\n"
-        "            facts.kind == 'strings', 'decompil' in tool,\n"
-        "            entry.tool == artefact_index.TOOL)\n"
+@pytest.mark.parametrize("snippet", NAME_READ_SNIPPETS)
+def test_the_guard_sees_each_way_a_name_is_read(snippet: str) -> None:
+    assert findings(snippet)
+
+
+def test_the_guard_lets_kinds_and_tool_to_tool_be() -> None:
+    clean = (
+        'ok = facts.kind in ("strings", "emulated_strings")\n'
+        'ok = kind_of(entry) == "sandbox_sections"\n'
+        "def f(rows):\n"
+        "    ranked = {}\n"
+        "    lines = []\n"
+        "    for row in rows:\n"
+        "        lines.append(f'{row.tool}')\n"
+        "        if str(row.tool) not in ranked:\n"
+        "            ranked[str(row.tool)] = 1\n"
+        "    return 'intro' not in lines\n"
     )
-    tree = ast.parse(source)
-    constants = _module_constants(tree)
-    hits = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Compare) and _compares_a_tool(node, constants)
-    ]
-    assert len(hits) == 6
+    assert findings(clean) == []

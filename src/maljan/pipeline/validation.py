@@ -45,7 +45,6 @@ from maljan.core.declared_reading import (
     bare_name,
     consumer_kinds,
     facts_of,
-    legacy_names,
     reads_as,
     shipped_by_name,
 )
@@ -2953,19 +2952,24 @@ def _section_reads_as(section: Any, consumer: str, by_id: Mapping[str, Any]) -> 
     section none of whose citations is in hand is read by the legacy reading
     of the tool's name (``core.declared_reading``).
     """
-    source = str(getattr(section, "source", "") or "").strip()
-    if not source.lower().startswith("tool:"):
+    opened_by = section_tool(section)
+    if opened_by is None:
         return False
-    tool = source[len("tool:") :]
     for cited in getattr(section, "evidence_ids", None) or []:
         entry = by_id.get(str(cited).strip().lower())
-        if entry is not None and str(getattr(entry, "tool", "") or "") == tool:
+        if entry is not None and str(getattr(entry, "tool", "") or "") == opened_by:
             return reads_as(entry, consumer)
-    # The legacy reading of the name as the section wrote it, prefix and all.
-    name = tool.lower()
-    facts = shipped_by_name().get(name)
-    held = facts is not None and facts.kind in consumer_kinds(consumer)
-    return held or name in legacy_names(consumer)
+    # The legacy reading of the name the section wrote, as an entry with no
+    # source is read: so handing the ledger never changes how it is read.
+    return reads_as({"tool": opened_by.lower()}, consumer)
+
+
+def section_tool(section: Any) -> str | None:
+    """The tool a report section names as the one that opened it (``tool:<name>``), or ``None``."""
+    source = str(getattr(section, "source", "") or "").strip()
+    if not source.lower().startswith("tool:"):
+        return None
+    return source[len("tool:") :]
 
 
 @dataclass(frozen=True)
@@ -3018,9 +3022,11 @@ class CapabilityGrounding:
 
     @classmethod
     def from_report(
-        cls, report: Any, isr_reports: Any = None, ledger: Iterable[Any] | None = None
+        cls, report: Any, isr_reports: Any = None, ledger: Any = None
     ) -> CapabilityGrounding:
-        """Read a ``MalwareReport`` (and optionally the analysts' ISRs and the run's ledger).
+        """Read a ``MalwareReport`` (and optionally the analysts' ISRs and the run's evidence).
+
+        ``ledger`` is the run's entries, or its ``EntryTexts`` (which holds them).
 
         A section's class (a reference lookup, the sample's own values, a
         rule match) is its tool's declared kind, read off the ledger entry the
@@ -3037,7 +3043,10 @@ class CapabilityGrounding:
         keys: set[str] = set()
         words: list[str] = []
         rule_rows: list[tuple[str, str, str]] = []
-        ledger = list(ledger or ())
+        # The run's evidence as the composer and the narrative round hold it
+        # (``EntryTexts``) gives its entries.
+        held = getattr(ledger, "entries", None)
+        ledger = list(held.values()) if isinstance(held, Mapping) else list(ledger or ())
         by_id = {str(getattr(entry, "id", "") or "").strip().lower(): entry for entry in ledger}
         try:
             # A technique only a rule match stands behind — one string of a
@@ -5796,6 +5805,9 @@ class EntryTexts:
     tools: Mapping[str, str] = field(default_factory=dict)
     # The words a statement may name each entry by (:func:`entry_words`).
     words: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    # The entries themselves, by id: what a reader of an entry's declared kind
+    # reads (``CapabilityGrounding.from_report``).
+    entries: Mapping[str, Any] = field(default_factory=dict)
     # The entries whose text is known not to be the whole answer — shortened
     # for the model or trimmed by the byte budget. A value absent from one of
     # them may be in the part that is not here, so no absence is read off it.
@@ -5822,12 +5834,14 @@ class EntryTexts:
         texts: dict[str, str] = {}
         tools: dict[str, str] = {}
         words: dict[str, frozenset[str]] = {}
+        entries: dict[str, Any] = {}
         partial: set[str] = set()
         for entry in ledger:
             written = str(getattr(entry, "id", "") or "").strip()
             entry_id = written.lower()
             if not entry_id:
                 continue
+            entries.setdefault(entry_id, entry)
             text = ""
             if corpus is not None:
                 try:
@@ -5854,7 +5868,9 @@ class EntryTexts:
                 words[repeat] = words[holder]
             if holder in partial:
                 partial.add(repeat)
-        return cls(texts=texts, tools=tools, words=words, partial=frozenset(partial))
+        return cls(
+            texts=texts, tools=tools, words=words, entries=entries, partial=frozenset(partial)
+        )
 
     def words_of(self, entry_id: str) -> frozenset[str]:
         """The words a statement may name one entry by."""
@@ -6609,13 +6625,10 @@ def _name_words(tool: str) -> set[str]:
 
 
 def _tool_words(tool: str) -> set[str]:
-    """The legacy reading: a name's words, and the words the old table gave a part of it."""
-    from maljan.core.legacy_tool_tables import TOOL_WORDS
+    """The legacy reading of an entry's words (``core.declared_reading.legacy_tool_words``)."""
+    from maljan.core.declared_reading import legacy_tool_words
 
-    words = _name_words(tool)
-    for part in list(words):
-        words.update(TOOL_WORDS.get(part, ()))
-    return words
+    return legacy_tool_words(tool)
 
 
 def entry_words(entry: Any) -> frozenset[str]:
@@ -6623,10 +6636,10 @@ def entry_words(entry: Any) -> frozenset[str]:
 
     An entry with no stored facts is read as it always was (:func:`_tool_words`).
     """
-    from maljan.core.declared_reading import facts_of, has_stored_facts
+    from maljan.core.declared_reading import facts_of, read_by_name
 
     tool = str(getattr(entry, "tool", "") or "")
-    if not has_stored_facts(entry):
+    if read_by_name(entry):
         return frozenset(_tool_words(tool))
     facts = facts_of(entry)
     declared = {str(word).lower() for word in facts.words} if facts is not None else set()

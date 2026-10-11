@@ -761,7 +761,7 @@ class NarrativeAgent:
         # this round is graded on the same grounding the composer is: without
         # the ISRs, a capability an analyst stated in a claim would be a
         # violation here and a pass there, on one run.
-        grounding = CapabilityGrounding.from_report(report, isr_reports)
+        grounding = CapabilityGrounding.from_report(report, isr_reports, ledger=evidence)
         # What the run publishes, which is what a recommendation may act on:
         # its indicators and its techniques.
         answers = published_answers(report)

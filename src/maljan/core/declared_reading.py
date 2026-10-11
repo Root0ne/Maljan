@@ -19,8 +19,12 @@ the facts the entry stored, never the reading process's settings, so a run
 reads the same in the worker, in a later stage and in the API, which renders
 without the operator's settings. A tool whose source declared nothing has no
 facts, whatever its name: a user tool sharing a built-in's name gets nothing
-from the built-in. An entry with no stored facts (every entry written before
-facts were recorded: the stored runs) is read by the **legacy reading**: the
+from the built-in. A record of a newer version is read for the fields this
+version knows, and one the validators refuse as absent, each with a warning.
+An entry with a source and no facts (written before facts were stored, or
+whose settings could not be read) reads as an undeclared tool, never by its
+name. An entry with no source and no facts (every entry written before sources
+were recorded: the stored runs) is read by the **legacy reading**: the
 facts the platform ships for its bare tool name (the server prefix a name
 collision adds taken off), from the built-in declarations alone. Those are the
 name tables the code read before (``builtin_declarations.CONSUMER_KINDS``, held
@@ -29,8 +33,14 @@ tool by tool by
 so a stored entry reads as it always did; a consumer table's ``legacy_names``
 count for such an entry only.
 
+The platform's in-process sources (``pack``, ``sandbox``,
+``provider:capa_yara``) are declared by built-in data only, so their records
+are written from it without the settings, even by a render that builds an
+entry.
+
 **Live declarations** (:func:`declarations`) are read only where nothing
-persisted depends on the result: by the writer above; by an evidence-only
+persisted depends on the result: by the writer above, for a server or a
+provider block; by an evidence-only
 provider naming the tool its answer is recorded under (a writer too); by the
 report step deciding whether the pack already holds that provider's answers
 (:func:`kinds_declared_by`), which decides only whether the provider runs; and
@@ -133,6 +143,27 @@ def stored_record(facts: ToolFacts | None) -> dict[str, Any]:
     return record
 
 
+@cache
+def _in_process_blocks() -> Mapping[str, Mapping[str, ToolFacts]]:
+    from maljan.core.builtin_declarations import in_process_declarations
+
+    return {str(ref): dict(cfg.tool_facts) for ref, cfg in in_process_declarations().items()}
+
+
+def _in_process_facts(source: str, tool: str) -> dict[str, Any] | None:
+    """The stored record of a platform in-process source's tool, from built-in data alone.
+
+    The triage pack, the sandbox report tools and the evidence-only rule
+    provider are the platform's own code, declared by built-in data only, so
+    their records never need the settings (a render that builds an entry reads
+    no settings). ``None`` for any other source.
+    """
+    held = _in_process_blocks().get(source)
+    if held is None:
+        return None
+    return stored_record(held.get(tool))
+
+
 def facts_record(
     source: str, tool: str, *, declared: ToolDeclarations | None = None
 ) -> dict[str, Any] | None:
@@ -142,6 +173,10 @@ def facts_record(
     nothing, and the entry is then read by the legacy reading.
     """
     try:
+        if declared is None:
+            shipped = _in_process_facts(source, tool)
+            if shipped is not None:
+                return shipped
         held = declared or declarations()
         return stored_record(held.declaration_for((source, tool)))
     except Exception as exc:  # noqa: BLE001 — a record is never worth a lost entry
@@ -185,28 +220,82 @@ def shipped_by_name() -> Mapping[str, ToolFacts]:
 
 
 def has_stored_facts(entry: Any) -> bool:
-    """Whether ``entry`` stored the facts its tool declared when it was written."""
-    held = _field(entry, "facts")
-    return isinstance(held, Mapping) and held.get("v") == FACTS_VERSION
+    """Whether ``entry`` stored a facts record when it was written."""
+    return isinstance(_field(entry, "facts"), Mapping)
+
+
+def read_by_name(entry: Any) -> bool:
+    """Whether ``entry`` is read by the legacy reading: it recorded no source and no facts.
+
+    An entry with a source and no facts (written before facts were stored, or
+    whose settings could not be read) reads as an undeclared tool, never by
+    its name.
+    """
+    return not recorded(entry) and not has_stored_facts(entry)
 
 
 @lru_cache(maxsize=4096)
 def _parsed(text: str) -> ToolFacts | None:
+    """One stored record as facts; ``None`` for one that declares nothing or cannot be read.
+
+    A record of a newer version is read for the fields this version knows, with
+    a warning; a record the validators refuse is treated as absent, with a
+    warning, and never stops a reader.
+    """
+    from maljan.core.logger import logger
+
     held = json.loads(text)
-    if "kind" not in held:
+    version = held.get("v")
+    if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+        logger.warning("declared facts: a record without a version is read as absent.")
         return None
-    return ToolFacts.model_validate({k: v for k, v in held.items() if k != "v"})
+    if version > FACTS_VERSION:
+        logger.warning(
+            "declared facts: a version %d record is read for the fields version %d knows.",
+            version,
+            FACTS_VERSION,
+        )
+    known = {k: v for k, v in held.items() if k in STORED_FACT_FIELDS}
+    if not known.get("kind"):
+        return None
+    try:
+        return ToolFacts.model_validate(known)
+    except ValueError as exc:
+        logger.warning("declared facts: a stored record is read as absent (%s).", exc)
+        return None
 
 
 def facts_of(entry: Any) -> ToolFacts | None:
-    """The facts an entry's tool declared, as the entry stored them; the legacy reading else.
+    """The facts an entry's tool declared, as the entry stored them.
 
     ``entry`` is a ledger entry, or a mapping with ``tool`` and, where it
-    stored them, ``facts``. Never reads the reading process's settings.
+    recorded them, ``source`` and ``facts``. An entry with no source and no
+    facts is read by the legacy reading of its name; one with a source and no
+    facts has none. Never reads the reading process's settings.
     """
-    if has_stored_facts(entry):
-        return _parsed(json.dumps(dict(_field(entry, "facts")), sort_keys=True))
+    held = _field(entry, "facts")
+    if isinstance(held, Mapping):
+        try:
+            text = json.dumps(dict(held), sort_keys=True, default=str)
+        except (TypeError, ValueError):
+            return None
+        return _parsed(text)
+    if recorded(entry):
+        return None
     return shipped_by_name().get(bare_name(_field(entry, "tool")))
+
+
+def legacy_tool_words(tool: str) -> set[str]:
+    """The legacy reading of the words a statement names an entry by: its name's words and
+    the words the old table gave a part of it (``legacy_tool_tables.TOOL_WORDS``)."""
+    import re
+
+    from maljan.core.legacy_tool_tables import TOOL_WORDS
+
+    words = {part for part in re.split(r"[_\W]+", str(tool).lower()) if len(part) >= 3}
+    for part in list(words):
+        words.update(TOOL_WORDS.get(part, ()))
+    return words
 
 
 def kind_of(entry: Any) -> str:
@@ -237,13 +326,13 @@ def legacy_names(consumer: str) -> frozenset[str]:
 def reads_as(entry: Any, consumer: str) -> bool:
     """Whether ``entry``'s tool is of a kind the named consumer reads.
 
-    By the entry's stored kind; an entry with no stored facts by the legacy
-    reading, and by the consumer's ``legacy_names``.
+    By the entry's stored kind; an entry with no source and no facts by the
+    legacy reading, and by the consumer's ``legacy_names``.
     """
     facts = facts_of(entry)
     if facts is not None and facts.kind in consumer_kinds(consumer):
         return True
-    if has_stored_facts(entry):
+    if not read_by_name(entry):
         return False
     return bare_name(_field(entry, "tool")) in legacy_names(consumer)
 

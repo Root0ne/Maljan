@@ -993,10 +993,16 @@ class ItemIndex:
                 yield f"{prefix}:{number}"
 
 
+# The declared kind of the triage pack's section index entry (``core.builtin_declarations``).
+SECTIONS_KIND = "sandbox_sections"
+
+
 def index_entry(entries: Iterable[Any]) -> Any | None:
-    """The run's readable ``sandbox_sections`` entry, or ``None``."""
+    """The run's readable section index entry (declared kind ``sandbox_sections``), or ``None``."""
+    from maljan.core.declared_reading import kind_of
+
     for entry in entries or ():
-        if str(getattr(entry, "tool", "") or "") != SECTIONS_TOOL:
+        if kind_of(entry) != SECTIONS_KIND:
             continue
         if getattr(entry, "ok", True) is False:
             continue

@@ -334,7 +334,7 @@ EVIDENCE_ROOT_READERS = {
     "unpack_upx": "unpacked_image",
     "sandbox_network": "flow_table",
     "pcap_summary": "flow_table",
-    "read_pcap_summary": "flow_table",
+    "read_pcap_summary": "packet_lines",
     "extract_dns": "dns_query_lines",
     "sandbox_items": "report_items",
 }

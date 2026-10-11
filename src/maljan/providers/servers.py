@@ -1007,17 +1007,29 @@ class ServerHandle:
             for name in (str(getattr(tool, "name", "")),)
             if name not in withheld and (keep is None or name in keep)
         ]
+        every_tool = list(self._all_tools)
         if not self.reads_own_errors:
             from maljan.providers.declared_errors import with_declared_errors
 
-            offered = with_declared_errors(
-                offered, self.config.error_patterns, self.error_sample_path
-            )
+            # Every answer, the open, select and analyse calls the opener
+            # makes included, is held against the declared error patterns.
+            reading = {
+                id(tool): wrapped
+                for tool, wrapped in zip(
+                    every_tool,
+                    with_declared_errors(
+                        every_tool, self.config.error_patterns, self.error_sample_path
+                    ),
+                    strict=True,
+                )
+            }
+            offered = [reading.get(id(tool), tool) for tool in offered]
+            every_tool = [reading[id(tool)] for tool in every_tool]
         # A server that declares its open tool has that tool answered through
         # the job's note: a path opened once is not opened again.
         return wrap_open_tool(
             offered,
-            self._all_tools,
+            every_tool,
             server=self.note_key,
             spec=getattr(self.config, "sample_open", None),
             notes=self.sample_notes,

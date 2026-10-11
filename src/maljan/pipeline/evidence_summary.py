@@ -23,7 +23,7 @@ from maljan.analysis.technique_ids import (
     sigma_technique_ids,
     technique_ids_in,
 )
-from maljan.core.declared_reading import bare_name, facts_of, has_stored_facts, reads_as
+from maljan.core.declared_reading import bare_name, facts_of, read_by_name, reads_as
 from maljan.core.tool_declarations import select
 from maljan.memory.attck_loader import technique_label
 
@@ -71,7 +71,7 @@ def asserted_techniques(entry: Any) -> set[str]:
     tools emit (:func:`_technique_ids`), as it always was.
     """
     structured = getattr(entry, "structured", None)
-    if not has_stored_facts(entry):
+    if read_by_name(entry):
         return _technique_ids(structured)
     facts = facts_of(entry)
     found: set[str] = set()

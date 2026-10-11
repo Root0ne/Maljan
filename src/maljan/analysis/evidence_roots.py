@@ -92,7 +92,7 @@ from maljan.analysis.sandbox_sections import (
     is_item_id,
     item_index_of,
 )
-from maljan.core.declared_reading import facts_of, kind_of, reads_as
+from maljan.core.declared_reading import facts_of, kind_of, reads_as, shipped_by_name
 from maljan.schemas.evidence import repeat_holders
 
 WHOLE_FILE = "the whole file"
@@ -814,18 +814,17 @@ def _flow_rows(entry: Any) -> list[dict[str, Any]]:
     """The connections one answer states, as ``proto, src, sport, dst, dport`` rows.
 
     A flow table (``reader: flow_table``) states them as conversation, TCP and
-    UDP rows of its structured answer, or, an answer with no structure, as
-    packet lines of its text.
+    UDP rows of its structured answer; a packet listing (``reader:
+    packet_lines``) as one packet per line of its text.
     """
-    if _reader(entry) != "flow_table":
-        return []
-    data = _structured(entry)
-    if isinstance(data, Mapping):
+    reader = _reader(entry)
+    if reader == "flow_table":
+        data = _structured(entry)
         rows = [dict(r) for r in _rows(data, "conversations")]
         rows += [{**r, "proto": "tcp"} for r in _rows(data, "tcp")]
         rows += [{**r, "proto": "udp"} for r in _rows(data, "udp")]
         return rows
-    if data is None:
+    if reader == "packet_lines":
         out: list[dict[str, Any]] = []
         for line in str(getattr(entry, "output", "") or "").splitlines():
             match = _PACKET_LINE.match(line.strip())
@@ -1165,39 +1164,143 @@ def _read_declared_rows(found: EntryRoots, facts: Any, data: Any, tool: str) -> 
             found.unplace(NOTHING_TO_PLACE.format(tool=tool), values=values, techniques=tids)
 
 
+# The readings ``_read_entry`` gives an entry, in the order they are tried:
+# each is a declared kind, reader or consumer table of
+# ``builtin_declarations.CONSUMER_KINDS``; ``declared_rows`` is a kind with no
+# reading of its own whose declaration gives rows and places; ``call_address``
+# is everything else, placed by the address its call was given.
+_KIND_BRANCHES: tuple[tuple[str, str], ...] = (
+    ("strings", "strings"),
+    ("decoded_strings", "decoded_strings"),
+    ("api_hash_resolution", "api_hash_resolution"),
+    ("capability_rules", "capability_rules"),
+    ("iocs_with_context", "iocs_with_context"),
+    ("sandbox_processes", "sandbox_processes"),
+    ("event_rules", "event_rules"),
+    ("command_match", "command_match"),
+    ("sandbox_signatures", "sandbox_signatures"),
+    ("signature_rules", "signature_rules"),
+)
+_READER_BRANCHES: dict[str, str] = {
+    "emulated_strings_with_call_sites": "emulated_strings_with_call_sites",
+    "function_table": "function_table",
+    "byte_transform": "byte_transform",
+    "unpacked_image": "unpacked_image",
+    "flow_table": "flows",
+    "packet_lines": "flows",
+    "dns_query_lines": "dns_query_lines",
+    "report_items": "report_items",
+}
+# The order the chain tries them in, the reader branches among the kinds.
+BRANCH_ORDER: tuple[str, ...] = (
+    "reference",
+    "whole_file",
+    "assessment",
+    "pe_header",
+    "import_listing",
+    "export_listing",
+    "strings",
+    "emulated_strings_with_call_sites",
+    "decoded_strings",
+    "api_hash_resolution",
+    "capability_rules",
+    "function_table",
+    "byte_transform",
+    "unpacked_image",
+    "iocs_with_context",
+    "sandbox_processes",
+    "flows",
+    "dns_query_lines",
+    "event_rules",
+    "command_match",
+    "sandbox_signatures",
+    "report_items",
+    "signature_rules",
+)
+
+
+def _shaped_otherwise(facts: Any) -> bool:
+    """Whether a tool declares rows and places other than the shipped tool of its kind.
+
+    Such a tool's answer has another shape than its kind's own reading reads,
+    so it is read by its declared paths; a tool shaped as the built-in of its
+    kind is read by that kind's reading.
+    """
+    if not (facts.rows and facts.places):
+        return False
+    shipped = next((f for f in shipped_by_name().values() if f.kind == facts.kind), None)
+    if shipped is None:
+        return False
+    return (facts.rows, facts.places) != (shipped.rows, shipped.places)
+
+
+def reading_branch(entry: Any) -> str:
+    """The reading ``_read_entry`` gives ``entry``, by its tool's declared kind and reader.
+
+    The first branch of :data:`BRANCH_ORDER` the entry's facts select;
+    ``declared_rows`` for a kind with none whose declaration gives rows and
+    places; ``call_address`` otherwise.
+    """
+    if reads_as(entry, _REFERENCE):
+        return "reference"
+    if reads_as(entry, _WHOLE_FILE):
+        return "whole_file"
+    if reads_as(entry, _FILE_ASSESSMENT):
+        return "assessment"
+    facts = facts_of(entry)
+    if facts is not None and _shaped_otherwise(facts):
+        return "declared_rows"
+    kind = facts.kind if facts is not None else ""
+    reader = facts.reader if facts is not None else ""
+    selected = {name for k, name in _KIND_BRANCHES if k == kind}
+    if reader in _READER_BRANCHES:
+        selected.add(_READER_BRANCHES[reader])
+    if reader == "pe_header":
+        selected.add("pe_header")
+    if reads_as(entry, _IMPORT_LISTING):
+        selected.add("import_listing")
+    if reads_as(entry, _EXPORT_LISTING):
+        selected.add("export_listing")
+    for name in BRANCH_ORDER:
+        if name in selected:
+            return name
+    if facts is not None and facts.rows and facts.places:
+        return "declared_rows"
+    return "call_address"
+
+
 def _read_entry(entry: Any, found: EntryRoots, joins: _Joins) -> EntryRoots:
     """One entry's roots, read from its own answer and arguments against its file's layout."""
     tool = _tool(entry)
     if getattr(entry, "ok", True) is False:
         found.reason = FAILED
         return found
-    if reads_as(entry, _REFERENCE):
+    branch = reading_branch(entry)
+    if branch == "reference":
         found.reason = REFERENCE.format(tool=tool)
         return found
-    if reads_as(entry, _WHOLE_FILE):
+    if branch == "whole_file":
         found.add(WHOLE_FILE)
         return found
-    if reads_as(entry, _FILE_ASSESSMENT):
+    if branch == "assessment":
         found.add(EXTERNAL_ASSESSMENT)
         return found
     data = _structured(entry)
     args = getattr(entry, "args", None) or {}
     facts = facts_of(entry)
-    kind = facts.kind if facts is not None else ""
-    reader = facts.reader if facts is not None else ""
-    if reader == "pe_header" and isinstance(data, Mapping):
+    if branch == "pe_header" and isinstance(data, Mapping):
         _read_pe_info(found, data)
-    elif reads_as(entry, _IMPORT_LISTING):
+    elif branch == "import_listing":
         found.add(IMPORT_TABLE, words=_WORD.findall(str(getattr(entry, "output", "") or "")))
-    elif reads_as(entry, _EXPORT_LISTING):
+    elif branch == "export_listing":
         found.add(EXPORT_TABLE, words=_WORD.findall(str(getattr(entry, "output", "") or "")))
-    elif kind == "strings":
+    elif branch == "strings":
         found.coordinate = "offset"
         for row in _rows(data, "strings"):
             offset = _hex(row.get("offset"))
             if offset is not None:
                 _offset_root(found, offset, values=(row.get("text"),))
-    elif reader == "emulated_strings_with_call_sites":
+    elif branch == "emulated_strings_with_call_sites":
         for row in _rows(data, "strings"):
             text = row.get("string")
             call = _hex(row.get("called_at_rva"))
@@ -1213,19 +1316,19 @@ def _read_entry(entry: Any, found: EntryRoots, joins: _Joins) -> EntryRoots:
             at = _hex(row.get("function_rva"))
             if at is not None:
                 _place(found, at, values=(text,))
-    elif kind == "decoded_strings":
+    elif branch == "decoded_strings":
         for row in _rows(data, "results"):
             blob = _hex(row.get("rva"))
             if blob is not None:
                 _place(found, blob, values=(row.get("text"),))
-    elif kind == "api_hash_resolution":
+    elif branch == "api_hash_resolution":
         for hit in _rows(data, "hits"):
             names = [r.get("name") for r in _rows(hit, "readings")]
             for place in _rows(hit, "occurrences"):
                 rva = _hex(place.get("rva"))
                 if rva is not None:
                     _place(found, rva, words=names)
-    elif kind == "capability_rules":
+    elif branch == "capability_rules":
         for row in _rows(data, "capabilities"):
             tids = _row_techniques(row)
             rule = (row.get("rule"),)
@@ -1235,20 +1338,20 @@ def _read_entry(entry: Any, found: EntryRoots, joins: _Joins) -> EntryRoots:
                     placed = True
             if not placed:
                 found.unplace(NOTHING_TO_PLACE.format(tool=tool), values=rule, techniques=tids)
-    elif reader == "function_table":
+    elif branch == "function_table":
         _read_function_index(found, data)
-    elif reader == "byte_transform":
+    elif branch == "byte_transform":
         _read_transform(found, data)
-    elif reader == "unpacked_image":
+    elif branch == "unpacked_image":
         _read_unpack(found, data)
-    elif kind == "iocs_with_context":
+    elif branch == "iocs_with_context":
         for row in _rows(data, "iocs"):
             _address_root(found, row.get("address"), values=(row.get("value"),))
-    elif kind == "sandbox_processes":
+    elif branch == "sandbox_processes":
         for row in _rows(data, "processes"):
             if row.get("pid") is not None:
                 found.add(_process(row["pid"]), values=(row.get("command_line"), row.get("name")))
-    elif reader == "flow_table":
+    elif branch == "flows":
         for row in _flow_rows(entry):
             label = _flow_of(row, joins)
             if label is not None:
@@ -1258,23 +1361,23 @@ def _read_entry(entry: Any, found: EntryRoots, joins: _Joins) -> EntryRoots:
             if name:
                 said = name.rstrip(".")
                 found.add(DNS_ROOT.format(name=_written(said)), values=(said,))
-    elif reader == "dns_query_lines":
+    elif branch == "dns_query_lines":
         for line in str(getattr(entry, "output", "") or "").splitlines():
             match = _DNS_NAME_LINE.match(line.strip())
             if match:
                 found.add(DNS_ROOT.format(name=match["name"]), values=(match["name"],))
-    elif kind == "event_rules":
+    elif branch == "event_rules":
         for row in _rows(data, "matches"):
             fields = row.get("matched_fields")
             command = (
                 str(fields.get("CommandLine") or "").strip() if isinstance(fields, Mapping) else ""
             )
             _command_root(found, command, joins, _row_techniques(row))
-    elif kind == "command_match":
+    elif branch == "command_match":
         tids = _row_techniques(data)
         for command in args.get("command_lines") or []:
             _command_root(found, str(command or "").strip(), joins, tids)
-    elif kind == "sandbox_signatures":
+    elif branch == "sandbox_signatures":
         for row in _rows(data, "signatures"):
             name = str(row.get("name") or "").strip()
             if name:
@@ -1285,7 +1388,7 @@ def _read_entry(entry: Any, found: EntryRoots, joins: _Joins) -> EntryRoots:
                 )
         if not found.roots:
             found.reason = SIGNATURE_UNPLACED
-    elif reader == "report_items":
+    elif branch == "report_items":
         for row in _rows(data, "items"):
             item = str(row.get("id") or "").lower()
             fields = row.get("fields")
@@ -1299,7 +1402,7 @@ def _read_entry(entry: Any, found: EntryRoots, joins: _Joins) -> EntryRoots:
                 found.add(label, values=[item, *values])
             else:
                 found.unplace(reason or ITEM_UNPLACED.format(section="report"), values=[item])
-    elif kind == "signature_rules":
+    elif branch == "signature_rules":
         found.coordinate = "offset"
         for row in _rows(data, "matches"):
             tids = _row_techniques(row)

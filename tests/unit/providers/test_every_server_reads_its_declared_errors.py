@@ -152,3 +152,20 @@ def test_the_reading_is_linear_on_a_hostile_answer() -> None:
 
     small, large = timed(20_000), timed(200_000)
     assert large < max(small, 1e-3) * 40
+
+
+def test_a_declared_open_tool_reads_its_errors_too() -> None:
+    from maljan.core.config import SampleOpenConfig
+    from maljan.providers.sample_open import SampleNotes
+
+    spec = SampleOpenConfig(open_tool="search", path_argument="query")
+    config = _invented([{"match": r"Failed to open .*", "code": "tool_failed"}])
+    config = config.model_copy(update={"sample_open": spec})
+    handle = ServerHandle("invented", config)
+    handle._all_tools = [_tool("search", "Failed to open /s/a.bin")]
+    handle.sample_notes = SampleNotes()
+    (tool,) = handle.tools()
+    said = asyncio.run(tool.ainvoke({"query": "/s/a.bin"}))
+    parts = error_parts(said)
+    assert parts is not None and parts[0] == "tool_failed"
+    assert handle.sample_notes.get(handle.note_key, "/s/a.bin") is None
