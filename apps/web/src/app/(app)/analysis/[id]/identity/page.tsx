@@ -87,7 +87,7 @@ export default function IdentityTab() {
       <div className="space-y-4">
         <ArtifactSections sections={evidenceSections} />
         {hashes}
-        <ReputationSection jobId={jobId} enabled={!loading} />
+        <ReputationSection jobId={jobId} report={report?.malware_report} enabled={!loading} />
         {evidenceSections.length === 0 && !hashes && (
           <div className="p-8 text-center text-sm text-text-secondary">
             No identifying tool answered for this sample.
@@ -178,7 +178,7 @@ export default function IdentityTab() {
         * inapplicable one. */}
       {hashes}
 
-      <ReputationSection jobId={jobId} enabled={!loading} />
+      <ReputationSection jobId={jobId} report={report?.malware_report} enabled={!loading} />
 
       {identity.signing.is_signed && (
         <div className="bg-bg-surface border border-border rounded">

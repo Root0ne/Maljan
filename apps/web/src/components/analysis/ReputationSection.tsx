@@ -2,11 +2,15 @@
 
 /* What a reputation service said about this file.
  *
- * The section is named after the service that answered — "VirusTotal" when the
- * ledger holds a `get_file_report`, "Threat intelligence" when it holds a
- * `check_hash` — because "reputation" alone hides which of the two the run
- * actually asked, and the two answer differently. A run that asked nobody
- * draws nothing: a key in the settings is not a finding.
+ * The section is named after the service that answered, by the name its
+ * lookup's declaration gives it, because "reputation" alone hides which
+ * service the run actually asked, and services answer differently. A run that
+ * asked nobody draws nothing: a key in the settings is not a finding.
+ *
+ * A report carries each lookup's answer as its declaration read it
+ * (`reputation.ts`), and that record is all this reads, from any server. A
+ * report stored before the records is read from its ledger by the legacy
+ * reader (`reputationLegacy.ts`).
  *
  * It sits beside the hashes, which is what was looked up.
  */
@@ -15,14 +19,12 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import { api } from "@/lib/api";
-import {
-  REPUTATION_TOOLS,
-  reputationFromLedger,
-  type Reputation,
-} from "./reputation";
+import type { MalwareReport } from "@/types/malware-report";
+import { carriesReputationRecords, reputationFromReport, type Reputation } from "./reputation";
+import { REPUTATION_TOOLS, reputationFromLedger } from "./reputationLegacy";
 
-/** The reputation answer this job's ledger holds, if it holds one. */
-function useReputation(jobId: string, enabled: boolean): Reputation | null {
+/** The reputation answer of a report stored before records, read from its ledger. */
+function useStoredReputation(jobId: string, enabled: boolean): Reputation | null {
   const [reputation, setReputation] = useState<Reputation | null>(null);
 
   useEffect(() => {
@@ -30,9 +32,9 @@ function useReputation(jobId: string, enabled: boolean): Reputation | null {
     let cancelled = false;
 
     (async () => {
-      // At most one of the two tools is ever configured, so the second request
-      // is only made when the first found nothing — which is also the case
-      // where it costs nothing, the ledger having no reputation row at all.
+      // At most one of the two tools was ever configured, so the second
+      // request is only made when the first found nothing — which is also the
+      // case where it costs nothing, the ledger having no reputation row at all.
       for (const tool of REPUTATION_TOOLS) {
         try {
           const page = await api.getJobEvidence(jobId, { tool, pageSize: 5 });
@@ -67,13 +69,18 @@ function day(iso: string | null): string {
 
 export default function ReputationSection({
   jobId,
+  report,
   enabled = true,
 }: {
   jobId: string;
+  /** The report, whose reputation records are read when it carries them. */
+  report?: Pick<MalwareReport, "reputation"> | null;
   /** False while the report is still loading, so nothing is asked too early. */
   enabled?: boolean;
 }) {
-  const reputation = useReputation(jobId, enabled);
+  const recorded = carriesReputationRecords(report);
+  const stored = useStoredReputation(jobId, enabled && !recorded);
+  const reputation = recorded ? reputationFromReport(report) : stored;
   if (!reputation) return null;
 
   const { engines, malicious, suspicious, labels, firstSeen, lastSeen, link } = reputation;

@@ -192,12 +192,16 @@ export interface ToolFactsEntry {
  * `kind: "agent"` names another definition: the agent gets a tool
  * `ask_<agent>` that hands that agent a task and returns its answer. The API
  * writes `agent` only on that kind, so the field is optional here.
+ * `kind: "capability"` names a kind of tool (`capability: "reputation"`): every
+ * server declaring a tool of that kind that leaves its binding to the
+ * definitions. The API writes `capability` only on that kind.
  */
 export interface ToolRefEntry {
-  kind: "mcp" | "provider" | "sandbox" | "agent";
+  kind: "mcp" | "provider" | "sandbox" | "agent" | "capability";
   server: string | null;
   name: string | null;
   agent?: string | null;
+  capability?: string | null;
 }
 
 /**
