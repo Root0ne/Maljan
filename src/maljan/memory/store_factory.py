@@ -22,7 +22,8 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
 from typing import TYPE_CHECKING, Any
@@ -228,6 +229,22 @@ def _settings_fingerprint(memory: Any, backend_id: str) -> str:
 # built from; a settings change replaces (and closes) it.
 _FUNCTION_HASH_STORES: dict[str, tuple[str, FunctionHashIndex | None]] = {}
 _FUNCTION_HASH_LOCK = threading.Lock()
+# How many holders each handed-out store has (``acquire_function_hash_store``),
+# by ``id``; a held store keeps its entry, so the id cannot be reused meanwhile.
+_LEASES: dict[int, int] = {}
+# Stores a settings change replaced while someone still held them: closed when
+# the last holder releases, never under a running job.
+_RETIRED: dict[int, Any] = {}
+
+
+def _retire(store: Any) -> Any:
+    """Under the lock: the store to close now, or ``None`` when it is still held."""
+    if store is None:
+        return None
+    if _LEASES.get(id(store)):
+        _RETIRED[id(store)] = store
+        return None
+    return store
 
 
 def build_function_hash_store(settings_or_memory: Any) -> FunctionHashIndex | None:
@@ -245,13 +262,53 @@ def build_function_hash_store(settings_or_memory: Any) -> FunctionHashIndex | No
             return held[1]
         store = build_memory_store(memory).function_hash_store()
         _FUNCTION_HASH_STORES[backend.id] = (fingerprint, store)
-    if held is not None:
-        _close(held[1])
+        superseded = _retire(held[1]) if held is not None else None
+    _close(superseded)
     return store
+
+
+def acquire_function_hash_store(settings_or_memory: Any) -> FunctionHashIndex | None:
+    """``build_function_hash_store``, held until ``release_function_hash_store``.
+
+    A store a settings change replaces is closed only once every holder has
+    released it, so a job keeps reading and writing the store it started with.
+    """
+    store = build_function_hash_store(settings_or_memory)
+    if store is not None:
+        with _FUNCTION_HASH_LOCK:
+            _LEASES[id(store)] = _LEASES.get(id(store), 0) + 1
+    return store
+
+
+def release_function_hash_store(store: Any) -> None:
+    """Let go of a store from ``acquire_function_hash_store``; the last holder of a
+    replaced store closes it. ``None`` is a no-op."""
+    if store is None:
+        return
+    with _FUNCTION_HASH_LOCK:
+        left = _LEASES.get(id(store), 0) - 1
+        if left > 0:
+            _LEASES[id(store)] = left
+            return
+        _LEASES.pop(id(store), None)
+        retired = _RETIRED.pop(id(store), None)
+    _close(retired)
+
+
+@contextmanager
+def leased_function_hash_store(settings_or_memory: Any) -> Iterator[FunctionHashIndex | None]:
+    """The function-hash store, held for the ``with`` block."""
+    store = acquire_function_hash_store(settings_or_memory)
+    try:
+        yield store
+    finally:
+        release_function_hash_store(store)
 
 
 def _close(store: Any) -> None:
     """Close a function-hash store that offers ``close``; closing never fails the caller."""
+    if store is None:
+        return
     close = getattr(store, "close", None)
     if callable(close):
         try:
@@ -263,9 +320,9 @@ def _close(store: Any) -> None:
 def forget_built_stores() -> None:
     """Drop every cached function-hash store, so the next ask builds afresh."""
     with _FUNCTION_HASH_LOCK:
-        held = list(_FUNCTION_HASH_STORES.values())
+        now = [_retire(store) for _fingerprint, store in _FUNCTION_HASH_STORES.values()]
         _FUNCTION_HASH_STORES.clear()
-    for _fingerprint, store in held:
+    for store in now:
         _close(store)
 
 

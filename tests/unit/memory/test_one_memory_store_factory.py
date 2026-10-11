@@ -65,6 +65,8 @@ class _FakeQdrant:
         return None
 
     def upsert(self, collection_name: str, points: list[Any], wait: bool = True) -> None:
+        if self.closed:
+            raise RuntimeError("the client is closed")
         for point in points:
             self.collections[collection_name][point.id] = dict(point.payload)
 
@@ -862,3 +864,70 @@ class TestOneMapOfMovedKeys:
             )
         assert response.status_code == 200, response.text
         assert saved == {"core.memory.qdrant.url": URL}
+
+
+class TestARunningJobKeepsTheStoreItHolds:
+    """A settings change never closes the function-hash store under a job."""
+
+    @staticmethod
+    def _job(config: Any) -> Any:
+        from maljan.core.container import ServiceContainer
+        from maljan.pipeline import nodes
+
+        provider = SimpleNamespace(
+            capabilities=SimpleNamespace(provides_function_hashes=True),
+            function_hashes=lambda _job: [("f1", "h1"), ("f2", "h2")],
+        )
+        container = ServiceContainer(config)
+        container.get_static_provider = lambda: provider  # type: ignore[method-assign]
+        state = {"static_sample_path": "/mirror/s.bin", "file_hash": "this"}
+        with (
+            patch("maljan.core.config.get_settings", return_value=config),
+            patch.object(nodes, "_assessed_family", return_value="FamilyB"),
+        ):
+            nodes._function_hash_attribution(container, state, bundle=None)  # type: ignore[arg-type]
+        assert container.pending_function_hashes is not None
+        return container
+
+    def test_the_job_writes_after_a_settings_change_and_the_old_store_closes_after(self) -> None:
+        container = self._job(_settings("qdrant"))
+        (held_client,) = _FakeQdrant.built
+
+        other = Settings(_env_file=None, memory={"qdrant": {"url": URL, "api_key": "other"}})
+        assert store_factory.build_function_hash_store(other) is not None  # the change
+        assert held_client.closed == 0  # still held by the running job
+
+        assert container.remember_the_run() is True  # the job's write succeeds
+        assert set(held_client.collections["maljan_function_hashes_v1"]) != set()
+        assert held_client.closed == 1  # closed once the job let go
+        assert _FakeQdrant.built[-1].closed == 0  # the new store stays open
+
+    def test_a_job_that_ends_without_writing_lets_go_at_teardown(self) -> None:
+        container = self._job(_settings("qdrant"))
+        (held_client,) = _FakeQdrant.built
+        store_factory.forget_built_stores()
+        assert held_client.closed == 0
+        asyncio.run(container.aclose())
+        assert held_client.closed == 1
+
+    def test_an_unchanged_store_stays_open_after_the_job(self) -> None:
+        container = self._job(_settings("qdrant"))
+        container.remember_the_run()
+        assert [c.closed for c in _FakeQdrant.built] == [0]
+
+    def test_two_holders_the_last_one_closes(self) -> None:
+        first = store_factory.acquire_function_hash_store(_settings("qdrant"))
+        second = store_factory.acquire_function_hash_store(_settings("qdrant"))
+        assert first is second
+        store_factory.forget_built_stores()
+        store_factory.release_function_hash_store(first)
+        assert _FakeQdrant.built[0].closed == 0
+        store_factory.release_function_hash_store(second)
+        assert _FakeQdrant.built[0].closed == 1
+
+    def test_a_read_in_progress_keeps_its_store(self) -> None:
+        with store_factory.leased_function_hash_store(_settings("qdrant")) as store:
+            store_factory.forget_built_stores()
+            assert store is not None and store.match(["h1"]) == []
+            assert _FakeQdrant.built[0].closed == 0
+        assert _FakeQdrant.built[0].closed == 1

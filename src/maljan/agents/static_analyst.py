@@ -379,22 +379,24 @@ class StaticAnalyst(BaseAnalyst):
                 aggregate_matches,
                 build_attribution_hint,
             )
-            from maljan.memory.store_factory import build_function_hash_store
+            from maljan.memory.store_factory import leased_function_hash_store
 
-            store = build_function_hash_store(cfg)
-            if store is None:
-                return ""  # the configured memory backend keeps no function hashes
+            # Held for the read: a settings change meanwhile closes this store
+            # only once the read has let go of it.
+            with leased_function_hash_store(cfg) as store:
+                if store is None:
+                    return ""  # the configured memory backend keeps no function hashes
 
-            functions = self._provider().function_hashes(
-                StaticJobContext(mirror_sample_path=file_path)
-            )
-            if not functions:
-                return ""
+                functions = self._provider().function_hashes(
+                    StaticJobContext(mirror_sample_path=file_path)
+                )
+                if not functions:
+                    return ""
 
-            matches = store.match(
-                [fh for _name, fh in functions],
-                exclude_sample_id=sample_hash or None,
-            )
+                matches = store.match(
+                    [fh for _name, fh in functions],
+                    exclude_sample_id=sample_hash or None,
+                )
             results = aggregate_matches(
                 matches, max_families=cfg.preprocessing.function_hash_max_matches
             )

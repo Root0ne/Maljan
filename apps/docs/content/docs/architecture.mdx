@@ -3250,7 +3250,11 @@ the same gate would remove), `readiness()`, `function_hash_store()` and
 left out the way it is for any backend that keeps no function hashes. A
 backend that derives from `MemoryStoreDefaults` gets those answers for what it
 does not implement; the factory refuses a store without the interface, naming
-what it lacks.
+what it lacks. The function-hash store is built once per backend and settings
+and handed out as a hold: a settings change builds a new one, and the one it
+replaces is closed only when the last holder lets go — the judge's hold ends
+with the job's corpus write, or at teardown for a job that never wrote — so a
+running job keeps reading and writing the store it started with.
 
 `memory.backend` is the id of a registered backend: saving any other id is
 refused (a settings PATCH or import), while a stored id whose package was

@@ -829,6 +829,8 @@ class ServiceContainer:
         if held is None:
             return False
         store, sample_id, family, functions = held
+        from maljan.memory.store_factory import release_function_hash_store
+
         try:
             written = int(store.upsert_sample(sample_id, family, functions) or 0)
         except Exception as exc:  # noqa: BLE001 — the corpus never costs a completed job
@@ -836,6 +838,10 @@ class ServiceContainer:
                 "Function-hash corpus write failed (%s). The completed job is unaffected.", exc
             )
             return False
+        finally:
+            # The judge's hold ends with the write: a store a settings change
+            # replaced meanwhile is closed now, not under this job.
+            release_function_hash_store(store)
         logger.info(
             "Function-hash corpus: filed %d function(s) of '%s' under %s.",
             written,
@@ -1326,6 +1332,13 @@ class ServiceContainer:
         plain ``await`` on the graph's loop. Each stack has to unwind where it
         was wound.
         """
+        # A job that ended before its corpus write (failed, cancelled, or never
+        # told to remember) lets go of the function-hash store its judge held.
+        unwritten, self.pending_function_hashes = self.pending_function_hashes, None
+        if unwritten is not None:
+            from maljan.memory.store_factory import release_function_hash_store
+
+            release_function_hash_store(unwritten[0])
         with self._lock:
             analysts = list(self._agent_cache.values())
             judges = list(self._judge_agent_cache.values())

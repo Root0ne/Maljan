@@ -1285,31 +1285,46 @@ def _function_hash_attribution(
             and static_path
         ):
             return []
-        from maljan.memory.store_factory import build_function_hash_store
+        from maljan.memory.store_factory import (
+            acquire_function_hash_store,
+            release_function_hash_store,
+        )
 
-        store = build_function_hash_store(cfg)
+        store = acquire_function_hash_store(cfg)
         if store is None:
             return []  # the configured memory backend keeps no function hashes
-        from maljan.analysis.function_hash_attribution import aggregate_matches, to_report_dicts
-        from maljan.providers.base import StaticJobContext
-
-        sample_id = state.get("file_hash", "") or ""
-        functions = provider.function_hashes(StaticJobContext(mirror_sample_path=str(static_path)))
-        if not functions:
-            return []
-        report = to_report_dicts(
-            aggregate_matches(
-                store.match([h for _n, h in functions], exclude_sample_id=sample_id or None),
-                max_families=cfg.preprocessing.function_hash_max_matches,
+        handed_on = False
+        try:
+            from maljan.analysis.function_hash_attribution import (
+                aggregate_matches,
+                to_report_dicts,
             )
-        )
-        # Only under a grounded family, so an UNKNOWN verdict cannot pollute
-        # the attribution corpus; held, not written, so a job that fails after
-        # its judge files nothing under a family nobody kept.
-        family = _assessed_family(bundle)
-        if family:
-            container.pending_function_hashes = (store, sample_id, family, list(functions))
-        return report
+            from maljan.providers.base import StaticJobContext
+
+            sample_id = state.get("file_hash", "") or ""
+            functions = provider.function_hashes(
+                StaticJobContext(mirror_sample_path=str(static_path))
+            )
+            if not functions:
+                return []
+            report = to_report_dicts(
+                aggregate_matches(
+                    store.match([h for _n, h in functions], exclude_sample_id=sample_id or None),
+                    max_families=cfg.preprocessing.function_hash_max_matches,
+                )
+            )
+            # Only under a grounded family, so an UNKNOWN verdict cannot pollute
+            # the attribution corpus; held, not written, so a job that fails after
+            # its judge files nothing under a family nobody kept. The container
+            # takes over the hold and lets go once it has written, or at teardown.
+            family = _assessed_family(bundle)
+            if family:
+                container.pending_function_hashes = (store, sample_id, family, list(functions))
+                handed_on = True
+            return report
+        finally:
+            if not handed_on:
+                release_function_hash_store(store)
     except Exception as exc:
         logger.warning("Function-hash attribution skipped (%s). Verdict unaffected.", exc)
         return []
@@ -1365,7 +1380,12 @@ def _function_matches_step(container: ServiceContainer, state: AnalysisState) ->
         }
         if unavailable and hashes:
             return args, {"matches": [], "reason": unavailable}
-        return args, knowledge.function_matches(hashes, store, exclude_sample_id=sha256)
+        from maljan.memory.store_factory import leased_function_hash_store
+
+        # Held for the read: a settings change meanwhile closes this store only
+        # once the read has let go of it.
+        with leased_function_hash_store(cfg) as held:
+            return args, knowledge.function_matches(hashes, held, exclude_sample_id=sha256)
 
     return step
 
