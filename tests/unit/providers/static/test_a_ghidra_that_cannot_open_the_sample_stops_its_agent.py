@@ -1,6 +1,6 @@
 """A Ghidra that cannot open the job's sample stops its agent, and says so.
 
-With the worker's ``GHIDRA_CONTAINER_SAMPLES_PATH`` set to a host path the
+With Ghidra's ``sample_mount`` set to a host path the
 container cannot see, Ghidra's ``load_program`` answered HTTP 200 with
 ``{"error": "File not found: ..."}``, no exception was raised, and every call
 after it answered "No program loaded". With no default loop limits a reverser
@@ -157,13 +157,13 @@ class TestWhatALoadAnswerSays:
         said = str(sample_not_opened(f"File not found: {HOST_PATH}"))
         assert said == (
             f"Ghidra could not open the job's sample: File not found: {HOST_PATH}; "
-            "check GHIDRA_CONTAINER_SAMPLES_PATH / the container mount"
+            "check core.static.ghidra.sample_mount / the container mount"
         )
 
     def test_the_published_form_keeps_the_sentence_and_drops_the_host_path(self) -> None:
         published = describe_exception(sample_not_opened(f"File not found: {HOST_PATH}"))
         assert "Ghidra could not open the job's sample" in published
-        assert "GHIDRA_CONTAINER_SAMPLES_PATH" in published
+        assert "core.static.ghidra.sample_mount" in published
         assert "/home/someone" not in published
 
 
@@ -634,7 +634,7 @@ class TestTheFailureIsTheAgents:
         report = update["reports"]["network"]
         assert report.startswith("[ERROR]")
         assert "Ghidra could not open the job's sample: File not found: abc.exe" in report
-        assert "check GHIDRA_CONTAINER_SAMPLES_PATH / the container mount" in report
+        assert "check core.static.ghidra.sample_mount / the container mount" in report
         assert "/home/someone" not in report
         (message,) = [data for kind, data in published if kind == ev.AGENT_MESSAGE]
         assert message["status"] == "failed"
@@ -668,7 +668,7 @@ class TestAGhidraThatDidNotAnswer:
             "(ConnectError); check the Ghidra container is running at that address and "
             "core.static.ghidra.auth_token matches its GHIDRA_MCP_AUTH_TOKEN"
         )
-        assert "GHIDRA_CONTAINER_SAMPLES_PATH" not in said
+        assert "sample_mount" not in said
         assert provider.sample_failure(CONTAINER_PATH) is None
 
     @pytest.mark.parametrize("code", [401, 403, 500, 503])

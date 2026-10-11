@@ -176,7 +176,7 @@ class TestTheModelsLoad:
         said = str(stopped.value)
         assert "refused to make it the current program" in said
         assert "Program not found: s.exe" in said
-        assert "GHIDRA_CONTAINER_SAMPLES_PATH" not in said
+        assert "sample_mount" not in said
         assert provider.sample_failure(HELD) is None
         assert provider.sample_notes.get(KEY, HELD) is None
 

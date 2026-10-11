@@ -124,8 +124,11 @@ make dev-up                         # docker compose up -d, development overlay
 The development overlay is for a workstation; [Deployment](https://root0ne.github.io/Maljan/deployment/)
 covers a production deployment.
 
-Every secret in [`docker/.env.example`](docker/.env.example) is declared with
-`:?` in the compose file, so the stack refuses to start while one is missing;
+Fill in every secret [`docker/.env.example`](docker/.env.example) declares; the
+core services' ones are declared with `:?` in the compose file, so the stack
+refuses to start while one is missing. Ghidra MCP and Qdrant run under Compose
+profiles the example file turns on (`COMPOSE_PROFILES=ghidra,qdrant`), and a
+deployment may take either out;
 [Quick start](https://root0ne.github.io/Maljan/getting-started/) has the commands that
 generate them. Open <http://localhost:3000>, register the first account from
 the login page, promote it to `admin` once in the database, then walk

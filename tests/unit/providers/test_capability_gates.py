@@ -37,4 +37,5 @@ def test_the_mirror_gate_is_a_capability_read():
         encoding="utf-8"
     )
     assert "needs_sample_mirror" in source
-    assert "ghidra_container_samples_path" in source, "the compose bind mount is still the path"
+    assert "ghidra_container_samples_path" not in source
+    assert "path_in_server" in source, "each server is handed the sample under its own mount"

@@ -19,9 +19,9 @@ applies both.
 | :-- | :-- | :-- |
 | `postgres` | `postgres:16-alpine` | Relational store. Healthchecked with `pg_isready`. |
 | `redis` | `redis:7-alpine` | Queue, events, rate-limit counters. Password-protected; the healthcheck asserts an actual `PONG`. |
-| `qdrant` | `qdrant/qdrant:v1.18.2` | Vector store, pinned to match the client version. |
+| `qdrant` | `qdrant/qdrant:v1.18.2` | Vector store, pinned to match the client version. Runs under the `qdrant` profile, which the shipped `docker/.env` turns on; without `QDRANT_API_KEY` it restarts, logging the variable to set. |
 | `minio` | `minio/minio:latest` | Sample storage, with its own console. |
-| `ghidra-mcp` | built from `external/ghidra-mcp` | Static analysis engine. Capped at 6 GB memory and swap, because the JVM's own limit does not bound the container. `GHIDRA_JAVA_OPTS`, `GHIDRA_MEM_LIMIT` and `GHIDRA_RESTART` in `docker/.env` change the JVM options, the cap and the restart policy; see *Running Ghidra lighter* in [configuration.md](/configuration/). |
+| `ghidra-mcp` | built from `external/ghidra-mcp` | A static analyser. Runs (and is built) under the `ghidra` profile, which the shipped `docker/.env` turns on; without `GHIDRA_MCP_AUTH_TOKEN` it refuses to bind and restarts. Capped at 6 GB memory and swap, because the JVM's own limit does not bound the container. `GHIDRA_JAVA_OPTS`, `GHIDRA_MEM_LIMIT` and `GHIDRA_RESTART` in `docker/.env` change the JVM options, the cap and the restart policy; see *Running Ghidra lighter* in [configuration.md](/configuration/). |
 | `migrate` | `maljan-backend` | One-shot `alembic upgrade head`. Runs to completion before the API and the worker start; on an upgrade, migrate before restarting either, since a stored built-in team written before a seeding revision loads under a renamed key until the revision has run. |
 | `backend-api` | `maljan-backend` | The FastAPI service. |
 | `backend-worker` | `maljan-backend` | The arq worker. Capped at 8 GB memory and swap; `WORKER_RSS_RESTART_MB` makes it exit between jobs before it gets there, and `restart: unless-stopped` brings it back. |
@@ -31,24 +31,52 @@ The three backend services share one build and one image tag, so Compose
 builds `maljan-backend` once rather than once per service.
 
 Ordering is explicit: `migrate` waits for a healthy Postgres, the API waits for
-`migrate` to exit successfully and for Postgres, Redis and Ghidra MCP to be
-healthy, and the worker waits for the API's own healthcheck on top of that.
+`migrate` to exit successfully and for Postgres and Redis to be healthy, and the
+worker waits for the API's own healthcheck on top of that. Nothing waits for a
+tool server or a vector store: a job whose team needs a static provider that is
+not ready is refused with the agent and the address, and a memory backend that
+is unavailable is reported and the run goes on without it.
+
+### Running without Ghidra or Qdrant
+
+`ghidra-mcp` and `qdrant` run under the Compose profiles `ghidra` and `qdrant`.
+The shipped `docker/.env.example` turns both on (`COMPOSE_PROFILES=ghidra,qdrant`),
+so a default install runs them exactly as before; a `docker/.env` copied before
+this line existed needs it added, or neither starts on the next `up`. `make
+docker-down` and `make dev-down` stop every profile's services whatever the
+line says.
+
+To run without one, take its name out of `COMPOSE_PROFILES` (an empty value
+runs neither); its token is then not needed, and nothing else waits for it. The
+stack starts and runs a job once two settings follow: select the static
+analyser you do run (radare2, capa and YARA, a tool server of your own through
+`generic_mcp`, or `none`) as `core.static.provider`, and, without Qdrant, set
+`core.memory.backend` to `memory`. The shipped backend is `qdrant`, so until
+then every run reports long-term memory unavailable and goes on without it.
 
 ## Required secrets
 
-Every secret Compose substitutes is declared with `:?`, so the stack refuses to
-start — with the variable named — while any is missing. There is no baked-in
-default for any of them.
+Every secret the core services need is declared with `:?`, so the stack
+refuses to start — with the variable named — while any is missing. There is no
+baked-in default for any of them. Ghidra's and Qdrant's tokens are not guarded
+that way, since Compose reads every service's variables whether its profile is
+on or not and a guard would stop a stack that runs neither: with its profile on
+and its token missing, that one container exits, restarts under its restart
+policy (`docker ps` shows it "Restarting") and logs the variable to set, and no
+other service is stopped by it.
 
 | Variable | Used by |
 | :-- | :-- |
 | `POSTGRES_PASSWORD` | The database, and the `DATABASE_URL` Compose assembles. |
 | `REDIS_PASSWORD` | `--requirepass` on Redis, and the API and worker URLs. |
-| `QDRANT_API_KEY` | `QDRANT__SERVICE__API_KEY` on Qdrant. |
 | `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | MinIO, and the API's MinIO credentials. |
-| `GHIDRA_MCP_AUTH_TOKEN` | The bearer token the Ghidra MCP container requires. |
 | `JWT_SECRET_KEY` | Signs API session tokens. |
 | `SETTINGS_ENCRYPTION_KEY` | Encrypts secrets in the settings store. |
+
+| Variable, with its profile on | Used by |
+| :-- | :-- |
+| `QDRANT_API_KEY` (`qdrant`) | `QDRANT__SERVICE__API_KEY` on Qdrant; without one it exits and restarts. |
+| `GHIDRA_MCP_AUTH_TOKEN` (`ghidra`) | The bearer token the Ghidra MCP container requires; without one it refuses to bind and restarts. |
 
 Optional knobs with defaults: `BIND_ADDRESS` (`127.0.0.1`), the published
 ports, `RUN_MIGRATIONS_ON_STARTUP`, `CORS_ORIGINS`, `COOKIE_SECURE`,
@@ -58,25 +86,33 @@ Every published port binds to `BIND_ADDRESS`, which the example file sets to
 `127.0.0.1`. The stack is unreachable from the network until that is changed
 deliberately, behind a firewall or a reverse proxy you control.
 
-## The Ghidra samples path
+## Where a tool server sees the sample
 
-The worker copies each sample into `data/samples/.work/` on the host, and the
-`ghidra-mcp` service mounts `../data/samples` at `/data/samples` inside its
-container (read-only). `GHIDRA_CONTAINER_SAMPLES_PATH` is the path INSIDE the
-Ghidra container, `/data/samples` with this Compose file, and never the host
-directory. The API and worker services set it; a worker started outside
-Compose (`bootstrap.env`, a supervisor, a shell) needs it set to
-`/data/samples` too, or left unset, since that is the default.
+The worker copies each sample into a directory under `data/samples/` on the
+host, one per server that needs a copy (`.work` by default), and a
+containerised server mounts `../data/samples` inside its own container. Each
+server's block declares that mount as its `sample_mount`; the worker hands the
+server its copy under it. Ghidra's ships `/data/samples`, the mount the
+`ghidra-mcp` service writes (read-only), whether or not the worker itself runs
+in Compose. A server on the worker's own filesystem (a stdio sidecar) declares
+none and is handed the host path. See [What a server declares about its
+tools](/configuration/#what-a-server-declares-about-its-tools).
 
-Set to the host path, Ghidra answers every load with `File not found: ...`,
-the Ghidra agent stops before its first model turn with "Ghidra could not open
-the job's sample: ...; check GHIDRA_CONTAINER_SAMPLES_PATH / the container
-mount", and the rest of the team runs without it. The worker's first lines
-say which path it uses and where it came from:
+Set to a path the container does not have, Ghidra answers every load with
+`File not found: ...`, the Ghidra agent stops before its first model turn with
+"Ghidra could not open the job's sample: ...; check
+core.static.ghidra.sample_mount / the container mount", and the rest of the
+team runs without it. The worker's first lines say, for each static provider
+the settings select, where its copy goes and the path its server is handed:
 
 ```text
-Ghidra samples path: /data/samples (from GHIDRA_CONTAINER_SAMPLES_PATH). ...
+Static provider 'ghidra' mirrors a sample to data/samples/.work/<sha256> and is handed it as /data/samples/.work/<sha256>.
 ```
+
+`GHIDRA_CONTAINER_SAMPLES_PATH` is retired. The migration that retired it read
+a value other than `/data/samples` once into `core.static.ghidra.sample_mount`,
+where the store held none; a worker that still has it set warns at start and
+names that setting.
 
 ## Rotating the JWT signing secret
 

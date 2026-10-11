@@ -501,6 +501,7 @@ class TestTheWorkerNamesItsOwnDirectoriesBeforeAnySidecarStarts:
         from app.worker import sample_files
         from maljan.agents.subprocess_env import child_env
         from maljan.core.settings_overrides import build_settings
+        from maljan.providers.base import DEFAULT_WORK_DIR
         from maljan.tools.roots import ROOT_SEPARATOR, SAMPLE_ROOTS_ENV
 
         _no_roots_yet(monkeypatch)
@@ -513,7 +514,7 @@ class TestTheWorkerNamesItsOwnDirectoriesBeforeAnySidecarStarts:
         env = child_env(config.env, allow=tuple(config.env_allow))
         roots = env[SAMPLE_ROOTS_ENV].split(ROOT_SEPARATOR)
         assert str(tmp_path / "uploads") in roots
-        assert str(tmp_path / "samples" / sample_files.WORK_SUBDIR) in roots
+        assert str(tmp_path / "samples" / DEFAULT_WORK_DIR) in roots
 
     def test_the_separator_is_the_platform_s_own(self) -> None:
         from maljan.tools.roots import ROOT_SEPARATOR

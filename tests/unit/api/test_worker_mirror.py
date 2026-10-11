@@ -134,7 +134,7 @@ def test_cleanup_reaches_every_mirror_directory(tmp_path, monkeypatch):
     monkeypatch.setattr(sample_files.settings, "upload_temp_dir", str(tmp_path / "tmp"))
 
     sha = "c" * 64
-    ghidra_copy = sample_files.work_dir() / f"{sha}.exe"
+    ghidra_copy = sample_files.work_dir(".work") / f"{sha}.exe"
     r2_copy = sample_files.work_dir("r2-work") / f"{sha}.exe"
     for path in (ghidra_copy, r2_copy):
         path.write_bytes(b"MZ")

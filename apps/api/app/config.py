@@ -106,16 +106,6 @@ class APISettings(BaseSettings):
     minio_bucket: str = "maljan-samples"
     minio_secure: bool = False
 
-    # ── Ghidra MCP container delivery ───────────────────────────────
-    # Worker mirrors each MinIO-downloaded sample into ``data/samples/``
-    # on the host so the Ghidra MCP container can read it through its
-    # bind mount. ``ghidra_container_samples_path`` is the path at which
-    # the Ghidra container sees that directory — it must match the
-    # right-hand side of the ``../data/samples:/data/samples`` mount in
-    # ``docker/docker-compose.yml``. Override via env when relocating
-    # the mount or running Ghidra outside Docker.
-    ghidra_container_samples_path: str = "/data/samples"
-
     # ── Settings-store encryption ──────────────────────────────
     # Fernet key that encrypts secret values in the runtime settings store.
     # Read directly from the environment by ``maljan.core.settings_secrets``
@@ -183,8 +173,9 @@ class APISettings(BaseSettings):
     upload_temp_dir: str = Field(default="data/uploads/.tmp")
     samples_dir: str = Field(
         default="data/samples",
-        description="Host directory bind-mounted into the Ghidra container; the worker's "
-        "per-job mirror lives in its .work subdirectory.",
+        description="Host directory the worker copies each job's sample under, one "
+        "subdirectory per server that needs a copy; a containerised server mounts it at "
+        "its declared sample_mount.",
     )
 
     @field_validator("jwt_secret_key")
