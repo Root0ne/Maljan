@@ -550,9 +550,9 @@ for each, the artefacts the run's answers and the platform's decoder place in
 it. The functions come from the file's exception directory (a chained fragment
 counted for the function it belongs to), its exports, its entry point, capa's
 function starts, and every direct call target the decoder reaches in an
-executable section. Ghidra's and radare2's function lists are not read: the
-pack runs before any analyst opens them, and the entry says so as `no:` with
-that reason. Every function start is collected first, by a walk that adds each
+executable section. A disassembler's function list is not read: the pack
+runs before any analyst opens one, and the entry says so as `no:` with that
+reason. Every function start is collected first, by a walk that adds each
 direct call target it reaches; then each function is read with all of them
 known. A function in the exception directory is decoded instruction after
 instruction across its stated range; any other is decoded from its start along
@@ -623,7 +623,7 @@ room they leave. The rest of the pack is rendered without it exactly as it
 would be, so no line gives way to it. The head says how many functions hold
 artefacts, where the functions come from, which sources are missing and why,
 and that each address is the image base plus the offset the other lines state,
-the form Ghidra and radare2 take. One row per function follows, ranked by the
+the form a disassembler takes. One row per function follows, ranked by the
 number of its own distinct artefacts, ties by address: `- 0x401000: calls
 "CreateFileW" (ev_0030); refers to 5 decoded strings (ev_0015); capa: …
 (ev_0011); called by 1, calls 3 functions; 1 callee holds 2 artefacts of their
@@ -917,9 +917,11 @@ The pack states facts and draws no conclusion, and it never fails a job: a
 tool that raises or answers with an error is an entry with `ok=False` and a
 degradation reason `triage.<tool>_failed`, the next tool runs, and a
 reputation lookup that has no enabled server is an entry saying so rather than
-a silence. Four of its facts — `has_signature`, `reputation_malicious`,
-`yara_hits`, `capa_hits` — are readable by every later stage's `when`
-condition as `triage.<field>`, and `run_summary.triage` records how many
+a silence. Its facts — `has_signature`, `reputation_malicious`, `rule_hits`
+and `hits["<key>"]` (the rules that matched in every rule-matching answer
+recorded so far, by kind, by declared corroboration name and by server; the
+legacy `yara_hits` and `capa_hits` keep the pack's own counts) — are readable
+by every later stage's `when` condition as `triage.<field>`, and `run_summary.triage` records how many
 entries it wrote, how many failed and how long it took. It declines, with the
 reason recorded, when `triage.enabled` is off, when the stage withholds the
 built-in tools, or when there is no sample on disk to read. The `measurement`
@@ -2587,12 +2589,17 @@ Every statement a prompt makes about tools is built from the list the request
 carries (`agents.prompt_fragments.tools_statement`): the families the tools
 come from — a registry server by its key, the team's `ask_<agent>` tools, the
 sandbox report's tools, the tools of the provider the role attaches itself —
-or, for an empty list, that there are none. A provider's fragment has two
-parts: its guidance about claims (what a claim cites, the ATT&CK focus,
-Ghidra's verification discipline and confidence caps), sent with every call
-on that provider, and its tool workflow, sent only when its tools are in the
-list; `none` says no disassembler or decompiler comes with
-the analyst, and a configured provider whose tools did not attach says so.
+or, for an empty list, that there are none, followed by the workflow text
+each registry server whose tools are in the list declares (its
+`prompt_fragment`). A static provider's fragment has two parts: its guidance
+about claims (what a claim cites, the ATT&CK focus, and the verification
+discipline with its confidence caps, which every static provider carries,
+whatever it is; a provider that writes its whole fragment itself gets the
+discipline after it), sent with every call on that provider, and the workflow
+its block declares, sent only when its tools are in the list; `none` says no
+disassembler or decompiler comes with the analyst, and a configured provider
+whose tools did not attach says so. A sandbox's own tool server is named by the
+sandbox's display name, and its workflow is the CAPE MCP block's declared text.
 Resolution builds the prompt for the list it resolved, describing a built-in
 role's own provider as expected; the analyst builds it again, through the same
 composition (`composition.prompt_for`), for the list each request carries —
@@ -3235,8 +3242,9 @@ sent; the platform answers it with a tool error in the structured shape
 (`maljan.tools.errors`, code `server_resting`) naming the server, that it is
 resting and when it will be tried again. A timeout counts: every call is sent
 with a deadline — the larger of the tool's budget in the server's own
-`capabilities` manifest and `core.mcp.breaker.call_timeout_seconds` (derived by
-default from the longest tool budget configured, capa's), plus thirty seconds —
+`capabilities` manifest and the server's own budget (`call_timeout_seconds`
+on its block, 300 for every built-in, or `core.mcp.breaker.call_timeout_seconds`
+for every server where set), plus thirty seconds —
 and a call still waiting when its caller's own budget runs out counts too.
 After the cooldown one call is let through, and a success ends the rest; that
 call's own failure is the only one that starts another rest, and only while the
@@ -4372,13 +4380,16 @@ is assembled from what the run gathered rather than recomputed beside it:
   digit and a letter (`c2.ru`), and one of two letters (`ab.ru`, `to.do`) only
   by a check that asks the run's network evidence, or defanged where the run
   recorded it, while every name read before is still read; a draft rule's
-  body is printed as it compiles; a VirusTotal (`/gui/file|url/<hex>`,
-  `/gui/domain|ip-address/<value>`), MalwareBazaar (`/sample/<sha256>/`) or
-  ATT&CK (`/techniques/…`, `/tactics/…`, `/software/…`, `/matrices/…`) lookup
-  with no query, matched whole on its decoded path (no dot segment, backslash,
-  `@` or second `//`) after a sentence's trailing punctuation is trimmed, and
-  kept exactly as matched, stays a link unless the run's indicator is in it, anything
-  else on those hosts is defanged, and the configured model endpoint stays as
+  body is printed as it compiles; an ATT&CK lookup (`/techniques/…`,
+  `/tactics/…`, `/software/…`, `/matrices/…`), and a link the report itself
+  holds (one of its references, which come from the lookup services the run
+  asked, or a link one of its reputation records carries), with no query and
+  no dot segment, backslash, `@` or second `//` on its decoded path, after a
+  sentence's trailing punctuation is trimmed, and kept exactly as matched,
+  stays a link unless the run's indicator is in it; a report stored before
+  reputation records also keeps a VirusTotal (`/gui/file|url/<hex>`,
+  `/gui/domain|ip-address/<value>`) or MalwareBazaar (`/sample/<sha256>/`)
+  lookup, as it always rendered; anything else on those hosts is defanged, and the configured model endpoint stays as
   written. The JSON report,
   the STIX bundle, MISP and `/reports/{id}/iocs` carry every value live, and
   the indicator section says so under its tables. A §7 string is printed as

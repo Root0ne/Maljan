@@ -110,7 +110,8 @@ platform == "windows"
 extension in ("apk", "dex")
 has_pcap and stages.triage.claim_count > 0
 "T1055" in stages.static.technique_ids
-triage.yara_hits > 0 or triage.capa_hits > 0
+triage.rule_hits > 0
+triage.hits["signature_rules"] > 0
 ```
 
 A condition that does not parse is refused when the team is saved, and the
