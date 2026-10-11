@@ -3393,16 +3393,21 @@ kept only where it adds something and costs nothing:
   that call (the same limit the text was held to);
 - never for an answer the guardrail cut, the conversation had no room for, or
   a repeat;
-- in the evidence budget, every text is decided first exactly as with no
-  structure; a structure is kept only while the room left after every text
-  (less the structures kept earlier) holds it, and is dropped otherwise, so it
-  never costs its own text or any other entry anything.
+- in the evidence budget, every text of every loop is decided first exactly
+  as with no structure, and kept structures are the first thing evicted: when
+  a later loop's texts take room, the structures the agent still holds from
+  its earlier loops are dropped largest first until everything fits, and a
+  new structure is kept only while the room left holds it. A structure never
+  costs a text anything.
 
 So an entry never holds a structure longer than the model could have been
 shown of the call, though the structure may hold rows the prose text only
-summarised. Because a later loop's texts are decided as if no structure had
-been kept, an agent's kept bytes can exceed its budget by the structures it
-kept before those texts arrived.
+summarised, and an agent's kept bytes stay within its budget. The one
+exception is a structure the agent already handed to the run's ledger (an
+agent asked again by a teammate after its first answer was collected): that
+one can no longer be evicted, so a later text it would crowd is still kept as
+it would be with no structure, and the agent's kept bytes may then exceed its
+budget by that structure.
 
 **A provider registered at runtime.** A static or sandbox provider class
 registered with `register_static_provider` or `register_sandbox_provider`

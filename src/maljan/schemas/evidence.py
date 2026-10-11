@@ -40,7 +40,7 @@ from __future__ import annotations
 import json
 import re
 import threading
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -603,6 +603,7 @@ def apply_budget(
     *,
     already_spent: int = 0,
     already_beside: int = 0,
+    earlier: Sequence[LedgerEntry] = (),
 ) -> tuple[int, int]:
     """Drop the outputs that overrun ``budget_bytes``, in call order.
 
@@ -616,12 +617,16 @@ def apply_budget(
     order to know something is missing.
 
     A structure a server returned beside a prose text (``structured_from_server``)
-    never costs an answer anything. Every text is decided first, exactly as
-    with no structure at all, and ``spent`` counts texts only, so a later loop's
-    texts are decided as they would be with none. The structures are then kept
-    in call order while the budget left after every text, less the structures
-    kept before (``already_beside``, :func:`beside_bytes`), holds them; one that
-    does not fit is dropped and its text stays.
+    never costs an answer anything, and kept structures are the first thing
+    evicted. Every text is decided first, exactly as with no structure at all,
+    and ``spent`` counts texts only, so every loop's texts are decided as they
+    would be with none. Then the structures already kept are held to the room
+    left after every text: ``earlier`` are the entries of earlier loops still in
+    the agent's hands, whose structures are dropped largest first until they
+    fit, and ``already_beside`` the bytes of structures already handed out of
+    those hands, which can no longer be dropped. Last, this call's structures
+    are kept in call order while the room left holds them; one that does not
+    fit is dropped and its text stays.
     """
     if budget_bytes <= 0:
         return 0, already_spent
@@ -643,6 +648,18 @@ def apply_budget(
         entry.truncated = True
         trimmed += 1
     room = budget_bytes - spent - max(0, already_beside)
+    held = sorted(
+        (entry for entry in earlier if beside_bytes(entry)),
+        key=lambda entry: (beside_bytes(entry), str(getattr(entry, "id", ""))),
+        reverse=True,
+    )
+    total = sum(beside_bytes(entry) for entry in held)
+    for entry in held:
+        if total <= room:
+            break
+        total -= beside_bytes(entry)
+        _drop_beside(entry)
+    room -= total
     for entry in entries:
         size = beside_bytes(entry)
         if not size:

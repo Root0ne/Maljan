@@ -3479,7 +3479,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         # each of them.
         self._evidence_bytes_spent = 0
         # The bytes of the structures servers returned beside prose texts
-        # this agent kept, charged after every text (``schemas.evidence``).
+        # that this agent kept and has already handed over (drained): charged
+        # after every text and no longer evictable (``schemas.evidence``).
         self._evidence_beside_spent = 0
         # The per-job id source, attached by the container next to the token
         # and truncation ledgers. None outside a job: the recorder then counts
@@ -5998,9 +5999,9 @@ class BaseAnalyst(BudgetMeter, ABC):
                 budget,
                 already_spent=self._evidence_bytes_spent,
                 already_beside=getattr(self, "_evidence_beside_spent", 0),
-            )
-            self._evidence_beside_spent = getattr(self, "_evidence_beside_spent", 0) + sum(
-                beside_bytes(entry) for entry in entries
+                # The entries of earlier loops not yet handed over: their
+                # structures are evicted first when this loop's texts take room.
+                earlier=list(self._evidence_entries),
             )
             if trimmed:
                 self.logger.warning(
@@ -6072,6 +6073,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         """
         entries = self._evidence_entries
         self._evidence_entries = []
+        # The structures handed over with them can no longer be evicted.
+        self._evidence_beside_spent = getattr(self, "_evidence_beside_spent", 0) + sum(
+            beside_bytes(entry) for entry in entries
+        )
         # The ids stay with the agent: the entries are the job's ledger's now,
         # and a later round of this agent may still cite them.
         held = _drained_ids_of(self)

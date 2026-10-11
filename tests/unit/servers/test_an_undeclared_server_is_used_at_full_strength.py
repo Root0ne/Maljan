@@ -24,6 +24,7 @@ import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from mcp.server.fastmcp import FastMCP
@@ -409,22 +410,79 @@ def test_a_structure_that_fits_but_would_crowd_later_entries_is_dropped() -> Non
     assert roomy[0].structured == small
 
 
-def test_a_later_loop_s_texts_are_decided_as_with_no_structure() -> None:
+def _kept_bytes(entries: list[Any]) -> int:
+    from maljan.schemas.evidence import beside_bytes, stored_bytes
+
+    return sum(stored_bytes(e) + beside_bytes(e) for e in entries if not e.repeated_of)
+
+
+def _two_loops(budget: int, structure: Any) -> tuple[list[Any], list[Any]]:
+    """Two loops of one agent, run through the agent's own budget step."""
+    from types import SimpleNamespace
+
+    from maljan.agents.base_agent import BaseAnalyst
+
+    agent = SimpleNamespace(
+        name="network",
+        logger=SimpleNamespace(warning=lambda *a, **k: None, debug=lambda *a, **k: None),
+        truncation_ledger=None,
+        _evidence_entries=[],
+        _evidence_bytes_spent=0,
+        _evidence_beside_spent=0,
+        _keep_for_function_map=lambda entries: None,
+        _live_map_entries=None,
+    )
+    first = [_prose_entry(1, structure), _text_entry(2, 100_000)]
+    second = [_text_entry(3, 120_000), _text_entry(4, 30_000)]
+    with patch("maljan.agents.base_agent.get_settings") as settings:
+        settings.return_value.reporting.evidence_budget_bytes = budget
+        BaseAnalyst._finish_evidence(agent, SimpleNamespace(entries=first))
+        kept_after_first = first[0].structured
+        BaseAnalyst._finish_evidence(agent, SimpleNamespace(entries=second))
+    assert kept_after_first == structure, "loop 1 kept its structure"
+    return first, second
+
+
+def test_a_later_loop_s_texts_evict_the_kept_structure_and_match_dev() -> None:
+    from maljan.schemas.evidence import apply_budget
+
+    structure = {"rows": ["r" * 1000 for _ in range(100)]}  # about 100 KB
+    budget = 260_000
+    first, second = _two_loops(budget, structure)
+
+    # The structure is evicted, its text kept.
+    assert first[0].structured is None and not first[0].structured_from_server
+    assert first[0].output == "1 rule matched" and not first[0].truncated
+    # Loop 2's texts are decided byte for byte as dev decides them.
+    dev_first = _without_structures([_prose_entry(1, structure), _text_entry(2, 100_000)])
+    _, dev_spent = apply_budget(dev_first, budget)
+    dev_second = [_text_entry(3, 120_000), _text_entry(4, 30_000)]
+    apply_budget(dev_second, budget, already_spent=dev_spent)
+    assert [e.model_dump_json() for e in second] == [e.model_dump_json() for e in dev_second]
+    assert [e.model_dump_json() for e in first] == [e.model_dump_json() for e in dev_first]
+    # And the agent's kept bytes stay within its budget.
+    assert _kept_bytes(first + second) <= budget
+
+
+def test_a_structure_later_texts_leave_room_for_stays() -> None:
+    structure = {"rows": ["r" * 1000 for _ in range(5)]}  # about 5 KB
+    first, second = _two_loops(400_000, structure)
+    assert first[0].structured == structure
+    assert _kept_bytes(first + second) <= 400_000
+
+
+def test_kept_structures_are_evicted_largest_first() -> None:
     from maljan.schemas.evidence import apply_budget, beside_bytes
 
-    small = {"rows": ["r" * 1000 for _ in range(50)]}
-    budget = 260_000
-    first = [_prose_entry(1, small), _text_entry(2, 150_000)]
-    _, spent = apply_budget(first, budget)
-    assert first[0].structured == small
-    second = [_text_entry(3, 100_000)]
-    dev_first = _without_structures([_prose_entry(1, small), _text_entry(2, 150_000)])
-    _, dev_spent = apply_budget(dev_first, budget)
-    assert spent == dev_spent
-    dev_second = [_text_entry(3, 100_000)]
-    apply_budget(dev_second, budget, already_spent=dev_spent)
-    apply_budget(second, budget, already_spent=spent, already_beside=beside_bytes(first[0]))
-    assert _outcome(second) == _outcome(dev_second)
+    big = {"rows": ["r" * 1000 for _ in range(60)]}
+    small = {"rows": ["r" * 1000 for _ in range(10)]}
+    earlier = [_prose_entry(1, small), _prose_entry(2, big)]
+    apply_budget(earlier, 1_000_000)
+    assert all(e.structured is not None for e in earlier)
+    room_for_small = 28 + beside_bytes(earlier[0]) + 150_000
+    apply_budget([_text_entry(3, 150_000)], room_for_small, already_spent=28, earlier=earlier)
+    assert earlier[0].structured == small
+    assert earlier[1].structured is None and earlier[1].output == "1 rule matched"
 
 
 def test_a_structure_longer_than_the_model_could_be_shown_is_not_carried() -> None:
