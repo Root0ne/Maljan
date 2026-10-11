@@ -660,6 +660,8 @@ _HIVES: tuple[tuple[str, str], ...] = (
 )
 
 _REGISTRY_OPERATIONS = {"create", "modify", "delete", "query"}
+# The registry operations that leave something in place to run again.
+_PERSISTING_OPERATIONS = frozenset({"create", "modify"})
 
 
 def _hive_of(key: str) -> str:
@@ -1705,14 +1707,16 @@ def persistence_from_ledger(ledger: list[LedgerEntry]) -> list[PersistenceMechan
             )
         )
 
-    # A Run key an agent read through ``sandbox_registry_ops`` is persistence.
+    # An autostart key an agent read through ``sandbox_registry_ops`` is
+    # persistence where the sample created or wrote it: a read, a delete, or a
+    # write the call reports as failed (bare access) arranges nothing to run.
     for entry, data in _payloads(ledger, "sandbox_registry_ops"):
         for row in data.get("registry") or []:
             if not isinstance(row, dict):
                 continue
             key = str(row.get("key") or "")
             autostart = _autostart_kind(key)
-            if autostart is None or row.get("operation") == "query":
+            if autostart is None or row.get("operation") not in _PERSISTING_OPERATIONS:
                 continue
             _add(autostart, key, str(row.get("value") or ""), None, entry.id)
 

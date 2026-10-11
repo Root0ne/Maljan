@@ -272,6 +272,23 @@ class TestRegistryOps:
 
             assert row["operation"] == "create", api
 
+    def test_a_disposition_filed_as_an_integer_or_padded_reads_as_its_text_form(self) -> None:
+        cases: tuple[tuple[object, str], ...] = (
+            (2, "query"),
+            (1, "create"),
+            ("02", "query"),
+            ("0x2", "query"),
+        )
+        for disposition, expected in cases:
+            report = self._create("RegCreateKeyExW", None)
+            report["behavior"]["processes"][0]["calls"][0]["arguments"].append(
+                {"name": "Disposition", "value": disposition}
+            )
+
+            [row] = sandbox_tools.sandbox_registry_ops(report)["registry"]
+
+            assert row["operation"] == expected, disposition
+
     def test_a_create_with_no_known_outcome_keeps_its_api_s_operation(self) -> None:
         for disposition in (None, "", "1701304", "not a number"):
             report = self._create("RegCreateKeyExW", disposition)

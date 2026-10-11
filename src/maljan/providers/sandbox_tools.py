@@ -444,12 +444,29 @@ def _registry_operation(call: dict[str, Any], operation: str) -> str:
     if outcome is None:
         return operation
     name, meanings = outcome
-    recorded = _argument(call, (name,))
-    try:
-        code = int(recorded, 0)
-    except ValueError:
-        return operation
-    return meanings.get(code, operation)
+    code = _outcome_code(pick_argument(call.get("arguments"), (name,)))
+    return operation if code is None else meanings.get(code, operation)
+
+
+def _outcome_code(recorded: Any) -> int | None:
+    """An outcome a call recorded, as the number it is: filed as an integer or as text.
+
+    Text is read as written, a ``0x`` prefix as hexadecimal and leading zeros
+    as decimal (``"02"`` is 2); anything else is no outcome.
+    """
+    if isinstance(recorded, bool):
+        return None
+    if isinstance(recorded, int):
+        return recorded
+    if not isinstance(recorded, str):
+        return None
+    text = recorded.strip()
+    for base in (0, 10):
+        try:
+            return int(text, base)
+        except ValueError:
+            continue
+    return None
 
 
 def sandbox_registry_ops(
