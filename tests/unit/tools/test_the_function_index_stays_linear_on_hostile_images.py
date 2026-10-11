@@ -12,6 +12,7 @@ with their product.
 
 from __future__ import annotations
 
+import gc
 import struct
 import time
 from collections.abc import Callable
@@ -147,10 +148,16 @@ def pe_bytes(image: Image) -> bytes:
 
 
 def _timed(make: Callable[[int], tuple[Image, dict[str, Any]]], n: int) -> tuple[float, Any]:
+    """The seconds the index takes on ``make(n)``, the collector held so no sweep is timed."""
     image, joined = make(n)
-    began = time.perf_counter()
-    answer = artefact_index.index_image(image, **joined)
-    return time.perf_counter() - began, answer
+    gc.collect()
+    gc.disable()
+    try:
+        began = time.perf_counter()
+        answer = artefact_index.index_image(image, **joined)
+        return time.perf_counter() - began, answer
+    finally:
+        gc.enable()
 
 
 def _text_offsets(texts: list[bytes]) -> list[int]:
@@ -439,14 +446,15 @@ class TestTheCostGrowsWithTheFunctionsAndTheCalls:
     def test_a_dense_fan_out_at_one_ten_and_a_hundred_thousand_functions(self) -> None:
         _timed(_dense, 1_000)
         seconds = {n: min(_timed(_dense, n)[0] for _ in range(2)) for n in (1_000, 10_000)}
-        seconds[100_000] = _timed(_dense, 100_000)[0]
+        seconds[100_000] = min(_timed(_dense, 100_000)[0] for _ in range(2))
         print("dense fan-out, 8 calls a function:", {n: round(s, 3) for n, s in seconds.items()})
         assert seconds[100_000] < seconds[10_000] * 20
 
     def test_a_hundred_thousand_resolved_call_sites(self) -> None:
         _timed(_resolved, 1_000)
         seconds = {n: min(_timed(_resolved, n)[0] for _ in range(2)) for n in (1_000, 10_000)}
-        seconds[100_000], answer = _timed(_resolved, 100_000)
+        runs = [_timed(_resolved, 100_000) for _ in range(2)]
+        seconds[100_000], answer = min(runs, key=lambda run: run[0])
         print("resolved call sites:", {n: round(s, 3) for n, s in seconds.items()})
         assert len(answer["resolved_slots"]) == 100_000
         assert seconds[100_000] < seconds[10_000] * 20
