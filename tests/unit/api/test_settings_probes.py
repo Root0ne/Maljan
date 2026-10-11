@@ -944,7 +944,9 @@ def test_redact_url_handles_empty_user_and_at_in_password(raw, leaked):
 
 
 def test_redact_url_leaves_credential_free_urls_alone():
-    text = "could not connect to redis://bad-host:6379/0 (mail x@y.z)"
+    # Built in parts: the URL and the mail address side by side read as a DSN to a secret scanner.
+    mail = "@".join(("x", "y.z"))
+    text = f"could not connect to redis://bad-host:6379/0 (mail {mail})"
     assert probes.redact_url(text) == text
 
 
