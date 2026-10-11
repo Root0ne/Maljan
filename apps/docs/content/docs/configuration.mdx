@@ -3081,6 +3081,17 @@ by its name alone, an agent's name or today's settings; a tool of yours that
 shares a built-in tool's name never takes the built-in's facts. An entry
 written before sources were recorded is read the way it always was.
 
+**The facts an entry stores.** When an entry is written, the facts its tool
+declares under its recorded source are stored with it (`facts` on the ledger
+entry): `{"v": 1, "kind": …}` and, where set, `reader`, `asserts_techniques`,
+`source`, `display_name`, `rows`, `places`, `values`, `techniques`,
+`reputation`, `words` and `report_sections`; `{"v": 1}` alone when the source
+declares nothing for the tool. Everything read from a run later (a later stage,
+a re-render, the API) reads these stored facts, never the reading process's
+settings, so a run reads the same wherever it is opened, and changing a
+declaration later changes only new runs. An entry written before facts were
+stored is read the way it always was.
+
 **Who reads a tool's kind.** A tool of yours declared with a built-in's kind is
 treated as the built-in of that kind, and its answer is read in that kind's
 shape:
