@@ -391,6 +391,11 @@ class R2StaticProvider(GenericMCPStaticProvider):
     rather than a failed job.
     """
 
+    @property
+    def declaration_source(self) -> str:
+        """radare2's own block, not a registry server: ``provider:r2``."""
+        return f"provider:{self.id}"
+
     # The workflow prompt is the radare2 declaration's text (``core.builtin_declarations``).
     R2_PROMPT_FRAGMENT: ClassVar[str] = builtin_declarations.R2_PROMPT_FRAGMENT
 

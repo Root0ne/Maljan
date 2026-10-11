@@ -84,6 +84,13 @@ def test_an_entry_with_no_source_dumps_as_it_always_did() -> None:
     assert LedgerEntry.model_validate(entry.model_dump()).source is None
 
 
+def test_the_ledger_entrys_schema_names_the_source() -> None:
+    for mode in ("validation", "serialization"):
+        schema = LedgerEntry.model_json_schema(mode=mode)  # type: ignore[arg-type]
+        assert "source" in schema["properties"]
+        assert "tool" in schema["properties"]
+
+
 def test_the_evidence_providers_entries_record_its_source() -> None:
     bundle = StaticEvidenceBundle(
         capa_rules=[{"rule": "r", "addresses": []}], yara_matches=[{"rule": "y"}]

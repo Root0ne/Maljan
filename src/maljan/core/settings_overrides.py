@@ -120,10 +120,10 @@ def public_snapshot(settings: Settings, secret_keys: Iterable[str]) -> dict[str,
 
 def declaration_blocks(settings: Settings) -> dict[str, str]:
     """Each server block's dotted path, by the source its declaration is read under."""
+    from maljan.core.tool_declarations import PROVIDER_BLOCKS
+
     blocks = {f"mcp:{key}": f"mcp.servers.{key}" for key in settings.mcp.servers}
-    blocks["provider:ghidra"] = "static.ghidra"
-    blocks["provider:r2"] = "static.r2"
-    blocks["provider:cape2"] = "sandbox.cape2.mcp"
+    blocks.update(PROVIDER_BLOCKS)
     return blocks
 
 

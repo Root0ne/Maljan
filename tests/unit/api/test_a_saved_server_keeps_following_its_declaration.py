@@ -68,3 +68,11 @@ def test_a_malformed_declaration_is_refused_with_the_field_named() -> None:
     with pytest.raises(ServerMapError) as exc:
         validate_server_map({"mine": _entry(error_patterns=[{"match": "(open"}])})
     assert any("linear time" in m for m in exc.value.errors.values())
+
+
+def test_a_renamed_spelling_is_refused_and_a_double_underscore_kept() -> None:
+    with pytest.raises(ServerMapError) as exc:
+        validate_server_map({"mine": _entry(tool_facts={"mine__scan": {"kind": "rule_match"}})})
+    assert "renamed tool" in exc.value.errors["mine.tool_facts"]
+    out = validate_server_map({"mine": _entry(tool_facts={"get__scan": {"kind": "rule_match"}})})
+    assert "get__scan" in out["mine"]["tool_facts"]

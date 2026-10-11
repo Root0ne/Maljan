@@ -59,10 +59,18 @@ describe("the server editor's declaration readers", () => {
     expect(showJson({ a: { kind: "strings" } })).toContain('"kind": "strings"');
   });
 
-  it("refuses a tool name that is empty, padded or a renamed tool", () => {
+  it("refuses a tool name that is empty, padded or this server's renamed spelling", () => {
     expect(readToolFacts('{"": {"kind": "strings"}}').error).toMatch(/own name/);
-    expect(readToolFacts('{"analysis__capa": {"kind": "strings"}}').error).toMatch(/own name/);
-    expect(readToolFacts('{"__proto__": {"kind": "strings"}}').error).toMatch(/own name/);
+    expect(readToolFacts('{" x": {"kind": "strings"}}').error).toMatch(/own name/);
+    expect(readToolFacts('{"mine__capa": {"kind": "strings"}}', "mine").error).toMatch(
+      /renamed tool/
+    );
+  });
+
+  it("accepts a tool whose own name holds a double underscore", () => {
+    const read = readToolFacts('{"get__thing": {"kind": "strings"}}', "mine");
+    expect(read.value).toEqual({ get__thing: { kind: "strings" } });
+    expect(readToolFacts('{"other__x": {"kind": "strings"}}', "mine").error).toBeNull();
   });
 
   it("reads a work directory as one name", () => {

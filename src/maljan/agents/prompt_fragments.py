@@ -251,6 +251,12 @@ SOURCE_METADATA_KEY = "maljan_source"
 DECLARED_SOURCE_METADATA_KEY = "maljan_declared_source"
 
 
+def provider_source(provider: Any) -> str:
+    """Where a provider's tools are declared: what it says, else its own block."""
+    said = getattr(provider, "declaration_source", "")
+    return str(said) if said else f"provider:{getattr(provider, 'id', '')}"
+
+
 def stamp_source(tools: Sequence[Any], source: str, declared: str = "") -> list[Any]:
     """``tools``, each marked as coming from ``source``, so its family is read, not guessed.
 

@@ -43,13 +43,7 @@ import threading
 from collections.abc import Mapping
 from typing import Any
 
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    SerializerFunctionWrapHandler,
-    model_serializer,
-)
+from pydantic import BaseModel, ConfigDict, Field
 
 from maljan.schemas.tool_evidence import (
     CapturedToolOutput,
@@ -294,6 +288,10 @@ class LedgerEntry(BaseModel):
     seq: int = Field(default=0, description="Call order within the job, 1-based.")
     source: str | None = Field(
         default=None,
+        # An entry with no source dumps exactly as one written before the
+        # field existed, so every stored ledger, fixture and pinned dump is
+        # unchanged; the schema still names the field.
+        exclude_if=lambda value: value is None,
         description=(
             "Where the tool's declaration lives, recorded when the entry was written: "
             "'mcp:<server key>', 'provider:<static or sandbox provider id>', 'sandbox' (the "
@@ -302,18 +300,6 @@ class LedgerEntry(BaseModel):
             "(core.tool_declarations)."
         ),
     )
-
-    @model_serializer(mode="wrap")
-    def _source_only_when_recorded(self, handler: SerializerFunctionWrapHandler) -> Any:
-        """Dump ``source`` only when one was recorded.
-
-        Every stored ledger, fixture and pinned dump was written before the
-        field existed; an entry with no source dumps exactly as it always did.
-        """
-        dumped = handler(self)
-        if isinstance(dumped, dict) and dumped.get("source") is None:
-            dumped.pop("source", None)
-        return dumped
 
     def to_captured(self) -> CapturedToolOutput:
         """This entry in the shape readers of the previous capture expect."""

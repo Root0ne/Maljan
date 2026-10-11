@@ -91,6 +91,23 @@ function ReadField<T>({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
+  // A discard or reset elsewhere: text that never read is dropped and the
+  // staged value shown again, which also lifts its hold on Apply.
+  const generation = ctx?.discardGeneration ?? 0;
+  const [seenGeneration, setSeenGeneration] = useState(generation);
+  if (generation !== seenGeneration) {
+    setSeenGeneration(generation);
+    if (error !== null) {
+      setText(show(value));
+      setError(null);
+    }
+  }
+  useEffect(() => {
+    if (error === null) note?.(id, null);
+    // Only a new discard decides this; the box's own edits do not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [generation]);
+
   useEffect(() => () => note?.(id, null), [id, note]);
 
   const stage = (next: string) => {
@@ -299,7 +316,7 @@ export default function DeclarationFields({
             show={showJson}
             rows={6}
             mono
-            read={readToolFacts}
+            read={(text) => readToolFacts(text, serverKey)}
             onValue={(tool_facts) => put({ tool_facts })}
           />
         </div>

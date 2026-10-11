@@ -116,12 +116,56 @@ def test_a_server_block_checks_its_names_mount_and_prefixes() -> None:
         MCPServerConfig(reference_urls=["https://example.org/"])
 
 
-@pytest.mark.parametrize("name", ["", " capa", "analysis__capa", "__proto__"])
+@pytest.mark.parametrize("name", ["", " capa", "capa "])
 def test_a_declared_tool_name_is_a_tools_own_name(name: str) -> None:
     with pytest.raises(ValidationError, match="tool"):
         MCPServerConfig(tool_facts={name: {"kind": "strings"}})
     with pytest.raises(ValidationError, match="tool"):
         ErrorPattern(match="x", tools=(name,))
+
+
+@pytest.mark.parametrize("name", ["get__thing", "a__b__c", "other__capa", "__proto__"])
+def test_a_tool_whose_own_name_holds_a_double_underscore_is_declared(name: str) -> None:
+    settings = Settings.model_validate(
+        {"mcp": {"servers": {"mine": {"command": "x", "tool_facts": {name: {"kind": "x"}}}}}}
+    )
+    d = ToolDeclarations.from_settings(settings)
+    assert d.declaration_for({"source": "mcp:mine", "tool": name}).kind == "x"
+    # Renamed by the registry beside another server's tool of the same name.
+    assert d.declaration_for({"source": "mcp:mine", "tool": f"mine__{name}"}).kind == "x"
+
+
+def test_a_tool_spelled_as_its_own_servers_renamed_tool_is_refused() -> None:
+    with pytest.raises(ValidationError, match="renamed tool"):
+        Settings.model_validate(
+            {
+                "mcp": {
+                    "servers": {"mine": {"command": "x", "tool_facts": {"mine__x": {"kind": "x"}}}}
+                }
+            }
+        )
+    with pytest.raises(ValidationError, match="renamed tool"):
+        Settings.model_validate(
+            {
+                "mcp": {
+                    "servers": {
+                        "mine": {
+                            "command": "x",
+                            "error_patterns": [{"match": "x", "tools": ["mine__x"]}],
+                        }
+                    }
+                }
+            }
+        )
+
+
+def test_the_separator_is_read_only_after_the_known_server_key() -> None:
+    from maljan.core.tool_declarations import renamed_tool
+
+    assert renamed_tool("mine", "mine__get__thing") == "get__thing"
+    assert renamed_tool("mine", "get__thing") == "get__thing"
+    assert renamed_tool("mine", "minefield__x") == "minefield__x"
+    assert renamed_tool("my", "mine__x") == "mine__x"
 
 
 def test_a_server_block_holds_every_declaration_field() -> None:
@@ -424,7 +468,7 @@ def test_a_generic_providers_tool_named_like_a_sandbox_tool_is_its_own() -> None
     d = _declarations(
         mcp={"servers": servers}, static={"provider": "generic_mcp", "generic": {"server": "qk"}}
     )
-    entry = {"source": "provider:generic_mcp", "tool": "sandbox_signatures"}
+    entry = {"source": "mcp:qk", "tool": "sandbox_signatures"}
     assert d.declaration_for(entry) is None
     assert d.declaration_for({"source": "sandbox", "tool": "sandbox_signatures"}) is not None
 
@@ -436,16 +480,56 @@ def test_an_operator_server_named_like_the_pack_is_its_own_server() -> None:
     assert d.declaration_for(entry) is None
 
 
-def test_the_generic_provider_reads_the_server_it_names() -> None:
-    servers = {"mydis": {"command": "x", "tool_facts": {"pseudo_c": {"kind": "decompile"}}}}
-    d = _declarations(
-        mcp={"servers": servers},
-        static={"provider": "generic_mcp", "generic": {"server": "mydis"}},
+def test_the_generic_providers_entries_are_read_by_the_server_they_recorded() -> None:
+    from maljan.providers.static.generic_mcp import GenericMCPStaticProvider
+
+    servers = {
+        "mydis": {"command": "x", "tool_facts": {"pseudo_c": {"kind": "decompile"}}},
+        "other": {"command": "y", "tool_facts": {"pseudo_c": {"kind": "listing"}}},
+    }
+    first = Settings.model_validate(
+        {
+            "mcp": {"servers": servers},
+            "static": {"provider": "generic_mcp", "generic": {"server": "mydis"}},
+        }
     )
-    entry = {"source": "provider:generic_mcp", "tool": "pseudo_c"}
-    assert d.declaration_for(entry).kind == "decompile"
-    kinds = d.tools_of_kind("decompile", enabled_only=True)
-    assert (SourceRef("provider", "generic_mcp"), "pseudo_c") in {(s, t) for s, t, _ in kinds}
+    provider = GenericMCPStaticProvider.from_settings(first)
+    assert provider.declaration_source == "mcp:mydis"
+    entry = {"source": provider.declaration_source, "tool": "pseudo_c"}
+    assert ToolDeclarations.from_settings(first).declaration_for(entry).kind == "decompile"
+    # The provider re-pointed at another server later: the entry keeps its server.
+    later = Settings.model_validate(
+        {
+            "mcp": {"servers": servers},
+            "static": {"provider": "generic_mcp", "generic": {"server": "other"}},
+        }
+    )
+    assert ToolDeclarations.from_settings(later).declaration_for(entry).kind == "decompile"
+    assert ToolDeclarations.from_settings(later).source("provider:generic_mcp") is None
+
+
+def test_radare2_and_ghidra_record_their_own_blocks() -> None:
+    from maljan.providers.static.ghidra import GhidraStaticProvider
+    from maljan.providers.static.r2 import R2StaticProvider
+
+    settings = Settings()
+    assert R2StaticProvider.from_settings(settings).declaration_source == "provider:r2"
+    assert GhidraStaticProvider.from_settings(settings).declaration_source == "provider:ghidra"
+
+
+def test_the_provider_blocks_are_one_table() -> None:
+    from maljan.core.settings_overrides import declaration_blocks
+    from maljan.core.tool_declarations import PROVIDER_BLOCKS, block_at
+
+    settings = Settings()
+    blocks = declaration_blocks(settings)
+    for source, path in PROVIDER_BLOCKS.items():
+        assert blocks[source] == path
+        assert isinstance(block_at(settings, path), MCPServerConfig)
+    d = ToolDeclarations.from_settings(settings)
+    assert {str(x.source) for x in d.sources() if x.source.kind == "provider"} >= set(
+        PROVIDER_BLOCKS
+    )
 
 
 def test_tools_of_a_kind_and_servers_of_a_role_come_from_the_declarations() -> None:

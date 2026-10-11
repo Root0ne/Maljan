@@ -101,15 +101,43 @@ def _words(values: Iterable[str], what: str) -> list[str]:
 
 
 def check_tool_name(value: str, what: str = "tool name") -> str:
-    """A declared tool name: not empty, no surrounding blanks, no renamed-tool separator."""
+    """A declared tool name: not empty and without surrounding blanks.
+
+    A name may hold ``__`` (a server's own tool may be called ``get__thing``);
+    only a name that starts with its own server's key and ``__``, which is how
+    a renamed tool is spelled, is refused, by :func:`check_own_prefix` where
+    the server's key is known.
+    """
     if not value or value != value.strip():
         raise ValueError(f"{what} {value!r} must be a tool's name, not empty or padded")
-    if RENAMED_TOOL_SEPARATOR in value:
-        raise ValueError(
-            f"{what} {value!r} holds '{RENAMED_TOOL_SEPARATOR}', the separator of a renamed "
-            "tool; declare the tool under its own name on its own server"
-        )
     return value
+
+
+def check_own_prefix(server: str, names: Iterable[str]) -> None:
+    """Refuse a declared tool name spelled as a renamed tool of ``server``.
+
+    A registry renames a tool two servers both offer to
+    ``<server key>__<tool>``; a declaration under that spelling would be read
+    as the declaration of the tool ``<tool>``, so it is written under the
+    tool's own name instead.
+    """
+    prefix = f"{server}{RENAMED_TOOL_SEPARATOR}"
+    for name in names:
+        if name.startswith(prefix):
+            raise ValueError(
+                f"tool {name!r} is spelled as {server!r}'s renamed tool "
+                f"{name[len(prefix) :]!r}; declare it under its own name"
+            )
+
+
+def renamed_tool(server: str, tool: str) -> str:
+    """``tool`` as ``server`` offers it: the name after ``<server>__`` when it is spelled so.
+
+    The separator is read only right after the known server key, so a tool
+    whose own name holds ``__`` keeps it.
+    """
+    prefix = f"{server}{RENAMED_TOOL_SEPARATOR}"
+    return tool[len(prefix) :] if tool.startswith(prefix) else tool
 
 
 # ---------------------------------------------------------------------------
@@ -754,6 +782,23 @@ class SourceRef:
 SANDBOX = SourceRef("sandbox")
 PACK = SourceRef("pack")
 
+# The provider-owned server blocks, by the source their declarations are read
+# under, at their dotted path in the settings. The one table of them: the read
+# API, the run snapshot and anything else that walks the blocks use it.
+PROVIDER_BLOCKS: dict[str, str] = {
+    "provider:ghidra": "static.ghidra",
+    "provider:r2": "static.r2",
+    "provider:cape2": "sandbox.cape2.mcp",
+}
+
+
+def block_at(settings: Any, path: str) -> Any:
+    """The settings block at a dotted ``path``."""
+    node = settings
+    for part in path.split("."):
+        node = getattr(node, part)
+    return node
+
 
 @dataclass(frozen=True)
 class Declared:
@@ -827,28 +872,10 @@ class ToolDeclarations:
         sources: list[Declared] = []
         for key, cfg in settings.mcp.servers.items():
             sources.append(Declared.of(SourceRef("mcp", key), cfg, enabled=bool(cfg.enabled)))
-        static = settings.static
-        for provider, cfg in (("ghidra", static.ghidra), ("r2", static.r2)):
-            sources.append(
-                Declared.of(SourceRef("provider", provider), cfg, enabled=provider in selected)
-            )
-        generic = settings.mcp.servers.get(static.generic.server or "")
-        if generic is not None:
-            sources.append(
-                Declared.of(
-                    SourceRef("provider", "generic_mcp"),
-                    generic,
-                    enabled="generic_mcp" in selected,
-                )
-            )
-        sources.append(
-            Declared.of(
-                SourceRef("provider", "cape2"),
-                settings.sandbox.cape2.mcp,
-                enabled=str(settings.sandbox.provider) == "cape2",
-                label="CAPE MCP",
-            )
-        )
+        selected.add(str(settings.sandbox.provider))
+        for text, path in PROVIDER_BLOCKS.items():
+            ref = SourceRef.parse(text)
+            sources.append(Declared.of(ref, block_at(settings, path), enabled=ref.key in selected))
         for source, cfg in in_process_declarations().items():
             enabled = source.kind != "provider" or source.key in selected
             sources.append(Declared.of(source, cfg, enabled=enabled))
@@ -897,9 +924,11 @@ class ToolDeclarations:
         held = self._sources.get(ref)
         if held is None:
             return None
-        if ref.kind == "mcp" and tool.startswith(f"{ref.key}{RENAMED_TOOL_SEPARATOR}"):
-            tool = tool[len(ref.key) + len(RENAMED_TOOL_SEPARATOR) :]
-        return held.tools.get(tool)
+        if tool in held.tools:
+            return held.tools[tool]
+        if ref.kind == "mcp":
+            return held.tools.get(renamed_tool(ref.key, tool))
+        return None
 
     def tools_of_kind(
         self, kind: str | Iterable[str], *, enabled_only: bool = False

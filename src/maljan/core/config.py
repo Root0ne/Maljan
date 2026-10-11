@@ -52,6 +52,7 @@ from maljan.core.tool_declarations import (
     check_auto_name_prefixes,
     check_env_names,
     check_mount,
+    check_own_prefix,
     check_reference_urls,
     check_roles,
     check_tool_facts_keys,
@@ -1488,6 +1489,15 @@ class MCPConfig(BaseModel):
     # how many calls it may have in flight at once. Per job and per server;
     # see ``maljan.providers.server_guard``.
     breaker: MCPBreakerConfig = Field(default_factory=lambda: MCPBreakerConfig())
+
+    @model_validator(mode="after")
+    def _no_tool_is_declared_under_a_renamed_spelling(self) -> "MCPConfig":
+        """A server's declared tool may not be spelled as its own renamed tool (``<key>__x``)."""
+        for key, server in self.servers.items():
+            check_own_prefix(key, server.tool_facts)
+            for pattern in server.error_patterns:
+                check_own_prefix(key, pattern.tools)
+        return self
 
     @model_validator(mode="after")
     def _reseed_builtins(self) -> "MCPConfig":

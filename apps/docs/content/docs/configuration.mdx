@@ -2937,7 +2937,11 @@ same output for the built-ins, and this section says when one does.
 | `tool_facts` | per tool name, what its answer is and where its facts sit (below) |
 
 Each entry of `tool_facts` describes one tool, under its own name on its own
-server (not empty, no `__`, the separator of a renamed tool):
+server. A name may hold `__` (`get__thing`); a name spelled as the server's own
+renamed tool, `<server key>__<tool>`, is refused, since a registry renames a
+tool two servers both offer to that spelling. A renamed tool is read by taking
+off its own server's key and `__` only, so a tool whose name holds `__` keeps
+it:
 
 | key | meaning |
 | :-- | :-- |
@@ -3033,10 +3037,13 @@ and one `sandbox_<section>` kind per sandbox report tool.
 
 **Which source a tool is read under.** Every ledger entry records, when it is
 written, where its tool's declaration lives: `mcp:<server key>` for a tool
-server's tool, `provider:<id>` for a static provider's (Ghidra, radare2, the
-generic provider, the evidence-only capa/YARA provider) or the CAPE provider's
-own tool, `sandbox` for the sandbox report tools and `pack` for the triage
-pack. A tool is looked up by that recorded source and its name together, never
+server's tool, `provider:<id>` for a static provider's own tool (Ghidra,
+radare2, the evidence-only capa/YARA provider) or the CAPE provider's, `sandbox`
+for the sandbox report tools and `pack` for the triage pack. The generic static
+provider drives a tool server of the registry, so its tools record that
+server's `mcp:<key>`, the server it drove when the entry was written: pointing
+`static.generic.server` elsewhere later does not change how a stored entry is
+read. A tool is looked up by that recorded source and its name together, never
 by its name alone, an agent's name or today's settings; a tool of yours that
 shares a built-in tool's name never takes the built-in's facts. An entry
 written before sources were recorded is read the way it always was.

@@ -28,6 +28,7 @@ from maljan.agents.prompt_fragments import (
     has_decompiler,
     has_xrefs,
     offered,
+    provider_source,
     stamp_source,
     tool_families,
     tool_names,
@@ -238,7 +239,7 @@ class StaticAnalyst(BaseAnalyst):
         # Marked as the provider's, so the prompt names them as such rather
         # than inferring it from the absence of a server key.
         pool = stamp_source(
-            provider.get_tools(), PROVIDER_FAMILY, declared=f"provider:{provider.id}"
+            provider.get_tools(), PROVIDER_FAMILY, declared=provider_source(provider)
         )
         # No ``self.toolkit`` assignment here: the provider holds its own client
         # privately and closes it itself (``ServiceContainer.aclose`` calls

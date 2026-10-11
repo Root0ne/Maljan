@@ -130,15 +130,23 @@ export function readErrorPatterns(text: string): Read<ErrorPatternEntry[]> {
   return ok(parsed.value as ErrorPatternEntry[]);
 }
 
-/** Tool declarations: a JSON object keyed by tool name, each with a `kind`; empty is `{}`. */
-export function readToolFacts(text: string): Read<Record<string, ToolFactsEntry>> {
+/** Tool declarations: a JSON object keyed by tool name, each with a `kind`; empty is `{}`.
+ *  A name may hold `__`; only one spelled as this server's renamed tool
+ *  (`<serverKey>__…`) is refused. */
+export function readToolFacts(
+  text: string,
+  serverKey = ""
+): Read<Record<string, ToolFactsEntry>> {
   const parsed = parseJson(text);
   if (parsed.error !== null) return bad(parsed.error);
   if (parsed.value === undefined) return ok({});
   if (!isObject(parsed.value)) return bad("expected an object keyed by tool name");
   for (const [tool, facts] of Object.entries(parsed.value)) {
-    if (tool.trim() === "" || tool !== tool.trim() || tool.includes("__")) {
-      return bad(`${JSON.stringify(tool)}: a tool's own name, not empty and without "__"`);
+    if (tool.trim() === "" || tool !== tool.trim()) {
+      return bad(`${JSON.stringify(tool)}: a tool's own name, not empty or padded`);
+    }
+    if (serverKey && tool.startsWith(`${serverKey}__`)) {
+      return bad(`${tool}: spelled as this server's renamed tool; use the tool's own name`);
     }
     if (!isObject(facts)) return bad(`${tool}: expected an object with a kind`);
     if (typeof facts.kind !== "string" || !WORD.test(facts.kind)) {

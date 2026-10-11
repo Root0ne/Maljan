@@ -21,7 +21,7 @@ import pytest
 from maljan.core import virustotal
 from maljan.core.builtin_declarations import BUILDER_OF_KIND, CONSUMER_KINDS, READERS
 from maljan.core.config import REPUTATION_SERVER_KEYS, REQUIRED_ENV_ALLOW, Settings
-from maljan.core.tool_declarations import PACK, SANDBOX, SourceRef, ToolDeclarations, select
+from maljan.core.tool_declarations import PACK, SourceRef, ToolDeclarations, select
 
 ROOT = Path(__file__).resolve().parents[3]
 GOLDEN = ROOT / "tests" / "fixtures" / "golden" / "mcp_tools"
@@ -366,14 +366,12 @@ def test_no_reader_is_named_after_a_tool_or_a_server(declared: ToolDeclarations)
 def test_the_asserting_sources_are_the_declared_asserting_tools(declared: ToolDeclarations) -> None:
     from maljan.pipeline.evidence_summary import ASSERTING_SOURCES
 
-    for source in (PACK, SourceRef("mcp", "analysis"), SourceRef("mcp", "knowledge"), SANDBOX):
-        held = declared.source(source)
-        assert held is not None
-        for name, facts in held.tools.items():
-            if name in ASSERTING_SOURCES:
-                assert facts.asserts_techniques and facts.source == ASSERTING_SOURCES[name], name
-            else:
-                assert not facts.asserts_techniques, (str(source), name)
+    for source, name, facts in _built_in_tools(declared):
+        if name in ASSERTING_SOURCES:
+            assert facts.asserts_techniques, (source, name)  # type: ignore[attr-defined]
+            assert facts.source == ASSERTING_SOURCES[name], (source, name)  # type: ignore[attr-defined]
+        else:
+            assert not facts.asserts_techniques, (source, name)  # type: ignore[attr-defined]
 
 
 def test_the_reputation_servers_are_the_servers_with_the_reputation_role(

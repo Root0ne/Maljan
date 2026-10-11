@@ -46,6 +46,9 @@ export type SettingsContextValue = ReturnType<typeof useSettings> & {
    *  the last value that read, which is not what the box shows. */
   unreadInputs: Record<string, string>;
   noteUnreadInput: (id: string, error: string | null) => void;
+  /** Counts the unstages (a discard, a reset): a box holding text that never
+   *  read shows the staged value again when this moves. */
+  discardGeneration: number;
 };
 
 const SettingsCtx = createContext<SettingsContextValue | null>(null);
@@ -75,6 +78,15 @@ export function SettingsProvider({
   const [models, setModels] = useState<string[]>([]);
   const [onlyChanged, setOnlyChanged] = useState(false);
   const [unreadInputs, setUnreadInputs] = useState<Record<string, string>>({});
+  const [discardGeneration, setDiscardGeneration] = useState(0);
+  const { unstage: unstageKey } = s;
+  const unstage = useCallback(
+    (key: string) => {
+      unstageKey(key);
+      setDiscardGeneration((n) => n + 1);
+    },
+    [unstageKey]
+  );
   const noteUnreadInput = useCallback((id: string, error: string | null) => {
     setUnreadInputs((current) => {
       if (error === null) {
@@ -139,6 +151,8 @@ export function SettingsProvider({
       setOnlyChanged,
       unreadInputs,
       noteUnreadInput,
+      unstage,
+      discardGeneration,
     }),
     [
       s,
@@ -150,6 +164,8 @@ export function SettingsProvider({
       onlyChanged,
       unreadInputs,
       noteUnreadInput,
+      unstage,
+      discardGeneration,
     ]
   );
 

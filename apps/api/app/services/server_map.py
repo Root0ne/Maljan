@@ -31,7 +31,11 @@ from maljan.core.config import (
     _builtin_servers,
     builtin_env_allow,
 )
-from maljan.core.tool_declarations import fill_declaration, strip_declaration_defaults
+from maljan.core.tool_declarations import (
+    check_own_prefix,
+    fill_declaration,
+    strip_declaration_defaults,
+)
 from pydantic import ValidationError
 
 SERVER_MAP_KEY = "core.mcp.servers"
@@ -117,6 +121,13 @@ def validate_server_map(
         except ValidationError as exc:
             for err in exc.errors():
                 errors[f"{key}." + ".".join(str(p) for p in err["loc"])] = err["msg"]
+            continue
+        try:
+            check_own_prefix(key, model.tool_facts)
+            for pattern in model.error_patterns:
+                check_own_prefix(key, pattern.tools)
+        except ValueError as exc:
+            errors[f"{key}.tool_facts"] = str(exc)
             continue
         if model.transport == "stdio" and not model.command:
             errors[f"{key}.command"] = "a stdio server needs a command to launch"

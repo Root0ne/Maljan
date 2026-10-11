@@ -178,6 +178,16 @@ class GenericMCPStaticProvider(StaticProvider):
         """The registry key this provider owns; the static analyst excludes it."""
         return self._handle.name
 
+    @property
+    def declaration_source(self) -> str:
+        """The registry server this provider drives: its tools are that server's.
+
+        Recorded when an entry is written, so a later re-pointing of
+        ``static.generic.server`` does not change which declaration a stored
+        entry is read by.
+        """
+        return f"mcp:{self.server_name}"
+
     def open(self, job: StaticJobContext) -> None:
         """Attach to the configured MCP server for ``job``. Idempotent, per the base contract.
 

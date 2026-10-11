@@ -592,9 +592,9 @@ def _provider_tools(container: Any, definition: AgentDefinition, provider_id: st
             context_budget=container.get_context_budget(),
         )
     )
-    from maljan.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
+    from maljan.agents.prompt_fragments import PROVIDER_FAMILY, provider_source, stamp_source
 
-    return stamp_source(provider.get_tools(), PROVIDER_FAMILY, declared=f"provider:{provider.id}")
+    return stamp_source(provider.get_tools(), PROVIDER_FAMILY, declared=provider_source(provider))
 
 
 def _sandbox_tools(container: Any, definition: AgentDefinition) -> list[Any]:

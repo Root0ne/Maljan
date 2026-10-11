@@ -136,6 +136,16 @@ class StaticProvider(ABC):
     def from_settings(cls, cfg: Settings) -> StaticProvider: ...
 
     @property
+    def declaration_source(self) -> str:
+        """Where this provider's tools are declared (``core.tool_declarations``).
+
+        Recorded on every ledger entry its tools write. ``provider:<id>`` names
+        the provider's own block; a provider that drives a tool server of the
+        registry names that server instead.
+        """
+        return f"provider:{self.id}"
+
+    @property
     @abstractmethod
     def capabilities(self) -> StaticCapabilities: ...
 
@@ -247,6 +257,16 @@ class SandboxProvider(ABC):
     @classmethod
     @abstractmethod
     def from_settings(cls, cfg: Settings) -> SandboxProvider: ...
+
+    @property
+    def declaration_source(self) -> str:
+        """Where this provider's tools are declared (``core.tool_declarations``).
+
+        Recorded on every ledger entry its tools write. ``provider:<id>`` names
+        the provider's own block; a provider that drives a tool server of the
+        registry names that server instead.
+        """
+        return f"provider:{self.id}"
 
     @property
     @abstractmethod
