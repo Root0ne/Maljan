@@ -27,6 +27,15 @@ import {
   removeEntry,
   type KeyError,
 } from "./mapEditorHelpers";
+import {
+  capabilitiesReaching,
+  capabilityRef,
+  holdsServer,
+  offeredCapabilities,
+  sameToolRef,
+  withoutServer,
+  type CapabilityServers,
+} from "./capabilityRefs";
 import type {
   AgentDefinitionEntry,
   AgentProbeDetails,
@@ -265,6 +274,7 @@ export function AgentDetail({
   sections = EDITOR_AGENT_SECTIONS,
   onClone,
   keyErrorMessage,
+  capabilityServers = {},
 }: {
   agentKey: string;
   /** The whole staged definition map, staged as a whole. */
@@ -289,6 +299,9 @@ export function AgentDetail({
   onClone?: (from: string) => void;
   /** A name the surrounding screen rejected on this agent's own Clone. */
   keyErrorMessage?: string | null;
+  /** Per capability, the servers a capability reference stands for, as the
+   *  API serves them (`CatalogEntry.capability_servers`). */
+  capabilityServers?: CapabilityServers;
 }) {
   const agent = definitions[agentKey];
   const has = (section: AgentSection) => sections.includes(section);
@@ -307,19 +320,25 @@ export function AgentDetail({
    *  which predates this editor. */
   const remove = (key: string) => onChange(removeEntry(definitions, key));
 
-  const sameRef = (a: ToolRefEntry, b: ToolRefEntry) =>
-    a.kind === b.kind &&
-    a.server === b.server &&
-    a.name === b.name &&
-    (a.agent ?? null) === (b.agent ?? null);
-
   const toggleRef = (key: string, ref: ToolRefEntry, on: boolean) => {
     const tools = definitions[key].tools;
-    put(key, { tools: on ? [...tools, ref] : tools.filter((t) => !sameRef(t, ref)) });
+    put(key, { tools: on ? [...tools, ref] : tools.filter((t) => !sameToolRef(t, ref)) });
   };
 
   const hasRef = (key: string, ref: ToolRefEntry) =>
-    definitions[key].tools.some((t) => sameRef(t, ref));
+    definitions[key].tools.some((t) => sameToolRef(t, ref));
+
+  /** A server's whole box: ticked when the definition names it or holds a
+   *  capability that reaches it, so a built-in shows the tools it resolves
+   *  to. Unticking it takes both away, as unticking the server always did. */
+  const toggleServer = (key: string, server: string, on: boolean) => {
+    const tools = definitions[key].tools;
+    put(key, {
+      tools: on
+        ? [...tools, { kind: "mcp", server, name: null }]
+        : withoutServer(tools, server, capabilityServers),
+    });
+  };
 
   /** One `ask_<agent>` reference, in the shape the API stores it. */
   const askRef = (agent: string): ToolRefEntry => ({
@@ -681,6 +700,28 @@ export function AgentDetail({
                 </ul>
               </li>
             )}
+            {/* A capability reference names a kind of tool rather than a
+                server: one row per capability, with the servers it stands for,
+                so a clone can drop it as it drops a server. */}
+            {offeredCapabilities(agent.tools, capabilityServers).map((cap) => (
+              <li key={`capability:${cap}`} role="treeitem" aria-selected={hasRef(agentKey, capabilityRef(cap))}>
+                <label className="text-xs text-text-secondary flex items-center gap-1">
+                  <input
+                    type="checkbox"
+                    aria-label={`${agentKey} capability ${cap}`}
+                    disabled={locked}
+                    checked={hasRef(agentKey, capabilityRef(cap))}
+                    onChange={(e) => toggleRef(agentKey, capabilityRef(cap), e.target.checked)}
+                  />
+                  <span>{cap} tools, by capability</span>
+                  <span className="text-text-muted">
+                    {(capabilityServers[cap] ?? []).length > 0
+                      ? `(${(capabilityServers[cap] ?? []).join(", ")})`
+                      : "(no server reached)"}
+                  </span>
+                </label>
+              </li>
+            ))}
             {Object.keys(servers).map((server) => {
               const listed = resolve.manifests[server];
               return (
@@ -688,7 +729,7 @@ export function AgentDetail({
                   key={server}
                   role="treeitem"
                   aria-expanded={listed && listed.length > 0 ? true : undefined}
-                  aria-selected={hasRef(agentKey, { kind: "mcp", server, name: null })}
+                  aria-selected={holdsServer(agent.tools, server, capabilityServers)}
                 >
                   <div className="flex items-center gap-2">
                     <label className="text-xs text-text-secondary flex items-center gap-1">
@@ -696,16 +737,16 @@ export function AgentDetail({
                         type="checkbox"
                         aria-label={`${agentKey} server ${server}`}
                         disabled={locked}
-                        checked={hasRef(agentKey, { kind: "mcp", server, name: null })}
-                        onChange={(e) =>
-                          toggleRef(
-                            agentKey,
-                            { kind: "mcp", server, name: null },
-                            e.target.checked
-                          )
-                        }
+                        checked={holdsServer(agent.tools, server, capabilityServers)}
+                        onChange={(e) => toggleServer(agentKey, server, e.target.checked)}
                       />
                       {server} (all allowed tools)
+                      {capabilitiesReaching(agent.tools, server, capabilityServers).map((cap) => (
+                        <span key={cap} className="text-text-muted">
+                          {" "}
+                          by capability: {cap}
+                        </span>
+                      ))}
                     </label>
                     <button
                       type="button"
@@ -1059,6 +1100,7 @@ export default function AgentDefinitionsEditor({
           entryKey={entry.key}
           onClone={add}
           keyErrorMessage={keyError?.at === selected ? keyError.message : null}
+          capabilityServers={entry.capability_servers ?? {}}
         />
       )}
     </div>

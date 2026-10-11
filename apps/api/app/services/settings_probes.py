@@ -828,20 +828,19 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
         available = ", ".join(sorted([*settings.agents.definitions, *ROLE_ENTRY_KEYS]))
         return ProbeResult(False, _ms(t0), f"unknown agent: {name!r}. Available: {available}")
 
-    from maljan.agents.composition import aresolve_agent
+    from maljan.agents.composition import aresolve_agent, mcp_refs_for
     from maljan.core.config import ToolRef
     from maljan.core.container import ServiceContainer
 
-    definition = settings.agents.definitions[name]
     bound = [
         key
         for key, server in settings.mcp.servers.items()
         if server.enabled and name in server.agents
     ]
+    # The definition's server references as resolution reads them, a
+    # capability reference as the servers it stands for.
     bound += [
-        str(ref.server)
-        for ref in definition.tools
-        if ref.kind == "mcp" and str(ref.server) not in bound
+        str(ref.server) for ref in mcp_refs_for(settings, name) if str(ref.server) not in bound
     ]
     bound = list(dict.fromkeys(bound))
 

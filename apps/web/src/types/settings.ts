@@ -83,6 +83,11 @@ export interface CatalogEntry {
    *  operator's server may take, as core defines them. */
   builtin_servers?: string[] | null;
   reserved_servers?: string[] | null;
+  /** For the agent definitions: per capability a seeded definition references
+   *  (`kind: "capability"`), the servers it stands for, as resolution reads
+   *  them. Absent from an API older than the field: a capability row is then
+   *  drawn without the servers it reaches. */
+  capability_servers?: Record<string, readonly string[]> | null;
 }
 
 /** What a provider declares about itself, served on its selector's entry.

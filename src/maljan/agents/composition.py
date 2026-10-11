@@ -35,7 +35,7 @@ stage agent.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -693,6 +693,16 @@ def capability_servers(settings: Settings, capability: str) -> list[str]:
     through a capability; it is bound by its own ``agents`` list or a
     reference to it by key, as every server of its own is.
     """
+    return servers_of_capability(settings.mcp.servers, capability)
+
+
+def servers_of_capability(server_keys: Iterable[str], capability: str) -> list[str]:
+    """``capability_servers`` over a list of server keys, in their order.
+
+    The settings API serves it on the agent definitions' catalogue entry, so
+    the console draws which servers a capability reference stands for
+    without a rule of its own.
+    """
     from maljan.core.builtin_declarations import server_declaration
     from maljan.core.config import _builtin_servers
     from maljan.core.reputation import kinds_of_capability
@@ -700,7 +710,7 @@ def capability_servers(settings: Settings, capability: str) -> list[str]:
     kinds = kinds_of_capability(capability)
     seeds = _builtin_servers()
     out: list[str] = []
-    for name in settings.mcp.servers:
+    for name in server_keys:
         seed = seeds.get(str(name))
         if seed is None or list(seed.agents or []):
             continue

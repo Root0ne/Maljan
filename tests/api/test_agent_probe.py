@@ -93,27 +93,12 @@ async def test_a_built_in_agent_resolves_to_its_prompt_and_its_tools():
     # The role-bound half first, then the definition's own references: the
     # network analyst is bound to ``network`` by role and names ``knowledge``
     # by reference.
-    assert [s["key"] for s in result.details["servers"]][:2] == ["network", "knowledge"]
-    assert {s["status"] for s in result.details["servers"]} == {"ok"}
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "the probe lists a definition's servers from its kind='mcp' references only; a "
-        "capability reference reaches its servers through agents.composition.mcp_refs_for, "
-        "which settings_probes.probe_agent does not read yet (a one-line change in a file "
-        "another branch owns)"
-    ),
-)
-@pytest.mark.asyncio
-async def test_the_probe_lists_the_servers_a_capability_reference_reaches():
-    result = await probe_agent({"name": "network", "settings": {}})
     assert [s["key"] for s in result.details["servers"]] == [
         "network",
         "knowledge",
         "virustotal",
     ]
+    assert {s["status"] for s in result.details["servers"]} == {"ok"}
 
 
 @pytest.mark.asyncio

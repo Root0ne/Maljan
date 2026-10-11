@@ -627,5 +627,28 @@ def resolved_catalog(
                 builtin_servers=builtin,
                 reserved_servers=reserved,
             )
+        if entry.editor == "agent_definitions":
+            entry = replace(entry, capability_servers=_capability_servers(servers))
         out.append(entry)
     return out
+
+
+def _capability_servers(servers: Iterable[str]) -> dict[str, list[str]]:
+    """Per capability a seeded definition references, the servers it stands for.
+
+    Over the built-in servers and the configured ones, in that order, read by
+    the same function resolution reads (``agents.composition``).
+    """
+    from maljan.agents.composition import servers_of_capability
+    from maljan.core.config import _builtin_definitions, _builtin_servers
+
+    keys = list(dict.fromkeys([*_builtin_servers(), *servers]))
+    capabilities = sorted(
+        {
+            str(ref.capability)
+            for definition in _builtin_definitions().values()
+            for ref in definition.tools
+            if ref.kind == "capability" and ref.capability
+        }
+    )
+    return {name: servers_of_capability(keys, name) for name in capabilities}
