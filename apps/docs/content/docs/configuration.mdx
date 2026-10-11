@@ -3018,8 +3018,12 @@ tools, applies_to, multiline, message_group}`, applied in list order:
 
 Every server's answers are held against its patterns by one function, the
 registry's servers and the static providers' alike, so an answer a pattern
-matches is filed as a failed call with the pattern's code and remediation. A
-server that declares no pattern has its answers passed on as they are.
+matches is filed as a failed call with the pattern's code and remediation, the
+answers of a declared `sample_open` tool and of the select and analyse calls it
+makes included. A server that declares no pattern has its answers passed on as
+they are. `remediation_with_path` names the job's sample where the server's
+path for it is known: for the static providers' servers (the job's mirror);
+an `mcp.servers` entry gets `remediation`.
 
 **Patterns run in linear time.** Every operator regular expression (error
 patterns and reputation `text_patterns`) is compiled and run by RE2, whose
@@ -3050,6 +3054,7 @@ tool of yours that answers in that shape may name one:
 | `unpacked_image` | an unpacked program written out as a file of its own |
 | `flow_table` | flows and DNS queries with their endpoints, from a capture or a sandbox |
 | `dns_query_lines` | a text answer holding one DNS query per line |
+| `packet_lines` | a text answer holding one captured packet per line, with its endpoints |
 | `report_items` | sandbox report items, each with an id and the fields that place it |
 
 **Vocabulary.** `kind`, `roles`, `source`, `reader`, `category`, a technique
@@ -3089,8 +3094,11 @@ entry): `{"v": 1, "kind": …}` and, where set, `reader`, `asserts_techniques`,
 declares nothing for the tool. Everything read from a run later (a later stage,
 a re-render, the API) reads these stored facts, never the reading process's
 settings, so a run reads the same wherever it is opened, and changing a
-declaration later changes only new runs. An entry written before facts were
-stored is read the way it always was.
+declaration later changes only new runs. A record of a newer version is read
+for the fields this release knows, and a record that no longer validates is
+read as declaring nothing, each with a warning. An entry that recorded a source
+but no facts is read as an undeclared tool; an entry written before sources
+were recorded is read the way it always was.
 
 **Who reads a tool's kind.** A tool of yours declared with a built-in's kind is
 treated as the built-in of that kind, and its answer is read in that kind's
@@ -3102,7 +3110,7 @@ shape:
   summary's per-source attribution;
 - the evidence roots place an entry by its kind or `reader` (a whole-file fact,
   a reference lookup, a disassembler's import listing, a capability or
-  signature rule match, recovered strings …); a kind with no reading of its own
+  signature rule match, recovered strings …); a kind with no reading of its own, or a tool whose `rows` and `places` differ from the shipped tool of its kind,
   is placed by its `rows` and `places` (`offset` a file offset, `rva`,
   `call_site` or `function` an offset from the image base, `address` or
   `addresses` an address, `pid` a sandbox process), else by the address its
