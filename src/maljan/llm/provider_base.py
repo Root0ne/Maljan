@@ -287,7 +287,8 @@ def facts_of(name: object) -> type[LLMProvider]:
 
             discover_provider(key)
         except Exception as exc:  # noqa: BLE001 — falls back to discovering every adapter
-            logger.debug("LLM provider %r could not be imported alone (%s).", key, exc)
+            # The name is the caller's value, so only the failure's type is logged.
+            logger.debug("An LLM provider could not be imported alone (%s).", type(exc).__name__)
         if key not in _PROVIDER_REGISTRY:
             _discover()
     built = _PROVIDER_REGISTRY.get(key)
