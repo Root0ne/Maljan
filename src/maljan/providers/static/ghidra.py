@@ -26,7 +26,7 @@ from maljan.providers.base import (
 from maljan.providers.registry import register_static_provider
 from maljan.providers.sample_open import long_running_tools, server_note_key
 from maljan.providers.server_guard import explicit_call_timeout
-from maljan.tools.errors import SERVER_WORDS_LIMIT
+from maljan.tools.errors import SERVER_WORDS_LIMIT, TRANSPORT_MARKERS
 
 if TYPE_CHECKING:
     from maljan.core.config import MCPServerConfig, MemoryConfig, PreprocessingConfig, Settings
@@ -55,12 +55,6 @@ GHIDRA_NOT_ANSWERING: str = (
     "Ghidra at {address} did not answer the load of the job's sample ({what}); "
     "check the Ghidra container is running at that address and "
     "core.static.ghidra.auth_token matches its GHIDRA_MCP_AUTH_TOKEN"
-)
-
-# The client markers that mean the request itself failed, as opposed to
-# Ghidra answering with an error of its own.
-TRANSPORT_MARKERS = frozenset(
-    {"http_status", "request_failed", "exception", "mcp_session_inactive"}
 )
 
 
