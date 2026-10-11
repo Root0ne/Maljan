@@ -24,6 +24,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from maljan.core.reputation import ReputationRecord
 from maljan.schemas.stix_models import get_utcnow
 
 # ---------------------------------------------------------------------------
@@ -1240,6 +1241,20 @@ class EvidenceIndexRow(BaseModel):
     facts: dict[str, Any] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
+class ReputationAnswer(ReputationRecord):
+    """One reputation lookup's answer in the report: its entry, its tool and its read record.
+
+    The record the lookup's declaration read from the answer when the entry
+    was written (``core.reputation.ReputationRecord``), so the Markdown
+    renderer and the console read it as the worker read it, without settings.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    entry_id: str
+    tool: str = ""
+
+
 # ---------------------------------------------------------------------------
 # Top-level report
 # ---------------------------------------------------------------------------
@@ -1385,6 +1400,15 @@ class MalwareReport(BaseModel):
     # list of calls behind them, without their outputs.
     sections: list[EvidenceSection] = Field(default_factory=list)
     evidence_index: list[EvidenceIndexRow] = Field(default_factory=list)
+    # Every reputation answer the run's lookups gave, as each lookup's
+    # declaration read it when its entry was written (``core.reputation``), in
+    # ledger order. ``None`` on a report stored before the records, and then
+    # left out of the dump, so a stored report reads and dumps as it did and
+    # its readers read it the way they always did (``core.legacy_reputation``);
+    # an empty list says the run's lookups established nothing.
+    reputation: list[ReputationAnswer] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     # --- Professional-report front-matter & spine ---
     # All additive/optional. Deterministic extractors fill front_matter /

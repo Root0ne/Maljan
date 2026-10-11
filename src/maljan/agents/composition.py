@@ -678,6 +678,49 @@ def _withheld_servers(settings: Settings, key: str) -> set[str]:
     return excluded
 
 
+def capability_servers(settings: Settings, capability: str) -> list[str]:
+    """The servers a ``ToolRef(kind="capability")`` stands for, in their configured order.
+
+    Every server in ``mcp.servers`` that declares a tool of kind
+    ``capability`` (``core.tool_declarations``) and leaves its binding to the
+    definitions: a server whose own ``agents`` list names the agents it serves
+    is bound by that list, never by a capability as well. Read from the live
+    declarations: which servers an agent is given persists nothing.
+    """
+    from maljan.core.declared_reading import declarations
+
+    declared = declarations(settings)
+    out: list[str] = []
+    for name, server in settings.mcp.servers.items():
+        held = declared.source(f"mcp:{name}")
+        if held is None or list(server.agents or []):
+            continue
+        if any(facts.kind == capability for facts in held.tools.values()):
+            out.append(str(name))
+    return out
+
+
+def _server_refs(settings: Settings, definition: AgentDefinition) -> list[ToolRef]:
+    """The definition's server references, a capability reference as one per server it names.
+
+    A server a capability names that the definition already references whole
+    (by key, or by an earlier capability) is not referenced twice.
+    """
+    from maljan.core.config import ToolRef
+
+    whole = {str(ref.server) for ref in definition.tools if ref.kind == "mcp" and not ref.name}
+    out: list[ToolRef] = []
+    for ref in definition.tools:
+        if ref.kind == "mcp":
+            out.append(ref)
+        elif ref.kind == "capability" and ref.capability:
+            for server in capability_servers(settings, ref.capability):
+                if server not in whole:
+                    whole.add(server)
+                    out.append(ToolRef(kind="mcp", server=server))
+    return out
+
+
 def _mcp_refs(settings: Settings, definition: AgentDefinition, key: str) -> list[ToolRef]:
     """The definition's server references, minus the ones the profile excludes."""
     from maljan.core.config import ALL_SERVERS
@@ -685,9 +728,7 @@ def _mcp_refs(settings: Settings, definition: AgentDefinition, key: str) -> list
     excluded = _withheld_servers(settings, key)
     if ALL_SERVERS in excluded:
         return []
-    return [
-        ref for ref in definition.tools if ref.kind == "mcp" and str(ref.server) not in excluded
-    ]
+    return [ref for ref in _server_refs(settings, definition) if str(ref.server) not in excluded]
 
 
 def mcp_refs_for(settings: Settings, key: str) -> list[ToolRef]:

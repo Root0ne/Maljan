@@ -2372,53 +2372,57 @@ class JudgeAgent(BudgetMeter):
         )
 
     def _holds_a_lookup_tool(self) -> bool:
-        """Whether a reputation server is among this judge's own tools.
+        """Whether a reputation lookup is among this judge's own tools.
 
-        Asked of the servers rather than of the tool names: the loop can only
-        answer an identity question if something in it can look a hash up, and
-        a judge holding only the knowledge sidecar would spend a full timeout
-        to learn nothing.
+        A tool attached to it that declares ``kind: reputation``, or a server
+        its definition references that declares one (``core.reputation``):
+        the loop can only answer an identity question if something in it can
+        look a hash up, and a judge holding only the knowledge sidecar would
+        spend a full timeout to learn nothing.
         """
-        from maljan.agents.tool_pinning import server_of
-        from maljan.core.config import REPUTATION_SERVER_KEYS
+        from maljan.core.declared_reading import declarations
+        from maljan.core.reputation import lookup_servers
 
-        attached = {server_of(tool) for tool in (getattr(self, "tools", None) or [])}
+        if self._holds_attached_lookup_tool():
+            return True
         referenced = {str(ref.server) for ref in self._definition_tool_refs()}
-        return bool((attached | referenced) & set(REPUTATION_SERVER_KEYS))
+        return bool(referenced & lookup_servers(declarations()))
 
     def _holds_attached_lookup_tool(self) -> bool:
-        """Whether a reputation server's tools are in this judge's attached list.
+        """Whether a tool that declares ``kind: reputation`` is in this judge's attached list.
 
         Unlike ``_holds_a_lookup_tool``, a reference that did not attach does
         not count: this answers what the mediator's prompt may say it has.
         """
-        from maljan.agents.tool_pinning import server_of
-        from maljan.core.config import REPUTATION_SERVER_KEYS
+        from maljan.agents.tool_pinning import declared_source_of
+        from maljan.core.declared_reading import declarations
+        from maljan.core.reputation import is_lookup
 
-        attached = {server_of(tool) for tool in (getattr(self, "tools", None) or [])}
-        return bool(attached & set(REPUTATION_SERVER_KEYS))
+        held = declarations()
+        for attached in getattr(self, "tools", None) or []:
+            source = declared_source_of(attached)
+            name = str(getattr(attached, "name", "") or "")
+            if source and is_lookup(held.declaration_for((source, name))):
+                return True
+        return False
 
-    def _can_ask_an_identity_question(self, ledger_servers: Iterable[str] | None) -> bool:
+    def _can_ask_an_identity_question(self, reputation_asked: bool) -> bool:
         """Whether the judge should open its tool loop to ask who this sample is.
 
         The loop used to run on dissent alone, so a run where every analyst
         agreed — and none of them had a reputation tool to agree *about* —
-        ended with a judge holding a bound VirusTotal server it never called
-        and a family of None.
+        ended with a judge holding a bound lookup it never called and a family
+        of None.
 
-        What settles it is the run's own record: the servers the evidence
-        ledger names. An earlier version read the analysts' prose for words
-        like "malware family", which turned the trigger *off* for the sentence
-        an analyst writes when it consulted nothing at all ("no malware family
-        could be determined") — the very case the trigger exists for. A tool
-        call is a fact, and a sentence is not one.
+        What settles it is the run's own record: whether the evidence ledger
+        holds a call to a reputation lookup (``core.reputation.asked``). An
+        earlier version read the analysts' prose for words like "malware
+        family", which turned the trigger *off* for the sentence an analyst
+        writes when it consulted nothing at all ("no malware family could be
+        determined") — the very case the trigger exists for. A tool call is a
+        fact, and a sentence is not one.
         """
-        if not self._holds_a_lookup_tool():
-            return False
-        from maljan.core.config import REPUTATION_SERVER_KEYS
-
-        asked = {str(name) for name in (ledger_servers or ())}
-        return not (asked & set(REPUTATION_SERVER_KEYS))
+        return self._holds_a_lookup_tool() and not reputation_asked
 
     async def mediate(
         self,
@@ -2426,7 +2430,7 @@ class JudgeAgent(BudgetMeter):
         history: list[AgentArgument],
         isr_reports: dict[str, AgentISR] | None = None,
         consensus_threshold: float | None = None,
-        ledger_servers: Iterable[str] | None = None,
+        reputation_asked: bool = False,
         sample: Any = None,
         facts_block: str = "",
         run_state: str = "",
@@ -2466,7 +2470,9 @@ class JudgeAgent(BudgetMeter):
         looped = False
         loop_ending = ""
         needs_tools = self._has_explicit_dissent(isr_reports)
-        identity_unanswered = not needs_tools and self._can_ask_an_identity_question(ledger_servers)
+        identity_unanswered = not needs_tools and self._can_ask_an_identity_question(
+            reputation_asked
+        )
         needs_tools = needs_tools or identity_unanswered
         # Attached before the prompt is written: the sentence about tools below
         # says what this request carries, and a server that would not attach is

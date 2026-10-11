@@ -24,6 +24,8 @@ from functools import cache
 from typing import TYPE_CHECKING, Any
 
 from maljan.core.builtin_reverser_tools import GHIDRA_TOOLS, R2_TOOLS
+from maljan.core.legacy_reputation import STORED_REPUTATION_KINDS
+from maljan.core.reputation import REPUTATION_KIND
 from maljan.tools.errors import BAD_ARGUMENT, TOOL_FAILED
 
 if TYPE_CHECKING:
@@ -393,9 +395,10 @@ _NETWORK_TOOLS: dict[str, dict[str, Any]] = {
 }
 
 # The threat-intel sidecar answers in prose. The live sidecar writes
-# "42/71 malicious" (``services/threatintel-mcp/server.py``), which the console
-# reads (``reputation.ts``); its mock writes "55/70 detections", which the pack
-# reads (``pipeline.triage_pack._DETECTIONS_RE``). Both are declared.
+# "42/71 malicious, 0/71 suspicious" (``services/threatintel-mcp/server.py``);
+# its mock writes "55/70 detections". Both are declared. Its rank puts it
+# after VirusTotal's own server, which the triage pack asks first when both
+# are enabled.
 _THREATINTEL_TOOLS: dict[str, dict[str, Any]] = {
     "capabilities": _CAPABILITIES,
     "check_domain_reputation": {
@@ -403,14 +406,16 @@ _THREATINTEL_TOOLS: dict[str, dict[str, Any]] = {
         "arguments": {"domain": "domain"},
     },
     "check_hash": {
-        "kind": "hash_reputation",
+        "kind": "reputation",
         "arguments": {"hash": "file_hash"},
         "display_name": "Threat intelligence",
         "reputation": {
             "text_patterns": [
                 r"(?i)\b(?P<malicious>\d+)\s*/\s*(?P<total>\d+)\s+detections?\b",
-                r"(?i)\b(?P<malicious>\d+)\s*/\s*(?P<total>\d+)\s+malicious\b",
-            ]
+                r"(?i)\b(?P<malicious>\d+)\s*/\s*(?P<total>\d+)\s+malicious\b"
+                r"(?:,\s*(?P<suspicious>\d+)\s*/\s*\d+\s+suspicious\b)?",
+            ],
+            "rank": 20,
         },
     },
     "check_ip_reputation": {"kind": "indicator_reputation", "arguments": {"ip": "ip_address"}},
@@ -418,12 +423,15 @@ _THREATINTEL_TOOLS: dict[str, dict[str, Any]] = {
 }
 
 # VirusTotal's own server: the lookups and submit tools of ``core.virustotal``;
-# the file report's shape as ``pipeline.triage_pack._reputation_facts``,
-# ``_find_key`` (eight levels) and ``_detection_labels`` read it.
+# the file report's shape read within eight levels of the answer: its engine
+# counts, its popular threat labels, its per-engine detection labels, its
+# dates and its report link, as the API and the agent server write them.
+# Rank 10: the triage pack asks it before the threat-intel sidecar.
 _VT_REPUTATION: dict[str, Any] = {
     "service": "VirusTotal",
     "stats": "/**7/last_analysis_stats",
     "malicious": "/**7/last_analysis_stats/malicious",
+    "suspicious": "/**7/last_analysis_stats/suspicious",
     "labels": [
         "/**7/popular_threat_classification/suggested_threat_label",
         "/**7/popular_threat_classification/popular_threat_name/*/value",
@@ -431,12 +439,24 @@ _VT_REPUTATION: dict[str, Any] = {
     ],
     "detections": "/**7/detections",
     "engines": "/**7/coverage/engines",
+    "first_seen": [
+        "/**7/first_submission_date",
+        "/**7/first_seen_itw_date",
+        "/**7/creation_date",
+    ],
+    "last_seen": [
+        "/**7/last_analysis_date",
+        "/**7/analysis_date",
+        "/**7/last_submission_date",
+    ],
+    "link": ["/**7/report_url", "/**7/gui_url", "/**7/permalink", "/**7/html_url"],
+    "rank": 10,
 }
 _VIRUSTOTAL_TOOLS: dict[str, dict[str, Any]] = {
     "get_analysis": {"kind": "submission_status"},
     "get_domain_report": {"kind": "indicator_report"},
     "get_file_report": {
-        "kind": "file_reputation",
+        "kind": "reputation",
         "arguments": {"hash": "hash"},
         "reputation": _VT_REPUTATION,
         "display_name": "VirusTotal",
@@ -533,6 +553,11 @@ _PACK_TOOLS: dict[str, dict[str, Any]] = {
 # Which kinds each consumer's table is
 # ---------------------------------------------------------------------------
 
+# A reputation lookup about the sample: ``reputation`` (``core.reputation``),
+# and the two kinds the built-in lookups declared before it, which facts
+# records stored then still carry (``core.legacy_reputation``).
+REPUTATION_KINDS: tuple[str, ...] = (REPUTATION_KIND, *STORED_REPUTATION_KINDS)
+
 # Each name table the core reads tools by, as the set of kinds that is exactly
 # that table over every built-in tool (``tests/unit/core/
 # test_every_built_in_declares_what_its_name_tables_say.py`` holds each one
@@ -541,9 +566,7 @@ _PACK_TOOLS: dict[str, dict[str, Any]] = {
 # tool has; a consumer keeps them for stored runs and servers declared by name.
 CONSUMER_KINDS: dict[str, dict[str, Any]] = {
     "evidence_roots._WHOLE_FILE_TOOLS": {"kinds": ["identity", "signing"]},
-    "evidence_roots.FILE_ASSESSMENT_TOOLS": {
-        "kinds": ["file_reputation", "hash_reputation", "reputation_not_asked"]
-    },
+    "evidence_roots.FILE_ASSESSMENT_TOOLS": {"kinds": [*REPUTATION_KINDS, "reputation_not_asked"]},
     "evidence_roots._REFERENCE_TOOLS": {
         "kinds": ["reference", "api_catalogue", "capabilities", "indicator_report"]
     },
@@ -608,17 +631,13 @@ CONSUMER_KINDS: dict[str, dict[str, Any]] = {
         ]
     },
     "markdown._REPUTATION_TOOLS": {
-        "kinds": ["file_reputation", "hash_reputation"],
+        "kinds": list(REPUTATION_KINDS),
         "legacy_names": ["file_report", "hash_lookup"],
     },
     "markdown._SANDBOX_TOOLS": {"same_as": "evidence_bundles.SANDBOX_TOOL_PREFIXES"},
-    "triage_pack._REPUTATION_TOOLS": {
-        "kinds": ["file_reputation", "hash_reputation", "reputation_not_asked"]
-    },
+    "triage_pack._REPUTATION_TOOLS": {"kinds": [*REPUTATION_KINDS, "reputation_not_asked"]},
     "triage_pack.RULE_TOOLS": {"kinds": ["capability_rules", "signature_rules"]},
-    "run_state.reputation": {
-        "kinds": ["file_reputation", "hash_reputation", "reputation_not_asked"]
-    },
+    "run_state.reputation": {"kinds": [*REPUTATION_KINDS, "reputation_not_asked"]},
     "network_analyst._PCAP_TOOLS": {"kinds": ["packet_overview", "dns", "http"]},
     "function_map": {
         "kinds": ["api_hash_resolution", "decoded_strings", "emulated_strings", "function_index"]
@@ -660,8 +679,7 @@ BUILDER_OF_KIND: dict[str, str] = {
     "sandbox_items": "_sandbox_items",
     "sandbox_status": "_sandbox_status",
     "pcap": "_pcap",
-    "file_reputation": "_reputation",
-    "hash_reputation": "_reputation",
+    **{kind: "_reputation" for kind in REPUTATION_KINDS},
 }
 
 # ---------------------------------------------------------------------------

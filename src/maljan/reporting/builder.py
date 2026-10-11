@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 from maljan.analysis.run_summary import NOT_APPLICABLE
 from maljan.core.logger import logger
+from maljan.core.reputation import reputation_of
 from maljan.extractors.attribution import build_family_attribution
 from maljan.extractors.capability_matrix import build_capability_matrix, unmapped_behaviours
 from maljan.pipeline.outcome import (
@@ -52,6 +53,7 @@ from maljan.reporting.models import (
     KeyFinding,
     MalwareReport,
     ReportFrontMatter,
+    ReputationAnswer,
     SeverityAssessment,
     VersionHistoryEntry,
 )
@@ -282,6 +284,7 @@ class MalwareReportBuilder:
             )
             for entry in self.evidence_ledger
         ]
+        report.reputation = _reputation_answers(self.evidence_ledger)
 
         # Deterministic front-matter, version history,
         # and consolidated IOC table (the professional-report scaffolding the
@@ -566,6 +569,20 @@ class MalwareReportBuilder:
             tlp=tlp,
             copyright=f"© {now:%Y} {rc.publisher}",
         )
+
+
+def _reputation_answers(ledger: list[LedgerEntry]) -> list[ReputationAnswer]:
+    """Every reputation answer of the ledger that established something, in ledger order.
+
+    Each is the record its lookup's declaration read when the entry was
+    written (``core.reputation.reputation_of``), from any server.
+    """
+    out: list[ReputationAnswer] = []
+    for entry in ledger:
+        answer = reputation_of(entry)
+        if answer is not None and answer.says_something():
+            out.append(ReputationAnswer(entry_id=entry.id, tool=entry.tool, **answer.model_dump()))
+    return out
 
 
 def _indicators_merged_in_the_bundle(run_summary: dict[str, Any]) -> int:

@@ -404,7 +404,7 @@ def _operator_settings() -> Settings:
                         "command": "x",
                         "tool_facts": {
                             "lookup_hash": {
-                                "kind": "file_reputation",
+                                "kind": "reputation",
                                 "reputation": {
                                     "service": "AcmeIntel",
                                     "stats": "/stats",

@@ -258,8 +258,8 @@ def test_reputation_text_patterns_are_searched_first_match_first() -> None:
             r"(?P<malicious>\d+) bad",
         )
     )
-    assert facts.counts_in_text("x 3/9 detections y") == (3, 9)
-    assert facts.counts_in_text("found 4 bad ones") == (4, None)
+    assert facts.counts_in_text("x 3/9 detections y") == (3, 9, None)
+    assert facts.counts_in_text("found 4 bad ones") == (4, None, None)
     assert facts.counts_in_text("nothing") is None
     with pytest.raises(ValidationError, match="named 'malicious'"):
         ReputationFacts(text_patterns=(r"(\d+)/(\d+)",))
@@ -427,7 +427,7 @@ def test_an_entry_resolves_by_its_recorded_source_and_its_tool_together() -> Non
     assert capa is not None and capa.asserts_techniques and capa.source == "capa"
     pack = d.declaration_for({"source": "pack", "server": "pipeline", "tool": "floss"})
     assert pack is not None and pack.kind == "emulated_strings"
-    assert d.declaration_for(("mcp:virustotal", "get_file_report")).kind == "file_reputation"
+    assert d.declaration_for(("mcp:virustotal", "get_file_report")).kind == "reputation"
     assert d.declaration_for((PACK, "reputation")).kind == "reputation_not_asked"
 
 

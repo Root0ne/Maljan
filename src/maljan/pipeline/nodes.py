@@ -1021,18 +1021,22 @@ def _reputation_lookup(container: ServiceContainer, sha256: str) -> Any:
     """The pack's reputation step, bound to this job's servers and settings.
 
     Returns a callable the pack invokes with its recorder. The callable makes
-    at most one call: ``get_file_report`` on VirusTotal's own server when it
-    is enabled, else ``check_hash`` on the threat-intel sidecar when it is, and
-    otherwise writes the entry that says why there was none — no server
-    enabled, the setting off, the team withholding the server, no hash to ask
-    about. The call goes through the tool server registry exactly as an
-    agent's does and is recorded under that server, so a run's ledger says
-    which service was asked, not only that something was. A server the active
-    team lists in ``exclude_servers`` is never asked, for the same reason its
-    agents never see it.
+    at most one call: to the first enabled server's tool that declares
+    ``kind: reputation`` and the argument it takes a hash in
+    (``core.reputation.pack_lookups``: the lowest declared rank first, then
+    the servers' configured order; the built-in declarations ask VirusTotal's
+    own server before the threat-intel sidecar), and otherwise writes the
+    entry that says why there was none — no lookup enabled, the setting off,
+    the team withholding the server, no hash to ask about. The call goes
+    through the tool server registry exactly as an agent's does and is
+    recorded under that server, so a run's ledger says which service was
+    asked, not only that something was. A server the active team lists in
+    ``exclude_servers`` is never asked, for the same reason its agents never
+    see it.
     """
-    from maljan.core import virustotal
     from maljan.core.config import ALL_SERVERS, ToolRef
+    from maljan.core.declared_reading import declarations
+    from maljan.core.reputation import pack_lookups
 
     def _skip(recorder: Any, why: str) -> Any:
         # The prefix is what tells the pack's rendering a call that was never
@@ -1054,17 +1058,19 @@ def _reputation_lookup(container: ServiceContainer, sha256: str) -> Any:
             return _skip(recorder, "core.triage.reputation is off; no lookup was made")
         if not sha256:
             return _skip(recorder, "the run has no sha256 to look up; no lookup was made")
-        servers = container.config.mcp.servers
-        candidates: list[tuple[str, str, dict[str, Any]]] = [
-            (virustotal.SERVER_KEY, "get_file_report", {"hash": sha256}),
-            ("threatintel", "check_hash", {"file_hash": sha256}),
+        lookups = pack_lookups(container.config.mcp.servers, declarations(container.config))
+        enabled: list[tuple[str, str, dict[str, Any]]] = [
+            (lookup.server, lookup.tool, {lookup.hash_argument: sha256})
+            for lookup in lookups
+            if lookup.enabled
         ]
-        enabled = [c for c in candidates if getattr(servers.get(c[0]), "enabled", False)]
         if not enabled:
+            declared = ", ".join(dict.fromkeys(lookup.server for lookup in lookups))
             return _skip(
                 recorder,
-                f"no reputation server is enabled ({virustotal.SERVER_KEY}, threatintel); "
-                "no lookup was made",
+                f"no reputation server is enabled ({declared}); no lookup was made"
+                if declared
+                else "no server declares a reputation lookup; no lookup was made",
             )
         withheld = _withheld_servers(container)
         usable = (
@@ -1690,19 +1696,15 @@ def _sample_identity(state: AnalysisState) -> dict[str, Any]:
     return {key: value for key, value in identity.items() if str(value or "").strip()}
 
 
-def _ledger_servers(state: AnalysisState) -> set[str]:
-    """Every server the run has recorded a tool call against, by key.
+def _reputation_asked(state: AnalysisState) -> bool:
+    """Whether the run has recorded a call to a reputation lookup, from any server.
 
-    Read off the raw rows rather than through ``LedgerEntry``: the question is
-    which servers were asked, one malformed row must not cost the answer, and
-    a row written by an in-process tool carries no server at all.
+    By each entry's declared kind (``core.reputation.asked``), read off the
+    raw rows: one malformed row must not cost the answer.
     """
-    servers: set[str] = set()
-    for row in state.get("evidence_ledger") or []:
-        name = row.get("server") if isinstance(row, dict) else getattr(row, "server", None)
-        if name:
-            servers.add(str(name))
-    return servers
+    from maljan.core.reputation import asked
+
+    return asked(state.get("evidence_ledger") or [])
 
 
 # ---------------------------------------------------------------------------
@@ -3823,12 +3825,12 @@ def make_negotiation_node(
                     reports=active_reports,
                     history=state.get("discussion_history") or [],
                     isr_reports=state.get("isr_reports") or {},
-                    # Which servers the run has actually called. The mediator
-                    # opens its tool loop to ask who this sample is only when
-                    # nothing has asked a reputation server yet, and that is a
+                    # Whether the run has called a reputation lookup. The
+                    # mediator opens its tool loop to ask who this sample is
+                    # only when nothing has asked one yet, and that is a
                     # question about the ledger rather than about the
                     # analysts' prose.
-                    ledger_servers=_ledger_servers(state),
+                    reputation_asked=_reputation_asked(state),
                     # The sample's own facts. The mediator tells the judge to
                     # look a hash up, and until now no message in the
                     # conversation carried one.

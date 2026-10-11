@@ -520,11 +520,16 @@ def test_the_awaited_resolution_prefixes_the_same_way(real_registry):
 
 
 def test_the_built_in_definitions_name_the_servers_their_role_reads():
-    definitions = Settings(_env_file=None).agents.definitions
+    from maljan.agents.composition import mcp_refs_for
+
+    settings = Settings(_env_file=None)
+    definitions = settings.agents.definitions
 
     def _servers(key: str) -> list[str]:
-        return [str(r.server) for r in definitions[key].tools if r.kind == "mcp"]
+        return [str(r.server) for r in mcp_refs_for(settings, key)]
 
+    # Reputation is reached by capability: the shipped server that declares a
+    # reputation lookup and leaves its binding to the definitions.
     assert _servers("static") == ["analysis", "knowledge", "virustotal"]
     assert _servers("network") == ["network", "knowledge", "virustotal"]
     # The judge reaches for reputation on dissent; VirusTotal's own server is

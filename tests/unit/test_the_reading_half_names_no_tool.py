@@ -11,10 +11,10 @@ lives in ``core.legacy_tool_tables``, read only by ``core.declared_reading``,
 outside these packages.
 
 ``STILL_BY_NAME`` holds, as a multiset, the reads whose own change is another
-branch's (the one reputation path; the triage pack's own steps, which the pack
-writes itself; name-text heuristics for an undeclared listing tool), each with
-its reason. Its counts may only shrink: a new read, a moved one, or one more of
-the same, fails.
+branch's (the triage pack's own steps, which the pack writes itself;
+name-text heuristics for an undeclared listing tool), each with its reason.
+Its counts may only shrink: a new read, a moved one, or one more of the same,
+fails.
 """
 
 from __future__ import annotations
@@ -29,7 +29,6 @@ from tests.tool_name_reads import NAME_READ_SNIPPETS, findings
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGES = ("pipeline", "analysis", "agents")
 
-_REPUTATION = "the reputation tables; the one reputation path replaces them"
 _PACK_STEP = (
     "the triage pack reading or rendering the entry its own step just wrote, by that step's "
     "name; the pack as a declared step list replaces it"
@@ -41,20 +40,6 @@ _LISTING_WORDS = (
 
 # ((module, what, code), count) -> why it is still by name.
 STILL_BY_NAME: dict[tuple[str, str, str], tuple[int, str]] = {
-    (
-        "pipeline/run_state.py",
-        "compares",
-        "e.tool in ('get_file_report', 'check_hash', 'reputation')",
-    ): (1, _REPUTATION),
-    (
-        "pipeline/triage_pack.py",
-        "imports",
-        "from maljan.core.legacy_tool_tables import FILE_ASSESSMENT_TOOLS",
-    ): (1, _REPUTATION),
-    ("pipeline/triage_pack.py", "compares", "entry.tool in ('get_file_report', 'check_hash')"): (
-        1,
-        _REPUTATION,
-    ),
     ("pipeline/triage_pack.py", "looks", "_ESTABLISHED.get(tool)"): (1, _PACK_STEP),
     ("pipeline/triage_pack.py", "looks", "_GROUP_LABELS.get(entry.tool, entry.tool)"): (
         2,

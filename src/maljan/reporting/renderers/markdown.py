@@ -3757,25 +3757,40 @@ def _reputation_line(report: MalwareReport) -> str:
         for row in section.rows:
             if len(row) >= 2:
                 rows.setdefault(str(row[0]).strip().lower(), str(row[1]))
-    # The engine counts: the section's own rows where the lookup was lifted into
-    # them, and otherwise the flattened answer a stored report carries.
-    blob = " ".join(rows.values())
-    flagged = rows.get("engines malicious") or _first_match(
-        r"last_analysis_stats=malicious=(\d+)", blob
-    )
-    engines = rows.get("engines") or _first_match(r"engines=(\d+)", blob)
-    source = rows.get("source", "").split(" via ")[0].strip() or "Reputation lookup"
-    if flagged and engines:
-        when = rows.get("analysis date")
-        said = f"{source}: {flagged} of {engines} engines flag it as malicious"
-        return said + (f" (analysis {when}; {where})" if when else f" ({where})")
+    if report.reputation is not None:
+        # The records each lookup's declaration read from its answer
+        # (``core.reputation``), from any server, named by the service the
+        # declaration names.
+        answers = [answer for answer in report.reputation if answer.entry_id in ids]
+        counted = next(
+            (a for a in answers if a.malicious is not None and a.engine_count() is not None),
+            None,
+        )
+        if counted is not None:
+            said = (
+                f"{counted.service or 'Reputation lookup'}: {counted.malicious} of "
+                f"{counted.engine_count()} engines flag it as malicious"
+            )
+            when = counted.last_seen
+            return said + (f" (analysis {when}; {where})" if when else f" ({where})")
+        flagged = next((a for a in answers if a.malicious is not None), None)
+        if flagged is not None:
+            said = (
+                f"{flagged.service or 'Reputation lookup'}: {flagged.malicious} engines flag "
+                "it as malicious"
+            )
+            return f"{said} ({where})"
+    else:
+        # A report stored before the records: its section rows, as it was read.
+        from maljan.core.legacy_reputation import stored_report_counts
+
+        flagged_count, engines, source = stored_report_counts(rows)
+        if flagged_count and engines:
+            when = rows.get("analysis date")
+            said = f"{source}: {flagged_count} of {engines} engines flag it as malicious"
+            return said + (f" (analysis {when}; {where})" if when else f" ({where})")
     facts = [f"{k} {v}" for k, v in rows.items() if k in _REPUTATION_KEYS]
     return f"{where}: {'; '.join(facts)}" if facts else f"{where}; see Appendix A"
-
-
-def _first_match(pattern: str, text: str) -> str:
-    match = re.search(pattern, text)
-    return match.group(1) if match else ""
 
 
 def _environment_line(report: MalwareReport) -> str:

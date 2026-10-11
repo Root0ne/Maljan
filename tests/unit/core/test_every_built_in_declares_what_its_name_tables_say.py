@@ -20,7 +20,7 @@ import pytest
 
 from maljan.core import virustotal
 from maljan.core.builtin_declarations import BUILDER_OF_KIND, CONSUMER_KINDS, READERS
-from maljan.core.config import REPUTATION_SERVER_KEYS, REQUIRED_ENV_ALLOW, Settings
+from maljan.core.config import REQUIRED_ENV_ALLOW, Settings
 from maljan.core.tool_declarations import PACK, SourceRef, ToolDeclarations, select
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -161,7 +161,6 @@ def _tables() -> dict[str, Callable[[str], bool]]:
     """Each consumer table as a membership test on a bare tool name, as the code reads it."""
     from maljan.agents import network_analyst, static_analyst
     from maljan.core import legacy_tool_tables as legacy
-    from maljan.pipeline import triage_pack
     from maljan.reporting import legacy_tool_names
 
     def names(values: object) -> Callable[[str], bool]:
@@ -179,9 +178,9 @@ def _tables() -> dict[str, Callable[[str], bool]]:
         "validation._REFERENCE_SECTION_SOURCES": names(legacy.REFERENCE_SECTION_SOURCES),
         "validation._SAMPLE_VALUE_SECTION_SOURCES": names(legacy.SAMPLE_VALUE_SECTION_SOURCES),
         "validation._RULE_MATCH_SECTION_SOURCES": names(legacy.RULE_MATCH_SECTION_SOURCES),
-        "triage_pack._REPUTATION_TOOLS": names(triage_pack._REPUTATION_TOOLS),
+        "triage_pack._REPUTATION_TOOLS": names(legacy.FILE_ASSESSMENT_TOOLS),
         "triage_pack.RULE_TOOLS": names(legacy.RULE_TOOLS),
-        "run_state.reputation": names(_read_inline_tables()["run_state.reputation"]),
+        "run_state.reputation": names(legacy.FILE_ASSESSMENT_TOOLS),
         "network_analyst._PCAP_TOOLS": names(t for t, _ in network_analyst._PCAP_TOOLS),
         "function_map": names(legacy.FUNCTION_MAP_TOOLS),
         "static_analyst._LOAD_TOOL": names((static_analyst._LOAD_TOOL,)),
@@ -200,23 +199,9 @@ def _read_inline_tables() -> dict[str, tuple[str, ...]]:
     the consumer test then holds the declaration to the new table. The
     reporting ones are read from the legacy module that keeps them.
     """
-    import ast
-    import inspect
-
-    from maljan.pipeline import run_state
     from maljan.reporting import legacy_tool_names
 
-    def literal(pattern: str, text: str) -> tuple[str, ...]:
-        found = re.findall(pattern, text)
-        assert len(found) == 1, (pattern, found)
-        value = ast.literal_eval(found[0])
-        return tuple(value) if isinstance(value, tuple) else (value,)
-
-    state = inspect.getsource(run_state)
     return {
-        "run_state.reputation": literal(
-            r"reputation = \[e for e in pack if e\.tool in (\([^)]*\))\]", state
-        ),
         "figures.code_listing": (legacy_tool_names.CODE_LISTING_TOOL,),
         "ledger_projection.technique_hits": legacy_tool_names.TECHNIQUE_HIT_TOOLS,
         "stix_renderer.recovering": (
@@ -230,7 +215,6 @@ def _read_inline_tables() -> dict[str, tuple[str, ...]]:
 
 def test_the_inline_tables_are_read_as_the_code_writes_them_today() -> None:
     assert _read_inline_tables() == {
-        "run_state.reputation": ("get_file_report", "check_hash", "reputation"),
         "figures.code_listing": ("decompile_function",),
         "ledger_projection.technique_hits": ("capa",),
         "stix_renderer.recovering": ("floss", "decode_string_blobs", "strings", "iocs_from_file"),
@@ -351,8 +335,10 @@ def test_the_asserting_sources_are_the_declared_asserting_tools(declared: ToolDe
 def test_the_reputation_servers_are_the_servers_with_the_reputation_role(
     declared: ToolDeclarations,
 ) -> None:
+    from maljan.core.reputation import lookup_servers
+
     keys = {ref.key for ref in declared.servers_with_role("reputation") if ref.kind == "mcp"}
-    assert keys == set(REPUTATION_SERVER_KEYS)
+    assert keys == lookup_servers(declared) == {"threatintel", "virustotal"}
 
 
 def test_the_pinned_servers_are_the_servers_that_read_the_staged_sample(
@@ -540,29 +526,32 @@ def test_the_technique_depth_bound_is_the_summarys(declared: ToolDeclarations) -
 def test_the_declared_reputation_paths_read_the_virustotal_answer(
     declared: ToolDeclarations,
 ) -> None:
-    from maljan.pipeline.triage_pack import _stats_malicious
+    from maljan.core.reputation import read_answer
 
     answer = json.loads((LEDGER / "get_file_report.json").read_text(encoding="utf-8"))
     facts = declared.declaration_for(("mcp:virustotal", "get_file_report"))
     assert facts is not None and facts.reputation is not None
-    malicious = select(answer, facts.reputation.malicious)
-    assert (malicious[0] if malicious else None) == _stats_malicious(answer)
-    engines = select(answer, facts.reputation.engines)
-    assert engines and engines[0] == answer["coverage"]["engines"]
+    stats = answer["data"]["last_analysis_stats"]
+    read = read_answer(facts, output=json.dumps(answer), server="virustotal")
+    assert read.malicious == stats["malicious"]
+    assert read.suspicious == stats["suspicious"]
+    assert read.stats == {k: v for k, v in stats.items() if isinstance(v, int)}
+    assert read.total == sum(v for v in stats.values() if isinstance(v, int))
+    assert read.engines == answer["coverage"]["engines"]
+    assert read.detections == [" ".join(d.split()) for d in answer["data"]["detections"]]
+    assert read.last_seen == answer["analysis_date"]
+    assert read.link == answer["report_url"]
+    assert read.service == "VirusTotal"
+    assert read.summary == ""
 
 
 def test_both_threat_intel_prose_forms_are_read(declared: ToolDeclarations) -> None:
-    from maljan.pipeline.triage_pack import _DETECTIONS_RE
-
     facts = declared.declaration_for(("mcp:threatintel", "check_hash"))
     assert facts is not None and facts.reputation is not None
     mock = "VirusTotal: 55/70 Detections for this hash"
     live = "VirusTotal: 42/71 malicious, 3/71 suspicious"
-    assert facts.reputation.counts_in_text(mock) == (55, 70)
-    assert facts.reputation.counts_in_text(live) == (42, 71)
-    assert _DETECTIONS_RE.search(mock) and not _DETECTIONS_RE.search(live)
-    console = (ROOT / "apps/web/src/components/analysis/reputation.ts").read_text()
-    assert "malicious" in console
+    assert facts.reputation.counts_in_text(mock) == (55, 70, None)
+    assert facts.reputation.counts_in_text(live) == (42, 71, 3)
 
 
 @pytest.mark.parametrize(("tool", "rows"), [("strings", 1), ("capa", 1), ("yara_scan", 1)])
