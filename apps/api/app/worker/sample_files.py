@@ -200,6 +200,8 @@ def _open_mirror(subdir: str) -> tuple[Path, int]:
                     "directory"
                 )
             _write_marker(fd)
+        # A directory only the worker may list and enter: 0o700 is owner-only, x is the entering.
+        # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions — owner-only directory  # noqa: E501
         os.fchmod(fd, 0o700)
     except BaseException:
         os.close(fd)
