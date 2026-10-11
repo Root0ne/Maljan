@@ -19,6 +19,42 @@ whole set where its definition asks for the sandbox tools); a claim cites an
 item by its id, in brackets or in its evidence field. See
 [the triage pack](/architecture/#the-triage-pack).
 
+## One neutral report
+
+Whichever sandbox produced it, a report is read into one neutral form
+(`SandboxReport`, `maljan.schemas.sandbox_report`) and every consumer reads
+that form's document (`maljan.schemas.sandbox_document`): the analysts'
+inputs, the sandbox tools, the triage pack's sections and rule events, the
+report and the run summary. A consumer reads each part by its name, never by a
+sandbox's own key. The form holds:
+
+| Part | In the document |
+| :-- | :-- |
+| The target and its hashes (SHA-256, MD5, SHA-1, SHA-512, ssdeep, name, type, size) | `target` |
+| The processes, and their tree as the sandbox nests it | `behavior.processes`, `behavior.processtree` |
+| The behaviour: API calls, per-process API counts, generic events, the resolved API names | `behavior.calls`, `behavior.apistats`, `behavior.generic`, `behavior.summary.resolved_apis` |
+| The file, registry, mutex, command and service lists | `behavior.summary.*` |
+| The signatures, with the scale their format declares | `signatures` (the scale is recorded on the run) |
+| The network: DNS, HTTP, TCP, UDP, hosts, domains, TLS, ICMP, the capture | `network.*` |
+| The dropped files and the screenshots | `dropped`, `screenshots` |
+| What the sandbox extracted: configurations and payloads | `extracted` |
+| The process dumps and the recorded process memory | `procdumps`, `memory` |
+| The alerts an intrusion detection engine raised, beside its other logs | `ids.alerts`, `ids` |
+| The sections the sandbox cannot produce | `unavailable` |
+| Namespaced platform rows (`linux.systemd`, `android.permissions`, ...) | `channels` |
+| Every block with no place above, under the source's own name | its own name |
+
+Nothing a reader reads is dropped: a field of a process or a signature that no
+part names is kept on the row under `extra`, and a block with no part of its
+own is kept under its own name. A CAPE, Cuckoo or mock report keeps its own
+arrangement: its document is the report itself, key for key and in order, with
+the four blocks CAPE names otherwise under the document's words in the same
+place (`CAPE` is `extracted`, `procdump` is `procdumps`, `procmemory` is
+`memory`, `suricata` is `ids`). A Triage report keeps its target's other
+digests, each process's guest pid and parent and the sample mark, each
+signature's tags and label, what Triage extracted, and the overview's analysis,
+task and target blocks.
+
 | Provider | Detonates | Reached at |
 | :-- | :-- | :-- |
 | `mock` (default) | nothing | — |
@@ -98,7 +134,7 @@ route read the declaration, never a format's name:
 | `detect` | How a payload is recognised: a list of groups of field tests, and the format matches when every test of any one group holds. A test is `{path, types, non_empty, contains}`: the value at `path` must be one of `types` (`object`, `array`, `string`, `number`, `boolean`, `null`), non-empty, or hold `contains` in its text (a string, number or boolean, compared without regard to case). |
 | `task_id_paths` | Where the source sandbox's task id sits; the first string or number (not empty text) a path names wins. Any other value (an object, a list, a boolean, null) counts as absent. |
 | `target_sha256_paths` | Where the report's claimed target sha256 sits; the first non-empty string or number wins. It is compared with the sample's hash, and a mismatch is a warning, not a refusal. |
-| `reader` | Which report reader reads the format into the internal sandbox report: `cape2`, `cuckoo`, `triage`, or empty for a format no reader reads yet. An upload of a format with no reader is refused (422) with a message saying so. |
+| `reader` | The id of the registered report reader that reads the format into the neutral report: `cape2`, `cuckoo`, `triage`, `generic` or one an operator registers ([report readers](#report-readers-are-registered)), or empty for a format no reader reads yet. An upload of a format whose reader is not registered is refused (422) with a message saying so. |
 | `signature_scale` | What a signature's severity number means: `{name, rungs}`, the rung of the severity ladder (Informational, Low, Medium, High, Critical) each score from 1 up names. Absent where the format documents no scale. |
 | `display_name` | The name published text gives the sandbox whose report this is, such as the sentence that says a process the sandbox marks as the sample's is disputed (`Triage`, `CAPE`, `Cuckoo` for the built-ins); empty uses the format's `name`. |
 
@@ -150,8 +186,54 @@ records each declaration as it ran, merged over its built-in.
 An uploaded report's format is recorded on its row when it is accepted, and the
 run reads the report as that format; it is never sniffed again. If the
 recorded format has since been removed from the declarations or from
-`sandbox.upload.allowed_formats`, or declared without a reader, the job stops
+`sandbox.upload.allowed_formats`, or names no registered reader, the job stops
 with a message saying so.
+
+### Report readers are registered
+
+A report reader declares an `id`, `sniff(payload)` (whether a payload is a
+report it reads) and `read(payload)` (the payload as the neutral report), and
+what its reports can fill. The shipped readers are `cape2`, `cuckoo`, `triage`,
+`mock` (the mock sandbox's fixtures) and `generic` (the JSONPath mapping of
+`sandbox.rest.mapping`). An operator's own reader is a subclass of
+`maljan.providers.sandbox.readers.ReportReader`, registered at run time with
+`register_report_reader` or by an installed package's entry point in the
+`maljan.sandbox_report_readers` group:
+
+```python
+from maljan.providers.sandbox.readers import ReportReader
+from maljan.schemas.sandbox_report import SandboxReport, SandboxTarget
+
+
+class AcmeBoxReader(ReportReader):
+    id = "acmebox"
+    display_name = "Acme Box"
+
+    def sniff(self, payload):
+        return isinstance(payload.get("acmebox"), dict)
+
+    def read(self, payload, *, provider, task_id="", fmt=None, **context):
+        report = SandboxReport(
+            provider=provider,
+            source_format=self.id,
+            target=SandboxTarget(sha256=payload["subject"]["sha256"]),
+            # ... processes, signatures, network, extracted, unavailable ...
+        )
+        return self._scaled(report, fmt)
+```
+
+```toml
+[project.entry-points."maljan.sandbox_report_readers"]
+acmebox = "acme_maljan.reader:AcmeBoxReader"
+```
+
+The formats a payload is tried against are the registry's: the declared
+formats above, then each registered reader no declaration names, recognised by
+its own `sniff`. `GET /api/v1/sandbox-report-formats` lists both, and
+`sandbox.upload.allowed_formats` names them by id. A registered reader is read
+by the upload route, the upload provider and the REST provider
+(`sandbox.rest.report.format`) alike, and its report reaches the analysts, the
+triage pack, the report and the console's Dynamic tab as a built-in's does.
 
 ### Signature scales on the run
 
@@ -159,8 +241,10 @@ The scale a run's signatures are read on is the one its sandbox provider
 declares for the report it read: the `signature_scale` of the report's format
 among the declarations (a live CAPE or Triage run and a REST report in a
 built-in format take that format's, merged with any declaration under its name;
-an uploaded report takes its recorded format's), or for a `generic` REST report
-`sandbox.rest.report.signature_scale_rungs` and `signature_scale_name`. The
+an uploaded report takes its recorded format's), for a REST report whose reader
+no format declares (the `generic` mapping's)
+`sandbox.rest.report.signature_scale_rungs` and `signature_scale_name`, and
+otherwise the scale the report's registered reader declares. The
 worker records it on the run summary as `sandbox_signature_scale` (`null` where
 none is declared), and the console's Dynamic tab colours and names each
 signature's number by it. A run recorded before scales were has no such key and
@@ -176,8 +260,8 @@ coding it:
 | `sandbox.rest.auth` | The header, scheme and token the API takes. |
 | `sandbox.rest.submit` | The multipart submission (`method`, `path`, `file_field`, `extra_fields`, `submit_fields`) and the JSONPath of the task id in its answer. |
 | `sandbox.rest.status` | The poll path, the JSONPath of the state, and the done and failed values. |
-| `sandbox.rest.report` | Where the report is, its format (`cape2`, `cuckoo`, `triage` or `generic`), an optional capture path, and for a `generic` report its signature scale (`signature_scale_rungs`, `signature_scale_name`). |
-| `sandbox.rest.mapping` | For a `generic` report, an RFC 9535 JSONPath per channel: processes, calls, signatures, DNS, HTTP, TCP, UDP, hosts, domains, dropped files, registry. |
+| `sandbox.rest.report` | Where the report is, the registered reader that reads it (`cape2`, `cuckoo`, `triage`, `generic` or one an operator registers), an optional capture path, and for a `generic` report its signature scale (`signature_scale_rungs`, `signature_scale_name`). |
+| `sandbox.rest.mapping` | For a `generic` report, an RFC 9535 JSONPath per channel: processes, calls, signatures, DNS, HTTP, TCP, UDP, hosts, domains, dropped files, registry; and per report place with no channel (`places`): `process_tree`, `resolved_apis`, `extracted`, `procdumps`, `memory`, `ids_alerts`, each match kept as the sandbox published it. |
 
 An empty path in `mapping` says the sandbox does not publish that channel, and
 the report lists it as unavailable rather than reading like a clean sample by
