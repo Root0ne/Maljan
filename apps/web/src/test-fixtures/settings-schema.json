@@ -6947,7 +6947,7 @@
       "triage",
       "generic"
      ],
-     "choices_from": null,
+     "choices_from": "sandbox_report_readers",
      "editable": true,
      "editor": "rest_sandbox",
      "group": "sandbox",

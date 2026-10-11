@@ -147,7 +147,7 @@ def test_a_declared_format_without_a_reader_is_refused_at_upload_in_words(monkey
     api, sample = _client(monkeypatch, sandbox)
     r = _upload(api, sample, _acme())
     assert r.status_code == 422
-    assert "declared without a reader" in r.json()["detail"]
+    assert "names no registered reader" in r.json()["detail"]
     module.put_object.assert_not_awaited()
 
 
