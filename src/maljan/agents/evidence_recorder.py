@@ -315,6 +315,7 @@ class EvidenceRecorder:
         not_shown: int | None = None,
         cut: int | None = None,
         guard_answer: bool = False,
+        source: str | None = None,
     ) -> LedgerEntry:
         """Append one entry and return it, so the caller can quote its id.
 
@@ -327,7 +328,10 @@ class EvidenceRecorder:
         and ``output``, what the model was handed instead, is what the run's
         corpus remembers. ``cut`` is the characters the tool-output guardrail
         dropped from an answer it cut to fit: the entry keeps what the model
-        read and is marked ``truncated`` with ``chars_dropped``.
+        read and is marked ``truncated`` with ``chars_dropped``. ``source`` is
+        where the tool's declaration lives (``mcp:<key>``, ``provider:<id>``,
+        ``sandbox``, ``pack``), as the caller knows it; it is never guessed
+        later from the tool's name.
         """
         if repeated_of:
             repeated_of = self.holder_of(repeated_of)
@@ -354,6 +358,7 @@ class EvidenceRecorder:
             model=self.model or None,
             not_shown=not_shown is not None,
             chars_dropped=int(cut or 0) if not_shown is None else 0,
+            source=source,
         )
         self.entries.append(entry)
         self._by_id[entry.id] = entry
@@ -415,6 +420,7 @@ class EvidenceRecorder:
         first: str,
         said: str,
         ok: bool = True,
+        source: str | None = None,
     ) -> LedgerEntry:
         """File a call the repeat guard answered without running, as a repeat of ``first``.
 
@@ -438,10 +444,17 @@ class EvidenceRecorder:
             started_at=time.time(),
             duration_ms=0,
             repeated_of=str(first),
+            source=source,
         )
 
     def record_guard_answer(
-        self, *, tool: str, args: dict[str, Any] | None, server: str | None, said: str
+        self,
+        *,
+        tool: str,
+        args: dict[str, Any] | None,
+        server: str | None,
+        said: str,
+        source: str | None = None,
     ) -> LedgerEntry:
         """File a call a guard answered without running any tool, as the guard's answer.
 
@@ -466,6 +479,7 @@ class EvidenceRecorder:
             started_at=time.time(),
             duration_ms=0,
             guard_answer=True,
+            source=source,
         )
 
 
@@ -1005,7 +1019,7 @@ def _record_tool(
     from langchain_core.tools import StructuredTool
 
     from maljan.agents.output_shortening import narrowing_arguments
-    from maljan.agents.tool_pinning import server_of
+    from maljan.agents.tool_pinning import declared_source_of, server_of
 
     func = getattr(tool, "func", None)
     coroutine = getattr(tool, "coroutine", None)
@@ -1015,6 +1029,9 @@ def _record_tool(
 
     name = str(getattr(tool, "name", "") or "unknown")
     server = server_of(tool) or None
+    # Where the tool's declaration lives (``core.tool_declarations``), read
+    # from the tool itself as it was built and written on every entry.
+    source = declared_source_of(tool)
     accepted = tuple(getattr(args_schema, "model_fields", {}) or {})
 
     # The arguments of this tool that reach a part its answer left out, read
@@ -1059,7 +1076,9 @@ def _record_tool(
         else:
             context_budget.charge(len(TOOL_PHASE_ENDED_NOTICE), recorder.agent)
             said = TOOL_PHASE_ENDED_NOTICE
-        recorder.record_guard_answer(tool=name, args=kwargs, server=server, said=said)
+        recorder.record_guard_answer(
+            tool=name, args=kwargs, server=server, source=source, said=said
+        )
         return said
 
     # How often each self-named call has been asked about in this loop. The
@@ -1094,7 +1113,9 @@ def _record_tool(
             except Exception as exc:  # noqa: BLE001 — a count never costs a call
                 logger.debug("the question was not counted (%s).", exc)
         notice = self_named_notice(name, found)
-        recorder.record_guard_answer(tool=name, args=kwargs, server=server, said=notice)
+        recorder.record_guard_answer(
+            tool=name, args=kwargs, server=server, source=source, said=notice
+        )
         return notice
 
     def _already_answered(kwargs: dict[str, Any]) -> str | None:
@@ -1114,6 +1135,7 @@ def _record_tool(
                 tool=name,
                 args=kwargs,
                 server=server,
+                source=source,
                 first=earlier,
                 said=earlier_chunk_sentence(name, earlier),
             )
@@ -1132,7 +1154,13 @@ def _record_tool(
         # is handed the notice with no id of its own: an id here would be one
         # a report could cite for evidence that does not exist.
         recorder.record_repeat(
-            tool=name, args=kwargs, server=server, first=first, said=notice, ok=not failed
+            tool=name,
+            args=kwargs,
+            server=server,
+            source=source,
+            first=first,
+            said=notice,
+            ok=not failed,
         )
         return notice
 
@@ -1212,6 +1240,7 @@ def _record_tool(
             tool=name,
             args=kwargs,
             server=server,
+            source=source,
             output=read_again_note(holder),
             ok=not recorder.entry_failed(holder),
             started_at=wall_clock,
@@ -1267,6 +1296,7 @@ def _record_tool(
             tool=name,
             args=kwargs,
             server=server,
+            source=source,
             # A repeat keeps the note, not a second copy of the listing the
             # entry it names already holds.
             output=same or text,
@@ -1325,6 +1355,7 @@ def _record_tool(
             tool=name,
             args=sent if sent is not None else kwargs,
             server=server,
+            source=source,
             output=message,
             ok=False,
             error=message,

@@ -18,7 +18,7 @@ import threading
 import time
 import traceback
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -30,7 +30,7 @@ from maljan.agents.base_agent import CANCEL_DELIVERY_GRACE
 from maljan.core.cancellation import Cancellation, JobCancelled
 from maljan.core.config import Settings as _CoreSettings
 from maljan.core.settings_catalog import core_catalog
-from maljan.core.settings_overrides import build_settings, public_snapshot
+from maljan.core.settings_overrides import build_settings, public_snapshot, trim_declarations
 from maljan.pipeline.events import MODEL_USAGE as MODEL_USAGE_EVENT
 from maljan.pipeline.outcome import absent_analysis_message
 from pydantic import ValidationError
@@ -356,6 +356,11 @@ def settings_snapshot(
     without re-deriving it from the (masked) values alone.
     """
     snap: dict[str, Any] = public_snapshot(core_settings, _SECRET_PATHS)
+    # The declarations an operator set are recorded; the rest are named by a
+    # digest (``settings_overrides.trim_declarations``). The stored values are
+    # read from ``overridden_keys`` when it is the overrides mapping itself.
+    stored = overridden_keys if isinstance(overridden_keys, Mapping) else {}
+    snap = trim_declarations(snap, core_settings, stored)
     snap["overridden_keys"] = sorted(overridden_keys or [])
     return snap
 
@@ -2627,7 +2632,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     note=_note,
                     transcript=transcript,
                     core_settings=core_settings,
-                    override_keys=overrides.keys(),
+                    override_keys=overrides,
                     hash_mismatch_reason=_report_hash_mismatch_reason,
                 )
                 if _kind == STOP_SHUTDOWN:
@@ -2739,7 +2744,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         stix_bundle_for_persist, _run_summary = _report_inputs(
             pipeline_result,
             core_settings=core_settings,
-            override_keys=overrides.keys(),
+            override_keys=overrides,
             hash_mismatch_reason=_report_hash_mismatch_reason,
         )
 
@@ -2930,7 +2935,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     note=kept_report_note(failed_step, exc, error_id),
                     transcript=transcript,
                     core_settings=core_settings,
-                    override_keys=overrides.keys(),
+                    override_keys=overrides,
                     hash_mismatch_reason=_report_hash_mismatch_reason,
                 )
             await mark_job_failed(db_session, job_uuid, reason=reason, error_id=error_id)

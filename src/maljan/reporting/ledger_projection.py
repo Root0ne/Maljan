@@ -1608,6 +1608,7 @@ def network_from_sandbox_report(report: dict[str, Any] | None) -> NetworkIOCs | 
         args={},
         server=None,
         output=json.dumps(answer),
+        source="sandbox",
     )
     return network_from_ledger([entry])
 

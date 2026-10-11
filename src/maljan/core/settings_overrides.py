@@ -118,6 +118,60 @@ def public_snapshot(settings: Settings, secret_keys: Iterable[str]) -> dict[str,
     return snap
 
 
+def declaration_blocks(settings: Settings) -> dict[str, str]:
+    """Each server block's dotted path, by the source its declaration is read under."""
+    from maljan.core.tool_declarations import PROVIDER_BLOCKS
+
+    blocks = {f"mcp:{key}": f"mcp.servers.{key}" for key in settings.mcp.servers}
+    blocks.update(PROVIDER_BLOCKS)
+    return blocks
+
+
+def trim_declarations(
+    snap: dict[str, Any], settings: Settings, overrides: Mapping[str, Any]
+) -> dict[str, Any]:
+    """``snap`` with each block's declaration recorded only where an operator set it.
+
+    A built-in's shipped declaration is the same on every run of a release
+    and runs to a thousand leaves, so the record keeps, of the declaration
+    fields beside ``sample_open``, only those the stored overrides set (a
+    provider block's leaf row, or the field in a server's entry of the stored
+    tool-server map), and names everything in force by a short digest per
+    source (``declaration_digest.<source>``) and one of the shipped data
+    (``declaration_digest.shipped``). Nothing re-renders a stored run from
+    these: a stored run is read by the legacy readers.
+    """
+    from maljan.core.builtin_declarations import shipped_digest
+    from maljan.core.tool_declarations import SNAPSHOT_DIGESTED_FIELDS, ToolDeclarations
+
+    stored_map = overrides.get("mcp.servers")
+    stored_map = stored_map if isinstance(stored_map, Mapping) else {}
+    kept_prefixes: list[str] = []
+    dropped_prefixes: list[str] = []
+    for path in declaration_blocks(settings).values():
+        for name in SNAPSHOT_DIGESTED_FIELDS:
+            field_path = f"{path}.{name}"
+            if path.startswith("mcp.servers."):
+                entry = stored_map.get(path.removeprefix("mcp.servers."))
+                operator_set = isinstance(entry, Mapping) and name in entry
+            else:
+                operator_set = any(
+                    key == field_path or key.startswith(f"{field_path}.") for key in overrides
+                )
+            (kept_prefixes if operator_set else dropped_prefixes).append(field_path)
+    dropped = tuple(dropped_prefixes)
+    dropped_dotted = tuple(f"{p}." for p in dropped_prefixes)
+    out = {
+        key: value
+        for key, value in snap.items()
+        if not (key in dropped or key.startswith(dropped_dotted))
+    }
+    for source, digest in sorted(ToolDeclarations.from_settings(settings).digests().items()):
+        out[f"declaration_digest.{source}"] = digest
+    out["declaration_digest.shipped"] = shipped_digest()
+    return out
+
+
 # Everything between "://" and the LAST "@" before the path is userinfo. Greedy
 # on purpose: a password may itself contain "@" or ":" and the username may be
 # empty (redis://:password@host is the usual Redis AUTH shape).

@@ -31,6 +31,11 @@ from maljan.core.config import (
     _builtin_servers,
     builtin_env_allow,
 )
+from maljan.core.tool_declarations import (
+    check_own_prefix,
+    fill_declaration,
+    strip_declaration_defaults,
+)
 from pydantic import ValidationError
 
 SERVER_MAP_KEY = "core.mcp.servers"
@@ -88,6 +93,7 @@ def validate_server_map(
         raise ServerMapError({"": "the server map must be an object keyed by server name"})
 
     out: dict[str, Any] = {}
+    builtins = _builtin_servers()
     for key, entry in value.items():
         if not _KEY_RE.match(str(key)):
             errors[str(key)] = (
@@ -116,12 +122,28 @@ def validate_server_map(
             for err in exc.errors():
                 errors[f"{key}." + ".".join(str(p) for p in err["loc"])] = err["msg"]
             continue
+        try:
+            check_own_prefix(key, model.tool_facts)
+            for pattern in model.error_patterns:
+                check_own_prefix(key, pattern.tools)
+        except ValueError as exc:
+            errors[f"{key}.tool_facts"] = str(exc)
+            continue
         if model.transport == "stdio" and not model.command:
             errors[f"{key}.command"] = "a stdio server needs a command to launch"
         if model.transport != "stdio" and not model.url:
             errors[f"{key}.url"] = "an http server needs a URL"
+        builtin = builtins.get(key)
+        if builtin is not None:
+            # A declaration field the entry left out is the built-in's, as on
+            # load; one equal to the built-in's is then not stored, so the row
+            # keeps following the shipped declaration and only an operator's
+            # own value (an empty one included) is written down.
+            fill_declaration(model, builtin)
         dumped = model.model_dump(mode="json")
         dumped.pop("auth_token", None)
+        if builtin is not None:
+            dumped = strip_declaration_defaults(dumped, builtin)
         if key in BUILTIN_SERVER_KEYS:
             # The row an operator saves is the one every later load starts
             # from, so the names the sidecar cannot run without are written
@@ -139,11 +161,11 @@ def validate_server_map(
     # A built-in the body left out is re-seeded rather than removed: the
     # settings model would put it back on the next load anyway, and a stored
     # map missing it would silently discard the operator's own edits to it.
-    for key, default in _builtin_servers().items():
+    for key, default in builtins.items():
         if key not in out:
             entry = default.model_dump(mode="json")
             entry.pop("auth_token", None)
-            out[key] = entry
+            out[key] = strip_declaration_defaults(entry, default)
     return out
 
 

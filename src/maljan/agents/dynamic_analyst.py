@@ -18,6 +18,7 @@ from maljan.agents.prompt_fragments import (
     FINDINGS_BLOCK_FRAGMENT,
     PROVIDER_FAMILY,
     format_fragment,
+    provider_source,
     stamp_source,
     tool_families,
     tools_statement,
@@ -157,7 +158,9 @@ class DynamicAnalyst(BaseAnalyst):
         provider = self._sandbox_provider()
         sandbox_tools: list[Any] = []
         if provider.capabilities.provides_tools:
-            sandbox_tools = stamp_source(provider.dynamic_tools(), PROVIDER_FAMILY)
+            sandbox_tools = stamp_source(
+                provider.dynamic_tools(), PROVIDER_FAMILY, declared=provider_source(provider)
+            )
             self.toolkit = getattr(provider, "_toolkit", None)
         else:
             self.logger.info("Sandbox provider '%s' exposes no tools.", provider.id)

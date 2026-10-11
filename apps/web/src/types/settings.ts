@@ -104,6 +104,52 @@ export interface McpServerEntry {
   tools: string[] | null;
   agents: string[];
   label: string;
+  /* The server's declaration (`maljan.core.tool_declarations`): what the
+   * platform reads about the server and its tools. Optional because an API
+   * older than a field sends none, and a new server sends none until the
+   * operator writes one; the API fills a built-in's from what it ships. */
+  sample_open?: SampleOpenEntry;
+  sample_mount?: string;
+  work_dir?: string;
+  error_patterns?: ErrorPatternEntry[];
+  roles?: string[];
+  prompt_fragment?: string;
+  required_env_allow?: string[];
+  variable_names?: string[];
+  reads_staged_sample?: boolean;
+  platform_owned?: boolean;
+  auto_name_prefixes?: string[];
+  reference_urls?: string[];
+  tool_facts?: Record<string, ToolFactsEntry>;
+}
+
+/** Which of a server's tools opens a sample, and which select and analyse it. */
+export interface SampleOpenEntry {
+  open_tool: string;
+  path_argument: string;
+  name_field: string;
+  select_tool: string;
+  select_argument: string;
+  analyse_tool: string;
+  analyse_argument: string;
+}
+
+/** One way a server's plain-text answer says "error". */
+export interface ErrorPatternEntry {
+  match: string;
+  code?: string;
+  remediation?: string;
+  remediation_with_path?: string;
+  tools?: string[];
+  applies_to?: string[];
+  multiline?: boolean;
+  message_group?: string;
+}
+
+/** What one tool's answer is and where its facts sit; every key but `kind` optional. */
+export interface ToolFactsEntry {
+  kind: string;
+  [field: string]: unknown;
 }
 
 /**

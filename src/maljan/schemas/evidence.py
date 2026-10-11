@@ -286,6 +286,20 @@ class LedgerEntry(BaseModel):
     started_at: float = Field(default=0.0, description="Unix timestamp the call started at.")
     duration_ms: int = Field(default=0, description="Wall-clock duration of the call.")
     seq: int = Field(default=0, description="Call order within the job, 1-based.")
+    source: str | None = Field(
+        default=None,
+        # An entry with no source dumps exactly as one written before the
+        # field existed, so every stored ledger, fixture and pinned dump is
+        # unchanged; the schema still names the field.
+        exclude_if=lambda value: value is None,
+        description=(
+            "Where the tool's declaration lives, recorded when the entry was written: "
+            "'mcp:<server key>', 'provider:<static or sandbox provider id>', 'sandbox' (the "
+            "platform's sandbox report tools) or 'pack' (the triage pack). None on an entry "
+            "written before sources were recorded, which is read by the legacy readers only "
+            "(core.tool_declarations)."
+        ),
+    )
 
     def to_captured(self) -> CapturedToolOutput:
         """This entry in the shape readers of the previous capture expect."""
@@ -341,6 +355,7 @@ def build_entry(
     model: str | None = None,
     not_shown: bool = False,
     chars_dropped: int = 0,
+    source: str | None = None,
 ) -> LedgerEntry:
     """One entry, with the output trimmed and parsed the same way every time.
 
@@ -416,6 +431,7 @@ def build_entry(
         started_at=started_at,
         duration_ms=max(0, int(duration_ms)),
         seq=seq,
+        source=source or None,
     )
 
 

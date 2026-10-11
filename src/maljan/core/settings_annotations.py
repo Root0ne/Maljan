@@ -1475,6 +1475,87 @@ ANNOTATIONS: dict[str, Annotation] = {
 }
 
 
+# The declaration fields of a server block beside ``sample_open``
+# (``maljan.core.tool_declarations``), described once for every block. The
+# console's server editor shows the same words for an ``mcp.servers`` entry.
+DECLARATION_LEAVES: tuple[tuple[str, str, str], ...] = (
+    (
+        "sample_mount",
+        "sample mount",
+        "Where the server sees the job's sample: the absolute path inside the server "
+        "that the worker's sample copy is mounted at. Empty when the server reads the "
+        "worker's own filesystem.",
+    ),
+    (
+        "error_patterns",
+        "error patterns",
+        "How the server's answers say error instead of answering: a list of {match, code, "
+        "remediation, remediation_with_path, tools, applies_to, multiline, message_group}. "
+        "match is a regular expression (run by RE2, so no back-references or lookarounds) "
+        "held against the whole stripped answer, or the protocol error's message where "
+        "applies_to names protocol_error; code the error code; remediation_with_path names "
+        "the sample's path as {sample_path}; tools the tools it applies to, empty for all.",
+    ),
+    (
+        "roles",
+        "roles",
+        "What the server is for, as lowercase words: reputation, decompiler, disassembler, "
+        "sandbox, rule_scanner, strings, or any word of your own.",
+    ),
+    (
+        "prompt_fragment",
+        "workflow text",
+        "The workflow text shown to an agent only while this server's tools are attached. "
+        "Empty shows none.",
+    ),
+    (
+        "required_env_allow",
+        "required environment names",
+        "The environment variable names the server cannot run without.",
+    ),
+    (
+        "work_dir",
+        "work directory",
+        "The directory under the worker's samples directory the sample is copied into for "
+        "this server; empty when it makes no copy of its own.",
+    ),
+    (
+        "variable_names",
+        "non-secret variable names",
+        "Environment variable names of this server's that are not secrets, so a remediation "
+        "naming one is shown as written.",
+    ),
+    (
+        "platform_owned",
+        "platform's own server",
+        "Whether the server is the platform's own, whose answers are the platform's code.",
+    ),
+    (
+        "auto_name_prefixes",
+        "auto-name prefixes",
+        "The prefixes the server's decompiler writes before an address when it names a "
+        "function itself, such as FUN_ or fcn.",
+    ),
+    (
+        "reference_urls",
+        "reference URLs",
+        "Reference URL templates for a sample, naming {sha256}, {md5} or {sha1}.",
+    ),
+    (
+        "reads_staged_sample",
+        "reads the staged sample",
+        "Whether the server's path-taking tools read the sample the platform staged for it.",
+    ),
+    (
+        "tool_facts",
+        "tool declarations",
+        "Per tool name: what kind of fact its answer is (kind) and where its facts sit "
+        "(rows, places, values, techniques, reputation), as JSON. See the configuration "
+        "guide's tool declarations section for every field.",
+    ),
+)
+
+
 def mcp_server_annotations(
     prefix: str,
     label: str,
@@ -1484,12 +1565,13 @@ def mcp_server_annotations(
     order: int = 0,
     provider_owned: bool = False,
 ) -> dict[str, Annotation]:
-    """The twenty-one leaves of an ``MCPServerConfig`` block, described for ``label``.
+    """The thirty-three leaves of an ``MCPServerConfig`` block, described for ``label``.
 
     Every MCP server in the settings has the same nine transport/tool-selection
     knobs, plus five tool-server fields (``cwd``, ``env_allow``, ``tools``,
-    ``agents``, ``label``) and the seven of ``sample_open``; writing them out
-    six times invites drift between blocks that must behave identically. The
+    ``agents``, ``label``), the seven of ``sample_open`` and the twelve other
+    declaration fields (``DECLARATION_LEAVES``); writing them out six times
+    invites drift between blocks that must behave identically. The
     per-field wording is fixed, the server's name is the only variable.
 
     ``provider_owned`` marks a block whose ``tools``/``agents``/``label`` a
@@ -1628,6 +1710,11 @@ def mcp_server_annotations(
     ):
         entries[f"{sample_open}.{leaf}"] = ann(
             f"{label} {title}", description, subgroup="Opening the sample", advanced=True
+        )
+
+    for leaf, title, description in DECLARATION_LEAVES:
+        entries[f"{prefix}.{leaf}"] = ann(
+            f"{label} {title}", description, subgroup="Declaration", advanced=True
         )
 
     if provider_owned:

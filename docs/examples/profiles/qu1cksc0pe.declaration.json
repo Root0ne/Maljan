@@ -1,0 +1,42 @@
+{
+  "roles": ["static_analysis"],
+  "reads_staged_sample": false,
+  "tool_facts": {
+    "analyze_file": {
+      "kind": "file_analysis",
+      "arguments": {"path": "file_path"},
+      "timeout_seconds": 900,
+      "category": "analyze"
+    },
+    "check_resources": {
+      "kind": "resource_listing",
+      "arguments": {"path": "file_path"},
+      "timeout_seconds": 180,
+      "category": "tool"
+    },
+    "check_signatures": {
+      "kind": "signature_check",
+      "arguments": {"path": "file_path"},
+      "timeout_seconds": 180,
+      "category": "tool"
+    },
+    "detect_language": {
+      "kind": "language_detection",
+      "arguments": {"path": "file_path"},
+      "timeout_seconds": 300,
+      "category": "analyze"
+    },
+    "detect_packer": {
+      "kind": "packer_detection",
+      "arguments": {"path": "file_path"},
+      "timeout_seconds": 600,
+      "category": "analyze"
+    },
+    "extract_iocs": {
+      "kind": "extracted_iocs",
+      "arguments": {"path": "file_path"},
+      "timeout_seconds": 300,
+      "category": "analyze"
+    }
+  }
+}

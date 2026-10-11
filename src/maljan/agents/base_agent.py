@@ -3916,7 +3916,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         from maljan.agents.prompt_fragments import SANDBOX_FAMILY, stamp_source
         from maljan.providers.sandbox_tools import sandbox_tools
 
-        return stamp_source(sandbox_tools(container), SANDBOX_FAMILY)
+        return stamp_source(sandbox_tools(container), SANDBOX_FAMILY, declared="sandbox")
 
     def _sandbox_items_tool(self) -> list[Any]:
         """The ``sandbox_items`` tool alone, for an analyst that reads the sandbox's evidence.
@@ -3947,7 +3947,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         if report is None:
             return []
         tool = items_tool(report, _answer_sizer(container), normalised_by_of(container))
-        return stamp_source([tool], SANDBOX_FAMILY)
+        return stamp_source([tool], SANDBOX_FAMILY, declared="sandbox")
 
     def _answer_sizer(self) -> Any | None:
         """The job's tool-answer guardrail (``ServerRegistry.answer_sizer``), or ``None`` without a job."""

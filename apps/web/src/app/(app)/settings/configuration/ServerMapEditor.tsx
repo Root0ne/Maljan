@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import type { CatalogEntry, McpServerEntry, ProbeResult, SettingValue } from "@/types/settings";
 import { unavailableTools } from "@/types/settings";
+import DeclarationFields from "./DeclarationFields";
 import Dot from "./Dot";
 import {
   addedEnvNames,
@@ -209,9 +210,15 @@ function EnvAllowField({
 
 /** Which blocks of the detail pane to draw. The console editor draws all of
  *  them; a guide step draws the one its step is about. */
-export type ServerSection = "header" | "connection" | "tools" | "agents";
+export type ServerSection = "header" | "connection" | "tools" | "agents" | "declaration";
 
-const ALL_SERVER_SECTIONS: ServerSection[] = ["header", "connection", "tools", "agents"];
+const ALL_SERVER_SECTIONS: ServerSection[] = [
+  "header",
+  "connection",
+  "tools",
+  "agents",
+  "declaration",
+];
 
 /**
  * What a probe knows about one server map, and about the one server whose
@@ -280,8 +287,8 @@ export function useServerProbe(
 }
 
 /**
- * One server's form: the header, the connection fields, the tool list and the
- * agent bindings, in that order.
+ * One server's form: the header, the connection fields, the tool list, the
+ * agent bindings and the server's declaration, in that order.
  *
  * The console renders every section of it beside its server list; a guide step
  * renders one section at a time for the server the guide is building, staging
@@ -627,6 +634,14 @@ export function ServerDetail({
             ))}
           </div>
         </fieldset>
+      )}
+
+      {has("declaration") && (
+        <DeclarationFields
+          serverKey={serverKey}
+          server={server}
+          put={(next) => put(serverKey, next)}
+        />
       )}
     </section>
   );

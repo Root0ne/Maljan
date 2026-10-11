@@ -39,6 +39,13 @@ NOT_CONFIGURED = "not_configured"
 SERVER_RESTING = "server_resting"
 TOOL_FAILED = "tool_failed"
 
+# The markers the platform's own HTTP and MCP clients put on a failure that is
+# the request itself failing (the transport), as opposed to the server
+# answering with an error of its own.
+TRANSPORT_MARKERS = frozenset(
+    {"http_status", "request_failed", "exception", "mcp_session_inactive"}
+)
+
 # How much of a server's own error text a failure marker or a failure
 # sentence quotes. A quote length for text about a failure, not a limit on
 # anything a model reads whole.
