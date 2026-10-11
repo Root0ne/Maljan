@@ -74,6 +74,10 @@ def facts_of(entry: Any, tool: str | None = None) -> ToolFacts | None:
     an undeclared tool; one with no source and no record by the shipped facts
     of the built-in tool of its exact name, as the report always read it.
     ``tool`` names the tool for that reading in place of the entry's own.
+
+    That legacy reading looks the exact name up, where
+    ``declared_reading``'s takes a ``<server>__`` prefix off first: the
+    report's tables never took one off, and a stored run re-renders as it did.
     """
     if stored(entry):
         return declared_reading.facts_of(entry)

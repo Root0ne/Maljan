@@ -3161,6 +3161,12 @@ built. So a reverser you add with tools of these kinds feeds every section as
 Ghidra's tools do. An entry written before sources were recorded is read by
 the tool names the report always read it by.
 
+A server added under a built-in server's key (`analysis`, `knowledge`,
+`network`, `threatintel`, `virustotal`) is read as that built-in: a tool of
+yours there whose answer a purpose-built section cannot read is not given the
+generic block, and its answer is left out of the report's sections. Give a
+server of your own a key of its own.
+
 **What ships.** The built-in servers (`analysis`, `knowledge`, `network`,
 `threatintel`, `virustotal`), every tool Ghidra and radare2 advertise, the CAPE
 MCP block and the platform's in-process tools ship declarations that say what

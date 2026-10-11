@@ -508,3 +508,100 @@ def test_a_run_with_an_operator_server_renders_the_same_where_its_settings_are_a
     assert "no reputation lookup in this run" not in markdown
     assert "pseudo_c" in outputs
     assert figures == ["Decompiled function"]
+
+
+def _operator_ledger() -> list[Any]:
+    return [
+        build_entry(
+            entry_id="ev_0001",
+            seq=1,
+            agent="pipeline",
+            tool="lookup_hash",
+            args={},
+            server="myrep",
+            output=json.dumps({"stats": {"malicious": 52, "undetected": 23}}),
+            source="mcp:myrep",
+        ),
+        build_entry(
+            entry_id="ev_0002",
+            seq=2,
+            agent="static",
+            tool="pseudo_c",
+            args={},
+            server="myrev",
+            output="int beacon(void) { return 1; }",
+            source="mcp:myrev",
+        ),
+        build_entry(
+            entry_id="ev_0003",
+            seq=3,
+            agent="static",
+            tool="match_rules",
+            args={},
+            server="myscan",
+            output=json.dumps({"hits": [{"name": "c2 over http", "area": "comm", "ttp": "T1071"}]}),
+            source="mcp:myscan",
+        ),
+    ]
+
+
+def test_the_built_report_carries_each_entry_s_facts_to_what_the_api_renders() -> None:
+    """The report built from the ledger, as the worker builds it, re-renders the same anywhere.
+
+    The builder copies each entry's stored facts onto its evidence index row,
+    and the report step copies them onto the captured outputs
+    (``LedgerEntry.to_captured``); the API, which has no operator settings,
+    reads only those.
+    """
+    from maljan.core import declared_reading
+    from maljan.core.config import get_settings, install_settings
+    from maljan.reporting.builder import MalwareReportBuilder
+    from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+    previous = get_settings()
+    install_settings(_operator_settings())
+    declared_reading.forget()
+    try:
+        ledger = _operator_ledger()
+        report = MalwareReportBuilder(
+            file_hash="a" * 64,
+            file_name="fixture.exe",
+            sample_path=None,
+            sandbox_report={},
+            reports={},
+            isr_reports={},
+            stix_output={"objects": []},
+            run_summary={},
+            discussion_history=[],
+            final_decision="Malware",
+            overall_confidence=0.9,
+            malware_category="loader",
+            evidence_ledger=ledger,
+        ).build_deterministic()
+        # As the report step attaches the captured tool evidence.
+        report.technical_evidence = {"static": [e.to_captured().model_dump() for e in ledger]}
+        stored = report.model_dump_json()
+        in_the_worker = MarkdownRenderer().render(MalwareReport.model_validate_json(stored))
+    finally:
+        install_settings(previous)
+        declared_reading.forget()
+
+    install_settings(Settings())
+    declared_reading.forget()
+    try:
+        served = MalwareReport.model_validate_json(stored)
+        in_the_api = MarkdownRenderer().render(served)
+        bundle = bundle_for("command_and_control", served, served.technical_evidence)
+        figures = [f.caption for f in build_code_listings(served)]
+    finally:
+        install_settings(previous)
+        declared_reading.forget()
+
+    assert in_the_api == in_the_worker
+    reputation = next(line for line in in_the_api.splitlines() if line.startswith("| Reputation |"))
+    assert "lookup_hash, ev_0001" in reputation
+    assert "no reputation lookup in this run" not in in_the_api
+    assert "pseudo_c" in {o["tool"] for o in bundle["tool_outputs"]}
+    assert figures == ["Decompiled function"]
+    rows = {row.id: row for row in report.evidence_index}
+    assert all(rows[e.id].facts == e.facts and rows[e.id].source == e.source for e in ledger)
