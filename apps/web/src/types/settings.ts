@@ -139,6 +139,10 @@ export interface McpServerEntry {
   tools: string[] | null;
   agents: string[];
   label: string;
+  /** How long one call of the server's tools may go unanswered, in seconds
+   *  (zero: no deadline of its own; null: the deployment's floor). Optional because an API older than the
+   *  field sends none; the server editor keeps it as stored. */
+  call_timeout_seconds?: number | null;
   /* The server's declaration (`maljan.core.tool_declarations`): what the
    * platform reads about the server and its tools. Optional because an API
    * older than a field sends none, and a new server sends none until the

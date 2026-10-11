@@ -160,8 +160,9 @@ class TriageSandboxProvider(SandboxProvider):
     sample gets no screenshot either (the "Dynamic Report" docs page lists
     Triage's own top-level report fields — Version/Sample/Task/Errors/
     Analysis/Processes/Signatures/Network/Debug/Dumped/Extracted — and none
-    of them is a screenshot). ``UNAVAILABLE`` names all five rather than
-    leaving them silently empty, which would read exactly like a clean
+    of them is a screenshot). ``UNAVAILABLE`` names all five, by the
+    platform's own section ids (``schemas.sandbox_report.SECTION_IDS``), rather
+    than leaving them silently empty, which would read exactly like a clean
     sample.
     """
 
@@ -183,9 +184,9 @@ class TriageSandboxProvider(SandboxProvider):
 
     UNAVAILABLE: ClassVar[tuple[str, ...]] = (
         "apistats",
-        "calls",
+        "api_calls",
         "registry",
-        "generic_events",
+        "events",
         "screenshots",
     )
 

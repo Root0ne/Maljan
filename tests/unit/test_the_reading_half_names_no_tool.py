@@ -11,8 +11,10 @@ lives in ``core.legacy_tool_tables``, read only by ``core.declared_reading``,
 outside these packages.
 
 ``STILL_BY_NAME`` holds, as a multiset, the reads whose own change is another
-branch's (the triage pack's own steps, which the pack writes itself;
-name-text heuristics for an undeclared listing tool), each with its reason.
+branch's (the triage pack's own steps, which the pack writes itself), each
+with its reason. The name-text heuristics for an undeclared tool live in
+``core.undeclared_tools``, outside these packages, read only after a tool's
+declared kind.
 Its counts may only shrink: a new read, a moved one, or one more of the same,
 fails.
 """
@@ -32,10 +34,6 @@ PACKAGES = ("pipeline", "analysis", "agents")
 _PACK_STEP = (
     "the triage pack reading or rendering the entry its own step just wrote, by that step's "
     "name; the pack as a declared step list replaces it"
-)
-_LISTING_WORDS = (
-    "a name-text heuristic for a tool that lists code (decompile, disassemble, function), "
-    "kept for an undeclared tool; the prompts-and-wording group replaces it"
 )
 
 # ((module, what, code), count) -> why it is still by name.
@@ -68,18 +66,6 @@ STILL_BY_NAME: dict[tuple[str, str, str], tuple[int, str]] = {
         1,
         "the pack's own format step chosen for the routed format; the declared step list "
         "replaces it",
-    ),
-    ("pipeline/function_claims.py", "compares", "'disassembl' not in tool"): (1, _LISTING_WORDS),
-    ("pipeline/function_claims.py", "compares", "'function' not in tool"): (1, _LISTING_WORDS),
-    ("pipeline/function_claims.py", "compares", "'string' in lowered"): (1, _LISTING_WORDS),
-    ("pipeline/function_claims.py", "compares", "'floss' in lowered"): (1, _LISTING_WORDS),
-    ("pipeline/validation.py", "compares", "'decompil' not in tool"): (1, _LISTING_WORDS),
-    ("agents/function_map.py", "compares", "'decompil' in tool"): (1, _LISTING_WORDS),
-    ("agents/function_map.py", "compares", "'disassembl' in tool.lower()"): (1, _LISTING_WORDS),
-    ("agents/function_map.py", "compares", "'function' in tool.lower()"): (1, _LISTING_WORDS),
-    ("agents/evidence_recorder.py", "compares", "'decompil' in str(tool or '').lower()"): (
-        1,
-        _LISTING_WORDS,
     ),
     ("agents/evidence_recorder.py", "compares", "name != tool"): (
         1,

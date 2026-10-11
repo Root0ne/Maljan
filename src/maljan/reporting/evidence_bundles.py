@@ -24,7 +24,7 @@ from maljan.analysis.sandbox_sections import ItemIndex
 from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import distinct_processes
 from maljan.reporting.models import MalwareReport
-from maljan.schemas.sandbox_report import SAMPLE_TREE_KEY
+from maljan.schemas.sandbox_report import SAMPLE_TREE_KEY, section_id
 
 # Section keys the Composer authors. Kept as plain strings (not an enum) so the
 # Composer can iterate a config-driven subset per malware type.
@@ -438,7 +438,7 @@ def _assessed_persistence(report: MalwareReport) -> list[str]:
 def sandbox_watched_persistence(report: MalwareReport) -> bool:
     """Whether a sandbox report is held whose registry and file views were not unavailable."""
     dyn = report.dynamic
-    blind = {str(name).strip().lower() for name in (dyn.unavailable if dyn else [])}
+    blind = {section_id(name) for name in (dyn.unavailable if dyn else [])}
     return dyn is not None and not blind.intersection(
         {"registry", "files", "file", "file_operations", "filesystem"}
     )

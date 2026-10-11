@@ -76,7 +76,52 @@ FUNCTION_MAP_TOOLS = ("resolve_api_hashes", "decode_string_blobs", "floss", "fun
 # evidence-only static provider need not run.
 RULE_TOOLS = ("capa", "yara_scan")
 
+# ``agents.network_analyst``: the packet tools its capture turns named, which
+# it now reads by declared kind (``_PCAP_STEPS``).
+PCAP_TOOLS = ("read_pcap_summary", "extract_dns", "extract_http")
+
 # ``pipeline.evidence_summary``: the one tool whose matches carry a rule's own
 # strings, and the one whose rows are the API catalogue's associations.
 SIGNATURE_RULE_TOOLS = ("yara_scan",)
 API_CATALOGUE_TOOLS = ("api_capability",)
+
+
+# ``providers.server_guard``: the settings blocks whose ``timeout_seconds`` the
+# deployment-wide per-call floor was derived from before each server declared
+# its own budget (``MCPServerConfig.call_timeout_seconds``). Read only for a
+# server that declares none, so a deployment's stored settings keep every
+# server's budget exactly as it was.
+LEGACY_CALL_FLOOR_BLOCKS = ("capa", "yara")
+
+
+def legacy_call_floor(cfg: object) -> float:
+    """The per-call floor every server got before servers declared their own budget.
+
+    The longest ``static.<block>.timeout_seconds`` of the blocks above, as
+    ``deployment_call_budget`` derived it; ``0`` with none set.
+    """
+    static = getattr(cfg, "static", None)
+    budgets = [
+        float(getattr(getattr(static, name, None), "timeout_seconds", 0) or 0)
+        for name in LEGACY_CALL_FLOOR_BLOCKS
+    ]
+    return max([b for b in budgets if b > 0], default=0.0)
+
+
+# ``core.config.StaticConfig``: how the whole static fragment opened when the
+# provider blocks' ``prompt_fragment`` held it (lead, citation, discipline and
+# workflow) and the providers ignored the stored leaf. A value stored then,
+# edited or not, had no effect on any prompt; one that opens this way is read
+# as not set, so the block shows its shipped workflow as dev showed its
+# shipped fragment, instead of being placed after the lead a second time.
+LEGACY_WHOLE_FRAGMENT_OPENINGS: dict[str, str] = {
+    "ghidra": "Analyze binary files (e.g. PE, ELF) utilizing Ghidra through your available tools.",
+    "r2": "Analyze binary files (e.g. PE, ELF) utilizing radare2 through your available tools.",
+}
+
+
+def legacy_whole_fragment(block: str, text: object) -> bool:
+    """Whether a stored ``static.<block>.prompt_fragment`` is the whole fragment an earlier
+    release stored there, which no prompt read."""
+    opening = LEGACY_WHOLE_FRAGMENT_OPENINGS.get(block)
+    return bool(opening) and str(text or "").lstrip().startswith(opening)  # type: ignore[arg-type]

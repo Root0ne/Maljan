@@ -66,6 +66,7 @@ from maljan.pipeline.conditions import (
     StageResult,
     TriageFacts,
     evaluate,
+    rule_match_hits,
 )
 from maljan.pipeline.debate_facts import (
     BLOCK_NOT_READ_NOTE,
@@ -1423,25 +1424,24 @@ def _anti_analysis_step(container: ServiceContainer, state: AnalysisState) -> An
     when none can, the first sentence saying why it cannot is; a provider with
     no scan answers ``None``, and with none the pack makes no anti-analysis
     entry. Each
-    request waits what one tool call of this deployment may take, as the sink
-    pre-pass's do.
+    request waits what one call to that provider's server may take
+    (``StaticProvider.call_budget``), as the sink pre-pass's do.
     """
     from maljan.providers.base import StaticJobContext
-    from maljan.providers.server_guard import deployment_call_budget
 
     cfg = container.config
     paths = state.get("static_sample_paths") or {}
     configured = str(cfg.static.provider)
-    budget = deployment_call_budget(cfg)
     unavailable: Any = None
     for provider_id in dict.fromkeys([configured, *paths]):
         own = paths.get(provider_id)
         path = own or (state.get("static_sample_path") if provider_id == configured else None)
         try:
-            scan = container.get_static_provider(provider_id).anti_analysis_scan(
+            provider = container.get_static_provider(provider_id)
+            scan = provider.anti_analysis_scan(
                 StaticJobContext(mirror_sample_path=str(path) if path else None),
                 notes=getattr(container, "sample_notes", None),
-                call_budget=budget,
+                call_budget=provider.call_budget(cfg),
             )
         except Exception as exc:  # noqa: BLE001 — a provider that cannot say is not asked
             logger.debug(
@@ -1911,7 +1911,11 @@ def stage_context(state: AnalysisState) -> StageContext:
         has_pcap=bool(isinstance(network, dict) and network),
         has_sandbox_report=bool(report),
         stages=results,
-        triage=TriageFacts.from_dict(state.get("triage_facts") or {}),
+        # The rule matches every answer recorded so far holds, the pack's and
+        # earlier stages' alike, whichever server answered.
+        triage=TriageFacts.from_dict(state.get("triage_facts") or {}).with_hits(
+            *rule_match_hits(state.get("evidence_ledger") or [])
+        ),
     )
 
 

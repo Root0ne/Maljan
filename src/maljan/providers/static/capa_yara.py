@@ -44,6 +44,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from maljan.core.logger import logger
 from maljan.core.paths import resolve_data
 from maljan.providers.base import (
+    VERIFICATION_DISCIPLINE,
     EvidenceAnswer,
     ProviderProbe,
     StaticCapabilities,
@@ -363,6 +364,18 @@ class CapaYaraStaticProvider(StaticProvider):
         else:
             parts.append(f"{len(yara_files)} YARA rule file(s) under {yara_dir}")
         return ProviderProbe(capa_ok, "; ".join(parts), int((time.perf_counter() - t0) * 1000))
+
+    def prompt_fragment(self) -> str:
+        """The verification discipline every static analyst carries, and nothing else.
+
+        This provider's fragment was empty before the discipline was shared;
+        it gains the discipline and no sentence of the citation's, so its
+        prompt carries no technique id it did not carry.
+        """
+        return VERIFICATION_DISCIPLINE
+
+    def guidance_fragment(self) -> str:
+        return VERIFICATION_DISCIPLINE
 
     @property
     def capabilities(self) -> StaticCapabilities:

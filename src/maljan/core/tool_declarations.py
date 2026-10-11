@@ -529,7 +529,9 @@ class ToolFacts(BaseModel):
     wall clock of its own; ``timeout_seconds`` is the budget the tool itself
     keeps and ``memory_peak_mb`` its measured peak, where known.
     ``discloses_sample`` marks a tool that sends the sample, or its bytes, out
-    of the deployment.
+    of the deployment. ``holds_strings`` marks a tool whose answer holds the
+    sample's strings as data though its kind is not a strings kind (a report
+    that anchors strings to the functions referring to them).
 
     ``rows`` is the path of the answer's rows; ``places`` names, per kind of
     place (``offset``, ``rva``, ``address``, ``addresses``, ``call_site``,
@@ -559,6 +561,7 @@ class ToolFacts(BaseModel):
     timeout_seconds: float | None = Field(default=None, gt=0)
     memory_peak_mb: int | None = Field(default=None, gt=0)
     discloses_sample: bool = False
+    holds_strings: bool = False
     rows: str = ""
     places: dict[str, str] = Field(default_factory=dict)
     values: dict[str, str] = Field(default_factory=dict)
@@ -706,6 +709,42 @@ def check_reference_urls(value: list[str]) -> list[str]:
         if not any(p in template for p in REFERENCE_PLACEHOLDERS):
             raise ValueError(
                 f"reference URL {template!r} names none of: " + ", ".join(REFERENCE_PLACEHOLDERS)
+            )
+    return value
+
+
+# A part of a declared ``prompt_fragment`` shown only while another server's
+# tools are in the request: ``{{attached:<server key>|<while attached>|<otherwise>}}``.
+# A branch holds no ``|``, ``{`` or ``}``, so parts never nest.
+ATTACHED_OPENING = "{{attached:"
+ATTACHED_PART = re.compile(r"\{\{attached:([A-Za-z0-9_.-]+)\|([^|{}]*)\|([^|{}]*)\}\}")
+# The tool families that are not a registry server's key (``agents.prompt_fragments``:
+# a role's own provider, the job's sandbox report, the team's ``ask_`` tools); a
+# part may not name one.
+RESERVED_FAMILIES: frozenset[str] = frozenset({"provider", "sandbox", "team"})
+
+
+def check_fragment_template(value: str) -> str:
+    """A ``prompt_fragment`` whose every ``{{attached:…}}`` part reads, or ``ValueError``.
+
+    Each opening must begin a whole part (a server key, two branches, no ``|``,
+    ``{`` or ``}`` inside a branch, so no part nests in another), and the key
+    must be a server's, not a reserved family name.
+    """
+    if ATTACHED_OPENING not in value:
+        return value
+    parts = list(ATTACHED_PART.finditer(value))
+    if len(parts) != value.count(ATTACHED_OPENING):
+        raise ValueError(
+            "prompt_fragment holds an {{attached:...}} part that does not read: write "
+            "{{attached:<server key>|<text while attached>|<text otherwise>}}, with no |, { "
+            "or } inside either text and no part inside another"
+        )
+    for part in parts:
+        if part.group(1) in RESERVED_FAMILIES:
+            raise ValueError(
+                f"prompt_fragment's {{{{attached:{part.group(1)}|...}}}} names a reserved "
+                f"family, not a tool server's key: use the key of a server in mcp.servers"
             )
     return value
 

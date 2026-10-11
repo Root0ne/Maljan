@@ -14,8 +14,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, ClassVar
 
 from maljan.providers.base import (
+    CLAIM_GUIDANCE,
     NO_STATIC_PROVIDER,
-    STATIC_EVIDENCE_INSTRUCTIONS,
+    STATIC_EVIDENCE_LEAD,
     StaticCapabilities,
     StaticProvider,
 )
@@ -33,7 +34,8 @@ class NullStaticProvider(StaticProvider):
     analyst reasons over the deterministic extraction it already receives and
     over whatever tool servers its definition binds. Its prompt fragment keeps
     the provider-neutral instructions (cite a concrete artifact, the four
-    ATT&CK techniques), says no disassembler or decompiler comes with it, and
+    ATT&CK techniques, the verification discipline), says no disassembler or
+    decompiler comes with it, and
     says nothing about the agent's other tools: that sentence is built from
     the tool list the request carries.
     """
@@ -53,7 +55,8 @@ class NullStaticProvider(StaticProvider):
     # (``prompt_fragments.tools_statement``). The fragment this replaced told
     # the model it had no tools while the same request carried 36.
     NO_PROVIDER_FRAGMENT: ClassVar[str] = (
-        STATIC_EVIDENCE_INSTRUCTIONS
+        STATIC_EVIDENCE_LEAD
+        + CLAIM_GUIDANCE
         + "\n\n"
         + "No static provider is attached, so no disassembler or decompiler comes with "
         "this analyst."

@@ -208,7 +208,7 @@ class MalwareReportBuilder:
 
         negotiation_summary = self._negotiation_summary(self.run_summary, self.overall_confidence)
 
-        references = self._build_references(mappings, identity.hashes.sha256)
+        references = self._build_references(mappings, identity.hashes)
 
         report = MalwareReport(
             verdict=verdict,
@@ -488,23 +488,31 @@ class MalwareReportBuilder:
             platforms.append("Unknown")
         return platforms
 
-    def _build_references(self, mappings: list[Any], sha256: str | None) -> list[ExternalReference]:
-        refs: list[ExternalReference] = []
-        if sha256 and len(sha256) == 64:
-            refs.extend(
-                [
-                    ExternalReference(
-                        source="VirusTotal",
-                        url=f"https://www.virustotal.com/gui/file/{sha256}",
-                        note="VT detection summary",
-                    ),
-                    ExternalReference(
-                        source="MalwareBazaar",
-                        url=f"https://bazaar.abuse.ch/sample/{sha256}/",
-                        note="Sample lookup",
-                    ),
-                ]
+    def _build_references(self, mappings: list[Any], hashes: Any) -> list[ExternalReference]:
+        """The report's references: the sample lookups of the sources the run used, then ATT&CK.
+
+        A source links its declared lookups (``reference_urls``) only when
+        the run recorded an entry from it, and the operator's own templates
+        (``reporting.reference_urls``) are linked on every report
+        (``reporting.references``). A run that asked no service links none.
+        """
+        from maljan.core.config import get_settings
+        from maljan.reporting.references import declared_references
+
+        operator: list[Any] = []
+        try:
+            operator = list(get_settings().reporting.reference_urls)
+        except Exception as exc:  # noqa: BLE001 — a reference is never worth a report
+            logger.debug(
+                "MalwareReportBuilder: no operator references read (%s).", type(exc).__name__
             )
+        try:
+            refs = declared_references(self.evidence_ledger, hashes, operator=operator)
+        except Exception as exc:  # noqa: BLE001 — a reference is never worth a report
+            logger.warning(
+                "MalwareReportBuilder: the sample lookups were not read (%s).", type(exc).__name__
+            )
+            refs = []
         # One ExternalReference per technique produced
         # the "MITRE ATT&CK" source label repeated 7×. Emit a single grouped
         # ATT&CK reference (pointing at the matrix landing page) whose note lists

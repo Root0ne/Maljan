@@ -20,7 +20,9 @@ from maljan.core import builtin_declarations
 from maljan.core.exceptions import SampleNotOpened
 from maljan.core.logger import logger
 from maljan.core.settings_overrides import redact_url
+from maljan.core.undeclared_tools import categories_of
 from maljan.providers.base import (
+    CLAIM_CITATION,
     MirrorSpec,
     ProviderProbe,
     StaticCapabilities,
@@ -40,12 +42,19 @@ if TYPE_CHECKING:
     from maljan.providers.static.ghidra.passes import GhidraPasses
 
 
-# Ghidra's prompt is its declaration's text (``core.builtin_declarations``):
-# the guidance about claims, which goes with every call on a Ghidra run, the
-# workflow, which goes only where Ghidra's tools do, and the whole fragment.
-GHIDRA_GUIDANCE = builtin_declarations.GHIDRA_GUIDANCE
+# Ghidra's prompt: its opening sentence, its guidance about claims (the
+# citation every static analyst is given and the verification discipline in
+# the words Ghidra's prompt has always used; it goes with every call on a
+# Ghidra run, tools or none), then the workflow its block declares
+# (``core.builtin_declarations``), which goes only where Ghidra's tools do.
+# ``GHIDRA_PROMPT_FRAGMENT`` is the whole fragment with the shipped workflow.
+GHIDRA_LEAD = (
+    "Analyze binary files (e.g. PE, ELF) utilizing Ghidra through your available tools. "
+    "You can decompile functions, find cross-references, extract strings, and more. "
+)
+GHIDRA_GUIDANCE = CLAIM_CITATION + "\n\n" + builtin_declarations.GHIDRA_VERIFICATION_DISCIPLINE
 GHIDRA_WORKFLOW = builtin_declarations.GHIDRA_WORKFLOW
-GHIDRA_PROMPT_FRAGMENT = builtin_declarations.GHIDRA_PROMPT_FRAGMENT
+GHIDRA_PROMPT_FRAGMENT = GHIDRA_LEAD + GHIDRA_GUIDANCE + "\n\n" + GHIDRA_WORKFLOW
 
 
 # What an agent on Ghidra is stopped with when Ghidra answered that it could
@@ -340,8 +349,18 @@ class GhidraStaticProvider(StaticProvider):
             degrade_on_failure=False,
         )
 
+    def prompt_lead(self) -> str:
+        return GHIDRA_LEAD
+
     def prompt_fragment(self) -> str:
-        return GHIDRA_PROMPT_FRAGMENT
+        """Ghidra's lead, its own guidance (its discipline as it has always read), its workflow."""
+        workflow = self.workflow_fragment()
+        text = self.prompt_lead() + self.guidance_fragment()
+        return text + "\n\n" + workflow if workflow.strip() else text
+
+    def workflow_fragment(self) -> str:
+        """The workflow Ghidra's block declares (``static.ghidra.prompt_fragment``)."""
+        return str(getattr(self._cfg, "prompt_fragment", "") or "")
 
     def guidance_fragment(self) -> str:
         return GHIDRA_GUIDANCE
@@ -402,6 +421,7 @@ class GhidraStaticProvider(StaticProvider):
                 context_budget=job.context_budget,
                 long_running_tools=long_running_tools(getattr(self._cfg, "sample_open", None)),
                 explicit_call_timeout=explicit_call_timeout(get_settings_or_none()),
+                categories=categories_of(getattr(self._cfg, "tool_facts", None)),
             )
 
             self._run_async(client.initialize())
@@ -435,6 +455,7 @@ class GhidraStaticProvider(StaticProvider):
             max_output_chars=max_chars,
             truncation_ledger=job.truncation_ledger,
             context_budget=job.context_budget,
+            categories=categories_of(getattr(self._cfg, "tool_facts", None)),
         )
 
         self._run_async(toolkit.initialize())
@@ -641,17 +662,15 @@ class GhidraStaticProvider(StaticProvider):
     def _rest_client(self) -> Any:
         """A client for Ghidra's REST API, with the token, each request waiting one call's budget.
 
-        What one tool call of this deployment may take
-        (``core.mcp.breaker.call_timeout_seconds``, else the longest tool
-        budget configured), and with neither set, as long as Ghidra takes.
+        What one call to Ghidra may take (``call_budget``:
+        ``core.mcp.breaker.call_timeout_seconds``, else Ghidra's block's own
+        ``call_timeout_seconds``); zero, as long as Ghidra takes.
         """
         import httpx
 
-        from maljan.providers.server_guard import deployment_call_budget
-
         token = self._cfg.auth_token.get_secret_value()
         headers = {"Authorization": f"Bearer {token}"} if token else {}
-        budget = deployment_call_budget(get_settings_or_none())
+        budget = self.call_budget(get_settings_or_none())
         return httpx.Client(timeout=budget if budget > 0 else None, headers=headers)
 
     def open_sample(self, path: str | None = None) -> bool:

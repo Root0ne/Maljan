@@ -311,19 +311,25 @@ def guard_from_settings(
     cfg: Any,
     on_open: Callable[[dict[str, Any]], None] | None = None,
     sample_open: Any = None,
+    block: Any = None,
 ) -> ServerGuard:
     """A guard for ``server`` with the thresholds ``cfg.mcp.breaker`` sets.
 
     ``sample_open`` is the server's own block's declaration: its open and
-    analysis tools are held long-running.
+    analysis tools are held long-running. ``block`` is the server's settings
+    block, whose ``call_timeout_seconds`` is the budget each of its calls gets
+    (:func:`server_call_budget`); with none given it is ``cfg.mcp.servers[server]``.
     """
     breaker = getattr(getattr(cfg, "mcp", None), "breaker", None)
+    if block is None:
+        servers = getattr(getattr(cfg, "mcp", None), "servers", None)
+        block = servers.get(server) if isinstance(servers, dict) else None
     guard = ServerGuard(
         server,
         failures_to_open=int(getattr(breaker, "failures_to_open", 3)),
         cooldown_seconds=float(getattr(breaker, "cooldown_seconds", 60.0)),
         max_concurrent_calls=int(getattr(breaker, "max_concurrent_calls", 4)),
-        call_timeout_seconds=deployment_call_budget(cfg),
+        call_timeout_seconds=server_call_budget(cfg, block),
         on_open=on_open,
         explicit_call_timeout=explicit_call_timeout(cfg) > 0,
     )
@@ -340,22 +346,24 @@ def explicit_call_timeout(cfg: Any) -> float:
     return max(0.0, float(getattr(breaker, "call_timeout_seconds", 0.0) or 0.0))
 
 
-def deployment_call_budget(cfg: Any) -> float:
-    """The budget every tool call gets at least: the setting, or the longest tool budget configured.
+def server_call_budget(cfg: Any, block: Any) -> float:
+    """The budget each call to one server gets at least: the operator's, or the server's own.
 
-    ``core.mcp.breaker.call_timeout_seconds`` when it is set. Zero means
-    "derive it": the longest budget the deployment gives a tool — capa's
-    ``core.static.capa.timeout_seconds`` (300 by default, raised to 900 for a
-    slow host) and YARA's — so a call never times out at the transport before
-    the analysis it runs is allowed to finish.
+    ``core.mcp.breaker.call_timeout_seconds`` when an operator set it, for
+    every server. Otherwise the ``call_timeout_seconds`` the server's own
+    block declares (``MCPServerConfig``; zero sends its calls with no deadline
+    of their own). A block that declares none (every built-in), or no block,
+    gets the deployment's floor exactly as it was derived before servers
+    declared their own (``core.legacy_tool_tables.legacy_call_floor``), so
+    stored settings keep every server's budget. A tool that declares a longer
+    budget of its own gets that one (:meth:`ServerGuard.call_timeout`).
     """
-    breaker = getattr(getattr(cfg, "mcp", None), "breaker", None)
-    explicit = float(getattr(breaker, "call_timeout_seconds", 0.0) or 0.0)
+    from maljan.core.legacy_tool_tables import legacy_call_floor
+
+    explicit = explicit_call_timeout(cfg)
     if explicit > 0:
         return explicit
-    static = getattr(cfg, "static", None)
-    budgets = [
-        float(getattr(getattr(static, name, None), "timeout_seconds", 0) or 0)
-        for name in ("capa", "yara")
-    ]
-    return max([b for b in budgets if b > 0], default=0.0)
+    declared = getattr(block, "call_timeout_seconds", None) if block is not None else None
+    if isinstance(declared, int | float) and not isinstance(declared, bool):
+        return max(0.0, float(declared))
+    return legacy_call_floor(cfg)

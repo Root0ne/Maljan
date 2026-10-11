@@ -107,9 +107,9 @@ def test_a_triage_upload_is_mapped_instead_of_refused():
     assert run.report.cti["family"] == ["qakbot"]
     assert [s.name for s in run.report.signatures] == ["s"]
     assert sorted(run.report.unavailable) == [
+        "api_calls",
         "apistats",
-        "calls",
-        "generic_events",
+        "events",
         "registry",
         "screenshots",
     ]

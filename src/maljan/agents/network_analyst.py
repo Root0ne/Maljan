@@ -1,16 +1,16 @@
-"""Network Analyst agent — evaluates network flows (Zeek/PCAP/DNS logs).
+"""Network Analyst agent — evaluates network flows (packet captures, DNS logs).
 
 Overrides analyze_isr() and revise_isr() to extract structured
 ClaimEvidence objects. Focuses on C2 beaconing patterns, DGA domains,
 TLS certificate anomalies, and protocol tunneling.
 
 Data Flow:
-  - Fixture mode: Receives pre-parsed Zeek JSON text from NetworkParser.
+  - Fixture mode: Receives pre-parsed network log text from NetworkParser.
     Analysis is LLM-only (text-based reasoning on parsed tables).
-  - Sandbox mode: Receives PCAP file path from the CAPEv2 sandbox.
-    Analysis uses Network MCP tools (read_pcap_summary, extract_dns,
-    extract_http) for deep traffic inspection, falling back to text
-    analysis if MCP initialization fails.
+  - Sandbox mode: Receives a packet capture's path from the job's sandbox.
+    Analysis uses the capture tools its tool servers declare (by kind:
+    a packet overview, DNS queries, HTTP requests) for deep traffic
+    inspection, falling back to text analysis if MCP initialization fails.
 
 PCAP detection heuristic:
   If the input data looks like a file path ending in .pcap/.pcapng,
@@ -20,6 +20,7 @@ PCAP detection heuristic:
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 from collections.abc import Sequence
@@ -30,7 +31,6 @@ from maljan.agents.prompt_fragments import (
     CLAIM_FORMAT_FRAGMENT,
     FINDINGS_BLOCK_FRAGMENT,
     format_fragment,
-    tool_names,
     tools_statement,
 )
 from maljan.agents.registry import register_agent
@@ -77,11 +77,15 @@ def _network_prompt(tools: Sequence[Any] = ()) -> str:
 # Back-compat: the neutral assembly with no tools.
 _ISR_SYSTEM = _network_prompt()
 
-# The packet tools the PCAP turns walk through, in the order they are named.
-_PCAP_TOOLS: tuple[tuple[str, str], ...] = (
-    ("read_pcap_summary", "get packet overview"),
-    ("extract_dns", "extract all DNS queries"),
-    ("extract_http", "extract HTTP request headers"),
+# The kinds of capture tool the PCAP turns walk through, in the order they
+# are named, with what each is for (``builtin_declarations.CONSUMER_KINDS``
+# ``network_analyst._PCAP_TOOLS``). A tool is offered in the line by the kind
+# it declares, under the name the request offers it by, whichever server
+# serves it.
+_PCAP_STEPS: tuple[tuple[str, str], ...] = (
+    ("packet_overview", "get packet overview"),
+    ("dns", "extract all DNS queries"),
+    ("http", "extract HTTP request headers"),
 )
 
 
@@ -93,9 +97,75 @@ OTHER_TOOLS_THEN_ANALYZE = "Use the tools in your tool list where they help, the
 
 
 def _pcap_tools_in(tools: Sequence[Any]) -> list[tuple[str, str]]:
-    """The packet tools of ``_PCAP_TOOLS`` the request actually carries."""
-    offered = tool_names(tools)
-    return [(name, what) for name, what in _PCAP_TOOLS if name in offered]
+    """The capture tools the request carries, one per kind of ``_PCAP_STEPS``, by declared kind."""
+    from maljan.agents.prompt_fragments import offered
+    from maljan.agents.tool_pinning import declared_facts_of
+
+    kinds = {kind for kind, _what in _PCAP_STEPS}
+    named: dict[str, str] = {}
+    for tool in offered(tools):
+        facts = declared_facts_of(tool)
+        kind = getattr(facts, "kind", "")
+        if kind in kinds and kind not in named:
+            named[kind] = str(getattr(tool, "name", ""))
+    return [(named[kind], what) for kind, what in _PCAP_STEPS if kind in named]
+
+
+# The annotations the platform's enrichment writes on a flow's host, by the
+# field it writes them under (``enrichment.orchestrator``, the network
+# extractor), and the words the line names each by, in order.
+_ANNOTATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("ASN", ("asn",)),
+    ("country", ("geo", "country")),
+    ("reputation", ("reputation",)),
+)
+_FIELD = re.compile(r'"([a-z_]{2,20})"\s*:')
+
+
+def _annotations_in(data: str) -> list[str]:
+    """The annotation words for what the flows actually carry, read once over ``data``.
+
+    A JSON flow block names them by field; the platform's own flow text
+    (``parsers.network_parser``) by its ASN/country column and its reputation
+    paragraph.
+    """
+    from maljan.parsers.network_parser import ASN_COUNTRY_COLUMN, REPUTATION_HEADING
+
+    text = str(data or "")
+    present = set(_FIELD.findall(text))
+    if ASN_COUNTRY_COLUMN in text:
+        present.update({"asn", "country"})
+    if REPUTATION_HEADING in text:
+        present.add("reputation")
+    return [word for word, fields in _ANNOTATIONS if present.intersection(fields)]
+
+
+def primary_evidence_line(sandbox: Any, data: str = "") -> str:
+    """The line that hands the analyst the structured flows, naming the job's sandbox or none.
+
+    It says which annotations the flows carry (ASN, country, reputation) only
+    where the flows in ``data`` carry them.
+    """
+    found = _annotations_in(data)
+    place = [word for word in found if word in ("ASN", "country")]
+    parts = (["/".join(place)] if place else []) + [w for w in found if w not in place]
+    said = ", annotated with " + " and ".join(parts) if parts else ""
+    return (
+        f"PRIMARY EVIDENCE — {_flows_label(sandbox)} (DNS / HTTP / TCP / UDP / contacted "
+        f"hosts{said}):\n"
+    )
+
+
+def _flows_label(sandbox: Any) -> str:
+    """What the structured flows are called: the sandbox's declared display name, or neither."""
+    name = ""
+    with contextlib.suppress(Exception):
+        name = str(sandbox.display_name()) if sandbox is not None else ""
+    return (
+        f"structured network flows from the job's sandbox ({name})"
+        if name
+        else ("structured sandbox network flows")
+    )
 
 
 # The text revision path's own system prompt. It is not ``_ISR_SYSTEM`` plus a
@@ -134,7 +204,18 @@ def _detect_pcap_path(data: str) -> str | None:
 
 @register_agent("network")
 class NetworkAnalyst(BaseAnalyst):
-    """Specialized agent for evaluating network connectivity logs (Zeek/PCAP)."""
+    """Specialized agent for evaluating network connectivity logs (packet captures, DNS)."""
+
+    def _job_sandbox(self) -> Any:
+        """The job's sandbox provider, ``None`` for an analyst built outside a container."""
+        container = getattr(self, "_container", None)
+        if container is None:
+            return None
+        try:
+            return container.get_sandbox_provider()
+        except Exception as exc:  # noqa: BLE001 — a prompt never fails over a provider lookup
+            self.logger.debug("No sandbox provider for the flows' label (%s).", type(exc).__name__)
+            return None
 
     # ------------------------------------------------------------------
     # MCP Tool Interface
@@ -224,7 +305,7 @@ class NetworkAnalyst(BaseAnalyst):
             (
                 "human",
                 "Analyze DNS queries, HTTPS SSL flows, and potential C2 beacons "
-                "in this Zeek/pcap network data:\n"
+                "in this network data:\n"
                 f"{target_info}\n\n"
                 "Identify beaconing patterns, suspicious domains, and exfiltration channels.",
             ),
@@ -290,11 +371,11 @@ class NetworkAnalyst(BaseAnalyst):
             mcp_ready = self._try_initialize_mcp()
 
             if mcp_ready:
-                # The structured CAPE flows (``data``) are the PRIMARY evidence —
-                # they already carry DNS/HTTP/TCP/UDP/hosts with ASN/country +
-                # VirusTotal permalinks (network_extractor). The raw PCAP is an
-                # OPTIONAL deep-dive: on a constrained local model an unbounded
-                # read_pcap_summary loop over-ran the 330s analyst budget and
+                # The sandbox's structured flows (``data``) are the PRIMARY
+                # evidence — they already carry DNS/HTTP/TCP/UDP/hosts with
+                # whatever the enrichment added (network_extractor). The raw PCAP
+                # is an OPTIONAL deep-dive: on a constrained local model an
+                # unbounded packet-overview loop over-ran the 330s analyst budget and
                 # aborted, so we hand the analyst the structured evidence up front
                 # and ask for a short PCAP peek in the prompt below; the loop
                 # itself has no step limit unless an operator sets one.
@@ -314,10 +395,8 @@ class NetworkAnalyst(BaseAnalyst):
                         "human",
                         "Analyze the network activity below and return a structured "
                         "list of findings.\n\n"
-                        "PRIMARY EVIDENCE — structured CAPE network flows (DNS / HTTP / "
-                        "TCP / UDP / contacted hosts, annotated with ASN/country and "
-                        "VirusTotal permalinks):\n"
-                        f"{data}\n\n"
+                        + primary_evidence_line(self._job_sandbox(), data)
+                        + f"{data}\n\n"
                         f"A raw packet capture is ALSO available at: {pcap_path}\n"
                         f"{peek}"
                         "For each finding state: the claim, the exact artifact reference "

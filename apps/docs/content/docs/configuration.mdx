@@ -1306,7 +1306,9 @@ for as long as their caller asks (the triage pack passes
 `core.static.capa.timeout_seconds` and what is left of
 `core.triage.budget_seconds`), and their manifest declares none and marks them
 `long_running`. A model's call of either is waited for with no client deadline
-unless you set `core.mcp.breaker.call_timeout_seconds`; a timeout or a
+unless you set `core.mcp.breaker.call_timeout_seconds`; every other call waits
+the `call_timeout_seconds` its server's block declares, or, where it declares
+none (every built-in), the deployment's floor; a timeout or a
 cancellation of such a call is not counted by the breaker; a call the client
 gives up on, or a job that ends, is cancelled at the server, which kills the
 tool's child process with its process group; and a second call of the same
@@ -1316,9 +1318,10 @@ of starting another child;
 documented derivation constant; the Ghidra sink pre-pass — run for every agent
 whose own static provider is Ghidra, the static analyst, a clone of it and a
 generic agent given Ghidra's tools alike, as the provider's own open and call
-graph — waits one tool call's deployment budget per request
-(`core.mcp.breaker.call_timeout_seconds`, derived as that row says), or as
-long as Ghidra takes with none.
+graph — waits one call's budget per request (Ghidra's block's
+`call_timeout_seconds` where declared, else the deployment's floor, or
+`core.mcp.breaker.call_timeout_seconds` where set), or as long as Ghidra takes
+when that budget is zero.
 
 **The spend ceiling.** `core.llm.max_spend_usd_per_job` is the most one job may
 spend on its models, in US dollars. It has no default: while it is empty a job
@@ -1611,6 +1614,16 @@ age. arq's own in-progress claim on the job is refreshed with the heartbeat, so
 a killed worker's claim expires within 90 s instead of lingering.
 
 ### The evidence budget
+
+`reporting.reference_urls` lists the sample lookups linked under References
+on every report, first: each a URL template (`url`: `https://`, naming
+`{sha256}`, `{md5}` or `{sha1}`), the name it is linked under (`source`), its
+`note`, and whether the Sigma draft lists it among its references (`sigma`). It ships with VirusTotal's and MalwareBazaar's lookups, the two
+every report has linked (VirusTotal's with `sigma`, as the draft has always
+referenced it); remove one and it is no longer linked. A tool
+server's own lookups (its declared `reference_urls`) are linked besides, only
+on a run that asked that server. A report keeps its own links live in the
+Markdown.
 
 `reporting.evidence_budget_bytes` (512 KiB by default) is how many bytes of
 tool output one agent may keep in the evidence ledger. Entries past it still
@@ -2566,12 +2579,13 @@ The names it may use:
 | `has_sandbox_report` | The same fact, named for readability. |
 | `has_pcap` | Whether the report carries a non-empty network block. |
 | `stages.<key>.<field>` | A stage result: `ran`, `reason`, `claim_count`, `technique_ids`, `finding_count`, `agents`. |
-| `triage.<field>` | What the triage pack established: `has_signature`, `reputation_malicious` (a count, or `None` when no lookup answered with one), `yara_hits`, `capa_hits`. |
+| `triage.<field>` | What the triage pack and the run so far established: `has_signature`, `reputation_malicious` (a count, or `None` when no lookup answered with one), `rule_hits` (how many rules matched in every answer of a rule-matching kind recorded so far — `capability_rules`, `signature_rules`, `event_rules` — the pack's and earlier stages' alike, whichever server answered), and `yara_hits` and `capa_hits`, kept for the teams that read them: the pack's own signature-rule and capability-rule counts. |
+| `triage.hits["<key>"]` | The same count for one key: an answer's declared kind (`signature_rules`), the name its tool declares for corroboration (`source`, such as `yara`), or the key of the tool server that answered (`acmescan`). A key nothing counted reads as `0`; the key is written as a literal. |
 
 `stages["triage"].ran` is the same lookup as `stages.triage.ran`. A stage the
 run never reached reads as one that did not run, so naming a stage that was
 itself skipped is not an error. A team without a triage pack reads `triage`
-as nothing established: `false`, `None`, `0`, `0`.
+as nothing established: `false`, `None`, and every count `0`.
 
 Examples:
 
@@ -2582,7 +2596,9 @@ has_pcap and stages.triage.claim_count > 0
 "T1055" in stages.static.technique_ids
 not stages.detonate.ran
 size > 10485760
-triage.yara_hits > 0 or triage.capa_hits > 0
+triage.rule_hits > 0
+triage.hits["signature_rules"] > 0 or triage.hits["capability_rules"] > 0
+triage.hits["acmescan"] > 0
 not triage.has_signature and triage.reputation_malicious != None and triage.reputation_malicious > 0
 ```
 
@@ -2958,11 +2974,15 @@ of a server card (closed by default), and in the catalogue the advanced
 **Declaration** subgroup of each provider block. The consumers move onto it one
 by one, each with the same output for the built-ins. Read today: `sample_open`;
 the worker reads `sample_mount` and `work_dir` (below); `error_patterns`, for
-every server; and each tool's `kind`, `reader`, `asserts_techniques`, `source`,
-`techniques`, `rows`, `places`, `values`, `words` and `display_name` by the
-evidence summary, the evidence roots, validation, the function map, the triage
-pack's function index and rule check, and the run summary's rule layers (see
-**Who reads a tool's kind** below).
+every server; `prompt_fragment` by the prompts (a static provider's block after
+its claim guidance, any other server after the sentence about tools);
+`auto_name_prefixes` wherever a function's auto-name is read as its address;
+`reference_urls` by the report's references; and each tool's `kind`, `reader`,
+`asserts_techniques`, `source`, `techniques`, `rows`, `places`, `values`,
+`words`, `display_name`, `category` and `arguments` by the evidence summary, the
+evidence roots, validation, the function map, the triage pack's function index
+and rule check, the stage conditions, the MCP client's description tags and the
+run summary's rule layers (see **Who reads a tool's kind** below).
 
 **Where a server sees the sample.** The worker copies the job's sample into
 `work_dir` under `SAMPLES_DIR` (the shared `.work` when a block names none;
@@ -2992,13 +3012,13 @@ are ever removed.
 | `work_dir` | the directory under the worker's samples directory the sample is copied into for this server (one name); empty when it makes no copy of its own |
 | `error_patterns` | how the server's answers say "error" (below) |
 | `roles` | what the server is for: `reputation`, `decompiler`, `disassembler`, `sandbox`, `rule_scanner`, `strings`, `reference`, `capture`, or any word of your own |
-| `prompt_fragment` | the workflow text shown to an agent only while the server's tools are attached |
+| `prompt_fragment` | the workflow text shown to an agent only while the server's tools are in its request: after the sentence about tools for a server of the registry, and, for a static provider's block, after the provider's opening sentence and the claim guidance every static analyst is given (the built-in Ghidra and radare2 blocks and the CAPE MCP block ship their workflows here). A sentence naming another server's tool is written `{{attached:<server key>|<text while that server's tools are in the request>|<text otherwise>}}`, in any block's fragment (a registry server's, a static provider's or the CAPE MCP block's): the key is a server's in `mcp.servers` (never `provider`, `sandbox` or `team`), neither text holds `|`, `{` or `}`, and no part sits inside another; a fragment whose part does not read is refused when it is saved. Ghidra's names the analysis server's crypto-constant tool so. A Ghidra or radare2 block that stored the whole fragment of an earlier release (opening with the provider's old lead sentence), which no prompt read, is read as not set |
 | `required_env_allow` | the environment names the server cannot run without |
 | `variable_names` | environment variable names of the server's that are not secrets; those a shipped declaration or a registered provider class (`variable_names`) names are kept whole in published text, read from those so the redaction does not depend on a run's settings |
 | `reads_staged_sample` | whether the server's path-taking tools read the sample the platform staged |
 | `platform_owned` | whether the server is the platform's own, whose answers are the platform's code |
-| `auto_name_prefixes` | the prefixes its decompiler writes before an address when it names a function itself (`FUN_`, `fcn.`) |
-| `reference_urls` | reference URL templates for a sample, `https://` and naming `{sha256}`, `{md5}` or `{sha1}` |
+| `auto_name_prefixes` | the prefixes its decompiler writes before an address when it names a function itself (`FUN_`, `fcn.`); every server's join the shipped ones (`FUN_`, `fcn.`, `sub_`, `func.`, `loc.`, `LAB_`) wherever a function's auto-name is read as its address |
+| `reference_urls` | sample lookup URL templates, `https://` and naming `{sha256}`, `{md5}` or `{sha1}`; a report links them, under the name its lookup's record gives (else the server's label), only when the run recorded an entry from this server. `reporting.reference_urls` holds the lookups linked on every report (shipped with VirusTotal's and MalwareBazaar's) |
 | `tool_facts` | per tool name, what its answer is and where its facts sit (below) |
 
 Each entry of `tool_facts` describes one tool, under its own name on its own
@@ -3017,6 +3037,7 @@ it:
 | `timeout_seconds` | the budget the tool itself keeps, where it has one |
 | `memory_peak_mb` | the tool's measured memory peak, where known |
 | `discloses_sample` | the tool sends the sample, or its bytes, out of the deployment |
+| `holds_strings` | the answer holds the sample's strings as data though its kind is not a strings kind (Ghidra's `batch_string_anchor_report` and `find_undocumented_by_string`); a function claim's quoted value is looked for in it |
 | `rows` | the path of the answer's rows |
 | `places` | per kind of place (`offset`, `rva`, `address`, `addresses`, `call_site`, `function`, `pid`, `command_line` …), the path inside a row that holds one |
 | `values` | per kind of value (`text`, `rule`, `namespace`, `value` …), the path inside a row that holds one |
@@ -3027,7 +3048,7 @@ it:
 | `report_sections` | the report sections whose writer is shown this tool's answers, beside the sections its `kind` reaches (below) |
 | `words` | words a statement may use to name this tool's entry |
 | `display_name` | the name published text gives the tool: a rule table's title, the tool a recovered value names, the decoder a decoded value names; empty uses the tool's name |
-| `category` | the tag its description is shown with (`analyze`, `list`, `modify` …) |
+| `category` | the tag its description is shown with (`analyze`, `list`, `modify` …); an undeclared tool is tagged by its name's first word |
 
 **Paths** are JSON-pointer-like: `/strings/*/offset` is the `offset` of every
 item of `strings`; `*` is every item of a list or every value of an object at
@@ -3196,7 +3217,25 @@ shape:
   `api_hash_resolution`, `decoded_strings`, `emulated_strings` and
   `function_index` answers by kind, and the report step does not run an
   evidence-only static provider when the pack already recorded an answer of a
-  kind that provider declares.
+  kind that provider declares;
+- a tool's role is its kind: `decompile`, `decompile_batch` and
+  `decompile_refresh` list decompiled code, `disassembly`, `byte_disassembly`
+  and `function_disassembly` list instructions (the last a whole function),
+  `xrefs` reads cross-references, and `strings`, `emulated_strings`,
+  `decoded_strings`, `listing_strings`, `listing_all_strings` and
+  `string_search` hold the sample's strings, as does any tool declaring
+  `holds_strings`. The decompiled-function list, the
+  function map, a function claim's check, a repeated decompile and the static
+  turn's tool line read it so, and a call gives its address in the argument
+  `arguments.address` names, then in the shared list (`address`, `addr`,
+  `function_address`, `ea`, `va`, `start_address`, `entry_address`). Only a
+  tool that declares nothing is read by the words of its name (`decompil`,
+  `disassembl`, `xref`, `string`), in one place (`core.undeclared_tools`);
+- a network turn offers the capture tools by kind (`packet_overview`, `dns`,
+  `http`), under the names the request offers them by;
+- a stage condition counts the rows of every `capability_rules`,
+  `signature_rules` and `event_rules` answer as matched rules
+  (`triage.rule_hits`, `triage.hits[...]`).
 
 **How the report reads a tool.** The report reads an entry by its tool's
 declared kind, from whichever server declares it, and never by the tool's
@@ -3275,7 +3314,8 @@ Per job and per tool server, three settings under **Tool servers → Resilience*
 |---|---|---|
 | `core.mcp.breaker.failures_to_open` | 3 | The number of attempts the platform already gives a model call that drops its connection before calling it a failure. No recorded live run had a tool server fail at the transport, so it is a judgement, not a measurement. |
 | `core.mcp.breaker.cooldown_seconds` | 60 | A judgement: long enough for a sidecar being restarted to come back, short against the analysts' own loop budgets. |
-| `core.mcp.breaker.call_timeout_seconds` | 0 (derived) | Derived from the longest tool budget the deployment configures — `core.static.capa.timeout_seconds`, 300 by default and 900 on a slow host — so a call never times out before the analysis it runs may finish. A tool whose server declares a longer budget in its manifest gets that; thirty seconds of grace are added either way. |
+| `core.mcp.breaker.call_timeout_seconds` | 0 (per server) | Set, the budget of every call to every server. Zero gives each server the `call_timeout_seconds` its own block declares, and a server that declares none (every built-in) the deployment's floor: the longest of `core.static.capa.timeout_seconds` and `core.static.yara.timeout_seconds` (300 by default, 900 on a slow host), as every server got before. A tool whose server declares a longer budget in its manifest gets that, a long-running tool none unless this is set, and thirty seconds of grace are added either way. |
+| `<server block>.call_timeout_seconds` | empty | Each server's own budget per call (an `mcp.servers` entry, `static.ghidra`, `static.r2`, `sandbox.cape2.mcp`), read when `core.mcp.breaker.call_timeout_seconds` is zero; zero sends its calls with no deadline of their own, empty takes the deployment's floor. Ghidra's REST requests (open, call graph, anti-analysis scan) and radare2's open before the loop wait it too. |
 | `core.mcp.breaker.max_concurrent_calls` | 4 | A judgement: the shipped teams run their analysts one after another, and four lets one analyst's parallel tool calls through while bounding a team that fans out. `0` leaves the calls uncapped, as every server was before. |
 
 An unanswered call is either a transport failure — a timeout, a refused or

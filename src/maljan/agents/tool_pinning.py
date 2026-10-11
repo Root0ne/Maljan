@@ -41,6 +41,10 @@ if TYPE_CHECKING:
 # The metadata key ``ServerRegistry`` stamps a tool with. Read here, written
 # there, and named once so the two cannot drift.
 SERVER_METADATA_KEY = "maljan_server"
+# And the workflow text the server declares (its ``prompt_fragment``), carried
+# with each of its tools so a prompt built from the tool list shows it exactly
+# where the server's tools are (``prompt_fragments.tools_statement``).
+SERVER_FRAGMENT_METADATA_KEY = "maljan_server_fragment"
 
 # An argument whose *name* looks like it takes a file. Substring matches cover
 # ``file``, ``file_path``, ``filepath``, ``filename``, ``path``, ``target_file``;
@@ -137,6 +141,27 @@ def declared_source_of(tool: Any) -> str | None:
     if server and server != TEAM_SERVER:
         return f"mcp:{server}"
     return None
+
+
+def declared_facts_of(tool: Any) -> Any:
+    """What a tool declares about itself (``core.tool_declarations.ToolFacts``), or ``None``.
+
+    Read by the source the tool was built under (:func:`declared_source_of`)
+    and the name it is offered under, from the live declarations: what the
+    request is about to offer, never a persisted record. A tool nothing
+    stamped, or whose source declares nothing for it, has none; it is never
+    guessed from the tool's name.
+    """
+    source = declared_source_of(tool)
+    if source is None:
+        return None
+    try:
+        from maljan.core.declared_reading import declarations
+
+        return declarations().declaration_for((source, str(getattr(tool, "name", "") or "")))
+    except Exception as exc:  # noqa: BLE001 — an unreadable declaration declares nothing
+        logger.debug("declared facts of a tool not read (%s).", type(exc).__name__)
+        return None
 
 
 def _spellings(

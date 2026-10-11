@@ -41,6 +41,7 @@ from maljan.agents.delegation import (
     WAITING_ON_EACH_OTHER_REFUSAL,
     _what_an_ask_gets_sentence,
 )
+from maljan.agents.dynamic_analyst import sandbox_server_label
 from maljan.agents.evidence_recorder import earlier_chunk_answer, same_function_notice
 from maljan.agents.judge_agent import (
     COMPACT_BUNDLE_RULES,
@@ -65,7 +66,12 @@ from maljan.agents.judge_agent import (
     verdict_cut_violation,
 )
 from maljan.agents.judge_agent import QUESTION_ROOTS_LABEL as _ROOTS_LABEL
-from maljan.agents.network_analyst import NO_PACKET_TOOL_LINE, OTHER_TOOLS_THEN_ANALYZE
+from maljan.agents.network_analyst import (
+    NO_PACKET_TOOL_LINE,
+    OTHER_TOOLS_THEN_ANALYZE,
+    _flows_label,
+    primary_evidence_line,
+)
 from maljan.agents.prompt_fragments import (
     CLAIM_FORMAT_FRAGMENT,
     ENDPOINTS_ROW_SHAPE,
@@ -99,6 +105,7 @@ from maljan.agents.tool_pinning import (
     UNREADABLE_FILLED_CAPTURE_REMEDIATION,
 )
 from maljan.analysis import evidence_roots as _roots
+from maljan.analysis import sandbox_sections
 from maljan.analysis.evidence_roots import layers_and_roots as _layers_and_roots
 from maljan.analysis.evidence_roots import roots_phrase as _roots_phrase
 from maljan.analysis.function_summarizer import SHORTENED_NOTE as SUMMARISER_SHORTENED_NOTE
@@ -195,7 +202,14 @@ from maljan.pipeline.validation import (
     validate_verdict_bundle,
     whole_answer_after_retry_question,
 )
-from maljan.providers.base import STATIC_EVIDENCE_INSTRUCTIONS, absent_provider_fragment
+from maljan.providers.base import (
+    CLAIM_CITATION,
+    STATIC_EVIDENCE_LEAD,
+    VERIFICATION_DISCIPLINE,
+    absent_provider_fragment,
+)
+from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
+from maljan.providers.sandbox.mock import MockSandboxProvider
 from maljan.providers.static import r2 as _r2
 from maljan.providers.static.ghidra import (
     GHIDRA_GUIDANCE,
@@ -279,8 +293,9 @@ from maljan.schemas.isr_models import (
     judge_dropped_reason,
     judge_kept_note,
 )
+from maljan.schemas.sandbox_report import SECTION_IDS
 from maljan.schemas.stix_models import Bundle
-from maljan.tools import api_hashes, binary, knowledge, string_blobs
+from maljan.tools import api_hashes, artefact_index, binary, knowledge, string_blobs
 from maljan.tools.errors import CAPTURES_REMEDIATION, NO_CAPTURE_REMEDIATION
 
 # Every no: sentence a root reading writes, and the names of the roots.
@@ -1979,9 +1994,13 @@ PROMPTS: dict[str, str] = {
         provider_label="the Ghidra static provider",
     ),
     "analyst tool statement for a request with none": NO_TOOLS_STATEMENT,
+    # The citation before it is the text every static prompt carried before
+    # the leak test; the shared verification discipline after it is scanned
+    # whole, with the sentence of its own.
     "static provider sentence when none is attached": NullStaticProvider.NO_PROVIDER_FRAGMENT[
-        len(STATIC_EVIDENCE_INSTRUCTIONS) :
+        len(STATIC_EVIDENCE_LEAD + CLAIM_CITATION) :
     ],
+    "the shared verification discipline, whole": VERIFICATION_DISCIPLINE,
     "a Ghidra that could not open the job's sample, as an ask's caller reads it": str(
         sample_not_opened("File not found: /data/samples/.work/a.bin")
     ),
@@ -1992,7 +2011,7 @@ PROMPTS: dict[str, str] = {
         "No program loaded.", "get_function_count"
     ),
     "static provider sentence when its tools did not attach": absent_provider_fragment("Ghidra")[
-        len(STATIC_EVIDENCE_INSTRUCTIONS) :
+        len(STATIC_EVIDENCE_LEAD + CLAIM_CITATION) :
     ],
     "static human-turn tool lines": " ".join(
         [
@@ -2008,6 +2027,25 @@ PROMPTS: dict[str, str] = {
         ]
     ),
     "network packet-tool lines": f"{NO_PACKET_TOOL_LINE} {OTHER_TOOLS_THEN_ANALYZE}",
+    "the network flows named by the job's sandbox, or by neither": " ".join(
+        [_flows_label(None), _flows_label(CAPE2SandboxProvider), _flows_label(MockSandboxProvider)]
+    ),
+    "a sandbox's own tool server named by its display name": " ".join(
+        [sandbox_server_label(CAPE2SandboxProvider), sandbox_server_label(None)]
+    ),
+    "the network analyst's primary-evidence line": " ".join(
+        [
+            primary_evidence_line(None),
+            primary_evidence_line(CAPE2SandboxProvider, '{"asn": 1, "geo": "x", "reputation": {}}'),
+            primary_evidence_line(None, '{"country": "x"}'),
+        ]
+    ),
+    "the served function index's sentence on a disassembler's list": (
+        artefact_index.SERVED_FUNCTION_LISTS
+    ),
+    "a sandbox section the report names unavailable, by its section id": " ".join(
+        sandbox_sections.NO_UNAVAILABLE.format(name=name) for name in SECTION_IDS
+    ),
     "question for an entry said to hold one line": " ".join(
         v.message
         for v in misstated_entry_contents(
@@ -2686,3 +2724,40 @@ def test_both_new_capability_terms_are_scanned() -> None:
     text = PROMPTS["capability questions for the anti-analysis and anti-forensics terms"]
 
     assert "claims anti-analysis" in text and "claims anti-forensics" in text
+
+
+# The evaluation-key terms each static provider's whole system prompt carried
+# on dev 767bd97a, for a Windows PE (``format_fragment("pe", "windows")``),
+# with no tools and with the provider expected: the format fragment's
+# ``mutex`` and ``scheduled task``, and the citation's technique ids where the
+# provider's fragment held the citation. A prompt built today from the shipped
+# declarations carries no term beyond its provider's.
+DEV_STATIC_PROMPT_TERMS: dict[str, frozenset[str]] = {
+    "r2": frozenset({"mutex", "scheduled task", "t1027", "t1055", "t1106", "t1140"}),
+    "generic_mcp": frozenset({"mutex", "scheduled task", "t1027", "t1055", "t1106", "t1140"}),
+    "none": frozenset({"mutex", "scheduled task", "t1027", "t1055", "t1106", "t1140"}),
+    "capa_yara": frozenset({"mutex", "scheduled task", "t1055"}),
+}
+
+
+@pytest.mark.parametrize("provider_id", sorted(DEV_STATIC_PROMPT_TERMS))
+@pytest.mark.parametrize("expected", [False, True])
+def test_a_non_ghidra_static_prompt_carries_no_key_term_dev_s_did_not(
+    provider_id: str, expected: bool
+) -> None:
+    from maljan.agents.prompt_fragments import format_fragment
+    from maljan.agents.static_analyst import assemble_static_prompt
+    from maljan.core.config import Settings
+    from maljan.providers.registry import get_static_provider
+
+    settings = Settings(_env_file=None)
+    settings.static.provider = provider_id
+    provider = get_static_provider(settings)
+    prompt = assemble_static_prompt(
+        provider, format_fragment("pe", "windows"), [], provider_expected=expected
+    ).lower()
+    carried = {term for term in KEY_TERMS if term in prompt}
+    assert carried <= DEV_STATIC_PROMPT_TERMS[provider_id], sorted(
+        carried - DEV_STATIC_PROMPT_TERMS[provider_id]
+    )
+    assert VERIFICATION_DISCIPLINE.lower() in prompt

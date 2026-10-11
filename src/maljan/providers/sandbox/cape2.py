@@ -15,8 +15,10 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from langchain_core.tools import BaseTool
 
 from maljan.agents.base_agent import run_coro_blocking
+from maljan.core import builtin_declarations
 from maljan.core.logger import logger
 from maljan.core.settings_overrides import redact_url
+from maljan.core.undeclared_tools import categories_of
 from maljan.providers.base import ProviderProbe, SandboxCapabilities, SandboxProvider
 from maljan.providers.registry import register_sandbox_provider
 from maljan.schemas.sandbox_report import cape_report_to_sandbox_report
@@ -51,29 +53,14 @@ class CAPE2SandboxProvider(SandboxProvider):
     probe_label = "Test CAPE connection"
     settings_intro = "The API token is stored on the server and never shown again."
 
-    # The tool-facing body of the dynamic system prompt: verbatim lines 25-36 of
-    # the old ``_ISR_SYSTEM`` in ``dynamic_analyst.py``, moved rather than
-    # retyped so a golden test can pin the assembled prompt byte for byte.
-    # ``_DYN_HEAD`` in the analyst supplies the provider-independent opening
-    # this fragment completes. A property of the sandbox, not of its MCP
-    # server: it is what the analyst was measured against whether or not the
-    # CAPE MCP server is actually enabled today (see ``dynamic_prompt_fragment``).
-    CAPE_PROMPT_FRAGMENT: ClassVar[str] = (
-        "=== TOOL USAGE WORKFLOW ===\n"
-        "Follow this sequence when given a file path or hash:\n"
-        "1. Call `get_cuckoo_status` to verify the sandbox is online.\n"
-        "2. Call `search_task(hash_value=<sha256>)` to check if this sample was already analyzed.\n"
-        "3. If no existing task: call `submit_file(file_path=<path>)` to submit for analysis.\n"
-        "4. After submission, POLL with `get_task_status(task_id=<id>)` until status "
-        "is 'reported'.\n"
-        "5. Once reported: call `get_task_report(task_id=<id>, format='lean')` for a "
-        "summarized report.\n"
-        "6. Call `get_task_iocs(task_id=<id>)` for IOCs (domains, IPs, mutexes).\n"
-        "7. Optionally call `get_task_config(task_id=<id>)` for extracted malware configs.\n\n"
-        "IMPORTANT: Always use format='lean' for reports to avoid context overflow. "
-        "The lean format filters 50MB reports down to key findings.\n"
-        "If given a Task ID directly, skip to step 5."
-    )
+    # The tool-facing body of the dynamic system prompt: the CAPE MCP block's
+    # declared workflow (``sandbox.cape2.mcp.prompt_fragment``, shipped as
+    # ``core.builtin_declarations.CAPE_WORKFLOW``), verbatim lines 25-36 of the
+    # old ``_ISR_SYSTEM`` in ``dynamic_analyst.py``. ``_DYN_HEAD`` in the
+    # analyst supplies the provider-independent opening this fragment
+    # completes. It is sent only where the sandbox's own tools are attached
+    # (``dynamic_analyst.sandbox_provider_parts``).
+    CAPE_PROMPT_FRAGMENT: ClassVar[str] = builtin_declarations.CAPE_WORKFLOW
 
     def __init__(self, cfg: SandboxCape2Config) -> None:
         self._cfg = cfg
@@ -97,14 +84,13 @@ class CAPE2SandboxProvider(SandboxProvider):
         )
 
     def dynamic_prompt_fragment(self) -> str:
-        """The tool-usage workflow text, whether or not the MCP server is up.
+        """The workflow text the CAPE MCP block declares, whether or not the server is up.
 
-        A property of the sandbox report shape, not of the MCP toggle: the
-        dynamic analyst was measured against this workflow description either
-        way, and a disabled/unreachable MCP server degrades the *tools*
-        (``dynamic_tools`` below), never the prompt.
+        The analyst sends it only where the sandbox's own tools are in the
+        request (``dynamic_analyst.sandbox_provider_parts``); a disabled or
+        unreachable MCP server degrades the *tools* (``dynamic_tools`` below).
         """
-        return self.CAPE_PROMPT_FRAGMENT
+        return str(getattr(self._cfg.mcp, "prompt_fragment", "") or "")
 
     def dynamic_tools(self) -> list[BaseTool]:
         """The CAPE MCP server's tools, narrowed only by ``mcp.tools``; none while disabled.
@@ -153,7 +139,12 @@ class CAPE2SandboxProvider(SandboxProvider):
             if raw_token:
                 headers["Authorization"] = f"Bearer {raw_token}"
             logger.info("Initializing CAPEv2 MCP over %s: %s", transport, url)
-            toolkit = MCPLangChainToolkit(transport=transport, http_url=url, http_headers=headers)
+            toolkit = MCPLangChainToolkit(
+                transport=transport,
+                http_url=url,
+                http_headers=headers,
+                categories=categories_of(self._cfg.mcp.tool_facts),
+            )
         else:
             command = self._cfg.mcp.command
             args = self._cfg.mcp.args
@@ -170,7 +161,9 @@ class CAPE2SandboxProvider(SandboxProvider):
                 command=command, args=args, env=env, cwd=project_root
             )
 
-            toolkit = MCPLangChainToolkit(server_params)
+            toolkit = MCPLangChainToolkit(
+                server_params, categories=categories_of(self._cfg.mcp.tool_facts)
+            )
 
         # Init the MCP toolkit on the shared agent loop so its session/transport
         # is bound to the SAME loop the ReAct tool calls later run on. Running it

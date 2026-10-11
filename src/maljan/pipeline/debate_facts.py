@@ -722,18 +722,20 @@ def place_facts_for(name: str, facts: Iterable[str], participants: Sequence[str]
 def tools_taking_an_address(tools: Iterable[Any]) -> list[str]:
     """The names of the tools whose declared arguments take a function's address.
 
-    Read from each tool's own argument schema, by the argument names a
-    function-listing call gives an address under
-    (``validation._ADDRESS_ARGUMENTS``): what a tool can be asked is what it
-    declares, whichever server serves it.
+    Read from each tool's own argument schema, by the argument its
+    declaration names for an address and the shared list after it
+    (``core.undeclared_tools.address_arguments``): what a tool can be asked is
+    what it declares, whichever server serves it.
     """
-    from maljan.pipeline.validation import _ADDRESS_ARGUMENTS
+    from maljan.agents.tool_pinning import declared_facts_of
+    from maljan.core.undeclared_tools import address_arguments
 
     names: list[str] = []
     for tool in tools or ():
         fields = getattr(getattr(tool, "args_schema", None), "model_fields", None)
-        if isinstance(fields, dict) and any(
-            str(field).strip().lower() in _ADDRESS_ARGUMENTS for field in fields
-        ):
+        if not isinstance(fields, dict):
+            continue
+        taking = {name.lower() for name in address_arguments(declared_facts_of(tool))}
+        if any(str(field).strip().lower() in taking for field in fields):
             names.append(str(getattr(tool, "name", "") or ""))
     return [n for n in names if n]

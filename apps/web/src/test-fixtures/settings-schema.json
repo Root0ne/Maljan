@@ -2349,6 +2349,41 @@
      "type": "list"
     },
     {
+     "advanced": true,
+     "applies": "next_job",
+     "applies_when": {
+      "core.static.provider": [
+       "ghidra"
+      ]
+     },
+     "builtin_servers": null,
+     "capability_servers": null,
+     "choice_descriptions": null,
+     "choice_facts": null,
+     "choice_labels": null,
+     "choice_titles": null,
+     "choices": null,
+     "choices_from": null,
+     "editable": true,
+     "editor": null,
+     "group": "static",
+     "key": "core.static.ghidra.call_timeout_seconds",
+     "maximum": null,
+     "minimum": null,
+     "namespace": "core",
+     "nullable": true,
+     "order": 0,
+     "path": "static.ghidra.call_timeout_seconds",
+     "probe": null,
+     "reason": null,
+     "required_env": null,
+     "reserved_servers": null,
+     "secret": false,
+     "subgroup": "Connection",
+     "title": "Ghidra MCP call budget (seconds)",
+     "type": "json"
+    },
+    {
      "advanced": false,
      "applies": "next_job",
      "applies_when": {
@@ -3468,6 +3503,41 @@
      "type": "str"
     },
     {
+     "advanced": true,
+     "applies": "next_job",
+     "applies_when": {
+      "core.static.provider": [
+       "r2"
+      ]
+     },
+     "builtin_servers": null,
+     "capability_servers": null,
+     "choice_descriptions": null,
+     "choice_facts": null,
+     "choice_labels": null,
+     "choice_titles": null,
+     "choices": null,
+     "choices_from": null,
+     "editable": true,
+     "editor": null,
+     "group": "static",
+     "key": "core.static.r2.call_timeout_seconds",
+     "maximum": null,
+     "minimum": null,
+     "namespace": "core",
+     "nullable": true,
+     "order": 0,
+     "path": "static.r2.call_timeout_seconds",
+     "probe": null,
+     "reason": null,
+     "required_env": null,
+     "reserved_servers": null,
+     "secret": false,
+     "subgroup": "Connection",
+     "title": "radare2 MCP call budget (seconds)",
+     "type": "json"
+    },
+    {
      "advanced": false,
      "applies": "next_job",
      "applies_when": {
@@ -4544,6 +4614,7 @@
         "core.sandbox.cape2.mcp.args",
         "core.sandbox.cape2.mcp.auth_token",
         "core.sandbox.cape2.mcp.auto_name_prefixes",
+        "core.sandbox.cape2.mcp.call_timeout_seconds",
         "core.sandbox.cape2.mcp.command",
         "core.sandbox.cape2.mcp.cwd",
         "core.sandbox.cape2.mcp.enabled",
@@ -4860,6 +4931,41 @@
      "subgroup": "Declaration",
      "title": "CAPE MCP auto-name prefixes",
      "type": "list"
+    },
+    {
+     "advanced": true,
+     "applies": "next_job",
+     "applies_when": {
+      "core.sandbox.provider": [
+       "cape2"
+      ]
+     },
+     "builtin_servers": null,
+     "capability_servers": null,
+     "choice_descriptions": null,
+     "choice_facts": null,
+     "choice_labels": null,
+     "choice_titles": null,
+     "choices": null,
+     "choices_from": null,
+     "editable": true,
+     "editor": null,
+     "group": "sandbox",
+     "key": "core.sandbox.cape2.mcp.call_timeout_seconds",
+     "maximum": null,
+     "minimum": null,
+     "namespace": "core",
+     "nullable": true,
+     "order": 0,
+     "path": "sandbox.cape2.mcp.call_timeout_seconds",
+     "probe": null,
+     "reason": null,
+     "required_env": null,
+     "reserved_servers": null,
+     "secret": false,
+     "subgroup": "Connection",
+     "title": "CAPE MCP call budget (seconds)",
+     "type": "json"
     },
     {
      "advanced": false,
@@ -9696,6 +9802,37 @@
      "subgroup": "Document metadata",
      "title": "Publisher",
      "type": "str"
+    },
+    {
+     "advanced": false,
+     "applies": "next_job",
+     "applies_when": null,
+     "builtin_servers": null,
+     "capability_servers": null,
+     "choice_descriptions": null,
+     "choice_facts": null,
+     "choice_labels": null,
+     "choice_titles": null,
+     "choices": null,
+     "choices_from": null,
+     "editable": true,
+     "editor": null,
+     "group": "reporting",
+     "key": "core.reporting.reference_urls",
+     "maximum": null,
+     "minimum": null,
+     "namespace": "core",
+     "nullable": false,
+     "order": 0,
+     "path": "reporting.reference_urls",
+     "probe": null,
+     "reason": null,
+     "required_env": null,
+     "reserved_servers": null,
+     "secret": false,
+     "subgroup": "Report content",
+     "title": "Sample lookups every report links to",
+     "type": "json"
     },
     {
      "advanced": false,

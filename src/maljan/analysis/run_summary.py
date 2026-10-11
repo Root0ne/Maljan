@@ -962,8 +962,16 @@ def spend_lines(spend: Any) -> list[str]:
 
 
 def _sandbox_name(provider: str) -> str:
-    """A sandbox provider's name as a reader knows it."""
-    return {"triage": "Triage", "cape2": "CAPE", "cuckoo": "Cuckoo"}.get(provider, provider)
+    """A sandbox's name as a reader knows it: the display name its report format declares.
+
+    The report format declared under the provider's name gives it
+    (``core.report_formats``: ``Triage``, ``CAPE``, ``Cuckoo``); a provider no
+    format is named after is named as written.
+    """
+    from maljan.core.report_formats import format_named
+
+    declared = format_named(provider)
+    return (declared.display_name or provider) if declared is not None else provider
 
 
 def tool_latency_lines(latency: Any) -> list[str]:

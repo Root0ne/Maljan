@@ -29,13 +29,18 @@ from maljan.agents.prompt_fragments import (
     has_xrefs,
     offered,
     provider_source,
+    resolve_attached,
     stamp_source,
     tool_families,
     tool_names,
     tools_statement,
 )
 from maljan.agents.registry import register_agent
-from maljan.providers.base import StaticJobContext, absent_provider_fragment
+from maljan.providers.base import (
+    StaticJobContext,
+    absent_provider_fragment,
+    holding_the_discipline,
+)
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
 # The provider- and platform-independent head of the static system prompt.
@@ -121,7 +126,12 @@ def static_provider_parts(
         provider_label=f"the {label} static provider",
         provider_expected=attached,
     )
-    return body.rstrip(), statement
+    # Every static analyst is held to the verification discipline, whatever
+    # its provider wrote: a provider that writes its whole fragment itself
+    # gets it after that fragment.
+    # A part of the provider's declared workflow that names another server's
+    # tool reads as that server's being attached or not.
+    return resolve_attached(holding_the_discipline(body), tools).rstrip(), statement
 
 
 def _static_prompt(provider: Any | None = None, tools: Sequence[Any] = ()) -> str:

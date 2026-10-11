@@ -10,10 +10,10 @@ Only the declaration fields are here. A built-in server's connection settings
 stay in ``config._builtin_servers``; its declaration is merged from this
 module under whatever an operator stored (``tool_declarations.fill_declaration``).
 
-The two static providers' workflow prompts and radare2's error patterns live
-here as the text of their declarations, and the adapters read them from here,
-so there is one copy of each. The Ghidra and radare2 tool tables are data in
-``maljan.core.builtin_reverser_tools``.
+The static providers' and the CAPE sidecar's workflow prompts and radare2's
+error patterns live here as the text of their declarations; the adapters read
+the workflow from their block, so there is one copy of each. The Ghidra and
+radare2 tool tables are data in ``maljan.core.builtin_reverser_tools``.
 """
 
 from __future__ import annotations
@@ -36,17 +36,21 @@ if TYPE_CHECKING:
 # Model-facing text the declarations carry
 # ---------------------------------------------------------------------------
 
-# The Ghidra fragment in two parts. The guidance is about claims — what a
-# claim cites, which techniques to look for, and the verification discipline
-# with its confidence caps — and goes with every call the analyst makes on a
-# Ghidra run, tools or none: a revision or a validation retry that lost it
-# could raise an unverified claim past the caps the first turn was held to.
-# The workflow is the tool calls, and goes only where Ghidra's tools do.
-GHIDRA_GUIDANCE: str = (
-    "For EVERY claim you make, you MUST cite a concrete artifact: a function name, "
-    "string offset (.data+0xNN), API import, or hex pattern. "
-    "Focus on MITRE ATT&CK: T1027 (Obfuscation), T1106 (Native API), "
-    "T1055 (Process Injection), T1140 (Deobfuscation).\n\n"
+# Each static provider's workflow: the tool calls, in the order the server's
+# tools are best called. It is the server's declared ``prompt_fragment``, shown
+# only where that server's tools are attached to the agent; the provider's own
+# opening sentence and the claim guidance every static analyst is given
+# (``providers.base.CLAIM_GUIDANCE``) come before it. A sentence here names only
+# the server's own tools; a tool of another server is named only inside
+# ``{{attached:<server>|<while that server is attached>|<otherwise>}}``, which
+# the prompt resolves for the servers the request carries
+# (``prompt_fragments.resolve_attached``).
+# Ghidra's verification discipline, as its prompt has always worded it, with
+# its own examples. The shared discipline every other static provider carries
+# (``providers.base.VERIFICATION_DISCIPLINE``) holds the same rules in generic
+# words; this text stays with Ghidra's declaration so a Ghidra run's prompt is
+# unchanged.
+GHIDRA_VERIFICATION_DISCIPLINE: str = (
     "=== VERIFICATION DISCIPLINE (suppresses confidently-wrong attribution) ===\n"
     "- A SPECIFIC claim (a named algorithm like RC4/djb2/ROR13, a constant or XOR\n"
     "  key, or a hash-resolved API) may reach CONFIDENCE >= 0.8 only if you\n"
@@ -94,8 +98,10 @@ GHIDRA_WORKFLOW: str = (
     "- API names resolved by hash (a hashing loop, sparse imports): call\n"
     "  `emulate_hash_batch` to brute-force the obfuscated API names.\n"
     "- Suspected encryption / ransomware: the pack's crypto constants line names the\n"
-    "  published constants and where they stand; `find_crypto_constants` on the\n"
-    "  analysis server gives its whole answer (Ghidra's `detect_crypto_constants`\n"
+    "  published constants and where they stand; "
+    "{{attached:analysis|`find_crypto_constants` on the\n"
+    "  analysis server|a crypto-constant tool, where one\n"
+    "  is attached,}} gives its whole answer (Ghidra's `detect_crypto_constants`\n"
     "  is not implemented).\n"
     "- Trace a key, config value, or decoded buffer through a function:\n"
     "  `analyze_dataflow(address=<addr>, direction=backward|forward)`.\n"
@@ -114,21 +120,7 @@ GHIDRA_WORKFLOW: str = (
     "- Summarize assembly patterns instead of dumping raw hex."
 )
 
-# The whole fragment, with Ghidra attached: the tools, the guidance, the workflow.
-GHIDRA_PROMPT_FRAGMENT: str = (
-    "Analyze binary files (e.g. PE, ELF) utilizing Ghidra through your available tools. "
-    "You can decompile functions, find cross-references, extract strings, and more. "
-    + GHIDRA_GUIDANCE
-    + "\n\n"
-    + GHIDRA_WORKFLOW
-)
-
-R2_PROMPT_FRAGMENT: str = (
-    "Analyze binary files (e.g. PE, ELF) utilizing radare2 through your available tools. "
-    "For EVERY claim you make, you MUST cite a concrete artifact: a function name, "
-    "string offset (.data+0xNN), API import, or hex pattern. "
-    "Focus on MITRE ATT&CK: T1027 (Obfuscation), T1106 (Native API), "
-    "T1055 (Process Injection), T1140 (Deobfuscation).\n\n"
+R2_WORKFLOW: str = (
     "=== TOOL USAGE WORKFLOW ===\n"
     "1. Call `open_file` with the path you are given, then `analyze` to run the\n"
     "   analysis pass.\n"
@@ -137,6 +129,25 @@ R2_PROMPT_FRAGMENT: str = (
     "   process APIs; `decompile_function` those and `xrefs_to` their addresses.\n"
     "4. Summarise assembly patterns instead of dumping raw hex, and prefer one\n"
     "   summarising call over many narrow ones.\n"
+)
+
+# The CAPE MCP sidecar's workflow, the CAPE sandbox provider's dynamic
+# fragment (``providers.sandbox.cape2``), sent only where its tools are attached.
+CAPE_WORKFLOW: str = (
+    "=== TOOL USAGE WORKFLOW ===\n"
+    "Follow this sequence when given a file path or hash:\n"
+    "1. Call `get_cuckoo_status` to verify the sandbox is online.\n"
+    "2. Call `search_task(hash_value=<sha256>)` to check if this sample was already analyzed.\n"
+    "3. If no existing task: call `submit_file(file_path=<path>)` to submit for analysis.\n"
+    "4. After submission, POLL with `get_task_status(task_id=<id>)` until status "
+    "is 'reported'.\n"
+    "5. Once reported: call `get_task_report(task_id=<id>, format='lean')` for a "
+    "summarized report.\n"
+    "6. Call `get_task_iocs(task_id=<id>)` for IOCs (domains, IPs, mutexes).\n"
+    "7. Optionally call `get_task_config(task_id=<id>)` for extracted malware configs.\n\n"
+    "IMPORTANT: Always use format='lean' for reports to avoid context overflow. "
+    "The lean format filters 50MB reports down to key findings.\n"
+    "If given a Task ID directly, skip to step 5."
 )
 
 # What r2mcp is told after an answer that says no file is open, without and
@@ -738,7 +749,7 @@ _PROVIDER_BLOCKS: dict[str, dict[str, Any]] = {
         "sample_mount": "/data/samples",
         "work_dir": ".work",
         "roles": ["decompiler", "disassembler"],
-        "prompt_fragment": GHIDRA_PROMPT_FRAGMENT,
+        "prompt_fragment": GHIDRA_WORKFLOW,
         "variable_names": ["GHIDRA_CONTAINER_SAMPLES_PATH"],
         "auto_name_prefixes": ["FUN_", "LAB_", "SUB_"],
         "tool_facts": GHIDRA_TOOLS,
@@ -746,12 +757,12 @@ _PROVIDER_BLOCKS: dict[str, dict[str, Any]] = {
     "r2": {
         "work_dir": "r2-work",
         "roles": ["decompiler", "disassembler"],
-        "prompt_fragment": R2_PROMPT_FRAGMENT,
+        "prompt_fragment": R2_WORKFLOW,
         "error_patterns": list(R2_ERROR_PATTERNS),
         "auto_name_prefixes": ["fcn.", "loc.", "sub.", "func."],
         "tool_facts": R2_TOOLS,
     },
-    "cape2_mcp": {"roles": ["sandbox"]},
+    "cape2_mcp": {"roles": ["sandbox"], "prompt_fragment": CAPE_WORKFLOW},
 }
 
 # The platform's own in-process sources, declared like any server.

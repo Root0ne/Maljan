@@ -158,6 +158,10 @@ class SandboxReport(BaseModel):
     channels: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     screenshots: list[dict[str, Any]] = Field(default_factory=list)
     cti: dict[str, Any] = Field(default_factory=dict)
+    # The sections this sandbox structurally cannot produce, by the platform's
+    # own section ids (``SECTION_IDS``: ``api_calls``, ``events``,
+    # ``registry`` …), never a sandbox's own words; a report stored before
+    # the ids were normalised is read through ``LEGACY_SECTION_IDS``.
     unavailable: list[str] = Field(default_factory=list)
     # The run-time limit the sandbox set for the task, in seconds, as its own
     # report says (Triage's task ``timeout``): the limit, not a measured
@@ -290,6 +294,23 @@ def _cape_channels(
             if rows:
                 channels[str(name)] = rows
     return channels
+
+
+# The section ids a report's ``unavailable`` list names, as the sandbox
+# sections read them (``analysis.sandbox_sections.SECTION_PREFIXES``), and the
+# words an earlier report or a sandbox's own list used for two of them.
+SECTION_IDS: tuple[str, ...] = ("api_calls", "apistats", "events", "registry", "screenshots")
+LEGACY_SECTION_IDS: dict[str, str] = {"calls": "api_calls", "generic_events": "events"}
+
+
+def section_id(name: Any) -> str:
+    """A section named in an ``unavailable`` list, as the platform's own id.
+
+    The id itself, lower-cased; a word an earlier report used for one
+    (``calls``, ``generic_events``) is read as the id it meant.
+    """
+    word = str(name or "").strip().lower()
+    return LEGACY_SECTION_IDS.get(word, word)
 
 
 # The list fields of the model a normaliser may fill, as one vocabulary: what

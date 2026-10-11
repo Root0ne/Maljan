@@ -14,8 +14,8 @@ What it states, and nothing else:
 * **The functions.** The starts of the file's exception directory (x64, a
   chained fragment counted for the function it belongs to), its exports, its
   entry point, the function starts capa listed, and every direct call target
-  the decoder reaches in an executable section. Ghidra's and radare2's lists
-  are not read here: the pack runs before any analyst opens them, and the
+  the decoder reaches in an executable section. A disassembler's function
+  list is not read here: the pack runs before any analyst opens one, and the
   answer says so.
 * **What a function calls.** Every function start is collected first (a walk
   that adds each direct call target it reaches), then each function is read
@@ -129,7 +129,7 @@ SELF = "this entry"
 
 # Said in every answer for the function lists the pack does not read.
 FUNCTION_LISTS_ABSENT = (
-    "Ghidra's and radare2's function lists: no: the pack runs before any analyst opens them"
+    "a disassembler's function list: no: the pack runs before any analyst opens one"
 )
 
 # The shortest run of characters taken as a plain string, as the pack's strings head reads one.
@@ -1900,8 +1900,8 @@ def head_text(data: Mapping[str, Any], rows: int) -> str:
     if not rows:
         return said
     return (
-        f"{said}; address = image base {data.get('image_base')} + offset, as Ghidra and radare2 "
-        "take it; ranked by distinct artefacts of their own, then by address:"
+        f"{said}; address = image base {data.get('image_base')} + offset, as a disassembler "
+        "takes it; ranked by distinct artefacts of their own, then by address:"
     )
 
 
@@ -2038,7 +2038,7 @@ FLOSS_NOT_REMEMBERED = "no: FLOSS has not run on this file in this server"
 
 # Why the served index has no disassembler's function list.
 SERVED_FUNCTION_LISTS = (
-    "Ghidra's and radare2's function lists: no: the analysis server has no disassembler of its own"
+    "a disassembler's function list: no: the analysis server has no disassembler of its own"
 )
 
 # The name a cell of the served answer gives its own decoding.

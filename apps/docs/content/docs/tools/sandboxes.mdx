@@ -181,7 +181,10 @@ coding it:
 
 An empty path in `mapping` says the sandbox does not publish that channel, and
 the report lists it as unavailable rather than reading like a clean sample by
-omission. `mapping.channels` maps a channel name of your own to a JSONPath for
+omission. The list names the platform's own section ids (`api_calls`,
+`events`, `apistats`, `registry`, `screenshots`, and the mapping's other
+channel names as written); a report stored when the list said `calls` or
+`generic_events` is printed as stored and read as the ids those words meant. `mapping.channels` maps a channel name of your own to a JSONPath for
 anything the schema has no field for; namespace it by platform, e.g.
 `{"android.permissions": "$.apk.permissions[*]"}`. See [Format routing and the
 sandbox](/configuration/#format-routing-and-the-sandbox).

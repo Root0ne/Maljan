@@ -328,8 +328,10 @@ class DynamicBehavior(BaseModel):
     file_operations: list[dict[str, Any]] = Field(default_factory=list)
     notable_apis: list[dict[str, Any]] = Field(default_factory=list)
     sandbox_signatures: list[SandboxSignature] = Field(default_factory=list)
-    # Sections this sandbox structurally cannot produce, e.g. ["apistats",
-    # "calls", "registry", "generic_events"] for Hatching Triage. Named rather
+    # Sections this sandbox structurally cannot produce, by the platform's
+    # section ids (``schemas.sandbox_report.SECTION_IDS``), printed as stored:
+    # a report stored before the ids were normalised holds its sandbox's own
+    # words, read through ``LEGACY_SECTION_IDS`` wherever compared. Named rather
     # than left empty: an empty API-call table reads as "the sample did
     # nothing", which is the opposite of "we could not see". Every renderer
     # prints "Not provided by this sandbox" for these, and no detection layer
@@ -766,6 +768,10 @@ class ExternalReference(BaseModel):
     source: str  # "VirusTotal", "MalwareBazaar", "MITRE ATT&CK", ...
     url: str
     note: str | None = None
+    # Whether the Sigma draft lists this link among its references, as the
+    # lookup it came from declares (``reporting.reference_urls``' ``sigma``).
+    # Left out of the dump when false, so a stored report dumps as it did.
+    sigma: bool = Field(default=False, exclude_if=lambda value: not value)
 
 
 # ---------------------------------------------------------------------------

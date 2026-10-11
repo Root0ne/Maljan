@@ -59,6 +59,7 @@ from maljan.core.tool_declarations import (
     ToolFacts,
     check_auto_name_prefixes,
     check_env_names,
+    check_fragment_template,
     check_mount,
     check_own_prefix,
     check_reference_urls,
@@ -1292,6 +1293,15 @@ class MCPServerConfig(BaseModel):
     agents: list[str] = Field(default_factory=list)
     # Display name; empty means "use the key".
     label: str = ""
+    # How long one call of this server's tools may go unanswered before it is
+    # a transport failure, before the grace (``providers.server_guard``); a tool
+    # the server's manifest gives a longer budget gets that one. Zero sends its
+    # calls with no deadline of their own. Unset (``None``, every built-in), the
+    # server gets the deployment's floor as it always did
+    # (``core.legacy_tool_tables.legacy_call_floor``).
+    # ``mcp.breaker.call_timeout_seconds``, where an operator set it, applies to
+    # every server instead.
+    call_timeout_seconds: Annotated[float, Field(ge=0.0)] | None = None
     # Which tool opens a sample, and which select and analyse one; empty
     # declares nothing. See ``SampleOpenConfig``.
     sample_open: SampleOpenConfig = Field(default_factory=SampleOpenConfig)
@@ -1355,6 +1365,11 @@ class MCPServerConfig(BaseModel):
     @classmethod
     def _prefixes_are_prefixes(cls, value: list[str]) -> list[str]:
         return check_auto_name_prefixes(value)
+
+    @field_validator("prompt_fragment")
+    @classmethod
+    def _attached_parts_read(cls, value: str) -> str:
+        return check_fragment_template(value)
 
     @field_validator("reference_urls")
     @classmethod
@@ -1586,8 +1601,9 @@ class MCPBreakerConfig(BaseModel):
     max_concurrent_calls: Annotated[int, Field(ge=0)] = 4
     # The budget every tool call gets at least before it counts as a server
     # that did not answer (a tool whose server declares a longer budget gets
-    # that, and thirty seconds of grace are added either way). Zero derives
-    # it from the longest tool budget the deployment configures — capa's.
+    # that, and thirty seconds of grace are added either way). Set, it applies
+    # to every server; zero gives each server its own block's
+    # ``call_timeout_seconds``.
     call_timeout_seconds: Annotated[float, Field(ge=0.0)] = 0.0
 
 
@@ -3595,6 +3611,19 @@ def cape_mcp_block() -> MCPServerConfig:
     return MCPServerConfig(**provider_declaration("cape2_mcp"))
 
 
+_LEGACY_FRAGMENT_NOTED: list[bool] = [False]
+
+
+def _note_legacy_fragment_once() -> None:
+    """Say once per process that a stored whole static fragment was read as not set."""
+    if not _LEGACY_FRAGMENT_NOTED[0]:
+        _LEGACY_FRAGMENT_NOTED[0] = True
+        logger.info(
+            "settings: a static provider block's stored prompt_fragment holds an earlier "
+            "release's whole fragment, which no prompt read; its shipped workflow is used."
+        )
+
+
 class StaticConfig(BaseModel):
     """Which static-analysis tool the static analyst attaches, and its settings.
 
@@ -3619,6 +3648,18 @@ class StaticConfig(BaseModel):
         parse with an empty one (Ghidra's ``sample_open`` among them); a field
         an operator set (to anything, empty included) is kept as set.
         """
+        from maljan.core.legacy_tool_tables import legacy_whole_fragment
+
+        # A provider block's ``prompt_fragment`` is now the workflow alone; a
+        # value stored when it held the whole fragment (which no prompt read)
+        # is read as not set, so the block shows its shipped workflow.
+        for name in ("ghidra", "r2"):
+            block = getattr(self, name)
+            if "prompt_fragment" in block.model_fields_set and legacy_whole_fragment(
+                name, block.prompt_fragment
+            ):
+                block.model_fields_set.discard("prompt_fragment")
+                _note_legacy_fragment_once()
         fill_declaration(self.ghidra, ghidra_block())
         fill_declaration(self.r2, r2_block())
         return self
@@ -3837,6 +3878,50 @@ class SandboxConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class ReferenceLookup(BaseModel):
+    """One sample lookup a report links to: a URL template, its name, its note, and where else.
+
+    Written as a bare template it is linked under the template's host and the
+    note "Sample lookup". ``sigma`` lists the link among the Sigma draft's
+    references too.
+    """
+
+    url: str
+    source: str = ""
+    note: str = ""
+    sigma: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _a_bare_template(cls, value: Any) -> Any:
+        return {"url": value} if isinstance(value, str) else value
+
+    @field_validator("url")
+    @classmethod
+    def _url_is_a_template(cls, value: str) -> str:
+        check_reference_urls([value])
+        return value
+
+
+# The lookups every report linked before they were data (``reporting.builder``
+# wrote these two for every sample): shipped as the defaults of
+# ``reporting.reference_urls`` so a report under default settings links what
+# it always linked; an operator removes either by editing the list.
+DEFAULT_REFERENCE_LOOKUPS: tuple[ReferenceLookup, ...] = (
+    ReferenceLookup(
+        url="https://www.virustotal.com/gui/file/{sha256}",
+        source="VirusTotal",
+        note="VT detection summary",
+        sigma=True,
+    ),
+    ReferenceLookup(
+        url="https://bazaar.abuse.ch/sample/{sha256}/",
+        source="MalwareBazaar",
+        note="Sample lookup",
+    ),
+)
+
+
 class ReportingConfig(BaseModel):
     """Comprehensive malware report generation settings.
 
@@ -3894,6 +3979,14 @@ class ReportingConfig(BaseModel):
     # a live report when the model's answer outgrew it.
     composer_section_max_tokens: Annotated[int, Field(ge=0)] = 0
     composer_per_section_timeout: Annotated[int, Field(ge=1)] = 120
+    # The sample lookups every report links to, whatever the run used: each a
+    # URL template (``{sha256}``, ``{md5}``, ``{sha1}``), the name it is linked
+    # under and its note. Shipped with the two every report linked before, as
+    # data an operator may remove; a tool server's own lookups (its declared
+    # ``reference_urls``) are linked besides, only on a run that asked it.
+    reference_urls: list[ReferenceLookup] = Field(
+        default_factory=lambda: [lookup.model_copy() for lookup in DEFAULT_REFERENCE_LOOKUPS]
+    )
     # Server-side HTML→PDF export.
     html_export_enabled: bool = True
 

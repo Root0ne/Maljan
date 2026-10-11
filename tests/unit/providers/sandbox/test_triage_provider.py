@@ -12,6 +12,7 @@ import pytest
 from maljan.core.config import Settings
 from maljan.providers.errors import ProviderError
 from maljan.providers.sandbox.triage import TriageSandboxProvider
+from maljan.schemas.sandbox_report import section_id
 
 FIX = Path(__file__).resolve().parents[3] / "fixtures" / "sandbox"
 
@@ -268,9 +269,9 @@ def test_fetch_maps_overview_and_task_report_into_a_sandbox_report():
         p["procid_parent"] and p["image"] or p["image"] for p in task["processes"]
     ]
     assert sorted(report.unavailable) == [
+        "api_calls",
         "apistats",
-        "calls",
-        "generic_events",
+        "events",
         "registry",
         "screenshots",
     ]
@@ -358,7 +359,7 @@ def test_every_consumer_channel_is_populated_or_named_unavailable():
         ("dropped_files", report.dropped_files),
     ]
     for name, value in channels:
-        assert bool(value) or name in unavailable, (
+        assert bool(value) or section_id(name) in unavailable, (
             f"{name!r} is empty and not named in `unavailable`: "
             "a rendered report would read like a clean sample for it"
         )

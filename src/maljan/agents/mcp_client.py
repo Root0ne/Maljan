@@ -13,7 +13,7 @@ supported:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from datetime import timedelta
 from typing import Any
@@ -111,6 +111,7 @@ class MCPLangChainToolkit:
         truncation_ledger: Any | None = None,
         context_budget: Any | None = None,
         guard: Any | None = None,
+        categories: Mapping[str, str] | None = None,
     ):
         self.server_params = server_params
         self.transport = (transport or "stdio").lower()
@@ -134,6 +135,10 @@ class MCPLangChainToolkit:
         # (``maljan.providers.server_guard``). None outside a job's registry,
         # and every call is then sent exactly as it always was.
         self._guard = guard
+        # The tag each tool's description is shown with, as its server's block
+        # declares it (``ToolFacts.category``); an undeclared tool's is read
+        # from its name (``core.undeclared_tools.category_tag``).
+        self._categories = dict(categories or {})
 
     async def initialize(self) -> None:
         """Initialize the connection to the MCP server and fetch available tools."""
@@ -443,53 +448,15 @@ class MCPLangChainToolkit:
                 guard.abandoned(trial=trial)
 
     def _tag_description(self, name: str, description: str) -> str:
-        """Add a category tag and truncate to keep ReAct context lean."""
-        prefix = name.split("_")[0]
+        """Prefix the description with its category tag; the text itself is kept whole.
 
-        category_map: dict[str, str] = {
-            "analyze": "ANALYZE",
-            "decompile": "ANALYZE",
-            "disassemble": "ANALYZE",
-            "detect": "ANALYZE",
-            "find": "ANALYZE",
-            "diff": "ANALYZE",
-            "compare": "ANALYZE",
-            "inspect": "ANALYZE",
-            "emulate": "ANALYZE",
-            "extract": "ANALYZE",
-            "list": "LIST",
-            "get": "LIST",
-            "search": "LIST",
-            "batch": "BATCH",
-            "bulk": "BATCH",
-            "run": "EXEC",
-            "rename": "MODIFY",
-            "create": "MODIFY",
-            "delete": "MODIFY",
-            "set": "MODIFY",
-            "apply": "MODIFY",
-            "modify": "MODIFY",
-            "remove": "MODIFY",
-            "move": "MODIFY",
-            "clear": "MODIFY",
-            "convert": "MODIFY",
-            "clone": "MODIFY",
-            "force": "MODIFY",
-            "open": "NAV",
-            "close": "NAV",
-            "save": "NAV",
-            "load": "NAV",
-            "switch": "NAV",
-            "validate": "CHECK",
-            "can": "CHECK",
-            "read": "READ",
-            "import": "IMPORT",
-            "server": "META",
-        }
-        cat = category_map.get(prefix, "TOOL")
+        The tag is the one the tool's declaration gives, else, for a tool
+        that declares none, the one its name's first word gives.
+        """
+        from maljan.core.undeclared_tools import category_tag
 
         clean = " ".join(description.split())
-        return f"[{cat}] {clean}"
+        return f"[{category_tag(name, self._categories.get(name, ''))}] {clean}"
 
     def _apply_output_guardrail(self, output: str, narrowing: Sequence[str] = ()) -> str:
         """Limit tool output size to prevent LLM context overflow.
