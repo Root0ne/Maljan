@@ -54,6 +54,26 @@ if TYPE_CHECKING:
 # pack (recorded as ``pipeline``) and the analysis server.
 _RESOLVING_SERVERS = frozenset({"pipeline", "analysis"})
 
+
+def _platforms_own_resolution(entry: Any) -> bool:
+    """Whether ``entry`` is an API hash resolution the platform's own resolver answered.
+
+    By its declared kind, from a source that declares ``platform_owned``; an
+    entry with no recorded source by the legacy reading and the server it was
+    made to (``_RESOLVING_SERVERS``).
+    """
+    from maljan.core.declared_reading import declarations, kind_of, recorded
+    from maljan.core.tool_declarations import ToolDeclarations
+
+    if kind_of(entry) != "api_hash_resolution":
+        return False
+    if not recorded(entry):
+        return str(getattr(entry, "server", "") or "") in _RESOLVING_SERVERS
+    ref = ToolDeclarations.source_of(entry)
+    held = declarations().source(ref) if ref is not None else None
+    return bool(held is not None and held.platform_owned)
+
+
 # The closers a repair may append, and nothing else. A repair that deleted a
 # character, changed one or inserted one anywhere but the end would be this
 # code deciding what the model meant.
@@ -364,14 +384,10 @@ class EvidenceRecorder:
         self._by_id[entry.id] = entry
         # The function names a hash resolution read are names, and the event
         # and transcript scrub keeps them as written for the rest of the job.
-        # Only this platform's own resolver answers them: the pack's call and
-        # the analysis server's tool. Another server's tool of that name is not.
-        if (
-            tool == "resolve_api_hashes"
-            and entry.ok
-            and server in _RESOLVING_SERVERS
-            and not repeated_of
-        ):
+        # Only this platform's own resolver answers them: an API hash
+        # resolution (its declared kind) from a source the platform owns (the
+        # pack, the analysis server). Another server's tool of that name is not.
+        if entry.ok and not repeated_of and _platforms_own_resolution(entry):
             remember_resolved_names(output)
         # ``output``, the text the model was handed, and not ``entry.output``,
         # which the ledger has already trimmed and the byte budget may blank

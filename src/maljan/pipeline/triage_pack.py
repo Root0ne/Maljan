@@ -108,9 +108,10 @@ from maljan.analysis.ghidra_passes import (
 )
 from maljan.analysis.pcap_summary import conversation_line
 from maljan.analysis.technique_ids import technique_ids_in
-from maljan.core.declared_reading import consumer_kinds, kind_of
+from maljan.core.declared_reading import consumer_kinds, declarations, facts_of, kind_of
 from maljan.core.legacy_tool_tables import FILE_ASSESSMENT_TOOLS
 from maljan.core.logger import logger
+from maljan.core.tool_declarations import PACK
 from maljan.extractors.sample_identity import ARCHIVE_FILE_TYPES, DOCUMENT_FILE_TYPES
 from maljan.pipeline.conditions import TriageFacts
 from maljan.pipeline.sandbox_status import (
@@ -1202,12 +1203,18 @@ class _Pack:
         path = self.inputs.sample_path
         latest: dict[str, LedgerEntry] = {}
         for recorded in self.recorder.entries:
-            if recorded.agent == PIPELINE and recorded.tool in _INDEX_SOURCES:
-                latest[recorded.tool] = recorded
+            slot = _index_slot(recorded) if recorded.agent == PIPELINE else ""
+            if slot:
+                latest[slot] = recorded
         joined: dict[str, tuple[str, dict[str, Any]]] = {}
+        slots: dict[str, str] = {}
         absent: dict[str, str] = {}
-        for tool in _INDEX_SOURCES:
-            entry = latest.get(tool)
+        for slot, kind, reader in _INDEX_INPUTS:
+            entry = latest.get(slot)
+            # Each input is named by the tool that answered it, else by the
+            # pack's own tool of that kind.
+            tool = entry.tool if entry is not None else _pack_tool_of(kind, reader)
+            slots[slot] = tool
             if entry is None:
                 absent[tool] = INDEX_SOURCE_NOT_IN_PACK
             elif entry.ok and isinstance(entry.structured, dict):
@@ -1234,11 +1241,11 @@ class _Pack:
             args,
             lambda: artefact_index.function_index(
                 path,
-                pe_info=joined.get("pe_info"),
-                capa=joined.get("capa"),
-                floss=joined.get("floss"),
-                hashes=joined.get("resolve_api_hashes"),
-                blobs=joined.get("decode_string_blobs"),
+                pe_info=joined.get(slots["pe_info"]),
+                capa=joined.get(slots["capa"]),
+                floss=joined.get(slots["floss"]),
+                hashes=joined.get(slots["hashes"]),
+                blobs=joined.get(slots["blobs"]),
                 absent=absent,
                 ranges_into=ranges,
             ),
@@ -1339,8 +1346,38 @@ def _file_digest(path: str) -> str:
     return hasher.hexdigest()
 
 
-# The pack's answers the function index joins, by tool.
-_INDEX_SOURCES = ("pe_info", "capa", "floss", "resolve_api_hashes", "decode_string_blobs")
+# The pack's answers the function index joins: per input of
+# ``artefact_index.function_index``, the declared kind (or reader) of the answer
+# that fills it (``core.declared_reading``): the PE header, capability rules
+# with their addresses, an emulator's recovered strings with their call sites,
+# an API hash resolution, a static string decoder.
+_INDEX_INPUTS: tuple[tuple[str, str, str], ...] = (
+    ("pe_info", "", "pe_header"),
+    ("capa", "capability_rules", ""),
+    ("floss", "emulated_strings", ""),
+    ("hashes", "api_hash_resolution", ""),
+    ("blobs", "decoded_strings", ""),
+)
+
+
+def _index_slot(entry: LedgerEntry) -> str:
+    """The function index input an entry fills, by its declared kind or reader; ``""`` for none."""
+    facts = facts_of(entry)
+    if facts is None:
+        return ""
+    for slot, kind, reader in _INDEX_INPUTS:
+        if (kind and facts.kind == kind) or (reader and facts.reader == reader):
+            return slot
+    return ""
+
+
+def _pack_tool_of(kind: str, reader: str) -> str:
+    """The pack's own tool declared under ``kind`` (or with ``reader``), for a missing input."""
+    held = declarations().source(PACK)
+    for name, facts in held.tools.items() if held is not None else ():
+        if (kind and facts.kind == kind) or (reader and facts.reader == reader):
+            return name
+    return kind or reader
 
 
 # Why the index could not join one of the pack's answers, by case.
