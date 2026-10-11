@@ -1,16 +1,17 @@
 """Where the worker keeps its private copies of a sample, and how they go away.
 
 The download target (``upload_temp_dir``) plus one mirror subdirectory per
-static provider that needs a copy, all created 0o700 with files 0o600. Those
+server that needs a copy, all created 0o700 with files 0o600. Those
 subdirectories are the boundary between the worker's scratch and the operator's
 own corpus in ``samples_dir``: nothing here lists or deletes outside them.
 
-There is more than one because radare2 will not read from a hidden one. Its
-own path check rejects a path carrying a ``/.`` segment, so an r2mcp handed
-``<samples_dir>/.work/<sha>.exe`` answers "Failed to open file." to every tool
-call — the whole of BUG 10, live on 2026-09-07. ``.work`` stays for Ghidra,
-whose container mount is written against it; r2 gets ``r2-work``, and
-``WORK_SUBDIRS`` is what keeps the cleanup and the sweep covering both.
+Which subdirectories there are is not written here. Each static provider says
+where it mirrors (``mirror_spec()``) and each server declares its own
+``work_dir``; ``maljan.providers.registry.mirror_work_dirs`` is their union for
+a settings object, and every path that sweeps, removes or exports a root takes
+that union from its caller. There is more than one because a tool may refuse a
+directory another accepts: radare2 rejects a path carrying a ``/.`` segment, so
+its copies cannot go in the hidden shared one (BUG 10, live on 2026-09-07).
 """
 
 from __future__ import annotations
@@ -19,26 +20,13 @@ import os
 import re
 import shutil
 import time
+from collections.abc import Iterable
 from pathlib import Path
 
 from app.config import settings
 from app.logging_config import get_logger
 
 logger = get_logger("worker.sample_files")
-
-# The Ghidra mirror, and the default for anything that does not ask otherwise.
-# Hidden on purpose: it is the worker's scratch, not part of the corpus.
-WORK_SUBDIR = ".work"
-
-# radare2's, which may not be hidden — see the module docstring. Named here
-# rather than derived from settings so the sweep can find it without loading
-# the analysis config.
-R2_WORK_SUBDIR = "r2-work"
-
-# Every mirror subdirectory the cleanup paths must reach. A provider that
-# introduces another one adds it here, or its copies outlive their job.
-WORK_SUBDIRS = (WORK_SUBDIR, R2_WORK_SUBDIR)
-
 
 # The characters a sample file's suffix keeps in the platform's own copy of it.
 _SAFE_SUFFIX = re.compile(r"\.[A-Za-z0-9._-]+")
@@ -69,7 +57,7 @@ def temp_dir() -> Path:
     return _private_dir(Path(settings.upload_temp_dir).resolve())
 
 
-def work_dir(subdir: str = WORK_SUBDIR) -> Path:
+def work_dir(subdir: str) -> Path:
     """The private mirror directory ``subdir`` names, created 0o700.
 
     ``subdir`` is a provider's ``MirrorSpec.work_subdir``, which for r2 comes
@@ -78,8 +66,8 @@ def work_dir(subdir: str = WORK_SUBDIR) -> Path:
     ``".."``, which resolves to the *parent* of ``samples_dir`` — a directory
     this would then chmod 0o700 and ``sweep`` would delete stale files in.
     ``""`` and ``"."`` were quieter and no better: they fell back to the hidden
-    ``WORK_SUBDIR``, silently putting r2's sample back where radare2 refuses to
-    open it (BUG 10).
+    shared directory, silently putting r2's sample back where radare2 refuses
+    to open it (BUG 10).
 
     So the three names that do not denote a child are refused outright rather
     than corrected into something plausible. ``StaticR2Config`` rejects them at
@@ -95,44 +83,36 @@ def work_dir(subdir: str = WORK_SUBDIR) -> Path:
     return _private_dir((Path(settings.samples_dir) / name).resolve())
 
 
-def _configured_mirror_subdirs(mirror_dir: str | None) -> tuple[str, ...]:
-    """``mirror_dir``, on top of the built-ins, as a one-entry tuple or none.
+def configured_subdirs() -> tuple[str, ...]:
+    """The mirror subdirectories the shipped settings name, for a caller with none of its own.
 
-    ``WORK_SUBDIRS`` alone left a custom ``static.r2.mirror_dir`` — which the
-    validator accepts — cleaned per job through the explicit ``host_mirrors``
-    list but never reached by ``sweep`` or ``remove_for_sha``, so a crashed
-    worker's copies stayed forever in a directory that holds live malware.
-
-    Takes the effective ``static.r2.mirror_dir`` value as a parameter rather
-    than reading it itself: this module is imported by both the API and the
-    worker, and neither may build core ``Settings`` bare (the environment is
-    not a layer for the application) or reach for the process-wide
-    ``get_settings()`` singleton on a request path that never installed it.
-    Each caller resolves the value the way appropriate to where it runs (the
-    store, for a request handler; a caller inside a job, from the settings
-    already installed for that job) and passes it in. ``None`` (the settings
-    load failed, or the caller has no settings to offer) means "built-ins
-    only" — the same as before this took a parameter.
+    Built from the model defaults only (``build_settings({})``): a caller that
+    has the effective settings (the store, for a request handler; the job's
+    own, inside a job) passes their ``mirror_work_dirs`` instead.
     """
-    if not mirror_dir:
-        return ()
-    configured = Path(mirror_dir).name
-    return (configured,) if configured and configured not in ("", ".", "..") else ()
+    from maljan.core.settings_overrides import build_settings
+    from maljan.providers.registry import mirror_work_dirs
+
+    return mirror_work_dirs(build_settings({}))
 
 
-def work_dirs(mirror_dir: str | None = None) -> list[Path]:
+def work_dirs(subdirs: Iterable[str] | None = None) -> list[Path]:
     """Every mirror directory, for the paths that sweep or clean up.
 
-    ``mirror_dir`` is the effective ``static.r2.mirror_dir``, if the caller
-    has one to offer -- see ``_configured_mirror_subdirs``.
+    ``subdirs`` is ``mirror_work_dirs`` of the caller's effective settings;
+    ``None`` reads the shipped settings' (``configured_subdirs``). A name that
+    does not denote a child of the samples directory is skipped here, so one
+    bad declaration never stops the sweep of the others.
     """
     seen: dict[str, None] = {}
-    for name in (*WORK_SUBDIRS, *_configured_mirror_subdirs(mirror_dir)):
-        seen.setdefault(name, None)
+    for name in configured_subdirs() if subdirs is None else subdirs:
+        last = Path(str(name)).name
+        if last and last not in (".", ".."):
+            seen.setdefault(last, None)
     return [work_dir(name) for name in seen]
 
 
-def export_sample_roots(mirror_dir: str | None = None) -> list[Path]:
+def export_sample_roots(subdirs: Iterable[str] | None = None) -> list[Path]:
     """Tell the tool sidecars which directories this worker's samples live in.
 
     A sidecar reads a path argument only inside the roots it was given (see
@@ -143,11 +123,12 @@ def export_sample_roots(mirror_dir: str | None = None) -> list[Path]:
 
     Called at worker startup, before any job can start a sidecar, and again
     per job for a worker whose settings named another mirror directory.
+    ``subdirs`` is as for ``work_dirs``.
     Returns the roots it exported, for the caller that wants to log them.
     """
     from maljan.tools.roots import add_sample_root
 
-    roots = [temp_dir(), *work_dirs(mirror_dir)]
+    roots = [temp_dir(), *work_dirs(subdirs)]
     for root in roots:
         add_sample_root(root)
     return roots
@@ -171,9 +152,9 @@ def remove_quietly(path: Path | str | None, *, job_id: str | None = None) -> Non
         logger.warning("Could not remove %s: %s", p, type(exc).__name__, extra={"job_id": job_id})
 
 
-def remove_for_sha(sha256: str, *, mirror_dir: str | None = None) -> list[Path]:
+def remove_for_sha(sha256: str, *, subdirs: Iterable[str] | None = None) -> list[Path]:
     removed: list[Path] = []
-    for base in [temp_dir(), *work_dirs(mirror_dir)]:
+    for base in [temp_dir(), *work_dirs(subdirs)]:
         for candidate in base.glob(f"{sha256}*"):
             if candidate.is_file():
                 remove_quietly(candidate)
@@ -182,7 +163,10 @@ def remove_for_sha(sha256: str, *, mirror_dir: str | None = None) -> list[Path]:
 
 
 def sweep(
-    max_age_s: float = 86_400.0, *, now: float | None = None, mirror_dir: str | None = None
+    max_age_s: float = 86_400.0,
+    *,
+    now: float | None = None,
+    subdirs: Iterable[str] | None = None,
 ) -> int:
     """Remove mirrored sample copies older than ``max_age_s``.
 
@@ -204,7 +188,8 @@ def sweep(
     """
     cutoff = (now if now is not None else time.time()) - max_age_s
     count = 0
-    for base in [temp_dir(), *work_dirs(mirror_dir)]:
+    bases = [temp_dir(), *work_dirs(subdirs)]
+    for base in bases:
         for candidate in base.iterdir():
             try:
                 if candidate.is_file() and candidate.stat().st_mtime < cutoff:
@@ -219,6 +204,6 @@ def sweep(
         logger.info(
             "Swept %d stale sample copies from %s",
             count,
-            ", ".join(str(base) for base in [temp_dir(), *work_dirs(mirror_dir)]),
+            ", ".join(str(base) for base in bases),
         )
     return count

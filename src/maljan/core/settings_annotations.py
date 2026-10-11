@@ -53,6 +53,15 @@ RENAMED_SETTINGS: dict[str, str] = {
 }
 
 
+# Process environment variables a setting replaced, each with the settings key
+# that now holds its value. The revision that retired a variable reads it once
+# into that key where the store holds nothing for it; a process that still has
+# one set says at start which key holds it now, and reads it no more.
+RETIRED_ENVIRONMENT: dict[str, str] = {
+    "GHIDRA_CONTAINER_SAMPLES_PATH": "core.static.ghidra.sample_mount",
+}
+
+
 # Settings that were retired with no effect, each with what replaces it. An
 # export written before a retirement still carries the key; the import refuses
 # it like any key the catalogue no longer knows, and says it is this one, so

@@ -868,7 +868,7 @@ class ToolDeclarations:
     def from_settings(cls, settings: Settings) -> ToolDeclarations:
         from maljan.core.builtin_declarations import in_process_declarations
 
-        selected = _selected_providers(settings)
+        selected = selected_static_providers(settings)
         sources: list[Declared] = []
         for key, cfg in settings.mcp.servers.items():
             sources.append(Declared.of(SourceRef("mcp", key), cfg, enabled=bool(cfg.enabled)))
@@ -972,7 +972,7 @@ class ToolDeclarations:
         }
 
 
-def _selected_providers(settings: Settings) -> set[str]:
+def selected_static_providers(settings: Settings) -> set[str]:
     """The static providers this deployment selects: the global one and any agent's own."""
     chosen = {str(settings.static.provider)}
     for definition in settings.agents.definitions.values():

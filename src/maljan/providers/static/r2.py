@@ -514,4 +514,12 @@ class R2StaticProvider(GenericMCPStaticProvider):
         return True
 
     def mirror_spec(self) -> MirrorSpec:
-        return MirrorSpec(work_subdir=Path(self._mirror_dir).name, container_prefix="")
+        """r2's own mirror directory (``mirror_dir``), seen at its block's ``sample_mount``.
+
+        A stdio r2mcp shares the worker's filesystem, which the shipped empty
+        mount says; a block that declares a mount is handed the path under it.
+        """
+        return MirrorSpec(
+            work_subdir=Path(self._mirror_dir).name,
+            container_prefix=str(self._cfg.sample_mount or ""),
+        )

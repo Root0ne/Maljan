@@ -109,7 +109,7 @@ def test_deleting_a_sample_with_no_sandbox_reports_touches_storage_once(monkeypa
             no_reports,
             None,
             not_shared,
-            # The delete handler now resolves sandbox.static.r2.mirror_dir
+            # The delete handler resolves the configured mirror directories
             # through effective_core_settings(db), which reads the same
             # RuntimeSetting table SettingsService always has -- no rows here.
             no_setting_rows,
@@ -120,7 +120,7 @@ def test_deleting_a_sample_with_no_sandbox_reports_touches_storage_once(monkeypa
 
     minio = MagicMock()
     monkeypatch.setattr(module, "_minio_client", lambda: minio)
-    monkeypatch.setattr("app.worker.sample_files.remove_for_sha", lambda sha, mirror_dir=None: [])
+    monkeypatch.setattr("app.worker.sample_files.remove_for_sha", lambda sha, subdirs=None: [])
     # This test's db mock is a fixed, ordered side_effect list, so a settings
     # read cached from a previous test's (different) db within the same TTL
     # window must not be reused here.

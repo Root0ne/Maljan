@@ -91,6 +91,47 @@ def _build(registry: dict[str, type], name: str, cfg: Any, kind: str) -> Any:
     return cls.from_settings(cfg)  # type: ignore[attr-defined]
 
 
+def static_provider_class(name: str) -> type[StaticProvider]:
+    """The registered static provider class ``name`` names."""
+    discover_providers()
+    cls = _STATIC_REGISTRY.get(name)
+    if cls is None:
+        raise ProviderConfigurationError(f"Unknown static provider: {name!r}")
+    return cls  # type: ignore[return-value]
+
+
+def mirror_work_dirs(cfg: Settings) -> tuple[str, ...]:
+    """Every directory the worker may copy a sample into under these settings.
+
+    The union of each registered static provider's ``mirror_spec()`` (built
+    from ``cfg``, which does no I/O) and every declared server's ``work_dir``,
+    so the sweep, a sample's delete and the sidecars' sample roots reach the
+    copies of any provider or server, selected now or before. A provider whose
+    construction fails contributes nothing and is logged; the rest still count.
+    """
+    from maljan.core.tool_declarations import ToolDeclarations
+
+    discover_providers()
+    names: dict[str, None] = {}
+    for provider_id, cls in sorted(_STATIC_REGISTRY.items()):
+        try:
+            provider = cls.from_settings(cfg)  # type: ignore[attr-defined]
+            spec = provider.mirror_spec() if provider.capabilities.needs_sample_mirror else None
+        except Exception as exc:  # noqa: BLE001 - one provider never hides the others
+            logger.warning(
+                "Static provider '%s' did not say where it mirrors a sample (%s).",
+                provider_id,
+                type(exc).__name__,
+            )
+            continue
+        if spec is not None and spec.work_subdir:
+            names.setdefault(spec.work_subdir, None)
+    for declared in ToolDeclarations.from_settings(cfg).sources():
+        if declared.work_dir:
+            names.setdefault(declared.work_dir, None)
+    return tuple(names)
+
+
 def get_static_provider(cfg: Settings) -> StaticProvider:
     discover_providers()
     return _build(_STATIC_REGISTRY, str(cfg.static.provider), cfg, "static")  # type: ignore[no-any-return]

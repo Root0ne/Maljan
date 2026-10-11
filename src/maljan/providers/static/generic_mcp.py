@@ -43,6 +43,11 @@ from maljan.providers.servers import ServerHandle
 if TYPE_CHECKING:
     from maljan.core.config import MCPServerConfig, Settings
 
+# The samples directory's mount inside a server reached over the network that
+# declares no ``sample_mount`` of its own: the right-hand side of the samples
+# bind mount in ``docker/docker-compose.yml``.
+REMOTE_SAMPLE_MOUNT = "/data/samples"
+
 
 @register_static_provider("generic_mcp")
 class GenericMCPStaticProvider(StaticProvider):
@@ -225,18 +230,16 @@ class GenericMCPStaticProvider(StaticProvider):
     def mirror_spec(self) -> MirrorSpec:
         """Where the sample is mirrored, and under which path the server sees it.
 
-        A stdio server is spawned by the worker and reads the worker's own
-        filesystem, so it has to be told the host path — the empty prefix the
-        mirror step reads as "no translation", the same answer
-        ``R2StaticProvider`` gives. Only an http/streamable-http/sse server is
-        somewhere else with its own mount, and only then does the container
-        prefix describe the path it can open (BUG 4, live run S4). That prefix
-        is the literal the mount in ``docker/docker-compose.yml`` uses; the
-        worker translates it through ``ghidra_container_samples_path`` when it
-        writes the mirror.
+        Both come from the server's own declaration: its ``work_dir`` and its
+        ``sample_mount``. A stdio server is spawned by the worker and reads
+        the worker's own filesystem, so with no mount declared it is handed
+        the host path. An http/streamable-http/sse server is somewhere else
+        with its own mount (BUG 4, live run S4); with none declared it is
+        taken to see the samples directory at ``REMOTE_SAMPLE_MOUNT``, the
+        mount the shipped compose file writes.
         """
-        prefix = "" if self._cfg.transport == "stdio" else "/data/samples"
-        return MirrorSpec(work_subdir=".work", container_prefix=prefix)
+        default = "" if self._cfg.transport == "stdio" else REMOTE_SAMPLE_MOUNT
+        return MirrorSpec.of(self._cfg, default_mount=default)
 
     def close(self) -> None:
         self.tools = []

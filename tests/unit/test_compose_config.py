@@ -11,17 +11,22 @@ ROOT = Path(__file__).resolve().parents[2]
 # Every variable docker-compose.yml's `${VAR:?...}` guards refuse to render
 # without. Bootstrap secrets (JWT_SECRET_KEY, SETTINGS_ENCRYPTION_KEY) and the
 # MinIO root credentials (also read as MINIO_ACCESS_KEY/MINIO_SECRET_KEY by the
-# api/worker services) joined the original three infrastructure secrets when
-# the api/worker services stopped defaulting to "minioadmin".
+# api/worker services) joined the infrastructure secrets when the api/worker
+# services stopped defaulting to "minioadmin". The tokens of the optional
+# services (Ghidra, Qdrant) are not among them: see OPTIONAL_ENV.
 REQUIRED_ENV = {
-    "GHIDRA_MCP_AUTH_TOKEN": "t" * 32,
     "REDIS_PASSWORD": "p" * 32,
-    "QDRANT_API_KEY": "q" * 32,
     "MINIO_ROOT_USER": "maljan",
     "MINIO_ROOT_PASSWORD": "m" * 32,
     "JWT_SECRET_KEY": "j" * 32,
     "SETTINGS_ENCRYPTION_KEY": "s" * 32,
     "POSTGRES_PASSWORD": "d" * 32,
+}
+
+# The tokens of the services that run only under their profile.
+OPTIONAL_ENV = {
+    "GHIDRA_MCP_AUTH_TOKEN": "t" * 32,
+    "QDRANT_API_KEY": "q" * 32,
 }
 
 
@@ -150,8 +155,18 @@ def _render_ghidra(tmp_path: Path, **extra: str) -> dict:
     empty_env = tmp_path / ".env"
     empty_env.write_text("")
     out = subprocess.run(
-        ["docker", "compose", "--env-file", str(empty_env), "-f", str(copy), "config"],
-        env={**REQUIRED_ENV, **extra, "PATH": "/usr/bin:/bin"},
+        [
+            "docker",
+            "compose",
+            "--env-file",
+            str(empty_env),
+            "-f",
+            str(copy),
+            "--profile",
+            "ghidra",
+            "config",
+        ],
+        env={**REQUIRED_ENV, **OPTIONAL_ENV, **extra, "PATH": "/usr/bin:/bin"},
         capture_output=True,
         text=True,
         check=True,
@@ -184,3 +199,73 @@ def test_a_lighter_ghidra_is_three_variables(tmp_path):
     # One variable sets both, so swap cannot outgrow the memory limit.
     assert int(ghidra["mem_limit"]) == int(ghidra["memswap_limit"]) == 4 * GIB
     assert ghidra["environment"]["JAVA_OPTS"] == "-Xmx2g -XX:+UseG1GC"
+
+
+def _render(tmp_path: Path, *profiles: str, env: dict[str, str] | None = None) -> dict:
+    """The rendered compose file with ``profiles`` on, from a copy and an empty env file."""
+    compose_dir = tmp_path / "docker"
+    compose_dir.mkdir(exist_ok=True)
+    copy = compose_dir / "docker-compose.yml"
+    shutil.copy(ROOT / "docker" / "docker-compose.yml", copy)
+    empty_env = tmp_path / ".env"
+    empty_env.write_text("")
+    flags = [arg for profile in profiles for arg in ("--profile", profile)]
+    out = subprocess.run(
+        ["docker", "compose", "--env-file", str(empty_env), "-f", str(copy), *flags, "config"],
+        env={**(REQUIRED_ENV if env is None else env), "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return yaml.safe_load(out)
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="docker not installed")
+def test_the_stack_renders_without_ghidra_and_qdrant_and_without_their_tokens(tmp_path):
+    services = _render(tmp_path)["services"]
+    assert "ghidra-mcp" not in services
+    assert "qdrant" not in services
+    for name in ("backend-api", "backend-worker", "migrate", "enrichment-worker", "frontend"):
+        assert name in services, name
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="docker not installed")
+def test_no_service_waits_for_an_optional_one(tmp_path):
+    services = _render(tmp_path, "ghidra", "qdrant", env={**REQUIRED_ENV, **OPTIONAL_ENV})[
+        "services"
+    ]
+    assert {"ghidra-mcp", "qdrant"} <= set(services)
+    for name, service in services.items():
+        waits = set(service.get("depends_on") or {})
+        assert not waits & {"ghidra-mcp", "qdrant"}, (name, waits)
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="docker not installed")
+def test_each_optional_service_runs_under_its_own_profile(tmp_path):
+    config = _render(tmp_path, "ghidra", "qdrant", env={**REQUIRED_ENV, **OPTIONAL_ENV})
+    assert config["services"]["ghidra-mcp"]["profiles"] == ["ghidra"]
+    assert config["services"]["qdrant"]["profiles"] == ["qdrant"]
+    for name in ("ghidra-mcp", "qdrant"):
+        ports = config["services"][name]["ports"]
+        assert ports and all(p["host_ip"] == "127.0.0.1" for p in ports), (name, ports)
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="docker not installed")
+def test_qdrant_without_its_key_refuses_to_start_rather_than_run_open(tmp_path):
+    qdrant = _render(tmp_path, "qdrant")["services"]["qdrant"]
+    script = " ".join(qdrant["entrypoint"])
+    # ``config`` writes a literal dollar escaped again, as ``$$``; the container's
+    # shell is handed ``$QDRANT__SERVICE__API_KEY``, the variable set above it.
+    assert '[ -n "$$QDRANT__SERVICE__API_KEY" ]' in script
+    assert qdrant["environment"]["QDRANT__SERVICE__API_KEY"] == ""
+    assert "exit 1" in script
+    assert script.endswith("exec ./entrypoint.sh")
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="docker not installed")
+def test_no_service_is_handed_a_samples_path_named_for_one_tool(tmp_path):
+    services = _render(tmp_path, "ghidra", "qdrant", env={**REQUIRED_ENV, **OPTIONAL_ENV})[
+        "services"
+    ]
+    for name, service in services.items():
+        assert "GHIDRA_CONTAINER_SAMPLES_PATH" not in (service.get("environment") or {}), name

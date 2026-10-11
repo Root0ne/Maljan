@@ -45,7 +45,7 @@ GHIDRA_PROMPT_FRAGMENT = builtin_declarations.GHIDRA_PROMPT_FRAGMENT
 # names the two things that decide whether the container can see the file.
 SAMPLE_NOT_OPENED: str = (
     "Ghidra could not open the job's sample: {words}; "
-    "check GHIDRA_CONTAINER_SAMPLES_PATH / the container mount"
+    "check core.static.ghidra.sample_mount / the container mount"
 )
 
 # And when the load got no answer from Ghidra at all: the connection failed,
@@ -412,12 +412,10 @@ class GhidraStaticProvider(StaticProvider):
         cfg: MCPServerConfig,
         preprocessing: PreprocessingConfig,
         memory: MemoryConfig,
-        container_samples_path: str = "/data/samples",
     ) -> None:
         self._cfg = cfg
         self._pre = preprocessing
         self._memory = memory
-        self._container_samples_path = container_samples_path
         self._job = StaticJobContext()
         # The container path an agent was pinned to (``pin_sample``), for an
         # attach whose job context names none: a generic agent's provider is
@@ -731,7 +729,8 @@ class GhidraStaticProvider(StaticProvider):
         )
 
     def mirror_spec(self) -> MirrorSpec:
-        return MirrorSpec(work_subdir=".work", container_prefix=self._container_samples_path)
+        """Where this server's block declares the sample goes and is seen."""
+        return MirrorSpec.of(self._cfg)
 
     def function_hashes(self, job: StaticJobContext) -> list[tuple[str, str]]:
         """Two lines of delegation: the pre-pass itself already lives in analysis/."""

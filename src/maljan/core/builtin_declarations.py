@@ -705,11 +705,13 @@ _SERVER_BLOCKS: dict[str, dict[str, Any]] = {
 
 # The static providers' own blocks (``static.ghidra``, ``static.r2``) and the
 # CAPE MCP sidecar's (``sandbox.cape2.mcp``). Ghidra's mount is the container
-# path its provider mirrors to (``providers.static.ghidra`` ``mirror_spec``);
-# its ``sample_open`` is ``config.GHIDRA_SAMPLE_OPEN``, set where it has always
-# been set; its work directory and radare2's are the worker's
-# (``apps/api/app/worker/sample_files.WORK_SUBDIR`` / ``R2_WORK_SUBDIR``); its
-# non-secret variable is ``pipeline.events._OWN_VARIABLE_NAMES``. The
+# path the shipped compose file mounts the samples directory at, which its
+# provider's ``mirror_spec`` reads; its ``sample_open`` is
+# ``config.GHIDRA_SAMPLE_OPEN``, set where it has always been set; its work
+# directory is the shared default (``providers.base.DEFAULT_WORK_DIR``) and
+# radare2's is its ``mirror_dir``'s own default; its non-secret variable, which
+# texts written before the variable was retired still name, is
+# ``pipeline.events._OWN_VARIABLE_NAMES``. The
 # auto-name prefixes together are ``pipeline.validation._GENERIC_FUNCTION_NAME``'s.
 _PROVIDER_BLOCKS: dict[str, dict[str, Any]] = {
     "ghidra": {

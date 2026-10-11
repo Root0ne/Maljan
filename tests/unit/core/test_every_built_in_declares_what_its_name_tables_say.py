@@ -413,11 +413,15 @@ def test_the_non_secret_variable_names_are_the_events_ones(declared: ToolDeclara
     assert declared_names == set(_OWN_VARIABLE_NAMES)
 
 
-def test_the_work_directories_are_the_workers(declared: ToolDeclarations) -> None:
-    from app.worker.sample_files import R2_WORK_SUBDIR, WORK_SUBDIR
+def test_the_work_directories_are_the_providers(declared: ToolDeclarations) -> None:
+    from pathlib import Path
 
-    assert declared.source("provider:ghidra").work_dir == WORK_SUBDIR  # type: ignore[union-attr]
-    assert declared.source("provider:r2").work_dir == R2_WORK_SUBDIR  # type: ignore[union-attr]
+    from maljan.core.config import StaticR2Config
+    from maljan.providers.base import DEFAULT_WORK_DIR
+
+    assert declared.source("provider:ghidra").work_dir == DEFAULT_WORK_DIR  # type: ignore[union-attr]
+    r2_dir = Path(StaticR2Config().mirror_dir).name
+    assert declared.source("provider:r2").work_dir == r2_dir  # type: ignore[union-attr]
 
 
 def test_the_auto_name_prefixes_are_the_validation_patterns(declared: ToolDeclarations) -> None:

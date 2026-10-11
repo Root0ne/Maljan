@@ -379,8 +379,9 @@ API_READONLY: dict[str, dict[str, Any]] = {
     },
     "samples_dir": {
         "title": "Samples directory",
-        "description": "Host path mounted into the Ghidra MCP container; the worker mirrors "
-        "each job's binary under its .work subdirectory and removes it when the job ends.",
+        "description": "Host path the worker mirrors each job's binary under, one "
+        "subdirectory per server that needs a copy, removed when the job ends; a "
+        "containerised server mounts it at its declared sample mount.",
     },
     "upload_temp_dir": {
         "title": "Upload staging directory",

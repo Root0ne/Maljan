@@ -586,7 +586,8 @@ _CREDENTIAL_RUN = re.compile(r"(?:[A-Fa-f0-9]{24,}|[A-Za-z0-9+/_\-]{24,}={0,2})\
 # above takes for keys by their length. Named one by one rather than by shape:
 # an upper-case run with underscores in it is also what a key can look like,
 # and the remedy "check GHIDRA_CONTAINER_SAMPLES_PATH" read "check ***" on the
-# console, for the one failure whose remedy is that variable.
+# console, for the one failure whose remedy was that variable. The variable is
+# retired; stored runs written before still name it.
 _OWN_VARIABLE_NAMES = frozenset({"GHIDRA_CONTAINER_SAMPLES_PATH"})
 # A JSON Web Token, which no length rule can see: it is three base64url runs
 # with dots between them, and this project's own access token is one. The

@@ -13,6 +13,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from langchain_core.tools import BaseTool
@@ -48,8 +49,48 @@ class SandboxCapabilities:
 
 @dataclass(frozen=True)
 class MirrorSpec:
+    """Where the worker copies the sample for one server, and where that server sees it.
+
+    ``work_subdir`` is the directory under the worker's samples directory the
+    copy goes into. ``container_prefix`` is the server's declared
+    ``sample_mount``: the absolute path inside the server that the samples
+    directory is mounted at, or empty when the server reads the worker's own
+    filesystem and is handed the copy's host path as it is.
+    """
+
     work_subdir: str
     container_prefix: str
+
+    @classmethod
+    def of(cls, declaration: Any, *, default_mount: str = "") -> MirrorSpec:
+        """The spec a server block declares (its ``work_dir`` and ``sample_mount``).
+
+        A block that names no work directory of its own is copied into the
+        shared ``DEFAULT_WORK_DIR``; ``default_mount`` is the mount a server of
+        this kind has when its block declares none.
+        """
+        work = str(getattr(declaration, "work_dir", "") or "") or DEFAULT_WORK_DIR
+        mount = str(getattr(declaration, "sample_mount", "") or "") or default_mount
+        return cls(work_subdir=work, container_prefix=mount)
+
+
+# The mirror directory of a server whose declaration names none of its own.
+# Hidden on purpose: it is the worker's scratch, not part of the corpus.
+DEFAULT_WORK_DIR = ".work"
+
+
+def path_in_server(spec: MirrorSpec, host_path: str | Path) -> str:
+    """The path a server opens the worker's copy at ``host_path`` under.
+
+    The one translation from a mirror copy on the worker to the path its
+    server is handed: the host path itself for a server on the worker's own
+    filesystem (an empty ``container_prefix``), otherwise the copy's place
+    under the server's own mount of the samples directory.
+    """
+    if not spec.container_prefix:
+        return str(host_path)
+    prefix = spec.container_prefix.rstrip("/")
+    return f"{prefix}/{spec.work_subdir}/{Path(host_path).name}"
 
 
 @dataclass(frozen=True)

@@ -167,24 +167,93 @@ def build_job_settings(
     return build_settings(merged)
 
 
-def ghidra_samples_path_line(api_settings: Any) -> str:
-    """The line the worker states at start: the Ghidra samples path and where it came from.
+def retired_environment_lines(environ: Mapping[str, str]) -> list[str]:
+    """One line per retired variable still set: it is read no more, and which key holds it.
 
-    The path is the one the Ghidra container sees the samples directory at,
-    and the worker hands Ghidra every sample under it. A host path here makes
-    every load answer "File not found" from inside the container, so the
-    value and its source are said once, where an operator reads the start.
+    ``settings_annotations.RETIRED_ENVIRONMENT`` names each one; the value
+    itself is not repeated, only where it lives now.
     """
-    path = str(api_settings.ghidra_container_samples_path)
-    if "ghidra_container_samples_path" in api_settings.model_fields_set:
-        source = "from GHIDRA_CONTAINER_SAMPLES_PATH"
-    else:
-        source = "the default; GHIDRA_CONTAINER_SAMPLES_PATH is not set"
-    return (
-        f"Ghidra samples path: {path} ({source}). Ghidra is handed each sample under "
-        "this path, which is the samples directory as the Ghidra container sees it, "
-        "not a path on this host."
-    )
+    from maljan.core.settings_annotations import RETIRED_ENVIRONMENT
+
+    return [
+        f"{variable} is set and no longer read; the setting {key} holds its value "
+        "(the migration that retired it read it in once where the store held none)."
+        for variable, key in RETIRED_ENVIRONMENT.items()
+        if str(environ.get(variable, "")).strip()
+    ]
+
+
+def mirror_lines(core: Any) -> list[str]:
+    """The lines the worker states at start: where each static provider's sample copy goes.
+
+    One per static provider the settings select (the global one and any
+    agent's own) that mirrors: the directory its copy is written to on this host, and
+    the path its server is handed, which is that copy under the server's
+    declared ``sample_mount`` (or the host path itself when it declares
+    none). A mount that does not match the server's own makes every load
+    answer "file not found", so each pair is said once, where an operator
+    reads the start.
+    """
+    from maljan.core.tool_declarations import selected_static_providers
+    from maljan.providers.base import path_in_server
+    from maljan.providers.registry import static_provider_class, static_provider_ids
+
+    lines: list[str] = []
+    selected = selected_static_providers(core)
+    for provider_id in static_provider_ids():
+        if provider_id not in selected:
+            continue
+        try:
+            provider = static_provider_class(provider_id).from_settings(core)
+            if not provider.capabilities.needs_sample_mirror:
+                continue
+            spec = provider.mirror_spec()
+        except Exception:  # noqa: BLE001 - a line not stated never stops the start
+            continue
+        if spec is None:
+            continue
+        host = Path(settings.samples_dir) / Path(spec.work_subdir).name / "<sha256>"
+        lines.append(
+            f"Static provider '{provider_id}' mirrors a sample to {host} "
+            f"and is handed it as {path_in_server(spec, host)}."
+        )
+    return lines
+
+
+async def state_the_mirrors(session_factory: Any) -> None:
+    """Say where each static provider's copy goes under the stored settings, and export those roots.
+
+    The sweep above runs before there is a session, on the shipped settings;
+    this reads the store, so the lines name the mounts an operator saved and a
+    mirror directory the store names is a sample root from the start. A store
+    that cannot be read leaves the shipped settings' lines, and the start goes on.
+    """
+    from maljan.providers.registry import mirror_work_dirs
+
+    from app.services.settings_service import effective_core_settings
+    from app.worker import sample_files
+
+    try:
+        async with session_factory() as db:
+            core = await effective_core_settings(db)
+    except Exception as exc:  # noqa: BLE001 - the start never stops on a statement
+        logger.warning(
+            "The stored settings were not read for the mirror statement (%s); "
+            "it names the shipped settings' mounts.",
+            type(exc).__name__,
+            extra={"component": "worker.lifecycle"},
+        )
+        core = build_settings({})
+    for line in mirror_lines(core):
+        logger.info(line, extra={"component": "worker.lifecycle"})
+    try:
+        sample_files.export_sample_roots(mirror_work_dirs(core))
+    except OSError as exc:
+        logger.warning(
+            "The stored mirror directories were not exported as sample roots (%s).",
+            type(exc).__name__,
+            extra={"component": "worker.lifecycle"},
+        )
 
 
 def mirror_target_for(provider: Any, *, sha256: str, extension: str) -> tuple[Path, str] | None:
@@ -195,6 +264,8 @@ def mirror_target_for(provider: Any, *, sha256: str, extension: str) -> tuple[Pa
     place, and every future provider that does the same. The host directory and
     its 0o700/0o600 handling stay in ``sample_files``; only the decision moved.
     """
+    from maljan.providers.base import path_in_server
+
     from app.worker import sample_files
 
     if not provider.capabilities.needs_sample_mirror:
@@ -205,16 +276,12 @@ def mirror_target_for(provider: Any, *, sha256: str, extension: str) -> tuple[Pa
     # The spec's own subdirectory, not a fixed one. This was ``work_dir()``
     # unconditionally, which put r2's copy in the hidden ``.work`` that radare2
     # refuses to open — BUG 10, every live r2 tool call answering "Failed to
-    # open file." The container-visible path below already read the spec.
+    # open file."
     host = sample_files.work_dir(spec.work_subdir) / f"{sha256}{extension}"
-    if not spec.container_prefix:
-        # An empty prefix means the analyst-facing tool is co-located with the
-        # worker (e.g. a stdio r2mcp) and opens the sample by its host path
-        # directly — there is no separate container mount to translate into.
-        return host, str(host)
-    prefix = settings.ghidra_container_samples_path.rstrip("/")
-    container = f"{prefix}/{spec.work_subdir}/{sha256}{extension}"
-    return host, container
+    # The path the server opens is its own: under the mount its block
+    # declares, or the host path for a server on this filesystem. One mount
+    # for every server handed a second containerised server another one's.
+    return host, path_in_server(spec, host)
 
 
 def global_mirror_path(paths: dict[str, str], static_settings: Any) -> str | None:
@@ -3468,7 +3535,8 @@ async def startup(ctx: dict) -> None:
         logger.critical(str(exc))
         raise
 
-    logger.info(ghidra_samples_path_line(settings), extra={"component": "worker.lifecycle"})
+    for line in retired_environment_lines(os.environ):
+        logger.warning(line, extra={"component": "worker.lifecycle"})
 
     # Clear stale private sample copies left behind by a worker that was
     # killed mid-job (no finally ran) before this one starts taking jobs.
@@ -3482,12 +3550,15 @@ async def startup(ctx: dict) -> None:
         # minus the environment read.
         core = build_settings({})
         remember_process_secrets(core)
-        sample_files.sweep(mirror_dir=core.static.r2.mirror_dir)
+        from maljan.providers.registry import mirror_work_dirs
+
+        subdirs = mirror_work_dirs(core)
+        sample_files.sweep(subdirs=subdirs)
         # The directories this worker hands a sidecar a path into. A tool
         # server reads a path argument only inside the roots it was given, and
         # these are the ones the worker itself writes a sample to; without
         # them a sidecar would refuse the sample it was started for.
-        sample_files.export_sample_roots(core.static.r2.mirror_dir)
+        sample_files.export_sample_roots(subdirs)
     except OSError as exc:
         logger.warning(
             "Startup sample sweep failed (non-fatal): %s",
@@ -3502,6 +3573,7 @@ async def startup(ctx: dict) -> None:
         max_overflow=10,
     )
     ctx["db_session"] = async_sessionmaker(engine, expire_on_commit=False)
+    await state_the_mirrors(ctx["db_session"])
 
     # Store a Redis connection for PubSub
     ctx["redis"] = aioredis.from_url(settings.redis_url)
