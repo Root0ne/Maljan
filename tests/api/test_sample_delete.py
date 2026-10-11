@@ -132,3 +132,62 @@ def test_deleting_a_sample_with_no_sandbox_reports_touches_storage_once(monkeypa
 
     assert r.status_code == 204
     minio.remove_object.assert_called_once_with(module.settings.minio_bucket, sample.storage_path)
+
+
+def test_a_local_cleanup_that_fails_does_not_fail_the_delete(monkeypatch):
+    """A mirror directory of another user's raises PermissionError; the delete still answers 204."""
+    user = MagicMock(id=uuid.uuid4())
+    sha256 = "b" * 64
+    sample = MagicMock(
+        id=uuid.uuid4(),
+        sha256=sha256,
+        storage_path=f"samples/{sha256[:2]}/{sha256}",
+        uploaded_by=user.id,
+    )
+
+    sample_result = MagicMock()
+    sample_result.scalar_one_or_none.return_value = sample
+    no_active_jobs = MagicMock()
+    no_active_jobs.scalar.return_value = 0
+    no_reports = MagicMock()
+    no_reports.scalars.return_value.all.return_value = []
+    not_shared = MagicMock()
+    not_shared.scalar.return_value = 0
+    no_setting_rows = MagicMock()
+    no_setting_rows.scalars.return_value.all.return_value = []
+
+    db = MagicMock()
+    db.execute = AsyncMock(
+        side_effect=[
+            sample_result,
+            no_active_jobs,
+            no_reports,
+            None,
+            not_shared,
+            # The delete handler resolves the configured mirror directories
+            # through effective_core_settings(db), which reads the same
+            # RuntimeSetting table SettingsService always has -- no rows here.
+            no_setting_rows,
+        ]
+    )
+    db.delete = AsyncMock()
+    db.flush = AsyncMock()
+
+    minio = MagicMock()
+    monkeypatch.setattr(module, "_minio_client", lambda: minio)
+
+    def refusing(sha, subdirs=None):
+        raise PermissionError("another user's directory")
+
+    monkeypatch.setattr("app.worker.sample_files.remove_for_sha", refusing)
+    # This test's db mock is a fixed, ordered side_effect list, so a settings
+    # read cached from a previous test's (different) db within the same TTL
+    # window must not be reused here.
+    from app.services.settings_service import core_settings_cache
+
+    core_settings_cache.invalidate()
+
+    r = _client(db, user).delete(f"/api/v1/samples/{sample.id}")
+
+    assert r.status_code == 204
+    minio.remove_object.assert_called_once_with(module.settings.minio_bucket, sample.storage_path)
