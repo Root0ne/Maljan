@@ -17,6 +17,7 @@ import {
   bySeverityDesc,
   NEUTRAL_TONE,
   ladderDots,
+  runSignatureScale,
   signatureScore,
   severityRank,
   severityRung,
@@ -24,6 +25,11 @@ import {
   severityWord,
   sortBySeverity,
 } from "@/lib/severity";
+
+/** A run summary stored before scales were recorded: only its provider. */
+function stored(provider: string | null) {
+  return runSignatureScale({ settings_snapshot: { "sandbox.provider": provider } });
+}
 
 describe("the severity ladder", () => {
   it("ranks the judge's five words from Critical down to Informational", () => {
@@ -87,27 +93,27 @@ describe("the severity ladder", () => {
     expect(severityWord("unrated")).toBe("unrated");
   });
 
-  it("reads a CAPE signature on CAPE's 1 to 3 scale", () => {
-    expect(signatureScore(1, "cape2")).toMatchObject({ rung: "Low", label: "1/3" });
-    expect(signatureScore(2, "cape2")).toMatchObject({ rung: "Medium", label: "2/3" });
-    expect(signatureScore(3, "cape2")).toMatchObject({ rung: "High", label: "3/3" });
-    expect(signatureScore(3, "cape2").tone).toEqual(severityTone("High"));
-    expect(signatureScore(2, "cape2").text).toBe("Medium, 2/3");
+  it("reads a stored CAPE run's signature on the legacy CAPE 1 to 3 scale", () => {
+    expect(signatureScore(1, stored("cape2"))).toMatchObject({ rung: "Low", label: "1/3" });
+    expect(signatureScore(2, stored("cape2"))).toMatchObject({ rung: "Medium", label: "2/3" });
+    expect(signatureScore(3, stored("cape2"))).toMatchObject({ rung: "High", label: "3/3" });
+    expect(signatureScore(3, stored("cape2")).tone).toEqual(severityTone("High"));
+    expect(signatureScore(2, stored("cape2")).text).toBe("Medium, 2/3");
   });
 
-  it("reads a Triage signature on Triage's 1 to 10 scale", () => {
-    expect(signatureScore(1, "triage").rung).toBe("Informational");
-    expect(signatureScore(3, "triage").rung).toBe("Low");
-    expect(signatureScore(6, "triage").rung).toBe("Medium");
-    expect(signatureScore(8, "triage")).toMatchObject({ rung: "High", label: "8/10", text: "High, 8/10" });
-    expect(signatureScore(10, "triage").rung).toBe("Critical");
+  it("reads a stored Triage run's signature on the legacy Triage 1 to 10 scale", () => {
+    expect(signatureScore(1, stored("triage")).rung).toBe("Informational");
+    expect(signatureScore(3, stored("triage")).rung).toBe("Low");
+    expect(signatureScore(6, stored("triage")).rung).toBe("Medium");
+    expect(signatureScore(8, stored("triage"))).toMatchObject({ rung: "High", label: "8/10", text: "High, 8/10" });
+    expect(signatureScore(10, stored("triage")).rung).toBe("Critical");
   });
 
-  it("draws a number whose scale is not known in one neutral tone, as it came", () => {
-    // An uploaded report can be either sandbox's, so its provider says nothing
-    // about the scale.
+  it("draws a stored run's number whose scale is not known in one neutral tone, as it came", () => {
+    // A stored uploaded report could be either sandbox's, so its provider says
+    // nothing about the scale.
     for (const provider of ["upload", "rest", "mock", "", null]) {
-      expect(signatureScore(8, provider)).toEqual({
+      expect(signatureScore(8, stored(provider))).toEqual({
         tone: NEUTRAL_TONE,
         rung: null,
         label: "8",
@@ -118,8 +124,48 @@ describe("the severity ladder", () => {
   });
 
   it("draws a number outside its provider's scale neutrally, not at the scale's top", () => {
-    expect(signatureScore(8, "cape2")).toMatchObject({ tone: NEUTRAL_TONE, rung: null, label: "8" });
-    expect(signatureScore(0, "triage").rung).toBeNull();
+    expect(signatureScore(8, stored("cape2"))).toMatchObject({ tone: NEUTRAL_TONE, rung: null, label: "8" });
+    expect(signatureScore(0, stored("triage")).rung).toBeNull();
+  });
+
+  it("reads a run's recorded scale, whatever its provider", () => {
+    const summary = {
+      settings_snapshot: { "sandbox.provider": "upload" },
+      sandbox_signature_scale: { name: "Acme 1–4", max: 4, rungs: ["Low", "Low", "High", "Critical"] },
+    };
+    const scale = runSignatureScale(summary);
+    expect(scale).toEqual({ name: "Acme 1–4", max: 4, rungs: ["Low", "Low", "High", "Critical"] });
+    expect(signatureScore(3, scale)).toMatchObject({ rung: "High", label: "3/4", text: "High, 3/4" });
+    expect(signatureScore(4, scale).tone).toEqual(severityTone("Critical"));
+  });
+
+  it("draws a run that recorded no scale unrated, even where the legacy table has one", () => {
+    const summary = { settings_snapshot: { "sandbox.provider": "cape2" }, sandbox_signature_scale: null };
+    expect(runSignatureScale(summary)).toBeNull();
+    expect(signatureScore(2, runSignatureScale(summary))).toMatchObject({ rung: null, text: "unrated, 2" });
+  });
+
+  it("reads a recorded scale whose rungs are not all ladder words as no scale", () => {
+    for (const recorded of [
+      { name: "x", max: 2, rungs: ["Low", "Severe"] },
+      { name: "x", max: 3, rungs: ["Low", "High"] },
+      { name: "x", max: 0, rungs: [] },
+      { max: 1, rungs: ["Low"] },
+      "Low",
+    ]) {
+      expect(runSignatureScale({ sandbox_signature_scale: recorded })).toBeNull();
+    }
+  });
+
+  it("reads a recorded rung in any case in its own spelling", () => {
+    const scale = runSignatureScale({ sandbox_signature_scale: { name: "x", max: 2, rungs: ["low", "HIGH"] } });
+    expect(scale?.rungs).toEqual(["Low", "High"]);
+  });
+
+  it("reads a summary that is missing or carries no snapshot by the legacy table as no scale", () => {
+    expect(runSignatureScale(null)).toBeNull();
+    expect(runSignatureScale(undefined)).toBeNull();
+    expect(runSignatureScale({})).toBeNull();
   });
 });
 

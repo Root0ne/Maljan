@@ -120,33 +120,37 @@ export const NEUTRAL_TONE: SeverityTone = {
   dot: "bg-text-muted",
 };
 
-interface SignatureScale {
-  /** The provider's own name for the scale, for the reader. */
+export interface SignatureScale {
+  /** The scale's own name, for the reader. */
   name: string;
   max: number;
-  /** The rung each score from 1 to `max` means, by the provider's own
+  /** The rung each score from 1 to `max` means, by the scale's own
    *  documented reading of it. */
   rungs: readonly SeverityRating[];
 }
 
+/** Where a run summary records the signature scale its sandbox provider
+ *  declared (`SIGNATURE_SCALE_KEY` in `src/maljan/core/report_formats.py`). */
+export const SIGNATURE_SCALE_KEY = "sandbox_signature_scale";
+
 /**
- * The signature scales of the sandboxes whose scale is documented, keyed by
- * the provider a run records in `run_summary.settings_snapshot`
- * (`sandbox.provider`).
+ * The legacy reader: the scales of the sandboxes whose scale was documented,
+ * keyed by the provider a run records in `run_summary.settings_snapshot`
+ * (`sandbox.provider`). Read only for a run summary without
+ * `sandbox_signature_scale` (every run recorded before scales were recorded on
+ * the run), so a stored run is drawn exactly as it always was.
  *
- * - `cape2`: a CAPEv2 (and Cuckoo) signature declares a severity from 1 to 3 —
- *   low, medium, high.
+ * - `cape2`: a CAPEv2 signature declares a severity from 1 to 3 — low,
+ *   medium, high.
  * - `triage`: a Hatching Triage signature carries a `score` from 1 to 10, the
  *   same scale as its sample score. 1 is no malicious behaviour; 2 to 5 is
  *   likely benign; 6 and 7 are suspicious; 8 and 9 are likely malicious; 10 is
- *   known bad. The provider writes that score into the same `severity` field
- *   (`src/maljan/schemas/sandbox_report.py`), which is why the scale has to
- *   come from the provider and never from the number.
+ *   known bad.
  *
- * `upload`, `rest` and `mock` carry whatever report they were handed, which
- * may be on either scale, so they have none here.
+ * `upload`, `rest` and `mock` carried whatever report they were handed, so
+ * they have none here.
  */
-const SIGNATURE_SCALES: Record<string, SignatureScale> = {
+const LEGACY_SIGNATURE_SCALES: Record<string, SignatureScale> = {
   cape2: { name: "CAPE 1–3", max: 3, rungs: ["Low", "Medium", "High"] },
   triage: {
     name: "Triage 1–10",
@@ -166,13 +170,48 @@ const SIGNATURE_SCALES: Record<string, SignatureScale> = {
   },
 };
 
+/** The legacy table's scale for a recorded provider, or null. */
+export function legacySignatureScale(provider: string | null | undefined): SignatureScale | null {
+  return LEGACY_SIGNATURE_SCALES[String(provider ?? "").trim().toLowerCase()] ?? null;
+}
+
+/** A recorded scale as a run summary carries it, or null when it is not one. */
+function recordedScale(value: unknown): SignatureScale | null {
+  if (!value || typeof value !== "object") return null;
+  const { name, max, rungs } = value as { name?: unknown; max?: unknown; rungs?: unknown };
+  if (typeof name !== "string" || !Array.isArray(rungs) || rungs.length === 0) return null;
+  const read = rungs.map((r) => severityRung(typeof r === "string" ? r : null));
+  if (read.some((r) => r === null)) return null;
+  if (typeof max === "number" && max !== read.length) return null;
+  return { name, max: read.length, rungs: read as SeverityRating[] };
+}
+
+/**
+ * The scale a run's sandbox signatures are read on.
+ *
+ * A run summary that carries `sandbox_signature_scale` is read from it: the
+ * scale the run's provider or report format declared, or null where it
+ * declared none. A summary without the key is read by the legacy table, from
+ * the provider in its settings snapshot.
+ */
+export function runSignatureScale(runSummary: unknown): SignatureScale | null {
+  const summary =
+    runSummary && typeof runSummary === "object" ? (runSummary as Record<string, unknown>) : null;
+  if (summary && SIGNATURE_SCALE_KEY in summary) {
+    return recordedScale(summary[SIGNATURE_SCALE_KEY]);
+  }
+  const snapshot = summary?.settings_snapshot as Record<string, unknown> | null | undefined;
+  const provider = snapshot?.["sandbox.provider"];
+  return legacySignatureScale(typeof provider === "string" ? provider : null);
+}
+
 export interface SignatureScore {
   tone: SeverityTone;
-  /** The rung the score means on its provider's scale, or null off it. */
+  /** The rung the score means on its scale, or null off it. */
   rung: SeverityRating | null;
   /** "8/10" on a known scale, the bare number otherwise. */
   label: string;
-  /** The scale's name, or null when the provider's scale is not known. */
+  /** The scale's name, or null when the run's scale is not known. */
   scale: string | null;
   /** What the badge prints: the rung in words beside the number — "High,
    *  8/10" — or "unrated" beside a number whose scale is not known, so the
@@ -181,16 +220,16 @@ export interface SignatureScore {
 }
 
 /**
- * How a sandbox signature's number is drawn.
+ * How a sandbox signature's number is drawn on `scale` (`runSignatureScale`).
  *
- * On a provider whose scale is documented, a whole score inside that scale
- * takes the rung it means and prints as "n/max". Anything else — a provider
- * whose report could be on either scale, one this console does not know, or a
- * number outside its provider's scale — is drawn in one neutral tone with the
- * number as it came, rather than coloured by a guess.
+ * A whole score inside the scale takes the rung it means and prints as
+ * "n/max". Anything else — no scale, or a number outside it — is drawn in one
+ * neutral tone with the number as it came, rather than coloured by a guess.
  */
-export function signatureScore(score: number, provider: string | null | undefined): SignatureScore {
-  const scale = SIGNATURE_SCALES[String(provider ?? "").trim().toLowerCase()];
+export function signatureScore(
+  score: number,
+  scale: SignatureScale | null | undefined
+): SignatureScore {
   const whole = Number.isInteger(score);
   if (!scale || !whole || score < 1 || score > scale.max) {
     const label = String(score);
