@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
 from maljan.pipeline.sandbox_status import NOT_RUN, sandbox_status
+from maljan.providers.call_arguments import pick_argument
 from maljan.utils.marked_cut import marked_cut
 
 if TYPE_CHECKING:
@@ -342,24 +343,60 @@ _REGISTRY_OPS: dict[str, str] = {
     "ntcreatekey": "create",
     "regdeletekeya": "delete",
     "regdeletekeyw": "delete",
+    "regdeletekeyexa": "delete",
+    "regdeletekeyexw": "delete",
     "regdeletevaluea": "delete",
     "regdeletevaluew": "delete",
     "ntdeletekey": "delete",
     "ntdeletevaluekey": "delete",
     "regqueryvalueexa": "query",
     "regqueryvalueexw": "query",
-    "ntquueryvaluekey": "query",
+    "ntqueryvaluekey": "query",
     "regopenkeyexa": "query",
     "regopenkeyexw": "query",
     "ntopenkey": "query",
+    "ntopenkeyex": "query",
 }
 
+# What a call says it did, where the operation its API names is only what it
+# may do: for each such operation, the argument the outcome is filed under and
+# what each recorded value means. A create call opens the key when it already
+# exists and says so in its disposition (1 created a new key, 2 opened an
+# existing one), and a key only opened was read, not created. A call that
+# records no outcome, or one this table does not know, keeps its API's
+# operation.
+_REGISTRY_OUTCOMES: dict[str, tuple[str, dict[int, str]]] = {
+    "create": ("Disposition", {1: "create", 2: "query"}),
+}
+
+# A write the call itself reports as failed (``status`` false) changed
+# nothing: the key was reached and that is all, so it is recorded as bare
+# access, which any read or write of the key replaces.
+_FAILED_WRITE = "access"
+
+# What one operation on a key says, against another on the same key: the bare
+# fact of access least, a read more, a write most.
+_REGISTRY_OP_WEIGHT: dict[str, int] = {
+    "access": 0,
+    "query": 1,
+    "create": 2,
+    "modify": 2,
+    "delete": 2,
+}
+
+# The argument names each reader takes its value from, most wanted first: a
+# call's own argument order never decides. A registry key is a full path before
+# a subkey and a subkey before the bare hive handle (``Registry``), which is
+# the key only for a call that names nothing else; a value is what was written
+# or, for a query, what was read (``Data``, or ``Information`` for the native
+# value query); a service is its name, under either spelling, before its
+# display name or the binary it runs.
 _REGISTRY_KEY_ARGS = ("FullName", "KeyName", "ObjectAttributes", "SubKey", "Registry")
-_REGISTRY_VALUE_ARGS = ("Buffer", "Data", "ValueData", "Value")
+_REGISTRY_VALUE_ARGS = ("Buffer", "Data", "ValueData", "Value", "Information")
 _MUTEX_APIS = frozenset({"ntcreatemutant", "ntopenmutant", "createmutexa", "createmutexw"})
 _MUTEX_ARGS = ("MutexName", "lpName", "ObjectAttributes", "Name")
 _SERVICE_APIS = frozenset({"createservicea", "createservicew", "startservicea", "startservicew"})
-_SERVICE_ARGS = ("ServiceName", "DisplayName", "BinaryPathName", "lpServiceName")
+_SERVICE_ARGS = ("ServiceName", "lpServiceName", "DisplayName", "BinaryPathName")
 
 
 def _calls(report: dict[str, Any]) -> list[dict[str, Any]]:
@@ -380,30 +417,56 @@ def _calls(report: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def _text(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
 def _argument(call: dict[str, Any], names: tuple[str, ...]) -> str:
-    """The first of ``names`` this call carries, whichever shape it filed them in."""
-    arguments = call.get("arguments")
-    if isinstance(arguments, dict):
-        pools: list[dict[str, Any]] = [arguments]
-    elif isinstance(arguments, list):
-        pools = [row for row in arguments if isinstance(row, dict)]
-    else:
-        pools = []
-    for pool in pools:
-        for key in names:
-            value = pool.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-        # Cuckoo's older shape files each argument as {"name": ..., "value": ...}.
-        if pool.get("name") in names and isinstance(pool.get("value"), str):
-            return str(pool["value"]).strip()
-    return ""
+    """The text of the first of ``names``, in that order, this call carries.
+
+    Whichever shape the call filed its arguments in; see ``call_arguments``.
+    """
+    value = pick_argument(call.get("arguments"), names, accept=_text)
+    return value.strip() if isinstance(value, str) else ""
 
 
 def _summary_list(report: dict[str, Any], key: str) -> list[str]:
     rows = _behavior(report).get("summary")
     values = rows.get(key) if isinstance(rows, dict) else None
     return [str(v) for v in values if isinstance(v, str)] if isinstance(values, list) else []
+
+
+def _registry_operation(call: dict[str, Any], operation: str) -> str:
+    """What ``call`` did to its key: its API's operation, as the call's own outcome refines it."""
+    if operation != "query" and call.get("status") is False:
+        return _FAILED_WRITE
+    outcome = _REGISTRY_OUTCOMES.get(operation)
+    if outcome is None:
+        return operation
+    name, meanings = outcome
+    code = _outcome_code(pick_argument(call.get("arguments"), (name,)))
+    return operation if code is None else meanings.get(code, operation)
+
+
+def _outcome_code(recorded: Any) -> int | None:
+    """An outcome a call recorded, as the number it is: filed as an integer or as text.
+
+    Text is read as written, a ``0x`` prefix as hexadecimal and leading zeros
+    as decimal (``"02"`` is 2); anything else is no outcome.
+    """
+    if isinstance(recorded, bool):
+        return None
+    if isinstance(recorded, int):
+        return recorded
+    if not isinstance(recorded, str):
+        return None
+    text = recorded.strip()
+    for base in (0, 10):
+        try:
+            return int(text, base)
+        except ValueError:
+            continue
+    return None
 
 
 def sandbox_registry_ops(
@@ -415,7 +478,15 @@ def sandbox_registry_ops(
     key list, which says a key was touched and nothing else, and the registry
     API calls themselves, which say what was done and what was written. The
     call wins where both name the same key — an operation is worth more than
-    the bare fact of access.
+    the bare fact of access — and for the same reason a read never replaces a
+    write: a key created, modified or deleted and then read stays the write,
+    with what was written, and a read that saw no value leaves an earlier
+    read's value standing. Between writes the later one in the report's order
+    stands; that order is the report's process by process, not time.
+
+    A call's own outcome refines what its API may do (``_REGISTRY_OUTCOMES``):
+    a create that opened an existing key is a read. A write the call reports as
+    failed is bare access, without the value it did not write.
     """
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
@@ -424,14 +495,23 @@ def sandbox_registry_ops(
         rows.setdefault(key, {"key": key, "operation": "access", "value": None})
     for call in _calls(report):
         api = str(call.get("api") or "")
-        operation = _REGISTRY_OPS.get(api.lower())
-        if operation is None:
+        listed = _REGISTRY_OPS.get(api.lower())
+        if listed is None:
             continue
         key = _argument(call, _REGISTRY_KEY_ARGS)
         if not key:
             continue
-        value = _argument(call, _REGISTRY_VALUE_ARGS)
-        rows[key] = {"key": key, "operation": operation, "value": value or None}
+        operation = _registry_operation(call, listed)
+        value = _argument(call, _REGISTRY_VALUE_ARGS) or None
+        if operation == _FAILED_WRITE:
+            value = None
+        before = rows.get(key)
+        if before is not None:
+            if _REGISTRY_OP_WEIGHT[operation] < _REGISTRY_OP_WEIGHT[before["operation"]]:
+                continue
+            if operation == before["operation"] == "query" and value is None:
+                continue
+        rows[key] = {"key": key, "operation": operation, "value": value}
     ordered = list(rows.values())
     page, meta = _page(ordered, offset, limit)
     return {"registry": page, "total": len(ordered), **meta}

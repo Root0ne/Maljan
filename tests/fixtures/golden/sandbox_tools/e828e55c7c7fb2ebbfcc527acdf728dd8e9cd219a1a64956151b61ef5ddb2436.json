@@ -41,7 +41,7 @@
         "api": "CreateProcessInternalW",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'ApplicationName', 'value': ''}, {'name': 'CommandLine', 'value': '\"schtasks\" /create /tn \"malware\" /sc ONLOGON /tr \"C:\\\\Users\\\\Admin\\\\AppData\\\\Roaming\\\\malware\\\\molliza.exe\" /rl HIGHEST /f'}, {'name': 'CreationFlags', 'value': '0x08000000', 'pretty_value': 'CREATE_NO_WINDOW'}, {'name': 'ProcessId', 'value': '4256'}, {'name': 'ThreadId', 'value': '3100'}, {'name': 'ProcessHandle', 'valu\u2026",
+        "first_args": "[{'name': 'ApplicationName', 'value': ''}, {'name': 'CommandLine', 'value': '\"schtasks\" /create /tn \"malware\" /sc ONLOGON /tr \"C:\\\\Users\\\\Admin\\\\AppData\\\\Roaming\\\\malware\\\\molliza.exe\" /rl HIGHEST /f'}, {'name': 'CreationFlags', 'value': '0x08000000', 'pretty_value': 'CREATE_NO_WINDOW'}, {'name': 'ProcessId', 'value': '4256'}, {'name': 'ThreadId', 'value': '3100'}, {'name': 'ProcessHandle', 'valu…",
         "first_seen": "2026-08-13 19:21:41,252",
         "process_count": 0,
         "processes": []
@@ -77,7 +77,7 @@
         "api": "CryptDecodeObjectEx",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'CertEncodingType', 'value': '0x00000001'}, {'name': 'Encoded', 'value': '0\\\\x82\\\\x04\\\\xf40\\\\x82\\\\x02\\\\xdc\\\\xa0\\\\x03\\\\x02\\\\x01\\\\x02\\\\x02\\\\x10\\\\x00\\\\xa7\\\\\\\\xbdB\\\\xb3\\\\x9fw\\\\xee\\\\x08\\\\xaeH:\\\\x04\\\\xb2\\\\xe90\\r\\\\x06\\t*\\\\x86H\\\\x86\\\\xf7\\r\\\\x01\\\\x01\\r\\\\x05\\\\x000\\\\x1b1\\\\x190\\\\x17\\\\x06\\\\x03U\\\\x04\\\\x03\\\\x0c\\\\x10Quasar Server CA0 \\\\x17\\r251010155336Z\\\\x18\\\\x0f99991231235959Z0\\\\x1b1\\\\x190\\\\x17\\\\x06\\\u2026",
+        "first_args": "[{'name': 'CertEncodingType', 'value': '0x00000001'}, {'name': 'Encoded', 'value': '0\\\\x82\\\\x04\\\\xf40\\\\x82\\\\x02\\\\xdc\\\\xa0\\\\x03\\\\x02\\\\x01\\\\x02\\\\x02\\\\x10\\\\x00\\\\xa7\\\\\\\\xbdB\\\\xb3\\\\x9fw\\\\xee\\\\x08\\\\xaeH:\\\\x04\\\\xb2\\\\xe90\\r\\\\x06\\t*\\\\x86H\\\\x86\\\\xf7\\r\\\\x01\\\\x01\\r\\\\x05\\\\x000\\\\x1b1\\\\x190\\\\x17\\\\x06\\\\x03U\\\\x04\\\\x03\\\\x0c\\\\x10Quasar Server CA0 \\\\x17\\r251010155336Z\\\\x18\\\\x0f99991231235959Z0\\\\x1b1\\\\x190\\\\x17\\\\x06\\…",
         "first_seen": "2026-08-13 19:21:40,392",
         "process_count": 0,
         "processes": []
@@ -419,7 +419,7 @@
         "api": "NtCreateFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x00000224'}, {'name': 'DesiredAccess', 'value': '0x80100080', 'pretty_value': 'GENERIC_READ|FILE_READ_ATTRIBUTES|SYNCHRONIZE'}, {'name': 'FileName', 'value': 'C:\\\\Windows\\\\Globalization\\\\Sorting\\\\sortdefault.nls'}, {'name': 'CreateDisposition', 'value': '1', 'pretty_value': 'FILE_OPEN'}, {'name': 'ShareAccess', 'value': '1', 'pretty_value': 'FILE_SHARE_READ'}, {\u2026",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x00000224'}, {'name': 'DesiredAccess', 'value': '0x80100080', 'pretty_value': 'GENERIC_READ|FILE_READ_ATTRIBUTES|SYNCHRONIZE'}, {'name': 'FileName', 'value': 'C:\\\\Windows\\\\Globalization\\\\Sorting\\\\sortdefault.nls'}, {'name': 'CreateDisposition', 'value': '1', 'pretty_value': 'FILE_OPEN'}, {'name': 'ShareAccess', 'value': '1', 'pretty_value': 'FILE_SHARE_READ'}, {…",
         "first_seen": "2026-07-25 17:54:01,515",
         "process_count": 0,
         "processes": []
@@ -455,7 +455,7 @@
         "api": "NtCreateUserProcess",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'ProcessHandle', 'value': '0x00000464'}, {'name': 'ThreadHandle', 'value': '0x00000434'}, {'name': 'ProcessDesiredAccess', 'value': '0x02000000'}, {'name': 'ThreadDesiredAccess', 'value': '0x02000000'}, {'name': 'ProcessFileName', 'value': ''}, {'name': 'ThreadName', 'value': ''}, {'name': 'ImagePathName', 'value': 'C:\\\\Windows\\\\SYSTEM32\\\\schtasks.exe'}, {'name': 'CommandLine', 'value':\u2026",
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0x00000464'}, {'name': 'ThreadHandle', 'value': '0x00000434'}, {'name': 'ProcessDesiredAccess', 'value': '0x02000000'}, {'name': 'ThreadDesiredAccess', 'value': '0x02000000'}, {'name': 'ProcessFileName', 'value': ''}, {'name': 'ThreadName', 'value': ''}, {'name': 'ImagePathName', 'value': 'C:\\\\Windows\\\\SYSTEM32\\\\schtasks.exe'}, {'name': 'CommandLine', 'value':…",
         "first_seen": "2026-08-13 19:21:41,127",
         "process_count": 0,
         "processes": []
@@ -464,7 +464,7 @@
         "api": "NtDeviceIoControlFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x00000044'}, {'name': 'HandleName', 'value': '\\\\Device\\\\ConDrv'}, {'name': 'IoControlCode', 'value': '0x00500016'}, {'name': 'InputBuffer', 'value': '\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x01\\\\x00\\\\x00\\\\x00\\\\x01\\\\x00\\\\x00\\\\x00\\n\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x000\\\\xf0\\\\x97*\\\\xcf\\\\x00\\\\x00\\\\x00\\\\x02\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x008\\\\xf0\\\\x97*\\\\xcf\\\\x00\\\\x\u2026",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x00000044'}, {'name': 'HandleName', 'value': '\\\\Device\\\\ConDrv'}, {'name': 'IoControlCode', 'value': '0x00500016'}, {'name': 'InputBuffer', 'value': '\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x01\\\\x00\\\\x00\\\\x00\\\\x01\\\\x00\\\\x00\\\\x00\\n\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x000\\\\xf0\\\\x97*\\\\xcf\\\\x00\\\\x00\\\\x00\\\\x02\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x008\\\\xf0\\\\x97*\\\\xcf\\\\x00\\\\x…",
         "first_seen": "2026-07-25 17:54:01,499",
         "process_count": 0,
         "processes": []
@@ -527,7 +527,7 @@
         "api": "NtOpenKey",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000224'}, {'name': 'DesiredAccess', 'value': '0x00020019', 'pretty_value': 'KEY_READ'}, {'name': 'ObjectAttributesHandle', 'value': '0x00000000'}, {'name': 'ObjectAttributesName', 'value': '\\\\Registry\\\\Machine\\\\System\\\\CurrentControlSet\\\\Control\\\\Nls\\\\Sorting\\\\Ids'}, {'name': 'ObjectAttributes', 'value': 'HKEY_LOCAL_MACHINE\\\\System\\\\CurrentControlSet\\\\Control\\\u2026",
+        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000224'}, {'name': 'DesiredAccess', 'value': '0x00020019', 'pretty_value': 'KEY_READ'}, {'name': 'ObjectAttributesHandle', 'value': '0x00000000'}, {'name': 'ObjectAttributesName', 'value': '\\\\Registry\\\\Machine\\\\System\\\\CurrentControlSet\\\\Control\\\\Nls\\\\Sorting\\\\Ids'}, {'name': 'ObjectAttributes', 'value': 'HKEY_LOCAL_MACHINE\\\\System\\\\CurrentControlSet\\\\Control\\…",
         "first_seen": "2026-07-25 17:54:01,515",
         "process_count": 0,
         "processes": []
@@ -536,7 +536,7 @@
         "api": "NtOpenKeyEx",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000328'}, {'name': 'DesiredAccess', 'value': '0x00000001', 'pretty_value': 'KEY_QUERY_VALUE'}, {'name': 'ObjectAttributesHandle', 'value': '0x00000324'}, {'name': 'ObjectAttributesName', 'value': 'SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Themes\\\\Personalize'}, {'name': 'ObjectAttributes', 'value': 'HKEY_CURRENT_USER\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentV\u2026",
+        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000328'}, {'name': 'DesiredAccess', 'value': '0x00000001', 'pretty_value': 'KEY_QUERY_VALUE'}, {'name': 'ObjectAttributesHandle', 'value': '0x00000324'}, {'name': 'ObjectAttributesName', 'value': 'SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Themes\\\\Personalize'}, {'name': 'ObjectAttributes', 'value': 'HKEY_CURRENT_USER\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentV…",
         "first_seen": "2026-08-13 19:20:31,908",
         "process_count": 0,
         "processes": []
@@ -572,7 +572,7 @@
         "api": "NtProtectVirtualMemory",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x7ffa067af000'}, {'name': 'ModuleName', 'value': 'kernel.appcore.dll'}, {'name': 'NumberOfBytesProtected', 'value': '0x00001000'}, {'name': 'MemoryType', 'value': '0x00000000'}, {'name': 'NewAccessProtection', 'value': '0x00000002', 'pretty_value': 'PAGE_READONLY'}, {'name': 'OldAccessProtection', 'value': '0x00\u2026",
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x7ffa067af000'}, {'name': 'ModuleName', 'value': 'kernel.appcore.dll'}, {'name': 'NumberOfBytesProtected', 'value': '0x00001000'}, {'name': 'MemoryType', 'value': '0x00000000'}, {'name': 'NewAccessProtection', 'value': '0x00000002', 'pretty_value': 'PAGE_READONLY'}, {'name': 'OldAccessProtection', 'value': '0x00…",
         "first_seen": "2026-07-25 17:54:01,531",
         "process_count": 0,
         "processes": []
@@ -662,7 +662,7 @@
         "api": "NtReadFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x00000218'}, {'name': 'HandleName', 'value': 'C:\\\\Windows\\\\Microsoft.NET\\\\Framework64\\\\v4.0.30319\\\\Config\\\\machine.config'}, {'name': 'Buffer', 'value': '<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\\r\\n<!--\\r\\n    Please refer to machine.config.comments for a description and\\r\\n    the default values of each configuration section.\\r\\n\\r\\n    For a full documentation\u2026",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x00000218'}, {'name': 'HandleName', 'value': 'C:\\\\Windows\\\\Microsoft.NET\\\\Framework64\\\\v4.0.30319\\\\Config\\\\machine.config'}, {'name': 'Buffer', 'value': '<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\\r\\n<!--\\r\\n    Please refer to machine.config.comments for a description and\\r\\n    the default values of each configuration section.\\r\\n\\r\\n    For a full documentation…",
         "first_seen": "2026-08-13 19:20:31,017",
         "process_count": 0,
         "processes": []
@@ -3339,8 +3339,8 @@
     "registry": [
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\Sorting\\Versions\\000603xx",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "kernel32.dll"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Nls\\Sorting\\Ids",
@@ -3354,7 +3354,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CustomLocale\\en-US",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3364,17 +3364,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\ExtendedLocale\\en-US",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\Sorting\\Ids\\en-US",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\Sorting\\Ids\\en",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3384,13 +3384,13 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Lsa\\FipsAlgorithmPolicy\\STE",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Lsa\\FipsAlgorithmPolicy\\Enabled",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "0"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Lsa",
@@ -3399,12 +3399,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Lsa\\FipsAlgorithmPolicy",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Lsa\\FipsAlgorithmPolicy\\MDMEnabled",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3419,7 +3419,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Appx\\AllowDevelopmentWithoutDevLicense",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3429,12 +3429,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AppModelUnlock\\AllowDevelopmentWithoutDevLicense",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\OLE\\AppCompat",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3449,7 +3449,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\AppID\\schtasks.exe",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3459,27 +3459,27 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\GRE_Initialize\\DisableMetaFiles",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\GRE_Initialize\\DisableUmpdBufferSizeCheck",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\.NETFramework\\Policy\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\.NETFramework\\policy\\v4.0",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\.NETFramework",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3489,7 +3489,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\.NETFramework",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3504,22 +3504,22 @@
       },
       {
         "key": "Policy\\Standards",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\.NETFramework\\Policy\\Standards",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\.NETFramework\\policy\\standards\\v4.0.30319",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Fusion",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3529,17 +3529,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\.NETFramework\\v4.0.30319\\SKUs\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\.NETFramework\\v4.0.30319\\SKUs\\default",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\NET Framework Setup\\NDP\\v4\\Full",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3554,12 +3554,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Fusion",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options\\e828e55c7c7fb2ebbfcc.exe",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3574,7 +3574,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Fusion",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3624,7 +3624,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3634,7 +3634,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\.NETFramework\\NGen\\Policy\\v4.0",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3644,17 +3644,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\.NETFramework\\Policy\\Servicing",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\StrongName",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\.NETFramework\\Policy\\APTCA",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3664,7 +3664,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3684,7 +3684,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3694,17 +3694,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\.NETFramework\\AppContext",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList\\S-1-5-21-1795187001-776152809-4276559823-1000",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\Defaults\\Provider Types\\Type 024",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3714,17 +3714,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\.NETFramework\\XML",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\.NETFramework\\XML",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\.NETFramework\\v4.0.30319",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3734,7 +3734,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\.NETFramework\\v4.0.30319\\System.Net.ServicePointManager.UseHttpPipeliningAndBufferPooling",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3744,7 +3744,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\.NETFramework\\v4.0.30319\\System.Net.ServicePointManager.UseSafeSynchronousClose",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3754,7 +3754,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\.NETFramework\\v4.0.30319\\System.Net.ServicePointManager.UseStrictRfcInterimResponseHandling",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3764,7 +3764,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\.NETFramework\\v4.0.30319\\System.Uri.AllowDangerousUnicodeDecompositions",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3774,7 +3774,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\.NETFramework\\v4.0.30319\\System.Uri.UseStrictIPv6AddressParsing",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3784,7 +3784,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\.NETFramework\\v4.0.30319\\System.Uri.AllowAllUriEncodingExpansion",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3799,7 +3799,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\.NETFramework\\v4.0.30319\\System.Net.ServicePointManager.SchSendAuxRecord",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3814,7 +3814,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\.NETFramework\\v4.0.30319\\System.Net.ServicePointManager.RequireCertificateEKUs",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3829,32 +3829,32 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\PreferExternalManifest",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Cryptography\\OID",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.10.3.37!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.10.3.37!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3869,8 +3869,8 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\MUI\\StringCacheSettings\\StringCacheGeneration",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "3"
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\MuiCache\\3\\52C64B7E",
@@ -3879,17 +3879,17 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\MuiCache\\3\\52C64B7E\\@%SystemRoot%\\System32\\ci.dll,-100",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "Isolated User Mode (IUM)"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.10.3.42!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.10.3.42!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3899,17 +3899,17 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\MuiCache\\3\\52C64B7E\\@%SystemRoot%\\System32\\ci.dll,-101",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "Enclave"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.64.1.1!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.64.1.1!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3919,17 +3919,17 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\MuiCache\\3\\52C64B7E\\@%SystemRoot%\\system32\\dnsapi.dll,-103",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "Domain Name System (DNS) Server Trust"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.67.1.1!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.67.1.1!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3939,17 +3939,17 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\MuiCache\\3\\52C64B7E\\@%SystemRoot%\\System32\\fveui.dll,-843",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "BitLocker Drive Encryption"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.67.1.2!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.67.1.2!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3959,17 +3959,17 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\MuiCache\\3\\52C64B7E\\@%SystemRoot%\\System32\\fveui.dll,-844",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "BitLocker Data Recovery Agent"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.76.6.1!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.76.6.1!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3979,17 +3979,17 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\MuiCache\\3\\52C64B7E\\@%SystemRoot%\\System32\\wuaueng.dll,-400",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "Windows Update"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.80.1!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.80.1!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3999,17 +3999,17 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\MuiCache\\3\\52C64B7E\\@%SystemRoot%\\system32\\WindowsPowerShell\\v1.0\\powershell.exe,-124",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "Document Encryption"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.92.1.1!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.92.1.1!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4019,12 +4019,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\MuiCache\\3\\52C64B7E\\@%SystemRoot%\\system32\\NgcRecovery.dll,-100",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "Windows Hello Recovery Key Encryption"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Cryptography\\ECCParameters",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4034,7 +4034,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4044,7 +4044,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\AppID\\e828e55c7c7fb2ebbfcc.exe",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4054,7 +4054,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\OLE",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4064,12 +4064,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Interface\\{00000134-0000-0000-C000-000000000046}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Interface\\{00000134-0000-0000-C000-000000000046}\\ProxyStubClsid32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4084,76 +4084,11 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Rpc\\Extensions\\NdrOleExtDLL",
-        "operation": "access",
-        "value": null
-      },
-      {
-        "key": "0x80000002",
         "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000246",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000200",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x80000001",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000000",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000210",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000204",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000218",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000434",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000438",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x0000043c",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000426",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x0000047e",
-        "operation": "query",
-        "value": null
+        "value": "combase.dll"
       }
     ],
-    "total": 163
+    "total": 150
   },
   "sandbox_services_and_tasks": {
     "commands": [

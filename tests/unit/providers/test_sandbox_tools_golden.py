@@ -9,13 +9,18 @@ those answers, so freezing them over the real corpus
 (``data/cape_reports/*.json``, 97 detonations) is what makes a change to the
 provider layer visible instead of quietly reshaping every report.
 
-The golden dumps for all 98 CAPE-shaped fixtures are committed (see
+The golden dumps for all 99 CAPE-shaped fixtures are committed (see
 ``tests/fixtures/golden/sandbox_tools``), but the raw source reports themselves
 are git-ignored — ``data/cape_reports/`` (97 files) exists only on the machine
-that captured them; only ``data/samples/dynamic/sample_1.json`` is tracked.
-Anywhere else (CI included), a case whose raw source is missing is skipped by
-name rather than failed, so CI still exercises the tracked sample while this
-machine exercises the full corpus.
+that captured them. Two sources are tracked: ``data/samples/dynamic/sample_1.json``
+and ``tests/fixtures/sandbox/cape2_synthetic.json``, a hand-written report of
+documentation addresses and made-up names whose processes, registry calls and
+network rows give CI a registry and a network answer to compare. Anywhere else
+(CI included), a case whose raw source is missing is skipped by name rather
+than failed, with the reason ``tests.golden_fixtures`` counts at the end of the
+session, so a run that compared only the tracked sources says how many it did
+not compare. ``MALJAN_TEST_NO_CAPE_REPORTS=1`` takes that path on a machine
+that has the corpus.
 """
 
 from __future__ import annotations
@@ -36,15 +41,28 @@ from maljan.providers.sandbox_tools import (
     sandbox_services_and_tasks,
     sandbox_signatures,
 )
+from tests.golden_fixtures import golden_stems, read_golden, skip_absent_fixture
+from tests.unit.providers._cape_fixture import no_real_reports_forced
 
 ROOT = Path(__file__).resolve().parents[3]
 GOLDEN = ROOT / "tests" / "fixtures" / "golden" / "sandbox_tools"
-CAPE_GLOBS: tuple[str, ...] = ("data/cape_reports/*.json", "data/samples/dynamic/sample_1.json")
+CORPUS_GLOB = "data/cape_reports/*.json"
+CAPE_GLOBS: tuple[str, ...] = (
+    CORPUS_GLOB,
+    "data/samples/dynamic/sample_1.json",
+    "tests/fixtures/sandbox/cape2_synthetic.json",
+)
+
+
+def _globs() -> tuple[str, ...]:
+    if no_real_reports_forced():
+        return tuple(pattern for pattern in CAPE_GLOBS if pattern != CORPUS_GLOB)
+    return CAPE_GLOBS
 
 
 def cape_reports() -> list[tuple[str, dict[str, Any]]]:
     out: list[tuple[str, dict[str, Any]]] = []
-    for pattern in CAPE_GLOBS:
+    for pattern in _globs():
         for path in sorted(ROOT.glob(pattern)):
             raw = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(raw, dict):
@@ -53,7 +71,7 @@ def cape_reports() -> list[tuple[str, dict[str, Any]]]:
 
 
 def _raw_path_for(name: str) -> Path | None:
-    for pattern in CAPE_GLOBS:
+    for pattern in _globs():
         for path in ROOT.glob(pattern):
             if path.stem == name:
                 return path
@@ -63,13 +81,13 @@ def _raw_path_for(name: str) -> Path | None:
 def _load_case(name: str) -> tuple[dict[str, Any], dict[str, Any]]:
     raw_path = _raw_path_for(name)
     if raw_path is None:
-        pytest.skip(f"raw CAPE report missing: {name}.json (not found under {CAPE_GLOBS})")
+        skip_absent_fixture(f"raw CAPE report {name}.json is not under {_globs()}")
     raw = json.loads(raw_path.read_text(encoding="utf-8"))
-    expected = json.loads((GOLDEN / f"{name}.json").read_text(encoding="utf-8"))
+    expected = read_golden(GOLDEN, name)
     return raw, expected
 
 
-_ALL_NAMES: list[str] = sorted(p.stem for p in GOLDEN.glob("*.json"))
+_ALL_NAMES: list[str] = golden_stems(GOLDEN)
 
 
 def test_the_corpus_is_present():

@@ -1,0 +1,427 @@
+{
+  "info": {
+    "id": 1,
+    "category": "file",
+    "package": "exe",
+    "machine": {"name": "guest", "platform": "windows"}
+  },
+  "target": {
+    "category": "file",
+    "file": {
+      "name": "synthetic.exe",
+      "size": 4096,
+      "md5": "0123456789abcdef0123456789abcdef",
+      "sha1": "0123456789abcdef0123456789abcdef01234567",
+      "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "type": "PE32 executable (GUI) Intel 80386, for MS Windows"
+    }
+  },
+  "behavior": {
+    "processes": [
+      {
+        "process_id": 1000,
+        "process_name": "synthetic.exe",
+        "parent_id": 900,
+        "module_path": "C:\\Users\\guest\\AppData\\Local\\Temp\\synthetic.exe",
+        "first_seen": "2000-01-01 00:00:00,000",
+        "environ": {"CommandLine": "\"C:\\Users\\guest\\AppData\\Local\\Temp\\synthetic.exe\""},
+        "calls": [
+          {
+            "timestamp": "2000-01-01 00:00:01,000",
+            "category": "registry",
+            "api": "NtOpenKey",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {"name": "KeyHandle", "value": "0x00000100"},
+              {"name": "DesiredAccess", "value": "0x00020019"},
+              {"name": "ObjectAttributes", "value": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Synthetic\\Settings"}
+            ],
+            "repeated": 0,
+            "id": 1
+          },
+          {
+            "timestamp": "2000-01-01 00:00:01,100",
+            "category": "registry",
+            "api": "RegQueryValueExW",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {"name": "Handle", "value": "0x00000100"},
+              {"name": "ValueName", "value": "InstallPath"},
+              {"name": "Data", "value": "C:\\Program Files\\Synthetic"},
+              {"name": "FullName", "value": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Synthetic\\Settings\\InstallPath"}
+            ],
+            "repeated": 0,
+            "id": 2
+          },
+          {
+            "timestamp": "2000-01-01 00:00:01,200",
+            "category": "registry",
+            "api": "NtCreateKey",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {"name": "KeyHandle", "value": "0x00000104"},
+              {"name": "DesiredAccess", "value": "0x000f003f"},
+              {"name": "ObjectAttributes", "value": "HKEY_CURRENT_USER\\Software\\Synthetic"}
+            ],
+            "repeated": 0,
+            "id": 3
+          },
+          {
+            "timestamp": "2000-01-01 00:00:01,300",
+            "category": "registry",
+            "api": "RegSetValueExW",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {"name": "Handle", "value": "0x00000108"},
+              {"name": "ValueName", "value": "Updater"},
+              {"name": "Type", "value": "1"},
+              {"name": "Buffer", "value": "C:\\Users\\guest\\AppData\\Roaming\\first.exe"},
+              {"name": "FullName", "value": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\Updater"}
+            ],
+            "repeated": 0,
+            "id": 4
+          },
+          {
+            "timestamp": "2000-01-01 00:00:01,400",
+            "category": "registry",
+            "api": "RegSetValueExW",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {"name": "Handle", "value": "0x00000108"},
+              {"name": "ValueName", "value": "Updater"},
+              {"name": "Type", "value": "1"},
+              {"name": "Buffer", "value": "C:\\Users\\guest\\AppData\\Roaming\\second.exe"},
+              {"name": "FullName", "value": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\Updater"}
+            ],
+            "repeated": 0,
+            "id": 5
+          },
+          {
+            "timestamp": "2000-01-01 00:00:01,500",
+            "category": "registry",
+            "api": "RegDeleteValueW",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {"name": "Handle", "value": "0x00000104"},
+              {"name": "ValueName", "value": "Trace"},
+              {"name": "FullName", "value": "HKEY_CURRENT_USER\\Software\\Synthetic\\Trace"}
+            ],
+            "repeated": 0,
+            "id": 6
+          },
+          {
+            "timestamp": "2000-01-01 00:00:01,600",
+            "category": "registry",
+            "api": "RegSetValueExW",
+            "status": false,
+            "return": "0xc0000022",
+            "arguments": [
+              {"name": "Handle", "value": "0x00000000"},
+              {"name": "ValueName", "value": "NoKey"}
+            ],
+            "repeated": 0,
+            "id": 7
+          },
+          {
+            "timestamp": "2000-01-01 00:00:01,610",
+            "category": "registry",
+            "api": "RegOpenKeyExW",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {"name": "Registry", "value": "0x80000002"},
+              {"name": "SubKey", "value": "SOFTWARE\\Synthetic\\Policies"},
+              {"name": "Handle", "value": "0x00000114"},
+              {"name": "FullName", "value": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Synthetic\\Policies"}
+            ],
+            "repeated": 0,
+            "id": 10
+          },
+          {
+            "timestamp": "2000-01-01 00:00:01,620",
+            "category": "registry",
+            "api": "RegCreateKeyExW",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {"name": "Registry", "value": "0x80000001"},
+              {"name": "SubKey", "value": "Software\\Synthetic\\Cache"},
+              {"name": "Class", "value": ""},
+              {"name": "Access", "value": "0x000f003f"},
+              {"name": "Handle", "value": "0x00000118"},
+              {"name": "FullName", "value": "HKEY_CURRENT_USER\\Software\\Synthetic\\Cache"},
+              {"name": "Disposition", "value": "1"}
+            ],
+            "repeated": 0,
+            "id": 11
+          },
+          {
+            "timestamp": "2000-01-01 00:00:01,630",
+            "category": "registry",
+            "api": "RegCreateKeyExW",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {"name": "Registry", "value": "0x80000001"},
+              {"name": "SubKey", "value": "Software\\Synthetic\\NoFullName"}
+            ],
+            "repeated": 0,
+            "id": 12
+          },
+          {
+            "timestamp": "2000-01-01 00:00:01,640",
+            "category": "registry",
+            "api": "NtQueryValueKey",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {"name": "KeyHandle", "value": "0x00000100"},
+              {"name": "ValueName", "value": "Version"},
+              {"name": "Type", "value": "1"},
+              {"name": "Information", "value": "2.0"},
+              {"name": "FullName", "value": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Synthetic\\Settings\\Version"}
+            ],
+            "repeated": 0,
+            "id": 13
+          },
+          {
+            "timestamp": "2000-01-01 00:00:01,650",
+            "category": "registry",
+            "api": "NtQueryValueKey",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {"name": "KeyHandle", "value": "0x00000100"},
+              {"name": "ValueName", "value": "Locale"},
+              {"name": "FullName", "value": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Synthetic\\Settings\\Locale"}
+            ],
+            "repeated": 0,
+            "id": 14
+          },
+          {
+            "timestamp": "2000-01-01 00:00:01,660",
+            "category": "registry",
+            "api": "RegCreateKeyExW",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {"name": "Registry", "value": "0x80000001"},
+              {"name": "SubKey", "value": "Software\\Synthetic\\Existing"},
+              {"name": "Class", "value": ""},
+              {"name": "Access", "value": "0x000f003f"},
+              {"name": "Handle", "value": "0x0000011c"},
+              {"name": "FullName", "value": "HKEY_CURRENT_USER\\Software\\Synthetic\\Existing"},
+              {"name": "Disposition", "value": "2"}
+            ],
+            "repeated": 0,
+            "id": 15
+          },
+          {
+            "timestamp": "2000-01-01 00:00:01,670",
+            "category": "registry",
+            "api": "NtCreateKey",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {"name": "KeyHandle", "value": "0x00000120"},
+              {"name": "DesiredAccess", "value": "0x000f003f"},
+              {"name": "ObjectAttributes", "value": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Synthetic\\NativeExisting"},
+              {"name": "Disposition", "value": "2"}
+            ],
+            "repeated": 0,
+            "id": 16
+          },
+          {
+            "timestamp": "2000-01-01 00:00:01,680",
+            "category": "registry",
+            "api": "NtCreateKey",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {"name": "KeyHandle", "value": "0x00000124"},
+              {"name": "DesiredAccess", "value": "0x000f003f"},
+              {"name": "ObjectAttributes", "value": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Synthetic\\NativeNew"},
+              {"name": "Disposition", "value": "1"}
+            ],
+            "repeated": 0,
+            "id": 17
+          },
+          {
+            "timestamp": "2000-01-01 00:00:01,690",
+            "category": "registry",
+            "api": "RegDeleteValueW",
+            "status": false,
+            "return": "0x00000002",
+            "arguments": [
+              {"name": "Handle", "value": "0x00000108"},
+              {"name": "ValueName", "value": "Missing"},
+              {"name": "FullName", "value": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\Missing"}
+            ],
+            "repeated": 0,
+            "id": 18
+          },
+          {
+            "timestamp": "2000-01-01 00:00:01,700",
+            "category": "filesystem",
+            "api": "NtCreateFile",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {"name": "FileHandle", "value": "0x0000010c"},
+              {"name": "FileName", "value": "C:\\Users\\guest\\AppData\\Roaming\\second.exe"}
+            ],
+            "repeated": 0,
+            "id": 8
+          },
+          {
+            "timestamp": "2000-01-01 00:00:01,800",
+            "category": "synchronisation",
+            "api": "NtCreateMutant",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {"name": "Handle", "value": "0x00000110"},
+              {"name": "MutexName", "value": "Global\\SyntheticMutex"}
+            ],
+            "repeated": 0,
+            "id": 9
+          }
+        ]
+      },
+      {
+        "process_id": 1004,
+        "process_name": "second.exe",
+        "parent_id": 1000,
+        "module_path": "C:\\Users\\guest\\AppData\\Roaming\\second.exe",
+        "first_seen": "2000-01-01 00:00:02,000",
+        "environ": {"CommandLine": "\"C:\\Users\\guest\\AppData\\Roaming\\second.exe\" --run"},
+        "calls": [
+          {
+            "timestamp": "2000-01-01 00:00:02,100",
+            "category": "registry",
+            "api": "NtSetValueKey",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": {
+              "KeyHandle": "0x00000200",
+              "ValueName": "Interval",
+              "Buffer": "300",
+              "FullName": "HKEY_CURRENT_USER\\Software\\Synthetic\\Interval"
+            },
+            "repeated": 0,
+            "id": 1
+          },
+          {
+            "timestamp": "2000-01-01 00:00:02,200",
+            "category": "registry",
+            "api": "NtOpenKey",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {"name": "KeyHandle", "value": "0x00000204"},
+              {"name": "DesiredAccess", "value": "0x00020019"},
+              {"name": "ObjectAttributes", "value": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Synthetic"}
+            ],
+            "repeated": 0,
+            "id": 2
+          },
+          {
+            "timestamp": "2000-01-01 00:00:02,300",
+            "category": "services",
+            "api": "CreateServiceW",
+            "status": true,
+            "return": "0x00000130",
+            "arguments": [
+              {"name": "ServiceControlHandle", "value": "0x00000128"},
+              {"name": "DisplayName", "value": "Synthetic Update Service"},
+              {"name": "ServiceName", "value": "SyntheticSvc"},
+              {"name": "BinaryPathName", "value": "C:\\Users\\guest\\AppData\\Roaming\\second.exe --service"}
+            ],
+            "repeated": 0,
+            "id": 3
+          }
+        ]
+      }
+    ],
+    "summary": {
+      "files": ["C:\\Users\\guest\\AppData\\Roaming\\second.exe"],
+      "write_files": ["C:\\Users\\guest\\AppData\\Roaming\\second.exe"],
+      "keys": [
+        "HKEY_LOCAL_MACHINE\\SOFTWARE\\Synthetic\\Settings",
+        "HKEY_LOCAL_MACHINE\\SOFTWARE\\Synthetic\\OnlyInSummary",
+        "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\Updater"
+      ],
+      "write_keys": ["HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\Updater"],
+      "mutexes": ["Global\\SyntheticMutex"],
+      "executed_commands": ["\"C:\\Users\\guest\\AppData\\Roaming\\second.exe\" --run"]
+    }
+  },
+  "network": {
+    "hosts": [
+      {"ip": "203.0.113.10", "country_name": "", "asn": "", "asn_name": "", "hostname": "", "inaddrarpa": "", "ports": [80]},
+      {"ip": "198.51.100.20", "country_name": "", "asn": "", "asn_name": "", "hostname": "", "inaddrarpa": "", "ports": [443]},
+      {"ip": "8.8.8.8", "country_name": "", "asn": "", "asn_name": "", "hostname": "", "inaddrarpa": "", "ports": [53]}
+    ],
+    "domains": [
+      {"domain": "c2.synthetic.test", "ip": "203.0.113.10"},
+      {"domain": "update.synthetic.test", "ip": "198.51.100.20"}
+    ],
+    "dns": [
+      {"request": "c2.synthetic.test", "type": "A", "answers": [{"type": "A", "data": "203.0.113.10"}], "first_seen": 1.5},
+      {"request": "update.synthetic.test", "type": "A", "answers": [{"type": "A", "data": "198.51.100.20"}], "first_seen": 2.5},
+      {"request": "missing.synthetic.test", "type": "A", "answers": [], "first_seen": 3.5}
+    ],
+    "tcp": [
+      {"src": "192.0.2.50", "sport": 49160, "dst": "203.0.113.10", "dport": 80, "offset": 100, "time": 1.6},
+      {"src": "192.0.2.50", "sport": 49161, "dst": "198.51.100.20", "dport": 443, "offset": 200, "time": 2.6}
+    ],
+    "udp": [
+      {"src": "192.0.2.50", "sport": 50000, "dst": "8.8.8.8", "dport": 53, "offset": 50, "time": 1.4},
+      {"src": "192.0.2.50", "sport": 50001, "dst": "192.0.2.1", "dport": 53, "offset": 60, "time": 2.4}
+    ],
+    "http": [
+      {
+        "host": "c2.synthetic.test",
+        "port": 80,
+        "uri": "http://c2.synthetic.test/gate",
+        "method": "POST",
+        "path": "/gate",
+        "user-agent": "SyntheticAgent/1.0",
+        "version": "1.1",
+        "body": "id=1"
+      }
+    ],
+    "tls": [
+      {"srcip": "192.0.2.50", "srcport": 49161, "dstip": "198.51.100.20", "dstport": 443, "version": "TLS 1.2", "sni": "update.synthetic.test"}
+    ],
+    "icmp": [],
+    "smtp": [],
+    "irc": []
+  },
+  "signatures": [
+    {
+      "name": "persistence_autorun",
+      "description": "Installs itself for autorun at Windows startup",
+      "severity": 3,
+      "confidence": 100,
+      "references": [],
+      "data": []
+    }
+  ],
+  "dropped": [
+    {
+      "name": "second.exe",
+      "path": "C:\\Users\\guest\\AppData\\Roaming\\second.exe",
+      "size": 4096,
+      "md5": "fedcba9876543210fedcba9876543210",
+      "sha256": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+      "type": "PE32 executable (GUI) Intel 80386, for MS Windows"
+    }
+  ]
+}

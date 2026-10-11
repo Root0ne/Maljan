@@ -72,6 +72,19 @@ on loopback port 8080.
   secret in the environment: a pytest-only JWT secret is substituted, and the
   auth bypass is forced off so real 401 and 403 assertions still mean
   something.
+- **Goldens** — `scripts/goldens/capture_provider_goldens.py` freezes the
+  sandbox tools' answers per report under `tests/fixtures/golden/sandbox_tools/`.
+  Most source reports (`data/cape_reports/`) are kept only on the machine that
+  captured them; two are tracked, one of them a hand-written report
+  (`tests/fixtures/sandbox/cape2_synthetic.json`) whose registry calls and
+  network rows CI compares. A case whose source is absent is skipped, and the
+  session ends with the number of such skips (on GitHub Actions also a warning
+  annotation and a line in the job summary). `MALJAN_TEST_NO_CAPE_REPORTS=1`
+  takes that path on a machine that has the reports. A golden whose text
+  passes 5 MB is written as `<name>.json.gz` and read back decompressed. The
+  same script writes the two prompt fixtures under `tests/fixtures/prompts/`,
+  which a test compares with the live prompt builder, so a prompt change
+  comes with its recapture.
 - **Frontend unit** — `cd apps/web && npm run test:unit` (vitest), alongside
   `npx tsc --noEmit` and `npm run lint`.
 - **Playwright** — `cd apps/web && npm run test:e2e`. The suite starts its own
