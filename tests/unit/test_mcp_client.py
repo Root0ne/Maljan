@@ -440,6 +440,7 @@ class TestDynamicAnalystMcpTransportWiring:
                 transport="stdio",
                 http_url="",
                 http_headers=None,
+                categories=None,
             ):
                 captured["transport"] = transport
                 captured["http_url"] = http_url

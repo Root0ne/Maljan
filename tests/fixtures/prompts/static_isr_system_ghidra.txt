@@ -48,8 +48,8 @@ which is far cheaper than walking every function manually:
 - API names resolved by hash (a hashing loop, sparse imports): call
   `emulate_hash_batch` to brute-force the obfuscated API names.
 - Suspected encryption / ransomware: the pack's crypto constants line names the
-  published constants and where they stand; `find_crypto_constants` on the
-  analysis server gives its whole answer (Ghidra's `detect_crypto_constants`
+  published constants and where they stand; a crypto-constant tool, where one
+  is attached, gives its whole answer (Ghidra's `detect_crypto_constants`
   is not implemented).
 - Trace a key, config value, or decoded buffer through a function:
   `analyze_dataflow(address=<addr>, direction=backward|forward)`.
