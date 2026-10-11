@@ -336,3 +336,37 @@ def test_a_declaration_reads_its_family_into_the_body() -> None:
         family="fam",
     )
     assert declared.request_body() == {"who": "fam", "nested": ["fam", 1]}
+
+
+def test_a_fact_that_reads_the_token_s_path_is_refused() -> None:
+    with pytest.raises(ValidationError, match="reads token_json_path"):
+        MCPServerConfig.model_validate(_invented_server(facts={"handle": "/grant/token"}))
+
+
+def test_a_fact_is_audited_under_its_own_name_and_never_carries_the_token() -> None:
+    stored = {
+        "core.mcp.servers": {
+            "invented": _invented_server(facts={"server": "/grant/server", "echo": "/grant/echo"})
+        }
+    }
+    answer = {
+        "grant": {"token": INVENTED_TOKEN, "server": "spoofed", "echo": f"was {INVENTED_TOKEN}"}
+    }
+    response = _post(stored, _Wire(answer), "invented", {})
+
+    assert response.status_code == 200, response.text
+    assert INVENTED_TOKEN not in response.text
+    assert response.json()["facts"] == {"server": "spoofed", "echo": f"was {TOKEN_MASK}"}
+    details = _post.audit.call_args.kwargs["details"]  # type: ignore[attr-defined]
+    assert details["server"] == "invented"
+    assert details["facts"] == {"server": "spoofed", "echo": f"was {TOKEN_MASK}"}
+    assert INVENTED_TOKEN not in json.dumps(details)
+
+
+@pytest.mark.parametrize("block", ["static.ghidra", "static.r2", "sandbox.cape2.mcp"])
+def test_a_provider_block_refuses_a_bootstrap_no_route_performs(block: str) -> None:
+    from maljan.core.settings_overrides import build_settings
+
+    declared = _invented_server()["credential_bootstrap"]
+    with pytest.raises(ValidationError, match="provider's own block takes none"):
+        build_settings({f"{block}.credential_bootstrap": declared})

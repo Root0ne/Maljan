@@ -240,7 +240,7 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         "title": "Enrichment sources",
         "description": (
             "The sources post-verdict enrichment asks, by key: the indicator kinds each "
-            "answers (ip, domain, hash, url), a reputation server's tool or one https "
+            "answers (domain, ip), a reputation server's tool or one https "
             "request per kind, where its credential is read from, and the paths of its "
             "answer's facts. An entry under a shipped source's key changes only the "
             "fields it names; any other key adds a source. A source's own api_key is "

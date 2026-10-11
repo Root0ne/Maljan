@@ -698,6 +698,18 @@ class CredentialBootstrap(BaseModel):
             parse_path(path)
         return value
 
+    @model_validator(mode="after")
+    def _no_fact_reads_the_token(self) -> CredentialBootstrap:
+        """A fact is shown to the operator and audited, so none may name the token's path."""
+        token = parse_path(self.token_json_path)
+        for name, path in self.facts.items():
+            if parse_path(path) == token:
+                raise ValueError(
+                    f"credential_bootstrap.facts.{name} reads token_json_path; a fact is shown "
+                    "and audited, the token never is"
+                )
+        return self
+
     def request_body(self) -> dict[str, Any]:
         """The JSON body sent: ``body`` with the family written in."""
         return dict(_with_family(self.body, self.family))

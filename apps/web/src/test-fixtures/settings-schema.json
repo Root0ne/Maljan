@@ -18,7 +18,8 @@
    "label": "VirusTotal",
    "own_credential": false,
    "probe": true,
-   "server": null
+   "server": null,
+   "server_enabled": null
   },
   {
    "credential_key": "api.abuseipdb_api_key",
@@ -30,7 +31,8 @@
    "label": "AbuseIPDB",
    "own_credential": false,
    "probe": true,
-   "server": null
+   "server": null,
+   "server_enabled": null
   }
  ],
  "groups": [
@@ -2453,12 +2455,10 @@
      "type": "str"
     },
     {
-     "advanced": true,
+     "advanced": false,
      "applies": "next_job",
      "applies_when": {
-      "core.static.provider": [
-       "ghidra"
-      ]
+      "core.static.provider": []
      },
      "builtin_servers": null,
      "capability_servers": null,
@@ -2483,7 +2483,7 @@
      "required_env": null,
      "reserved_servers": null,
      "secret": false,
-     "subgroup": "Declaration",
+     "subgroup": null,
      "title": "Ghidra MCP credential bootstrap",
      "type": "json"
     },
@@ -3642,12 +3642,10 @@
      "type": "str"
     },
     {
-     "advanced": true,
+     "advanced": false,
      "applies": "next_job",
      "applies_when": {
-      "core.static.provider": [
-       "r2"
-      ]
+      "core.static.provider": []
      },
      "builtin_servers": null,
      "capability_servers": null,
@@ -3672,7 +3670,7 @@
      "required_env": null,
      "reserved_servers": null,
      "secret": false,
-     "subgroup": "Declaration",
+     "subgroup": null,
      "title": "radare2 MCP credential bootstrap",
      "type": "json"
     },
@@ -5108,12 +5106,10 @@
      "type": "str"
     },
     {
-     "advanced": true,
+     "advanced": false,
      "applies": "next_job",
      "applies_when": {
-      "core.sandbox.provider": [
-       "cape2"
-      ]
+      "core.sandbox.provider": []
      },
      "builtin_servers": null,
      "capability_servers": null,
@@ -5138,7 +5134,7 @@
      "required_env": null,
      "reserved_servers": null,
      "secret": false,
-     "subgroup": "Declaration",
+     "subgroup": null,
      "title": "CAPE MCP credential bootstrap",
      "type": "json"
     },

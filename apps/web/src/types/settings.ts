@@ -406,6 +406,8 @@ export interface EnrichmentSourceFacts {
   credential_key: string | null;
   own_credential: boolean;
   server: string | null;
+  /** For a server source, whether its server is enabled; null otherwise. */
+  server_enabled?: boolean | null;
   /** Whether it declares a connection test, run under its key. */
   probe: boolean;
 }

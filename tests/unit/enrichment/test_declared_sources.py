@@ -262,6 +262,114 @@ def test_the_indicator_never_moves_the_host() -> None:
     assert httpx.URL(built["url"]).host == "www.virustotal.com"
 
 
+# A sample controls the names it resolves: each of these is a value a hostile
+# sample can hand the enrichment as a domain.
+HOSTILE_VALUES = [
+    "{credential}.evil-c2.com",
+    "{value}{credential}.evil-c2.com",
+    "%7Bcredential%7D.evil-c2.com",
+    "{credential}",
+    "a\r\nX-Injected: {credential}.evil-c2.com",
+]
+
+
+def _echoing_source() -> EnrichmentSource:
+    """A source that takes the value in every slot, and whose service echoes what it got."""
+    return EnrichmentSource.model_validate(
+        {
+            "kinds": ["domain"],
+            "requests": {
+                "domain": {
+                    "method": "POST",
+                    "url": f"https://{INVENTED_HOST}/v1/{{value}}/lookup",
+                    "params": {"q": "{value}", "key": "{credential}"},
+                    "headers": {"Authorization": "Bearer {credential}", "X-Query": "{value}"},
+                    "json_body": {"query": "{value}", "nested": ["{value}"]},
+                }
+            },
+            "answer_root": "/echo",
+            "record": [
+                {"name": "path", "path": "/path"},
+                {"name": "q", "path": "/q"},
+                {"name": "header", "path": "/header"},
+                {"name": "body", "path": "/body"},
+            ],
+        }
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", HOSTILE_VALUES)
+async def test_a_hostile_indicator_never_carries_the_credential_anywhere(
+    value: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    import json as _json
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+    secret = _key("sec", "r3t", "v4lue")
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        echo = {
+            "path": request.url.path,
+            "q": request.url.params.get("q"),
+            "header": request.headers.get("X-Query"),
+            "body": _json.loads(request.content),
+        }
+        return httpx.Response(200, json={"echo": echo})
+
+    ready = ReadySource(key="echo", source=_echoing_source(), credential=secret)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        record = await SourceAsker(http).ask(ready, "domain", value)
+
+    if "\r" in value or "\n" in value:
+        # A value with a line break is never sent at all.
+        assert seen == [] and record is None
+        return
+    (request,) = seen
+    url = str(request.url)
+    # The credential sits only where the declaration put it: the key parameter
+    # and the Authorization header, once each.
+    assert url.count(secret) == 1 and request.url.params.get("key") == secret
+    assert request.url.path.count(secret) == 0
+    assert request.headers["Authorization"] == f"Bearer {secret}"
+    assert request.headers["X-Query"] == value
+    assert secret not in request.content.decode()
+    # Each slot received the indicator as written, in its own encoding.
+    assert request.url.params.get("q") == value
+    assert _json.loads(request.content) == {"query": value, "nested": [value]}
+    assert record is not None and secret not in _json.dumps(record)
+    assert record["q"] == value and record["header"] == value
+    assert secret not in caplog.text
+
+
+def test_every_placeholder_is_filled_in_one_pass() -> None:
+    from maljan.enrichment.declared import _filled
+
+    assert _filled("{value}|{credential}", "{credential}", "S") == "{credential}|S"
+    assert _filled({"a": ["{value}"]}, "{value}", "S") == {"a": ["{value}"]}
+
+
+def test_a_probe_error_masks_the_credential_in_every_encoding() -> None:
+    import base64
+    from urllib.parse import quote, quote_plus
+
+    from maljan.enrichment.declared import masked
+
+    secret = _key("a+b/c=d", "e f")
+    for form in (
+        secret,
+        quote(secret, safe=""),
+        quote_plus(secret),
+        base64.b64encode(secret.encode()).decode(),
+    ):
+        said = masked(f"ConnectError: https://x/?key={form} refused", secret)
+        assert form not in said and "***" in said
+    assert masked("nothing here", "") == "nothing here"
+
+
 # ---------------------------------------------------------------------------
 # A source declared only as data
 # ---------------------------------------------------------------------------
@@ -364,6 +472,10 @@ def test_a_stored_entry_under_a_shipped_key_changes_only_what_it_names() -> None
         (_invented(malicious_when=[{"field": "nope", "at_least": 1}]), "nope"),
         (_invented(record=[{"name": "source", "path": "/a"}]), "source"),
         (_invented(surprise=True), "surprise"),
+        (_invented(kinds=["hash"]), "hash reputation is declared as a reputation lookup tool"),
+        (_invented(kinds=["domain", "url"]), "asks only about domain and ip"),
+        (_invented(kinds=["email"]), "an indicator kind is one of domain, ip"),
+        (_invented(requests={}, server="Bad\nName", tool="t"), "server must be the key"),
     ],
 )
 def test_a_declaration_that_cannot_work_is_refused_in_words(

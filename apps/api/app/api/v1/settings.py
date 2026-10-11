@@ -164,7 +164,7 @@ def served_schema(
     return SchemaResponse(
         groups=groups,
         probe_labels=probe_labels(enrichment_sources),
-        enrichment_sources=source_facts(enrichment_sources),
+        enrichment_sources=source_facts(enrichment_sources, server_configs),
         credential_servers=bootstrap_facts(server_configs),
     )
 
@@ -718,7 +718,10 @@ async def obtain_server_credential(
         "settings.servers.credential",
         resource_type="settings",
         user_id=user.id,
-        details={"server": log_safe(key), **{k: log_safe(v) for k, v in facts.items()}},
+        details={
+            "server": log_safe(key),
+            "facts": {log_safe(k): log_safe(v) for k, v in facts.items()},
+        },
         ip=_client_ip(request),
     )
     runtime_config.invalidate()

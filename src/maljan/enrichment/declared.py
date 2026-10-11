@@ -33,6 +33,7 @@ schema.
 from __future__ import annotations
 
 import asyncio
+import base64
 import ipaddress
 import json
 import re
@@ -40,7 +41,7 @@ import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, quote_plus, urlparse
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
@@ -48,8 +49,12 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, m
 from maljan.core.logger import logger
 from maljan.core.tool_declarations import first, parse_path, select
 
-IndicatorKind = Literal["ip", "domain", "hash", "url"]
-INDICATOR_KINDS: tuple[str, ...] = ("ip", "domain", "hash", "url")
+# The indicator kinds post-verdict enrichment asks about: the report holds a
+# reputation slot for each (``network.domains``, ``network.ips``).
+ASKED_KINDS: tuple[str, ...] = ("domain", "ip")
+# Kinds an indicator has that enrichment does not ask about. The sample's own
+# hash is asked by a declared reputation lookup tool (``core.reputation``).
+UNASKED_KINDS: tuple[str, ...] = ("hash", "url")
 
 # The placeholders a request template may hold.
 VALUE = "{value}"
@@ -88,9 +93,18 @@ def _holds(template: Any, placeholder: str) -> bool:
     return False
 
 
+# Every placeholder a template may hold, found in one scan of the template.
+_PLACEHOLDER = re.compile(r"\{(value|credential)\}")
+
+
 def _filled(template: Any, value: str, credential: str) -> Any:
+    """``template`` with each placeholder replaced in one pass over the template.
+
+    The inserted text is never scanned again, so an indicator that holds
+    ``{credential}`` (or any placeholder) is sent as the characters it is.
+    """
     if isinstance(template, str):
-        return template.replace(VALUE, value).replace(CREDENTIAL, credential)
+        return _PLACEHOLDER.sub(lambda m: value if m.group(1) == "value" else credential, template)
     if isinstance(template, Mapping):
         return {k: _filled(v, value, credential) for k, v in template.items()}
     if isinstance(template, list | tuple):
@@ -137,10 +151,16 @@ class RestRequest(BaseModel):
         )
 
     def build(self, value: str, credential: str) -> dict[str, Any]:
-        """The arguments of ``httpx.AsyncClient.request`` for ``value``."""
+        """The arguments of ``httpx.AsyncClient.request`` for ``value``.
+
+        Each slot takes the value in its own encoding: URL-encoded as one path
+        segment in the URL (which never holds the credential), as text in a
+        query parameter (which the client URL-encodes), and as an opaque value
+        in a header or the JSON body.
+        """
         built: dict[str, Any] = {
             "method": self.method,
-            "url": self.url.replace(VALUE, quote(value, safe="")),
+            "url": _filled(self.url, quote(value, safe=""), ""),
             "headers": _filled(self.headers, value, credential),
         }
         if self.params:
@@ -199,15 +219,15 @@ class EnrichmentSource(BaseModel):
 
     label: str = ""
     enabled: bool = True
-    kinds: list[IndicatorKind] = Field(min_length=1)
+    kinds: list[str] = Field(min_length=1)
     # Lower first: the first source of a kind that answers is the one kept.
     order: int = 100
     # A declared tool server's tool.
     server: str = ""
     tool: str = ""
-    arguments: dict[IndicatorKind, str] = Field(default_factory=dict)
+    arguments: dict[str, str] = Field(default_factory=dict)
     # A REST endpoint.
-    requests: dict[IndicatorKind, RestRequest] = Field(default_factory=dict)
+    requests: dict[str, RestRequest] = Field(default_factory=dict)
     credential: str = ""
     api_key: SecretStr = SecretStr("")
     probe: RestRequest | None = None
@@ -225,6 +245,26 @@ class EnrichmentSource(BaseModel):
     def _each_kind_once(cls, value: list[str]) -> list[str]:
         if len(set(value)) != len(value):
             raise ValueError("kinds names a kind twice")
+        unasked = [k for k in value if k in UNASKED_KINDS]
+        if unasked:
+            raise ValueError(
+                f"kinds {', '.join(unasked)}: post-verdict enrichment asks only about "
+                f"{' and '.join(ASKED_KINDS)}; hash reputation is declared as a reputation "
+                "lookup tool (a server tool of kind reputation that takes the hash), which "
+                "the triage pack and the judge ask"
+            )
+        unknown = [k for k in value if k not in ASKED_KINDS]
+        if unknown:
+            raise ValueError(
+                f"kinds {', '.join(unknown)}: an indicator kind is one of {', '.join(ASKED_KINDS)}"
+            )
+        return value
+
+    @field_validator("server")
+    @classmethod
+    def _a_server_key(cls, value: str) -> str:
+        if value and not _KEY_RE.match(value):
+            raise ValueError("server must be the key of a server in mcp.servers")
         return value
 
     @field_validator("credential")
@@ -334,7 +374,7 @@ def effective_sources(stored: Mapping[str, Any] | None) -> dict[str, EnrichmentS
             check_source_key(key)
             out[key] = EnrichmentSource.model_validate(entry)
         except (ValidationError, ValueError, TypeError):
-            logger.warning("enrich: source %s is not a valid declaration; left out.", key[:40])
+            logger.warning("enrich: a source is not a valid declaration; left out.")
     return out
 
 
@@ -480,7 +520,7 @@ class SourceAsker:
             else:
                 answer = await self._ask_rest(ready, kind, value)
         except Exception as exc:  # noqa: BLE001 — one source's failure is no lookup
-            logger.warning("enrich: source %s failed (%s).", ready.key, type(exc).__name__)
+            logger.warning("enrich: a source failed (%s).", type(exc).__name__)
             return None
         if answer is None:
             return None
@@ -494,9 +534,7 @@ class SourceAsker:
         if not argument and self.tool_arguments is not None:
             argument = self.tool_arguments(source.server, source.tool).get(kind)
         if not argument:
-            logger.warning(
-                "enrich: source %s names no argument for %s; not asked.", ready.key, kind
-            )
+            logger.warning("enrich: a server source names no argument for a kind; not asked.")
             return None
         return await self.tool_caller(source.server, source.tool, {argument: value})
 
@@ -505,33 +543,53 @@ class SourceAsker:
         request = source.requests[kind]  # type: ignore[index]
         built = request.build(value, ready.credential)
         if urlparse(built["url"]).hostname != request.host:
-            logger.warning("enrich: source %s request left its declared host; refused.", ready.key)
+            logger.warning("enrich: a source request left its declared host; refused.")
             return None
         pace = self._paces.setdefault(ready.key, asyncio.Semaphore(1))
         async with pace:
             try:
                 resp = await self.http.request(**built, timeout=source.timeout_seconds)
             except httpx.HTTPError as exc:
-                logger.warning(
-                    "enrich: source %s request failed (%s).", ready.key, type(exc).__name__
-                )
+                logger.warning("enrich: a source request failed (%s).", type(exc).__name__)
                 return None
             if source.rate_limit_seconds:
                 await asyncio.sleep(source.rate_limit_seconds)
         if resp.status_code == 404:
             return None
         if resp.status_code >= 400:
-            logger.warning("enrich: source %s answered HTTP %s.", ready.key, resp.status_code)
+            logger.warning("enrich: a source answered HTTP %d.", int(resp.status_code))
             return None
         if urlparse(str(resp.request.url)).hostname != request.host:
-            logger.warning("enrich: source %s answered from another host; discarded.", ready.key)
+            logger.warning("enrich: a source answered from another host; discarded.")
             return None
         try:
             data = resp.json()
         except ValueError:
-            logger.warning("enrich: source %s answered something other than JSON.", ready.key)
+            logger.warning("enrich: a source answered something other than JSON.")
             return None
         return data if isinstance(data, dict | list) else None
+
+
+def masked(text: str, credential: str) -> str:
+    """``text`` with ``credential`` masked in every form a request may carry it.
+
+    Raw (a header, a JSON body), percent-encoded as a path or query character
+    run (``quote``, ``quote_plus``) and base64 (a basic-auth style header): an
+    error message that quotes the request shows it in one of these.
+    """
+    if not credential:
+        return text
+    forms = {
+        credential,
+        quote(credential, safe=""),
+        quote_plus(credential),
+        quote(credential),
+        base64.b64encode(credential.encode()).decode(),
+    }
+    for form in sorted(forms, key=len, reverse=True):
+        if form:
+            text = text.replace(form, "***")
+    return text
 
 
 async def probe_source(source: EnrichmentSource, credential: str) -> Any:
@@ -553,8 +611,7 @@ async def probe_source(source: EnrichmentSource, credential: str) -> Any:
     except httpx.TimeoutException:
         return ProviderProbe(False, f"timeout after {int(PROBE_TIMEOUT_SECONDS)} s", _ms())
     except httpx.HTTPError as exc:
-        said = redact_url(f"{type(exc).__name__}: {exc}")
-        if credential:
-            said = said.replace(credential, "***")
-        return ProviderProbe(False, said, _ms())
+        return ProviderProbe(
+            False, masked(redact_url(f"{type(exc).__name__}: {exc}"), credential), _ms()
+        )
     return ProviderProbe(answer.status_code < 400, f"HTTP {answer.status_code}", _ms())

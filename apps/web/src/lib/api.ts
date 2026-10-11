@@ -193,8 +193,11 @@ export interface SystemStatusDTO {
    *  absent, `unknown` when the queue could not be read. Absent from an API
    *  older than the field. */
   enrichment_worker?: string;
+  /** How many enrichment sources are configured; absent when unknown. */
+  enrichment_configured?: number;
   /** Every enrichment source in force, in the order they are asked, and
-   *  whether each is configured. Absent from an API older than the field. */
+   *  whether each is configured. Signed-in callers only; absent otherwise, or
+   *  when the sources could not be read. */
   enrichment_sources?: EnrichmentSourceStatusDTO[];
 }
 
@@ -366,6 +369,7 @@ const _SYSTEM_STATUS_SCHEMA: Record<string, ExpectedShape> = {
   // Optional: an API older than the field answers without it, and the console
   // draws nothing rather than warning about a shape nobody broke.
   enrichment_worker: "string?",
+  enrichment_configured: "number?",
   enrichment_sources: "array?",
 };
 

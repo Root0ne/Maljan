@@ -1765,6 +1765,13 @@ def mcp_server_annotations(
         )
 
     if provider_owned:
+        # Only a tool server of ``mcp.servers`` has the route that performs a
+        # bootstrap; on a provider's block the field is refused on save.
+        entries[f"{prefix}.credential_bootstrap"] = owned_ann(
+            f"{label} credential bootstrap",
+            f"Refused: {label} is a provider-owned server; a credential bootstrap is "
+            "declared on a tool server of mcp.servers, whose route performs it.",
+        )
         entries[f"{prefix}.tools"] = owned_ann(
             f"{label} tool allow-list",
             f"Ignored: {label} is a provider-owned server and computes its own tool exposure.",

@@ -278,6 +278,7 @@ export const MOCK_SYSTEM_STATUS = {
   // What a single-process install answers: the enrichment is queued beside the
   // analyses, so there is no second worker to be missing.
   enrichment_worker: "not_required",
+  enrichment_configured: 1,
   enrichment_sources: [
     { key: "virustotal", label: "VirusTotal", configured: true },
     { key: "abuseipdb", label: "AbuseIPDB", configured: false },

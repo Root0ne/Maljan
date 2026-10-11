@@ -53,7 +53,7 @@ class ServerToolCaller:
         cfg = self._config(server)
         if cfg is None or not cfg.enabled or REPUTATION_ROLE not in (cfg.roles or []):
             logger.warning(
-                "enrich: server %s is not an enabled reputation server; not asked.", server[:40]
+                "enrich: a source names a server that is not an enabled reputation server."
             )
             self._failed.add(server)
             return None
@@ -63,9 +63,7 @@ class ServerToolCaller:
         try:
             await handle.aopen(self._job_key)
         except Exception as exc:  # noqa: BLE001 — a server that will not attach is no answer
-            logger.warning(
-                "enrich: server %s did not attach (%s).", server[:40], type(exc).__name__
-            )
+            logger.warning("enrich: a source's server did not attach (%s).", type(exc).__name__)
             self._failed.add(server)
             return None
         self._handles[server] = handle
@@ -77,7 +75,7 @@ class ServerToolCaller:
             return None
         picked = [t for t in handle.tools() if str(getattr(t, "name", "")) == tool]
         if not picked:
-            logger.warning("enrich: server %s offers no tool %s.", server[:40], tool[:80])
+            logger.warning("enrich: a source's server offers no tool of the name it declares.")
             return None
         answer = await asyncio.wait_for(picked[0].ainvoke(args), CALL_TIMEOUT_SECONDS)
         return answer if isinstance(answer, dict | list) else str(answer)

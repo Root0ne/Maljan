@@ -67,12 +67,21 @@ class SystemStatusResponse(BaseModel):
             "queue could not be read."
         ),
     )
-    enrichment_sources: list[EnrichmentSourceStatus] = Field(
-        default_factory=list,
+    enrichment_configured: int | None = Field(
+        default=None,
+        description=(
+            "How many enrichment sources are configured (enabled, holding the "
+            "credential they need, and their server on for a server source). "
+            "Omitted when the sources could not be read."
+        ),
+    )
+    enrichment_sources: list[EnrichmentSourceStatus] | None = Field(
+        default=None,
         description=(
             "Every enrichment source in force, in the order they are asked: its key, "
-            "its label and whether it is configured (enabled, holding the credential "
-            "it needs, and its server on for a server source). Never a credential."
+            "its label and whether it is configured. Never a credential. Signed-in "
+            "callers only — omitted for anonymous requests, and when the sources "
+            "could not be read."
         ),
     )
     throttle: dict[str, object] | None = Field(
@@ -174,23 +183,31 @@ def _grace_secret_state() -> dict[str, object] | None:
     }
 
 
-async def _enrichment_sources() -> list[EnrichmentSourceStatus]:
-    """Each source in force, asked order, with whether it is configured: booleans, no key."""
-    from maljan.enrichment.declared import effective_sources
+async def _enrichment_sources() -> list[EnrichmentSourceStatus] | None:
+    """Each source in force, asked order, with whether it is configured: booleans, no key.
 
-    from app.services.enrichment_sources import (
-        ENRICHMENT_SOURCES_PATH,
-        read_setting_secret,
-        ready_sources,
-        stored_map,
-    )
+    ``None`` when the sources could not be read: the status is polled without
+    authentication and must answer with what it knows rather than fail.
+    """
+    try:
+        from maljan.enrichment.declared import effective_sources
 
-    stored = await runtime_config.get(ENRICHMENT_SOURCES_PATH)
-    # The tool servers are read only where a source is asked through one.
-    servers = None
-    if any(s.server for s in effective_sources(stored_map(stored)).values()):
-        servers = (await runtime_config.core()).mcp.servers
-    ready = await ready_sources(stored, read_setting_secret, servers)
+        from app.services.enrichment_sources import (
+            ENRICHMENT_SOURCES_PATH,
+            read_setting_secret,
+            ready_sources,
+            stored_map,
+        )
+
+        stored = await runtime_config.get(ENRICHMENT_SOURCES_PATH)
+        # The tool servers are read only where a source is asked through one.
+        servers = None
+        if any(s.server for s in effective_sources(stored_map(stored)).values()):
+            servers = (await runtime_config.core()).mcp.servers
+        ready = await ready_sources(stored, read_setting_secret, servers)
+    except Exception as exc:  # noqa: BLE001 — the status degrades, it never fails
+        logger.warning("enrichment sources could not be read (%s)", type(exc).__name__)
+        return None
     ready.sort(key=lambda s: s.source.order)
     return [
         EnrichmentSourceStatus(key=s.key, label=s.label, configured=s.configured) for s in ready
@@ -213,13 +230,18 @@ async def system_status(
     entirely for everyone else.
     """
     is_admin = user is not None and user.role == "admin"
+    sources = await _enrichment_sources()
     return SystemStatusResponse(
         app_name=settings.app_name,
         app_version=settings.app_version,
         mock_mode_allowed=bool(await runtime_config.get("mock_mode_allowed")),
         enrichment_enabled=bool(await runtime_config.get("enrichment_enabled")),
         enrichment_worker=await _enrichment_worker_state(),
-        enrichment_sources=await _enrichment_sources(),
+        enrichment_configured=(
+            None if sources is None else sum(1 for s in sources if s.configured)
+        ),
+        # Source keys and labels are an operator's own names: signed-in callers only.
+        enrichment_sources=sources if user is not None else None,
         throttle=throttle_state() if is_admin else None,
         audit_write_failures=observability.counters.audit_write_failures if is_admin else None,
         jwt_grace_secret=_grace_secret_state() if is_admin else None,

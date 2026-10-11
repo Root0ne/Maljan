@@ -120,10 +120,15 @@ async def ready_sources(
     return out
 
 
-def source_facts(stored: Any) -> list[dict[str, Any]]:
-    """What the console's guide is told about each source in force: no credential, ever."""
+def source_facts(stored: Any, servers: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
+    """What the console's guide is told about each source in force: no credential, ever.
+
+    ``servers`` are the tool servers in force: a server source's
+    ``server_enabled`` says whether its server is on, as ``ReadySource`` reads it.
+    """
     out: list[dict[str, Any]] = []
     for key, source in effective_sources(stored_map(stored)).items():
+        server_cfg = (servers or {}).get(source.server) if source.server else None
         out.append(
             {
                 "key": key,
@@ -137,6 +142,9 @@ def source_facts(stored: Any) -> list[dict[str, Any]]:
                 and not source.server
                 and source.needs_credential(),
                 "server": source.server or None,
+                "server_enabled": (
+                    bool(getattr(server_cfg, "enabled", False)) if source.server else None
+                ),
                 "probe": source.probe is not None,
             }
         )

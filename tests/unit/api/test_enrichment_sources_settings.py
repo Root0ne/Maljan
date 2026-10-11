@@ -119,9 +119,33 @@ def test_the_schema_tells_the_console_each_source_and_never_a_credential() -> No
         "credential_key": None,
         "own_credential": True,
         "server": None,
+        "server_enabled": None,
         "probe": True,
     }
     assert _own_key() not in str(facts)
+
+
+def test_a_server_source_says_whether_its_server_is_on() -> None:
+    from types import SimpleNamespace
+
+    declared = {
+        "intel": {
+            "kinds": ["ip"],
+            "server": "intelsrv",
+            "tool": "lookup",
+            "record": [{"name": "score", "path": "/score", "read": "count"}],
+        }
+    }
+    on = source_facts(declared, {"intelsrv": SimpleNamespace(enabled=True)})
+    off = source_facts(declared, {"intelsrv": SimpleNamespace(enabled=False)})
+    gone = source_facts(declared, {})
+    assert [f["server_enabled"] for f in (on[-1], off[-1], gone[-1])] == [True, False, False]
+
+
+def test_a_source_enrichment_cannot_ask_is_refused_naming_the_reputation_lookup() -> None:
+    said = _problem({"hashrep": _invented(kinds=["hash"], requests={})})
+    assert said is not None and said.startswith("hashrep:")
+    assert "hash reputation is declared as a reputation lookup tool" in said
 
 
 # ---- a source's own key ---------------------------------------------

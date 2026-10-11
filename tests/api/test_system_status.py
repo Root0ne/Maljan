@@ -76,12 +76,8 @@ class TestSystemStatus:
             "mock_mode_allowed": True,
             "enrichment_enabled": True,
             "enrichment_worker": "not_required",
-            # The shipped sources, in the order they are asked; configured
-            # where the credential setting each names is set.
-            "enrichment_sources": [
-                {"key": "virustotal", "label": "VirusTotal", "configured": True},
-                {"key": "abuseipdb", "label": "AbuseIPDB", "configured": False},
-            ],
+            # Anonymous: how many sources are configured, never their names.
+            "enrichment_configured": 1,
         }
         assert "has_virustotal_key" not in body and "has_abuseipdb_key" not in body
         # Anonymous caller: the throttle/audit fields are admin-only detail,
@@ -173,6 +169,7 @@ class TestSystemStatus:
         fake_settings.app_version = "0.1.0"
         own_key = "-".join(["k", "own"])
         declared = {"domainrep": _invented_source(api_key=own_key), "abuseipdb": {"enabled": False}}
+        client.app.dependency_overrides[optional_current_user] = lambda: MagicMock(role="analyst")
         with (
             patch("app.api.v1.system.settings", fake_settings),
             patch(
@@ -191,6 +188,8 @@ class TestSystemStatus:
             ),
         ):
             resp = client.get("/api/v1/system/status")
+            del client.app.dependency_overrides[optional_current_user]
+            anonymous = client.get("/api/v1/system/status")
 
         assert resp.status_code == 200
         assert resp.json()["enrichment_sources"] == [
@@ -198,7 +197,92 @@ class TestSystemStatus:
             {"key": "virustotal", "label": "VirusTotal", "configured": False},
             {"key": "abuseipdb", "label": "AbuseIPDB", "configured": False},
         ]
+        assert resp.json()["enrichment_configured"] == 1
         assert own_key not in resp.text
+        # Without a session: the count, and no operator's source name.
+        assert anonymous.json()["enrichment_configured"] == 1
+        assert "enrichment_sources" not in anonymous.json()
+        assert "domainrep" not in anonymous.text
+
+    def test_a_server_source_is_configured_only_while_its_server_is_on(
+        self, client: TestClient
+    ) -> None:
+        from maljan.core.settings_overrides import build_settings
+
+        fake_settings = MagicMock()
+        fake_settings.app_name = "Maljan"
+        fake_settings.app_version = "0.1.0"
+        declared = {
+            "intel": {
+                "kinds": ["ip"],
+                "server": "intelsrv",
+                "tool": "lookup",
+                "record": [{"name": "abuse_confidence", "path": "/score", "read": "count"}],
+            }
+        }
+        server = {"command": "x", "roles": ["reputation"]}
+        client.app.dependency_overrides[optional_current_user] = lambda: MagicMock(role="analyst")
+        try:
+            for enabled in (True, False):
+                core = build_settings({"mcp.servers": {"intelsrv": {**server, "enabled": enabled}}})
+                with (
+                    patch("app.api.v1.system.settings", fake_settings),
+                    patch(
+                        "app.api.v1.system.runtime_config.get",
+                        AsyncMock(
+                            side_effect=lambda n: {
+                                "enrichment_enabled": True,
+                                "mock_mode_allowed": False,
+                                "enrichment_sources": declared,
+                            }[n]
+                        ),
+                    ),
+                    patch(
+                        "app.api.v1.system.runtime_config.get_secret", AsyncMock(return_value="")
+                    ),
+                    patch("app.api.v1.system.runtime_config.core", AsyncMock(return_value=core)),
+                ):
+                    body = client.get("/api/v1/system/status").json()
+                intel = next(s for s in body["enrichment_sources"] if s["key"] == "intel")
+                assert intel["configured"] is enabled
+        finally:
+            del client.app.dependency_overrides[optional_current_user]
+
+    def test_a_status_whose_sources_cannot_be_read_still_answers(self, client: TestClient) -> None:
+        fake_settings = MagicMock()
+        fake_settings.app_name = "Maljan"
+        fake_settings.app_version = "0.1.0"
+        declared = {
+            "intel": {
+                "kinds": ["ip"],
+                "server": "intelsrv",
+                "tool": "lookup",
+                "record": [{"name": "abuse_confidence", "path": "/score", "read": "count"}],
+            }
+        }
+        with (
+            patch("app.api.v1.system.settings", fake_settings),
+            patch(
+                "app.api.v1.system.runtime_config.get",
+                AsyncMock(
+                    side_effect=lambda n: {
+                        "enrichment_enabled": True,
+                        "mock_mode_allowed": False,
+                        "enrichment_sources": declared,
+                    }[n]
+                ),
+            ),
+            patch(
+                "app.api.v1.system.runtime_config.core",
+                AsyncMock(side_effect=ValueError("broken core settings")),
+            ),
+        ):
+            resp = client.get("/api/v1/system/status")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["enrichment_enabled"] is True
+        assert "enrichment_configured" not in body and "enrichment_sources" not in body
 
 
 def _invented_source(**extra: object) -> dict[str, object]:

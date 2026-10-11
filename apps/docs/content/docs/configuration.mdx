@@ -430,18 +430,20 @@ read it whichever source wrote it.
 | Field | Meaning |
 | :-- | :-- |
 | `label`, `enabled`, `order` | the name shown, whether it is asked, and its place (lower first) |
-| `kinds` | the indicator kinds it answers: `ip`, `domain`, `hash`, `url` (the report holds a reputation slot for domains and IPs) |
+| `kinds` | the indicator kinds it answers: `domain`, `ip` (the kinds the report holds a reputation slot for). A source naming `hash` or `url` is refused on save: the sample's hash reputation is declared as a reputation lookup tool (a server tool of kind `reputation` that takes the hash), which the triage pack and the judge ask |
 | `server`, `tool`, `arguments` | a tool of a server in `mcp.servers` whose `roles` holds `reputation`; the indicator goes in the argument the tool's declaration names for its kind (`tool_facts.<tool>.arguments`), or the one `arguments` names |
-| `requests` | otherwise one https request per kind: `method` (`GET` or `POST`), `url` (`{value}` is the indicator, URL-encoded), `params`, `headers` and `json_body`, where `{credential}` stands for the credential. The host is the URL's own; the credential never goes in the URL's path |
+| `requests` | otherwise one https request per kind: `method` (`GET` or `POST`), `url`, `params`, `headers` and `json_body`, where `{value}` stands for the indicator and `{credential}` for the credential. Every placeholder is filled in one pass, so text the indicator brings (a `{credential}` in a domain name) is sent as written and never filled; the indicator is URL-encoded as one path segment in the URL, URL-encoded by the client in a query parameter, and an opaque value in a header or the body. The host is the URL's own; the credential never goes in the URL's path |
 | `credential`, `api_key` | the settings key the credential is read from, or the source's own key, stored encrypted beside the map and shown masked |
 | `probe` | the request its Test button sends, under the source's key |
 | `timeout_seconds`, `rate_limit_seconds` | per request, and the pause after each one |
 | `answer_root`, `record` | where the answer's object sits, and each field of the record: `name`, `path`, `read` (`count`, `value`, `whole`, `texts` with `limit`) |
 | `record_source`, `malicious_when`, `age_from` | the record's `source` (default: the key), the thresholds that mark an indicator suspicious, and the field holding the answer's date in epoch seconds (older than 90 days is `stale` and marks nothing) |
 
-`GET /api/v1/system/status` lists every source in force as
-`enrichment_sources: [{key, label, configured}]`, and the enrichment guide
-offers one step per source.
+`GET /api/v1/system/status` reports how many sources are configured
+(`enrichment_configured`) to anyone, and lists every source in force as
+`enrichment_sources: [{key, label, configured}]` to a signed-in caller only; a
+server source is configured only while its server is enabled. The enrichment
+guide offers one step per source.
 
 ### Where the enrichment runs
 
@@ -3058,7 +3060,9 @@ A server whose credential a service issues on request declares
 JSON `body` posted (each `{family}` replaced by `family`, the name this
 deployment registers under), `token_json_path` (where the token sits in the
 answer), `token_prefix` (what a real token starts with), `facts` (the answer's
-other values the operator is shown, by path, first non-empty one first) and
+other values the operator is shown and audited under `facts`, by path, first
+non-empty one first; a fact may not read the token's path, and one that carries
+the token is masked) and
 `note` (shown beside the button). The tool-server guide then opens with a
 **Connect** step for that server, and `POST
 /api/v1/settings/servers/<key>/credential` (admin only) sends the request,
@@ -3067,7 +3071,9 @@ the server on and answers with the masked state and the facts. The token is in
 no log line, audit row or answer; a refusal carries the service's own sentence,
 with a token it still holds masked. Until a token is stored, the server's Test
 button answers "no credential" without dialling. VirusTotal's agent-token
-registration is the built-in `virustotal` server's declaration.
+registration is the built-in `virustotal` server's declaration. Only a tool
+server of `mcp.servers` takes one: a provider's own block (`static.ghidra`,
+`static.r2`, `sandbox.cape2.mcp`) refuses it on save.
 
 Each entry of `tool_facts` describes one tool, under its own name on its own
 server. A name may hold `__` (`get__thing`); a name spelled as the server's own

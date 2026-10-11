@@ -4361,6 +4361,26 @@ class Settings(BaseSettings):
         return renamed
 
     @model_validator(mode="after")
+    def _a_bootstrap_only_where_a_route_performs_it(self) -> "Settings":
+        """``credential_bootstrap`` on a provider's own block is refused.
+
+        Only a tool server of ``mcp.servers`` has the route that performs one
+        (``POST /settings/servers/{key}/credential``); on a provider's block the
+        field would be a setting that does nothing.
+        """
+        from maljan.core.tool_declarations import PROVIDER_BLOCKS, block_at
+
+        for path in PROVIDER_BLOCKS.values():
+            block = block_at(self, path)
+            if getattr(block, "credential_bootstrap", None) is not None:
+                raise ValueError(
+                    f"{path}.credential_bootstrap: a credential bootstrap is declared on a "
+                    "tool server of mcp.servers, whose route performs it; a provider's own "
+                    "block takes none"
+                )
+        return self
+
+    @model_validator(mode="after")
     def _validate_agent_composition(self) -> "Settings":
         """The agent rules that need more than ``AgentsConfig`` to check.
 

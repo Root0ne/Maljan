@@ -95,7 +95,9 @@ async def obtain_credential(
     facts: dict[str, str] = {}
     for name, path in declared.facts.items():
         value = first(body, path)
-        facts[name] = "" if value is None or isinstance(value, dict | list) else str(value)
+        text = "" if value is None or isinstance(value, dict | list) else str(value)
+        # A fact is shown and audited; one that carries the token is masked.
+        facts[name] = text.replace(token, TOKEN_MASK) if token in text else text
     return token, facts
 
 
