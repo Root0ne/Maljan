@@ -111,6 +111,14 @@ def _pcap_tools_in(tools: Sequence[Any]) -> list[tuple[str, str]]:
     return [(named[kind], what) for kind, what in _PCAP_STEPS if kind in named]
 
 
+def primary_evidence_line(sandbox: Any) -> str:
+    """The line that hands the analyst the structured flows, naming the job's sandbox or none."""
+    return (
+        f"PRIMARY EVIDENCE — {_flows_label(sandbox)} (DNS / HTTP / TCP / UDP / contacted "
+        "hosts, with the annotations the enrichment added):\n"
+    )
+
+
 def _flows_label(sandbox: Any) -> str:
     """What the structured flows are called: the sandbox's declared display name, or neither."""
     name = ""
@@ -350,10 +358,8 @@ class NetworkAnalyst(BaseAnalyst):
                         "human",
                         "Analyze the network activity below and return a structured "
                         "list of findings.\n\n"
-                        f"PRIMARY EVIDENCE — {_flows_label(self._job_sandbox())} (DNS / "
-                        "HTTP / TCP / UDP / contacted hosts, with the annotations the "
-                        "enrichment added):\n"
-                        f"{data}\n\n"
+                        + primary_evidence_line(self._job_sandbox())
+                        + f"{data}\n\n"
                         f"A raw packet capture is ALSO available at: {pcap_path}\n"
                         f"{peek}"
                         "For each finding state: the claim, the exact artifact reference "

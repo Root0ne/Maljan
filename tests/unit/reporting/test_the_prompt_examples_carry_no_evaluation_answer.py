@@ -70,6 +70,7 @@ from maljan.agents.network_analyst import (
     NO_PACKET_TOOL_LINE,
     OTHER_TOOLS_THEN_ANALYZE,
     _flows_label,
+    primary_evidence_line,
 )
 from maljan.agents.prompt_fragments import (
     CLAIM_FORMAT_FRAGMENT,
@@ -104,6 +105,7 @@ from maljan.agents.tool_pinning import (
     UNREADABLE_FILLED_CAPTURE_REMEDIATION,
 )
 from maljan.analysis import evidence_roots as _roots
+from maljan.analysis import sandbox_sections
 from maljan.analysis.evidence_roots import layers_and_roots as _layers_and_roots
 from maljan.analysis.evidence_roots import roots_phrase as _roots_phrase
 from maljan.analysis.function_summarizer import SHORTENED_NOTE as SUMMARISER_SHORTENED_NOTE
@@ -290,8 +292,9 @@ from maljan.schemas.isr_models import (
     judge_dropped_reason,
     judge_kept_note,
 )
+from maljan.schemas.sandbox_report import SECTION_IDS
 from maljan.schemas.stix_models import Bundle
-from maljan.tools import api_hashes, binary, knowledge, string_blobs
+from maljan.tools import api_hashes, artefact_index, binary, knowledge, string_blobs
 from maljan.tools.errors import CAPTURES_REMEDIATION, NO_CAPTURE_REMEDIATION
 
 # Every no: sentence a root reading writes, and the names of the roots.
@@ -2027,6 +2030,15 @@ PROMPTS: dict[str, str] = {
     ),
     "a sandbox's own tool server named by its display name": " ".join(
         [sandbox_server_label(CAPE2SandboxProvider), sandbox_server_label(None)]
+    ),
+    "the network analyst's primary-evidence line": " ".join(
+        [primary_evidence_line(None), primary_evidence_line(CAPE2SandboxProvider)]
+    ),
+    "the served function index's sentence on a disassembler's list": (
+        artefact_index.SERVED_FUNCTION_LISTS
+    ),
+    "a sandbox section the report names unavailable, by its section id": " ".join(
+        sandbox_sections.NO_UNAVAILABLE.format(name=name) for name in SECTION_IDS
     ),
     "question for an entry said to hold one line": " ".join(
         v.message
