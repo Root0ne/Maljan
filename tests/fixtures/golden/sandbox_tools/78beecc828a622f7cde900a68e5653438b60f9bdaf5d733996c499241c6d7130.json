@@ -50,7 +50,7 @@
         "api": "CreateProcessInternalW",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'ApplicationName', 'value': 'C:\\\\Windows\\\\system32\\\\BackgroundTaskHost.exe'}, {'name': 'CommandLine', 'value': '\"C:\\\\Windows\\\\system32\\\\BackgroundTaskHost.exe\" -ServerName:BackgroundTaskHost.WebAccountProvider'}, {'name': 'CreationFlags', 'value': '0x00080414', 'pretty_value': 'CREATE_SUSPENDED|CREATE_NEW_CONSOLE|CREATE_UNICODE_ENVIRONMENT|EXTENDED_STARTUPINFO_PRESENT'}, {'name': 'Proce\u2026",
+        "first_args": "[{'name': 'ApplicationName', 'value': 'C:\\\\Windows\\\\system32\\\\BackgroundTaskHost.exe'}, {'name': 'CommandLine', 'value': '\"C:\\\\Windows\\\\system32\\\\BackgroundTaskHost.exe\" -ServerName:BackgroundTaskHost.WebAccountProvider'}, {'name': 'CreationFlags', 'value': '0x00080414', 'pretty_value': 'CREATE_SUSPENDED|CREATE_NEW_CONSOLE|CREATE_UNICODE_ENVIRONMENT|EXTENDED_STARTUPINFO_PRESENT'}, {'name': 'Proce…",
         "first_seen": "2026-07-25 17:54:14,086",
         "process_count": 0,
         "processes": []
@@ -365,7 +365,7 @@
         "api": "NtCreateFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x00000000'}, {'name': 'DesiredAccess', 'value': '0x80100080', 'pretty_value': 'GENERIC_READ|FILE_READ_ATTRIBUTES|SYNCHRONIZE'}, {'name': 'FileName', 'value': '\\\\??\\\\VBoxMiniRdrDN'}, {'name': 'CreateDisposition', 'value': '1', 'pretty_value': 'FILE_OPEN'}, {'name': 'ShareAccess', 'value': '1', 'pretty_value': 'FILE_SHARE_READ'}, {'name': 'FileAttributes', 'value'\u2026",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x00000000'}, {'name': 'DesiredAccess', 'value': '0x80100080', 'pretty_value': 'GENERIC_READ|FILE_READ_ATTRIBUTES|SYNCHRONIZE'}, {'name': 'FileName', 'value': '\\\\??\\\\VBoxMiniRdrDN'}, {'name': 'CreateDisposition', 'value': '1', 'pretty_value': 'FILE_OPEN'}, {'name': 'ShareAccess', 'value': '1', 'pretty_value': 'FILE_SHARE_READ'}, {'name': 'FileAttributes', 'value'…",
         "first_seen": "2026-07-25 17:52:43,044",
         "process_count": 0,
         "processes": []
@@ -374,7 +374,7 @@
         "api": "NtCreateKey",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'KeyHandle', 'value': '0x000002ec'}, {'name': 'DesiredAccess', 'value': '0x0002011f', 'pretty_value': 'KEY_QUERY_VALUE|KEY_SET_VALUE|KEY_CREATE_SUB_KEY|KEY_ENUMERATE_SUB_KEYS|KEY_NOTIFY|KEY_WOW64_64KEY|STANDARD_RIGHTS_REQUIRED'}, {'name': 'ObjectAttributesHandle', 'value': '0x00000000'}, {'name': 'ObjectAttributesName', 'value': '\\\\Registry\\\\Machine\\\\Software\\\\Microsoft\\\\Windows\\\\Curren\u2026",
+        "first_args": "[{'name': 'KeyHandle', 'value': '0x000002ec'}, {'name': 'DesiredAccess', 'value': '0x0002011f', 'pretty_value': 'KEY_QUERY_VALUE|KEY_SET_VALUE|KEY_CREATE_SUB_KEY|KEY_ENUMERATE_SUB_KEYS|KEY_NOTIFY|KEY_WOW64_64KEY|STANDARD_RIGHTS_REQUIRED'}, {'name': 'ObjectAttributesHandle', 'value': '0x00000000'}, {'name': 'ObjectAttributesName', 'value': '\\\\Registry\\\\Machine\\\\Software\\\\Microsoft\\\\Windows\\\\Curren…",
         "first_seen": "2026-07-25 17:54:26,274",
         "process_count": 0,
         "processes": []
@@ -410,7 +410,7 @@
         "api": "NtCreateUserProcess",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'ProcessHandle', 'value': '0x00000f64'}, {'name': 'ThreadHandle', 'value': '0x00000f60'}, {'name': 'ProcessDesiredAccess', 'value': '0x02000000'}, {'name': 'ThreadDesiredAccess', 'value': '0x02000000'}, {'name': 'ProcessFileName', 'value': ''}, {'name': 'ThreadName', 'value': ''}, {'name': 'ImagePathName', 'value': 'C:\\\\Windows\\\\system32\\\\BackgroundTaskHost.exe'}, {'name': 'CommandLine'\u2026",
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0x00000f64'}, {'name': 'ThreadHandle', 'value': '0x00000f60'}, {'name': 'ProcessDesiredAccess', 'value': '0x02000000'}, {'name': 'ThreadDesiredAccess', 'value': '0x02000000'}, {'name': 'ProcessFileName', 'value': ''}, {'name': 'ThreadName', 'value': ''}, {'name': 'ImagePathName', 'value': 'C:\\\\Windows\\\\system32\\\\BackgroundTaskHost.exe'}, {'name': 'CommandLine'…",
         "first_seen": "2026-07-25 17:54:13,868",
         "process_count": 0,
         "processes": []
@@ -437,7 +437,7 @@
         "api": "NtDeviceIoControlFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x00000408'}, {'name': 'HandleName', 'value': '\\\\Device\\\\Afd'}, {'name': 'IoControlCode', 'value': '0x0001207b', 'pretty_value': 'IOCTL_AFD_GET_INFO'}, {'name': 'InputBuffer', 'value': '\\\\x07\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x01\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00'}, {'name': 'OutputBuffer', 'value': '\\\\x07\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x01\\\\x00\u2026",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x00000408'}, {'name': 'HandleName', 'value': '\\\\Device\\\\Afd'}, {'name': 'IoControlCode', 'value': '0x0001207b', 'pretty_value': 'IOCTL_AFD_GET_INFO'}, {'name': 'InputBuffer', 'value': '\\\\x07\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x01\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00'}, {'name': 'OutputBuffer', 'value': '\\\\x07\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x01\\\\x00…",
         "first_seen": "2026-07-25 17:53:49,013",
         "process_count": 0,
         "processes": []
@@ -509,7 +509,7 @@
         "api": "NtOpenKey",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000224'}, {'name': 'DesiredAccess', 'value': '0x00020019', 'pretty_value': 'KEY_READ'}, {'name': 'ObjectAttributesHandle', 'value': '0x00000000'}, {'name': 'ObjectAttributesName', 'value': '\\\\Registry\\\\MACHINE\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\SideBySide'}, {'name': 'ObjectAttributes', 'value': 'HKEY_LOCAL_MACHINE\\\\Software\\\\Microsoft\\\\Windows\\\\Cu\u2026",
+        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000224'}, {'name': 'DesiredAccess', 'value': '0x00020019', 'pretty_value': 'KEY_READ'}, {'name': 'ObjectAttributesHandle', 'value': '0x00000000'}, {'name': 'ObjectAttributesName', 'value': '\\\\Registry\\\\MACHINE\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\SideBySide'}, {'name': 'ObjectAttributes', 'value': 'HKEY_LOCAL_MACHINE\\\\Software\\\\Microsoft\\\\Windows\\\\Cu…",
         "first_seen": "2026-07-25 17:52:35,763",
         "process_count": 0,
         "processes": []
@@ -518,7 +518,7 @@
         "api": "NtOpenKeyEx",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000204'}, {'name': 'DesiredAccess', 'value': '0x00000001', 'pretty_value': 'KEY_QUERY_VALUE'}, {'name': 'ObjectAttributesHandle', 'value': '0x00000208'}, {'name': 'ObjectAttributesName', 'value': 'SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Themes\\\\Personalize'}, {'name': 'ObjectAttributes', 'value': 'HKEY_CURRENT_USER\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentV\u2026",
+        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000204'}, {'name': 'DesiredAccess', 'value': '0x00000001', 'pretty_value': 'KEY_QUERY_VALUE'}, {'name': 'ObjectAttributesHandle', 'value': '0x00000208'}, {'name': 'ObjectAttributesName', 'value': 'SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Themes\\\\Personalize'}, {'name': 'ObjectAttributes', 'value': 'HKEY_CURRENT_USER\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentV…",
         "first_seen": "2026-07-25 17:52:35,841",
         "process_count": 0,
         "processes": []
@@ -563,7 +563,7 @@
         "api": "NtProtectVirtualMemory",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x7ff637f92000'}, {'name': 'ModuleName', 'value': 'rundll32.exe'}, {'name': 'NumberOfBytesProtected', 'value': '0x00001000'}, {'name': 'MemoryType', 'value': '0x00000000'}, {'name': 'NewAccessProtection', 'value': '0x00000004', 'pretty_value': 'PAGE_READWRITE'}, {'name': 'OldAccessProtection', 'value': '0x0000000\u2026",
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x7ff637f92000'}, {'name': 'ModuleName', 'value': 'rundll32.exe'}, {'name': 'NumberOfBytesProtected', 'value': '0x00001000'}, {'name': 'MemoryType', 'value': '0x00000000'}, {'name': 'NewAccessProtection', 'value': '0x00000004', 'pretty_value': 'PAGE_READWRITE'}, {'name': 'OldAccessProtection', 'value': '0x0000000…",
         "first_seen": "2026-07-25 17:52:35,810",
         "process_count": 0,
         "processes": []
@@ -599,7 +599,7 @@
         "api": "NtQueryInformationToken",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'TokenInformationClass', 'value': '25'}, {'name': 'TokenInformation', 'value': '\\\\x00\\\\xe9X\\\\xc3s\\\\x00\\\\x00\\\\x00`\\\\x00\\\\x00\\\\x00s\\\\x00\\\\x00\\\\x00\\\\x01\\\\x01\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x10\\\\x000\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\xa0\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x88\\\\xecX\\\\xc3s\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00k\\\\xed-\\\\x0b\\\\xfa\\\\x7f\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00s\\\\x0\u2026",
+        "first_args": "[{'name': 'TokenInformationClass', 'value': '25'}, {'name': 'TokenInformation', 'value': '\\\\x00\\\\xe9X\\\\xc3s\\\\x00\\\\x00\\\\x00`\\\\x00\\\\x00\\\\x00s\\\\x00\\\\x00\\\\x00\\\\x01\\\\x01\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x10\\\\x000\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\xa0\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x88\\\\xecX\\\\xc3s\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00k\\\\xed-\\\\x0b\\\\xfa\\\\x7f\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00s\\\\x0…",
         "first_seen": "2026-07-25 17:52:35,763",
         "process_count": 0,
         "processes": []
@@ -644,7 +644,7 @@
         "api": "NtReadFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x000003b8'}, {'name': 'HandleName', 'value': 'C:\\\\Windows\\\\WinSxS\\\\FileMaps\\\\$$_system32_21f9a9c4a2f8b514.cdf-ms'}, {'name': 'Buffer', 'value': 'PcmH\\\\x01\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\xbc\\\\x89;\\\\x07\\\\x0c\\\\xbb\\\\x07*\\\\x06:\\\\x00\\\\x00\\\\\\\\xe8\\\\x00\\\\x00\\\\x08.\\\\x00\\\\x00T\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\xfa\\\\x0b\\\\x00\\\\x00t\\\\xb8\\\\x00\\\\x00\\\\\u2026",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x000003b8'}, {'name': 'HandleName', 'value': 'C:\\\\Windows\\\\WinSxS\\\\FileMaps\\\\$$_system32_21f9a9c4a2f8b514.cdf-ms'}, {'name': 'Buffer', 'value': 'PcmH\\\\x01\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\xbc\\\\x89;\\\\x07\\\\x0c\\\\xbb\\\\x07*\\\\x06:\\\\x00\\\\x00\\\\\\\\xe8\\\\x00\\\\x00\\\\x08.\\\\x00\\\\x00T\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\xfa\\\\x0b\\\\x00\\\\x00t\\\\xb8\\\\x00\\\\x00\\\\…",
         "first_seen": "2026-07-25 17:54:27,165",
         "process_count": 0,
         "processes": []
@@ -689,7 +689,7 @@
         "api": "NtSetValueKey",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000384'}, {'name': 'ValueName', 'value': '10.0.19041.5967 (WinBuild.160101.0800)'}, {'name': 'Type', 'value': '1', 'pretty_value': 'REG_SZ'}, {'name': 'Buffer', 'value': '2026/7/25:17:54:26.256 10.0.19041.5967 (WinBuild.160101.0800)'}, {'name': 'BufferLength', 'value': '124'}, {'name': 'FullName', 'value': 'HKEY_LOCAL_MACHINE\\\\COMPONENTS\\\\ServicingStackVersion\u2026",
+        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000384'}, {'name': 'ValueName', 'value': '10.0.19041.5967 (WinBuild.160101.0800)'}, {'name': 'Type', 'value': '1', 'pretty_value': 'REG_SZ'}, {'name': 'Buffer', 'value': '2026/7/25:17:54:26.256 10.0.19041.5967 (WinBuild.160101.0800)'}, {'name': 'BufferLength', 'value': '124'}, {'name': 'FullName', 'value': 'HKEY_LOCAL_MACHINE\\\\COMPONENTS\\\\ServicingStackVersion…",
         "first_seen": "2026-07-25 17:54:26,258",
         "process_count": 0,
         "processes": []
@@ -4720,6 +4720,2421 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Classes\\CLSID\\{75207391-23F2-4396-85F0-8FDB879ED0ED}\\InprocHandler",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{75207391-23F2-4396-85F0-8FDB879ED0ED}\\LocalServer32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{75207391-23F2-4396-85F0-8FDB879ED0ED}\\AppID",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{75207391-23F2-4396-85F0-8FDB879ED0ED}\\LocalServer",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Classes\\CLSID\\{75207391-23F2-4396-85F0-8FDB879ED0ED}\\LocalServer",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{75207391-23F2-4396-85F0-8FDB879ED0ED}\\Elevation",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Interface\\{365DE52E-EE7E-4975-AEC8-06588234BB3C}",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Interface\\{365DE52E-EE7E-4975-AEC8-06588234BB3C}\\ProxyStubClsid32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Interface\\{365DE52E-EE7E-4975-AEC8-06588234BB3C}\\ProxyStubClsid32\\(Default)",
+        "operation": "query",
+        "value": "{75207391-23F2-4396-85F0-8FDB879ED0ED}"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Tracing\\CbsCheckRefCount",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\SideBySide",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\DisableKernelTransactions",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\Configuration",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\Configuration\\DisablePSRL",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\Version",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\Sorting\\Versions\\000603xx",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Nls\\Sorting\\Ids",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\BuildLabEx",
+        "operation": "query",
+        "value": "19041.1.amd64fre.vb_release.191206-1406"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\RebootInProgress",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\LastScavengingStarvationReport",
+        "operation": "query",
+        "value": "\\xb2ZZ\\x85\\x17\\x0e\\xdd\\x01"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\SafeBoot\\Option",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\PostponeOnlineActions",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\COMPONENTS",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\PackagesPending",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\Tracing",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\StoreFormatVersion",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\StoreArchitecture",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\Winners",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\Configuration",
+        "operation": "create",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Servicing",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\Configuration\\MobileStore",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\Configuration\\MobileStoreVersion",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\DriverDatabase",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\DriverDatabase\\ConfigOptions",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\CanonicalData",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\CanonicalData\\Deployments",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\CanonicalData\\Catalogs",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\DerivedData",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\DerivedData\\Components",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\DerivedData\\VersionedIndex",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\DerivedData\\VersionedIndex\\10.0.19041.5967 (WinBuild.160101.0800)",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\DerivedData\\VersionedIndex\\10.0.19041.5967 (WinBuild.160101.0800)\\ComponentFamilies",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\DerivedData\\VersionedIndex\\10.0.19041.5967 (WinBuild.160101.0800)\\ComponentFamilies\\PopulateIncomplete",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\ServicingStackVersions",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\ServicingStackVersions\\LastWCPVersionToAccessStore",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\ServicingStackVersions\\10.0.19041.5967 (WinBuild.160101.0800)",
+        "operation": "modify",
+        "value": "2026/7/25:17:54:26.256 10.0.19041.5967 (WinBuild.160101.0800)"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\System\\Setup",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\PendingRequired",
+        "operation": "delete",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\PendingXmlIdentifier",
+        "operation": "delete",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\PoqexecFailure",
+        "operation": "delete",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\ExecutionState",
+        "operation": "delete",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\RepairTransactionPended",
+        "operation": "delete",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\AIFailureInformation",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\DataMigrationFramework\\AIStatus",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Components\\Installers\\RegKeySDTable\\Install",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Components\\Installers\\RegKeySDTable\\UnInstall",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\Configuration\\DontRunPoqexecInSmss",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\Configuration\\PoqexecCmdline",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Interface\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Interface\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}\\ProxyStubClsid32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Interface\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}\\ProxyStubClsid32\\(Default)",
+        "operation": "query",
+        "value": "{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}\\TreatAs",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Classes\\CLSID\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}\\TreatAs",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}\\ActivateOnHostFlags",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}\\(Default)",
+        "operation": "query",
+        "value": "SFP Interface Class"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}\\InprocServer32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}\\InprocServer32\\InprocServer32",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}\\InprocServer32\\(Default)",
+        "operation": "query",
+        "value": "%systemroot%\\servicing\\wrpintapi.dll"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}\\InprocServer32\\ThreadingModel",
+        "operation": "query",
+        "value": "Both"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}\\InprocHandler32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Classes\\CLSID\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}\\InprocHandler32",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}\\InprocHandler",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Classes\\CLSID\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}\\InprocHandler",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}\\LocalServer32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}\\AppID",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}\\LocalServer",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Classes\\CLSID\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}\\LocalServer",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}\\Elevation",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\software\\microsoft\\windows\\currentversion\\setup\\PnpLockdownFiles",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Setup\\PnpLockdownFiles\\%SystemRoot%/system32/wuaueng.dll",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\StoreDirty",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SYSTEM",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\Setup\\SKUAssemblyInProgress",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\DerivedData\\Components\\amd64_microsoft-windows-w..wsupdateclient-core_31bf3856ad364e35_10.0.19041.5915_none_23579de85f07ef39",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\DerivedData\\Components\\amd64_microsoft-windows-w..wsupdateclient-core_31bf3856ad364e35_10.0.19041.5915_none_23579de85f07ef39\\identity",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\Winners\\amd64_microsoft-windows-w..wsupdateclient-core_31bf3856ad364e35_none_54ea0d262e25c877",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\Winners\\amd64_microsoft-windows-w..wsupdateclient-core_31bf3856ad364e35_none_54ea0d262e25c877\\(Default)",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\Winners\\amd64_microsoft-windows-w..wsupdateclient-core_31bf3856ad364e35_none_54ea0d262e25c877\\10.0",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\Winners\\amd64_microsoft-windows-w..wsupdateclient-core_31bf3856ad364e35_none_54ea0d262e25c877\\10.0\\(Default)",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\GRE_Initialize",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\GRE_Initialize\\DisableMetaFiles",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\GRE_Initialize\\DisableUmpdBufferSizeCheck",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\MiniNT",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_USERS\\.DEFAULT\\Software\\Microsoft\\Windows\\Windows Error Reporting\\Consent",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\user\\Software\\Microsoft\\Windows\\Windows Error Reporting\\Consent",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\Windows Error Reporting\\Consent",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\Consent\\NewUserDefaultConsent",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\Windows Error Reporting",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\DontSendAdditionalData",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\Disabled",
+        "operation": "query",
+        "value": "1"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\Consent",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\LoggingDisabled",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\DontShowUI",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\QueuePesterInterval",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\DebugApplications",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\BypassDataThrottling",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\ForceUserModeCabCollection",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\BypassPowerThrottling",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\BypassNetworkCostThrottling",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\QueueNoPesterInterval",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\AutoApproveOSDumps",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\LiveReportFlushInterval",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\Windows Error Reporting",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\DontSendAdditionalData",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\Consent",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\Consent\\DefaultConsent",
+        "operation": "query",
+        "value": "4"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\Consent\\DefaultOverrideBehavior",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\LoggingDisabled",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\DontShowUI",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\QueuePesterInterval",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\DebugApplications",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\BypassDataThrottling",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\ForceUserModeCabCollection",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\BypassPowerThrottling",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\BypassNetworkCostThrottling",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\QueueNoPesterInterval",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\AutoApproveOSDumps",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\LiveReportFlushInterval",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\Windows Error Reporting",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\Windows Error Reporting",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Session Manager",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Session Manager\\ResourcePolicies",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\ForceQueue",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\MaxQueueCount",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\MaxArchiveCount",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\ConfigureArchive",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\DisableArchive",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\CorporateWerServer",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\CorporateWerUseSSL",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\CorporateWerPortNumber",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\CorporateWerUseAuthentication",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\MinFreeDiskSpace",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\CabArchiveFolder",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\ForceHeapDump",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\ForceMetadata",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\Source",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\User",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\StorePath",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\ForceEtw",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\CorporateWerUploadOnFreeNetworksOnly",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\UploadOnFreeNetworksOnly",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\CabArchiveSeparate",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\CabArchiveCreate",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\LocalCompression",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\DisableWerUpload",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\DisableEnterpriseAuthProxy",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\ArchiveFolderCountLimit",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\QueueSizeMaxPercentFreeDisk",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\MinQueueSize",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\MaxRetriesForSasRenewal",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\NoHeapDumpOnQueue",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\DeferCabUpload",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\ForceQueue",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\MaxQueueCount",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\MaxArchiveCount",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\ConfigureArchive",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\DisableArchive",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\CorporateWerServer",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\CorporateWerUseSSL",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\CorporateWerPortNumber",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\CorporateWerUseAuthentication",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\MinFreeDiskSpace",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\CabArchiveFolder",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\ForceHeapDump",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\ForceMetadata",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\Source",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\User",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\StorePath",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\ForceEtw",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\CorporateWerUploadOnFreeNetworksOnly",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\UploadOnFreeNetworksOnly",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\CabArchiveSeparate",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\CabArchiveCreate",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\LocalCompression",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\DisableWerUpload",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\DisableEnterpriseAuthProxy",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\ArchiveFolderCountLimit",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\QueueSizeMaxPercentFreeDisk",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\MinQueueSize",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\MaxRetriesForSasRenewal",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\NoHeapDumpOnQueue",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\DeferCabUpload",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\DataCollection",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\DataCollection\\AllowTelemetry",
+        "operation": "query",
+        "value": "0"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\DataCollection\\Users",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\PolicyManager\\default\\System\\ConfigureTelemetryOptInSettingsUx",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\System\\ConfigureTelemetryOptInSettingsUx\\PolicyType",
+        "operation": "query",
+        "value": "4"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\System\\ConfigureTelemetryOptInSettingsUx\\Behavior",
+        "operation": "query",
+        "value": "139296"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\System\\ConfigureTelemetryOptInSettingsUx\\MergeAlgorithm",
+        "operation": "query",
+        "value": "2"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\System\\ConfigureTelemetryOptInSettingsUx\\RegKeyPathRedirectMapped",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\System\\ConfigureTelemetryOptInSettingsUx\\RegKeyPathRedirect",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\System\\ConfigureTelemetryOptInSettingsUx\\grouppolicyname",
+        "operation": "query",
+        "value": "DisableTelemetryOptInSettingsUx"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\System\\ConfigureTelemetryOptInSettingsUx\\grouppolicypath",
+        "operation": "query",
+        "value": "Software\\Policies\\Microsoft\\Windows\\DataCollection"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\System\\ConfigureTelemetryOptInSettingsUx\\grouppolicyismultisz",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\System\\ConfigureTelemetryOptInSettingsUx\\grouppolicymultiszSeparatorChar",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\System\\ConfigureTelemetryOptInSettingsUx\\ADMXMetadataUser",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\System\\ConfigureTelemetryOptInSettingsUx\\ADMXMetadataDevice",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\System\\ConfigureTelemetryOptInSettingsUx\\ADMXMetadataBoth",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\System\\ConfigureTelemetryOptInSettingsUx\\30Value",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\System\\ConfigureTelemetryOptInSettingsUx\\Value",
+        "operation": "query",
+        "value": "0"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\DataCollection\\DisableTelemetryOptInSettingsUx",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\PolicyManager\\current\\Device\\System",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\DataCollection",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\DataCollection\\AllowTelemetry",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SQMClient",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SQMClient\\MSFTInternal",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SQMClient",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SQMClient\\MSFTInternal",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SQMClient\\IsTest",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SQMClient\\IsTest",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\Windows Error Reporting\\Debug",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\COM3",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\COM3\\Com+Enabled",
+        "operation": "query",
+        "value": "1"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\AppID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\AppID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\(Default)",
+        "operation": "query",
+        "value": "Delivery Optimization Managment"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\AppID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\LocalService",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\AppID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\DllSurrogate",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\AppID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\RunAs",
+        "operation": "query",
+        "value": "NT Authority\\NetworkService"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\AppID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\ActivateAtStorage",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\AppID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\ROTFlags",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\AppID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\AppIDFlags",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\AppID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\MGOTFlags",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\AppID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\ProcessMitigationPolicy",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\AppID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\LaunchPermission",
+        "operation": "query",
+        "value": "\\x01\\x00\\x14\\x80\\x94\\x00\\x00\\x00\\xa4\\x00\\x00\\x00\\x14\\x00\\x00\\x000\\x00\\x00\\x00\\x02\\x00\\x1c\\x00\\x01\\x00\\x00\\x00\\x11\\x00\\x14\\x00\\x04\\x00\\x00\\x00\\x01\\x01\\x00\\x00\\x00\\x00\\x00\\x10\\x00\\x10\\x00\\x00\\x02\\x00d\\x00\\x04\\x00\\x00\\x00\\x00\\x00\\x14\\x00\\x0b\\x00\\x00\\x00\\x01\\x01\\x00\\x00\\x00\\x00\\x00\\x05\\x12\\x00\\x00\\x00\\x00\\x00\\x18\\x00\\x0b\\x00\\x00\\x00\\x01\\x02\\x00\\x00\\x00\\x00\\x00\\x05 \\x00\\x00\\x00 \\x02\\x00\\x00\\x00\\x00\\x18\\x00\\x0b\\x00\\x00\\x00\\x01\\x02\\x00\\x00\\x00\\x00\\x00\\x05 \\x00\\x00\\x00!\\x02\\x00\\x00\\x00\\x00\\x18\\x00\\x0b\\x00\\x00\\x00\\x01\\x02\\x00\\x00\\x00\\x00\\x00\\x0f\\x02\\x00\\x00\\x00\\x01\\x00\\x00\\x00\\x01\\x02\\x00\\x00\\x00\\x00\\x00\\x05 \\x00\\x00\\x00 \\x02\\x00\\x00\\x01\\x02\\x00\\x00\\x00\\x00\\x00\\x05 \\x00\\x00\\x00 \\x02\\x00\\x00"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Ole\\LegacyAuthenticationLevel",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Ole\\LegacyImpersonationLevel",
+        "operation": "query",
+        "value": "2"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\AppID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\AuthenticationLevel",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\AppID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\RemoteServerName",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\AppID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\SRPTrustLevel",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\AppID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\PreferredServerBitness",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\AppID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\LoadUserSettings",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\AppID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\ProtectionLevel",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\AppID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\AccessPermission",
+        "operation": "query",
+        "value": "\\x01\\x00\\x14\\x80\\x90\\x00\\x00\\x00\\xa0\\x00\\x00\\x00\\x14\\x00\\x00\\x000\\x00\\x00\\x00\\x02\\x00\\x1c\\x00\\x01\\x00\\x00\\x00\\x11\\x00\\x14\\x00\\x04\\x00\\x00\\x00\\x01\\x01\\x00\\x00\\x00\\x00\\x00\\x10\\x00\\x10\\x00\\x00\\x02\\x00`\\x00\\x04\\x00\\x00\\x00\\x00\\x00\\x14\\x00\\x03\\x00\\x00\\x00\\x01\\x01\\x00\\x00\\x00\\x00\\x00\\x05\n\\x00\\x00\\x00\\x00\\x00\\x14\\x00\\x03\\x00\\x00\\x00\\x01\\x01\\x00\\x00\\x00\\x00\\x00\\x05\\x12\\x00\\x00\\x00\\x00\\x00\\x18\\x00\\x03\\x00\\x00\\x00\\x01\\x02\\x00\\x00\\x00\\x00\\x00\\x05 \\x00\\x00\\x00!\\x02\\x00\\x00\\x00\\x00\\x18\\x00\\x03\\x00\\x00\\x00\\x01\\x02\\x00\\x00\\x00\\x00\\x00\\x0f\\x02\\x00\\x00\\x00\\x01\\x00\\x00\\x00\\x01\\x02\\x00\\x00\\x00\\x00\\x00\\x05 \\x00\\x00\\x00 \\x02\\x00\\x00\\x01\\x02\\x00\\x00\\x00\\x00\\x00\\x05 \\x00\\x00\\x00 \\x02\\x00\\x00"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Rpc\\Extensions",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Rpc\\Extensions\\NdrOleExtDLL",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\TreatAs",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Classes\\CLSID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\TreatAs",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\ActivateOnHostFlags",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\(Default)",
+        "operation": "query",
+        "value": "Delivery Optimization Management Class"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\InprocServer32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\InProcServer32\\InprocServer32",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\InProcServer32\\(Default)",
+        "operation": "query",
+        "value": "%SystemRoot%\\system32\\domgmt.dll"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\InProcServer32\\ThreadingModel",
+        "operation": "query",
+        "value": "Both"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\InprocHandler32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Classes\\CLSID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\InprocHandler32",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\InprocHandler",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Classes\\CLSID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\InprocHandler",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\LocalServer32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\AppID",
+        "operation": "query",
+        "value": "{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\LocalServer",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Classes\\CLSID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\LocalServer",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\Elevation",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Interface\\{DDA0424F-9478-40FF-9B21-099EC9FFCBAE}",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Interface\\{DDA0424F-9478-40FF-9B21-099EC9FFCBAE}\\ProxyStubClsid32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Interface\\{DDA0424F-9478-40FF-9B21-099EC9FFCBAE}\\ProxyStubClsid32\\(Default)",
+        "operation": "query",
+        "value": "{A6FF50C0-56C0-71CA-5732-BED303A59628}"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{A6FF50C0-56C0-71CA-5732-BED303A59628}",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{A6FF50C0-56C0-71CA-5732-BED303A59628}\\TreatAs",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Classes\\CLSID\\{A6FF50C0-56C0-71CA-5732-BED303A59628}\\TreatAs",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{A6FF50C0-56C0-71CA-5732-BED303A59628}\\ActivateOnHostFlags",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{A6FF50C0-56C0-71CA-5732-BED303A59628}\\(Default)",
+        "operation": "query",
+        "value": "PSFactoryBuffer"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{A6FF50C0-56C0-71CA-5732-BED303A59628}\\InprocServer32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{A6FF50C0-56C0-71CA-5732-BED303A59628}\\InProcServer32\\InprocServer32",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{A6FF50C0-56C0-71CA-5732-BED303A59628}\\InProcServer32\\(Default)",
+        "operation": "query",
+        "value": "C:\\Windows\\System32\\OneCoreCommonProxyStub.dll"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{A6FF50C0-56C0-71CA-5732-BED303A59628}\\InProcServer32\\ThreadingModel",
+        "operation": "query",
+        "value": "Both"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{A6FF50C0-56C0-71CA-5732-BED303A59628}\\InprocHandler32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Classes\\CLSID\\{A6FF50C0-56C0-71CA-5732-BED303A59628}\\InprocHandler32",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{A6FF50C0-56C0-71CA-5732-BED303A59628}\\InprocHandler",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Classes\\CLSID\\{A6FF50C0-56C0-71CA-5732-BED303A59628}\\InprocHandler",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{A6FF50C0-56C0-71CA-5732-BED303A59628}\\LocalServer32",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{A6FF50C0-56C0-71CA-5732-BED303A59628}\\AppID",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{A6FF50C0-56C0-71CA-5732-BED303A59628}\\LocalServer",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\Classes\\CLSID\\{A6FF50C0-56C0-71CA-5732-BED303A59628}\\LocalServer",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{A6FF50C0-56C0-71CA-5732-BED303A59628}\\Elevation",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\DeliveryOptimization",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\DeliveryOptimization\\MajorVersion",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\LanguageOverlay\\OverlayPackages\\en-US",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\DeliveryOptimization\\Config",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\DeliveryOptimization\\Settings",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\DeliveryOptimization",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_USERS\\S-1-5-20\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\User Shell Folders",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\User Shell Folders\\Local AppData",
+        "operation": "query",
+        "value": "%USERPROFILE%\\AppData\\Local"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList\\S-1-5-20",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList\\S-1-5-20\\ProfileImagePath",
+        "operation": "query",
+        "value": "%systemroot%\\ServiceProfiles\\NetworkService"
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\DeliveryOptimization\\Config\\UsagePolicy",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DODownloadMode",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DODownloadMode\\PolicyType",
+        "operation": "query",
+        "value": "4"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DODownloadMode\\Behavior",
+        "operation": "query",
+        "value": "139296"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DODownloadMode\\MergeAlgorithm",
+        "operation": "query",
+        "value": "3"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DODownloadMode\\RegKeyPathRedirectMapped",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DODownloadMode\\RegKeyPathRedirect",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DODownloadMode\\grouppolicyname",
+        "operation": "query",
+        "value": "DODownloadMode"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DODownloadMode\\grouppolicypath",
+        "operation": "query",
+        "value": "SOFTWARE\\Policies\\Microsoft\\Windows\\DeliveryOptimization"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DODownloadMode\\grouppolicyismultisz",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DODownloadMode\\grouppolicymultiszSeparatorChar",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DODownloadMode\\ADMXMetadataUser",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DODownloadMode\\ADMXMetadataDevice",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DODownloadMode\\ADMXMetadataBoth",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DODownloadMode\\30Value",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DODownloadMode\\Value",
+        "operation": "query",
+        "value": "1"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\DeliveryOptimization",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\PolicyManager\\current\\Device\\DeliveryOptimization",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\DeliveryOptimization\\Settings\\DownloadMode",
+        "operation": "query",
+        "value": "0"
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\DeliveryOptimization\\Settings\\DownloadModeProvider",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\DeliveryOptimization\\Config\\DownloadMode_BackCompat",
+        "operation": "modify",
+        "value": "0"
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\DeliveryOptimization\\Config\\DODownloadMode",
+        "operation": "modify",
+        "value": "0"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitForegroundDownloadBandwidth",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitForegroundDownloadBandwidth\\PolicyType",
+        "operation": "query",
+        "value": "1"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitForegroundDownloadBandwidth\\Behavior",
+        "operation": "query",
+        "value": "262176"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitForegroundDownloadBandwidth\\MergeAlgorithm",
+        "operation": "query",
+        "value": "3"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitForegroundDownloadBandwidth\\RegKeyPathRedirectMapped",
+        "operation": "query",
+        "value": "1"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitForegroundDownloadBandwidth\\grouppolicyname",
+        "operation": "query",
+        "value": "DOSetHoursToLimitForegroundDownloadBandwidth"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitForegroundDownloadBandwidth\\grouppolicypath",
+        "operation": "query",
+        "value": "SOFTWARE\\Policies\\Microsoft\\Windows\\DeliveryOptimization"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitForegroundDownloadBandwidth\\grouppolicyismultisz",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitForegroundDownloadBandwidth\\grouppolicymultiszSeparatorChar",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitForegroundDownloadBandwidth\\ADMXMetadataUser",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitForegroundDownloadBandwidth\\ADMXMetadataDevice",
+        "operation": "query",
+        "value": "07NE.\\x00\\x00\\x00SetHoursToLimitForegroundDownloadBandwidthFrom@1\\x00\\x00\\x00DOSetHoursToLimitForegroundDownloadBandwidth_FromL\\x0156=\\x00\\x00\\x00\\x00\\x00\\x0056=\\x01\\x00\\x00\\x00\\x00\\x0056=\\x02\\x00\\x00\\x00\\x00\\x0056=\\x03\\x00\\x00\\x00\\x00\\x0056=\\x04\\x00\\x00\\x00\\x00\\x0056=\\x05\\x00\\x00\\x00\\x00\\x0056=\\x06\\x00\\x00\\x00\\x00\\x0056=\\x07\\x00\\x00\\x00\\x00\\x0056=\\x08\\x00\\x00\\x00\\x00\\x0056=\t\\x00\\x00\\x00\\x00\\x0056=\n\\x00\\x00\\x00\\x00\\x0056=\\x0b\\x00\\x00\\x00\\x00\\x0056=\\x0c\\x00\\x00\\x00\\x00\\x0056=\r\\x00\\x00\\x00\\x00\\x0056=\\x0e\\x00\\x00\\x00\\x00\\x0056=\\x0f\\x00\\x00\\x00\\x00\\x0056=\\x10\\x00\\x00\\x00\\x00\\x0056=\\x11\\x00\\x00\\x00\\x00\\x0056=\\x12\\x00\\x00\\x00\\x00\\x0056=\\x13\\x00\\x00\\x00\\x00\\x0056=\\x14\\x00\\x00\\x00\\x00\\x0056=\\x15\\x00\\x00\\x00\\x00\\x0056=\\x16\\x00\\x00\\x00\\x00\\x0056=\\x17\\x00\\x00\\x00\\x00\\x00\\x00NE,\\x00\\x00\\x00SetHoursToLimitForegroundDownloadBandwidthTo@/\\x00\\x00\\x00DOSetHoursToLimitForegroundDownloadBandwidth_ToL\\x0156=\\x00\\x00\\x00\\x00\\x00\\x0056=\\x01\\x00\\x00\\x00\\x00\\x0056=\\x02\\x00\\x00\\x00\\x00\\x0056=\\x03\\x00\\x00\\x00\\x00\\x0056=\\x04\\x00\\x00\\x00\\x00\\x0056=\\x05\\x00\\x00\\x00\\x00\\x0056=\\x06\\x00\\x00\\x00\\x00\\x0056=\\x07\\x00\\x00\\x00\\x00\\x0056=\\x08\\x00\\x00\\x00\\x00\\x00"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitForegroundDownloadBandwidth\\ADMXMetadataBoth",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitForegroundDownloadBandwidth\\30Value",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitForegroundDownloadBandwidth\\Value",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxForegroundBandwidth",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxForegroundBandwidth\\PolicyType",
+        "operation": "query",
+        "value": "4"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxForegroundBandwidth\\Behavior",
+        "operation": "query",
+        "value": "139296"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxForegroundBandwidth\\MergeAlgorithm",
+        "operation": "query",
+        "value": "3"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxForegroundBandwidth\\RegKeyPathRedirectMapped",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxForegroundBandwidth\\RegKeyPathRedirect",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxForegroundBandwidth\\grouppolicyname",
+        "operation": "query",
+        "value": "DOPercentageMaxForegroundBandwidth"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxForegroundBandwidth\\grouppolicypath",
+        "operation": "query",
+        "value": "SOFTWARE\\Policies\\Microsoft\\Windows\\DeliveryOptimization"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxForegroundBandwidth\\grouppolicyismultisz",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxForegroundBandwidth\\grouppolicymultiszSeparatorChar",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxForegroundBandwidth\\ADMXMetadataUser",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxForegroundBandwidth\\ADMXMetadataDevice",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxForegroundBandwidth\\ADMXMetadataBoth",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxForegroundBandwidth\\30Value",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxForegroundBandwidth\\Value",
+        "operation": "query",
+        "value": "0"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxForegroundDownloadBandwidth",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxForegroundDownloadBandwidth\\PolicyType",
+        "operation": "query",
+        "value": "4"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxForegroundDownloadBandwidth\\Behavior",
+        "operation": "query",
+        "value": "139296"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxForegroundDownloadBandwidth\\MergeAlgorithm",
+        "operation": "query",
+        "value": "3"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxForegroundDownloadBandwidth\\RegKeyPathRedirectMapped",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxForegroundDownloadBandwidth\\RegKeyPathRedirect",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxForegroundDownloadBandwidth\\grouppolicyname",
+        "operation": "query",
+        "value": "DOMaxForegroundDownloadBandwidth"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxForegroundDownloadBandwidth\\grouppolicypath",
+        "operation": "query",
+        "value": "SOFTWARE\\Policies\\Microsoft\\Windows\\DeliveryOptimization"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxForegroundDownloadBandwidth\\grouppolicyismultisz",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxForegroundDownloadBandwidth\\grouppolicymultiszSeparatorChar",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxForegroundDownloadBandwidth\\ADMXMetadataUser",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxForegroundDownloadBandwidth\\ADMXMetadataDevice",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxForegroundDownloadBandwidth\\ADMXMetadataBoth",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxForegroundDownloadBandwidth\\30Value",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxForegroundDownloadBandwidth\\Value",
+        "operation": "query",
+        "value": "0"
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\DeliveryOptimization\\Settings\\DownloadRateForegroundBps",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\DeliveryOptimization\\Settings\\DownloadRateForegroundPct",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitBackgroundDownloadBandwidth",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitBackgroundDownloadBandwidth\\PolicyType",
+        "operation": "query",
+        "value": "1"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitBackgroundDownloadBandwidth\\Behavior",
+        "operation": "query",
+        "value": "262176"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitBackgroundDownloadBandwidth\\MergeAlgorithm",
+        "operation": "query",
+        "value": "3"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitBackgroundDownloadBandwidth\\RegKeyPathRedirectMapped",
+        "operation": "query",
+        "value": "1"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitBackgroundDownloadBandwidth\\grouppolicyname",
+        "operation": "query",
+        "value": "DOSetHoursToLimitBackgroundDownloadBandwidth"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitBackgroundDownloadBandwidth\\grouppolicypath",
+        "operation": "query",
+        "value": "SOFTWARE\\Policies\\Microsoft\\Windows\\DeliveryOptimization"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitBackgroundDownloadBandwidth\\grouppolicyismultisz",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitBackgroundDownloadBandwidth\\grouppolicymultiszSeparatorChar",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitBackgroundDownloadBandwidth\\ADMXMetadataUser",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitBackgroundDownloadBandwidth\\ADMXMetadataDevice",
+        "operation": "query",
+        "value": "07NE.\\x00\\x00\\x00SetHoursToLimitBackgroundDownloadBandwidthFrom@1\\x00\\x00\\x00DOSetHoursToLimitBackgroundDownloadBandwidth_FromL\\x0156=\\x00\\x00\\x00\\x00\\x00\\x0056=\\x01\\x00\\x00\\x00\\x00\\x0056=\\x02\\x00\\x00\\x00\\x00\\x0056=\\x03\\x00\\x00\\x00\\x00\\x0056=\\x04\\x00\\x00\\x00\\x00\\x0056=\\x05\\x00\\x00\\x00\\x00\\x0056=\\x06\\x00\\x00\\x00\\x00\\x0056=\\x07\\x00\\x00\\x00\\x00\\x0056=\\x08\\x00\\x00\\x00\\x00\\x0056=\t\\x00\\x00\\x00\\x00\\x0056=\n\\x00\\x00\\x00\\x00\\x0056=\\x0b\\x00\\x00\\x00\\x00\\x0056=\\x0c\\x00\\x00\\x00\\x00\\x0056=\r\\x00\\x00\\x00\\x00\\x0056=\\x0e\\x00\\x00\\x00\\x00\\x0056=\\x0f\\x00\\x00\\x00\\x00\\x0056=\\x10\\x00\\x00\\x00\\x00\\x0056=\\x11\\x00\\x00\\x00\\x00\\x0056=\\x12\\x00\\x00\\x00\\x00\\x0056=\\x13\\x00\\x00\\x00\\x00\\x0056=\\x14\\x00\\x00\\x00\\x00\\x0056=\\x15\\x00\\x00\\x00\\x00\\x0056=\\x16\\x00\\x00\\x00\\x00\\x0056=\\x17\\x00\\x00\\x00\\x00\\x00\\x00NE,\\x00\\x00\\x00SetHoursToLimitBackgroundDownloadBandwidthTo@/\\x00\\x00\\x00DOSetHoursToLimitBackgroundDownloadBandwidth_ToL\\x0156=\\x00\\x00\\x00\\x00\\x00\\x0056=\\x01\\x00\\x00\\x00\\x00\\x0056=\\x02\\x00\\x00\\x00\\x00\\x0056=\\x03\\x00\\x00\\x00\\x00\\x0056=\\x04\\x00\\x00\\x00\\x00\\x0056=\\x05\\x00\\x00\\x00\\x00\\x0056=\\x06\\x00\\x00\\x00\\x00\\x0056=\\x07\\x00\\x00\\x00\\x00\\x0056=\\x08\\x00\\x00\\x00\\x00\\x00"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitBackgroundDownloadBandwidth\\ADMXMetadataBoth",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitBackgroundDownloadBandwidth\\30Value",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitBackgroundDownloadBandwidth\\Value",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxBackgroundBandwidth",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxBackgroundBandwidth\\PolicyType",
+        "operation": "query",
+        "value": "4"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxBackgroundBandwidth\\Behavior",
+        "operation": "query",
+        "value": "139296"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxBackgroundBandwidth\\MergeAlgorithm",
+        "operation": "query",
+        "value": "3"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxBackgroundBandwidth\\RegKeyPathRedirectMapped",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxBackgroundBandwidth\\RegKeyPathRedirect",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxBackgroundBandwidth\\grouppolicyname",
+        "operation": "query",
+        "value": "DOPercentageMaxBackgroundBandwidth"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxBackgroundBandwidth\\grouppolicypath",
+        "operation": "query",
+        "value": "SOFTWARE\\Policies\\Microsoft\\Windows\\DeliveryOptimization"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxBackgroundBandwidth\\grouppolicyismultisz",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxBackgroundBandwidth\\grouppolicymultiszSeparatorChar",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxBackgroundBandwidth\\ADMXMetadataUser",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxBackgroundBandwidth\\ADMXMetadataDevice",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxBackgroundBandwidth\\ADMXMetadataBoth",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxBackgroundBandwidth\\30Value",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxBackgroundBandwidth\\Value",
+        "operation": "query",
+        "value": "0"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxBackgroundDownloadBandwidth",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxBackgroundDownloadBandwidth\\PolicyType",
+        "operation": "query",
+        "value": "4"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxBackgroundDownloadBandwidth\\Behavior",
+        "operation": "query",
+        "value": "139296"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxBackgroundDownloadBandwidth\\MergeAlgorithm",
+        "operation": "query",
+        "value": "3"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxBackgroundDownloadBandwidth\\RegKeyPathRedirectMapped",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxBackgroundDownloadBandwidth\\RegKeyPathRedirect",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxBackgroundDownloadBandwidth\\grouppolicyname",
+        "operation": "query",
+        "value": "DOMaxBackgroundDownloadBandwidth"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxBackgroundDownloadBandwidth\\grouppolicypath",
+        "operation": "query",
+        "value": "SOFTWARE\\Policies\\Microsoft\\Windows\\DeliveryOptimization"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxBackgroundDownloadBandwidth\\grouppolicyismultisz",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxBackgroundDownloadBandwidth\\grouppolicymultiszSeparatorChar",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxBackgroundDownloadBandwidth\\ADMXMetadataUser",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxBackgroundDownloadBandwidth\\ADMXMetadataDevice",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxBackgroundDownloadBandwidth\\ADMXMetadataBoth",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxBackgroundDownloadBandwidth\\30Value",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxBackgroundDownloadBandwidth\\Value",
+        "operation": "query",
+        "value": "0"
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\DeliveryOptimization\\Settings\\DownloadRateBackgroundBps",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\DeliveryOptimization\\Settings\\DownloadRateBackgroundPct",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\DeliveryOptimization\\Settings\\UpRatePctBandwidth",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\DeliveryOptimization\\Config\\UpRatePctBandwidth",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMonthlyUploadDataCap",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMonthlyUploadDataCap\\PolicyType",
+        "operation": "query",
+        "value": "4"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMonthlyUploadDataCap\\Behavior",
+        "operation": "query",
+        "value": "139296"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMonthlyUploadDataCap\\MergeAlgorithm",
+        "operation": "query",
+        "value": "3"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMonthlyUploadDataCap\\RegKeyPathRedirectMapped",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMonthlyUploadDataCap\\RegKeyPathRedirect",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMonthlyUploadDataCap\\grouppolicyname",
+        "operation": "query",
+        "value": "DOMonthlyUploadDataCap"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMonthlyUploadDataCap\\grouppolicypath",
+        "operation": "query",
+        "value": "SOFTWARE\\Policies\\Microsoft\\Windows\\DeliveryOptimization"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMonthlyUploadDataCap\\grouppolicyismultisz",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMonthlyUploadDataCap\\grouppolicymultiszSeparatorChar",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMonthlyUploadDataCap\\ADMXMetadataUser",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMonthlyUploadDataCap\\ADMXMetadataDevice",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMonthlyUploadDataCap\\ADMXMetadataBoth",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMonthlyUploadDataCap\\30Value",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMonthlyUploadDataCap\\Value",
+        "operation": "query",
+        "value": "20"
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\DeliveryOptimization\\Settings\\UploadLimitGBMonth",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\DeliveryOptimization\\Config\\UploadLimitGBMonth",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x80000001",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x80000002",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x000002bc",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x000002c0",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x0000030e",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x000003b2",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x00000312",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x000003be",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x0000035e",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x0000039a",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x000003c2",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x000003c6",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x00000332",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x000002fa",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x00000322",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x000003ca",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x000003a2",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x0000037a",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x0000032e",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x00000336",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x000003d6",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x000003ce",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x000003d2",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x00000408",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x00000230",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x00000280",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x00000238",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x000002a4",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x000002ac",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x000002b0",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x0000038c",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x00000384",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x000003b8",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x0000024c",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x00000250",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x00000258",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x00000264",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x000002cc",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x00000268",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x000002d0",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x000002f4",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x0000027c",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x000002f8",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x00000224",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x0000023c",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x000002b4",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x0000031c",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x00000320",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x00000310",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "0x80000003",
         "operation": "query",
         "value": null
       }
