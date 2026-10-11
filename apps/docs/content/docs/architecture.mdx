@@ -3852,17 +3852,26 @@ is assembled from what the run gathered rather than recomputed beside it:
   roots are sandbox processes, flows or DNS queries); a rule match (an
   asserting tool's entry whose own rows name the technique, or one the
   statement places a row of: a capa match by its address, a sandbox signature
-  by its name, `sandbox signature <name>` being a signature row's own root);
+  by its name, `sandbox signature <name>` being a signature row's own root; a
+  sandbox's own technique tags on a signature, as its report declares them,
+  ride on `sandbox_signatures` rows as `technique_ids` and make the citation a
+  rule match for those techniques, and a signature's name is never read as a
+  technique);
   an artefact of the file (a place in it, its tables, the file itself, or
   what its answer states as a whole: a count, a scheme, the routine an
-  emulator ran, a value every row holds, which a statement writing it places,
-  `evidence_roots.answer_facts`); an external assessment of the whole file (a
+  emulator ran, a value every row holds, which a statement writing it in a
+  sentence or evidence item citing the entry places, `evidence_roots.answer_facts`;
+  never a reference lookup, a reputation answer or a run's answer, and a count
+  of zero places nothing); an external assessment of the whole file (a
   reputation answer, whose root is "an external assessment of the whole
   file", read from the platform's one table of reputation tools,
   `evidence_roots.FILE_ASSESSMENT_TOOLS`); or a citation placed nowhere. A run
   observation or a rule cited by a sentence or evidence item of the statement
-  that negates (`_NOT_SEEN_RE` or a negating word) is cited for its absence and
-  placed nowhere. `independent_sources` counts the sources that stand behind a
+  that says it was not seen or holds no record (`_NOT_SEEN_RE`, `_HOLDS_NO_RE`:
+  "capa has no injection rule", "no write is recorded"; a negating word that
+  says nothing of the source, "resolved, not imported", is not one) is cited
+  for its absence and placed nowhere; a citation written only in the evidence
+  line is read against the claim's sentences too. `independent_sources` counts the sources that stand behind a
   fact about the technique, joining citations of one reading kind whose roots
   overlap (two tools reading one string are one source; a rule match and an
   index row on one function are two methods, never joined); a citation placed

@@ -539,7 +539,10 @@ _PACK_TOOLS: dict[str, dict[str, Any]] = {
 # kinds named here. ``legacy_names`` are names a table holds that no built-in
 # tool has; a consumer keeps them for stored runs and servers declared by name.
 CONSUMER_KINDS: dict[str, dict[str, Any]] = {
-    "evidence_roots._WHOLE_FILE_TOOLS": {"kinds": ["identity", "signing", "file_reputation"]},
+    "evidence_roots._WHOLE_FILE_TOOLS": {"kinds": ["identity", "signing"]},
+    "evidence_roots.FILE_ASSESSMENT_TOOLS": {
+        "kinds": ["file_reputation", "hash_reputation", "reputation_not_asked"]
+    },
     "evidence_roots._REFERENCE_TOOLS": {
         "kinds": ["reference", "api_catalogue", "capabilities", "indicator_report"]
     },

@@ -387,6 +387,78 @@ class TestTheWholeAnswer:
         assert timings[1] < timings[0] * 10 * 4 + 0.5
 
 
+class TestTheRefinements:
+    def test_a_sandbox_s_own_signature_tags_ride_on_the_tool_and_assert(self) -> None:
+        from maljan.providers.sandbox_tools import sandbox_signatures
+
+        answer = sandbox_signatures(
+            {
+                "signatures": [
+                    {"name": "Uses a scheduler API", "ttp_tags": ["T1053.005"]},
+                    {"name": "Plain", "ttp": []},
+                ]
+            }
+        )
+        rows = answer["signatures"]
+        assert rows[0]["technique_ids"] == ["T1053.005"]
+        assert "technique_ids" not in rows[1]
+
+        ledger = [*_ledger(), _entry("ev_0010", "sandbox_signatures", answer, agent="pipeline")]
+        isrs = {
+            n: _isr(
+                n, _claim(f"A task is scheduled, {n} reads [ev_0010].", "[ev_0010]", "T1053.005")
+            )
+            for n in ("a", "b")
+        }
+        held = technique_sources(isrs, ledger)["T1053.005"]
+        assert _readings(held) == {"ev_0010": READING_RULE}
+
+    def test_a_signature_name_is_never_read_as_a_technique(self) -> None:
+        from maljan.providers.sandbox_tools import sandbox_signatures
+
+        answer = sandbox_signatures({"signatures": [{"name": "Scheduled Task/Job"}]})
+        assert "technique_ids" not in answer["signatures"][0]
+
+    def test_a_reference_lookup_is_never_placed_by_its_whole_answer(self) -> None:
+        ledger = [
+            *_ledger(),
+            _entry("ev_0011", "get_ip_report", {"ip": "192.0.2.7", "verdict": "bad_host_1"}),
+        ]
+        said = "The host 192.0.2.7 is bad_host_1 [ev_0011]."
+        held = technique_sources({"a": _isr("a", _claim(said, "[ev_0011]"))}, ledger)
+
+        assert _readings(held["T1547.001"]) == {"ev_0011": READING_UNPLACED}
+
+    def test_a_count_of_zero_places_nothing(self) -> None:
+        from maljan.analysis.evidence_roots import answer_facts
+
+        assert answer_facts({"total": 0, "count": 4}).numbers == {4}
+
+    def test_a_run_answer_is_never_placed_by_its_whole_answer(self) -> None:
+        said = "The sandbox ran 2 processes; total 2 [ev_0003]."
+        held = technique_sources({"a": _isr("a", _claim(said, "[ev_0003]"))}, _ledger())
+
+        assert _readings(held["T1547.001"]) == {"ev_0003": READING_UNPLACED}
+
+    def test_the_whole_answer_value_must_sit_beside_the_citation(self) -> None:
+        said = "The routine at 0x1180 decodes. FLOSS ran [ev_0008]."
+        held = technique_sources({"a": _isr("a", _claim(said, "[ev_0008]"))}, _ledger())
+
+        assert _readings(held["T1547.001"]) == {"ev_0008": READING_UNPLACED}
+
+    def test_a_negating_word_that_says_nothing_of_the_source_keeps_the_rule(self) -> None:
+        said = "The names are resolved, not imported, at 0x1300 [ev_0005]."
+        held = technique_sources({"a": _isr("a", _claim(said, "[ev_0005]"))}, _ledger())
+
+        assert _readings(held["T1547.001"]) == {"ev_0005": READING_RULE}
+
+    def test_an_evidence_line_citation_is_read_against_the_claim(self) -> None:
+        said = "capa has no rule for an autostart."
+        held = technique_sources({"a": _isr("a", _claim(said, "[ev_0005] at 0x1300"))}, _ledger())
+
+        assert _readings(held["T1547.001"]) == {"ev_0005": READING_UNPLACED}
+
+
 class TestTheCorroborationRow:
     def test_six_analysts_restating_one_signature_are_not_corroborated(self) -> None:
         row = corroboration(_restating(6, "[ev_0006]", "T1547.008"), _ledger())["T1547.008"]

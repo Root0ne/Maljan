@@ -9686,25 +9686,48 @@ def support_of(sources: Mapping[str, Any]) -> str:
 # The opening of the root a statement places an entry by when it writes what
 # the answer states as a whole (``evidence_roots.WHOLE_ANSWER_ROOT``).
 _WHOLE_ANSWER_OPENING = "the whole answer of "
-# A statement that negates what it cites: a run observation or a rule it cites
-# is cited for an absence ("the sandbox recorded no HTTP traffic"), not as support.
-_NEGATES_RE = re.compile(r"\b(?:no|not|never|none|nothing|without|neither|nor)\b", re.IGNORECASE)
+# A statement that says a source holds no record of something: a negation
+# governing what was recorded, matched or found ("capa has no injection rule",
+# "the sandbox recorded no HTTP traffic", "no write is recorded", "not found"),
+# beside ``_NOT_SEEN_RE``'s negation of an observation. A negating word
+# elsewhere ("resolved, not imported") says nothing of the source.
+_HOLDS_NO_RE = re.compile(
+    r"\b(?:has|have|had|holds?|held|shows?|showed|shown|lists?|listed|records?|recorded"
+    r"|reports?|reported|contains?|contained|carries|carried|finds?|found|gives?|gave"
+    r"|returns?|returned|matche[sd]|names?|named|states?|stated)\s+(?:no|none)\b"
+    r"|\bno\b(?:\s+[\w-]+){1,3}?\s+(?:is|are|was|were)\s+(?:recorded|seen|observed|found"
+    r"|matched|listed|reported|shown|present)\b"
+    r"|\b(?:not|never)\s+(?:recorded|seen|observed|found|matched|listed|reported|shown"
+    r"|present)\b",
+    re.IGNORECASE,
+)
 
 
 # Where a statement's sentences and its evidence line's items break.
 _CITING_PIECE_BREAK = re.compile(r"(?<=[.!?;])\s+|\n+")
 
 
-def _cites_to_negate(said: str, citation: str) -> bool:
-    """Whether the pieces of ``said`` that cite ``citation`` negate (an absence cited).
+def _negates(piece: str) -> bool:
+    return bool(_NOT_SEEN_RE.search(piece) or _HOLDS_NO_RE.search(piece))
+
+
+def _cites_to_negate(said: str, citation: str, claim: str | None = None) -> bool:
+    """Whether the pieces of ``said`` that cite ``citation`` cite it for an absence.
 
     A piece is a sentence or an evidence-line item; the ones that write the
-    citation are read (``_NOT_SEEN_RE``, or a negating word in them). A
-    statement that cites the entry nowhere in its own words is read whole.
+    citation are read for a negation governing an observation, a record or a
+    match (``_NOT_SEEN_RE``, ``_HOLDS_NO_RE``). A citation written only in the
+    evidence line is also read against the claim's own sentences (``claim``),
+    which say what it was cited for. A statement that writes the citation
+    nowhere is read whole.
     """
-    pieces = [p for p in _CITING_PIECE_BREAK.split(_read_dashes(said)) if p.strip()]
-    mine = [p for p in pieces if citation.lower() in p.lower()] or [_read_dashes(said)]
-    return any(_NOT_SEEN_RE.search(p) or _NEGATES_RE.search(p) for p in mine)
+    text = _read_dashes(said)
+    needle = citation.lower()
+    pieces = [p for p in _CITING_PIECE_BREAK.split(text) if p.strip()]
+    mine = [p for p in pieces if needle in p.lower()] or [text]
+    if claim is not None and needle not in claim.lower():
+        mine = [*mine, *(p for p in _CITING_PIECE_BREAK.split(_read_dashes(claim)) if p.strip())]
+    return any(_negates(p) for p in mine)
 
 
 def technique_sources(
@@ -9772,12 +9795,12 @@ def technique_sources(
             }
 
     def cited_sources(
-        said: str, cited: list[str], tid: str
+        said: str, cited: list[str], tid: str, claim: str | None = None
     ) -> dict[str, tuple[str, tuple[str, ...]]]:
         held = roots.sources_of_statement(said, cited)
         found_here: dict[str, tuple[str, tuple[str, ...]]] = {}
         for source, (reading, placed) in held.items():
-            negates = _cites_to_negate(said, source)
+            negates = _cites_to_negate(said, source, claim)
             rows = [root for root in placed if not root.startswith(_WHOLE_ANSWER_OPENING)]
             if source in asserts:
                 # An asserting entry is a rule match for this technique when
@@ -9804,7 +9827,7 @@ def technique_sources(
             ref = str(getattr(claim, "evidence_ref", "") or "")
             said = f"{getattr(claim, 'claim', '') or ''} {ref}"
             cited = [*entry_ids_in(said), *item_ids_in(ref)]
-            add(tid, cited_sources(said, cited, tid))
+            add(tid, cited_sources(said, cited, tid, str(getattr(claim, "claim", "") or "")))
         for finding in getattr(isr, "findings", None) or []:
             said = f"{getattr(finding, 'title', '') or ''} {getattr(finding, 'detail', '') or ''}"
             cited = [str(i) for i in getattr(finding, "evidence_ids", None) or [] if i]

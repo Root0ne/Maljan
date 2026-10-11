@@ -1468,19 +1468,34 @@ class RunRoots:
         this ledger, or no item of its sandbox report, is no source.
         """
         out: dict[str, tuple[str, tuple[str, ...]]] = {}
-        written: StatementValues | None = None
         for citation, held, _said in self._citations(text, entry_ids):
             if not held and not self._known(citation):
                 continue
-            if not held and citation in self.answers:
-                # A statement that writes what the answer states as a whole
-                # (its count, its scheme, the routine it ran) places the entry.
-                if written is None:
-                    written = statement_values(text)
-                if self.answers[citation].written_in(written, self.of_entry(citation).layout):
-                    held = [WHOLE_ANSWER_ROOT.format(entry=citation)]
+            if not held and self._answer_places(citation, text):
+                held = [WHOLE_ANSWER_ROOT.format(entry=citation)]
             out[citation] = (self.reading(citation, held), tuple(held))
         return out
+
+    def _answer_places(self, citation: str, text: str) -> bool:
+        """Whether ``text`` places ``citation`` by what its answer states as a whole.
+
+        Only an answer about the file: a reference lookup, a reputation answer
+        and an answer whose rows are a run's (sandbox processes, flows, DNS
+        queries) are never placed so. The value has to sit in a piece of the
+        statement (a sentence or an evidence item) that cites the entry.
+        """
+        facts = self.answers.get(citation)
+        if facts is None or facts.empty():
+            return False
+        tool = self.tools.get(citation, "")
+        if tool in _REFERENCE_TOOLS or tool in FILE_ASSESSMENT_TOOLS:
+            return False
+        found = self.of_entry(citation)
+        if any(str(root).startswith(_RUN_ROOT_OPENINGS) for root in found.roots):
+            return False
+        pieces = [p for p in _PIECE_BREAK.split(str(text or "")) if citation in p.lower()]
+        said = statement_values(" ".join(pieces) if pieces else str(text or ""))
+        return facts.written_in(said, found.layout)
 
     def _known(self, citation: str) -> bool:
         """Whether a citation is an entry of this ledger or an item of its sandbox report."""
@@ -1522,6 +1537,8 @@ _ANSWER_COUNT_KEY = re.compile(r"total|count|decoded|recovered|matched", re.IGNO
 # A value written as an identifier: four characters or more, a digit or ``_`` in it.
 _ANSWER_TOKEN = re.compile(r"^(?=[\w.\-]*[\d_])[\w.\-]{4,64}$")
 _STATEMENT_NUMBER = re.compile(r"(?<![\w.])\d+(?![\w])")
+# Where a statement's sentences and its evidence line's items break.
+_PIECE_BREAK = re.compile(r"(?<=[.!?;])\s+|\n+")
 _STATEMENT_TOKEN = re.compile(r"[\w.\-]{4,64}")
 
 
@@ -1559,6 +1576,9 @@ class AnswerFacts:
     addresses: frozenset[int] = frozenset()
     tokens: frozenset[str] = frozenset()
 
+    def empty(self) -> bool:
+        return not (self.numbers or self.addresses or self.tokens)
+
     def written_in(self, said: StatementValues, layout: Layout) -> bool:
         """Whether the statement writes one of these values."""
         if self.numbers & said.numbers or self.tokens & said.tokens:
@@ -1578,7 +1598,8 @@ def _answer_value(key: str, value: Any, facts: dict[str, set[Any]]) -> None:
     if isinstance(value, bool) or value is None:
         return
     if isinstance(value, int):
-        if _ANSWER_COUNT_KEY.search(str(key)):
+        # A count of zero is an absence: it places nothing.
+        if value and _ANSWER_COUNT_KEY.search(str(key)):
             facts["numbers"].add(value)
         return
     if not isinstance(value, str):
