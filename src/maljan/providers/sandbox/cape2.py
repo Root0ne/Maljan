@@ -18,6 +18,7 @@ from maljan.agents.base_agent import run_coro_blocking
 from maljan.core import builtin_declarations
 from maljan.core.logger import logger
 from maljan.core.settings_overrides import redact_url
+from maljan.core.undeclared_tools import categories_of
 from maljan.providers.base import ProviderProbe, SandboxCapabilities, SandboxProvider
 from maljan.providers.registry import register_sandbox_provider
 from maljan.schemas.sandbox_report import cape_report_to_sandbox_report
@@ -138,7 +139,12 @@ class CAPE2SandboxProvider(SandboxProvider):
             if raw_token:
                 headers["Authorization"] = f"Bearer {raw_token}"
             logger.info("Initializing CAPEv2 MCP over %s: %s", transport, url)
-            toolkit = MCPLangChainToolkit(transport=transport, http_url=url, http_headers=headers)
+            toolkit = MCPLangChainToolkit(
+                transport=transport,
+                http_url=url,
+                http_headers=headers,
+                categories=categories_of(self._cfg.mcp.tool_facts),
+            )
         else:
             command = self._cfg.mcp.command
             args = self._cfg.mcp.args
@@ -155,7 +161,9 @@ class CAPE2SandboxProvider(SandboxProvider):
                 command=command, args=args, env=env, cwd=project_root
             )
 
-            toolkit = MCPLangChainToolkit(server_params)
+            toolkit = MCPLangChainToolkit(
+                server_params, categories=categories_of(self._cfg.mcp.tool_facts)
+            )
 
         # Init the MCP toolkit on the shared agent loop so its session/transport
         # is bound to the SAME loop the ReAct tool calls later run on. Running it

@@ -99,6 +99,20 @@ def sigma_technique_ids(row: Mapping[str, Any] | None) -> list[str]:
     return found
 
 
+# The readers of a declared technique field (``TechniqueField.format``), by
+# format: a bare id or a decorated label (``attck``), and a Sigma tag
+# (``sigma_tag``). A format no reader is named for is read as ``attck``: a
+# technique id written anywhere in the value.
+SIGMA_TAG_FORMAT = "sigma_tag"
+
+
+def ids_in_field(value: Any, field_format: str) -> list[str]:
+    """The technique ids a declared field's ``value`` names, read by the field's format."""
+    if field_format == SIGMA_TAG_FORMAT:
+        return sigma_technique_ids({"tags": value})
+    return technique_ids_in(value)
+
+
 def api_capability_hits(payload: Mapping[str, Any] | None) -> list[dict[str, Any]]:
     """The technique rules an ``api_capability`` result cleared, one row per rule.
 

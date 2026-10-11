@@ -20,6 +20,7 @@ from maljan.core import builtin_declarations
 from maljan.core.exceptions import SampleNotOpened
 from maljan.core.logger import logger
 from maljan.core.settings_overrides import redact_url
+from maljan.core.undeclared_tools import categories_of
 from maljan.providers.base import (
     CLAIM_GUIDANCE,
     MirrorSpec,
@@ -414,6 +415,7 @@ class GhidraStaticProvider(StaticProvider):
                 context_budget=job.context_budget,
                 long_running_tools=long_running_tools(getattr(self._cfg, "sample_open", None)),
                 explicit_call_timeout=explicit_call_timeout(get_settings_or_none()),
+                categories=categories_of(getattr(self._cfg, "tool_facts", None)),
             )
 
             self._run_async(client.initialize())
@@ -447,6 +449,7 @@ class GhidraStaticProvider(StaticProvider):
             max_output_chars=max_chars,
             truncation_ledger=job.truncation_ledger,
             context_budget=job.context_budget,
+            categories=categories_of(getattr(self._cfg, "tool_facts", None)),
         )
 
         self._run_async(toolkit.initialize())

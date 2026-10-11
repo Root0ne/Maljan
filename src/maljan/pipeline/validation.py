@@ -50,6 +50,13 @@ from maljan.core.declared_reading import (
 )
 from maljan.core.logger import logger
 from maljan.core.spend import validation_retry
+from maljan.core.undeclared_tools import (
+    ADDRESS_ARGUMENTS,
+    auto_name_pattern,
+    declared_auto_name_pattern,
+    entry_address_arguments,
+    entry_decompiles,
+)
 from maljan.pipeline.events import (
     VALIDATION_RESOLVED,
     VALIDATION_RETRIED,
@@ -4148,17 +4155,26 @@ def chunk_cut_unread_sentence(chunk: str) -> str:
 # either. The functions its ledger entries decompiled are listed to it, once.
 DECOMPILED_NOT_DESCRIBED_CODE = "isr.decompiled_not_described"
 
-# The argument names a decompile call gives its function under: an address, a
-# list of addresses (a batch), or a name.
-_ADDRESS_ARGUMENTS = ("address", "addr", "function_address", "ea", "va", "start")
+# The argument names a decompile call gives its function under: an address
+# (the one its tool declares, then the shared list,
+# ``core.undeclared_tools.address_arguments``), a list of addresses (a batch),
+# or a name.
+_ADDRESS_ARGUMENTS = ADDRESS_ARGUMENTS
 _ADDRESS_LIST_ARGUMENTS = ("functions", "addresses")
 _NAME_ARGUMENTS = ("name", "function_name", "function", "symbol")
 # A decompiler's own name for a function it was given no name for: the address
-# after a fixed prefix (Ghidra's ``FUN_``, radare2's ``fcn.``, IDA's ``sub_``).
-_GENERIC_FUNCTION_NAME = re.compile(
-    r"(?<![0-9A-Za-z_])(?:fun|fcn|sub|func|loc|lab)[_.]([0-9a-f]{1,16})(?![0-9a-z_])",
-    re.IGNORECASE,
-)
+# after a prefix its server declares (``auto_name_prefixes``: ``FUN_``,
+# ``fcn.``) or one of the defaults. ``_GENERIC_FUNCTION_NAME`` is the defaults'
+# pattern; :func:`generic_function_name` adds every prefix the run's servers
+# declare.
+_GENERIC_FUNCTION_NAME = auto_name_pattern()
+
+
+def generic_function_name() -> re.Pattern[str]:
+    """A decompiler's own name for a function, for every prefix a server declares."""
+    return declared_auto_name_pattern()
+
+
 # An address written in a claim: ``0x`` and hex digits.
 _HEX_ADDRESS = re.compile(r"(?<![0-9A-Za-z_])0x([0-9a-f]{1,16})(?![0-9a-z_])", re.IGNORECASE)
 # The same address in an assembler's spelling (``1230h``), and as bare hex
@@ -4265,7 +4281,7 @@ def listed_function(output: str) -> tuple[str, str | int] | None:
     name = _signature_name(_listing_text(str(output or "")))
     if not name:
         return None
-    generic = _GENERIC_FUNCTION_NAME.fullmatch(name.lower())
+    generic = generic_function_name().fullmatch(name.lower())
     if generic is not None:
         return ("start", int(generic.group(1), 16))
     return ("name", name)
@@ -4350,7 +4366,7 @@ def _entry_functions(entry: Any) -> list[tuple[int | None, list[str]]]:
             if len(addresses) > 1:
                 return [(address, []) for address in addresses]
     address: int | None = None
-    for argument in _ADDRESS_ARGUMENTS:
+    for argument in entry_address_arguments(entry):
         if argument in args and address is None:
             address = _address_value(args[argument])
     for argument in _ADDRESS_LIST_ARGUMENTS:
@@ -4360,7 +4376,7 @@ def _entry_functions(entry: Any) -> list[tuple[int | None, list[str]]]:
     names = _named(address, _listing_text(output), args=args)
     if address is None:
         for name in names:
-            generic = _GENERIC_FUNCTION_NAME.fullmatch(name)
+            generic = generic_function_name().fullmatch(name)
             if generic is not None:
                 address = int(generic.group(1), 16)
                 break
@@ -4398,8 +4414,7 @@ def decompiled_functions(entries: Iterable[Any]) -> list[DecompiledFunction]:
     """
     found: dict[Any, DecompiledFunction] = {}
     for entry in entries:
-        tool = str(getattr(entry, "tool", "") or "").lower()
-        if "decompil" not in tool or not getattr(entry, "ok", True) or answer_not_shown(entry):
+        if not entry_decompiles(entry) or not getattr(entry, "ok", True) or answer_not_shown(entry):
             continue
         # A repeat holds the guard's note, not a listing: the function it
         # asked for is the earlier entry's.
@@ -4497,7 +4512,7 @@ def _addresses_written(text: str) -> list[int]:
     """Every address ``text`` writes: ``0x…``, ``…h``, bare hex, or in a generic name."""
     return [
         int(match.group(1), 16)
-        for pattern in (_HEX_ADDRESS, _GENERIC_FUNCTION_NAME, _SUFFIXED_ADDRESS, _BARE_ADDRESS)
+        for pattern in (_HEX_ADDRESS, generic_function_name(), _SUFFIXED_ADDRESS, _BARE_ADDRESS)
         for match in pattern.finditer(text)
     ]
 
@@ -4517,7 +4532,7 @@ def _named_by(text: str, function: DecompiledFunction, bases: Sequence[int] = ()
         ):
             return True
     for name in function.names:
-        if _GENERIC_FUNCTION_NAME.fullmatch(name):
+        if generic_function_name().fullmatch(name):
             continue
         spellings = {name, name.rsplit(".", 1)[-1]} if "." in name else {name}
         for spelling in spellings:
@@ -4663,9 +4678,9 @@ def _is_library_only(claim: Any) -> bool:
     evidence = str(getattr(claim, "evidence_ref", "") or "")
     if not text or re.search(r"[.!?]\s+\S", text.rstrip(".!? ")):
         return False
-    if _HEX_ADDRESS.search(text) or _GENERIC_FUNCTION_NAME.search(text):
+    if _HEX_ADDRESS.search(text) or generic_function_name().search(text):
         return False
-    if _HEX_ADDRESS.search(evidence) or _GENERIC_FUNCTION_NAME.search(evidence):
+    if _HEX_ADDRESS.search(evidence) or generic_function_name().search(evidence):
         return False
     sentence = _LIBRARY_SENTENCE.match(text)
     if sentence is None:

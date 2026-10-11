@@ -410,6 +410,7 @@ class ServerHandle:
         ways of running the coroutine it returns.
         """
         from maljan.agents.mcp_client import MCPLangChainToolkit
+        from maljan.core.undeclared_tools import categories_of
 
         if self.config.transport == "stdio":
             from mcp import StdioServerParameters
@@ -446,6 +447,7 @@ class ServerHandle:
                 truncation_ledger=truncation_ledger,
                 context_budget=context_budget,
                 guard=self.guard,
+                categories=categories_of(getattr(self.config, "tool_facts", None)),
             )
         # An http/sse transport has no child of ours to reap.
         self._launch_argv = ()
@@ -460,6 +462,7 @@ class ServerHandle:
             truncation_ledger=truncation_ledger,
             context_budget=context_budget,
             guard=self.guard,
+            categories=categories_of(getattr(self.config, "tool_facts", None)),
         )
 
     def open(

@@ -396,13 +396,21 @@ def test_the_auto_name_prefixes_are_the_validation_patterns(declared: ToolDeclar
         assert _GENERIC_FUNCTION_NAME.search(f"{prefix}401000")
 
 
-def test_virustotals_reference_url_is_the_reports(declared: ToolDeclarations) -> None:
-    from maljan.reporting.detection_signatures import __file__ as signatures_file
+def test_virustotals_reference_url_is_linked_on_a_run_that_asked_it(
+    declared: ToolDeclarations,
+) -> None:
+    from types import SimpleNamespace
+
+    from maljan.reporting.references import declared_references
 
     held = declared.source("mcp:virustotal")
     assert held is not None
     assert held.reference_urls == ("https://www.virustotal.com/gui/file/{sha256}",)
-    assert "https://www.virustotal.com/gui/file/{sha256}" in Path(signatures_file).read_text()
+    hashes = SimpleNamespace(sha256="a" * 64, md5=None, sha1=None)
+    asked = [{"source": "mcp:virustotal", "server": "virustotal", "tool": "get_file_report"}]
+    linked = declared_references(asked, hashes, declared=declared)
+    assert [ref.url for ref in linked] == [f"https://www.virustotal.com/gui/file/{'a' * 64}"]
+    assert declared_references([], hashes, declared=declared) == []
 
 
 def test_ghidras_open_tools_are_its_long_running_tools(declared: ToolDeclarations) -> None:
@@ -444,12 +452,17 @@ def test_the_tool_words_are_the_validation_words(declared: ToolDeclarations) -> 
 
 def test_the_categories_are_the_mcp_clients_tags(declared: ToolDeclarations) -> None:
     from maljan.agents.mcp_client import MCPLangChainToolkit
+    from maljan.core.undeclared_tools import categories_of, category_tag
 
-    tag = MCPLangChainToolkit._tag_description
     for source in ("provider:ghidra", "provider:r2"):
-        for name, facts in _tools(declared, source).items():
-            shown = tag(None, name, "x")  # type: ignore[arg-type]
+        tools = _tools(declared, source)
+        toolkit = MCPLangChainToolkit(categories=categories_of(tools))
+        for name, facts in tools.items():
+            shown = toolkit._tag_description(name, "x")
             assert shown.startswith(f"[{facts.category.upper()}]"), (source, name)
+            # The declared tag is the one the name alone would give an
+            # undeclared tool: the declarations were written from that table.
+            assert category_tag(name) == facts.category.upper(), (source, name)
 
 
 def test_the_rule_match_display_names_are_the_assertion_words(declared: ToolDeclarations) -> None:

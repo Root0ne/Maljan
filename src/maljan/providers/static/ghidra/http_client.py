@@ -14,7 +14,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import httpx
@@ -96,6 +96,7 @@ class GhidraHTTPClient:
         context_budget: Any | None = None,
         long_running_tools: frozenset[str] = frozenset(),
         explicit_call_timeout: float = 0.0,
+        categories: Mapping[str, str] | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         # The rule every tool server's guard applies (``ServerGuard.call_timeout``),
@@ -106,6 +107,9 @@ class GhidraHTTPClient:
         # client's own request timeout.
         self._long_running = frozenset(t for t in long_running_tools if t)
         self._explicit_call_timeout = max(0.0, float(explicit_call_timeout or 0.0))
+        # The tag each tool's description is shown with, as Ghidra's block
+        # declares it (``ToolFacts.category``).
+        self._categories = dict(categories or {})
         # Callers pass a plain string (``SecretStr.get_secret_value()`` already
         # unwrapped at the config boundary); stored plain here too, since this
         # client builds the header string itself.
@@ -324,56 +328,16 @@ class GhidraHTTPClient:
             logger.warning("Ghidra switch_program failed for '%s' (non-fatal): %s", name, exc)
 
     def _tag_description(self, path: str, description: str) -> str:
-        """Prefix the description with a category tag; the text itself is kept whole."""
+        """Prefix the description with its category tag; the text itself is kept whole.
+
+        The tag Ghidra's block declares for the tool, else the one its name's
+        first word gives (``core.undeclared_tools.category_tag``).
+        """
+        from maljan.core.undeclared_tools import category_tag
+
         name = path.lstrip("/").replace("/", "_")
-        prefix = name.split("_")[0]
-
-        # Map first word of tool name to a functional category
-        category_map: dict[str, str] = {
-            "analyze": "ANALYZE",
-            "decompile": "ANALYZE",
-            "disassemble": "ANALYZE",
-            "detect": "ANALYZE",
-            "find": "ANALYZE",
-            "diff": "ANALYZE",
-            "compare": "ANALYZE",
-            "inspect": "ANALYZE",
-            "emulate": "ANALYZE",
-            "extract": "ANALYZE",
-            "list": "LIST",
-            "get": "LIST",
-            "search": "LIST",
-            "batch": "BATCH",
-            "bulk": "BATCH",
-            "run": "EXEC",
-            "rename": "MODIFY",
-            "create": "MODIFY",
-            "delete": "MODIFY",
-            "set": "MODIFY",
-            "apply": "MODIFY",
-            "modify": "MODIFY",
-            "remove": "MODIFY",
-            "move": "MODIFY",
-            "clear": "MODIFY",
-            "convert": "MODIFY",
-            "clone": "MODIFY",
-            "force": "MODIFY",
-            "open": "NAV",
-            "close": "NAV",
-            "save": "NAV",
-            "load": "NAV",
-            "switch": "NAV",
-            "validate": "CHECK",
-            "can": "CHECK",
-            "read": "READ",
-            "import": "IMPORT",
-            "server": "META",
-        }
-        cat = category_map.get(prefix, "TOOL")
-
-        # Strip existing newlines and collapse whitespace
         clean = " ".join(description.split())
-        return f"[{cat}] {clean}"
+        return f"[{category_tag(name, self._categories.get(name, ''))}] {clean}"
 
     def _charge_overage(self, kept: int, limit: int) -> str:
         """Charge what a result is longer than the cap it was measured against.

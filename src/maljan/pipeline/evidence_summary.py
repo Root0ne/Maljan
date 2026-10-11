@@ -20,6 +20,7 @@ from typing import Any
 from maljan.analysis.technique_ids import (
     TECHNIQUE_ID_EXACT_RE,
     api_capability_hits,
+    ids_in_field,
     sigma_technique_ids,
     technique_ids_in,
 )
@@ -77,10 +78,7 @@ def asserted_techniques(entry: Any) -> set[str]:
     found: set[str] = set()
     for held in facts.techniques if facts is not None else ():
         for value in select(structured, held.path):
-            if held.format == "sigma_tag":
-                found.update(sigma_technique_ids({"tags": value}))
-            else:
-                found.update(technique_ids_in(value))
+            found.update(ids_in_field(value, held.format))
     return found
 
 

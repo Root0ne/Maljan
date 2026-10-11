@@ -531,8 +531,15 @@ class TestTheFactsAConditionReads:
 
     def test_the_facts_are_read_off_the_tools_answers(self, tmp_path: Path) -> None:
         result = _pack(_apk(tmp_path), "apk")
+        # The capability rule counts under its kind and its declared source
+        # name, and the legacy field keeps the pack's own count.
         assert result.facts == TriageFacts(
-            has_signature=True, reputation_malicious=None, yara_hits=0, capa_hits=1
+            has_signature=True,
+            reputation_malicious=None,
+            yara_hits=0,
+            capa_hits=1,
+            rule_hits=1,
+            hits={"capability_rules": 1, "capa": 1},
         )
 
     def test_a_condition_names_only_the_four_fields(self) -> None:

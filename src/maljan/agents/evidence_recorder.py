@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 from maljan.agents.tool_fence import fenced
 from maljan.core.exceptions import SampleNotOpened
 from maljan.core.logger import logger
+from maljan.core.undeclared_tools import entry_decompiles
 from maljan.llm.context_window import answering_for
 from maljan.llm.stream_watch import watching
 from maljan.pipeline.events import (
@@ -749,7 +750,7 @@ def seeded_repeat_guard(entries: Sequence[Any] | None) -> RepeatGuard:
             continue
         output = str(getattr(entry, "output", "") or "")
         guard.seed(tool, args, entry_id, recorded=output)
-        if decompiles(tool):
+        if entry_decompiles(entry):
             guard.note_function(listed_function(output), entry_id, output)
     return guard
 
@@ -765,9 +766,15 @@ def listing_body(listing: str) -> str:
     return text[: -len(_CUT_MARKER)] if text.endswith(_CUT_MARKER) else text
 
 
-def decompiles(tool: str) -> bool:
-    """Whether a tool's name says it decompiles, the way the decompiled-function list reads it."""
-    return "decompil" in str(tool or "").lower()
+def decompiles(tool: str, facts: Any = None) -> bool:
+    """Whether a tool lists decompiled code, the way the decompiled-function list reads it.
+
+    By the kind its declaration (``facts``) gives, else, for a tool that
+    declares nothing, by its name (``core.undeclared_tools``).
+    """
+    from maljan.core.undeclared_tools import decompiles as by_declaration
+
+    return by_declaration(facts, tool)
 
 
 def _function_label(text: str, key: tuple[str, Any] | None) -> str:
@@ -1035,7 +1042,7 @@ def _record_tool(
     from langchain_core.tools import StructuredTool
 
     from maljan.agents.output_shortening import narrowing_arguments
-    from maljan.agents.tool_pinning import declared_source_of, server_of
+    from maljan.agents.tool_pinning import declared_facts_of, declared_source_of, server_of
 
     func = getattr(tool, "func", None)
     coroutine = getattr(tool, "coroutine", None)
@@ -1048,6 +1055,8 @@ def _record_tool(
     # Where the tool's declaration lives (``core.tool_declarations``), read
     # from the tool itself as it was built and written on every entry.
     source = declared_source_of(tool)
+    # What the tool declares about itself, read once for every call it makes.
+    facts = declared_facts_of(tool)
     accepted = tuple(getattr(args_schema, "model_fields", {}) or {})
 
     # The arguments of this tool that reach a part its answer left out, read
@@ -1294,7 +1303,7 @@ def _record_tool(
         # Not for an answer the conversation had no room for.
         function = (
             listed_function(text)
-            if repeats is not None and decompiles(name) and not_shown is None
+            if repeats is not None and decompiles(name, facts) and not_shown is None
             else None
         )
         holder = repeats.function_entry(function, text) if repeats is not None else None

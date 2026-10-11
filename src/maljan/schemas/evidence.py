@@ -123,13 +123,15 @@ def not_shown_record(chars: int) -> str:
 
 
 def lists_code(tool: Any) -> bool:
-    """Whether a tool's name says it decompiles or disassembles: the platform's one rule for it.
+    """Whether an undeclared tool's name says it decompiles or disassembles.
 
-    Every reader that asks whether an entry is a listing of code reads it here,
-    so the readers cannot drift apart.
+    The name half of ``core.undeclared_tools``: a reader that holds the
+    entry reads it by its declared kind (``entry_lists_any_code``) and comes
+    here only for a tool whose name is all it has.
     """
-    name = str(tool or "").lower()
-    return "decompil" in name or "disassembl" in name
+    from maljan.core.undeclared_tools import named_as_code_listing, named_as_decompiler
+
+    return named_as_decompiler(tool) or named_as_code_listing(tool)
 
 
 def answer_not_shown(entry: Any) -> bool:

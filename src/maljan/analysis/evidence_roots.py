@@ -93,6 +93,7 @@ from maljan.analysis.sandbox_sections import (
     item_index_of,
 )
 from maljan.core.declared_reading import facts_of, kind_of, reads_as, shipped_by_name
+from maljan.core.undeclared_tools import address_arguments, entry_lists_any_code
 from maljan.schemas.evidence import repeat_holders
 
 WHOLE_FILE = "the whole file"
@@ -164,16 +165,9 @@ _IMPORT_LISTING = "evidence_roots._IMPORT_LISTINGS"
 _EXPORT_LISTING = "evidence_roots._EXPORT_LISTINGS"
 _PROGRAM_STATEMENT = "evidence_roots._PROGRAM_TOOLS"
 _OPEN = "evidence_roots._OPEN_TOOLS"
-# The argument names a call gives one address under, and a list of them under.
-_ADDRESS_ARGS = (
-    "address",
-    "addr",
-    "function_address",
-    "ea",
-    "va",
-    "start_address",
-    "entry_address",
-)
+# The argument names a call gives one address under: the one its tool
+# declares, then the shared list (``core.undeclared_tools.address_arguments``);
+# and a list of them under.
 _ADDRESS_LIST_ARGS = ("functions", "addresses")
 _NAME_ARGS = ("name", "function_name", "function", "symbol")
 # The argument that names a file the run carved.
@@ -1423,7 +1417,7 @@ def _read_entry(entry: Any, found: EntryRoots, joins: _Joins) -> EntryRoots:
         if facts is not None and facts.rows and facts.places:
             _read_declared_rows(found, facts, data, tool)
         placed = bool(found.roots)
-        for key in () if placed else _ADDRESS_ARGS:
+        for key in () if placed else address_arguments(facts):
             if args.get(key) not in (None, "") and _address_root(found, args[key]):
                 placed = True
                 break
@@ -1480,8 +1474,10 @@ class RunRoots:
         # The run's sandbox section index: an item id is read only against it.
         self.items: ItemIndex | None = item_index_of(entries)
         self.entries: dict[str, EntryRoots] = {}
-        # Each entry's tool, lower-cased, for what kind of reading it is.
+        # Each entry's tool, lower-cased, and the entries whose tool lists
+        # code (decompiled or as instructions), for what kind of reading it is.
         self.tools: dict[str, str] = {}
+        self._listings: set[str] = set()
         # What each entry's answer states as a whole (``answer_facts``).
         self.answers: dict[str, AnswerFacts] = {}
         # The entries whose answer is not about the file's bytes: a reference
@@ -1492,6 +1488,8 @@ class RunRoots:
             if not eid or getattr(entry, "repeated_of", None):
                 continue
             self.tools[eid] = _tool(entry).lower()
+            if entry_lists_any_code(entry):
+                self._listings.add(eid)
             if reads_as(entry, _REFERENCE) or reads_as(entry, _FILE_ASSESSMENT):
                 self._reads_nothing_of_the_file.add(eid)
             self.answers[eid] = answer_facts(_structured(entry))
@@ -1510,6 +1508,8 @@ class RunRoots:
             self.entries[repeat] = held or EntryRoots(reason=REPEAT_LOOP.format(entry=repeat))
             if held and holder in self.tools:
                 self.tools[repeat] = self.tools[holder]
+                if holder in self._listings:
+                    self._listings.add(repeat)
 
     def of_entry(self, entry_id: str) -> EntryRoots:
         eid = str(entry_id or "").strip().lower()
@@ -1691,8 +1691,8 @@ class RunRoots:
 
     def reading(self, citation: str, roots: Sequence[str]) -> str:
         """What one cited source is (``reading_of``), from its tool and the roots it gives."""
-        tool = self.tools.get(str(citation).strip().lower(), "")
-        return reading_of(tool, roots)
+        cited = str(citation).strip().lower()
+        return reading_of(self.tools.get(cited, ""), roots, code=cited in self._listings)
 
     def of_assertion(self, entry_id: str, technique_id: str) -> tuple[list[str], list[str]]:
         """``(roots, no: reasons)`` for the rows of an asserting entry that name the technique."""
@@ -1859,11 +1859,12 @@ _RUN_ROOT_OPENINGS = tuple(
 )
 
 
-def reading_of(tool: str, roots: Iterable[str]) -> str:
-    """What one source is, read from its tool's name and the roots it gives.
+def reading_of(tool: str, roots: Iterable[str], *, code: bool | None = None) -> str:
+    """What one source is, read from what its tool lists and the roots it gives.
 
-    ``code``: the tool's name says it decompiles or disassembles
-    (``schemas.evidence.lists_code``, the platform's one rule for a listing);
+    ``code``: the tool lists code, decompiled or as instructions, by the kind
+    it declares (``code``, as the caller read it from the entry's facts), or,
+    for an undeclared tool, by its name (``schemas.evidence.lists_code``);
     ``run``: a root is a sandbox process, network flow or DNS query, what a
     sandbox or a capture recorded while the sample ran; ``report``: a root is
     an external assessment of the whole file; ``artefact``: its roots are
@@ -1873,7 +1874,7 @@ def reading_of(tool: str, roots: Iterable[str]) -> str:
     from maljan.schemas.evidence import lists_code
 
     held = [str(root) for root in roots]
-    if lists_code(tool):
+    if lists_code(tool) if code is None else code:
         return READING_CODE
     if any(root.startswith(_RUN_ROOT_OPENINGS) for root in held):
         return READING_RUN

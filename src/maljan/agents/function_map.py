@@ -32,14 +32,19 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from maljan.core.declared_reading import kind_of, reads_as
+from maljan.core.undeclared_tools import (
+    entry_address_arguments,
+    entry_lists_a_function,
+    entry_lists_any_code,
+    entry_lists_code,
+)
 from maljan.pipeline.validation import (
-    _ADDRESS_ARGUMENTS,
     _DIGIT_RUN,
-    _GENERIC_FUNCTION_NAME,
     _NAME_ARGUMENTS,
     _address_value,
     _addresses_written,
     decompiled_functions,
+    generic_function_name,
     image_bases_in,
 )
 from maljan.schemas.evidence import answer_not_shown
@@ -378,25 +383,14 @@ def keeps_for_the_map(entry: Any) -> bool:
     one of the analysis server's tools that tie artefacts to functions."""
     if getattr(entry, "repeated_of", None):
         return False
-    tool = str(getattr(entry, "tool", "") or "").lower()
-    return "decompil" in tool or _lists_code(tool) or bool(_map_kind(entry))
-
-
-# A tool whose name says it disassembles, and one of those whose name says the
-# whole function is what it lists.
-def _lists_code(tool: str) -> bool:
-    return "disassembl" in tool.lower()
-
-
-def _lists_a_function(tool: str) -> bool:
-    return _lists_code(tool) and "function" in tool.lower()
+    return entry_lists_any_code(entry) or bool(_map_kind(entry))
 
 
 def _listed_at(entry: Any) -> tuple[int | None, list[str]]:
     """The address and the names a listing call was given, from its arguments alone."""
     args = getattr(entry, "args", None) or {}
     address: int | None = None
-    for argument in _ADDRESS_ARGUMENTS:
+    for argument in entry_address_arguments(entry):
         if argument in args and address is None:
             address = _address_value(args[argument])
     names: list[str] = []
@@ -404,7 +398,7 @@ def _listed_at(entry: Any) -> tuple[int | None, list[str]]:
         value = str(args.get(argument) or "").strip()
         if value:
             names.append(value)
-            generic = _GENERIC_FUNCTION_NAME.fullmatch(value)
+            generic = generic_function_name().fullmatch(value)
             if generic is not None and address is None:
                 address = int(generic.group(1), 16)
     return address, names
@@ -517,13 +511,12 @@ def build_function_map(
     )
     known = [e.address for e in visited if e.address is not None] + list(found.by_function)
     for entry in entries:
-        tool = str(getattr(entry, "tool", "") or "")
-        if not _lists_code(tool):
+        if not entry_lists_code(entry):
             continue
         address, names = _listed_at(entry)
         if address is None:
             continue
-        if not _lists_a_function(tool) and not any(_same(address, k, bases) for k in known):
+        if not entry_lists_a_function(entry) and not any(_same(address, k, bases) for k in known):
             continue
         entry_id = str(getattr(entry, "id", "") or "")
         into = next((e for e in visited if _same(e.address, address, bases)), None)
@@ -602,14 +595,14 @@ def _claim_names(text: str, entry: MapEntry, bases: Sequence[int]) -> bool:
         ):
             return True
     for name in entry.names:
-        if _GENERIC_FUNCTION_NAME.fullmatch(name):
+        if generic_function_name().fullmatch(name):
             continue
         # A dotted name (``sym.entry``, ``fcn.main``) written whole names it;
         # its last label is read by the same rule as a plain name.
         if "." in name and _written_bare(text, name):
             return True
         last = name.rsplit(".", 1)[-1]
-        if len(last) < 3 or _GENERIC_FUNCTION_NAME.fullmatch(last):
+        if len(last) < 3 or generic_function_name().fullmatch(last):
             continue
         if _WORD_NAME.fullmatch(last):
             if _named_as_a_function(text, last):
@@ -687,7 +680,7 @@ def _where(address: int | None, names: Sequence[str]) -> str:
 def _folded(entry: MapEntry) -> str:
     """A bare visit on the "also visited" line: its address, with the names that are not
     a decompiler's generic ``FUN_``/``sub_``/``fcn.`` name."""
-    kept = [n for n in entry.names if not _GENERIC_FUNCTION_NAME.fullmatch(n)]
+    kept = [n for n in entry.names if not generic_function_name().fullmatch(n)]
     if entry.address is None:
         return _where(None, kept or list(entry.names))
     return _where(entry.address, kept)

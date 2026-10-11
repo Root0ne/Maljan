@@ -62,14 +62,18 @@ from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from maljan.core.undeclared_tools import (
+    entry_address_arguments,
+    entry_is_strings_source,
+    entry_lists_a_function,
+    entry_lists_any_code,
+)
 from maljan.pipeline.events import safe_finding_value
 from maljan.pipeline.validation import (
-    _ADDRESS_ARGUMENTS,
     _BARE_ADDRESS,
     _CLAUSE_BREAK_RE,
     _CODE_SPAN_RE,
     _CUE_THAT_ASSERTS_RE,
-    _GENERIC_FUNCTION_NAME,
     _HEX_ADDRESS,
     _INSIDE_A_NEGATION_RE,
     _LIST_END_RE,
@@ -95,9 +99,10 @@ from maljan.pipeline.validation import (
     claim_block_indexes,
     decidable,
     decompiled_functions,
+    generic_function_name,
     literal_values,
 )
-from maljan.schemas.evidence import answer_not_shown, entry_ids_in, lists_code
+from maljan.schemas.evidence import answer_not_shown, entry_ids_in
 
 __all__ = [
     "FUNCTION_CLAIM_UNHELD_CODE",
@@ -261,12 +266,6 @@ def _names_in(text: str) -> set[str]:
     return {_api_key(token) for token in _IDENTIFIER.findall(str(text or "")) if len(token) >= 3}
 
 
-def _is_a_strings_source(tool: str) -> bool:
-    """Whether an entry's tool answers with the sample's strings as data."""
-    lowered = tool.lower()
-    return "string" in lowered or "floss" in lowered
-
-
 # ---------------------------------------------------------------------------
 # The functions a claim may be about
 # ---------------------------------------------------------------------------
@@ -285,8 +284,7 @@ def listed_functions(entries: Iterable[Any]) -> list[DecompiledFunction]:
     for function in decompiled_functions(entries):
         found[function.address if function.address is not None else function.names[0]] = function
     for entry in entries:
-        tool = str(getattr(entry, "tool", "") or "").lower()
-        if "disassembl" not in tool or "function" not in tool:
+        if not entry_lists_a_function(entry):
             continue
         if not getattr(entry, "ok", True) or answer_not_shown(entry):
             continue
@@ -294,7 +292,7 @@ def listed_functions(entries: Iterable[Any]) -> list[DecompiledFunction]:
             continue
         args = getattr(entry, "args", None) or {}
         address: int | None = None
-        for argument in _ADDRESS_ARGUMENTS:
+        for argument in entry_address_arguments(entry):
             if argument in args and address is None:
                 address = _address_value(args[argument])
         names = [
@@ -304,7 +302,7 @@ def listed_functions(entries: Iterable[Any]) -> list[DecompiledFunction]:
         ]
         if address is None:
             for name in names:
-                generic = _GENERIC_FUNCTION_NAME.fullmatch(name)
+                generic = generic_function_name().fullmatch(name)
                 if generic is not None:
                     address = int(generic.group(1), 16)
                     break
@@ -593,13 +591,9 @@ def function_facts(
     found = merged_artefacts(artefacts, function_artefacts(entries))
     facts = FunctionFacts()
     run_names: set[str] = set()
-    sources = [
-        entry
-        for entry in [*pack_entries, *entries]
-        if _is_a_strings_source(str(getattr(entry, "tool", "") or ""))
-    ]
+    sources = [entry for entry in [*pack_entries, *entries] if entry_is_strings_source(entry)]
     for entry in entries:
-        if not lists_code(getattr(entry, "tool", "")):
+        if not entry_lists_any_code(entry):
             continue
         entry_id = str(getattr(entry, "id", "") or "")
         output = str(getattr(entry, "output", "") or "")
@@ -1023,7 +1017,7 @@ def _named_at(text: str, names: frozenset[str] | set[str]) -> list[tuple[str, in
     described: set[str] = set()
     for match in _IDENTIFIER.finditer(text):
         token = match.group(0)
-        if token in seen or len(token) < 3 or _GENERIC_FUNCTION_NAME.fullmatch(token):
+        if token in seen or len(token) < 3 or generic_function_name().fullmatch(token):
             continue
         if not _is_a_name(token, names):
             continue
@@ -1052,7 +1046,7 @@ def _named_at(text: str, names: frozenset[str] | set[str]) -> list[tuple[str, in
             or not re.search(r"[A-Za-z0-9]", _ESCAPE.sub("", value))
             or not decidable(value)
             or _api_key(value) in keys
-            or _GENERIC_FUNCTION_NAME.fullmatch(value)
+            or generic_function_name().fullmatch(value)
             or entry_ids_in(value)
         ):
             continue
@@ -1363,7 +1357,7 @@ def _attribution(
     from bisect import bisect_right
 
     mentions: list[tuple[int, str]] = []
-    for pattern in (_HEX_ADDRESS, _GENERIC_FUNCTION_NAME, _SUFFIXED_ADDRESS, _BARE_ADDRESS):
+    for pattern in (_HEX_ADDRESS, generic_function_name(), _SUFFIXED_ADDRESS, _BARE_ADDRESS):
         for match in pattern.finditer(sentence):
             start = facts.offset(int(match.group(1), 16))
             if start is None:
@@ -1374,7 +1368,7 @@ def _attribution(
                 mentions.append((match.start(), facts.va(start)))
     for function in about:
         for name in function.names:
-            if _GENERIC_FUNCTION_NAME.fullmatch(name) or len(name) < 3:
+            if generic_function_name().fullmatch(name) or len(name) < 3:
                 continue
             for match in re.finditer(r"(?<![\w.])" + re.escape(name) + r"(?![\w])", sentence):
                 mentions.append((match.start(), ""))

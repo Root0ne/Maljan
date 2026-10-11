@@ -379,13 +379,23 @@ def server_fragments(tools: Sequence[object]) -> list[str]:
 
 
 def has_decompiler(tools: Sequence[object]) -> bool:
-    """Whether any tool in ``tools`` decompiles, by the name it is offered under."""
-    return any("decompile" in name.lower() for name in tool_names(tools))
+    """Whether any tool in ``tools`` decompiles: by the kind it declares, else by its name."""
+    from maljan.agents.tool_pinning import declared_facts_of
+    from maljan.core.undeclared_tools import decompiles
+
+    return any(
+        decompiles(declared_facts_of(tool), getattr(tool, "name", "")) for tool in offered(tools)
+    )
 
 
 def has_xrefs(tools: Sequence[object]) -> bool:
-    """Whether any tool in ``tools`` reads cross-references, by the name it is offered under."""
-    return any("xref" in name.lower() for name in tool_names(tools))
+    """Whether any tool in ``tools`` reads cross-references: by its declared kind, else its name."""
+    from maljan.agents.tool_pinning import declared_facts_of
+    from maljan.core.undeclared_tools import reads_xrefs
+
+    return any(
+        reads_xrefs(declared_facts_of(tool), getattr(tool, "name", "")) for tool in offered(tools)
+    )
 
 
 def tool_names(tools: Sequence[object]) -> frozenset[str]:
