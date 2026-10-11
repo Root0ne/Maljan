@@ -1302,8 +1302,8 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           minimum: null, maximum: null, secret: false, group: "memory",
           title: "Backend", description: "In-process memory, or a Qdrant instance that survives a restart.",
           applies: "next_job", editable: true, reason: null, probe: null,
-          applies_when: null, order: -1, choices_from: null, editor: null, subgroup: null, advanced: false,
-          required_env: null,
+          applies_when: null, order: -1, choices_from: "memory_backends", editor: null, subgroup: null, advanced: false,
+          required_env: null, choice_labels: { memory: "in-process" },
         },
         {
           key: "core.memory.qdrant.url", namespace: "core", path: "memory.qdrant.url",

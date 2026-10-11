@@ -142,6 +142,29 @@ describe("guideStatus", () => {
     );
   });
 
+  it("shows the label each backend declares beside its id", () => {
+    /* As the catalogue serves it: `choice_labels` on core.memory.backend. */
+    const labels: Record<string, string> = { memory: "in-process", vectorhub: "hosted" };
+    const label = (key: string, choice: string) =>
+      key === "core.memory.backend" ? labels[choice] : undefined;
+    const mem = ctx({ "core.memory.backend": "memory" });
+    expect(guideStatus("memory", mem.effective, mem.isSet, label)).toBe("memory (in-process)");
+    const qdrant = ctx({
+      "core.memory.backend": "qdrant",
+      "core.memory.qdrant.url": "http://localhost:6333",
+    });
+    expect(guideStatus("memory", qdrant.effective, qdrant.isSet, label)).toBe(
+      "qdrant · http://localhost:6333"
+    );
+    const other = ctx({
+      "core.memory.backend": "vectorhub",
+      "core.memory.vectorhub.url": "http://store:9000",
+    });
+    expect(guideStatus("memory", other.effective, other.isSet, label)).toBe(
+      "vectorhub (hosted) · http://store:9000"
+    );
+  });
+
   it("reports enrichment on or off and which keys are set", () => {
     const off = ctx({ "api.enrichment_enabled": false });
     expect(guideStatus("enrichment", off.effective, off.isSet)).toBe("Off");

@@ -89,6 +89,9 @@ class CatalogEntry:
     # reason ``choices`` is: the rule lives in ``REQUIRED_ENV_ALLOW`` and a
     # second copy of it in the console is a copy that drifts.
     required_env: dict[str, list[str]] | None = None
+    # The short phrase each choice declares for the console to show beside it
+    # (a registry's own labels), keyed by choice; ``None`` when none declares one.
+    choice_labels: dict[str, str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -169,6 +172,16 @@ def _registry_choices(source: str | None) -> list[str] | None:
         from maljan.memory.store_factory import memory_backends
 
         return list(memory_backends())
+    return None
+
+
+def _registry_labels(source: str | None) -> dict[str, str] | None:
+    """The labels a core registry's choices declare for ``source``, or ``None``."""
+    if source == "memory_backends":
+        from maljan.memory.store_factory import registered_backends
+
+        labels = {key: b.label for key, b in registered_backends().items() if b.label}
+        return labels or None
     return None
 
 
@@ -259,6 +272,7 @@ def core_catalog() -> list[CatalogEntry]:
                 applies_when=(ann.get("applies_when") if ann else None),
                 order=(ann.get("order", 0) if ann else 0),
                 choices_from=(ann.get("choices_from") if ann else None),
+                choice_labels=_registry_labels(ann.get("choices_from") if ann else None),
                 editor=(ann.get("editor") if ann else None),
                 subgroup=(ann.get("subgroup") if ann else None),
                 advanced=bool(ann.get("advanced", False)) if ann else False,

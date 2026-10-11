@@ -70,6 +70,9 @@ export interface CatalogEntry {
    *  so a server card from such an API offers every name as removable rather
    *  than failing to draw. */
   required_env?: Record<string, readonly string[]> | null;
+  /** The short phrase a choice declares for display beside it (a memory
+   *  backend's "in-process"), keyed by choice; absent when none declares one. */
+  choice_labels?: Record<string, string> | null;
 }
 
 /**

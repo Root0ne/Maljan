@@ -38,6 +38,7 @@ class CatalogEntryDTO(BaseModel):
     subgroup: str | None = None
     advanced: bool = False
     required_env: dict[str, list[str]] | None = None
+    choice_labels: dict[str, str] | None = None
 
 
 class GroupDTO(BaseModel):
