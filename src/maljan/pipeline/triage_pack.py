@@ -162,6 +162,8 @@ __all__ = [
 
 # The agent and server every in-process entry of the pack is recorded under.
 PIPELINE = "pipeline"
+# The source every pack entry records (``core.tool_declarations``).
+PACK_SOURCE = "pack"
 
 # The shortest printable run the strings head keeps. Six characters is where
 # a run stops being an accident of the byte stream and starts being a token
@@ -628,6 +630,7 @@ class _Pack:
                 tool=tool,
                 args=args,
                 server=PIPELINE,
+                source=PACK_SOURCE,
                 output=message,
                 ok=False,
                 error=message,
@@ -651,6 +654,7 @@ class _Pack:
             tool=tool,
             args=args,
             server=PIPELINE,
+            source=PACK_SOURCE,
             output=result_text(value),
             ok=not error,
             error=str(error) if error else None,
@@ -675,6 +679,7 @@ class _Pack:
             tool=tool,
             args=args,
             server=PIPELINE,
+            source=PACK_SOURCE,
             output=message,
             ok=False,
             error=message,
@@ -893,6 +898,7 @@ class _Pack:
                 tool="reputation",
                 args={"sha256": self.inputs.sha256},
                 server=PIPELINE,
+                source=PACK_SOURCE,
                 output=message,
                 ok=False,
                 error=message,
@@ -924,6 +930,7 @@ class _Pack:
                 tool="function_matches",
                 args={"exclude_sample_id": self.inputs.sha256},
                 server=PIPELINE,
+                source=PACK_SOURCE,
                 output=message,
                 ok=False,
                 error=message,
@@ -1057,6 +1064,7 @@ class _Pack:
                 tool="floss",
                 args=args,
                 server=PIPELINE,
+                source=PACK_SOURCE,
                 output=message,
                 ok=False,
                 error=message,
@@ -1118,6 +1126,7 @@ class _Pack:
             tool=tool,
             args=args,
             server=PIPELINE,
+            source=PACK_SOURCE,
             output=message,
             ok=False,
             error=message,

@@ -246,12 +246,18 @@ NO_TOOLS_STATEMENT = (
 # registry server's tools carry their server key instead, and the team's
 # ``ask_`` tools carry ``team`` there.
 SOURCE_METADATA_KEY = "maljan_source"
+# Where the tool's declaration lives (``core.tool_declarations``):
+# ``provider:<id>`` or ``sandbox``, written on every ledger entry of the tool.
+DECLARED_SOURCE_METADATA_KEY = "maljan_declared_source"
 
 
-def stamp_source(tools: Sequence[Any], source: str) -> list[Any]:
+def stamp_source(tools: Sequence[Any], source: str, declared: str = "") -> list[Any]:
     """``tools``, each marked as coming from ``source``, so its family is read, not guessed.
 
-    A tool that cannot be copied is kept as it is; its family is then inferred.
+    ``declared`` is where the tools' declaration lives (``provider:ghidra``,
+    ``sandbox``), recorded on each ledger entry they write. A tool that cannot
+    be copied is kept as it is; its family is then inferred, and it records
+    no source.
     """
     out: list[Any] = []
     for tool in tools:
@@ -260,6 +266,8 @@ def stamp_source(tools: Sequence[Any], source: str) -> list[Any]:
             out.append(tool)
             continue
         metadata = {**(getattr(tool, "metadata", None) or {}), SOURCE_METADATA_KEY: source}
+        if declared:
+            metadata[DECLARED_SOURCE_METADATA_KEY] = declared
         try:
             out.append(copy(update={"metadata": metadata}))
         except Exception:  # noqa: BLE001 — a mark is never worth a tool

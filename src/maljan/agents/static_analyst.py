@@ -237,7 +237,9 @@ class StaticAnalyst(BaseAnalyst):
             raise
         # Marked as the provider's, so the prompt names them as such rather
         # than inferring it from the absence of a server key.
-        pool = stamp_source(provider.get_tools(), PROVIDER_FAMILY)
+        pool = stamp_source(
+            provider.get_tools(), PROVIDER_FAMILY, declared=f"provider:{provider.id}"
+        )
         # No ``self.toolkit`` assignment here: the provider holds its own client
         # privately and closes it itself (``ServiceContainer.aclose`` calls
         # ``get_static_provider().close()``), so there is nothing for this

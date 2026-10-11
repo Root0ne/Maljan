@@ -118,6 +118,27 @@ def server_of(tool: Any) -> str:
     return str(metadata.get(SERVER_METADATA_KEY, "") or "")
 
 
+def declared_source_of(tool: Any) -> str | None:
+    """Where a tool's declaration lives (``core.tool_declarations``), as the tool was built.
+
+    A registry server's tool is ``mcp:<key>``; a provider's or the sandbox
+    report's tool carries the source it was stamped with when it was attached
+    (``prompt_fragments.stamp_source``). A team ``ask_`` tool, or a tool
+    nothing stamped, has none: it is never guessed from the tool's name.
+    """
+    from maljan.agents.delegation import TEAM_SERVER
+    from maljan.agents.prompt_fragments import DECLARED_SOURCE_METADATA_KEY
+
+    metadata = getattr(tool, "metadata", None) or {}
+    stamped = str(metadata.get(DECLARED_SOURCE_METADATA_KEY, "") or "")
+    if stamped:
+        return stamped
+    server = server_of(tool)
+    if server and server != TEAM_SERVER:
+        return f"mcp:{server}"
+    return None
+
+
 def _spellings(
     default_path: str | None, target: str, staged_path: str | None = None
 ) -> frozenset[str]:

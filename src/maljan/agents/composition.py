@@ -594,7 +594,7 @@ def _provider_tools(container: Any, definition: AgentDefinition, provider_id: st
     )
     from maljan.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
 
-    return stamp_source(provider.get_tools(), PROVIDER_FAMILY)
+    return stamp_source(provider.get_tools(), PROVIDER_FAMILY, declared=f"provider:{provider.id}")
 
 
 def _sandbox_tools(container: Any, definition: AgentDefinition) -> list[Any]:
@@ -614,7 +614,7 @@ def _sandbox_tools(container: Any, definition: AgentDefinition) -> list[Any]:
     from maljan.agents.prompt_fragments import SANDBOX_FAMILY, stamp_source
     from maljan.providers.sandbox_tools import sandbox_tools
 
-    return stamp_source(sandbox_tools(container), SANDBOX_FAMILY)
+    return stamp_source(sandbox_tools(container), SANDBOX_FAMILY, declared="sandbox")
 
 
 def _agent_tools(container: Any, definition: AgentDefinition, key: str) -> list[Any]:

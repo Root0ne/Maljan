@@ -157,7 +157,9 @@ class DynamicAnalyst(BaseAnalyst):
         provider = self._sandbox_provider()
         sandbox_tools: list[Any] = []
         if provider.capabilities.provides_tools:
-            sandbox_tools = stamp_source(provider.dynamic_tools(), PROVIDER_FAMILY)
+            sandbox_tools = stamp_source(
+                provider.dynamic_tools(), PROVIDER_FAMILY, declared=f"provider:{provider.id}"
+            )
             self.toolkit = getattr(provider, "_toolkit", None)
         else:
             self.logger.info("Sandbox provider '%s' exposes no tools.", provider.id)

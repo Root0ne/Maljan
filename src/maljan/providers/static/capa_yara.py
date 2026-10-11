@@ -551,6 +551,7 @@ def ledger_entries(
                 tool=tool,
                 args={},
                 server=None,
+                source="provider:capa_yara",
                 output=json.dumps(payload),
                 stage=stage,
             )
