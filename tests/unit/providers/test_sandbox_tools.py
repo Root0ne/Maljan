@@ -129,6 +129,34 @@ class TestNetwork:
         assert result["dns_next_offset"] == 6
 
 
+class TestRegistryOps:
+    """Every registry row comes back unless a page is asked for.
+
+    The golden answers over the real corpus once held 200 rows per report
+    while the tool already answered all of them, and nothing outside that
+    corpus noticed; this pins the whole-list answer where CI runs it.
+    """
+
+    @staticmethod
+    def _report(count: int) -> dict[str, Any]:
+        keys = [f"HKEY_CURRENT_USER\\Software\\Example\\k{i}" for i in range(count)]
+        return {"behavior": {"summary": {"keys": keys}}}
+
+    def test_every_row_comes_back_when_no_page_is_asked_for(self) -> None:
+        result = sandbox_tools.sandbox_registry_ops(self._report(500))
+
+        assert len(result["registry"]) == 500
+        assert result["total"] == 500
+        assert "next_offset" not in result
+
+    def test_a_page_says_where_the_next_starts(self) -> None:
+        result = sandbox_tools.sandbox_registry_ops(self._report(10), limit=3, offset=3)
+
+        assert [row["key"][-2:] for row in result["registry"]] == ["k3", "k4", "k5"]
+        assert result["total"] == 10
+        assert result["next_offset"] == 6
+
+
 class TestSignatures:
     def test_a_signature_is_reported_as_the_engine_s_opinion_with_its_severity(self) -> None:
         result = sandbox_tools.sandbox_signatures(REPORT)

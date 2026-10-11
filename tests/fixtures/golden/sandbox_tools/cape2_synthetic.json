@@ -1,0 +1,321 @@
+{
+  "sandbox_api_calls": {
+    "apis": [
+      {
+        "api": "NtCreateFile",
+        "count": 0,
+        "dll": null,
+        "first_args": "[{'name': 'FileHandle', 'value': '0x0000010c'}, {'name': 'FileName', 'value': 'C:\\\\Users\\\\guest\\\\AppData\\\\Roaming\\\\second.exe'}]",
+        "first_seen": "2000-01-01 00:00:01,700",
+        "process_count": 0,
+        "processes": []
+      },
+      {
+        "api": "NtCreateKey",
+        "count": 0,
+        "dll": null,
+        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000104'}, {'name': 'DesiredAccess', 'value': '0x000f003f'}, {'name': 'ObjectAttributes', 'value': 'HKEY_CURRENT_USER\\\\Software\\\\Synthetic'}]",
+        "first_seen": "2000-01-01 00:00:01,200",
+        "process_count": 0,
+        "processes": []
+      },
+      {
+        "api": "NtCreateMutant",
+        "count": 0,
+        "dll": null,
+        "first_args": "[{'name': 'Handle', 'value': '0x00000110'}, {'name': 'MutexName', 'value': 'Global\\\\SyntheticMutex'}]",
+        "first_seen": "2000-01-01 00:00:01,800",
+        "process_count": 0,
+        "processes": []
+      },
+      {
+        "api": "NtOpenKey",
+        "count": 0,
+        "dll": null,
+        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000100'}, {'name': 'DesiredAccess', 'value': '0x00020019'}, {'name': 'ObjectAttributes', 'value': 'HKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\Synthetic\\\\Settings'}]",
+        "first_seen": "2000-01-01 00:00:01,000",
+        "process_count": 0,
+        "processes": []
+      },
+      {
+        "api": "NtSetValueKey",
+        "count": 0,
+        "dll": null,
+        "first_args": "{'KeyHandle': '0x00000200', 'ValueName': 'Interval', 'Buffer': '300', 'FullName': 'HKEY_CURRENT_USER\\\\Software\\\\Synthetic\\\\Interval'}",
+        "first_seen": "2000-01-01 00:00:02,100",
+        "process_count": 0,
+        "processes": []
+      },
+      {
+        "api": "RegDeleteValueW",
+        "count": 0,
+        "dll": null,
+        "first_args": "[{'name': 'Handle', 'value': '0x00000104'}, {'name': 'ValueName', 'value': 'Trace'}, {'name': 'FullName', 'value': 'HKEY_CURRENT_USER\\\\Software\\\\Synthetic\\\\Trace'}]",
+        "first_seen": "2000-01-01 00:00:01,500",
+        "process_count": 0,
+        "processes": []
+      },
+      {
+        "api": "RegQueryValueExW",
+        "count": 0,
+        "dll": null,
+        "first_args": "[{'name': 'Handle', 'value': '0x00000100'}, {'name': 'ValueName', 'value': 'InstallPath'}, {'name': 'Data', 'value': 'C:\\\\Program Files\\\\Synthetic'}, {'name': 'FullName', 'value': 'HKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\Synthetic\\\\Settings\\\\InstallPath'}]",
+        "first_seen": "2000-01-01 00:00:01,100",
+        "process_count": 0,
+        "processes": []
+      },
+      {
+        "api": "RegSetValueExW",
+        "count": 0,
+        "dll": null,
+        "first_args": "[{'name': 'Handle', 'value': '0x00000108'}, {'name': 'ValueName', 'value': 'Updater'}, {'name': 'Type', 'value': '1'}, {'name': 'Buffer', 'value': 'C:\\\\Users\\\\guest\\\\AppData\\\\Roaming\\\\first.exe'}, {'name': 'FullName', 'value': 'HKEY_CURRENT_USER\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run\\\\Updater'}]",
+        "first_seen": "2000-01-01 00:00:01,300",
+        "process_count": 0,
+        "processes": []
+      }
+    ],
+    "total": 8
+  },
+  "sandbox_dropped_files": {
+    "dropped": [
+      {
+        "name": "second.exe",
+        "path": "",
+        "sha256": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+        "size": 4096,
+        "type": "PE32 executable (GUI) Intel 80386, for MS Windows"
+      }
+    ],
+    "total": 1
+  },
+  "sandbox_mutexes": {
+    "mutexes": [
+      "Global\\SyntheticMutex"
+    ],
+    "total": 1
+  },
+  "sandbox_network": {
+    "dns": [
+      {
+        "answers": [
+          {
+            "data": "203.0.113.10",
+            "type": "A"
+          }
+        ],
+        "first_seen": 1.5,
+        "request": "c2.synthetic.test",
+        "type": "A"
+      },
+      {
+        "answers": [
+          {
+            "data": "198.51.100.20",
+            "type": "A"
+          }
+        ],
+        "first_seen": 2.5,
+        "request": "update.synthetic.test",
+        "type": "A"
+      },
+      {
+        "answers": [],
+        "first_seen": 3.5,
+        "request": "missing.synthetic.test",
+        "type": "A"
+      }
+    ],
+    "domains": [
+      {
+        "domain": "c2.synthetic.test",
+        "ip": "203.0.113.10"
+      },
+      {
+        "domain": "update.synthetic.test",
+        "ip": "198.51.100.20"
+      }
+    ],
+    "hosts": [
+      {
+        "asn": "",
+        "asn_name": "",
+        "country_name": "",
+        "hostname": "",
+        "inaddrarpa": "",
+        "ip": "203.0.113.10",
+        "ports": [
+          80
+        ]
+      },
+      {
+        "asn": "",
+        "asn_name": "",
+        "country_name": "",
+        "hostname": "",
+        "inaddrarpa": "",
+        "ip": "198.51.100.20",
+        "ports": [
+          443
+        ]
+      },
+      {
+        "asn": "",
+        "asn_name": "",
+        "country_name": "",
+        "hostname": "",
+        "inaddrarpa": "",
+        "ip": "8.8.8.8",
+        "ports": [
+          53
+        ],
+        "public_resolver": true
+      }
+    ],
+    "http": [
+      {
+        "body": "id=1",
+        "host": "c2.synthetic.test",
+        "method": "POST",
+        "path": "/gate",
+        "port": 80,
+        "uri": "http://c2.synthetic.test/gate",
+        "user-agent": "SyntheticAgent/1.0",
+        "version": "1.1"
+      }
+    ],
+    "icmp": [],
+    "tcp": [
+      {
+        "dport": 80,
+        "dst": "203.0.113.10",
+        "offset": 100,
+        "sport": 49160,
+        "src": "192.0.2.50",
+        "time": 1.6
+      },
+      {
+        "dport": 443,
+        "dst": "198.51.100.20",
+        "offset": 200,
+        "sport": 49161,
+        "src": "192.0.2.50",
+        "time": 2.6
+      }
+    ],
+    "tls": [
+      {
+        "dstip": "198.51.100.20",
+        "dstport": 443,
+        "sni": "update.synthetic.test",
+        "srcip": "192.0.2.50",
+        "srcport": 49161,
+        "version": "TLS 1.2"
+      }
+    ],
+    "udp": [
+      {
+        "dport": 53,
+        "dst": "8.8.8.8",
+        "offset": 50,
+        "public_resolver": true,
+        "sport": 50000,
+        "src": "192.0.2.50",
+        "time": 1.4
+      },
+      {
+        "dport": 53,
+        "dst": "192.0.2.1",
+        "offset": 60,
+        "sport": 50001,
+        "src": "192.0.2.50",
+        "time": 2.4
+      }
+    ]
+  },
+  "sandbox_processes": {
+    "processes": [
+      {
+        "call_count": 9,
+        "command_line": "",
+        "first_seen": "2000-01-01 00:00:00,000",
+        "name": "synthetic.exe",
+        "pid": null,
+        "ppid": 900
+      },
+      {
+        "call_count": 2,
+        "command_line": "",
+        "first_seen": "2000-01-01 00:00:02,000",
+        "name": "second.exe",
+        "pid": null,
+        "ppid": 1000
+      }
+    ],
+    "total": 2
+  },
+  "sandbox_registry_ops": {
+    "registry": [
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Synthetic\\Settings",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Synthetic\\OnlyInSummary",
+        "operation": "access",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\Updater",
+        "operation": "modify",
+        "value": "C:\\Users\\guest\\AppData\\Roaming\\second.exe"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Synthetic\\Settings\\InstallPath",
+        "operation": "query",
+        "value": "C:\\Program Files\\Synthetic"
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Synthetic",
+        "operation": "create",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Synthetic\\Trace",
+        "operation": "delete",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Synthetic\\Interval",
+        "operation": "modify",
+        "value": "300"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Synthetic",
+        "operation": "query",
+        "value": null
+      }
+    ],
+    "total": 8
+  },
+  "sandbox_services_and_tasks": {
+    "commands": [
+      "\"C:\\Users\\guest\\AppData\\Roaming\\second.exe\" --run"
+    ],
+    "services": [],
+    "tasks": [],
+    "total": 1
+  },
+  "sandbox_signatures": {
+    "signatures": [
+      {
+        "confidence": 100,
+        "description": "Installs itself for autorun at Windows startup",
+        "name": "persistence_autorun",
+        "references": [],
+        "severity": 3
+      }
+    ],
+    "total": 1
+  }
+}

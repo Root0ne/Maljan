@@ -6,6 +6,7 @@ import pytest
 from app import observability
 from app.auth import throttle
 from maljan.app import MaljanApp
+from tests.golden_fixtures import report_absent_fixture_skips
 
 
 @pytest.fixture(autouse=True)
@@ -193,3 +194,8 @@ def sample_network_data() -> list[dict]:
             "resp_bytes": 512,
         },
     ]
+
+
+def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
+    """The session ends with how many golden cases compared nothing for want of a source."""
+    report_absent_fixture_skips(terminalreporter)

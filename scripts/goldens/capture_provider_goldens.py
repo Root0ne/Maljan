@@ -39,7 +39,11 @@ from maljan.providers.static.ghidra import GhidraStaticProvider
 ROOT = Path(__file__).resolve().parents[2]
 PROMPTS = ROOT / "tests" / "fixtures" / "prompts"
 GOLDEN = ROOT / "tests" / "fixtures" / "golden"
-CAPE_GLOBS = ("data/cape_reports/*.json", "data/samples/dynamic/sample_1.json")
+CAPE_GLOBS = (
+    "data/cape_reports/*.json",
+    "data/samples/dynamic/sample_1.json",
+    "tests/fixtures/sandbox/cape2_synthetic.json",
+)
 
 
 def _prompts() -> tuple[str, str]:
