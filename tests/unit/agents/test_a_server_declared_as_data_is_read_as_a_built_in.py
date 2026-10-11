@@ -493,3 +493,99 @@ class TestReviewFixes:
 
         assert declared_auto_name_pattern(settings(True)).fullmatch("a_1234")
         assert not declared_auto_name_pattern(settings(False)).fullmatch("a_1234")
+
+
+class TestReReviewFixes:
+    def test_a_sandbox_workflow_resolves_its_attached_parts(self) -> None:
+        from maljan.agents.dynamic_analyst import sandbox_provider_parts
+
+        net = _tool("x").model_copy(update={"metadata": {"maljan_server": "network"}})
+        fragment = "W {{attached:network|`extract_dns`|a DNS tool}}."
+        attached, _ = sandbox_provider_parts(
+            [net], provider_fragment=fragment, provider_expected=True
+        )
+        alone, _ = sandbox_provider_parts([], provider_fragment=fragment, provider_expected=True)
+        assert attached == "W `extract_dns`." and alone == "W a DNS tool."
+
+    @pytest.mark.parametrize(
+        "fragment",
+        [
+            "{{attached:analysis|p {{attached:knowledge|K|L}} q|N}}",
+            "{{attached:analysis|call f() {x}|none}}",
+            "{{attached:analysis|only one branch}}",
+            "{{attached:provider|P|Q}}",
+            "{{attached:sandbox|P|Q}}",
+        ],
+    )
+    def test_a_fragment_whose_attached_part_does_not_read_is_refused(self, fragment: str) -> None:
+        with pytest.raises(ValueError, match="prompt_fragment"):
+            Settings.model_validate(
+                {"mcp": {"servers": {"acme": {"command": "x", "prompt_fragment": fragment}}}}
+            )
+
+    def test_a_reserved_family_never_reads_as_attached(self) -> None:
+        from maljan.agents.prompt_fragments import PROVIDER_FAMILY, resolve_attached, stamp_source
+
+        tools = stamp_source([_tool("t")], PROVIDER_FAMILY)
+        assert resolve_attached("{{attached:provider|P|Q}}", tools) == "Q"
+
+    def test_every_shipped_fragment_reads_and_resolves(self) -> None:
+        from maljan.agents.prompt_fragments import resolve_attached
+        from maljan.core.tool_declarations import ToolDeclarations, check_fragment_template
+
+        for source in ToolDeclarations.from_settings(Settings()).sources():
+            check_fragment_template(source.prompt_fragment)
+            assert "{{attached:" not in resolve_attached(source.prompt_fragment, [])
+
+    def test_the_reserved_families_are_the_prompts_own(self) -> None:
+        from maljan.agents.delegation import TEAM_SERVER
+        from maljan.agents.prompt_fragments import PROVIDER_FAMILY, SANDBOX_FAMILY
+        from maljan.core.tool_declarations import RESERVED_FAMILIES
+
+        assert {PROVIDER_FAMILY, SANDBOX_FAMILY, TEAM_SERVER} <= RESERVED_FAMILIES
+
+    def test_the_parsers_own_flow_text_names_its_annotations(self) -> None:
+        from maljan.agents.network_analyst import primary_evidence_line
+        from maljan.parsers.network_parser import NetworkParser
+
+        text = NetworkParser().parse(
+            {
+                "tcp": [{"dst": "198.51.100.15", "dport": 443}],
+                "hosts": [
+                    {"ip": "198.51.100.15", "asn": "AS64500", "country_name": "NL", "ports": [443]}
+                ],
+            }
+        )
+        assert "annotated with ASN/country and reputation" in primary_evidence_line(None, text)
+
+    def test_a_provider_one_agent_resolves_to_gives_its_prefixes(self) -> None:
+        from maljan.core.undeclared_tools import declared_auto_name_pattern
+
+        settings = Settings.model_validate(
+            {
+                "static": {"provider": "ghidra", "r2": {"auto_name_prefixes": ["XQ_"]}},
+                "agents": {"definitions": {"rev_r2": {"role": "static", "static_provider": "r2"}}},
+            }
+        )
+        assert declared_auto_name_pattern(settings).fullmatch("xq_1234")
+        settings.agents.definitions.pop("rev_r2")
+        plain = Settings.model_validate(
+            {"static": {"provider": "ghidra", "r2": {"auto_name_prefixes": ["XQ_"]}}}
+        )
+        assert not declared_auto_name_pattern(plain).fullmatch("xq_1234")
+
+    def test_the_legacy_read_says_so_once_with_no_stored_value(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        from maljan.core import config
+        from maljan.providers.static import ghidra
+
+        config._LEGACY_FRAGMENT_NOTED[0] = False
+        stored = {"static": {"ghidra": {"prompt_fragment": ghidra.GHIDRA_LEAD + "SECRETISH"}}}
+        with caplog.at_level(logging.INFO, logger=config.logger.name):
+            Settings.model_validate(stored)
+            Settings.model_validate(stored)
+        said = [r.getMessage() for r in caplog.records if "earlier release" in r.getMessage()]
+        assert len(said) == 1 and "SECRETISH" not in said[0]

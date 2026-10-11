@@ -356,24 +356,22 @@ def tools_statement(
     return "\n\n".join([statement, *server_fragments(tools)])
 
 
-# A part of a declared fragment that depends on another server being attached:
-# ``{{attached:<server key>|<text while it is attached>|<text otherwise>}}``.
-# Neither text may hold ``|`` or ``}}``.
-_ATTACHED_PART = re.compile(r"\{\{attached:([A-Za-z0-9_.-]+)\|([^|}]*)\|([^|}]*)\}\}")
-
-
 def resolve_attached(text: str, tools: Sequence[object]) -> str:
     """``text`` with each attached-server part resolved for the servers ``tools`` come from.
 
     A fragment may name another server's tool only while that server's tools
-    are in the request; otherwise its neutral words are shown. One pass over
-    the text.
+    are in the request; otherwise its neutral words are shown. Only a
+    registry server's key counts as attached, never a reserved family
+    (``core.tool_declarations.ATTACHED_PART``, ``RESERVED_FAMILIES``). One pass
+    over the text.
     """
-    if "{{attached:" not in text:
+    from maljan.core.tool_declarations import ATTACHED_OPENING, ATTACHED_PART, RESERVED_FAMILIES
+
+    if ATTACHED_OPENING not in text:
         return text
-    families = set(tool_families(tools))
-    return _ATTACHED_PART.sub(
-        lambda found: found.group(2) if found.group(1) in families else found.group(3), text
+    servers = {family for family in tool_families(tools) if family not in RESERVED_FAMILIES}
+    return ATTACHED_PART.sub(
+        lambda found: found.group(2) if found.group(1) in servers else found.group(3), text
     )
 
 

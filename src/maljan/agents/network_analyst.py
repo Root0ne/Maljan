@@ -123,8 +123,20 @@ _FIELD = re.compile(r'"([a-z_]{2,20})"\s*:')
 
 
 def _annotations_in(data: str) -> list[str]:
-    """The annotation words for the fields the flows actually carry, read once over ``data``."""
-    present = set(_FIELD.findall(str(data or "")))
+    """The annotation words for what the flows actually carry, read once over ``data``.
+
+    A JSON flow block names them by field; the platform's own flow text
+    (``parsers.network_parser``) by its ASN/country column and its reputation
+    paragraph.
+    """
+    from maljan.parsers.network_parser import ASN_COUNTRY_COLUMN, REPUTATION_HEADING
+
+    text = str(data or "")
+    present = set(_FIELD.findall(text))
+    if ASN_COUNTRY_COLUMN in text:
+        present.update({"asn", "country"})
+    if REPUTATION_HEADING in text:
+        present.add("reputation")
     return [word for word, fields in _ANNOTATIONS if present.intersection(fields)]
 
 

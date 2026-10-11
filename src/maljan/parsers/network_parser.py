@@ -3,6 +3,12 @@ from typing import Any
 from maljan.parsers.base_parser import BaseParser
 from maljan.parsers.registry import register_parser
 
+# The column a flow or host table names each destination's ASN and country
+# under, and the heading of the paragraph about reputation permalinks; the
+# network analyst's evidence line reads them to name those annotations.
+ASN_COUNTRY_COLUMN = "ASN / Country"
+REPUTATION_HEADING = "#### Reputation:"
+
 
 @register_parser("network")
 class NetworkParser(BaseParser):
@@ -123,11 +129,11 @@ class NetworkParser(BaseParser):
 
         dns_table = self._format_as_table(headers=["Target Domain", "IP Address"], rows=dns_rows)
         http_table = self._format_as_table(headers=["Host", "Request", "Status"], rows=http_rows)
-        flow_hdr = ["Destination", "Port", "ASN / Country"]
+        flow_hdr = ["Destination", "Port", ASN_COUNTRY_COLUMN]
         tcp_table = self._format_as_table(headers=flow_hdr, rows=tcp_rows)
         udp_table = self._format_as_table(headers=flow_hdr, rows=udp_rows)
         host_table = self._format_as_table(
-            headers=["Host/Domain", "ASN / Country", "Ports"], rows=host_rows
+            headers=["Host/Domain", ASN_COUNTRY_COLUMN, "Ports"], rows=host_rows
         )
 
         # Deterministic FULL-PCAP analysis folded in as text. We read every
@@ -147,7 +153,7 @@ class NetworkParser(BaseParser):
             if summary:
                 extras += "\n\n" + summary
         extras += (
-            "\n\n#### Reputation:\nEvery public IP/domain above carries a VirusTotal "
+            f"\n\n{REPUTATION_HEADING}\nEvery public IP/domain above carries a VirusTotal "
             "permalink in the structured report "
             "(``network.ips[].reputation.virustotal_url`` / "
             "``network.domains[].reputation.virustotal_url``) — pivot for third-party verdicts."

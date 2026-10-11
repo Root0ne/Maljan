@@ -266,21 +266,40 @@ def declared_auto_name_pattern(settings: Any = None) -> re.Pattern[str]:
     defaults' pattern.
     """
     try:
+        from maljan.core.config import get_settings
         from maljan.core.declared_reading import declarations
 
+        settings = settings if settings is not None else get_settings()
         held = declarations(settings)
     except Exception:  # noqa: BLE001 — unreadable settings declare nothing more
         return auto_name_pattern()
     if _HELD_PATTERN[0] is held:
         return _HELD_PATTERN[1]  # type: ignore[no-any-return]
-    # Only the sources this deployment has switched on: a disabled server's
-    # prefix names no function any run can have listed.
+    # Only the sources this deployment switches on, and the static provider
+    # blocks any agent resolves to: a disabled server's prefix names no
+    # function any run can have listed.
+    resolved = _resolved_static_providers(settings)
     declared = [
-        prefix for source in held.sources(enabled_only=True) for prefix in source.auto_name_prefixes
+        prefix
+        for source in held.sources()
+        if source.enabled or (source.source.kind == "provider" and source.source.key in resolved)
+        for prefix in source.auto_name_prefixes
     ]
     pattern = auto_name_pattern(auto_name_words(declared))
     _HELD_PATTERN[0], _HELD_PATTERN[1] = held, pattern
     return pattern
+
+
+def _resolved_static_providers(settings: Any) -> set[str]:
+    """The static provider each agent definition resolves to (team, own, or global)."""
+    try:
+        from maljan.agents.composition import static_provider_id_for
+
+        return {static_provider_id_for(settings, key) for key in settings.agents.definitions} | {
+            str(settings.static.provider)
+        }
+    except Exception:  # noqa: BLE001 — an unreadable team resolves nothing more
+        return set()
 
 
 # ---------------------------------------------------------------------------

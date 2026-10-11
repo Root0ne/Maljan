@@ -19,6 +19,7 @@ from maljan.agents.prompt_fragments import (
     PROVIDER_FAMILY,
     format_fragment,
     provider_source,
+    resolve_attached,
     stamp_source,
     tool_families,
     tools_statement,
@@ -97,7 +98,9 @@ def sandbox_provider_parts(
     dynamic role.
     """
     attached = provider_expected or PROVIDER_FAMILY in tool_families(tools)
-    workflow = provider_fragment.strip() if attached else ""
+    # A part of the sandbox's declared workflow that names another server's
+    # tool reads as that server's being attached or not.
+    workflow = resolve_attached(provider_fragment.strip(), tools) if attached else ""
     statement = tools_statement(
         tools,
         provider_label=provider_label or "the sandbox's own tool server",

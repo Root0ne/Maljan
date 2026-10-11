@@ -59,6 +59,7 @@ from maljan.core.tool_declarations import (
     ToolFacts,
     check_auto_name_prefixes,
     check_env_names,
+    check_fragment_template,
     check_mount,
     check_own_prefix,
     check_reference_urls,
@@ -1364,6 +1365,11 @@ class MCPServerConfig(BaseModel):
     @classmethod
     def _prefixes_are_prefixes(cls, value: list[str]) -> list[str]:
         return check_auto_name_prefixes(value)
+
+    @field_validator("prompt_fragment")
+    @classmethod
+    def _attached_parts_read(cls, value: str) -> str:
+        return check_fragment_template(value)
 
     @field_validator("reference_urls")
     @classmethod
@@ -3605,6 +3611,19 @@ def cape_mcp_block() -> MCPServerConfig:
     return MCPServerConfig(**provider_declaration("cape2_mcp"))
 
 
+_LEGACY_FRAGMENT_NOTED: list[bool] = [False]
+
+
+def _note_legacy_fragment_once() -> None:
+    """Say once per process that a stored whole static fragment was read as not set."""
+    if not _LEGACY_FRAGMENT_NOTED[0]:
+        _LEGACY_FRAGMENT_NOTED[0] = True
+        logger.info(
+            "settings: a static provider block's stored prompt_fragment holds an earlier "
+            "release's whole fragment, which no prompt read; its shipped workflow is used."
+        )
+
+
 class StaticConfig(BaseModel):
     """Which static-analysis tool the static analyst attaches, and its settings.
 
@@ -3640,6 +3659,7 @@ class StaticConfig(BaseModel):
                 name, block.prompt_fragment
             ):
                 block.model_fields_set.discard("prompt_fragment")
+                _note_legacy_fragment_once()
         fill_declaration(self.ghidra, ghidra_block())
         fill_declaration(self.r2, r2_block())
         return self

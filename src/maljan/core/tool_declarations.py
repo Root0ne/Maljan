@@ -713,6 +713,42 @@ def check_reference_urls(value: list[str]) -> list[str]:
     return value
 
 
+# A part of a declared ``prompt_fragment`` shown only while another server's
+# tools are in the request: ``{{attached:<server key>|<while attached>|<otherwise>}}``.
+# A branch holds no ``|``, ``{`` or ``}``, so parts never nest.
+ATTACHED_OPENING = "{{attached:"
+ATTACHED_PART = re.compile(r"\{\{attached:([A-Za-z0-9_.-]+)\|([^|{}]*)\|([^|{}]*)\}\}")
+# The tool families that are not a registry server's key (``agents.prompt_fragments``:
+# a role's own provider, the job's sandbox report, the team's ``ask_`` tools); a
+# part may not name one.
+RESERVED_FAMILIES: frozenset[str] = frozenset({"provider", "sandbox", "team"})
+
+
+def check_fragment_template(value: str) -> str:
+    """A ``prompt_fragment`` whose every ``{{attached:…}}`` part reads, or ``ValueError``.
+
+    Each opening must begin a whole part (a server key, two branches, no ``|``,
+    ``{`` or ``}`` inside a branch, so no part nests in another), and the key
+    must be a server's, not a reserved family name.
+    """
+    if ATTACHED_OPENING not in value:
+        return value
+    parts = list(ATTACHED_PART.finditer(value))
+    if len(parts) != value.count(ATTACHED_OPENING):
+        raise ValueError(
+            "prompt_fragment holds an {{attached:...}} part that does not read: write "
+            "{{attached:<server key>|<text while attached>|<text otherwise>}}, with no |, { "
+            "or } inside either text and no part inside another"
+        )
+    for part in parts:
+        if part.group(1) in RESERVED_FAMILIES:
+            raise ValueError(
+                f"prompt_fragment's {{{{attached:{part.group(1)}|...}}}} names a reserved "
+                f"family, not a tool server's key: use the key of a server in mcp.servers"
+            )
+    return value
+
+
 def check_tool_facts_keys(value: dict[str, Any]) -> dict[str, Any]:
     for name in value:
         check_tool_name(name, "tool_facts key")
