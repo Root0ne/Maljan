@@ -3782,9 +3782,7 @@ def _reputation_line(report: MalwareReport) -> str:
             return f"{said} ({where})"
     else:
         # A report stored before the records: its section rows, as it was read.
-        from maljan.core.legacy_reputation import stored_report_counts
-
-        flagged_count, engines, source = stored_report_counts(rows)
+        flagged_count, engines, source = tool_kinds.stored_reputation_counts(rows)
         if flagged_count and engines:
             when = rows.get("analysis date")
             said = f"{source}: {flagged_count} of {engines} engines flag it as malicious"

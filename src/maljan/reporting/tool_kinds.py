@@ -266,6 +266,17 @@ def stated_name(entry: Any, facts: ToolFacts) -> str:
     return facts.display_name or tool_of(entry)
 
 
+def stored_reputation_counts(rows: Mapping[str, str]) -> tuple[str, str, str]:
+    """``(flagged, engines, source)`` of a report stored before reputation records.
+
+    Read from the key/value rows of the section its lookups were drawn in, as
+    the report always read them (``core.legacy_reputation``).
+    """
+    from maljan.core.legacy_reputation import stored_report_counts
+
+    return stored_report_counts(rows)
+
+
 def stored_builder_of(tool: str) -> str | None:
     """The section builder a source-less entry of ``tool`` was drawn with."""
     return legacy.BUILDERS.get(tool)
