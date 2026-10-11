@@ -1419,9 +1419,10 @@ def _anti_analysis_step(container: ServiceContainer, state: AnalysisState) -> An
     Asked of the run's static providers through the provider interface
     (``StaticProvider.anti_analysis_scan``): the configured one first, then
     each other provider of the run's profile, each with the copy of this job's
-    sample the worker mirrored for it. The first that answers is the pass's,
-    a scan or the sentence saying why it cannot scan; a provider with no scan
-    answers ``None``, and with none the pack makes no anti-analysis entry. Each
+    sample the worker mirrored for it. The first that can scan is the pass's;
+    when none can, the first sentence saying why it cannot is; a provider with
+    no scan answers ``None``, and with none the pack makes no anti-analysis
+    entry. Each
     request waits what one tool call of this deployment may take, as the sink
     pre-pass's do.
     """
@@ -1432,6 +1433,7 @@ def _anti_analysis_step(container: ServiceContainer, state: AnalysisState) -> An
     paths = state.get("static_sample_paths") or {}
     configured = str(cfg.static.provider)
     budget = deployment_call_budget(cfg)
+    unavailable: Any = None
     for provider_id in dict.fromkeys([configured, *paths]):
         own = paths.get(provider_id)
         path = own or (state.get("static_sample_path") if provider_id == configured else None)
@@ -1446,9 +1448,17 @@ def _anti_analysis_step(container: ServiceContainer, state: AnalysisState) -> An
                 "triage pack: a static provider gave no scan to make (%s)", type(exc).__name__
             )
             continue
-        if scan is not None:
+        if scan is None:
+            continue
+        if not getattr(scan, "unavailable", ""):
+            if unavailable is not None:
+                unavailable.close()
             return scan
-    return None
+        if unavailable is None:
+            unavailable = scan
+        else:
+            scan.close()
+    return unavailable
 
 
 def _pack_left_out(entries: list[Any], container: ServiceContainer) -> dict[str, Any] | None:

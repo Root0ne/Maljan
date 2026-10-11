@@ -587,16 +587,19 @@ _CREDENTIAL_RUN = re.compile(r"(?:[A-Fa-f0-9]{24,}|[A-Za-z0-9+/_\-]{24,}={0,2})\
 # an upper-case run with underscores in it is also what a key can look like,
 # and a remedy naming a provider's path variable read "check ***" on the
 # console. Each server and provider declares the variable names its sentences
-# use (``variable_names``), read from the shipped declarations only
-# (``builtin_declarations.shipped_variable_names``), so this stays one pure
-# rule; a retired variable stays declared while stored runs still name it.
+# use (``variable_names``), read from the shipped declarations
+# (``builtin_declarations.shipped_variable_names``) and from each provider class
+# registered at runtime (``registry.registered_variable_names``), never from a
+# run's settings, so the rule does not depend on which run publishes; a retired
+# variable stays declared while stored runs still name it.
 
 
 def _own_variable_name(token: str) -> bool:
     """Whether ``token`` is a variable name a shipped declaration says is not a secret."""
     from maljan.core.builtin_declarations import shipped_variable_names
+    from maljan.providers.registry import registered_variable_names
 
-    return token in shipped_variable_names()
+    return token in shipped_variable_names() or token in registered_variable_names()
 
 
 # A JSON Web Token, which no length rule can see: it is three base64url runs

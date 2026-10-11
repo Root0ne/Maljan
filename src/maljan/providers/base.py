@@ -28,6 +28,11 @@ if TYPE_CHECKING:
     from maljan.schemas.sandbox_report import SandboxRun
 
 
+# The static provider id that means "no static provider": a run analysed with
+# no static tool. Not a tool's name; the null provider registers under it.
+NO_STATIC_PROVIDER = "none"
+
+
 @dataclass(frozen=True)
 class StaticCapabilities:
     provides_tools: bool = False
@@ -296,6 +301,10 @@ class StaticProvider(ABC):
     # to do with those functions, in this provider's own tools' words. Empty
     # reads the neutral sentence (``sink_reachability.FOLLOW_UP``).
     priority_follow_up: ClassVar[str] = ""
+    # The environment variable names this provider's own sentences name that are
+    # not secrets, which published text keeps whole (``pipeline.events``); read
+    # from the registered class, never from a run's settings.
+    variable_names: ClassVar[tuple[str, ...]] = ()
     # What this provider's anti-analysis scan checks, as the triage pack's line
     # says it in short; empty names the scan alone.
     scan_checks_short: ClassVar[str] = ""
@@ -399,15 +408,15 @@ class StaticProvider(ABC):
             return None
         try:
             graph = self.call_graph(path)
+            if graph is None:
+                return None
+            return rank_suspicious_functions(graph, max_funcs=pre.sink_reachability_max_funcs)
         except Exception as exc:  # noqa: BLE001 — never break analysis over a hint
             logger.warning(
                 "Sink-reachability pre-pass failed (%s); continuing without hint.",
                 type(exc).__name__,
             )
             return None
-        if graph is None:
-            return None
-        return rank_suspicious_functions(graph, max_funcs=pre.sink_reachability_max_funcs)
 
     def anti_analysis_scan(
         self, job: StaticJobContext, *, notes: Any = None, call_budget: float = 0.0
@@ -523,11 +532,18 @@ def prepare_sample(provider: StaticProvider | None, path: str, log: Any = None) 
     except Exception as exc:  # noqa: BLE001 — the model's own open is still there
         logger_.debug("the provider did not open the sample early: %s", type(exc).__name__)
     rank = getattr(provider, "priority_functions", None)
-    ranked = rank(path) if callable(rank) else None
-    if ranked is None:
+    try:
+        ranked = rank(path) if callable(rank) else None
+        if ranked is None:
+            return ""
+        follow_up = str(getattr(provider, "priority_follow_up", "") or "") or FOLLOW_UP
+        hint = priority_hint(list(ranked), follow_up=follow_up)
+    except Exception as exc:  # noqa: BLE001 — never break analysis over a hint
+        logger_.warning(
+            "Sink-reachability pre-pass failed (%s); continuing without hint.",
+            type(exc).__name__,
+        )
         return ""
-    follow_up = str(getattr(provider, "priority_follow_up", "") or "") or FOLLOW_UP
-    hint = priority_hint(ranked, follow_up=follow_up)
     if hint:
         logger_.info(
             "Sink-reachability pre-pass: priority-functions hint built (%d chars).", len(hint)
@@ -571,6 +587,9 @@ class SandboxProvider(ABC):
     # block by each entry's own advanced flag.
     guide_leaves: ClassVar[tuple[str, ...]] = ()
     guide_advanced_leaves: ClassVar[tuple[str, ...]] = ()
+    # The non-secret environment variable names this provider's own sentences
+    # name, kept whole in published text (as ``StaticProvider.variable_names``).
+    variable_names: ClassVar[tuple[str, ...]] = ()
 
     @classmethod
     @abstractmethod

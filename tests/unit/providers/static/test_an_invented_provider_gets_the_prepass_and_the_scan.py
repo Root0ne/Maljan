@@ -75,6 +75,7 @@ class _Acme(StaticProvider):
     title: ClassVar[str] = "Acme Disassembler MCP"
     priority_follow_up: ClassVar[str] = FOLLOW_UP
     scan_checks_short: ClassVar[str] = "listed instructions"
+    variable_names: ClassVar[tuple[str, ...]] = ("ACMECONTAINERSAMPLESDIRECTORYPATH",)
 
     def __init__(self) -> None:
         self.opened: list[str | None] = []
@@ -112,7 +113,7 @@ def acme() -> Iterator[type[_Acme]]:
     try:
         yield _Acme
     finally:
-        registry._STATIC_REGISTRY.pop(INVENTED, None)
+        registry.forget_static_provider(INVENTED)
 
 
 @pytest.fixture(autouse=True)
@@ -248,3 +249,80 @@ class TestTheScan:
         result = _pack(tmp_path, None)
         assert SCAN_TOOL not in [e.tool for e in result.entries]
         assert result.failed == []
+
+
+class TestAMalformedAnswer:
+    def test_a_graph_that_cannot_be_ranked_gives_no_hint(
+        self, acme: type[_Acme], caplog: pytest.LogCaptureFixture
+    ) -> None:
+        class _Broken(acme):  # type: ignore[valid-type,misc]
+            def call_graph(self, path: str) -> CallGraph:
+                return CallGraph(callees={"start": 5})  # type: ignore[dict-item]
+
+        with caplog.at_level("WARNING"):
+            assert prepare_sample(_Broken(), "/s/x.exe") == ""
+        said = [r.getMessage() for r in caplog.records]
+        assert said == ["Sink-reachability pre-pass failed (TypeError); continuing without hint."]
+
+    def test_a_ranking_override_that_raises_gives_no_hint(
+        self, acme: type[_Acme], caplog: pytest.LogCaptureFixture
+    ) -> None:
+        class _Raises(acme):  # type: ignore[valid-type,misc]
+            def priority_functions(self, path: str) -> Any:
+                raise ValueError("a /secret/path in the words")
+
+        with caplog.at_level("WARNING"):
+            assert prepare_sample(_Raises(), "/s/x.exe") == ""
+        said = " ".join(r.getMessage() for r in caplog.records)
+        assert "ValueError" in said and "/secret/path" not in said
+
+    def test_a_ranking_that_is_not_a_list_gives_no_hint(self, acme: type[_Acme]) -> None:
+        class _Odd(acme):  # type: ignore[valid-type,misc]
+            def priority_functions(self, path: str) -> Any:
+                return [object()]
+
+        assert prepare_sample(_Odd(), "/s/x.exe") == ""
+
+
+class TestTheScanFallsThrough:
+    def test_an_unavailable_configured_scan_gives_way_to_one_that_can_scan(
+        self, acme: type[_Acme]
+    ) -> None:
+        settings = Settings(
+            _env_file=None, static={"ghidra": {"enabled": True, "transport": "stdio"}}
+        )
+        ghidra = registry.static_provider_class("ghidra").from_settings(settings)
+        container = _Container("ghidra", {"ghidra": ghidra, INVENTED: acme()})
+        state = {"static_sample_paths": {"ghidra": "/g/x.exe", INVENTED: "/a/x.exe"}}
+        scan = _anti_analysis_step(container, state)  # type: ignore[arg-type]
+        assert isinstance(scan, _AcmeScan) and scan.sample_path == "/a/x.exe"
+
+    def test_with_none_that_can_scan_the_first_reason_is_kept(self) -> None:
+        settings = Settings(
+            _env_file=None, static={"ghidra": {"enabled": True, "transport": "stdio"}}
+        )
+        ghidra = registry.static_provider_class("ghidra").from_settings(settings)
+        container = _Container("ghidra", {"ghidra": ghidra, "r2": _shipped("r2")})
+        state = {"static_sample_paths": {"ghidra": "/g/x.exe", "r2": "/r/x.exe"}}
+        scan = _anti_analysis_step(container, state)  # type: ignore[arg-type]
+        assert scan is not None
+        assert scan.unavailable.startswith("Ghidra is reached over stdio")
+
+
+class TestItsVariableNames:
+    # A name with no word break is the shape a key has, which the redaction
+    # would replace if the provider did not declare it.
+    def test_a_registered_provider_s_variable_is_kept_whole_in_published_text(
+        self, acme: type[_Acme]
+    ) -> None:
+        from maljan.pipeline.events import scrub
+
+        said = "check ACMECONTAINERSAMPLESDIRECTORYPATH and the mount"
+        assert scrub(said) == said
+
+    def test_it_is_redacted_once_the_provider_is_gone(self) -> None:
+        from maljan.pipeline.events import scrub
+
+        assert "ACMECONTAINERSAMPLESDIRECTORYPATH" not in scrub(
+            "check ACMECONTAINERSAMPLESDIRECTORYPATH and the mount"
+        )

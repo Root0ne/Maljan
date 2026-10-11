@@ -493,7 +493,7 @@ so the platform scans itself; the analysis server serves the same function.
 Then the static provider's anti-analysis scan (`analysis.anti_analysis`),
 asked through `StaticProvider.anti_analysis_scan` of the run's configured
 static provider first and then of each other static provider of the run's
-profile; the first that offers one makes it, and with none there is no entry.
+profile; the first that can scan makes it, a provider's sentence saying why it cannot is recorded only when none can, and with none offering a scan there is no entry.
 Ghidra's is its `find_anti_analysis_techniques`
 (`providers.static.ghidra.passes`), the sample opened the way the sink
 pre-pass opens it (load, switch, auto-analysis). Ghidra's answer is kept whole, each address also as an offset

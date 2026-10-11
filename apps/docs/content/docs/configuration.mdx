@@ -2994,7 +2994,7 @@ are ever removed.
 | `roles` | what the server is for: `reputation`, `decompiler`, `disassembler`, `sandbox`, `rule_scanner`, `strings`, `reference`, `capture`, or any word of your own |
 | `prompt_fragment` | the workflow text shown to an agent only while the server's tools are attached |
 | `required_env_allow` | the environment names the server cannot run without |
-| `variable_names` | environment variable names of the server's that are not secrets; those a shipped declaration names are kept whole in published text, read from the shipped declarations so the redaction does not depend on a run's settings |
+| `variable_names` | environment variable names of the server's that are not secrets; those a shipped declaration or a registered provider class (`variable_names`) names are kept whole in published text, read from those so the redaction does not depend on a run's settings |
 | `reads_staged_sample` | whether the server's path-taking tools read the sample the platform staged |
 | `platform_owned` | whether the server is the platform's own, whose answers are the platform's code |
 | `auto_name_prefixes` | the prefixes its decompiler writes before an address when it names a function itself (`FUN_`, `fcn.`) |

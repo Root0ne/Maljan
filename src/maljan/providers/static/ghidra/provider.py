@@ -210,6 +210,10 @@ def open_ghidra_sample(
     return str(loaded)
 
 
+# The call-graph request: the server's edge text, every function walked
+# (``limit`` 0 is no limit; absent, the server walks 1000).
+CALL_GRAPH_PARAMS: dict[str, Any] = {"format": "edges", "limit": 0}
+
 # Ghidra's load tool, as the load is made when the block declares no open
 # tool: the behaviour from before there was a declaration.
 UNDECLARED_LOAD_TOOL = "load_program"
@@ -716,13 +720,19 @@ class GhidraStaticProvider(StaticProvider):
         The program the open before the loop made current. ``None`` when
         Ghidra is not reached over ``http``; a request that fails raises, and
         the pre-pass reads that as no hint.
+
+        The whole graph, in one answer: the server's ``limit`` defaults to
+        1000 functions when absent and ``0`` means none, and the endpoint has no
+        pages. ``edges`` is the server's text format of one ``CALLER -> CALLEE``
+        line per call, the one ``call_graph_from_text`` reads (the server
+        answers any format it does not know, ``json`` among them, the same way).
         """
         if not self._over_http():
             return None
         with self._rest_client() as http:
             resp = http.get(
                 f"{self._cfg.url.rstrip('/')}/get_full_call_graph",
-                params={"format": "json", "limit": 20000},
+                params=CALL_GRAPH_PARAMS,
             )
             resp.raise_for_status()
         return call_graph_from_text(resp.text)

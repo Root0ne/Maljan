@@ -41,6 +41,7 @@ class _Client:
     def __init__(self) -> None:
         self.paths: list[str] = []
         self.timeouts: list[Any] = []
+        self.params: list[Any] = []
 
     def __call__(self, **kwargs: Any) -> _Client:
         self.timeouts.append(kwargs.get("timeout"))
@@ -60,6 +61,7 @@ class _Client:
 
     def get(self, url: str, params: Any = None) -> _Resp:
         self.paths.append(url.rsplit("/", 1)[-1])
+        self.params.append(params)
         graph = {
             "nodes": [
                 {"name": "entry", "address": "0x1000"},
@@ -126,6 +128,8 @@ class TestTheStaticRole:
         _static_analyst(provider)._compute_sink_priority_hint("/data/samples/x.exe")
         assert client.paths[0] == "load_program", client.paths
         assert client.paths[-1] == "get_full_call_graph", client.paths
+        # The whole graph in the server's edge text: no limit (0), no pages.
+        assert client.params == [{"format": "edges", "limit": 0}]
 
     def test_an_analyst_on_r2_never_calls_ghidra(self, client: _Client) -> None:
         assert _static_analyst(_shipped("r2"))._compute_sink_priority_hint("/s/x.exe") == ""

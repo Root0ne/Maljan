@@ -28,6 +28,7 @@ from maljan.core.config import (
 from maljan.core.settings_overrides import build_settings
 from maljan.core.team_layout import layout_team
 from maljan.core.team_lint import TeamFinding, lint_team, lint_teams, team_stages
+from maljan.providers.base import NO_STATIC_PROVIDER
 from pydantic import ValidationError
 
 AGENT_DEFINITIONS_KEY = "core.agents.definitions"
@@ -345,7 +346,7 @@ def profile_warnings(
     it on the stage card the operator is looking at.
     """
     provider = _effective_static_provider(overrides)
-    if provider != "none":
+    if provider != NO_STATIC_PROVIDER:
         return {}
 
     warnings: dict[str, str] = {}
@@ -354,7 +355,7 @@ def profile_warnings(
             continue
         # A team may force a provider of its own, in which case the global
         # setting is not what its members open.
-        if entry.get("static_provider") not in (None, "none"):
+        if entry.get("static_provider") not in (None, NO_STATIC_PROVIDER):
             continue
         for stage in entry.get("stages") or []:
             if not isinstance(stage, dict) or stage.get("kind") != "analysis":
@@ -397,7 +398,7 @@ def _reads_the_static_provider(definition: Any) -> bool:
     if pair is None:
         return False
     tools, own_provider = pair
-    if own_provider not in (None, "none"):
+    if own_provider not in (None, NO_STATIC_PROVIDER):
         return False
     return any(t.get("kind") == "provider" for t in tools)
 
