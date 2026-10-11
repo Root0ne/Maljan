@@ -248,7 +248,7 @@ def test_open_is_idempotent_for_a_repeat_call_with_an_equal_job(monkeypatch):
     value comparison ``open()`` relies on, rather than trivially passing an
     identity check.
     """
-    from maljan.agents import ghidra_http_client
+    from maljan.providers.static.ghidra import http_client as ghidra_http_client
 
     constructions: list[int] = []
 
@@ -281,7 +281,7 @@ def test_open_is_idempotent_for_a_repeat_call_with_an_equal_job(monkeypatch):
 
 
 def test_open_for_a_different_job_closes_the_stale_toolkit_before_reattaching(monkeypatch):
-    from maljan.agents import ghidra_http_client
+    from maljan.providers.static.ghidra import http_client as ghidra_http_client
 
     constructions: list[int] = []
     closed: list[int] = []

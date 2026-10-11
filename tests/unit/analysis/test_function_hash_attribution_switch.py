@@ -2,7 +2,7 @@
 
 ``fetch_bulk_function_hashes`` loads the sample, then must make it the
 *current* program before asking for its function hashes (see
-``maljan.analysis.ghidra_program`` for why the load response alone is not
+``maljan.providers.static.ghidra.program`` for why the load response alone is not
 enough). If the switch (or the follow-up ``run_analysis``) fails, the
 previous behaviour was to swallow the error and hash on regardless —
 silently attributing this sample to whatever binary Ghidra was still
@@ -16,8 +16,8 @@ import json
 import logging
 from typing import Any
 
-from maljan.analysis import function_hash_attribution as fha
-from maljan.analysis.ghidra_program import SWITCH_PATH
+from maljan.providers.static.ghidra import function_hashes as fha
+from maljan.providers.static.ghidra.program import SWITCH_PATH
 
 LOAD_OK = json.dumps({"success": True, "program": "sample.exe"})
 

@@ -1297,9 +1297,10 @@ def _function_hash_attribution(
 
         cfg = get_settings()
         provider = container.get_static_provider()
+        pre = provider.preprocessing()
         static_path = state.get("static_sample_path")
         if not (
-            cfg.preprocessing.use_function_hash_attribution
+            pre.use_function_hash_attribution
             and provider.capabilities.provides_function_hashes
             and static_path
         ):
@@ -1329,8 +1330,9 @@ def _function_hash_attribution(
             report = to_report_dicts(
                 aggregate_matches(
                     store.match([h for _n, h in functions], exclude_sample_id=sample_id or None),
-                    max_families=cfg.preprocessing.function_hash_max_matches,
-                )
+                    max_families=pre.function_hash_max_matches,
+                ),
+                source=provider.id,
             )
             # Only under a grounded family, so an UNKNOWN verdict cannot pollute
             # the attribution corpus; held, not written, so a job that fails after
@@ -1409,48 +1411,43 @@ def _function_matches_step(container: ServiceContainer, state: AnalysisState) ->
     return step
 
 
-def _ghidra_passes_step(container: ServiceContainer, state: AnalysisState) -> Any:
-    """The Ghidra the pack's passes call, or the sentence saying why there is none.
+def _anti_analysis_step(container: ServiceContainer, state: AnalysisState) -> Any:
+    """The anti-analysis scan the pack's pass makes, or ``None`` when no provider has one.
 
-    Ghidra has to be switched on, reached over its REST API (``http``: Ghidra
-    over stdio serves no endpoint the pack can call), and holding a copy of
-    this job's sample where it reads: the mirror the worker made for Ghidra as
-    a static provider of the run's profile. Each request waits what one tool
-    call of this deployment may take, as the sink pre-pass's do.
+    Asked of the run's static providers through the provider interface
+    (``StaticProvider.anti_analysis_scan``): the configured one first, then
+    each other provider of the run's profile, each with the copy of this job's
+    sample the worker mirrored for it. The first that answers is the pass's,
+    a scan or the sentence saying why it cannot scan; a provider with no scan
+    answers ``None``, and with none the pack makes no anti-analysis entry. Each
+    request waits what one tool call of this deployment may take, as the sink
+    pre-pass's do.
     """
-    from maljan.analysis.ghidra_passes import (
-        GHIDRA_HAS_NO_COPY,
-        GHIDRA_NOT_OVER_HTTP,
-        GHIDRA_SWITCHED_OFF,
-        GhidraPasses,
-    )
-    from maljan.providers.sample_open import server_note_key
+    from maljan.providers.base import StaticJobContext
     from maljan.providers.server_guard import deployment_call_budget
 
     cfg = container.config
-    ghidra = cfg.static.ghidra
     paths = state.get("static_sample_paths") or {}
-    path = paths.get("ghidra") or (
-        state.get("static_sample_path") if cfg.static.provider == "ghidra" else None
-    )
-    if not bool(getattr(ghidra, "enabled", True)):
-        reason = GHIDRA_SWITCHED_OFF
-    elif ghidra.transport != "http":
-        reason = GHIDRA_NOT_OVER_HTTP.format(transport=ghidra.transport)
-    elif not path:
-        reason = GHIDRA_HAS_NO_COPY
-    else:
-        budget = deployment_call_budget(cfg)
-        return GhidraPasses(
-            base_url=str(ghidra.url),
-            token=ghidra.auth_token.get_secret_value(),
-            sample_path=str(path),
-            call_timeout=budget if budget > 0 else None,
-            sample_open=getattr(ghidra, "sample_open", None),
-            sample_notes=getattr(container, "sample_notes", None),
-            note_key=server_note_key(ghidra),
+    configured = str(cfg.static.provider)
+    budget = deployment_call_budget(cfg)
+    for provider_id in dict.fromkeys([configured, *paths]):
+        try:
+            provider = container.get_static_provider(provider_id)
+        except Exception as exc:  # noqa: BLE001 — no provider, nothing to ask
+            logger.debug(
+                "triage pack: no static provider to ask for a scan (%s)", type(exc).__name__
+            )
+            continue
+        own = paths.get(provider_id)
+        path = own or (state.get("static_sample_path") if provider_id == configured else None)
+        scan = provider.anti_analysis_scan(
+            StaticJobContext(mirror_sample_path=str(path) if path else None),
+            notes=getattr(container, "sample_notes", None),
+            call_budget=budget,
         )
-    return GhidraPasses(unavailable=reason, note_key=server_note_key(ghidra))
+        if scan is not None:
+            return scan
+    return None
 
 
 def _pack_left_out(entries: list[Any], container: ServiceContainer) -> dict[str, Any] | None:
@@ -1591,7 +1588,7 @@ def make_triage_node(
                 inputs,
                 reputation=_reputation_lookup(container, inputs.sha256),
                 function_matches=_function_matches_step(container, state),
-                ghidra=_ghidra_passes_step(container, state),
+                anti_analysis=_anti_analysis_step(container, state),
             )
         except Exception as exc:  # noqa: BLE001 — the pack never fails the job
             logger.warning(

@@ -648,7 +648,6 @@ CONSUMER_KINDS: dict[str, dict[str, Any]] = {
     "stix_renderer._STRING_SWEEP_TOOLS": {"kinds": ["strings", "file_iocs", "text_iocs"]},
     "figures.code_listing": {"kinds": ["decompile"]},
     "ledger_projection.technique_hits": {"kinds": ["capability_rules"]},
-    "static_analyst._LOAD_TOOL": {"kinds": ["load_sample"]},
     # The single-tool comparisons the reading half made inline.
     "evidence_summary.yara_rule_strings": {"kinds": ["signature_rules"]},
     "evidence_summary.catalogue_associations": {"kinds": ["api_catalogue"]},
@@ -731,8 +730,8 @@ _SERVER_BLOCKS: dict[str, dict[str, Any]] = {
 # ``config.GHIDRA_SAMPLE_OPEN``, set where it has always been set; its work
 # directory is the shared default (``providers.base.DEFAULT_WORK_DIR``) and
 # radare2's is its ``mirror_dir``'s own default; its non-secret variable, which
-# texts written before the variable was retired still name, is
-# ``pipeline.events._OWN_VARIABLE_NAMES``. The
+# texts written before the variable was retired still name, is kept whole by
+# the redaction of published text (``shipped_variable_names``). The
 # auto-name prefixes together are ``pipeline.validation._GENERIC_FUNCTION_NAME``'s.
 _PROVIDER_BLOCKS: dict[str, dict[str, Any]] = {
     "ghidra": {
@@ -785,6 +784,22 @@ def provider_names() -> tuple[str, ...]:
 def provider_declaration(provider: str) -> dict[str, Any]:
     """The declaration fields a provider-owned block ships: ghidra, r2, cape2_mcp."""
     return _block(_PROVIDER_BLOCKS.get(provider, {}))
+
+
+@cache
+def shipped_variable_names() -> frozenset[str]:
+    """Every non-secret environment variable name a shipped declaration names.
+
+    Each server and provider block says the variable names its own sentences
+    name (``variable_names``); the redaction of published text keeps them
+    (``pipeline.events``). Read from the shipped data alone, so the rule does
+    not depend on which run's settings publish.
+    """
+    names: set[str] = set()
+    for blocks in (_SERVER_BLOCKS, _PROVIDER_BLOCKS, _IN_PROCESS_BLOCKS):
+        for block in blocks.values():
+            names.update(str(name) for name in block.get("variable_names") or ())
+    return frozenset(names)
 
 
 def _block(block: dict[str, Any]) -> dict[str, Any]:

@@ -11,12 +11,12 @@ import json
 
 from maljan.analysis.function_hash_attribution import (
     FamilyHashAttribution,
-    _extract_functions,
     aggregate_matches,
     build_attribution_hint,
     to_report_dicts,
 )
 from maljan.memory.function_hash_store import FunctionMatch
+from maljan.providers.static.ghidra.function_hashes import _extract_functions
 
 
 def _m(func_hash: str, family: str, sample_id: str, func_name: str = "") -> FunctionMatch:
@@ -130,10 +130,35 @@ class TestBuildHint:
 class TestToReportDicts:
     def test_row_shape(self) -> None:
         results = aggregate_matches([_m("h1", "Emotet", "s1", "decrypt")])
-        [row] = to_report_dicts(results)
+        [row] = to_report_dicts(results, source="ghidra")
         assert row["family"] == "Emotet"
         assert row["match_method"] == "function-hash"
-        assert row["source"] == "ghidra-mcp"
+        assert row["source"] == "ghidra"
         assert row["shared_functions"] == 1
         assert row["sample_ids"] == ["s1"]
         assert 0.0 < row["confidence"] <= 0.95
+
+    def test_the_source_is_the_producing_provider_s_id(self) -> None:
+        results = aggregate_matches([_m("h1", "Emotet", "s1", "decrypt")])
+        [row] = to_report_dicts(results, source="acme_disassembler")
+        assert row["source"] == "acme_disassembler"
+
+    def test_a_stored_row_keeps_the_label_it_was_written_with(self) -> None:
+        from maljan.reporting.models import FamilyAttribution
+
+        stored = {
+            "family": "Emotet",
+            "function_hash_matches": [
+                {
+                    "family": "Emotet",
+                    "confidence": 0.5,
+                    "shared_functions": 1,
+                    "sample_ids": ["s1"],
+                    "example_functions": ["decrypt"],
+                    "match_method": "function-hash",
+                    "source": "ghidra-mcp",
+                }
+            ],
+        }
+        read = FamilyAttribution.model_validate(stored)
+        assert read.model_dump()["function_hash_matches"][0]["source"] == "ghidra-mcp"

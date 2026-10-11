@@ -20,10 +20,10 @@ from typing import Any
 import httpx
 from pydantic import SecretStr
 
-from maljan.agents.ghidra_http_client import GhidraHTTPClient
 from maljan.core.config import GHIDRA_SAMPLE_OPEN, MCPServerConfig
 from maljan.providers.sample_open import SampleNotes
 from maljan.providers.static.ghidra import GhidraStaticProvider
+from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
 
 HELD = "/data/samples/.work/s.exe"
 # Ghidra in the job's note: its address (``sample_open.server_note_key``).
@@ -193,7 +193,7 @@ class TestTheModelsLoad:
 
 class TestOneNoteForEveryPath:
     def test_the_triage_pass_s_open_answers_the_model_s_load(self) -> None:
-        from maljan.analysis.ghidra_passes import GhidraPasses
+        from maljan.providers.static.ghidra.passes import GhidraPasses
 
         notes = SampleNotes()
         pass_ghidra = _Ghidra()
@@ -216,7 +216,7 @@ class TestOneNoteForEveryPath:
     def test_an_analysis_the_pass_did_not_get_stops_the_pass(self) -> None:
         import pytest
 
-        from maljan.analysis.ghidra_passes import GhidraPasses, GhidraPassFailed
+        from maljan.providers.static.ghidra.passes import GhidraPasses, GhidraPassFailed
 
         ghidra = _Ghidra(run_analysis=json.dumps({"error": "Analysis failed: x"}))
         passes = GhidraPasses(
@@ -231,7 +231,7 @@ class TestOneNoteForEveryPath:
             passes.open()
 
     def test_the_function_hash_pass_selects_a_noted_sample(self, monkeypatch: Any) -> None:
-        from maljan.analysis import function_hash_attribution as hashes
+        from maljan.providers.static.ghidra import function_hashes as hashes
 
         notes = SampleNotes()
         notes.note(KEY, HELD, "s.exe", LOADED)
@@ -257,7 +257,7 @@ class TestOneNoteForEveryPath:
     def test_a_hash_pass_that_cannot_select_the_sample_hashes_nothing(
         self, monkeypatch: Any
     ) -> None:
-        from maljan.analysis import function_hash_attribution as hashes
+        from maljan.providers.static.ghidra import function_hashes as hashes
 
         ghidra = _Ghidra(switch_program=json.dumps({"error": "Program not found"}))
         real = httpx.Client

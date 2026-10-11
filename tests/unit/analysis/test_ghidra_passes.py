@@ -15,7 +15,7 @@ import httpx
 import pytest
 from tests.unit.fake_ghidra import X64_BASE, FakeGhidra
 
-from maljan.analysis.ghidra_passes import (
+from maljan.providers.static.ghidra.passes import (
     ANTI_ANALYSIS_TOOL,
     SCAN_CHECKS,
     GhidraPasses,

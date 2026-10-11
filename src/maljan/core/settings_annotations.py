@@ -1092,10 +1092,11 @@ ANNOTATIONS: dict[str, Annotation] = {
     "preprocessing.use_function_hash_attribution": {
         "title": "Use function-hash attribution",
         "description": (
-            "Enables a deterministic pre-pass that computes per-function "
-            "normalized-opcode hashes and matches them against past samples in the "
-            "function-hash store, injecting a high-precision family-attribution hint. "
-            "The judge also writes the current sample's hashes back to grow the corpus."
+            "Enables a deterministic pre-pass that asks a static provider that hashes "
+            "functions (Ghidra over http does) for per-function normalized-opcode hashes "
+            "and matches them against past samples in the function-hash store, injecting "
+            "a high-precision family-attribution hint. The judge also writes the current "
+            "sample's hashes back to grow the corpus."
         ),
         "subgroup": "Feature switches",
     },
@@ -1130,10 +1131,11 @@ ANNOTATIONS: dict[str, Annotation] = {
     "preprocessing.use_sink_reachability": {
         "title": "Use sink-reachability triage",
         "description": (
-            "Enables a deterministic pre-pass over the Ghidra call graph that finds "
-            "functions reaching security-sensitive sink APIs and injects a 'priority "
-            "functions' hint, focusing the static analyst's decompilation on the likely "
-            "malicious core. Fails safe to no hint on error or a stripped binary."
+            "Enables a deterministic pre-pass over the call graph of a static provider "
+            "that gives one (Ghidra over http does) that finds functions reaching "
+            "security-sensitive sink APIs and injects a 'priority functions' hint, "
+            "focusing the analyst's decompilation on the likely malicious core. Fails "
+            "safe to no hint on error, a stripped binary or a provider with no call graph."
         ),
         "subgroup": "Feature switches",
     },

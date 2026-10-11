@@ -21,6 +21,8 @@ from langchain_core.tools import BaseTool
 from maljan.providers.errors import ProviderError
 
 if TYPE_CHECKING:
+    from maljan.analysis.anti_analysis import AntiAnalysisScan
+    from maljan.analysis.sink_reachability import CallGraph, SuspiciousFunction
     from maljan.core.config import Settings
     from maljan.core.report_formats import ReportFormat, SignatureScale
     from maljan.schemas.sandbox_report import SandboxRun
@@ -290,10 +292,22 @@ class StaticProvider(ABC):
     # block by each entry's own advanced flag.
     guide_leaves: ClassVar[tuple[str, ...]] = ()
     guide_advanced_leaves: ClassVar[tuple[str, ...]] = ()
+    # The sentence after the priority-functions list (``prepare_sample``): what
+    # to do with those functions, in this provider's own tools' words. Empty
+    # reads the neutral sentence (``sink_reachability.FOLLOW_UP``).
+    priority_follow_up: ClassVar[str] = ""
+    # What this provider's anti-analysis scan checks, as the triage pack's line
+    # says it in short; empty names the scan alone.
+    scan_checks_short: ClassVar[str] = ""
 
     @classmethod
     @abstractmethod
     def from_settings(cls, cfg: Settings) -> StaticProvider: ...
+
+    @classmethod
+    def display_name(cls) -> str:
+        """What published text calls this provider: its choice label, else its title or id."""
+        return cls.choice_label or cls.title or cls.id or "static"
 
     @property
     def declaration_source(self) -> str:
@@ -339,10 +353,76 @@ class StaticProvider(ABC):
         """Open the sample in the provider's session before an analyst's loop, where it has one.
 
         A no-op returning ``False`` by default; a provider whose tools refuse
-        every call until a file is open (radare2's) overrides it. ``path`` is
-        the provider's own mirror; ``None`` reads the pinned one.
+        every call until a file is open overrides it. ``path`` is the
+        provider's own mirror; ``None`` reads the pinned one. A provider that
+        knows the sample cannot be opened raises
+        :class:`~maljan.core.exceptions.SampleNotOpened`, which stops the
+        agent's loop before a model turn is spent, and remembers it
+        (``sample_failure``); any other failure is the provider's to log, and
+        the model's own open is still there.
         """
         return False
+
+    def preprocessing(self) -> Any:
+        """The preprocessing settings this provider's pre-passes read.
+
+        The deployment's by default; a provider built with its own copy of
+        them answers with that one.
+        """
+        from maljan.core.config import get_settings
+
+        return get_settings().preprocessing
+
+    def call_graph(self, path: str) -> CallGraph | None:
+        """The opened program's call graph in the neutral shape, or ``None`` without one.
+
+        ``None`` by default: a provider that can read a program's call graph
+        overrides it, and its agents get the priority-functions pre-pass
+        (``prepare_sample``). A failure raises; the pre-pass is fail-safe.
+        """
+        return None
+
+    def priority_functions(self, path: str) -> list[SuspiciousFunction] | None:
+        """The functions of the opened program nearest the sensitive sinks, ranked.
+
+        ``None`` where there is no pre-pass to make: the provider gives no call
+        graph, or ``preprocessing.use_sink_reachability`` is off. An empty list
+        is a graph with no named sink reachable. At most
+        ``preprocessing.sink_reachability_max_funcs`` functions. Fail-safe: a
+        call graph that could not be read is ``None``, with a warning.
+        """
+        from maljan.analysis.sink_reachability import rank_suspicious_functions
+        from maljan.core.logger import logger
+
+        pre = self.preprocessing()
+        if not getattr(pre, "use_sink_reachability", False):
+            return None
+        try:
+            graph = self.call_graph(path)
+        except Exception as exc:  # noqa: BLE001 — never break analysis over a hint
+            logger.warning(
+                "Sink-reachability pre-pass failed (%s); continuing without hint.",
+                type(exc).__name__,
+            )
+            return None
+        if graph is None:
+            return None
+        return rank_suspicious_functions(graph, max_funcs=pre.sink_reachability_max_funcs)
+
+    def anti_analysis_scan(
+        self, job: StaticJobContext, *, notes: Any = None, call_budget: float = 0.0
+    ) -> AntiAnalysisScan | None:
+        """This job's anti-analysis scan for the triage pack, or ``None`` where it has none.
+
+        ``None`` by default. A provider whose tools can scan a program for
+        anti-analysis code overrides it and answers with an object in the
+        shape ``analysis.anti_analysis.AntiAnalysisScan`` names: one that says
+        why it cannot scan (``unavailable``), or scans ``job.mirror_sample_path``.
+        ``notes`` is the job's note of opened samples (``providers.sample_open``)
+        and ``call_budget`` what one tool call of this deployment may take
+        (zero: as long as the tool takes).
+        """
+        return None
 
     def switched_off(self) -> bool:
         """Whether the operator turned this provider off, so it attaches nothing.
@@ -398,6 +478,53 @@ class StaticProvider(ABC):
 
     def close(self) -> None:
         return None
+
+
+def prepare_sample(provider: StaticProvider | None, path: str, log: Any = None) -> str:
+    """Open the job's sample on an agent's static provider, then its priority-functions hint.
+
+    The one pre-pass every analyst on a static provider runs before its loop,
+    whatever the provider: the provider opens the sample where its session
+    needs it (``open_sample``; a sample it cannot open raises
+    :class:`~maljan.core.exceptions.SampleNotOpened` before any model turn),
+    then, where it gives a call graph, the functions that reach sensitive sinks
+    are rendered as a hint so the loop reads the malicious core first
+    (``analysis.sink_reachability``), followed by the provider's own sentence
+    on what to do with them. ``""`` for no provider, no call graph, the
+    pre-pass switched off, or no named sink reachable.
+    """
+    import logging
+
+    from maljan.analysis.sink_reachability import FOLLOW_UP, priority_hint
+    from maljan.core.exceptions import SampleNotOpened
+
+    logger_ = log if log is not None else logging.getLogger(__name__)
+    if provider is None:
+        return ""
+    opener = getattr(provider, "open_sample", None)
+    try:
+        if callable(opener):
+            opener(path)
+    except SampleNotOpened:
+        raise
+    except Exception as exc:  # noqa: BLE001 — the model's own open is still there
+        logger_.debug("the provider did not open the sample early: %s", type(exc).__name__)
+    rank = getattr(provider, "priority_functions", None)
+    ranked = rank(path) if callable(rank) else None
+    if ranked is None:
+        return ""
+    follow_up = str(getattr(provider, "priority_follow_up", "") or "") or FOLLOW_UP
+    hint = priority_hint(ranked, follow_up=follow_up)
+    if hint:
+        logger_.info(
+            "Sink-reachability pre-pass: priority-functions hint built (%d chars).", len(hint)
+        )
+    else:
+        logger_.info(
+            "Sink-reachability pre-pass: no named sink APIs reachable "
+            "(stripped/static binary?) — no hint emitted."
+        )
+    return hint
 
 
 class SandboxProvider(ABC):

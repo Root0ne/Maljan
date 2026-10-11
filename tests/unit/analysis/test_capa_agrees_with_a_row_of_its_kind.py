@@ -5,7 +5,7 @@ no namespace, and it agreed with a TEB/PEB read only because its name has the
 word in it. And any capa rule under ``anti-analysis`` agreed with every row in
 its function, so ``contain obfuscated stackstrings`` agreed with an SIDT. The
 kind each rule states is read off capa's own namespaces and rule names
-(``ghidra_passes.CAPA_NAMESPACE_KINDS``, ``CAPA_RULE_KINDS``); a rule that
+(``anti_analysis.RULE_NAMESPACE_KINDS``, ``RULE_NAME_KINDS``); a rule that
 states no kind agrees as every anti-analysis rule did.
 """
 
@@ -13,12 +13,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.analysis.ghidra_passes import (
-    CAPA_NAMESPACE_KINDS,
-    CAPA_RULE_KINDS,
+from maljan.analysis.anti_analysis import (
+    RULE_NAME_KINDS as CAPA_RULE_KINDS,
+)
+from maljan.analysis.anti_analysis import (
+    RULE_NAMESPACE_KINDS as CAPA_NAMESPACE_KINDS,
+)
+from maljan.analysis.anti_analysis import (
     SCAN_KINDS,
-    capa_agrees,
     scan_kind,
+)
+from maljan.analysis.anti_analysis import (
+    rule_agrees as capa_agrees,
 )
 from maljan.pipeline import triage_pack
 

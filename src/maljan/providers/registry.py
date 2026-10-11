@@ -62,11 +62,9 @@ def discover_providers() -> None:
         import maljan.providers.sandbox.rest  # noqa: F401
         import maljan.providers.sandbox.triage  # noqa: F401
         import maljan.providers.sandbox.upload  # noqa: F401
-        import maljan.providers.static.capa_yara  # noqa: F401
-        import maljan.providers.static.generic_mcp  # noqa: F401
-        import maljan.providers.static.ghidra  # noqa: F401
-        import maljan.providers.static.null  # noqa: F401
-        import maljan.providers.static.r2  # noqa: F401
+        from maljan.providers.static import import_built_ins
+
+        import_built_ins()
 
         _DISCOVERY_DONE = True
 
@@ -89,6 +87,12 @@ def _build(registry: dict[str, type], name: str, cfg: Any, kind: str) -> Any:
             f"Unknown {kind} provider: {name!r}. Available: {available}"
         )
     return cls.from_settings(cfg)  # type: ignore[attr-defined]
+
+
+def registered_static_provider(name: str) -> type[StaticProvider] | None:
+    """The static provider class registered as ``name``, or ``None`` for no such one."""
+    discover_providers()
+    return _STATIC_REGISTRY.get(str(name or ""))  # type: ignore[return-value]
 
 
 def static_provider_class(name: str) -> type[StaticProvider]:

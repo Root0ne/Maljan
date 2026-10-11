@@ -39,7 +39,7 @@ TRUNCATION_MARKER = "\n\n[OUTPUT TRUNCATED]"
 
 
 def tool_name_of_path(path: str) -> str:
-    """The tool name an endpoint path becomes: the leading slash dropped, slashes joined by ``_``."""
+    """The tool name an endpoint path becomes: the leading slash dropped, ``/`` read as ``_``."""
     return str(path).lstrip("/").replace("/", "_")
 
 
@@ -295,7 +295,7 @@ class GhidraHTTPClient:
         Best-effort by construction. A stale current program is a wrong answer;
         an exception raised here would be a failed analysis, which is worse.
         """
-        from maljan.analysis.ghidra_program import (
+        from maljan.providers.static.ghidra.program import (
             SWITCH_PARAM,
             SWITCH_PATH,
             program_name_from_load,

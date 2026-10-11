@@ -42,7 +42,6 @@ from maljan.agents.delegation import (
     _what_an_ask_gets_sentence,
 )
 from maljan.agents.evidence_recorder import earlier_chunk_answer, same_function_notice
-from maljan.agents.ghidra_http_client import no_program_as_error
 from maljan.agents.judge_agent import (
     COMPACT_BUNDLE_RULES,
     CONTRADICTION_DEFINITION,
@@ -105,6 +104,7 @@ from maljan.analysis.evidence_roots import roots_phrase as _roots_phrase
 from maljan.analysis.function_summarizer import SHORTENED_NOTE as SUMMARISER_SHORTENED_NOTE
 from maljan.analysis.function_summarizer import SUMMARY_CUT_NOTE, SUMMARY_FENCE_STATEMENT
 from maljan.analysis.pcap_summary import CaptureRead
+from maljan.core.config import SampleOpenConfig
 from maljan.core.reputation import read_answer
 from maljan.extractors.capability_matrix import (
     NOT_ASKED_UNKNOWN_ID,
@@ -203,6 +203,7 @@ from maljan.providers.static.ghidra import (
     ghidra_not_answering,
     sample_not_opened,
 )
+from maljan.providers.static.ghidra.http_client import no_program_as_error
 from maljan.providers.static.null import NullStaticProvider
 from maljan.providers.static.r2 import r2_error_reply
 from maljan.reporting.composer import (
@@ -675,7 +676,8 @@ def _analysis_tool_descriptions(*names: str) -> str:
 
 def _deobfuscation_sentences() -> str:
     """Every sentence the deobfuscation passes put in front of a model, filled in."""
-    from maljan.analysis import ghidra_passes
+    from maljan.analysis import anti_analysis
+    from maljan.providers.static.ghidra import passes as ghidra_passes
     from maljan.tools import crypto_constants
 
     return " ".join(
@@ -683,12 +685,27 @@ def _deobfuscation_sentences() -> str:
             crypto_constants.SCAN_RULE,
             ghidra_passes.SCAN_CHECKS,
             ghidra_passes.STATED_RULE,
-            ghidra_passes.GS_OFF_BOUNDARY,
+            anti_analysis.GS_OFF_BOUNDARY,
             ghidra_passes.GHIDRA_SWITCHED_OFF,
             ghidra_passes.GHIDRA_NOT_OVER_HTTP.format(transport="stdio"),
             ghidra_passes.GHIDRA_HAS_NO_COPY,
             triage_pack.PASS_ROOM_SENTENCE.format(shown=1, total=2),
-            triage_pack.SCAN_CHECKS_SHORT,
+            ghidra_passes.SCAN_CHECKS_SHORT,
+            triage_pack.UNNAMED_SCANNER,
+        ]
+    )
+
+
+def _priority_hints() -> str:
+    """The sink pre-pass's hint, with Ghidra's closing sentence and with the neutral one."""
+    from maljan.analysis.sink_reachability import FOLLOW_UP, CallGraph, build_priority_hint
+    from maljan.providers.static.ghidra.call_graph import PRIORITY_FOLLOW_UP
+
+    graph = CallGraph.of_edges([("f", "CreateRemoteThread")], {"f": "0x1"})
+    return " ".join(
+        [
+            build_priority_hint(graph, follow_up=PRIORITY_FOLLOW_UP),
+            build_priority_hint(graph, follow_up=FOLLOW_UP),
         ]
     )
 
@@ -750,7 +767,7 @@ def _reputation_lines() -> str:
 
 def _deobfuscation_lines() -> str:
     """The two pass lines with and without a finding, and the lines of a pass not run."""
-    from maljan.analysis.ghidra_passes import ANTI_ANALYSIS_TOOL
+    from maljan.analysis.anti_analysis import SCAN_TOOL as ANTI_ANALYSIS_TOOL
     from maljan.tools import crypto_constants
 
     place = {"offset": "0x1", "rva": "0x2", "function": "0x0"}
@@ -798,6 +815,7 @@ def _deobfuscation_lines() -> str:
             triage_pack._anti_analysis(findings, max_chars=200),
             triage_pack._anti_analysis({"stated": [], "not_stated": 2, "total_findings": 2}),
             triage_pack._anti_analysis({"stated": []}),
+            triage_pack._anti_analysis({"stated": [], "server": "ghidra"}),
             triage_pack.pack_block([*not_run, *failed], 0),
         ]
     )
@@ -807,7 +825,7 @@ def _ghidra_pass_failures() -> str:
     """What each way a Ghidra pass can stop says, from the passes' own code."""
     import httpx
 
-    from maljan.analysis.ghidra_passes import GhidraPasses, GhidraPassFailed
+    from maljan.providers.static.ghidra.passes import GhidraPasses, GhidraPassFailed
 
     def ghidra(answers: dict[str, Any]) -> GhidraPasses:
         def handler(request: httpx.Request) -> httpx.Response:
@@ -1835,6 +1853,7 @@ PROMPTS: dict[str, str] = {
     ],
     "the deobfuscation passes' pack lines": _deobfuscation_lines(),
     "what a Ghidra pass that stopped says": _ghidra_pass_failures(),
+    "the sink pre-pass's priority hints": _priority_hints(),
     "the constant sets as the pack line names them": _constant_set_names(),
     "the constant scan's description": _analysis_tool_descriptions("find_crypto_constants"),
     "the function index tool's description": _analysis_tool_descriptions("function_index"),
@@ -1981,6 +2000,11 @@ PROMPTS: dict[str, str] = {
             _tool_use_line([_StampedTool("a", "analysis")]),
             _extract_load_hint('{"analysis_file_path": "/s/a.bin"}', frozenset({"x"})),
             _extract_load_hint('{"analysis_file_path": "/s/a.bin"}', frozenset()),
+            _extract_load_hint(
+                '{"analysis_file_path": "/s/a.bin"}',
+                frozenset({"open_file"}),
+                SampleOpenConfig(open_tool="open_file", path_argument="file_path"),
+            ),
         ]
     ),
     "network packet-tool lines": f"{NO_PACKET_TOOL_LINE} {OTHER_TOOLS_THEN_ANALYZE}",

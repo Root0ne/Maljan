@@ -42,7 +42,7 @@ _LISTING_WORDS = (
 STILL_BY_NAME: dict[tuple[str, str, str], tuple[int, str]] = {
     ("pipeline/triage_pack.py", "looks", "_ESTABLISHED.get(tool)"): (1, _PACK_STEP),
     ("pipeline/triage_pack.py", "looks", "_GROUP_LABELS.get(entry.tool, entry.tool)"): (
-        2,
+        1,
         _PACK_STEP,
     ),
     ("pipeline/triage_pack.py", "looks", "_RENDERERS.get(entry.tool)"): (1, _PACK_STEP),
@@ -52,7 +52,7 @@ STILL_BY_NAME: dict[tuple[str, str, str], tuple[int, str]] = {
     ("pipeline/triage_pack.py", "compares", "entry.tool == 'capa'"): (1, _PACK_STEP),
     ("pipeline/triage_pack.py", "compares", "entry.tool != 'capa'"): (1, _PACK_STEP),
     ("pipeline/triage_pack.py", "compares", "entry.tool == crypto_constants.TOOL"): (1, _PACK_STEP),
-    ("pipeline/triage_pack.py", "compares", "entry.tool == ANTI_ANALYSIS_TOOL"): (1, _PACK_STEP),
+    ("pipeline/triage_pack.py", "compares", "entry.tool == SCAN_TOOL"): (1, _PACK_STEP),
     ("pipeline/triage_pack.py", "compares", "entry.tool == INDEX_TOOL"): (2, _PACK_STEP),
     ("pipeline/triage_pack.py", "compares", "entry.tool != INDEX_TOOL"): (1, _PACK_STEP),
     ("pipeline/triage_pack.py", "compares", "e.tool == INDEX_TOOL"): (1, _PACK_STEP),
@@ -84,10 +84,6 @@ STILL_BY_NAME: dict[tuple[str, str, str], tuple[int, str]] = {
     ("agents/evidence_recorder.py", "compares", "name != tool"): (
         1,
         "a repaired call matched to the note the same call left, by the tool name it gave",
-    ),
-    ("analysis/ghidra_program.py", "looks", "(overrides or {}).get(tool)"): (
-        1,
-        "the Ghidra REST opener's endpoint overrides, keyed by its caller (the Ghidra adapter)",
     ),
 }
 

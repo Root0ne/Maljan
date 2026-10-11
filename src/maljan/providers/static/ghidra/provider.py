@@ -1,9 +1,13 @@
-"""Ghidra MCP static analysis — moved out of the static analyst.
+"""Ghidra MCP static analysis: the provider the static analysts drive Ghidra through.
 
 The load_program path pin and the http/stdio attach path are the static
-analyst's own code (``StaticAnalyst``, pre-2026-09), transplanted here
-unchanged. The analyst's ``_initialize_mcp_client`` now calls this provider
-instead of driving its own copy.
+analyst's own code, transplanted here unchanged. What only Ghidra's REST API
+serves is answered here through the static provider interface
+(``providers.base.StaticProvider``): the open of the job's sample before an
+analyst's loop (``open_sample``), the call graph the sink pre-pass ranks
+(``call_graph``), the anti-analysis scan the triage pack makes
+(``anti_analysis_scan``, ``passes``) and the function hashes
+(``function_hashes``).
 """
 
 from __future__ import annotations
@@ -26,10 +30,14 @@ from maljan.providers.base import (
 from maljan.providers.registry import register_static_provider
 from maljan.providers.sample_open import long_running_tools, server_note_key
 from maljan.providers.server_guard import explicit_call_timeout
+from maljan.providers.static.ghidra.call_graph import PRIORITY_FOLLOW_UP, call_graph_from_text
+from maljan.providers.static.ghidra.passes import SCAN_CHECKS_SHORT
 from maljan.tools.errors import SERVER_WORDS_LIMIT, TRANSPORT_MARKERS
 
 if TYPE_CHECKING:
+    from maljan.analysis.sink_reachability import CallGraph
     from maljan.core.config import MCPServerConfig, MemoryConfig, PreprocessingConfig, Settings
+    from maljan.providers.static.ghidra.passes import GhidraPasses
 
 
 # Ghidra's prompt is its declaration's text (``core.builtin_declarations``):
@@ -127,7 +135,7 @@ def load_failure(load_output: str) -> tuple[str, bool] | None:
     """
     import json
 
-    from maljan.analysis.ghidra_program import program_name_from_load
+    from maljan.providers.static.ghidra.program import program_name_from_load
     from maljan.tools.errors import error_parts
 
     if program_name_from_load(load_output):
@@ -140,108 +148,6 @@ def load_failure(load_output: str) -> tuple[str, bool] | None:
     except (ValueError, TypeError, AttributeError):
         marker = None
     return parts[1], marker not in TRANSPORT_MARKERS
-
-
-def _ghidra_over_http(cfg: Settings, provider_id: str) -> bool:
-    """Whether this agent's provider is a switched-on Ghidra reached over its REST API."""
-    ghidra = cfg.static.ghidra
-    return (
-        provider_id == "ghidra"
-        and ghidra.transport == "http"
-        and bool(getattr(ghidra, "enabled", True))
-    )
-
-
-def prepare_sample(
-    cfg: Settings,
-    provider_id: str,
-    file_path: str,
-    log: Any = None,
-    provider: Any = None,
-) -> str:
-    """Open the job's sample on Ghidra, then the sink pre-pass: a priority hint, or ``""``.
-
-    The load is the precondition of the agent's loop. A load that opens
-    nothing — Ghidra answers HTTP 200 with ``{"error": "File not found: ..."}``
-    when the path is not one its container can see — raises
-    :class:`SampleNotOpened` with the server's words before any model turn is
-    spent, and ``provider`` (the agent's Ghidra provider, when the caller has
-    it) remembers it, so no later loop of the job calls Ghidra for that path.
-    A load Ghidra gave no answer to — a connection that failed twice, a 5xx,
-    a refused token — raises too, with a sentence naming Ghidra's address and
-    token rather than the samples path, and is not remembered.
-    A load that opens the program makes it the current one, and Ghidra's
-    auto-analysis runs on it, waited for without a limit: an import holds no
-    call or code reference for the agent's callers, callees and
-    cross-references to read. The open goes through the general opener
-    (``providers.sample_open``) with the tools the Ghidra block declares, so a
-    path the job already opened (here, in the triage pass or by a model) is a
-    switch answered from the job's note.
-
-    Then, with ``preprocessing.use_sink_reachability`` on, the pre-pass:
-    the whole call graph, and the functions that reach
-    sensitive sinks rendered as a hint, so the loop decompiles the malicious
-    core first. The pre-pass is fail-safe: any error in it, or a binary with
-    no named sink reachable, returns ``""``.
-
-    Only for an agent whose own static provider is Ghidra over ``http``: the
-    calls are Ghidra's REST API, which no other provider speaks and Ghidra
-    over stdio does not serve. Anything else returns ``""`` and calls nothing.
-
-    Each request waits what one tool call of this deployment may take
-    (``core.mcp.breaker.call_timeout_seconds``, else the longest tool budget
-    configured), and with neither set, as long as Ghidra takes.
-    """
-    import logging
-
-    logger_ = log if log is not None else logging.getLogger(__name__)
-    if not _ghidra_over_http(cfg, provider_id):
-        return ""
-    known = _known_failure(provider, file_path)
-    if known is not None:
-        raise known
-
-    import httpx
-
-    from maljan.analysis.ghidra_program import program_name_from_load
-    from maljan.providers.server_guard import deployment_call_budget
-
-    ghidra = cfg.static.ghidra
-    base = ghidra.url.rstrip("/")
-    token = ghidra.auth_token.get_secret_value()
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
-    call_budget = deployment_call_budget(cfg)
-    with httpx.Client(timeout=call_budget if call_budget > 0 else None, headers=headers) as http:
-        address = ghidra_address(ghidra.url)
-        answer = open_ghidra_sample(
-            http,
-            base,
-            file_path,
-            getattr(ghidra, "sample_open", None),
-            sample_notes_of(provider),
-            key=server_note_key(ghidra, str(getattr(provider, "note_instance", "") or "")),
-            open_call=lambda tool, arguments: (
-                _load(http, base, tool, arguments, address, logger_).text
-            ),
-        )
-        refused = not_made_current(answer)
-        if refused is not None:
-            logger_.error("%s", refused)
-            raise refused
-        if not program_name_from_load(answer):
-            # A failed load answers **200**, so raise_for_status sees nothing
-            # wrong. Carrying on would hand the model a Ghidra with no program,
-            # or with whichever program is still current: every call after it
-            # answers about nothing, or about a different binary. This is
-            # Ghidra's own answer about the file, so it is remembered.
-            said = load_failure(answer)
-            failure = sample_not_opened(said[0] if said else answer)
-            _remember_failure(provider, file_path, failure)
-            logger_.error("%s", failure)
-            raise failure
-        if not getattr(cfg.preprocessing, "use_sink_reachability", False):
-            return ""
-        return _sink_priority_hint(cfg, http, base, file_path, logger_)
 
 
 def sample_notes_of(holder: Any) -> Any:
@@ -278,13 +184,13 @@ def open_ghidra_sample(
     loop retries a connection and raises when Ghidra did not answer). ``key``
     names the server in the job's note (``sample_open.server_note_key``).
     """
-    from maljan.analysis.ghidra_program import (
+    from maljan.providers.sample_open import SampleOpener, declared
+    from maljan.providers.static.ghidra.program import (
         SWITCH_PARAM,
         SWITCH_PATH,
         program_name_from_load,
         rest_tool_call,
     )
-    from maljan.providers.sample_open import SampleOpener, declared
 
     if declared(spec):
         tool = spec.open_tool
@@ -344,40 +250,6 @@ def _load(
     raise AssertionError("unreachable")  # pragma: no cover
 
 
-def _sink_priority_hint(cfg: Settings, http: Any, base: str, file_path: str, log: Any) -> str:
-    """The sink-reachability pre-pass over the program just opened. Fail-safe: ``""``."""
-    try:
-        from maljan.analysis.sink_reachability import build_priority_hint
-
-        resp = http.get(
-            f"{base}/get_full_call_graph",
-            params={"format": "json", "limit": 20000},
-        )
-        resp.raise_for_status()
-        hint = build_priority_hint(
-            resp.text, max_funcs=cfg.preprocessing.sink_reachability_max_funcs
-        )
-    except Exception as exc:  # fail-safe: never break analysis over a hint
-        log.warning(
-            "Sink-reachability pre-pass failed (%s: %s); continuing without hint.",
-            type(exc).__name__,
-            exc,
-        )
-        return ""
-    if hint:
-        log.info(
-            "Sink-reachability pre-pass: priority-functions hint built (%d chars) for '%s'.",
-            len(hint),
-            file_path,
-        )
-    else:
-        log.info(
-            "Sink-reachability pre-pass: no named sink APIs reachable "
-            "(stripped/static binary?) — no hint emitted."
-        )
-    return hint
-
-
 def _known_failure(provider: Any, path: str) -> SampleNotOpened | None:
     """The failure ``provider`` already met opening ``path``, as a fresh exception."""
     known = getattr(provider, "sample_failure", None)
@@ -414,6 +286,8 @@ class GhidraStaticProvider(StaticProvider):
     description = "A running Ghidra MCP server decompiles and names functions on request."
     probe_label = "Test Ghidra MCP"
     settings_intro = "Where the Ghidra MCP server listens, and how it authenticates."
+    priority_follow_up = PRIORITY_FOLLOW_UP
+    scan_checks_short = SCAN_CHECKS_SHORT
 
     def __init__(
         self,
@@ -513,7 +387,7 @@ class GhidraStaticProvider(StaticProvider):
         # HTTP transport (headless Docker server)
         # ------------------------------------------------------------------
         if self._cfg.transport == "http":
-            from maljan.agents.ghidra_http_client import GhidraHTTPClient
+            from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
 
             client = GhidraHTTPClient(
                 base_url=self._cfg.url,
@@ -748,13 +622,156 @@ class GhidraStaticProvider(StaticProvider):
             args_schema=tool.args_schema,
         )
 
+    def _over_http(self) -> bool:
+        """Whether Ghidra is switched on and reached over its REST API.
+
+        The open before the loop, the call graph and the scan are REST calls,
+        which Ghidra over stdio does not serve.
+        """
+        return self._cfg.transport == "http" and bool(getattr(self._cfg, "enabled", True))
+
+    def preprocessing(self) -> Any:
+        """The preprocessing settings this provider was built with."""
+        return self._pre
+
+    def _rest_client(self) -> Any:
+        """A client for Ghidra's REST API, with the token, each request waiting one call's budget.
+
+        What one tool call of this deployment may take
+        (``core.mcp.breaker.call_timeout_seconds``, else the longest tool
+        budget configured), and with neither set, as long as Ghidra takes.
+        """
+        import httpx
+
+        from maljan.providers.server_guard import deployment_call_budget
+
+        token = self._cfg.auth_token.get_secret_value()
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        budget = deployment_call_budget(get_settings_or_none())
+        return httpx.Client(timeout=budget if budget > 0 else None, headers=headers)
+
+    def open_sample(self, path: str | None = None) -> bool:
+        """Open the job's sample on Ghidra before the agent's loop; whether it opened.
+
+        The load is the precondition of the agent's loop. A load that opens
+        nothing — Ghidra answers HTTP 200 with ``{"error": "File not found: ..."}``
+        when the path is not one its container can see — raises
+        :class:`SampleNotOpened` with the server's words before any model turn is
+        spent, and is remembered, so no later loop of the job calls Ghidra for
+        that path. A load Ghidra gave no answer to — a connection that failed
+        twice, a 5xx, a refused token — raises too, with a sentence naming
+        Ghidra's address and token rather than the samples path, and is not
+        remembered. A load that opens the program makes it the current one,
+        and Ghidra's auto-analysis runs on it, waited for without a limit: an
+        import holds no call or code reference for the agent's callers,
+        callees and cross-references to read. The open goes through the
+        general opener (``providers.sample_open``) with the tools the Ghidra
+        block declares, so a path the job already opened (here, in the triage
+        pass or by a model) is a switch answered from the job's note.
+
+        Only over ``http``: anything else returns ``False`` and calls nothing.
+        """
+        from maljan.providers.static.ghidra.program import program_name_from_load
+
+        target = path or self._held_path()
+        if not target or not self._over_http():
+            return False
+        known = _known_failure(self, target)
+        if known is not None:
+            raise known
+        base = self._cfg.url.rstrip("/")
+        with self._rest_client() as http:
+            address = ghidra_address(self._cfg.url)
+            answer = open_ghidra_sample(
+                http,
+                base,
+                target,
+                getattr(self._cfg, "sample_open", None),
+                sample_notes_of(self),
+                key=server_note_key(self._cfg, str(getattr(self, "note_instance", "") or "")),
+                open_call=lambda tool, arguments: (
+                    _load(http, base, tool, arguments, address, logger).text
+                ),
+            )
+        refused = not_made_current(answer)
+        if refused is not None:
+            logger.error("%s", refused)
+            raise refused
+        if not program_name_from_load(answer):
+            # A failed load answers **200**, so raise_for_status sees nothing
+            # wrong. Carrying on would hand the model a Ghidra with no program,
+            # or with whichever program is still current: every call after it
+            # answers about nothing, or about a different binary. This is
+            # Ghidra's own answer about the file, so it is remembered.
+            said = load_failure(answer)
+            failure = sample_not_opened(said[0] if said else answer)
+            _remember_failure(self, target, failure)
+            logger.error("%s", failure)
+            raise failure
+        return True
+
+    def call_graph(self, path: str) -> CallGraph | None:
+        """The current program's whole call graph, read from Ghidra's REST API.
+
+        The program the open before the loop made current. ``None`` when
+        Ghidra is not reached over ``http``; a request that fails raises, and
+        the pre-pass reads that as no hint.
+        """
+        if not self._over_http():
+            return None
+        with self._rest_client() as http:
+            resp = http.get(
+                f"{self._cfg.url.rstrip('/')}/get_full_call_graph",
+                params={"format": "json", "limit": 20000},
+            )
+            resp.raise_for_status()
+        return call_graph_from_text(resp.text)
+
+    def anti_analysis_scan(
+        self, job: StaticJobContext, *, notes: Any = None, call_budget: float = 0.0
+    ) -> GhidraPasses:
+        """Ghidra's anti-analysis scan of this job, or the sentence saying why there is none.
+
+        Ghidra has to be switched on, reached over its REST API (``http``:
+        Ghidra over stdio serves no endpoint the pack can call), and holding a
+        copy of this job's sample where it reads (``job.mirror_sample_path``,
+        the mirror the worker made for it).
+        """
+        from maljan.providers.static.ghidra.passes import (
+            GHIDRA_HAS_NO_COPY,
+            GHIDRA_NOT_OVER_HTTP,
+            GHIDRA_SWITCHED_OFF,
+            GhidraPasses,
+        )
+
+        key = server_note_key(self._cfg)
+        path = job.mirror_sample_path
+        if not bool(getattr(self._cfg, "enabled", True)):
+            reason = GHIDRA_SWITCHED_OFF
+        elif self._cfg.transport != "http":
+            reason = GHIDRA_NOT_OVER_HTTP.format(transport=self._cfg.transport)
+        elif not path:
+            reason = GHIDRA_HAS_NO_COPY
+        else:
+            return GhidraPasses(
+                base_url=str(self._cfg.url),
+                token=self._cfg.auth_token.get_secret_value(),
+                sample_path=str(path),
+                call_timeout=call_budget if call_budget > 0 else None,
+                sample_open=getattr(self._cfg, "sample_open", None),
+                sample_notes=notes,
+                note_key=key,
+                provider=self.id,
+            )
+        return GhidraPasses(unavailable=reason, note_key=key, provider=self.id)
+
     def mirror_spec(self) -> MirrorSpec:
         """Where this server's block declares the sample goes and is seen."""
         return MirrorSpec.of(self._cfg)
 
     def function_hashes(self, job: StaticJobContext) -> list[tuple[str, str]]:
-        """Two lines of delegation: the pre-pass itself already lives in analysis/."""
-        from maljan.analysis.function_hash_attribution import fetch_bulk_function_hashes
+        """Ghidra's per-function hashes of the job's mirror, over its REST API."""
+        from maljan.providers.static.ghidra.function_hashes import fetch_bulk_function_hashes
 
         if not self.capabilities.provides_function_hashes or not job.mirror_sample_path:
             return []
@@ -797,7 +814,7 @@ class GhidraStaticProvider(StaticProvider):
             return ProviderProbe(False, f"HTTP {response.status_code}", latency)
         # The tool names the model will call, read the way the client reads
         # the schema, for the editor's tick boxes.
-        from maljan.agents.ghidra_http_client import schema_tool_names
+        from maljan.providers.static.ghidra.http_client import schema_tool_names
 
         try:
             names = schema_tool_names(response.json())

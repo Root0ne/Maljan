@@ -369,12 +369,23 @@ class TestTheHumanTurnSaysWhatTheListHolds:
 
     def test_the_static_turn_names_the_decompiler_it_has(self) -> None:
         agent = _static_agent(
-            [_Tool("load_program"), _Tool("decompile_function"), _Tool("get_xrefs_to")]
+            [_Tool("load_program"), _Tool("decompile_function"), _Tool("get_xrefs_to")],
+            provider="ghidra",
         )
         turns = _turns(agent, "analyze_isr", _CHUNK)
 
         assert "decompile, xrefs" in turns["human"]
-        assert "LOAD THIS BINARY FIRST" in turns["human"]
+        assert (
+            'LOAD THIS BINARY FIRST: call ``load_program(file="/samples/ab.bin")``'
+            in (turns["human"])
+        )
+
+    def test_the_load_line_names_only_the_open_tool_the_provider_declares(self) -> None:
+        agent = _static_agent([_Tool("load_program"), _Tool("decompile_function")])
+        turns = _turns(agent, "analyze_isr", _CHUNK)
+
+        assert "LOAD THIS BINARY FIRST" not in turns["human"]
+        assert "use exactly this string wherever a tool asks for a file" in turns["human"]
 
     def test_a_decompiler_without_an_xref_tool_is_not_promised_xrefs(self) -> None:
         agent = _static_agent([_Tool("decompile_function")])
