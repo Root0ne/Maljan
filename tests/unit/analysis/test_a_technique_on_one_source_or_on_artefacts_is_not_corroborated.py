@@ -78,8 +78,8 @@ def _ledger() -> list[LedgerEntry]:
             {
                 "image_base": hex(BASE),
                 "results": [
-                    {"rva": "0x5010", "text": "Startup"},
-                    {"rva": "0x5080", "text": "Updater"},
+                    {"rva": "0x5010", "text": "Autorun"},
+                    {"rva": "0x5080", "text": "Helper"},
                 ],
             },
             agent="pipeline",
@@ -126,7 +126,7 @@ def _restating(n: int) -> dict[str, AgentISR]:
         f"a{i}": _isr(
             f"a{i}",
             _claim(
-                f'The file {words[i % len(words)]} "Startup" and "Updater"; analyst {i} '
+                f'The file {words[i % len(words)]} "Autorun" and "Helper"; analyst {i} '
                 "reads them as an autostart.",
                 "[ev_0002]",
             ),
@@ -147,7 +147,7 @@ class TestWhatASourceIs:
         roots = run_roots(_ledger())
 
         held = roots.sources_of_statement(
-            'The file holds "Startup"; no process wrote it [ev_0003].', ["ev_0002", "ev_0003"]
+            'The file holds "Autorun"; no process wrote it [ev_0003].', ["ev_0002", "ev_0003"]
         )
 
         assert held == {"ev_0002": READING_ARTEFACT}
@@ -157,7 +157,7 @@ class TestWhatASourceIs:
             "a": _isr(
                 "a",
                 _claim(
-                    '"Startup" is held; "rundll32.exe x.dll,#1" ran, no write observed [ev_0003].',
+                    '"Autorun" is held; "rundll32.exe x.dll,#1" ran, no write observed [ev_0003].',
                     "[ev_0002]",
                 ),
             ),
@@ -172,7 +172,7 @@ class TestWhatASourceIs:
     def test_of_statement_reads_as_it_did(self) -> None:
         roots = run_roots(_ledger())
 
-        assert roots.of_statement('"Startup" [ev_0002]', ["ev_0002"]) == (["0x5010 in .data"], [])
+        assert roots.of_statement('"Autorun" [ev_0002]', ["ev_0002"]) == (["0x5010 in .data"], [])
         assert roots.of_statement("nothing", []) == (
             [],
             ["no: the statement cites no ledger entry"],
@@ -215,7 +215,7 @@ class TestTheSourcesOfATechnique:
         timings = []
         for n in (200, 2000):
             isrs = {
-                "a": _isr("a", *[_claim(f'"Startup" {i} [ev_0002]', "[ev_0002]") for i in range(n)])
+                "a": _isr("a", *[_claim(f'"Autorun" {i} [ev_0002]', "[ev_0002]") for i in range(n)])
             }
             start = time.perf_counter()
             technique_sources(isrs, _ledger())

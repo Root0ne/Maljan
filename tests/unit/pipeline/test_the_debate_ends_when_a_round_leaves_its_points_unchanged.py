@@ -30,12 +30,12 @@ from maljan.pipeline.routing import (
 from maljan.pipeline.state import AgentArgument
 
 COUNTS = (
-    "[analysts: TRIAGE ANALYST, STATIC] TRIAGE claim 6 says 101 strings and STATIC claim 4 "
-    "says 81 from routine 0xae78 [ev_0019] [ev_0021]. [blocking: restate the counts]"
+    "[analysts: TRIAGE ANALYST, STATIC] TRIAGE claim 6 says 57 strings and STATIC claim 4 "
+    "says 43 from routine 0x4c10 [ev_0019] [ev_0021]. [blocking: restate the counts]"
 )
 COUNTS_REWORDED = (
-    "[analysts: static, triage] The decoder count (101) and the emulated count (81) for "
-    "0xAE78 still disagree in STATIC claim 9 and TRIAGE claim 2 ([ev_0021], [ev_0019]). "
+    "[analysts: static, triage] The decoder count (57) and the emulated count (43) for "
+    "0x4C10 still disagree in STATIC claim 9 and TRIAGE claim 2 ([ev_0021], [ev_0019]). "
     "[blocking: the two counts are not one routine's]"
 )
 EXPORTS = "[analysts: network] NETWORK claim 3 names 5 exports; [ev_0004] states 4. [blocking: x]"
@@ -74,7 +74,7 @@ class TestAPointIsWhatItIsAbout:
         assert point_key(COUNTS) == point_key(COUNTS_REWORDED)
 
     def test_claim_numbers_are_left_out(self) -> None:
-        assert point_key(COUNTS).numbers == (81, 101)
+        assert point_key(COUNTS).numbers == (43, 57)
 
     def test_the_mark_and_its_reason_are_left_out(self) -> None:
         a = point_key(EXPORTS)
