@@ -123,6 +123,7 @@ def build_capability_matrix(
     if not techniques:
         return [], []
     roots_of = run_roots(ledger) if ledger else None
+    sources_of = _technique_sources(isr_reports, ledger, roots_of)
 
     out_of_scope = _out_of_scope(list(techniques), sample)
     review = technique_review(stix_output)
@@ -158,6 +159,15 @@ def build_capability_matrix(
         if roots_of is not None:
             for text, ids in info.get("cited") or []:
                 counted.add(*roots_of.of_statement(text, ids))
+        held = sources_of.get(tid.upper()) or {}
+        support = _support_of(held)
+        # Corroboration is two analyst layers in statements of their own, and,
+        # where the ledger was read, two sources of their own that are not all
+        # artefacts of the file: five analysts restating one pack row are one
+        # source, and names and strings show what the sample can do.
+        corroborated = len(independent) >= 2 and (
+            roots_of is None or not held or (len(held) >= 2 and support != _CAPABILITY)
+        )
 
         # Never emit a zero-confidence cell with no evidence and no contributing
         # source — it is an empty claim the UI would render as a "verified"
@@ -243,6 +253,8 @@ def build_capability_matrix(
                 identical_statements=identical,
                 evidence_roots=list(counted.roots),
                 roots_not_read=list(counted.not_read),
+                sources=sorted(held),
+                support=support,
             )
         )
         if not_published:
@@ -262,12 +274,14 @@ def build_capability_matrix(
                 evidence_quotes=list(evidence),
                 confidence=confidence,
                 contributing_layers=layers,
-                is_corroborated=len(independent) >= 2,
+                is_corroborated=corroborated,
                 technique_id_valid=valid,
                 independent_layers=independent,
                 identical_statements=identical,
                 evidence_roots=list(counted.roots),
                 roots_not_read=list(counted.not_read),
+                sources=sorted(held),
+                support=support,
             )
         )
 
@@ -275,6 +289,34 @@ def build_capability_matrix(
     mappings.sort(key=lambda m: -1.0 if m.confidence is None else m.confidence, reverse=True)
     logger.info("capability_matrix: %d cells, %d ttp mappings", len(cells), len(mappings))
     return cells, mappings
+
+
+# The support a technique has when every source is an artefact of the file.
+_CAPABILITY = "capability"
+
+
+def _technique_sources(
+    isr_reports: dict[str, Any] | None, ledger: Sequence[Any] | None, roots_of: Any
+) -> dict[str, dict[str, str]]:
+    """Per technique, ``{source: reading}`` (``validation.technique_sources``). Never raises."""
+    if roots_of is None:
+        return {}
+    try:
+        from maljan.pipeline.validation import technique_sources
+
+        return technique_sources(isr_reports, ledger, roots_of)
+    except Exception as exc:  # noqa: BLE001 — a fact not read is no fact stated
+        logger.debug("capability_matrix: the technique sources were not read (%s)", exc)
+        return {}
+
+
+def _support_of(held: dict[str, str]) -> str:
+    """``capability`` when every source is an artefact of the file (``validation.support_of``)."""
+    if not held:
+        return ""
+    from maljan.pipeline.validation import support_of
+
+    return support_of(held)
 
 
 # What the judge is called in ``contributing_layers``. It is listed, because a

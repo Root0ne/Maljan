@@ -47,8 +47,41 @@ ASSERTING_SOURCES: dict[str, str] = {
 }
 
 
-def summarise(isrs: dict[str, Any] | None, ledger: Sequence[Any] | None = None) -> str:
-    """The evidence summary block, or "" when nothing named a technique."""
+# What the judge is told of a technique every source of which is an artefact.
+CAPABILITY_FACT = (
+    "every source is an artefact of the file (names, strings, tables or index rows); "
+    "no sandbox observation, code listing or rule match"
+)
+
+
+def _source_facts(row: Any) -> str:
+    """The sources a corroboration row traces its technique to, as the judge is told them.
+
+    Each source is one ledger entry or sandbox item however many sources
+    above name the technique from it (``validation.technique_sources``), and
+    a row whose sources are all artefacts of the file says so. ``""`` for a
+    row that names no source.
+    """
+    if not isinstance(row, dict) or not row.get("sources"):
+        return ""
+    held = [str(x) for x in row["sources"]]
+    said = f" [traced to {len(held)} cited source(s), each counted once: {', '.join(held)}"
+    if row.get("support") == "capability":
+        said += f"; {CAPABILITY_FACT}"
+    return said + "]"
+
+
+def summarise(
+    isrs: dict[str, Any] | None,
+    ledger: Sequence[Any] | None = None,
+    traced: dict[str, Any] | None = None,
+) -> str:
+    """The evidence summary block, or "" when nothing named a technique.
+
+    ``traced`` is the run's corroboration rows (``validation.corroboration``):
+    with them, each line also states the ledger sources its technique traces
+    to, a fact beside the sources that named it.
+    """
     rows = collect(isrs, ledger)
     if not rows:
         return ""
@@ -64,7 +97,10 @@ def summarise(isrs: dict[str, Any] | None, ledger: Sequence[Any] | None = None) 
             f"{name} ({confidence:.2f})" if confidence is not None else name
             for name, confidence in sources
         )
-        lines.append(f"- {technique_label(tid)}: {len(sources)} source(s) — {rendered}")
+        lines.append(
+            f"- {technique_label(tid)}: {len(sources)} source(s) — {rendered}"
+            + _source_facts((traced or {}).get(tid))
+        )
     return "\n".join(lines)
 
 

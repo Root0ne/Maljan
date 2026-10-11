@@ -6420,6 +6420,38 @@ class BaseAnalyst(BudgetMeter, ABC):
         )
         return str(content)
 
+    def revision_tools(self) -> tuple[Any, ...] | None:
+        """The tools a revision's system prompt states: ``None`` (its own) when it may read.
+
+        ``()`` for the one tools-free call a revision is by default; ``None``,
+        which ``_system_prompt`` reads as the tools the loop binds, when this
+        round's directive names a function the ledger holds no listing of and
+        this agent has tools (``safe_revise_isr(read_places=True)``).
+        """
+        return None if self._revision_may_read() else ()
+
+    def _revision_may_read(self) -> bool:
+        return bool(getattr(self, "_revision_reads", False)) and bool(getattr(self, "tools", None))
+
+    def revision_answer(self, messages: list[BaseMessage], what: str = "revision") -> str:
+        """A revision's answer: one tools-free call, or this agent's tool loop when it may read.
+
+        The tool loop runs when the round's directive names a function the
+        ledger holds no listing of and this agent has tools; its calls enter
+        the ledger as any loop's do, and the model decides whether to make any.
+        """
+        if self._revision_may_read():
+            pairs = [
+                ("system" if getattr(m, "type", "") == "system" else "human", str(m.content))
+                for m in messages
+                if getattr(m, "type", "") in ("system", "human")
+            ]
+            self.logger.info(
+                "%s: the revision may read a function the ledger never listed.", self.name
+            )
+            return str(self.execute_tool_loop(pairs) or "")
+        return self.ask_the_model(self.frame_messages(messages), what=what)
+
     # ------------------------------------------------------------------
     # Abstract text interface (must be implemented by subclasses)
     # ------------------------------------------------------------------
@@ -8433,6 +8465,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         peer_reports: dict[str, str],
         mediator_feedback: str,
         revision_round: int = 1,
+        *,
+        read_places: bool = False,
     ) -> tuple[str, AgentISR]:
         """Wrapper around revise_isr() with error handling, checked like a first answer.
 
@@ -8444,6 +8478,11 @@ class BaseAnalyst(BudgetMeter, ABC):
         confidence questions among them. The revision's own call decides what
         the turn reads: the round-0 loop's deadline and whether its answer was
         nudged are not this answer's, so they are cleared before it is made.
+
+        ``read_places`` is a round whose directive names a function the ledger
+        holds no listing of (``debate_facts.place_facts``): the revision is
+        given this agent's tools (``revision_answer``), and the model decides
+        whether to read it.
         """
         self.current_round = int(revision_round)
         with lock_for(self):
@@ -8451,9 +8490,13 @@ class BaseAnalyst(BudgetMeter, ABC):
                 truncated = self._truncate_input(original_data)
                 self._last_loop_deadline = None
                 self._answer_unstructured = False
-                text, isr = self.revise_isr(
-                    truncated, own_report, peer_reports, mediator_feedback, revision_round
-                )
+                self._revision_reads = bool(read_places)
+                try:
+                    text, isr = self.revise_isr(
+                        truncated, own_report, peer_reports, mediator_feedback, revision_round
+                    )
+                finally:
+                    self._revision_reads = False
                 isr = self._drain_findings(isr)
                 if not isr.answer_text:
                     isr.note_answer_text(strip_tool_call_scaffolding(str(text or "")))

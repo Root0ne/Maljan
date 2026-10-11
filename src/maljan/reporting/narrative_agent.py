@@ -207,6 +207,12 @@ _LIST_FIELDS = ("key_findings", "defensive_recommendations")
 # The calls the manual path may make: the answer and the one retry the
 # validation loop gives an answer it finds fault with.
 NARRATIVE_ATTEMPTS = 2
+# Beside a published technique every source of which is an artefact of the file.
+CAPABILITY_NOTE = (
+    "published as a capability, not observed: every source is an artefact of the file "
+    "(names, strings, tables or index rows), with no sandbox observation, code listing or rule "
+    "match among them"
+)
 
 
 def _parse_keeping_duplicate_keys(text: str) -> dict[str, Any] | None:
@@ -364,10 +370,17 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
             rule_note = (
                 f" — {rule_only[mapping.technique_id]}" if mapping.technique_id in rule_only else ""
             )
+            # Published as a capability: every source is an artefact of the
+            # file, so the report model is told it was not seen done.
+            capability_note = (
+                f" — {CAPABILITY_NOTE}"
+                if str(getattr(mapping, "support", "") or "") == "capability"
+                else ""
+            )
             lines.append(
                 f"  - {mapping.technique_id} {mapping.technique_name} "
                 f"(conf={confidence_text(mapping.confidence)}, layers={layers}{independent})"
-                f"{rule_note}: "
+                f"{rule_note}{capability_note}: "
                 f"{quote}"
             )
         if any(m.technique_id in rule_only for m in report.ttp_mappings):

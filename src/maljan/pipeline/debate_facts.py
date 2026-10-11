@@ -463,3 +463,226 @@ def contested_input(
             peer for peer, patterns in spellings.items() if any(p.search(line) for p in patterns)
         )
     return feedback, {k: v for k, v in reports.items() if k != name and str(k) in shown}
+
+
+# The words of a listed line once its fields, its mark and its numbers are read
+# apart: compared only for a line that cites, places and counts nothing.
+_WORDS = re.compile(r"[a-z0-9]+")
+_HEX_VALUE = re.compile(r"\b0x[0-9a-fA-F]+\b")
+
+
+@dataclass(frozen=True)
+class PointKey:
+    """What a contested point is about, read from its line alone.
+
+    The analysts its ``[analysts: ...]`` field names, the ledger ids it cites,
+    the hex values and the decimal numbers it writes (claim numbers aside: a
+    revision renumbers claims), and, for a line that holds none of those,
+    its words. Two lines with one key are one point however the mediator
+    worded it the second time.
+    """
+
+    analysts: tuple[str, ...]
+    entries: tuple[str, ...]
+    hexes: tuple[int, ...]
+    numbers: tuple[int, ...]
+    words: tuple[str, ...] = ()
+
+
+def _field_key(name: str) -> str:
+    key = _key(name)
+    return key[: -len(_HEADING_WORD)] if key.endswith(_HEADING_WORD) else key
+
+
+def point_key(line: str) -> PointKey:
+    """The ``PointKey`` of one listed line. Linear in the line."""
+    text = str(line)
+    named = tuple(sorted({_field_key(n) for n in read_analysts_field(text) or [] if _key(n)}))
+    body = _ANY_MARK.sub(" ", _ANALYSTS_FIELD.sub(" ", text))
+    entries = tuple(sorted({i.lower() for i in _ENTRY_ID.findall(body)}))
+    hexes = tuple(sorted({int(h, 16) for h in _HEX_VALUE.findall(body)}))
+    bare = _CLAIM_NUMBERS.sub(" ", _HEX_VALUE.sub(" ", _ENTRY_ID.sub(" ", body)))
+    numbers = tuple(sorted({int(n) for n in _NUMBER.findall(bare)}))
+    words: tuple[str, ...] = ()
+    if not (entries or hexes or numbers):
+        words = tuple(_WORDS.findall(bare.lower()))
+    return PointKey(analysts=named, entries=entries, hexes=hexes, numbers=numbers, words=words)
+
+
+def same_points(before: Sequence[str], after: Sequence[str]) -> bool:
+    """Whether two mediations' blocking lines are the same contested points.
+
+    The same points, each read by ``point_key``: none resolved and none new.
+    Two empty lists are no contested point and are not the same points.
+    """
+    if not before or not after:
+        return False
+    return {point_key(line) for line in before} == {point_key(line) for line in after}
+
+
+# The head of the places a revision round is told, after the ledger's counts.
+PLACE_FACTS_HEAD = "The run's record of the functions the lines naming you name:"
+# The words a place fact uses for a function the ledger holds no listing of.
+NO_LISTING = "the ledger holds no listing of it"
+# What an analyst with tools is told beside a function the ledger never listed.
+PLACE_READ_OFFER = (
+    "A function the ledger holds no listing of can be read in this round with your tools that "
+    "take an address; what you keep, correct or withdraw about it is yours to decide."
+)
+
+
+def _hex_text(value: int) -> str:
+    return f"{value:#x}"
+
+
+def place_facts(
+    lines: Sequence[str],
+    isr_reports: Mapping[str, Any],
+    ledger: Iterable[Any],
+    agent_names: Iterable[str],
+) -> list[str]:
+    """One sentence per listed line naming a function the run knows, and whether it was read.
+
+    The places a line names are the addresses it writes and the addresses the
+    claims it names write (claim, evidence line). A place is a function the
+    run knows: a row of the function index, or a function a decompile or
+    disassembly call listed (``function_map.build_function_map`` over the
+    whole ledger); an offset and its virtual address are one function where
+    an image base the run read joins them. For each, the sentence says
+    whether the ledger holds a listing of it, and which entries hold it. An
+    address that is no function the run knows is not named. Never raises on
+    a line it cannot read; linear in the lines, the claims they name and the
+    ledger.
+    """
+    from maljan.agents.function_map import build_function_map
+    from maljan.pipeline.validation import _addresses_written
+    from maljan.schemas.evidence import LedgerEntry
+
+    entries: list[Any] = []
+    for row in ledger or ():
+        if isinstance(row, Mapping):
+            try:
+                row = LedgerEntry.model_validate(row)
+            except Exception:  # noqa: BLE001 — one unreadable row is not a lost fact
+                continue
+        entries.append(row)
+    try:
+        found = build_function_map(entries, None, [])
+    except Exception:  # noqa: BLE001 — no map is no fact
+        return []
+    bases = tuple(found.image_bases)
+    # Every spelling of each known function, offset and virtual address alike.
+    listed: dict[int, tuple[str, ...]] = {}
+    for visited in found.visited:
+        if visited.address is None:
+            continue
+        held = tuple(dict.fromkeys([*visited.decompiled, *visited.listed]))
+        for key in (visited.address, *(visited.address - b for b in bases if visited.address >= b)):
+            listed.setdefault(key, held)
+    indexed = {offset for offset, _rank in found.index_unvisited} | {
+        e.address for e in found.visited if e.indexed and e.address is not None
+    }
+    indexed_keys: set[int] = set()
+    for offset in indexed:
+        indexed_keys.update((offset, *(offset + b for b in bases)))
+    index_entry = found.index_entry
+
+    def spellings(address: int) -> tuple[int, ...]:
+        return (address, *(address - b for b in bases if address >= b))
+
+    names = list(agent_names) or [str(k) for k in isr_reports]
+    facts: list[str] = []
+    for line in lines:
+        text = str(line)
+        try:
+            said = [text]
+            for name, numbers in _claims_named(text, names):
+                claims = _claims_of(isr_reports, name)
+                for number in numbers:
+                    place = _claim_place(number, len(claims))
+                    if place is not None:
+                        claim = claims[place]
+                        said.append(
+                            f"{getattr(claim, 'claim', '') or ''} "
+                            f"{getattr(claim, 'evidence_ref', '') or ''}"
+                        )
+            parts: list[str] = []
+            seen: set[int] = set()
+            for address in (a for part in said for a in _addresses_written(part)):
+                keys = spellings(address)
+                if seen.intersection(keys):
+                    continue
+                read = next((listed[k] for k in keys if k in listed), None)
+                known = read is not None or any(k in indexed_keys for k in keys)
+                if not known:
+                    continue
+                seen.update(keys)
+                if read is not None:
+                    parts.append(f"{_hex_text(address)} is listed in {', '.join(read)}")
+                else:
+                    where = f" [{index_entry}]" if index_entry else ""
+                    parts.append(
+                        f"{_hex_text(address)} is a function of the run's function index{where}, "
+                        f"and {NO_LISTING}"
+                    )
+        except Exception:  # noqa: BLE001 — a line that cannot be read gets no fact
+            continue
+        if parts:
+            facts.append(f'For the line "{text}": {"; ".join(parts)}.')
+    return facts
+
+
+def names_an_unlisted_place(facts: Iterable[str]) -> bool:
+    """Whether any of these place facts names a function the ledger holds no listing of."""
+    return any(NO_LISTING in str(f) for f in facts)
+
+
+def with_place_facts(directive: str, facts: Sequence[str], *, can_read: bool) -> str:
+    """The revision directive with the place facts after it, or as it was.
+
+    An analyst with tools is told, beside a function the ledger never listed,
+    that it can read it in this round; nothing is adopted or rejected for it.
+    """
+    said = [str(f) for f in facts if str(f).strip()]
+    if not said:
+        return directive
+    block = [PLACE_FACTS_HEAD, *(f"- {f}" for f in said)]
+    if can_read and names_an_unlisted_place(said):
+        block.append(PLACE_READ_OFFER)
+    text = "\n".join(block)
+    return f"{directive}\n\n{text}" if directive else text
+
+
+def place_facts_for(name: str, facts: Iterable[str], participants: Sequence[str]) -> list[str]:
+    """The place facts the analyst ``name`` is told: those whose line names it in its field.
+
+    A fact quotes its line whole, so the line's ``[analysts: ...]`` field is
+    read from the fact. A line with no field is put to every analyst, as a
+    round that cannot read the names asks every analyst.
+    """
+    found: list[str] = []
+    for fact in facts:
+        written = read_analysts_field(str(fact))
+        if written is None or any(resolve_analyst(w, participants) == name for w in written):
+            found.append(str(fact))
+    return found
+
+
+def tools_taking_an_address(tools: Iterable[Any]) -> list[str]:
+    """The names of the tools whose declared arguments take a function's address.
+
+    Read from each tool's own argument schema, by the argument names a
+    function-listing call gives an address under
+    (``validation._ADDRESS_ARGUMENTS``): what a tool can be asked is what it
+    declares, whichever server serves it.
+    """
+    from maljan.pipeline.validation import _ADDRESS_ARGUMENTS
+
+    names: list[str] = []
+    for tool in tools or ():
+        fields = getattr(getattr(tool, "args_schema", None), "model_fields", None)
+        if isinstance(fields, dict) and any(
+            str(field).strip().lower() in _ADDRESS_ARGUMENTS for field in fields
+        ):
+            names.append(str(getattr(tool, "name", "") or ""))
+    return [n for n in names if n]

@@ -880,7 +880,11 @@ class TestAssertionsFromYaraAndFromRetiredIds:
             ]
         }
         rows = corroboration({}, [_entry("yara_scan", yara, 1)])
-        assert rows["T1055.012"] == {"asserted_by": ["yara"], "claimed_by": []}
+        assert rows["T1055.012"] == {
+            "asserted_by": ["yara"],
+            "claimed_by": [],
+            "sources": ["ev_0001"],
+        }
 
     def test_an_upstream_rule_asserting_a_retired_id_is_marked(self) -> None:
         from maljan.analysis.corroboration import technique_label

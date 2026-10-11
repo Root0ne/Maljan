@@ -39,8 +39,30 @@ def corroboration_row(row: Mapping[str, Any] | Sequence[str] | None) -> dict[str
             out["evidence_roots"] = [str(x) for x in row["evidence_roots"]]
         if row.get("roots_not_read"):
             out["roots_not_read"] = [str(x) for x in row["roots_not_read"]]
+        # The ledger entries and sandbox items its statements read, each one
+        # source however many agents cite it, and ``capability`` where every
+        # one is an artefact of the file (``validation.technique_sources``).
+        if row.get("sources"):
+            out["sources"] = [str(x) for x in row["sources"]]
+        if row.get("support"):
+            out["support"] = str(row["support"])
         return out
     return {"asserted_by": [], "claimed_by": [str(x) for x in (row or [])]}
+
+
+def corroborated(row: Mapping[str, Any] | Sequence[str] | None) -> bool:
+    """Whether a technique stands on more than one source of its own.
+
+    A row that names its ``sources`` counts them, each one ledger entry or
+    sandbox item however many agents cite it, and a row whose support is
+    ``capability`` is not corroborated: names and strings in the file show
+    what the sample can do, not that it did it. A row stored before sources
+    were read counts its named sources, as it always did.
+    """
+    normalised = corroboration_row(row)
+    if "sources" in normalised:
+        return len(normalised["sources"]) > 1 and normalised.get("support") != "capability"
+    return len(corroboration_sources(row)) > 1
 
 
 def rule_match_only(report: Any) -> dict[str, str]:

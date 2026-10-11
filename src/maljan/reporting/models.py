@@ -588,6 +588,17 @@ class CapabilityCell(BaseModel):
     evidence_roots: list[str] = Field(default_factory=list)
     # One ``<entry id>: no: <reason>`` per cited entry that gave no root.
     roots_not_read: list[str] = Field(default_factory=list)
+    # The ledger entries and sandbox items behind the technique: each cited
+    # source that gives a statement naming it a root, and each asserting
+    # entry whose rows name it (``validation.technique_sources``). One entry
+    # is one source however many agents cite it. Empty on rows built without
+    # the ledger.
+    sources: list[str] = Field(default_factory=list)
+    # ``capability`` when every one of ``sources`` is an artefact of the file
+    # (names, strings, tables, index rows) and none is a sandbox observation,
+    # a listing of code or a rule match: what the sample can do, not what it
+    # was seen doing. Empty otherwise, and with no source.
+    support: str = ""
 
 
 class TTPMapping(BaseModel):
@@ -612,6 +623,9 @@ class TTPMapping(BaseModel):
     # See ``CapabilityCell.evidence_roots`` and ``roots_not_read``.
     evidence_roots: list[str] = Field(default_factory=list)
     roots_not_read: list[str] = Field(default_factory=list)
+    # See ``CapabilityCell.sources`` and ``support``.
+    sources: list[str] = Field(default_factory=list)
+    support: str = ""
 
 
 # ---------------------------------------------------------------------------

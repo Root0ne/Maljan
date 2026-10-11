@@ -4068,6 +4068,33 @@ def _corroborated_words(mapping: Any, rules: list[dict[str, Any]]) -> str:
     return f", {layers_and_roots(independent or named, roots, unread)}"
 
 
+# A technique every source of which is an artefact of the file, as its row says.
+CAPABILITY_SUPPORT = "capability"
+CAPABILITY_STATUS = "as a capability, not observed"
+
+
+def capability_words(sources: int, named: int, listed: str = "") -> str:
+    """The status words of a technique published as a capability, not observed.
+
+    Its sources are counted (each one ledger entry or sandbox item however
+    many analysts cite it), and said to be artefacts of the file with no
+    sandbox observation, code listing or rule match among them.
+    """
+    parts = [
+        f"{sources} source{'' if sources == 1 else 's'}, each an artefact of the file "
+        "(names, strings, tables or index rows); no sandbox observation, code listing or "
+        "rule match stands behind it"
+    ]
+    if named:
+        parts.append(
+            f"named by {named} analyst layer{'' if named == 1 else 's'}, counted as the "
+            "sources they cite"
+        )
+    if listed:
+        parts.append(listed)
+    return f"{CAPABILITY_STATUS} ({'; '.join(parts)})"
+
+
 def _layer_words(mapping: Any, rules: list[dict[str, Any]]) -> str:
     """``, corroborated`` for a row two analyst layers named, or ``""``.
 
@@ -4096,6 +4123,12 @@ def _layer_words(mapping: Any, rules: list[dict[str, Any]]) -> str:
         else ""
     )
     listed = rules and all(_resolved_only(hit) for hit in rules)
+    if str(getattr(mapping, "support", "") or "") == CAPABILITY_SUPPORT:
+        return " " + capability_words(
+            len(getattr(mapping, "sources", None) or []),
+            named,
+            "their statements are listed below the table" if listed else "",
+        )
     if not mapping.is_corroborated:
         if named < 2 or not (independent or identical):
             return ""

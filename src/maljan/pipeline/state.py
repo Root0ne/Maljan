@@ -58,7 +58,16 @@ class AgentArgument(BaseModel):
         ),
     )
     # Routing data for the platform, never model input: the history a prompt
-    # carries is this model's repr, so neither field is in it.
+    # carries is this model's repr, so none of these fields is in it.
+    place_facts: list[str] = Field(
+        default_factory=list,
+        repr=False,
+        description=(
+            "For the mediator: for each blocking line naming a function the run knows, which "
+            "functions it names and whether the ledger holds a listing of each, as the "
+            "platform put them to the analysts the line names."
+        ),
+    )
     revise: list[str] | None = Field(
         default=None,
         repr=False,

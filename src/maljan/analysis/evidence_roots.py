@@ -1280,10 +1280,13 @@ class RunRoots:
         # The run's sandbox section index: an item id is read only against it.
         self.items: ItemIndex | None = item_index_of(entries)
         self.entries: dict[str, EntryRoots] = {}
+        # Each entry's tool, lower-cased, for what kind of reading it is.
+        self.tools: dict[str, str] = {}
         for entry in entries:
             eid = str(getattr(entry, "id", "") or "").strip().lower()
             if not eid or getattr(entry, "repeated_of", None):
                 continue
+            self.tools[eid] = _tool(entry).lower()
             file = files.of(entry)
             if file is None:
                 self.entries[eid] = EntryRoots(reason=FILE_UNTOLD)
@@ -1297,6 +1300,8 @@ class RunRoots:
         for repeat, holder in repeat_holders(entries).items():
             held = self.entries.get(holder) if holder else None
             self.entries[repeat] = held or EntryRoots(reason=REPEAT_LOOP.format(entry=repeat))
+            if held and holder in self.tools:
+                self.tools[repeat] = self.tools[holder]
 
     def of_entry(self, entry_id: str) -> EntryRoots:
         eid = str(entry_id or "").strip().lower()
@@ -1365,13 +1370,13 @@ class RunRoots:
             return "", NO_ITEM.format(item=found)
         return _item_root(found, self._joins)
 
-    def of_statement(self, text: str, entry_ids: Iterable[str]) -> tuple[list[str], list[str]]:
-        """``(roots, no: reasons)`` for one statement citing ``entry_ids``.
+    def _citations(
+        self, text: str, entry_ids: Iterable[str]
+    ) -> list[tuple[str, list[str], list[str]]]:
+        """``(citation, roots, no: reasons)`` per citation of one statement, in its order.
 
-        A sandbox item id is a citation where ``entry_ids`` carries it (read
-        from a citing field) or the statement cites it in brackets, in a run
-        whose ledger holds the section index; the statement's own words are
-        never read for one.
+        Items first, then entries, as ``of_statement`` reads them. An empty
+        list is a statement citing nothing.
         """
         written = list(dict.fromkeys(str(i).strip().lower() for i in entry_ids if str(i).strip()))
         ids = [i for i in written if not is_item_id(i)]
@@ -1380,33 +1385,80 @@ class RunRoots:
             if self.items is not None
             else []
         )
-        if not ids and not items:
-            return [], [NO_CITATION]
-        roots: dict[str, None] = {}
-        reasons: list[str] = []
+        out: list[tuple[str, list[str], list[str]]] = []
         for item in items:
             label, reason = self.of_item(item)
-            if label:
-                roots[label] = None
-            else:
-                reasons.append(f"{item}: {reason}")
+            out.append((item, [label] if label else [], [] if label else [f"{item}: {reason}"]))
         for eid in ids:
             found = self.of_entry(eid)
             if not found.roots:
-                reasons.append(f"{eid}: {found.reason or NOTHING_TO_PLACE.format(tool=eid)}")
+                out.append(
+                    (eid, [], [f"{eid}: {found.reason or NOTHING_TO_PLACE.format(tool=eid)}"])
+                )
                 continue
             # An entry of one root, every row of it placed, gives that root.
             if len(found.roots) == 1 and not found.unplaced_values and not found.unplaced:
-                roots.update(dict.fromkeys(found.roots))
+                out.append((eid, list(found.roots), []))
                 continue
             # Otherwise the statement picks its rows out; one picking none out
             # gives no root for the entry: which row it read is not a fact.
             named, unplaced = self._named(text, found)
-            roots.update(dict.fromkeys(found.ordered(named)))
-            reasons += [f"{eid}: {reason}" for reason in unplaced]
+            reasons = [f"{eid}: {reason}" for reason in unplaced]
             if not named and not unplaced:
                 reasons.append(f"{eid}: {NAMES_NO_ROW.format(entry=eid)}")
+            out.append((eid, found.ordered(named), reasons))
+        return out
+
+    def of_statement(self, text: str, entry_ids: Iterable[str]) -> tuple[list[str], list[str]]:
+        """``(roots, no: reasons)`` for one statement citing ``entry_ids``.
+
+        A sandbox item id is a citation where ``entry_ids`` carries it (read
+        from a citing field) or the statement cites it in brackets, in a run
+        whose ledger holds the section index; the statement's own words are
+        never read for one.
+        """
+        cited = self._citations(text, entry_ids)
+        if not cited:
+            return [], [NO_CITATION]
+        roots: dict[str, None] = {}
+        reasons: list[str] = []
+        for _citation, held, said in cited:
+            roots.update(dict.fromkeys(held))
+            reasons += said
         return list(roots), reasons
+
+    def sources_of_statement(self, text: str, entry_ids: Iterable[str]) -> dict[str, str]:
+        """``{citation: reading}`` for each citation that gives the statement a root.
+
+        A citation is the source of the facts it gives: one ledger entry, or
+        one sandbox item, is one source however many statements cite it. The
+        reading is what the source is (``reading_of``). A citation that gives
+        the statement no root (an entry whose rows the statement names none
+        of, a reference lookup, a failed call) is no source of it.
+        """
+        return {
+            citation: self.reading(citation, held)
+            for citation, held, _said in self._citations(text, entry_ids)
+            if held
+        }
+
+    def sources_of_assertion(self, entry_id: str, technique_id: str) -> dict[str, str]:
+        """``{entry: "rule"}`` when the asserting entry's rows give the technique a root."""
+        roots, _reasons = self.of_assertion(entry_id, technique_id)
+        return {str(entry_id).strip().lower(): READING_RULE} if roots else {}
+
+    def reading(self, citation: str, roots: Sequence[str]) -> str:
+        """What one cited source is: a listing of code, a run observation, or an artefact.
+
+        ``code`` is an entry whose tool's name says it decompiles or
+        disassembles, the name rule every function-listing reader of the
+        platform uses; ``run`` is a citation whose roots are sandbox processes,
+        network flows or DNS queries, what a sandbox or a capture recorded
+        while the sample ran; anything else (names, strings, tables, index
+        rows) is an ``artefact``.
+        """
+        tool = self.tools.get(str(citation).strip().lower(), "")
+        return reading_of(tool, roots)
 
     def of_assertion(self, entry_id: str, technique_id: str) -> tuple[list[str], list[str]]:
         """``(roots, no: reasons)`` for the rows of an asserting entry that name the technique."""
@@ -1422,6 +1474,31 @@ class RunRoots:
         if len(found.roots) == 1 and not found.unplaced_values and not unplaced:
             return list(found.roots), []
         return [], [f"{eid}: {unplaced or NO_ROW_NAMES_TECHNIQUE.format(entry=eid)}"]
+
+
+# What a source of a statement is (``RunRoots.reading``).
+READING_CODE = "code"
+READING_RUN = "run"
+READING_ARTEFACT = "artefact"
+# An asserting tool's own row naming the technique: a rule match.
+READING_RULE = "rule"
+# The readings that are more than an artefact of the file: what the sample was
+# seen doing, the code that does it, or a rule that matched it.
+BEHAVIOUR_READINGS = frozenset({READING_CODE, READING_RUN, READING_RULE})
+# The fixed openings of the roots a run observation gives.
+_RUN_ROOT_OPENINGS = tuple(
+    template.split("{", 1)[0] for template in (PROCESS_ROOT, FLOW_ROOT, DNS_ROOT)
+)
+
+
+def reading_of(tool: str, roots: Iterable[str]) -> str:
+    """``code``, ``run`` or ``artefact`` for one source (see ``RunRoots.reading``)."""
+    name = str(tool or "").lower()
+    if "decompil" in name or "disassembl" in name:
+        return READING_CODE
+    if any(str(root).startswith(_RUN_ROOT_OPENINGS) for root in roots):
+        return READING_RUN
+    return READING_ARTEFACT
 
 
 def run_roots(ledger: Sequence[Any] | None) -> RunRoots:

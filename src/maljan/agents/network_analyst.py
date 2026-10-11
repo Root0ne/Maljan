@@ -385,8 +385,9 @@ class NetworkAnalyst(BaseAnalyst):
         self.logger.info("Executing network ISR revision (round %d)...", revision_round)
 
         messages = revision_messages(
-            # A revision is one tools-free call: the prompt says so.
-            self._system_prompt(_network_prompt, tools=()),
+            # A revision is one tools-free call unless it may read a function
+            # the ledger never listed: the prompt says which.
+            self._system_prompt(_network_prompt, tools=self.revision_tools()),
             original_data,
             own_report,
             peer_reports,
@@ -399,9 +400,7 @@ class NetworkAnalyst(BaseAnalyst):
         # that obeys it puts a JSON fence into the revised report, and nothing
         # downstream of here — the claim parser, the transcript, the Composer —
         # should ever see it.
-        content = self._capture_findings(
-            self.ask_the_model(self.frame_messages(prompt_to_messages(messages)), what="revision")
-        )
+        content = self._capture_findings(self.revision_answer(prompt_to_messages(messages)))
 
         claims = self._read_claims(content, revision_round)
         dissent = _parse_disputes(content)
