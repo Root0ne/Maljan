@@ -87,6 +87,64 @@ provider. CAPEv2, Cuckoo and Triage formats are accepted by default
 Only a report attached to the job's own sample is read. See [Running an
 analysis](/usage/running-an-analysis/).
 
+### Report formats are declarations
+
+Each report format is declared as data, and the upload route and the provider
+read the declaration, never a format's name:
+
+| Field | What it says |
+| :-- | :-- |
+| `name` | The format's name, a lowercase word (`unknown` is reserved). It is what the upload row records and what `allowed_formats` lists. |
+| `detect` | How a payload is recognised: a list of groups of field tests, and the format matches when every test of any one group holds. A test is `{path, types, non_empty, contains}`: the value at `path` must be one of `types` (`object`, `array`, `string`, `number`, `boolean`, `null`), non-empty, or hold `contains` in its text (a string, number or boolean, compared without regard to case). |
+| `task_id_paths` | Where the source sandbox's task id sits; the first path that holds a value (not null, not empty text) wins. |
+| `target_sha256_paths` | Where the report's claimed target sha256 sits; the first non-empty value wins. It is compared with the sample's hash, and a mismatch is a warning, not a refusal. |
+| `reader` | Which report reader reads the format into the internal sandbox report: `cape2`, `cuckoo`, `triage`, or empty for a format no reader reads yet (it can be attached, and a job reading it stops with a worded error). |
+| `signature_scale` | What a signature's severity number means: `{name, rungs}`, the rung of the severity ladder (Informational, Low, Medium, High, Critical) each score from 1 up names. Absent where the format documents no scale. |
+
+Field paths are the tool declarations' JSON-pointer-like paths (`/` keys, `*`
+for every item, `**` for any depth), read in time linear in the report. The
+built-in declarations reproduce what the platform always recognised:
+
+| Format | Recognised by | Task id | Target sha256 | Signature scale |
+| :-- | :-- | :-- | :-- | :-- |
+| `triage` | `/analysis` an object and `/tasks` a non-empty object or array | `/sample/id` | `/sample/sha256` | Triage 1–10: 1 Informational, 2–5 Low, 6–7 Medium, 8–9 High, 10 Critical |
+| `cape2` | `/CAPE` an object or array, or `/info/version` naming "cape" | `/info/id` | `/target/file/sha256`, then `/target/sha256` | CAPE 1–3: Low, Medium, High |
+| `cuckoo` | `/behavior` an object and `/info` a non-empty object | `/info/id` | `/target/file/sha256`, then `/target/sha256` | Cuckoo 1–3: Low, Medium, High |
+
+Declare your own in `sandbox.upload.formats` (a JSON list) and add each new
+name to `allowed_formats`. A declared format is tried before the built-ins, so
+a report shaped like Cuckoo but carrying your marker is yours; a declared
+format under a built-in's name replaces that built-in. For example, a CAPE-shaped
+export whose ticket and digest sit elsewhere:
+
+```json
+[
+  {
+    "name": "acme",
+    "detect": [[{"path": "/producer/name", "contains": "acme"}, {"path": "/run", "types": ["object"]}]],
+    "task_id_paths": ["/run/ticket"],
+    "target_sha256_paths": ["/subject/digests/sha256"],
+    "reader": "cape2",
+    "signature_scale": {"name": "Acme 1–4", "rungs": ["Low", "Medium", "High", "Critical"]}
+  }
+]
+```
+
+`GET /api/v1/sandbox-report-formats` serves every format in the order a
+payload is tried against them, with its declaration and scale.
+
+### Signature scales on the run
+
+The scale a run's signatures are read on is the one its sandbox provider
+declares for the report it read: the report format's `signature_scale` (a live
+CAPE or Triage run takes the built-in format's, an uploaded report the format
+it sniffed as), or for a `generic` REST report
+`sandbox.rest.report.signature_scale_rungs` and `signature_scale_name`. The
+worker records it on the run summary as `sandbox_signature_scale` (`null` where
+none is declared), and the console's Dynamic tab colours and names each
+signature's number by it. A run recorded before scales were has no such key and
+is drawn as it always was, from the sandbox provider in its settings snapshot.
+
 ## Any REST sandbox
 
 The `rest` provider describes a sandbox Maljan has never heard of, rather than
@@ -97,7 +155,7 @@ coding it:
 | `sandbox.rest.auth` | The header, scheme and token the API takes. |
 | `sandbox.rest.submit` | The multipart submission (`method`, `path`, `file_field`, `extra_fields`, `submit_fields`) and the JSONPath of the task id in its answer. |
 | `sandbox.rest.status` | The poll path, the JSONPath of the state, and the done and failed values. |
-| `sandbox.rest.report` | Where the report is, its format (`cape2`, `cuckoo`, `triage` or `generic`) and an optional capture path. |
+| `sandbox.rest.report` | Where the report is, its format (`cape2`, `cuckoo`, `triage` or `generic`), an optional capture path, and for a `generic` report its signature scale (`signature_scale_rungs`, `signature_scale_name`). |
 | `sandbox.rest.mapping` | For a `generic` report, an RFC 9535 JSONPath per channel: processes, calls, signatures, DNS, HTTP, TCP, UDP, hosts, domains, dropped files, registry. |
 
 An empty path in `mapping` says the sandbox does not publish that channel, and
