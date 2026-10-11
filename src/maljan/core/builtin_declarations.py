@@ -449,7 +449,7 @@ _VIRUSTOTAL_TOOLS: dict[str, dict[str, Any]] = {
 
 # The platform's sandbox report tools (``providers.sandbox_tools``). Shapes as
 # ``analysis.evidence_roots`` and ``reporting.ledger_report._BUILDERS`` read
-# them; the signatures assert techniques (``evidence_summary.ASSERTING_SOURCES``).
+# them; the signatures assert techniques (``evidence_summary.asserting_source``).
 _SANDBOX_TOOLS: dict[str, dict[str, Any]] = {
     "sandbox_report_section": {"kind": "sandbox_report_section"},
     "sandbox_processes": {
@@ -630,6 +630,9 @@ CONSUMER_KINDS: dict[str, dict[str, Any]] = {
     "figures.code_listing": {"kinds": ["decompile"]},
     "ledger_projection.technique_hits": {"kinds": ["capability_rules"]},
     "static_analyst._LOAD_TOOL": {"kinds": ["load_sample"]},
+    # The single-tool comparisons the reading half made inline.
+    "evidence_summary.yara_rule_strings": {"kinds": ["signature_rules"]},
+    "evidence_summary.catalogue_associations": {"kinds": ["api_catalogue"]},
 }
 
 # Which section builder of ``reporting.ledger_report._BUILDERS`` each kind is
@@ -754,6 +757,11 @@ def builtin_server_names() -> tuple[str, ...]:
 def server_declaration(key: str) -> dict[str, Any]:
     """The declaration fields a built-in server ships with; ``{}`` for any other key."""
     return _block(_SERVER_BLOCKS.get(key, {}))
+
+
+def provider_names() -> tuple[str, ...]:
+    """The provider-owned blocks that ship a declaration."""
+    return tuple(_PROVIDER_BLOCKS)
 
 
 def provider_declaration(provider: str) -> dict[str, Any]:

@@ -35,7 +35,6 @@ this environment via ``uv sync --extra capa``); a few names moved since the
 
 from __future__ import annotations
 
-import json
 import multiprocessing as mp
 import threading
 import time
@@ -44,7 +43,14 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from maljan.core.logger import logger
 from maljan.core.paths import resolve_data
-from maljan.providers.base import StaticCapabilities, StaticEvidenceBundle, StaticProvider
+from maljan.providers.base import (
+    EvidenceAnswer,
+    StaticCapabilities,
+    StaticEvidenceBundle,
+    StaticProvider,
+    declared_tool_of_kind,
+    evidence_entries,
+)
 from maljan.providers.registry import register_static_provider
 
 if TYPE_CHECKING:
@@ -371,12 +377,24 @@ class CapaYaraStaticProvider(StaticProvider):
         if yara_hits:
             evidence["yara"] = _render_yara(yara_hits)
 
+        answers: list[EvidenceAnswer] = []
+        for kind, payload in (
+            ("capability_rules", {"capabilities": capa_rows} if capa_rows else None),
+            (
+                "signature_rules",
+                {"matches": list(yara_hits), "rule_count": len(yara_hits), "filtered": 0}
+                if yara_hits
+                else None,
+            ),
+        ):
+            tool = declared_tool_of_kind(self.declaration_source, kind)
+            if payload is not None and tool:
+                answers.append(EvidenceAnswer(tool=tool, kind=kind, payload=payload))
         return StaticEvidenceBundle(
             technique_hits=hits,
             strings=[],
             technical_evidence=evidence,
-            capa_rules=capa_rows,
-            yara_matches=list(yara_hits),
+            entries=tuple(answers),
         )
 
     # ------------------------------------------------------------------
@@ -511,49 +529,10 @@ def _render_yara(hits: list[dict[str, Any]]) -> str:
 
 
 def ledger_entries(
-    bundle: StaticEvidenceBundle, counter: Any, stage: str = "analysis"
+    bundle: StaticEvidenceBundle,
+    counter: Any,
+    stage: str = "analysis",
+    source: str = "provider:capa_yara",
 ) -> list[Any]:
-    """The bundle as evidence-ledger entries, one per pass that found anything.
-
-    A provider without a tool loop has no seam that records its calls, so it
-    records them itself. Timing is not available after the fact and is left at
-    zero rather than invented; what matters is that the rows are citable and
-    reach the report's sections through the same path a tool call does.
-
-    ``stage`` is the team stage the entries were recorded in. These are written
-    by the report node, so it is that stage's key; the default is what a caller
-    outside a staged run gets.
-    """
-    from maljan.schemas.evidence import build_entry
-
-    out: list[Any] = []
-    for tool, payload in (
-        ("capa", {"capabilities": bundle.capa_rules} if bundle.capa_rules else None),
-        (
-            "yara_scan",
-            {
-                "matches": bundle.yara_matches,
-                "rule_count": len(bundle.yara_matches),
-                "filtered": 0,
-            }
-            if bundle.yara_matches
-            else None,
-        ),
-    ):
-        if payload is None:
-            continue
-        entry_id, seq = counter.next_id()
-        out.append(
-            build_entry(
-                entry_id=entry_id,
-                seq=seq,
-                agent="capa_yara",
-                tool=tool,
-                args={},
-                server=None,
-                source="provider:capa_yara",
-                output=json.dumps(payload),
-                stage=stage,
-            )
-        )
-    return out
+    """The bundle as evidence-ledger entries (``providers.base.evidence_entries``)."""
+    return evidence_entries(bundle, counter, stage, source=source, agent="capa_yara")

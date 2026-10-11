@@ -41,6 +41,7 @@ from maljan.analysis.corroboration import corroborated, corroboration_row
 from maljan.analysis.run_summary import RunSummaryBuilder, summary_counts_line, tool_asks_of
 from maljan.core.config import BUILTIN_AGENTS, JUDGE_AGENT_KEY, PROMPT_ROLES
 from maljan.core.container import ServiceContainer
+from maljan.core.declared_reading import kinds_declared_by
 from maljan.core.exceptions import AnalystError, LLMError, SampleNotOpened
 from maljan.core.logger import logger
 from maljan.core.spend import SpendCeilingStop
@@ -5643,13 +5644,17 @@ def make_report_node(
         try:
             _static_provider = container.get_static_provider()
             _sample_for_evidence = state.get("sample_path")
-            # When the triage pack ran capa or YARA, their entries are already
-            # in the ledger under the pipeline; running the provider again
-            # would pay capa's budget twice and record the pair twice.
-            if rules_already_recorded(state.get("evidence_ledger") or []):
+            # When the triage pack recorded answers of the kinds the provider
+            # answers, they are already in the ledger under the pipeline;
+            # running the provider again would pay its budget twice and record
+            # the answers twice.
+            if _static_provider.capabilities.provides_evidence and rules_already_recorded(
+                state.get("evidence_ledger") or [],
+                kinds_declared_by(_static_provider.declaration_source),
+            ):
                 logger.info(
-                    "report_node: the triage pack recorded capa/YARA; the static provider is "
-                    "not run again."
+                    "report_node: the triage pack recorded the static provider's answers; it "
+                    "is not run again."
                 )
             elif _static_provider.capabilities.provides_evidence and _sample_for_evidence:
                 # capa is a subprocess with a 900s budget and YARA is a corpus
@@ -5681,15 +5686,17 @@ def make_report_node(
         _capa_entries: list[LedgerEntry] = []
         if _static_bundle is not None:
             try:
-                from maljan.providers.static.capa_yara import ledger_entries
+                from maljan.providers.base import evidence_entries
 
-                _capa_entries = ledger_entries(
+                _capa_entries = evidence_entries(
                     _static_bundle,
                     container.get_evidence_counter(),
                     stage.key if stage is not None else "analysis",
+                    source=_static_provider.declaration_source,
+                    agent=_static_provider.id,
                 )
             except Exception as exc:  # noqa: BLE001
-                logger.warning("report_node: capa/YARA evidence not recorded (%s).", exc)
+                logger.warning("report_node: static provider evidence not recorded (%s).", exc)
         _ledger.extend(_capa_entries)
         _ledger.sort(key=lambda entry: entry.seq)
 

@@ -31,6 +31,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from maljan.core.declared_reading import kind_of, reads_as
 from maljan.pipeline.validation import (
     _ADDRESS_ARGUMENTS,
     _DIGIT_RUN,
@@ -62,11 +63,20 @@ FUNCTION_MAP_HEAD = (
     "write to it):"
 )
 
-# The analysis server's tools whose answers tie an artefact to a function.
-_HASH_TOOL = "resolve_api_hashes"
-_BLOB_TOOL = "decode_string_blobs"
-_FLOSS_TOOL = "floss"
-_INDEX_TOOL = "function_index"
+# The kinds of answer that tie an artefact to a function, by the tool's declared
+# kind (``core.declared_reading``; ``builtin_declarations.CONSUMER_KINDS``
+# ``function_map``): an API hash resolution, a static string decoder, an
+# emulator's recovered strings, the function index.
+_HASH_KIND = "api_hash_resolution"
+_BLOB_KIND = "decoded_strings"
+_FLOSS_KIND = "emulated_strings"
+_INDEX_KIND = "function_index"
+
+
+def _map_kind(entry: Any) -> str:
+    """The kind of an entry the map reads, ``""`` for any other entry."""
+    return kind_of(entry) if reads_as(entry, "function_map") else ""
+
 
 # How each kind of artefact is counted in the block, singular and plural.
 _KIND_WORDS: dict[str, tuple[str, str]] = {
@@ -222,7 +232,7 @@ def function_artefacts(entries: Iterable[Any]) -> FunctionArtefacts:
     rows = [e for e in entries if getattr(e, "ok", True)]
     found = FunctionArtefacts()
     for entry in entries:
-        if str(getattr(entry, "tool", "") or "") != _INDEX_TOOL:
+        if _map_kind(entry) != _INDEX_KIND:
             continue
         data = _parsed(entry) if getattr(entry, "ok", True) else None
         if isinstance(data, dict) and isinstance(data.get("rows"), list):
@@ -239,13 +249,13 @@ def function_artefacts(entries: Iterable[Any]) -> FunctionArtefacts:
     bases: list[int] = list(image_bases_in(rows))
     parsed: list[tuple[Any, str, Any]] = []
     for entry in rows:
-        tool = str(getattr(entry, "tool", "") or "")
-        if tool not in (_HASH_TOOL, _BLOB_TOOL, _FLOSS_TOOL, _INDEX_TOOL):
+        kind = _map_kind(entry)
+        if not kind:
             continue
         data = _parsed(entry)
         if not isinstance(data, dict):
             continue
-        if tool == _INDEX_TOOL:
+        if kind == _INDEX_KIND:
             _index_rows(found, data, str(getattr(entry, "id", "") or ""), entry)
             base = _stated_base(data)
             if base and base not in bases:
@@ -254,13 +264,13 @@ def function_artefacts(entries: Iterable[Any]) -> FunctionArtefacts:
         base = _stated_base(data)
         if base and base not in bases:
             bases.append(base)
-        parsed.append((entry, tool, data))
+        parsed.append((entry, kind, data))
     found.image_bases = tuple(bases)
-    for entry, tool, data in parsed:
+    for entry, kind, data in parsed:
         entry_id = str(getattr(entry, "id", "") or "")
-        if tool == _HASH_TOOL:
+        if kind == _HASH_KIND:
             _hash_artefacts(found, data, entry_id)
-        elif tool == _BLOB_TOOL:
+        elif kind == _BLOB_KIND:
             _blob_artefacts(found, data, entry_id)
         else:
             _floss_artefacts(found, data, entry_id)
@@ -369,11 +379,7 @@ def keeps_for_the_map(entry: Any) -> bool:
     if getattr(entry, "repeated_of", None):
         return False
     tool = str(getattr(entry, "tool", "") or "").lower()
-    return (
-        "decompil" in tool
-        or _lists_code(tool)
-        or tool in (_HASH_TOOL, _BLOB_TOOL, _FLOSS_TOOL, _INDEX_TOOL)
-    )
+    return "decompil" in tool or _lists_code(tool) or bool(_map_kind(entry))
 
 
 # A tool whose name says it disassembles, and one of those whose name says the

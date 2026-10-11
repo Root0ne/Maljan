@@ -201,6 +201,8 @@ class TestTheProviderIsNotRunTwice:
         container.get_report_composer.return_value = None
         provider = container.get_static_provider.return_value
         provider.capabilities.provides_evidence = True
+        provider.declaration_source = "provider:capa_yara"
+        provider.id = "capa_yara"
         provider.collect_evidence.return_value = None
         state = {**_initial_state(), "sample_path": "/tmp/sample.bin", "evidence_ledger": ledger}
         await make_report_node(container)(state)  # type: ignore[arg-type]

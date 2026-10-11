@@ -43,8 +43,14 @@ A root is derived from what the entry already holds, never guessed:
   in a run whose ledger holds the section index, against that index;
 * **the whole file**: hashes, file identification, signing;
 * **an external assessment of the whole file**: a file reputation answer, a
-  third party's verdict on the file and no reading of its bytes
-  (``FILE_ASSESSMENT_TOOLS``, the platform's one table of reputation tools).
+  third party's verdict on the file and no reading of its bytes.
+
+What an entry is read as comes from its tool's declared kind and reader
+(``core.declared_reading``), never from its name: a tool of any server
+declared with a kind below is read as that kind is; an entry written before
+sources were recorded is read by the facts the platform ships for its name.
+A tool whose kind has no reading of its own here gives the roots its declared
+``rows`` and ``places`` state, else the address its call was given.
 
 Each file has its own layout: an entry is about the sample only when the
 path it names is the sample's, or it names no path and its server's program
@@ -79,7 +85,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from maljan.analysis.sandbox_sections import (
-    ITEMS_TOOL,
     NETWORK_KINDS,
     SECTION_OF_PREFIX,
     ItemIndex,
@@ -87,6 +92,7 @@ from maljan.analysis.sandbox_sections import (
     is_item_id,
     item_index_of,
 )
+from maljan.core.declared_reading import facts_of, kind_of, reads_as
 from maljan.schemas.evidence import repeat_holders
 
 WHOLE_FILE = "the whole file"
@@ -145,30 +151,19 @@ BLOB_UNMATCHED = (
     "no: the call site holds blobs the blob decoder read, and none of them decodes to this text"
 )
 
-# The tools whose fact is about the file as a whole.
-_WHOLE_FILE_TOOLS = frozenset({"hashes", "identify_file", "signing_info"})
-# The tools whose answer is a third party's assessment of the whole file (a
-# reputation lookup by hash): the platform's one table of them, which the pack
-# reads too.
-FILE_ASSESSMENT_TOOLS = frozenset({"reputation", "get_file_report", "check_hash"})
-# The tools that answer what something is rather than read the sample.
-_REFERENCE_TOOLS = frozenset(
-    {
-        "api_capability",
-        "attck_validate",
-        "attck_lookup",
-        "resolve_technique",
-        "family_lookup",
-        "similar_cases",
-        "get_ip_report",
-        "get_domain_report",
-        "get_url_report",
-        "capabilities",
-        "knowledge__capabilities",
-    }
-)
-_IMPORT_LISTINGS = frozenset({"list_imports", "get_imports"})
-_EXPORT_LISTINGS = frozenset({"list_exports", "get_exports"})
+# The consumer tables of ``builtin_declarations.CONSUMER_KINDS`` this module
+# reads an entry's declared kind by (``core.declared_reading``): a fact about
+# the file as a whole; a third party's assessment of the whole file (a
+# reputation lookup by hash); an answer that says what something is rather than
+# reading the sample; a disassembler's import and export listings; a statement
+# of which program a disassembler's server holds, and an open of one.
+_WHOLE_FILE = "evidence_roots._WHOLE_FILE_TOOLS"
+_FILE_ASSESSMENT = "evidence_roots.FILE_ASSESSMENT_TOOLS"
+_REFERENCE = "evidence_roots._REFERENCE_TOOLS"
+_IMPORT_LISTING = "evidence_roots._IMPORT_LISTINGS"
+_EXPORT_LISTING = "evidence_roots._EXPORT_LISTINGS"
+_PROGRAM_STATEMENT = "evidence_roots._PROGRAM_TOOLS"
+_OPEN = "evidence_roots._OPEN_TOOLS"
 # The argument names a call gives one address under, and a list of them under.
 _ADDRESS_ARGS = (
     "address",
@@ -181,11 +176,8 @@ _ADDRESS_ARGS = (
 )
 _ADDRESS_LIST_ARGS = ("functions", "addresses")
 _NAME_ARGS = ("name", "function_name", "function", "symbol")
-# The argument that names a file the run carved, and the tool that carves.
+# The argument that names a file the run carved.
 _CARVED_ARG = "carved_path"
-_CARVE_TOOL = "carve_payloads"
-# The tool that writes the program a UPX-packed file holds out as a file of its own.
-_UNPACK_TOOL = "unpack_upx"
 
 
 _WORD = re.compile(r"[A-Za-z_.$?@][\w.$?@]*")
@@ -495,7 +487,19 @@ def _structured(entry: Any) -> Any:
 
 
 def _tool(entry: Any) -> str:
+    """The entry's tool name, for the sentences that name it: never what it is read as."""
     return str(getattr(entry, "tool", "") or "").rsplit("__", 1)[-1]
+
+
+def _kind(entry: Any) -> str:
+    """What kind of fact the entry's answer is, as its tool declares (``core.declared_reading``)."""
+    return kind_of(entry)
+
+
+def _reader(entry: Any) -> str:
+    """The answer shape the entry's tool declares a reader for, ``""`` for none."""
+    facts = facts_of(entry)
+    return facts.reader if facts is not None else ""
 
 
 def _rows(data: Any, key: str) -> list[Mapping[str, Any]]:
@@ -522,12 +526,8 @@ def _unquoted(value: str) -> str:
     return unquoted(value).strip()
 
 
-# The tools that state which program a disassembler's server holds, and the
-# answer keys and arguments that name its file.
-_PROGRAM_TOOLS = frozenset(
-    {"get_current_program_info", "get_program_info", "program_info", "get_current_program"}
-)
-_OPEN_TOOLS = frozenset({"open_file", "open_program", "load_program"})
+# The answer keys and arguments that name the file a program statement or an
+# open names.
 _PROGRAM_KEYS = ("path", "executable_path", "file_path", "program_path", "name", "program")
 _PATH_ARGS = ("path", "file_path", "file", "filename", "binary_path")
 _PIPELINE = "pipeline"
@@ -559,20 +559,21 @@ class _Files:
             if not _usable(entry):
                 continue
             data = _structured(entry)
-            if _tool(entry) == _CARVE_TOOL:
+            kind = _kind(entry)
+            if kind == "carve":
                 for row in _rows(data, "payloads"):
                     digest = str(row.get("sha256") or "").strip().lower()
                     for key in ("carved_path", "path"):
                         if digest and isinstance(row.get(key), str) and row[key].strip():
                             self._digest.setdefault(_unquoted(row[key]), digest)
-            elif _tool(entry) == _UNPACK_TOOL and isinstance(data, Mapping):
+            elif kind == "unpack" and isinstance(data, Mapping):
                 child = data.get("child")
                 child = child if isinstance(child, Mapping) else {}
                 digest = str(child.get("sha256") or "").strip().lower()
                 for key in ("carved_path", "path"):
                     if digest and isinstance(child.get(key), str) and child[key].strip():
                         self._digest.setdefault(_unquoted(child[key]), digest)
-            elif _tool(entry) == "hashes" and isinstance(data, Mapping):
+            elif kind == "identity" and isinstance(data, Mapping):
                 digest = str(data.get("sha256") or "").strip().lower()
                 path = self._path_named(entry)
                 if digest and path:
@@ -637,14 +638,13 @@ class _Files:
 
     def _program_named(self, entry: Any) -> str | None:
         """The file a program statement or open names, or ``None`` for any other entry."""
-        tool = _tool(entry)
-        if tool in _PROGRAM_TOOLS and _usable(entry):
+        if reads_as(entry, _PROGRAM_STATEMENT) and _usable(entry):
             data = _structured(entry)
             for key in _PROGRAM_KEYS:
                 value = data.get(key) if isinstance(data, Mapping) else None
                 if isinstance(value, str) and value.strip():
                     return self._file_of_path(_unquoted(value))
-        if tool in _OPEN_TOOLS and _usable(entry):
+        if reads_as(entry, _OPEN) and _usable(entry):
             path = self._path_named(entry)
             if path:
                 return self._file_of_path(path)
@@ -687,7 +687,7 @@ class _Stated:
 
 def _gather(entry: Any, stated: _Stated) -> None:
     data = _structured(entry)
-    tool = _tool(entry)
+    reader = _reader(entry)
     for start, spans in (getattr(entry, "function_ranges", None) or {}).items():
         first = _hex(start)
         for span in spans if isinstance(spans, list) else ():
@@ -708,7 +708,7 @@ def _gather(entry: Any, stated: _Stated) -> None:
             size = holder.get(key)
             if isinstance(size, int) and not isinstance(size, bool) and size > 0:
                 stated.extent = max(stated.extent, size)
-    if tool == "pe_info":
+    if reader == "pe_header":
         for row in _rows(data, "sections"):
             rva = _hex(row.get("virtual_address"))
             name = str(row.get("name") or "").strip()
@@ -728,7 +728,7 @@ def _gather(entry: Any, stated: _Stated) -> None:
         entry_point = data.get("entry_point")
         if isinstance(entry_point, int) and not isinstance(entry_point, bool) and entry_point > 0:
             stated.starts.setdefault(entry_point, None)
-    elif tool == "function_index":
+    elif reader == "function_table":
         for row in _rows(data, "rows"):
             rva = _hex(row.get("offset"))
             if rva is not None:
@@ -811,15 +811,21 @@ def _flow_key(
 
 
 def _flow_rows(entry: Any) -> list[dict[str, Any]]:
-    """The connections one answer states, as ``proto, src, sport, dst, dport`` rows."""
-    tool = _tool(entry)
+    """The connections one answer states, as ``proto, src, sport, dst, dport`` rows.
+
+    A flow table (``reader: flow_table``) states them as conversation, TCP and
+    UDP rows of its structured answer, or, an answer with no structure, as
+    packet lines of its text.
+    """
+    if _reader(entry) != "flow_table":
+        return []
     data = _structured(entry)
-    if tool in ("sandbox_network", "pcap_summary"):
+    if isinstance(data, Mapping):
         rows = [dict(r) for r in _rows(data, "conversations")]
         rows += [{**r, "proto": "tcp"} for r in _rows(data, "tcp")]
         rows += [{**r, "proto": "udp"} for r in _rows(data, "udp")]
         return rows
-    if tool == "read_pcap_summary":
+    if data is None:
         out: list[dict[str, Any]] = []
         for line in str(getattr(entry, "output", "") or "").splitlines():
             match = _PACKET_LINE.match(line.strip())
@@ -842,9 +848,9 @@ def _joins(entries: Iterable[Any], files: _Files) -> _Joins:
     for entry in entries:
         if not _usable(entry):
             continue
-        tool = _tool(entry)
+        kind = _kind(entry)
         data = _structured(entry)
-        if tool == "decode_string_blobs":
+        if kind == "decoded_strings":
             file = files.of(entry)
             if file is None:
                 continue
@@ -855,18 +861,22 @@ def _joins(entries: Iterable[Any], files: _Files) -> _Joins:
                 if call is not None and blob is not None:
                     found.blob_calls.add((file, call))
                     found.blob_of.setdefault((file, call, _fold(row.get("text"))), blob)
-        elif tool == "sandbox_processes":
+        elif kind == "sandbox_processes":
             for row in _rows(data, "processes"):
                 command = str(row.get("command_line") or "").strip()
                 if command and isinstance(row.get("pid"), int):
                     found.processes_of_command.setdefault(command, {})[int(row["pid"])] = None
-        if tool == ITEMS_TOOL and isinstance(data, Mapping) and data.get("section") == "network":
+        if (
+            _reader(entry) == "report_items"
+            and isinstance(data, Mapping)
+            and data.get("section") == "network"
+        ):
             for row in _rows(data, "items"):
                 if isinstance(row.get("id"), str):
                     found.network_items.setdefault(
                         row["id"].lower(), (str(row.get("kind") or ""), row.get("fields"))
                     )
-        elif tool == "sandbox_network" and _whole_network_answer(entry):
+        elif kind == "sandbox_network" and _whole_network_answer(entry):
             number = 0
             for kind in NETWORK_KINDS:
                 rows = data.get(kind)
@@ -1099,36 +1109,95 @@ def _command_root(
         found.unplace(MATCH_UNPLACED, values=(command,), techniques=techniques)
 
 
+# The declared places a row's root is read from, by the coordinate each states
+# (``ToolFacts.places``): a file offset; an offset from the image base (a
+# place, a call site, the start of the function a row is in); an address as a
+# tool writes it, one or a list; a sandbox process id.
+_OFFSET_PLACES = frozenset({"offset", "instance_offset"})
+_RVA_PLACES = frozenset({"rva", "call_site", "function"})
+_ADDRESS_PLACES = frozenset({"address", "addresses"})
+_PROCESS_PLACES = frozenset({"pid"})
+
+
+def _flat(values: Iterable[Any]) -> list[Any]:
+    """The values a path named, a list among them read as its items."""
+    out: list[Any] = []
+    for value in values:
+        out.extend(value if isinstance(value, list | tuple) else (value,))
+    return out
+
+
+def _read_declared_rows(found: EntryRoots, facts: Any, data: Any, tool: str) -> None:
+    """The roots of an answer whose kind has no reader of its own, read by its declared paths.
+
+    Each row (``rows``) gives a root per place its declared ``places`` name,
+    read in the coordinate the place's name states, with the row's declared
+    ``values`` and the technique ids it names; a row that gives none says why.
+    """
+    from maljan.core.tool_declarations import select
+
+    for row in select(data, facts.rows):
+        if not isinstance(row, Mapping):
+            continue
+        values = [v for path in facts.values.values() for v in _flat(select(row, path))]
+        tids = _row_techniques(row)
+        placed = False
+        for name, path in facts.places.items():
+            for value in _flat(select(row, path)):
+                if name in _OFFSET_PLACES:
+                    offset = _hex(value)
+                    if offset is not None:
+                        found.coordinate = "offset"
+                        placed = (
+                            _offset_root(found, offset, values=values, techniques=tids) or placed
+                        )
+                elif name in _RVA_PLACES:
+                    rva = _hex(value)
+                    if rva is not None:
+                        _place(found, rva, values=values, techniques=tids)
+                        placed = True
+                elif name in _ADDRESS_PLACES:
+                    placed = _address_root(found, value, values=values, techniques=tids) or placed
+                elif name in _PROCESS_PLACES and value not in (None, ""):
+                    found.add(_process(value), values=values, techniques=tids)
+                    placed = True
+        if not placed:
+            found.unplace(NOTHING_TO_PLACE.format(tool=tool), values=values, techniques=tids)
+
+
 def _read_entry(entry: Any, found: EntryRoots, joins: _Joins) -> EntryRoots:
     """One entry's roots, read from its own answer and arguments against its file's layout."""
     tool = _tool(entry)
     if getattr(entry, "ok", True) is False:
         found.reason = FAILED
         return found
-    if tool in _REFERENCE_TOOLS:
+    if reads_as(entry, _REFERENCE):
         found.reason = REFERENCE.format(tool=tool)
         return found
-    if tool in _WHOLE_FILE_TOOLS:
+    if reads_as(entry, _WHOLE_FILE):
         found.add(WHOLE_FILE)
         return found
-    if tool in FILE_ASSESSMENT_TOOLS:
+    if reads_as(entry, _FILE_ASSESSMENT):
         found.add(EXTERNAL_ASSESSMENT)
         return found
     data = _structured(entry)
     args = getattr(entry, "args", None) or {}
-    if tool == "pe_info" and isinstance(data, Mapping):
+    facts = facts_of(entry)
+    kind = facts.kind if facts is not None else ""
+    reader = facts.reader if facts is not None else ""
+    if reader == "pe_header" and isinstance(data, Mapping):
         _read_pe_info(found, data)
-    elif tool in _IMPORT_LISTINGS:
+    elif reads_as(entry, _IMPORT_LISTING):
         found.add(IMPORT_TABLE, words=_WORD.findall(str(getattr(entry, "output", "") or "")))
-    elif tool in _EXPORT_LISTINGS:
+    elif reads_as(entry, _EXPORT_LISTING):
         found.add(EXPORT_TABLE, words=_WORD.findall(str(getattr(entry, "output", "") or "")))
-    elif tool == "strings":
+    elif kind == "strings":
         found.coordinate = "offset"
         for row in _rows(data, "strings"):
             offset = _hex(row.get("offset"))
             if offset is not None:
                 _offset_root(found, offset, values=(row.get("text"),))
-    elif tool == "floss":
+    elif reader == "emulated_strings_with_call_sites":
         for row in _rows(data, "strings"):
             text = row.get("string")
             call = _hex(row.get("called_at_rva"))
@@ -1144,19 +1213,19 @@ def _read_entry(entry: Any, found: EntryRoots, joins: _Joins) -> EntryRoots:
             at = _hex(row.get("function_rva"))
             if at is not None:
                 _place(found, at, values=(text,))
-    elif tool == "decode_string_blobs":
+    elif kind == "decoded_strings":
         for row in _rows(data, "results"):
             blob = _hex(row.get("rva"))
             if blob is not None:
                 _place(found, blob, values=(row.get("text"),))
-    elif tool == "resolve_api_hashes":
+    elif kind == "api_hash_resolution":
         for hit in _rows(data, "hits"):
             names = [r.get("name") for r in _rows(hit, "readings")]
             for place in _rows(hit, "occurrences"):
                 rva = _hex(place.get("rva"))
                 if rva is not None:
                     _place(found, rva, words=names)
-    elif tool == "capa":
+    elif kind == "capability_rules":
         for row in _rows(data, "capabilities"):
             tids = _row_techniques(row)
             rule = (row.get("rule"),)
@@ -1166,20 +1235,20 @@ def _read_entry(entry: Any, found: EntryRoots, joins: _Joins) -> EntryRoots:
                     placed = True
             if not placed:
                 found.unplace(NOTHING_TO_PLACE.format(tool=tool), values=rule, techniques=tids)
-    elif tool == "function_index":
+    elif reader == "function_table":
         _read_function_index(found, data)
-    elif tool == "transform_bytes":
+    elif reader == "byte_transform":
         _read_transform(found, data)
-    elif tool == _UNPACK_TOOL:
+    elif reader == "unpacked_image":
         _read_unpack(found, data)
-    elif tool == "extract_iocs_with_context":
+    elif kind == "iocs_with_context":
         for row in _rows(data, "iocs"):
             _address_root(found, row.get("address"), values=(row.get("value"),))
-    elif tool == "sandbox_processes":
+    elif kind == "sandbox_processes":
         for row in _rows(data, "processes"):
             if row.get("pid") is not None:
                 found.add(_process(row["pid"]), values=(row.get("command_line"), row.get("name")))
-    elif tool in ("sandbox_network", "pcap_summary", "read_pcap_summary"):
+    elif reader == "flow_table":
         for row in _flow_rows(entry):
             label = _flow_of(row, joins)
             if label is not None:
@@ -1189,23 +1258,23 @@ def _read_entry(entry: Any, found: EntryRoots, joins: _Joins) -> EntryRoots:
             if name:
                 said = name.rstrip(".")
                 found.add(DNS_ROOT.format(name=_written(said)), values=(said,))
-    elif tool == "extract_dns":
+    elif reader == "dns_query_lines":
         for line in str(getattr(entry, "output", "") or "").splitlines():
             match = _DNS_NAME_LINE.match(line.strip())
             if match:
                 found.add(DNS_ROOT.format(name=match["name"]), values=(match["name"],))
-    elif tool in ("sigma_match_sandbox", "sigma_match"):
+    elif kind == "event_rules":
         for row in _rows(data, "matches"):
             fields = row.get("matched_fields")
             command = (
                 str(fields.get("CommandLine") or "").strip() if isinstance(fields, Mapping) else ""
             )
             _command_root(found, command, joins, _row_techniques(row))
-    elif tool == "lolbin_lookup":
+    elif kind == "command_match":
         tids = _row_techniques(data)
         for command in args.get("command_lines") or []:
             _command_root(found, str(command or "").strip(), joins, tids)
-    elif tool == "sandbox_signatures":
+    elif kind == "sandbox_signatures":
         for row in _rows(data, "signatures"):
             name = str(row.get("name") or "").strip()
             if name:
@@ -1216,7 +1285,7 @@ def _read_entry(entry: Any, found: EntryRoots, joins: _Joins) -> EntryRoots:
                 )
         if not found.roots:
             found.reason = SIGNATURE_UNPLACED
-    elif tool == ITEMS_TOOL:
+    elif reader == "report_items":
         for row in _rows(data, "items"):
             item = str(row.get("id") or "").lower()
             fields = row.get("fields")
@@ -1230,7 +1299,7 @@ def _read_entry(entry: Any, found: EntryRoots, joins: _Joins) -> EntryRoots:
                 found.add(label, values=[item, *values])
             else:
                 found.unplace(reason or ITEM_UNPLACED.format(section="report"), values=[item])
-    elif tool == "yara_scan":
+    elif kind == "signature_rules":
         found.coordinate = "offset"
         for row in _rows(data, "matches"):
             tids = _row_techniques(row)
@@ -1248,8 +1317,10 @@ def _read_entry(entry: Any, found: EntryRoots, joins: _Joins) -> EntryRoots:
         if not found.roots and not found.first_reason:
             found.add(WHOLE_FILE)
     else:
-        placed = False
-        for key in _ADDRESS_ARGS:
+        if facts is not None and facts.rows and facts.places:
+            _read_declared_rows(found, facts, data, tool)
+        placed = bool(found.roots)
+        for key in () if placed else _ADDRESS_ARGS:
             if args.get(key) not in (None, "") and _address_root(found, args[key]):
                 placed = True
                 break
@@ -1310,11 +1381,16 @@ class RunRoots:
         self.tools: dict[str, str] = {}
         # What each entry's answer states as a whole (``answer_facts``).
         self.answers: dict[str, AnswerFacts] = {}
+        # The entries whose answer is not about the file's bytes: a reference
+        # lookup, a third party's assessment of the whole file.
+        self._reads_nothing_of_the_file: set[str] = set()
         for entry in entries:
             eid = str(getattr(entry, "id", "") or "").strip().lower()
             if not eid or getattr(entry, "repeated_of", None):
                 continue
             self.tools[eid] = _tool(entry).lower()
+            if reads_as(entry, _REFERENCE) or reads_as(entry, _FILE_ASSESSMENT):
+                self._reads_nothing_of_the_file.add(eid)
             self.answers[eid] = answer_facts(_structured(entry))
             file = files.of(entry)
             if file is None:
@@ -1487,8 +1563,7 @@ class RunRoots:
         facts = self.answers.get(citation)
         if facts is None or facts.empty():
             return False
-        tool = self.tools.get(citation, "")
-        if tool in _REFERENCE_TOOLS or tool in FILE_ASSESSMENT_TOOLS:
+        if citation in self._reads_nothing_of_the_file:
             return False
         found = self.of_entry(citation)
         if any(str(root).startswith(_RUN_ROOT_OPENINGS) for root in found.roots):

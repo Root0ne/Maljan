@@ -23,28 +23,65 @@ from maljan.analysis.technique_ids import (
     sigma_technique_ids,
     technique_ids_in,
 )
+from maljan.core.declared_reading import bare_name, facts_of, reads_as, recorded
+from maljan.core.tool_declarations import select
 from maljan.memory.attck_loader import technique_label
 
 # Every technique and every source is named. The judge's prompt this block
 # goes into is sized from the judge's own window, and it is shortened there,
 # with a notice, only when the window cannot hold it.
 
-# The tools whose technique id is a statement about this sample, and the name a
-# corroboration row gives each: a capa rule, a Sigma rule or a YARA TTP rule
-# that fired on it, the LOLBin table matching one of its command lines, a
-# sandbox signature raised while it ran. Nothing else asserts. ``attck_lookup``,
-# ``attck_validate`` and ``resolve_technique`` answer what an id is, not what
-# the sample does; ``similar_cases`` and ``family_lookup`` return techniques of
-# other samples; ``api_capability`` is the catalogue's association, read apart
-# by ``catalogue_associations``. A tool this table does not name is not a source.
-ASSERTING_SOURCES: dict[str, str] = {
-    "capa": "capa",
-    "sigma_match": "sigma",
-    "sigma_match_sandbox": "sigma",
-    "yara_scan": "yara",
-    "lolbin_lookup": "lolbin",
-    "sandbox_signatures": "sandbox",
-}
+# The tools whose technique id is a statement about this sample are the ones
+# that declare ``asserts_techniques`` (a rule that matched it, a table matching
+# one of its command lines, a sandbox signature raised while it ran), each
+# under the name its declaration gives a corroboration row (``source``; the
+# tool's own name when it gives none). Nothing else asserts: a reference
+# lookup answers what an id is, not what the sample does, and the catalogue's
+# association is read apart by ``catalogue_associations``. An entry written
+# before sources were recorded is read by the facts the platform ships for its
+# name (``core.declared_reading``).
+
+
+def asserting_source(entry: Any) -> str | None:
+    """The name a corroboration row gives ``entry``'s tool, or ``None`` when it asserts nothing."""
+    facts = facts_of(entry)
+    if facts is None or not facts.asserts_techniques:
+        return None
+    return facts.source or bare_name(getattr(entry, "tool", ""))
+
+
+def asserting_labels(ledger: Sequence[Any] | None) -> dict[str, str]:
+    """``{tool name: corroboration name}`` for the asserting tools of ``ledger``.
+
+    :func:`collect` names an asserting tool by its own name; a corroboration
+    row names it by this (``sigma`` for both Sigma tools).
+    """
+    labels: dict[str, str] = {}
+    for entry in ledger or []:
+        source = asserting_source(entry)
+        if source is not None:
+            labels.setdefault(bare_name(getattr(entry, "tool", "")), source)
+    return labels
+
+
+def asserted_techniques(entry: Any) -> set[str]:
+    """Every technique id an asserting entry's answer names, where its tool declares them.
+
+    An entry with no recorded source is read in the shapes the platform's own
+    tools emit (:func:`_technique_ids`), as it always was.
+    """
+    structured = getattr(entry, "structured", None)
+    if not recorded(entry):
+        return _technique_ids(structured)
+    facts = facts_of(entry)
+    found: set[str] = set()
+    for held in facts.techniques if facts is not None else ():
+        for value in select(structured, held.path):
+            if held.format == "sigma_tag":
+                found.update(sigma_technique_ids({"tags": value}))
+            else:
+                found.update(technique_ids_in(value))
+    return found
 
 
 def _source_facts(row: Any) -> str:
@@ -140,10 +177,10 @@ def collect(
 
     invalid = invalid_technique_ids(ledger)
     for entry in ledger or []:
-        tool = _base_tool_name(getattr(entry, "tool", ""))
-        if tool not in ASSERTING_SOURCES:
+        if asserting_source(entry) is None:
             continue
-        for tid in _technique_ids(getattr(entry, "structured", None)):
+        tool = bare_name(getattr(entry, "tool", ""))
+        for tid in asserted_techniques(entry):
             if tid not in invalid:
                 add(tid, tool, None)
 
@@ -151,6 +188,12 @@ def collect(
 
 
 EVIDENCE_ID_RE = re.compile(r"^ev_[0-9]+$")
+
+# The consumer tables of ``builtin_declarations.CONSUMER_KINDS`` read here: a
+# signature rule scan, whose matches carry the rule's own strings, and the API
+# catalogue, whose rows are associations.
+_SIGNATURE_RULES = "evidence_summary.yara_rule_strings"
+_API_CATALOGUE = "evidence_summary.catalogue_associations"
 
 
 def yara_rule_strings(ledger: Sequence[Any] | None) -> dict[str, list[dict[str, Any]]]:
@@ -164,7 +207,7 @@ def yara_rule_strings(ledger: Sequence[Any] | None) -> dict[str, list[dict[str, 
     """
     found: dict[str, list[dict[str, Any]]] = {}
     for entry in ledger or []:
-        if _base_tool_name(getattr(entry, "tool", "")) != "yara_scan":
+        if not reads_as(entry, _SIGNATURE_RULES):
             continue
         structured = getattr(entry, "structured", None)
         matches = structured.get("matches") if isinstance(structured, dict) else None
@@ -233,9 +276,9 @@ def technique_evidence(
 
     invalid = invalid_technique_ids(ledger)
     for entry in ledger or []:
-        if _base_tool_name(getattr(entry, "tool", "")) not in ASSERTING_SOURCES:
+        if asserting_source(entry) is None:
             continue
-        for tid in _technique_ids(getattr(entry, "structured", None)):
+        for tid in asserted_techniques(entry):
             if tid not in invalid:
                 add(tid, _entry_id(entry))
 
@@ -271,11 +314,6 @@ def invalid_technique_ids(ledger: Sequence[Any] | None) -> set[str]:
     return found
 
 
-def _base_tool_name(tool: Any) -> str:
-    """The tool's own name, without the ``<server>__`` a name collision adds."""
-    return str(tool or "").rsplit("__", 1)[-1]
-
-
 def catalogue_associations(ledger: Sequence[Any] | None) -> dict[str, list[str]]:
     """``{technique_id: ["api_capability"]}`` for the rules the import set cleared.
 
@@ -284,7 +322,7 @@ def catalogue_associations(ledger: Sequence[Any] | None) -> dict[str, list[str]]
     """
     out: dict[str, list[str]] = {}
     for entry in ledger or []:
-        if str(getattr(entry, "tool", "") or "") != "api_capability":
+        if not reads_as(entry, _API_CATALOGUE):
             continue
         for hit in api_capability_hits(getattr(entry, "structured", None)):
             out.setdefault(hit["technique_id"], ["api_capability"])

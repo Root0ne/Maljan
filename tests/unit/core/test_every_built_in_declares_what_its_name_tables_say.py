@@ -159,9 +159,9 @@ def _strip_tool(names: object) -> set[str]:
 
 def _tables() -> dict[str, Callable[[str], bool]]:
     """Each consumer table as a membership test on a bare tool name, as the code reads it."""
-    from maljan.agents import function_map, network_analyst, static_analyst
-    from maljan.analysis import evidence_roots
-    from maljan.pipeline import triage_pack, validation
+    from maljan.agents import network_analyst, static_analyst
+    from maljan.core import legacy_tool_tables as legacy
+    from maljan.pipeline import triage_pack
     from maljan.reporting import evidence_bundles, ledger_report
     from maljan.reporting.renderers import markdown, stix_renderer
 
@@ -173,36 +173,29 @@ def _tables() -> dict[str, Callable[[str], bool]]:
         return lambda name: name.startswith(values)
 
     return {
-        "evidence_roots._WHOLE_FILE_TOOLS": names(evidence_roots._WHOLE_FILE_TOOLS),
-        "evidence_roots.FILE_ASSESSMENT_TOOLS": names(evidence_roots.FILE_ASSESSMENT_TOOLS),
-        "evidence_roots._REFERENCE_TOOLS": names(evidence_roots._REFERENCE_TOOLS),
-        "evidence_roots._IMPORT_LISTINGS": names(evidence_roots._IMPORT_LISTINGS),
-        "evidence_roots._EXPORT_LISTINGS": names(evidence_roots._EXPORT_LISTINGS),
-        "evidence_roots._PROGRAM_TOOLS": names(evidence_roots._PROGRAM_TOOLS),
-        "evidence_roots._OPEN_TOOLS": names(evidence_roots._OPEN_TOOLS),
+        "evidence_roots._WHOLE_FILE_TOOLS": names(legacy.WHOLE_FILE_TOOLS),
+        "evidence_roots.FILE_ASSESSMENT_TOOLS": names(legacy.FILE_ASSESSMENT_TOOLS),
+        "evidence_roots._REFERENCE_TOOLS": names(legacy.REFERENCE_TOOLS),
+        "evidence_roots._IMPORT_LISTINGS": names(legacy.IMPORT_LISTINGS),
+        "evidence_roots._EXPORT_LISTINGS": names(legacy.EXPORT_LISTINGS),
+        "evidence_roots._PROGRAM_TOOLS": names(legacy.PROGRAM_TOOLS),
+        "evidence_roots._OPEN_TOOLS": names(legacy.OPEN_TOOLS),
         "evidence_bundles._STRING_TOOLS": names(evidence_bundles._STRING_TOOLS),
         "evidence_bundles._NETWORK_SANDBOX_TOOLS": names(evidence_bundles._NETWORK_SANDBOX_TOOLS),
         "evidence_bundles.SANDBOX_TOOL_PREFIXES": prefixes(evidence_bundles.SANDBOX_TOOL_PREFIXES),
         "ledger_report._FUNCTION_TOOLS": names(ledger_report._FUNCTION_TOOLS),
         "ledger_report._FUNCTION_LIST_TOOLS": names(ledger_report._FUNCTION_LIST_TOOLS),
-        "validation._REFERENCE_SECTION_SOURCES": names(validation._REFERENCE_SECTION_SOURCES),
-        "validation._SAMPLE_VALUE_SECTION_SOURCES": names(validation._SAMPLE_VALUE_SECTION_SOURCES),
-        "validation._RULE_MATCH_SECTION_SOURCES": names(validation._RULE_MATCH_SECTION_SOURCES),
+        "validation._REFERENCE_SECTION_SOURCES": names(legacy.REFERENCE_SECTION_SOURCES),
+        "validation._SAMPLE_VALUE_SECTION_SOURCES": names(legacy.SAMPLE_VALUE_SECTION_SOURCES),
+        "validation._RULE_MATCH_SECTION_SOURCES": names(legacy.RULE_MATCH_SECTION_SOURCES),
         "markdown._ANALYSIS_TOOLS": names(markdown._ANALYSIS_TOOLS),
         "markdown._REPUTATION_TOOLS": names(markdown._REPUTATION_TOOLS),
         "markdown._SANDBOX_TOOLS": prefixes(markdown._SANDBOX_TOOLS),
         "triage_pack._REPUTATION_TOOLS": names(triage_pack._REPUTATION_TOOLS),
-        "triage_pack.RULE_TOOLS": names(triage_pack.RULE_TOOLS),
+        "triage_pack.RULE_TOOLS": names(legacy.RULE_TOOLS),
         "run_state.reputation": names(_read_inline_tables()["run_state.reputation"]),
         "network_analyst._PCAP_TOOLS": names(t for t, _ in network_analyst._PCAP_TOOLS),
-        "function_map": names(
-            (
-                function_map._HASH_TOOL,
-                function_map._BLOB_TOOL,
-                function_map._FLOSS_TOOL,
-                function_map._INDEX_TOOL,
-            )
-        ),
+        "function_map": names(legacy.FUNCTION_MAP_TOOLS),
         "stix_renderer.recovering": names(_read_inline_tables()["stix_renderer.recovering"]),
         "stix_renderer.DECODER_TOOL": names((stix_renderer.DECODER_TOOL,)),
         "stix_renderer._STRING_SWEEP_TOOLS": names(stix_renderer._STRING_SWEEP_TOOLS),
@@ -211,6 +204,8 @@ def _tables() -> dict[str, Callable[[str], bool]]:
             _read_inline_tables()["ledger_projection.technique_hits"]
         ),
         "static_analyst._LOAD_TOOL": names((static_analyst._LOAD_TOOL,)),
+        "evidence_summary.yara_rule_strings": names(legacy.SIGNATURE_RULE_TOOLS),
+        "evidence_summary.catalogue_associations": names(legacy.API_CATALOGUE_TOOLS),
     }
 
 
@@ -365,7 +360,7 @@ def test_no_reader_is_named_after_a_tool_or_a_server(declared: ToolDeclarations)
 
 
 def test_the_asserting_sources_are_the_declared_asserting_tools(declared: ToolDeclarations) -> None:
-    from maljan.pipeline.evidence_summary import ASSERTING_SOURCES
+    from maljan.core.legacy_tool_tables import ASSERTING_SOURCES
 
     for source, name, facts in _built_in_tools(declared):
         if name in ASSERTING_SOURCES:

@@ -87,7 +87,7 @@ import hashlib
 import json
 import re
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -97,7 +97,6 @@ from typing import Any, cast
 
 from maljan.agents.evidence_recorder import EvidenceRecorder, result_text
 from maljan.analysis import sandbox_sections
-from maljan.analysis.evidence_roots import FILE_ASSESSMENT_TOOLS
 from maljan.analysis.ghidra_passes import (
     ANTI_ANALYSIS_TOOL,
     CAPA_RULE_KINDS,
@@ -109,6 +108,8 @@ from maljan.analysis.ghidra_passes import (
 )
 from maljan.analysis.pcap_summary import conversation_line
 from maljan.analysis.technique_ids import technique_ids_in
+from maljan.core.declared_reading import consumer_kinds, kind_of
+from maljan.core.legacy_tool_tables import FILE_ASSESSMENT_TOOLS
 from maljan.core.logger import logger
 from maljan.extractors.sample_identity import ARCHIVE_FILE_TYPES, DOCUMENT_FILE_TYPES
 from maljan.pipeline.conditions import TriageFacts
@@ -384,8 +385,8 @@ def run_is_degraded(reasons: Sequence[str], informational: Sequence[str] = ()) -
 # under that name never carries a service's answer. That is why the console's
 # own list of reputation tools has only the two real ones: an entry it would
 # draw an IDENTITY section from is always one of those.
-# The platform's one table of them (``evidence_roots.FILE_ASSESSMENT_TOOLS``),
-# which the evidence roots read as an external assessment of the whole file.
+# The platform's one table of them (``legacy_tool_tables.FILE_ASSESSMENT_TOOLS``, until the
+# one reputation path replaces it); the evidence roots read the same kinds.
 _REPUTATION_TOOLS: frozenset[str] = FILE_ASSESSMENT_TOOLS
 
 
@@ -1552,19 +1553,23 @@ def _detail() -> PackDetail:
     return _DETAIL.get()
 
 
-RULE_TOOLS = ("capa", "yara_scan")
+# The kinds of answer whose pack entries mean an evidence-only static provider
+# that answers them need not run (``builtin_declarations.CONSUMER_KINDS``).
+RULE_ANSWERS = "triage_pack.RULE_TOOLS"
 
 
-def rules_already_recorded(rows: Any) -> bool:
-    """Whether the pack recorded an ``ok`` capa or YARA entry in this run.
+def rules_already_recorded(rows: Any, kinds: Iterable[str] | None = None) -> bool:
+    """Whether the pack recorded an ``ok`` entry of a kind the static provider answers.
 
-    The report node asks before running an evidence-only static provider
-    (``capa_yara``): when the pack ran the two tools, the pack is the
-    producer, and the report reads its entries rather than paying the
-    budget again.
+    The report node asks before running an evidence-only static provider:
+    when the pack recorded an answer of a kind that provider's declaration
+    names (``kinds``; the rule kinds when none is given), the pack is the
+    producer, and the report reads its entries rather than paying the budget
+    again. An entry's kind is its tool's declared one (``core.declared_reading``).
     """
+    wanted = frozenset(kinds) if kinds is not None else consumer_kinds(RULE_ANSWERS)
     return any(
-        entry.ok and entry.tool in RULE_TOOLS and entry.agent == PIPELINE
+        entry.ok and entry.agent == PIPELINE and kind_of(entry) in wanted
         for entry in pack_entries(rows)
     )
 
