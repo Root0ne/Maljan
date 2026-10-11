@@ -562,7 +562,7 @@ def test_the_service_s_name_and_date_cannot_write_markdown_into_the_report(
             "reputation": [
                 ReputationAnswer(
                     entry_id=entry.id,
-                    service="[Rep](https://evil.example/x)",
+                    service="[Rep](https://evil.example/x) | extra",
                     malicious=3,
                     engines=10,
                     last_seen="<b>2026</b> `x` http://evil.example/y",
@@ -575,3 +575,8 @@ def test_the_service_s_name_and_date_cannot_write_markdown_into_the_report(
     assert "\\[Rep\\]" in row
     assert "<b>" not in row and "\\<b\\>" in row
     assert "http://evil.example/y" not in row
+    # The separator is escaped once, by the row: the row keeps its two cells.
+    assert "\\\\|" not in row
+    import re
+
+    assert len(re.split(r"(?<!\\)\|", row)) == 4

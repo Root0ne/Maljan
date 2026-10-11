@@ -3767,26 +3767,28 @@ def _reputation_line(report: MalwareReport) -> str:
             None,
         )
         if counted is not None:
+            # The service's name and date are its answer's words: escaped and defanged;
+            # the row escapes the table separator itself (:func:`_cell`).
+            service = _inline_safe(counted.service or "Reputation lookup", pipes=False)
             said = (
-                f"{_inline_safe(counted.service or 'Reputation lookup')}: {counted.malicious} of "
+                f"{service}: {counted.malicious} of "
                 f"{counted.engine_count()} engines flag it as malicious"
             )
-            # The service's name and date are its answer's words: escaped and defanged.
-            when = _inline_safe(counted.last_seen) if counted.last_seen else ""
+            when = _inline_safe(counted.last_seen, pipes=False) if counted.last_seen else ""
             return said + (f" (analysis {when}; {where})" if when else f" ({where})")
         flagged = next((a for a in answers if a.malicious is not None), None)
         if flagged is not None:
-            service = _inline_safe(flagged.service or "Reputation lookup")
+            service = _inline_safe(flagged.service or "Reputation lookup", pipes=False)
             said = f"{service}: {flagged.malicious} engines flag it as malicious"
             return f"{said} ({where})"
     else:
         # A report stored before the records: its section rows, as it was read.
         flagged_count, engines, source = tool_kinds.stored_reputation_counts(rows)
         if flagged_count and engines:
-            when = _inline_safe(rows.get("analysis date")) if rows.get("analysis date") else ""
-            said = (
-                f"{_inline_safe(source)}: {flagged_count} of {engines} engines flag it as malicious"
-            )
+            dated = rows.get("analysis date")
+            when = _inline_safe(dated, pipes=False) if dated else ""
+            named = _inline_safe(source, pipes=False)
+            said = f"{named}: {flagged_count} of {engines} engines flag it as malicious"
             return said + (f" (analysis {when}; {where})" if when else f" ({where})")
     facts = [f"{k} {v}" for k, v in rows.items() if k in _REPUTATION_KEYS]
     return f"{where}: {'; '.join(facts)}" if facts else f"{where}; see Appendix A"
