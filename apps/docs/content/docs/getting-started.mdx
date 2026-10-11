@@ -15,9 +15,9 @@ production concerns see [deployment.md](/deployment/).
 - Python 3.13 and [uv](https://astral.sh/uv/)
 - Docker with the Compose plugin
 - Node.js 22 only if you intend to run the web app outside Docker
-- Free host ports for Postgres, Redis, Qdrant, MinIO, Ghidra MCP, the API and
-  the frontend; every published port binds to `BIND_ADDRESS` (`127.0.0.1` by
-  default)
+- Free host ports for Postgres, Redis, MinIO, the API and the frontend, and for
+  Qdrant and Ghidra MCP if you turn them on; every published port binds to
+  `BIND_ADDRESS` (`127.0.0.1` by default)
 
 ```bash
 git clone https://github.com/Root0ne/Maljan.git
@@ -27,8 +27,8 @@ make setup        # uv sync --all-extras --all-packages, pre-commit, external/
 
 `external/` is not carried in git. `make setup` runs
 `scripts/dev/fetch_external.sh`, which reconstructs it; `make external` does the
-same on its own. The `ghidra-mcp` image is built from that tree, so the stack
-cannot build without it.
+same on its own. The optional `ghidra-mcp` image is built from that tree, and
+only when its profile is on (below).
 
 ## The two configuration files
 
@@ -36,17 +36,30 @@ Maljan reads two files, and neither is committed.
 
 **`docker/.env`** — variables Compose substitutes into
 [`docker/docker-compose.yml`](https://github.com/Root0ne/Maljan/blob/dev/docker/docker-compose.yml).
-Every one of them
-is declared with `:?`, so Compose refuses to start while any is missing.
+Every one the default stack needs is declared with `:?`, so Compose refuses to
+start while any is missing.
 
 ```bash
 cp docker/.env.example docker/.env
-python -c "import secrets; [print(f'{k}={secrets.token_urlsafe(32)}') for k in ('GHIDRA_MCP_AUTH_TOKEN','REDIS_PASSWORD','QDRANT_API_KEY','POSTGRES_PASSWORD','MINIO_ROOT_PASSWORD')]"
+python -c "import secrets; [print(f'{k}={secrets.token_urlsafe(32)}') for k in ('REDIS_PASSWORD','POSTGRES_PASSWORD','MINIO_ROOT_PASSWORD')]"
 python -c "from cryptography.fernet import Fernet; print('SETTINGS_ENCRYPTION_KEY=' + Fernet.generate_key().decode())"
 python -c "import secrets; print('JWT_SECRET_KEY=' + secrets.token_hex(32))"
 ```
 
 Pick a `MINIO_ROOT_USER` of your own and paste the generated values in.
+
+**Optional services.** Ghidra MCP and Qdrant are Compose profiles, off unless
+you turn them on. To run them, add to `docker/.env` the profiles and a token
+for each one you turn on (each refuses to start without its own):
+
+```bash
+python -c "import secrets; [print(f'{k}={secrets.token_urlsafe(32)}') for k in ('GHIDRA_MCP_AUTH_TOKEN','QDRANT_API_KEY')]"
+# and
+COMPOSE_PROFILES=ghidra,qdrant
+```
+
+Without them the stack starts and runs analyses with whatever static analyser
+you configure, and long-term memory in process.
 
 **`bootstrap.env`** (repository root) — the same contract as process
 environment, for anything you run outside Compose: `make migrate`, the API or
@@ -91,7 +104,7 @@ Access points, on `BIND_ADDRESS`:
 | :-- | :-- |
 | Console | `http://localhost:3000` |
 | API health | `http://localhost:8000/health` |
-| Ghidra MCP | `http://localhost:8089/check_connection` |
+| Ghidra MCP (`ghidra` profile) | `http://localhost:8089/check_connection` |
 | MinIO console | `http://localhost:9001` |
 
 ## First account
@@ -125,11 +138,14 @@ walk the guides you need; at minimum:
 - **Connect a language model** — provider, endpoint and credentials. A local
   OpenAI-compatible server is reached from the containers at
   `http://host.docker.internal:8080/v1`.
-- **Choose a static analyser** — for the bundled container, the Ghidra MCP URL
-  is `http://ghidra-mcp:8089` with the `GHIDRA_MCP_AUTH_TOKEN` you generated.
+- **Choose a static analyser** — radare2, capa and YARA, a tool server of your
+  own, or `none`. With the `ghidra` profile on, the Ghidra MCP URL is
+  `http://ghidra-mcp:8089` with the `GHIDRA_MCP_AUTH_TOKEN` you generated. The
+  shipped choice is Ghidra, switched off: a stack without it selects another.
 - **Connect a sandbox** — CAPEv2, Triage, a generic REST sandbox, an uploaded
   report, or the mock provider, which is the default.
-- **Long-term memory** — Qdrant at `http://qdrant:6333` with `QDRANT_API_KEY`.
+- **Long-term memory** — `memory` keeps it in process; with the `qdrant`
+  profile on, Qdrant at `http://qdrant:6333` with `QDRANT_API_KEY`.
 
 Each guide ends in a review step and applies the staged values in one write.
 Connection tests are available on the settings that have a probe. An instance

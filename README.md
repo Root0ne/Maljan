@@ -112,7 +112,7 @@ control and the item-by-item score files are in
 
 The compose stack is the supported way to run Maljan. It needs Docker with the
 Compose plugin, and `make setup` once to fetch the third-party trees the
-`ghidra-mcp` image is built from.
+optional `ghidra-mcp` image is built from.
 
 ```bash
 git clone https://github.com/Root0ne/Maljan.git && cd Maljan
@@ -124,8 +124,10 @@ make dev-up                         # docker compose up -d, development overlay
 The development overlay is for a workstation; [Deployment](https://root0ne.github.io/Maljan/deployment/)
 covers a production deployment.
 
-Every secret in [`docker/.env.example`](docker/.env.example) is declared with
-`:?` in the compose file, so the stack refuses to start while one is missing;
+Every secret the default stack needs in [`docker/.env.example`](docker/.env.example)
+is declared with `:?` in the compose file, so the stack refuses to start while
+one is missing. Ghidra MCP and Qdrant are optional Compose profiles
+(`COMPOSE_PROFILES=ghidra,qdrant`), each with its own token;
 [Quick start](https://root0ne.github.io/Maljan/getting-started/) has the commands that
 generate them. Open <http://localhost:3000>, register the first account from
 the login page, promote it to `admin` once in the database, then walk

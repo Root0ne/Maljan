@@ -3069,11 +3069,11 @@ unavailable: …` with the remedy.
 over http starts its loop, the load of its sample is made once, and the sink
 pre-pass reads the program it opened. Ghidra answers a load it could not make
 with HTTP 200 and `{"error": "File not found: ..."}` — the path is one its
-container cannot see, most often `GHIDRA_CONTAINER_SAMPLES_PATH` set to a host
-directory — and every call after it answers "No program loaded". So a load
-that opens nothing raises `SampleNotOpened` with "Ghidra could not open the
-job's sample: \<the server's words>; check GHIDRA_CONTAINER_SAMPLES_PATH / the
-container mount", before any model turn. The same holds inside a loop over
+container cannot see, most often a `sample_mount` set to a host directory —
+and every call after it answers "No program loaded". So a load that opens
+nothing raises `SampleNotOpened` with "Ghidra could not open the job's sample:
+\<the server's words>; check core.static.ghidra.sample_mount / the container
+mount", before any model turn. The same holds inside a loop over
 stdio, or on a later load: the pinned `load_program` of the held path that
 answers with an error is filed on the ledger as a failed call with the
 server's words, and the exception ends the loop at once, with nothing

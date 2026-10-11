@@ -65,9 +65,14 @@ services:
       retries: 5
 
   # ─────────────────────────────────────────────
-  # Qdrant — Vector database (LTM / RAG)
+  # Qdrant — Vector database (LTM / RAG), optional
   # ─────────────────────────────────────────────
+  # Started only with the `qdrant` profile (`--profile qdrant`, or
+  # COMPOSE_PROFILES=qdrant in docker/.env). Long-term memory runs in process
+  # (`memory.backend` = `memory`) without it; with it, `memory.backend` =
+  # `qdrant` and its url `http://qdrant:6333`. Nothing else waits for it.
   qdrant:
+    profiles: [qdrant]
     # F3 (2026-07-05): pin instead of ``:latest`` for reproducibility. An
     # unpinned server drifted to 1.18.x while the pinned qdrant-client is
     # 1.17.1, which logged "Failed to obtain server version. Unable to check
@@ -76,7 +81,14 @@ services:
     container_name: maljan-qdrant
     restart: unless-stopped
     environment:
-      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?set QDRANT_API_KEY in docker/.env (see README)}
+      # Not a `:?` guard: Compose interpolates every service, the ones whose
+      # profile is off as well, so a guard here would stop a stack that never
+      # runs Qdrant. The entrypoint below refuses to start without the key.
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:-}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - '[ -n "$$QDRANT__SERVICE__API_KEY" ] || { echo "set QDRANT_API_KEY in docker/.env (see README)" >&2; exit 1; }; exec ./entrypoint.sh'
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${QDRANT_PORT:-6333}:6333"
       - "${BIND_ADDRESS:-127.0.0.1}:6334:6334"
@@ -106,9 +118,15 @@ services:
       retries: 5
 
   # -────────────────────────────────────────────
-  # Ghidra MCP Headless — Static analysis engine
+  # Ghidra MCP Headless — a static analyser, optional
   # -────────────────────────────────────────────
+  # Started only with the `ghidra` profile (`--profile ghidra`, or
+  # COMPOSE_PROFILES=ghidra in docker/.env), and built from external/ghidra-mcp
+  # only then. It is one static analyser among the ones a deployment can
+  # attach; nothing waits for it, and a job whose team needs a provider that
+  # is not ready is refused with the reason (provider_readiness).
   ghidra-mcp:
+    profiles: [ghidra]
     build:
       context: ../external/ghidra-mcp
       dockerfile: docker/Dockerfile
@@ -118,7 +136,10 @@ services:
     # restart, for a host that starts Ghidra only for the runs that need it.
     restart: ${GHIDRA_RESTART:-unless-stopped}
     environment:
-      GHIDRA_MCP_AUTH_TOKEN: ${GHIDRA_MCP_AUTH_TOKEN:?set GHIDRA_MCP_AUTH_TOKEN in docker/.env (see README)}
+      # Not a `:?` guard, for the reason given on Qdrant above. The server
+      # refuses to bind 0.0.0.0 without a token, so an unset one stops this
+      # container and no other.
+      GHIDRA_MCP_AUTH_TOKEN: ${GHIDRA_MCP_AUTH_TOKEN:-}
       GHIDRA_MCP_BIND_ADDRESS: 0.0.0.0
       GHIDRA_MCP_PORT: 8089
       # The JVM's options; the image's own default when unset. The heap cap
@@ -144,6 +165,8 @@ services:
     mem_limit: ${GHIDRA_MEM_LIMIT:-6g}
     memswap_limit: ${GHIDRA_MEM_LIMIT:-6g}
     volumes:
+      # The right-hand side is Ghidra's declared sample_mount
+      # (core.static.ghidra.sample_mount): change the two together.
       - ../data/samples:/data/samples:ro
       - ghidra_projects:/projects
     healthcheck:
@@ -199,8 +222,6 @@ services:
       SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?set SETTINGS_ENCRYPTION_KEY in docker/.env}
       SAMPLES_DIR: data/samples
       UPLOAD_TEMP_DIR: data/uploads/.tmp
-      # Must match the right-hand side of the ghidra-mcp samples bind mount.
-      GHIDRA_CONTAINER_SAMPLES_PATH: /data/samples
       # This stack runs the enrichment-worker service below, so an enrichment
       # is queued for it rather than for the analysis worker's single slot.
       # It is the setting's *default*, not an override: an operator who saves
@@ -236,10 +257,6 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      qdrant:
-        condition: service_started
-      ghidra-mcp:
         condition: service_healthy
     # The worker waits on this: the healthcheck gates it on an API that has
     # finished its startup, so a job is never taken while the settings store
@@ -286,8 +303,6 @@ services:
       SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?set SETTINGS_ENCRYPTION_KEY in docker/.env}
       SAMPLES_DIR: data/samples
       UPLOAD_TEMP_DIR: data/uploads/.tmp
-      # Must match the right-hand side of the ghidra-mcp samples bind mount.
-      GHIDRA_CONTAINER_SAMPLES_PATH: /data/samples
       # This stack runs the enrichment-worker service below, so an enrichment
       # is queued for it rather than for the analysis worker's single slot.
       # It is the setting's *default*, not an override: an operator who saves
@@ -354,8 +369,6 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      ghidra-mcp:
         condition: service_healthy
     command: >
       uv run arq app.worker.analysis_worker.WorkerSettings

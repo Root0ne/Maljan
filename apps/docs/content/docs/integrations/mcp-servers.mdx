@@ -29,11 +29,12 @@ server elsewhere there are two ways to make that hold.
 
 <Tab value="A shared volume">
 
-Mount the same directory into both, and point the provider's mirror at it —
-`static.r2.mirror_dir` is the worked example. The worker copies the sample
-there (a 0o700 directory, a 0o600 file, removed when the job ends) and the
-server reads it from its own mount. Nothing is uploaded, and the path both
-sides use has to agree.
+Mount the worker's samples directory into the server, and declare where on the
+server's block: `sample_mount` is the path inside the server it is mounted at,
+and `work_dir` the directory under it the worker copies the sample into (a
+0o700 directory, a 0o600 file, removed when the job ends). The server is handed
+`<sample_mount>/<work_dir>/<file>`. Nothing is uploaded; the mount and the
+declared `sample_mount` have to agree.
 
 </Tab>
 
