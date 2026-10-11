@@ -15,6 +15,14 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from maljan.core.config import Settings
 from maljan.core.exceptions import LLMError
 from maljan.core.logger import logger
+from maljan.llm.provider_base import (
+    COMPLETION_MAX_TOKENS,
+    COMPLETION_PROMPT,
+    LLMProvider,
+    ModelListing,
+    OneTurnRequest,
+    _text,
+)
 from maljan.llm.registry import register_provider
 from maljan.llm.tool_replies import (  # noqa: F401 — the names this module has always offered
     NO_REPLY_RECORDED,
@@ -1028,11 +1036,158 @@ def with_reasoning_passback(chat_class: Any) -> Any:
     return kept
 
 
+def _openai_extras(
+    base: str, disable_thinking: bool, compat: str, reasoning_effort: str = ""
+) -> dict[str, Any]:
+    """The request fields beyond OpenAI's basic ones this endpoint gets in a run.
+
+    Decided by the two functions every model build uses: ``sends_llama_cpp_extras``
+    says whether this endpoint takes the llama.cpp fields at all (a hosted
+    OpenAI-compatible API answers an unknown body field with 400), and the
+    thinking switch is the dialect's own. A probe that asked a different
+    question from the run it gates let a local reasoning model spend its eight
+    tokens inside its own chain of thought and answer with an empty string.
+    """
+    extras: dict[str, Any] = {}
+    if sends_llama_cpp_extras(base, str(compat or "auto")):
+        add_thinking_switch(extras, bool(disable_thinking))
+    elif compat == "deepseek":
+        add_deepseek_thinking_switch(extras, bool(disable_thinking))
+    # The operator's effort as the run sends it: a value the endpoint does not
+    # know is refused by the probe rather than on the job's first call.
+    effort = str(reasoning_effort or "").strip()
+    if effort:
+        extras["reasoning_effort"] = effort
+    return extras
+
+
 @register_provider("openai")
-class OpenAIProvider:
+class OpenAIProvider(LLMProvider):
     """Builds LangChain ChatOpenAI instances."""
 
     name = "openai"
+    label = "OpenAI-compatible"
+    description = (
+        "OpenAI's API or any server that speaks its chat completions: llama.cpp, "
+        "vLLM, DeepSeek and other hosted APIs."
+    )
+    hosted = False
+    setup_leaves = ("base_url", "api_key", "expert_model", "judge_model")
+    sdk_packages = frozenset({"openai"})
+    llm_types = ("openai-chat",)
+    timeout_kwarg = "request_timeout"
+    supports_agent_base_url = True
+    base_url_leaf = "base_url"
+    default_endpoint = "https://api.openai.com/v1"
+    effort_setting = "llm.openai.reasoning_effort"
+    concurrency = "endpoint"
+    # A thinking model's reasoning a provider sends back with the turn
+    # (``with_reasoning_passback``) stays with the turn it belongs to.
+    reasoning_passback_keys = (REASONING_CONTENT_KEY,)
+
+    @classmethod
+    def supports_structured_output(cls, settings: Any) -> bool:
+        # Against api.openai.com; a deployment with its own address is a local
+        # or another vendor's server, where a structured call hung for the
+        # whole request timeout.
+        return settings is None or not cls.configured_base_url(settings)
+
+    @classmethod
+    def model_declines_structured_output(cls, llm: Any) -> bool:
+        # A per-agent endpoint survives only on the model object, as
+        # ``openai_api_base``; only a real non-empty string counts.
+        candidate = getattr(llm, "openai_api_base", None)
+        return isinstance(candidate, str) and bool(candidate.strip())
+
+    @classmethod
+    def window_probes(cls, endpoint: object, model: str) -> tuple[Any, ...]:
+        from maljan.llm import context_window as cw
+
+        root = cw._root_of(endpoint)
+        if not root:
+            return ()
+        return (
+            cw.Ask(
+                "GET",
+                f"{root}{cw.LLAMA_PROPS_PATH}",
+                None,
+                cw.window_from_llama_props,
+                "llama.cpp /props",
+            ),
+            cw.Ask(
+                "GET",
+                f"{root}{cw.MODEL_LIST_PATH}",
+                None,
+                cw.window_from_model_list,
+                "the served model list",
+            ),
+            cw.Ask(
+                "GET",
+                f"{root}{cw.TGI_INFO_PATH}",
+                None,
+                cw.window_from_tgi_info,
+                "the server description",
+            ),
+        )
+
+    @classmethod
+    def declared_window(cls, settings: Any) -> tuple[int, bool]:
+        # ``context_size`` ships at zero, so a positive value is always an
+        # operator's decision.
+        return int(getattr(cls.settings_block(settings), "context_size", 0) or 0), False
+
+    @classmethod
+    def reasoning_counts_against_cap(cls, settings: Any) -> bool:
+        # llama.cpp's ``n_predict`` counts the reasoning channel with the answer.
+        return not bool(getattr(cls.settings_block(settings), "disable_thinking", False))
+
+    @classmethod
+    def model_listing(cls, settings: Any) -> ModelListing:
+        base = cls.endpoint(None, cls.configured_base_url(settings))
+        return ModelListing(
+            url=f"{base}/models",
+            headers={"Authorization": f"Bearer {cls.api_key(settings) or 'none'}"},
+            names=lambda payload: [m.get("id", "") for m in (payload or {}).get("data", [])],
+            where=base,
+        )
+
+    @classmethod
+    def one_turn_request(
+        cls, settings: Any, endpoint: str, model: str, effort: str | None = None
+    ) -> OneTurnRequest:
+        block = cls.settings_block(settings)
+        base = str(endpoint or "").rstrip("/")
+        return OneTurnRequest(
+            f"{base or cls.default_endpoint}/chat/completions",
+            {"Authorization": f"Bearer {cls.api_key(settings) or 'none'}"},
+            {
+                "model": model,
+                "max_tokens": COMPLETION_MAX_TOKENS,
+                "messages": [{"role": "user", "content": COMPLETION_PROMPT}],
+                **_openai_extras(
+                    base,
+                    bool(getattr(block, "disable_thinking", False)),
+                    str(getattr(block, "compat", "auto") or "auto"),
+                    str(effort or ""),
+                ),
+            },
+        )
+
+    @classmethod
+    def said_something(cls, payload: Any) -> bool:
+        choices = payload.get("choices")
+        if not isinstance(choices, list) or not choices:
+            return False
+        message = (choices[0] or {}).get("message") or {}
+        # Reasoning text counts: a local server serving a reasoning model with
+        # thinking left on puts the whole answer in ``reasoning_content``
+        # (``reasoning`` on some builds) and hands back an empty ``content``.
+        return bool(
+            _text(message.get("content"))
+            or _text(message.get(REASONING_CONTENT_KEY))
+            or _text(message.get("reasoning"))
+            or message.get("tool_calls")
+        )
 
     def __init__(self, config: Settings) -> None:
         self._config = config

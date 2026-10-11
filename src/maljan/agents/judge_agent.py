@@ -4111,8 +4111,8 @@ class JudgeAgent(BudgetMeter):
 
         ``self._config`` was read here but never assigned (``JudgeAgent`` took
         no config), so the provider name came from ``ChatOpenAI._llm_type`` =
-        ``"openai-chat"``, absent from ``PROVIDER_CAPABILITIES``, and every
-        provider got the unknown-provider default. The container passes the
+        ``"openai-chat"``, which named no provider, and every provider got
+        the unknown-provider default. The container passes the
         config now, and the decision itself is shared with the two other
         callers that were making it independently.
         """

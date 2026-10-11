@@ -19,7 +19,7 @@ from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from maljan.core.config import EFFORT_SETTING_OF_PROVIDER, Settings
+from maljan.core.config import Settings
 from maljan.core.exceptions import LLMError
 from maljan.core.logger import logger
 
@@ -39,35 +39,6 @@ PROVIDER_REQUEST_TIMEOUT_SECONDS = 1800
 _PROVIDER_REGISTRY: dict[str, type] = {}
 
 
-# Centralise per-provider capability flags so callers can
-# branch on "does this provider support langchain ``with_structured_output``"
-# / "what's the right place to set timeout?" without sniffing internal
-# state. Conservative defaults match the providers we ship today.
-PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
-    "openai": {
-        "supports_structured_output": True,
-        # LangChain ChatOpenAI takes ``request_timeout`` as a top-level kwarg.
-        "timeout_kwarg": "request_timeout",
-    },
-    "anthropic": {
-        "supports_structured_output": True,
-        "timeout_kwarg": "timeout",
-    },
-    "gemini": {
-        "supports_structured_output": True,
-        "timeout_kwarg": "request_options",  # gRPC; honoured via ``timeout`` key
-    },
-    "ollama": {
-        # langchain-ollama exposes structured output via tool calling that
-        # most Ollama-served models don't honour cleanly. Treat as
-        # unsupported so callers prompt the LLM to emit JSON manually
-        # instead of relying on a silent regex fallback.
-        "supports_structured_output": False,
-        "timeout_kwarg": "request_timeout",
-    },
-}
-
-
 def register_provider(name: str):  # type: ignore[no-untyped-def]
     """Decorator that registers an LLM provider class under the given name."""
 
@@ -75,6 +46,9 @@ def register_provider(name: str):  # type: ignore[no-untyped-def]
         if name in _PROVIDER_REGISTRY:
             logger.warning(f"LLM provider '{name}' is being re-registered (overwriting).")
         _PROVIDER_REGISTRY[name] = cls
+        from maljan.llm.provider_base import remember_facts
+
+        remember_facts(name, cls)
         return cls
 
     return decorator
@@ -267,7 +241,9 @@ class LLMProviderRegistry:
             agent_base_url or "(global)",
             effort_said,
         )
-        if own_effort and str(choice.provider) not in EFFORT_SETTING_OF_PROVIDER:
+        from maljan.llm.provider_base import facts_of
+
+        if own_effort and not facts_of(choice.provider).effort_setting:
             raise LLMError(
                 f"{own_setting} is {own_effort!r} on {choice.provider}/{choice.model}, "
                 "a provider that sends no reasoning effort."
@@ -325,21 +301,14 @@ def structured_output_supported(config: Any | None = None, llm: Any | None = Non
     """Whether ``with_structured_output`` is worth attempting against this endpoint.
 
     A property of the endpoint, not of the caller, which is why it lives here
-    rather than in each of the three places that ask. Two things it decides:
-
-    * **The provider name.** LangChain reports ``ChatOpenAI._llm_type`` as
-      ``"openai-chat"``, which is absent from ``PROVIDER_CAPABILITIES``, so a
-      caller that sniffed the model object got the unknown-provider default for
-      *every* provider. Config wins when present; the ``-chat`` suffix is
-      stripped as a backstop when it is not.
-
-    * **A local server is not the vendor API.** ``openai`` supports structured
-      output against api.openai.com. Against a local OpenAI-compatible server
-      it is a different animal: measured 2026-08-07, a NarrativeAgent
-      structured call against llama-server/Qwen3.6-35B hung for the full
-      ``request_timeout`` of 1800 s and was about to do it twice more, with no
-      log line in between, while the plain text path does the same job in
-      minutes. So a custom ``base_url`` disables it.
+    rather than in each of the places that ask. The provider answers for
+    itself (``LLMProvider.supports_structured_output`` and
+    ``model_declines_structured_output``): the configured provider when
+    ``config`` is given, else the provider that built ``llm``, read from its
+    ``_llm_type``. A local OpenAI-compatible server is not the vendor API: a
+    structured call against llama-server hung for the full request timeout
+    while the plain text path did the same job in minutes, so the OpenAI
+    adapter declines it for a model or a deployment with its own address.
 
     Never raises, and refuses when it cannot tell: knowing nothing about the
     endpoint is not a reason to gamble half an hour of a job on it.
@@ -353,32 +322,21 @@ def structured_output_supported(config: Any | None = None, llm: Any | None = Non
     if isinstance(inner, list) and getattr(llm, "_llm_type", "") == "maljan-fallback":
         return bool(inner) and all(structured_output_supported(None, model) for model in inner)
     try:
-        # A per-agent endpoint is as local as a global one, and the model
-        # object is the only place it survives: ChatOpenAI keeps it as
-        # ``openai_api_base`` (``base_url`` is the constructor alias). It is
-        # checked before the global provider name because the agent that owns
-        # this model may run on ``openai`` while the global provider is not.
-        # Only a real non-empty string counts — anything else is an object
-        # that answers every attribute, not a configured endpoint.
-        if llm is not None:
-            candidate = getattr(llm, "openai_api_base", None)
-            if isinstance(candidate, str) and candidate.strip():
-                return False
-        if config is not None:
-            provider_name = str(config.llm.provider)
-            base_url = getattr(config.llm.openai, "base_url", None)
-            if provider_name == "openai" and base_url:
-                return False
-        elif llm is not None:
-            # "openai-chat" -> "openai"; harmless for names without a suffix.
-            provider_name = str(getattr(llm, "_llm_type", "") or "").split("-")[0]
-            if not provider_name:
-                return False
-        else:
+        from maljan.llm.provider_base import facts_of, provider_of_model, registered_facts
+
+        # A model object is the only place a per-agent endpoint survives, and
+        # the agent that owns it may run on another provider than the global
+        # one, so every provider is asked whether this model declines first.
+        if llm is not None and any(
+            one.model_declines_structured_output(llm) for one in registered_facts()
+        ):
             return False
-        return bool(
-            PROVIDER_CAPABILITIES.get(provider_name, {}).get("supports_structured_output", False)
-        )
+        if config is not None:
+            return bool(facts_of(config.llm.provider).supports_structured_output(config))
+        if llm is not None:
+            built_by = provider_of_model(llm)
+            return built_by is not None and bool(built_by.supports_structured_output(None))
+        return False
     except Exception as exc:  # noqa: BLE001
         logger.debug("structured-output capability check failed (%s); assuming no.", exc)
         return False

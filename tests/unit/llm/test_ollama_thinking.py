@@ -16,53 +16,58 @@ from typing import Any
 import httpx
 import pytest
 
-from app.services.settings_probes import _completion_request, _said_something
+from app.services.settings_probes import _said_something
 from maljan.core.config import Settings
+from maljan.llm.ollama_provider import OllamaProvider
+from maljan.llm.provider_base import facts_of
 
 
 def _answer(payload: dict[str, Any]) -> httpx.Response:
     return httpx.Response(200, json=payload)
 
 
+def _body(*, disable_thinking: bool = False) -> dict[str, Any]:
+    settings = Settings()
+    settings.llm.ollama.disable_thinking = disable_thinking
+    return OllamaProvider.one_turn_request(settings, "", "qwen3:8b").body
+
+
 class TestWhatCountsAsAnAnswer:
     def test_a_plain_completion_counts(self) -> None:
-        assert _said_something("ollama", _answer({"response": "OK"}))
+        assert _said_something(facts_of("ollama"), _answer({"response": "OK"}))
 
     def test_thinking_alone_counts(self) -> None:
         """The reproduced case: the whole budget spent in the thinking channel."""
         assert _said_something(
-            "ollama",
+            facts_of("ollama"),
             _answer({"response": "", "thinking": 'The user wants the single word "ready"'}),
         )
 
     def test_the_chat_shape_counts_too(self) -> None:
         """``/api/chat`` puts both under ``message``; a proxy may answer either."""
-        assert _said_something("ollama", _answer({"message": {"content": "OK"}}))
-        assert _said_something("ollama", _answer({"message": {"thinking": "considering"}}))
+        assert _said_something(facts_of("ollama"), _answer({"message": {"content": "OK"}}))
+        assert _said_something(
+            facts_of("ollama"), _answer({"message": {"thinking": "considering"}})
+        )
 
     def test_an_empty_answer_is_still_nothing(self) -> None:
-        assert not _said_something("ollama", _answer({"response": "", "thinking": "   "}))
-        assert not _said_something("ollama", _answer({"message": {"content": ""}}))
+        assert not _said_something(facts_of("ollama"), _answer({"response": "", "thinking": "   "}))
+        assert not _said_something(facts_of("ollama"), _answer({"message": {"content": ""}}))
 
 
 class TestTheRequestTheProbeSends:
     def test_thinking_is_left_alone_by_default(self) -> None:
         """A model that does not know the field must not be sent it."""
-        _url, _headers, body = _completion_request("ollama", "", "qwen3:8b", "")
-        assert "think" not in body
+        assert "think" not in _body()
 
     def test_the_setting_turns_thinking_off_in_the_request(self) -> None:
-        _url, _headers, body = _completion_request(
-            "ollama", "", "qwen3:8b", "", disable_thinking=True
-        )
+        body = _body(disable_thinking=True)
         assert body["think"] is False
         assert body["options"]["num_predict"] > 0
 
     def test_the_openai_switch_is_not_sent_to_ollama(self) -> None:
         """The two providers spell it differently; only the right one travels."""
-        _url, _headers, body = _completion_request(
-            "ollama", "", "qwen3:8b", "", disable_thinking=True
-        )
+        body = _body(disable_thinking=True)
         assert "chat_template_kwargs" not in body
         assert "extra_body" not in body
 
@@ -114,44 +119,45 @@ class TestItIsConfigurable:
         assert entry.type == "bool"
         assert entry.title and entry.description
 
-    def test_the_probe_reads_the_staged_value(self) -> None:
-        """Staging it in the console changes the probe, not only the run."""
-        from app.services.settings_probes import _INPUTS
-
-        assert _INPUTS["llm"]["core.llm.ollama.disable_thinking"] == "ollama_disable_thinking"
-
     @pytest.mark.asyncio
     async def test_the_probe_sends_it_when_the_deployment_asked_for_it(self) -> None:
-        from app.services.settings_probes import _probe_llm_ollama
-
-        seen: list[dict[str, Any]] = []
-
-        async def _complete(provider: str, **kwargs: Any) -> tuple[bool, str]:
-            seen.append(kwargs)
-            return True, "answered"
-
+        """Staging it in the console changes the probe, not only the run."""
         import app.services.settings_probes as probes
+
+        sent: list[dict[str, Any]] = []
 
         async def _tags(url: str, headers: Any = None) -> tuple[bool, str, Any]:
             return True, "ok", httpx.Response(200, json={"models": [{"name": "qwen3:8b"}]})
 
-        original_get = probes._get
-        original_complete = probes.complete_one_turn
+        class _Client:
+            async def __aenter__(self) -> _Client:
+                return self
+
+            async def __aexit__(self, *exc: Any) -> None:
+                return None
+
+            async def post(self, url: str, headers: Any = None, json: Any = None) -> Any:
+                sent.append(json)
+                return httpx.Response(200, json={"response": "OK"})
+
+        original_get, original_client = probes._get, probes._client
         probes._get = _tags  # type: ignore[assignment]
-        probes.complete_one_turn = _complete  # type: ignore[assignment]
+        probes._client = lambda timeout=0: _Client()  # type: ignore[assignment]
         try:
-            result = await _probe_llm_ollama(
+            settings = probes.candidate_settings(
                 {
-                    "ollama_base_url": "http://localhost:11434",
-                    "ollama_expert_model": "qwen3:8b",
-                    "ollama_judge_model": "qwen3:8b",
-                    "ollama_disable_thinking": True,
-                }
+                    "core.llm.provider": "ollama",
+                    "core.llm.ollama.expert_model": "qwen3:8b",
+                    "core.llm.ollama.judge_model": "qwen3:8b",
+                    "core.llm.ollama.disable_thinking": True,
+                },
+                {},
             )
+            result = await probes.probe_llm(settings)
         finally:
             probes._get = original_get  # type: ignore[assignment]
-            probes.complete_one_turn = original_complete  # type: ignore[assignment]
+            probes._client = original_client  # type: ignore[assignment]
 
         assert result.ok
-        assert seen, "the probe asked nothing"
-        assert all(call.get("disable_thinking") is True for call in seen)
+        assert sent, "the probe asked nothing"
+        assert all(body.get("think") is False for body in sent)

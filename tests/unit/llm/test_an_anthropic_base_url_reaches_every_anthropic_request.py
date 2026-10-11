@@ -68,7 +68,7 @@ class TestSet:
     def test_files_a_probe_under_the_address(self) -> None:
         settings = _settings(base_url=STUB + "/")
         assert endpoint_for(settings, "anthropic") == STUB
-        assert endpoint_where("anthropic", anthropic_base_url=STUB) == STUB
+        assert endpoint_where("anthropic", configured=STUB) == STUB
 
     def test_asks_the_models_api_at_the_address(self) -> None:
         (ask,) = cw.probe_plan("anthropic", STUB, MODEL)
@@ -162,31 +162,23 @@ class TestARefusedAddress:
         assert _settings().llm.anthropic.allow_plain_http_to_docker_host is False
 
     def test_the_probe_asks_the_address_the_client_uses(self) -> None:
-        from app.services.settings_probes import _completion_request
-
         settings = _settings(base_url="https://proxy.example.org/anthropic/")
         where = endpoint_for(settings, "anthropic")
-        url, _headers, _body = _completion_request("anthropic", where, MODEL, "k")
+        url = AnthropicProvider.one_turn_request(settings, where, MODEL).url
         built = AnthropicProvider(settings).build_model(MODEL, 0.1)
         assert url == f"{built.anthropic_api_url}/v1/messages"
 
 
 class TestTheSettingsProbe:
     def test_asks_the_vendor_when_unset(self) -> None:
-        from app.services.settings_probes import _completion_request
-
-        url, _headers, _body = _completion_request(
-            "anthropic", "the Anthropic API", MODEL, "test-anthropic-key"
-        )
+        url = AnthropicProvider.one_turn_request(_settings(), "the Anthropic API", MODEL).url
         assert url == "https://api.anthropic.com/v1/messages"
 
     def test_asks_the_address_when_set(self) -> None:
-        from app.services.settings_probes import _completion_request
-
-        url, _headers, _body = _completion_request("anthropic", STUB, MODEL, "test-anthropic-key")
+        url = AnthropicProvider.one_turn_request(_settings(), STUB, MODEL).url
         assert url == f"{STUB}/v1/messages"
 
     def test_reads_the_setting(self) -> None:
-        from app.services.settings_probes import _INPUTS
-
-        assert _INPUTS["llm"]["core.llm.anthropic.base_url"] == "anthropic_base_url"
+        settings = _settings(base_url=STUB)
+        assert AnthropicProvider.configured_base_url(settings) == STUB
+        assert AnthropicProvider.model_listing(settings).url == f"{STUB}/v1/models"

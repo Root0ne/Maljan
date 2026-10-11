@@ -51,6 +51,13 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from maljan.core.config import Settings
 from maljan.core.exceptions import LLMError
 from maljan.core.logger import logger
+from maljan.llm.provider_base import (
+    COMPLETION_MAX_TOKENS,
+    COMPLETION_PROMPT,
+    LLMProvider,
+    ModelListing,
+    OneTurnRequest,
+)
 from maljan.llm.registry import register_provider
 
 _table_lock = threading.Lock()
@@ -358,11 +365,156 @@ def with_loop_bound_async_client(chat_class: Any) -> Any:
     return bound
 
 
+# Anthropic's API, where no address is configured, and the headers every
+# request to it carries.
+ANTHROPIC_ROOT = "https://api.anthropic.com"
+
+
+def anthropic_headers(api_key: str) -> dict[str, str]:
+    """The headers an Anthropic request authenticates with; ``{}`` without a key."""
+    from maljan.llm.context_window import ANTHROPIC_VERSION
+
+    return {"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION} if api_key else {}
+
+
 @register_provider("anthropic")
-class AnthropicProvider:
+class AnthropicProvider(LLMProvider):
     """Builds LangChain ChatAnthropic instances."""
 
     name = "anthropic"
+    label = "Anthropic"
+    description = "Claude models over the Anthropic API, or an address that serves it."
+    hosted = True
+    setup_leaves = ("api_key", "expert_model", "judge_model")
+    sdk_packages = frozenset({"anthropic"})
+    llm_types = ("anthropic-chat",)
+    timeout_kwarg = "timeout"
+    base_url_leaf = "base_url"
+    default_endpoint = "the Anthropic API"
+    effort_setting = "llm.anthropic.effort"
+    concurrency = "hosted"
+    # A cached prefix is readable only once an answer to the request that wrote
+    # it has begun; concurrent requests sent before that each write it again
+    # (https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
+    caches_once_answered = True
+    window_probe_needs_key = True
+
+    @classmethod
+    def effort_levels(cls, model: str) -> tuple[list[str] | None, list[str], str]:
+        """The levels a build would send, those the description left out, and the source.
+
+        A description that names no level says nothing about levels, so the
+        setting's list stands. Once it names any, a level it refuses is left
+        out (the build refuses it too) and a level it says nothing about is
+        offered and listed as undescribed, because the build sends it.
+        """
+        from maljan.core.config import ANTHROPIC_EFFORT_LEVELS
+        from maljan.llm.model_capabilities import takes_effort
+
+        said = {level: takes_effort(model, level) for level in ANTHROPIC_EFFORT_LEVELS}
+        if all(answer is None for answer in said.values()):
+            return list(ANTHROPIC_EFFORT_LEVELS), [], "settings"
+        offered = [level for level, answer in said.items() if answer is not False]
+        undescribed = [level for level, answer in said.items() if answer is None]
+        return offered, undescribed, "models_api"
+
+    @classmethod
+    def effort_refusal(cls, effort: str) -> str | None:
+        from maljan.core.config import ANTHROPIC_EFFORT_LEVELS
+
+        if effort in ANTHROPIC_EFFORT_LEVELS:
+            return None
+        return (
+            f"effort {effort!r} is not one of the Anthropic levels "
+            f"({', '.join(ANTHROPIC_EFFORT_LEVELS)})."
+        )
+
+    @classmethod
+    def supports_structured_output(cls, settings: Any) -> bool:
+        return True
+
+    @classmethod
+    def window_probes(cls, endpoint: object, model: str) -> tuple[Any, ...]:
+        from urllib.parse import quote
+
+        from maljan.llm import context_window as cw
+
+        name = str(model or "").strip()
+        if not name:
+            return ()
+        root = cw._root_of(endpoint)
+        # A configured address (``llm.anthropic.base_url``) is asked in place
+        # of the vendor's; the vendor's own name is no address.
+        anthropic_root = root if "://" in root else cw.ANTHROPIC_API_ROOT
+        return (
+            cw.Ask(
+                "GET",
+                f"{anthropic_root}{cw.ANTHROPIC_MODEL_PATH}{quote(name, safe='')}",
+                None,
+                cw.window_from_anthropic_model,
+                cw.ANTHROPIC_MODELS_API,
+                auth=anthropic_headers,
+            ),
+        )
+
+    @classmethod
+    def writes_hour_caches(cls, settings: Any) -> bool:
+        return str(getattr(cls.settings_block(settings), "prompt_cache_ttl", "") or "") == "1h"
+
+    @classmethod
+    def _root(cls, endpoint: str) -> str:
+        base = str(endpoint or "").rstrip("/")
+        return base if "://" in base else ANTHROPIC_ROOT
+
+    @classmethod
+    def model_listing(cls, settings: Any) -> ModelListing:
+        root = cls._root(cls.endpoint(None, cls.configured_base_url(settings)))
+        return ModelListing(
+            url=f"{root}/v1/models",
+            headers={
+                "x-api-key": cls.api_key(settings),
+                "anthropic-version": _anthropic_version(),
+            },
+            names=lambda payload: [m.get("id", "") for m in (payload or {}).get("data", [])],
+            where=root,
+        )
+
+    @classmethod
+    def one_turn_request(
+        cls, settings: Any, endpoint: str, model: str, effort: str | None = None
+    ) -> OneTurnRequest:
+        body: dict[str, Any] = {
+            "model": model,
+            "max_tokens": COMPLETION_MAX_TOKENS,
+            "messages": [{"role": "user", "content": COMPLETION_PROMPT}],
+        }
+        # The effort a job's every request carries, so a level the model does
+        # not take fails here, before a job.
+        level = str(effort or "").strip()
+        if level:
+            body["output_config"] = {"effort": level}
+        return OneTurnRequest(
+            f"{cls._root(endpoint)}/v1/messages",
+            {"x-api-key": cls.api_key(settings), "anthropic-version": _anthropic_version()},
+            body,
+        )
+
+    @classmethod
+    def said_something(cls, payload: Any) -> bool:
+        content = payload.get("content")
+        if not isinstance(content, list) or not content:
+            return False
+        # A thinking block counts: a model that thinks by default may spend the
+        # probe's eight tokens thinking, and its block, with its signature, is
+        # the model speaking (its text is empty by default on some models).
+        return any(
+            str(part.get("text") or "").strip()
+            or part.get("name")
+            or (part.get("type") == "thinking" and str(part.get("signature") or "").strip())
+            or (part.get("type") == "redacted_thinking" and part.get("data"))
+            for part in content
+            if isinstance(part, dict)
+        )
 
     def __init__(self, config: Settings) -> None:
         self._config = config
@@ -470,3 +622,9 @@ class AnthropicProvider:
             api_key=api_key,
             **kwargs,
         )
+
+
+def _anthropic_version() -> str:
+    from maljan.llm.context_window import ANTHROPIC_VERSION
+
+    return ANTHROPIC_VERSION

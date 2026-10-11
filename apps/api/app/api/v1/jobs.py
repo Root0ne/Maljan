@@ -487,7 +487,7 @@ async def get_job_usage(
     account's job is not found, to an admin as to anyone else.
     """
     from maljan.analysis.run_summary import usage_totals
-    from maljan.core.spend import SpendMeter
+    from maljan.core.spend import SpendMeter, hour_cache_models
 
     from app.services.job_events import read_usage
     from app.services.settings_service import effective_core_settings
@@ -502,8 +502,7 @@ async def get_job_usage(
     # here is admitted or refused.
     llm = core.llm
     prices = dict(llm.model_prices or {})
-    anthropic = getattr(llm, "anthropic", None)
-    hour_writes = str(getattr(anthropic, "prompt_cache_ttl", "") or "") == "1h"
+    hour_writes = hour_cache_models(core)
     totals = usage_totals(
         await read_usage(db, job_id),
         lambda: SpendMeter(None, prices, hour_writes=hour_writes),

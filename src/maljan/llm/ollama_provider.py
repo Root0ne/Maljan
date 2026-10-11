@@ -5,6 +5,14 @@ from typing import Any
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from maljan.core.config import Settings
+from maljan.llm.provider_base import (
+    COMPLETION_MAX_TOKENS,
+    COMPLETION_PROMPT,
+    LLMProvider,
+    ModelListing,
+    OneTurnRequest,
+    _text,
+)
 from maljan.llm.registry import register_provider
 
 # One subclass per chat class seen, so pydantic builds each schema once.
@@ -222,11 +230,144 @@ def _bind_async_client_per_loop(built: Any) -> None:
         layout_not_recognised("ollama", str(exc))
 
 
+# The setting whose default a reasoning model on Ollama fails the probe at, and
+# the sentence that names it. A measured trial: a 12B reasoning model answered
+# nothing in 55 s at the default and answered in 243 ms with the setting on.
+# The default stays (an operator who wants the model's reasoning gets it), but
+# the wall names its door.
+THINKING_SETTING = "core.llm.ollama.disable_thinking"
+
+
 @register_provider("ollama")
-class OllamaProvider:
+class OllamaProvider(LLMProvider):
     """Builds LangChain ChatOllama instances for local models."""
 
     name = "ollama"
+    label = "Ollama"
+    description = "Models served by an Ollama runtime you run, on this machine or another."
+    hosted = False
+    credential_leaf = ""
+    setup_leaves = ("base_url", "expert_model", "judge_model")
+    sdk_packages = frozenset({"ollama"})
+    llm_types = ("chat-ollama",)
+    # ``ChatOllama`` reads its cap only inside ``options`` and refuses an
+    # unknown keyword, so a call takes no cap of its own.
+    per_call_cap_field = None
+    timeout_kwarg = "request_timeout"
+    supports_agent_base_url = True
+    base_url_leaf = "base_url"
+    default_endpoint = "http://localhost:11434"
+    # A runtime somebody runs, taken to serve one request at a time.
+    concurrency = "serial"
+
+    @classmethod
+    def window_probes(cls, endpoint: object, model: str) -> tuple[Any, ...]:
+        from maljan.llm import context_window as cw
+
+        base = cw._root_of(endpoint) or cls.default_endpoint
+        return (
+            cw.Ask(
+                "POST",
+                f"{base}{cw.OLLAMA_SHOW_PATH}",
+                {"model": model},
+                cw.window_from_ollama_show,
+                "the Ollama model description",
+            ),
+        )
+
+    @classmethod
+    def declared_window(cls, settings: Any) -> tuple[int, bool]:
+        # ``num_ctx`` is sent with every call, so it is half of the served
+        # window whether or not anybody chose it; the second element says
+        # whether it is the shipped default rather than an operator's word.
+        from maljan.core.config import OllamaConfig
+
+        value = int(settings.llm.ollama.num_ctx)
+        shipped = int(OllamaConfig.model_fields["num_ctx"].default)
+        return value, value == shipped
+
+    @classmethod
+    def reasoning_counts_against_cap(cls, settings: Any) -> bool:
+        # ``num_predict`` counts the reasoning channel with the answer.
+        return not bool(getattr(cls.settings_block(settings), "disable_thinking", False))
+
+    @classmethod
+    def model_listing(cls, settings: Any) -> ModelListing:
+        base = cls.endpoint(None, cls.configured_base_url(settings))
+        return ModelListing(
+            url=f"{base}/api/tags",
+            headers={},
+            names=lambda payload: [m.get("name", "") for m in (payload or {}).get("models", [])],
+            where=base,
+            noun="models available",
+            check=cls._missing,
+        )
+
+    @classmethod
+    def _missing(cls, settings: Any, listed: list[str]) -> str | None:
+        block = cls.settings_block(settings)
+        named = {
+            str(getattr(block, "expert_model", "") or ""),
+            str(getattr(block, "judge_model", "") or ""),
+        }
+        missing = [m for m in named if m and m not in listed]
+        return f"{len(listed)} models available; missing {missing}" if missing else None
+
+    @classmethod
+    def probed_model(cls, settings: Any, listed: list[str]) -> str:
+        return str(getattr(cls.settings_block(settings), "expert_model", "") or "")
+
+    @classmethod
+    def one_turn_request(
+        cls, settings: Any, endpoint: str, model: str, effort: str | None = None
+    ) -> OneTurnRequest:
+        block = cls.settings_block(settings)
+        body: dict[str, Any] = {
+            "model": model,
+            "prompt": COMPLETION_PROMPT,
+            "stream": False,
+            "options": {"num_predict": COMPLETION_MAX_TOKENS},
+        }
+        # Only when the deployment asked for it: Ollama refuses ``think`` for a
+        # model with no thinking mode.
+        if bool(getattr(block, "disable_thinking", False)):
+            body["think"] = False
+        # The job's own window and keep-alive, so the model this loads is the
+        # instance the job's first call finds rather than one it reloads.
+        num_ctx = int(getattr(block, "num_ctx", 0) or 0)
+        if num_ctx:
+            body["options"]["num_ctx"] = num_ctx
+        keep_alive = str(getattr(block, "keep_alive", "") or "")
+        if keep_alive:
+            body["keep_alive"] = keep_alive
+        base = str(endpoint or "").rstrip("/")
+        return OneTurnRequest(f"{base or cls.default_endpoint}/api/generate", {}, body)
+
+    @classmethod
+    def said_something(cls, payload: Any) -> bool:
+        # Thinking counts: a reasoning model given eight tokens spends them in
+        # its thinking channel and answers with an empty ``response``.
+        # ``/api/chat`` puts the same two fields under ``message``, and a proxy
+        # may answer in either shape, so both are read.
+        message = payload.get("message")
+        message = message if isinstance(message, dict) else {}
+        return bool(
+            _text(payload.get("response"))
+            or _text(payload.get("thinking"))
+            or _text(message.get("content"))
+            or _text(message.get("thinking"))
+            or message.get("tool_calls")
+        )
+
+    @classmethod
+    def silence_remedy(cls, settings: Any) -> str:
+        if bool(getattr(cls.settings_block(settings), "disable_thinking", False)):
+            return ""
+        return (
+            f" A reasoning model answers in its thinking channel and leaves the answer empty:"
+            f" set {THINKING_SETTING} to true, which asks Ollama for the answer without the"
+            f" reasoning, and test again."
+        )
 
     def __init__(self, config: Settings) -> None:
         self._config = config

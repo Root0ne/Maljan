@@ -59,9 +59,9 @@ from app.services.mapping_preview import PREVIEW_MAX_BYTES, preview_mapping
 from app.services.server_map import SERVER_MAP_KEY, TOKEN_MASK
 from app.services.settings_catalog_api import catalog_index, full_catalog, resolved_catalog
 from app.services.settings_probes import (
-    PROBES,
     candidate_settings,
     context_window_facts,
+    known_probe,
     run_agent_probe,
     run_mcp_probe,
     run_probe,
@@ -726,7 +726,7 @@ async def test_probe(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> ProbeResponse:
-    if probe not in PROBES:
+    if not known_probe(probe):
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown probe: {probe}")
     stored = await SettingsService(db).load_overrides()
     # An LLM probe is allowed five minutes at a third-party endpoint; the read

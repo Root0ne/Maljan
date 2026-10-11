@@ -235,12 +235,14 @@ _CHARS_PER_TOKEN = 4
 def _model_context_tokens(cfg: Any, agent_name: str) -> int:
     """The context window of the model this agent runs on, or ``0``.
 
-    The per-agent entry decides which *provider* is asked, so an agent on
-    Ollama reads the Ollama window even when the run is otherwise OpenAI. It
-    does not carry a window of its own: an agent pointed at its own
-    OpenAI-compatible endpoint therefore reads ``llm.openai.context_size``,
-    which describes the global one. That is a known limit of this lookup and
-    not a claim about that agent's server; the floor below is what protects it.
+    The per-agent entry decides which *provider* is asked, and that provider's
+    adapter reads the window its own settings declare
+    (``LLMProvider.declared_window``), so an agent on one provider never reads
+    another provider's setting. An entry does not carry a window of its own:
+    an agent pointed at its own endpoint reads its provider's global setting,
+    which describes the global endpoint. That is a known limit of this lookup
+    and not a claim about that agent's server; the floor below is what
+    protects it.
 
     An agent that may fall back to another model reads the smallest window
     any of its models declares: the salvage is re-sent to whichever model is
@@ -250,15 +252,14 @@ def _model_context_tokens(cfg: Any, agent_name: str) -> int:
     Zero means nothing declared it, and the caller falls back to the floor.
     """
     try:
+        from maljan.llm.provider_base import facts_of
+
         entry = (getattr(cfg.llm, "agents", None) or {}).get(agent_name)
         chain: list[Any] = entry.chain() if entry is not None else [None]
         windows: list[int] = []
         for choice in chain:
             provider = str(getattr(choice, "provider", "") or cfg.llm.provider)
-            if provider == "ollama":
-                windows.append(int(cfg.llm.ollama.num_ctx))
-            else:
-                windows.append(int(getattr(cfg.llm.openai, "context_size", 0) or 0))
+            windows.append(int(facts_of(provider).declared_window(cfg)[0] or 0))
         declared = [window for window in windows if window > 0]
         return min(declared) if declared else 0
     except Exception as exc:  # noqa: BLE001 — a budget is never worth a lost salvage
@@ -352,11 +353,20 @@ def _message_chars(m: object) -> int:
     if calls:
         total += len(str(calls))
     # A thinking model's reasoning that a provider has sent back with the turn
-    # (``openai_provider.with_reasoning_passback``) is read with it too.
-    reasoning = (getattr(m, "additional_kwargs", None) or {}).get("reasoning_content")
-    if isinstance(reasoning, str):
-        total += len(reasoning)
+    # (each adapter's ``reasoning_passback_keys``) is read with it too.
+    kwargs = getattr(m, "additional_kwargs", None) or {}
+    for key in _passback_keys():
+        reasoning = kwargs.get(key)
+        if isinstance(reasoning, str):
+            total += len(reasoning)
     return total
+
+
+def _passback_keys() -> frozenset[str]:
+    """The ``additional_kwargs`` keys any registered provider asks to have sent back."""
+    from maljan.llm.provider_base import reasoning_passback_keys
+
+    return reasoning_passback_keys()
 
 
 def _reported_request(messages: list, per_token: int) -> tuple[int, int]:
@@ -1290,12 +1300,13 @@ def nudge_turns(msgs: list) -> tuple[list, bool]:
             if not content.strip() and not kept_calls:
                 continue
             # The reasoning a provider asks to have sent back stays with the
-            # turn it belongs to (``openai_provider.with_reasoning_passback``);
+            # turn it belongs to (each adapter's ``reasoning_passback_keys``);
             # nothing else of the dropped call's raw form is carried.
+            passback = _passback_keys()
             kept_kwargs = {
                 key: value
                 for key, value in (message.additional_kwargs or {}).items()
-                if key == "reasoning_content"
+                if key in passback
             }
             out.append(
                 AIMessage(

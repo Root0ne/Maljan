@@ -38,6 +38,22 @@ from maljan.tools.errors import SERVER_WORDS_LIMIT
 TRUNCATION_MARKER = "\n\n[OUTPUT TRUNCATED]"
 
 
+def tool_name_of_path(path: str) -> str:
+    """The tool name an endpoint path becomes: the leading slash dropped, slashes joined by ``_``."""
+    return str(path).lstrip("/").replace("/", "_")
+
+
+def schema_tool_names(schema: Any) -> list[str]:
+    """The tool names this client derives from a server's ``/mcp/schema`` answer."""
+    entries = schema.get("tools", []) if isinstance(schema, dict) else []
+    names: list[str] = []
+    for entry in entries:
+        path = str(entry.get("path", "")) if isinstance(entry, dict) else ""
+        if path:
+            names.append(tool_name_of_path(path))
+    return names
+
+
 def truncation_target(limit: int) -> int:
     """How much of an answer a character cut keeps, so the marker fits the limit."""
     return max(0, int(limit) - len(TRUNCATION_MARKER))
@@ -195,7 +211,7 @@ class GhidraHTTPClient:
             return await self._call_endpoint(_path, _method, _params, kwargs)
 
         # Use the last path segment as a concise name
-        tool_name = path.lstrip("/").replace("/", "_")
+        tool_name = tool_name_of_path(path)
 
         return StructuredTool.from_function(
             func=None,

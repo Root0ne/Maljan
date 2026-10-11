@@ -78,10 +78,12 @@ _TIMEOUT_NAMES = frozenset(
 _REFUSAL_CODES = ("content_filter", "content_policy", "safety", "refusal")
 
 
-# The packages whose exceptions carry an HTTP status a provider answered with.
-# An integer ``.code`` on anything else says nothing about a provider: a
-# library's own error code, an errno, a validator's number.
-_PROVIDER_PACKAGES = frozenset({"openai", "anthropic", "httpx", "ollama", "google"})
+# The packages whose exceptions carry an HTTP status a provider answered with:
+# every registered adapter's SDK packages (``provider_base.provider_error_packages``)
+# and the transport they share. An integer ``.code`` on anything else says
+# nothing about a provider: a library's own error code, an errno, a
+# validator's number.
+_TRANSPORT_PACKAGES = frozenset({"httpx"})
 
 
 def _status_of(exc: BaseException) -> int | None:
@@ -89,7 +91,9 @@ def _status_of(exc: BaseException) -> int | None:
     # errors (a 503 from ``ChatOpenAI`` is ``langchain_openai``'s
     # ``OpenAIAPIError``), whose own module names no provider.
     packages = {(klass.__module__ or "").split(".", 1)[0] for klass in type(exc).__mro__}
-    if not packages & _PROVIDER_PACKAGES:
+    from maljan.llm.provider_base import provider_error_packages
+
+    if not packages & (provider_error_packages() | _TRANSPORT_PACKAGES):
         return None
     candidates: list[Any] = [getattr(exc, "status_code", None), getattr(exc, "code", None)]
     response = getattr(exc, "response", None)

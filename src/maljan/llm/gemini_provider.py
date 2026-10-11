@@ -10,14 +10,71 @@ from pydantic import SecretStr
 
 from maljan.core.config import Settings
 from maljan.core.exceptions import LLMError
+from maljan.llm.provider_base import (
+    COMPLETION_MAX_TOKENS,
+    COMPLETION_PROMPT,
+    LLMProvider,
+    ModelListing,
+    OneTurnRequest,
+)
 from maljan.llm.registry import register_provider
+
+# Google's Generative Language API, the one address Gemini is reached at.
+GEMINI_API_ROOT = "https://generativelanguage.googleapis.com"
 
 
 @register_provider("gemini")
-class GeminiProvider:
+class GeminiProvider(LLMProvider):
     """Builds Gemini ChatModels via langchain-google-genai."""
 
     name = "gemini"
+    label = "Google Gemini"
+    description = "Gemini models over Google's Generative Language API."
+    hosted = True
+    setup_leaves = ("api_key", "expert_model", "judge_model")
+    sdk_packages = frozenset({"google"})
+    # The client asks again on a rate limit itself (``max_retries`` below).
+    retries_inside_client = True
+    llm_types = ("chat-google-generative-ai",)
+    # Its request config refuses any other name for the cap.
+    per_call_cap_field = "max_output_tokens"
+    timeout_kwarg = "request_options"
+    default_endpoint = "the Gemini API"
+    concurrency = "hosted"
+
+    @classmethod
+    def supports_structured_output(cls, settings: Any) -> bool:
+        return True
+
+    @classmethod
+    def model_listing(cls, settings: Any) -> ModelListing:
+        return ModelListing(
+            url=f"{GEMINI_API_ROOT}/v1beta/models",
+            headers={"x-goog-api-key": cls.api_key(settings)},
+            names=lambda payload: [m.get("name", "") for m in (payload or {}).get("models", [])],
+            where=GEMINI_API_ROOT,
+        )
+
+    @classmethod
+    def one_turn_request(
+        cls, settings: Any, endpoint: str, model: str, effort: str | None = None
+    ) -> OneTurnRequest:
+        return OneTurnRequest(
+            f"{GEMINI_API_ROOT}/v1beta/models/{model}:generateContent",
+            {"x-goog-api-key": cls.api_key(settings)},
+            {
+                "contents": [{"parts": [{"text": COMPLETION_PROMPT}]}],
+                "generationConfig": {"maxOutputTokens": COMPLETION_MAX_TOKENS},
+            },
+        )
+
+    @classmethod
+    def said_something(cls, payload: Any) -> bool:
+        candidates = payload.get("candidates")
+        if not isinstance(candidates, list) or not candidates:
+            return False
+        parts = ((candidates[0] or {}).get("content") or {}).get("parts") or []
+        return any(str(part.get("text") or "").strip() for part in parts)
 
     def __init__(self, config: Settings) -> None:
         self._config = config

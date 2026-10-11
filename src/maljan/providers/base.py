@@ -231,6 +231,8 @@ class ProviderProbe:
     ok: bool
     detail: str
     latency_ms: int = 0
+    # The tool names the provider's server offered, where the test read them.
+    tools: list[str] | None = None
 
 
 # The provider-neutral instructions every static provider fragment opens with:

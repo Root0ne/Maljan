@@ -1,27 +1,36 @@
-"""Connection tests for settings the UI is about to save. Nothing is persisted."""
+"""Connection tests for settings the UI is about to save. Nothing is persisted.
+
+Every provider answers for itself: the model probe asks the selected LLM
+provider's adapter (``maljan.llm.provider_base``) where its models are listed,
+which request one short turn is and how its answer is read; a static or
+sandbox provider is built from the candidate settings and its own ``probe()``
+is asked; a memory backend's ``readiness()``; a reputation source's
+``probe()``. Nothing here names a provider.
+"""
 
 from __future__ import annotations
 
 import asyncio
-import importlib.util
+import contextlib
 import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import httpx
 from maljan.core import virustotal
 from maljan.core.config import BUILTIN_SERVER_KEYS, MCPServerConfig, builtin_env_allow
 from maljan.core.logger import logger
-from maljan.core.model_assignments import endpoint_for, endpoint_label, endpoint_where
-from maljan.core.paths import resolve_data
+from maljan.core.model_assignments import endpoint_for, endpoint_label
 from maljan.core.settings_overrides import build_settings, redact_url, split_key
+from maljan.llm.provider_base import COMPLETION_MAX_TOKENS as _COMPLETION_MAX_TOKENS
+from maljan.llm.provider_base import COMPLETION_PROMPT as _COMPLETION_PROMPT
+from maljan.llm.provider_base import facts_of
+from maljan.providers import server_probe
 from maljan.providers.errors import ProviderConfigurationError
-from maljan.providers.sandbox.rest_mapping import compile_mapping
 from maljan.providers.servers import ServerHandle
-from pydantic import SecretStr, ValidationError
+from pydantic import ValidationError
 from redis.asyncio import Redis
 
 from app.config import settings as api_settings
@@ -30,10 +39,9 @@ from app.services.settings_catalog_api import API_DEFAULTS
 
 TIMEOUT = 10.0
 
-# A connection test is a person waiting at a button. Five seconds is long
-# enough for a local stdio server to answer tools/list and short enough that a
-# wedged one is reported rather than endured.
-PROBE_BUDGET_SECONDS = 5.0
+# A connection test is a person waiting at a button
+# (``server_probe.PROBE_BUDGET_SECONDS``).
+PROBE_BUDGET_SECONDS = server_probe.PROBE_BUDGET_SECONDS
 
 
 @dataclass
@@ -88,13 +96,10 @@ async def _get(
         return False, redact_url(f"{type(exc).__name__}: {exc}"), None
 
 
-ANTHROPIC_VERSION = "2023-06-01"
-
-# What every completion probe asks for and how much of an answer it will take.
-# One turn, eight tokens: enough to prove the endpoint serves this model and
-# short enough that a person at a button is not left waiting for prose.
-COMPLETION_PROMPT = "Reply with OK."
-COMPLETION_MAX_TOKENS = 8
+# What every completion probe asks for and how much of an answer it takes: the
+# adapters build the request (``LLMProvider.one_turn_request``) around these.
+COMPLETION_PROMPT = _COMPLETION_PROMPT
+COMPLETION_MAX_TOKENS = _COMPLETION_MAX_TOKENS
 
 # What a completion gets, apart from the ten seconds a catalogue listing gets.
 # A gate refuses jobs on this answer, and a local server that unloaded its
@@ -128,14 +133,10 @@ async def complete_one_turn(
     *,
     endpoint: str,
     model: str,
-    api_key: str = "",
-    disable_thinking: bool = False,
-    compat: str = "auto",
-    reasoning_effort: str = "",
-    num_ctx: int | None = None,
-    keep_alive: str | None = None,
+    settings: Any = None,
+    effort: str | None = None,
 ) -> tuple[bool | None, str]:
-    """Ask ``model`` at ``endpoint`` for one short answer.
+    """Ask ``model`` at ``endpoint`` for one short answer, as ``provider``'s adapter builds it.
 
     The only check that proves anything. Listing a provider's models says the
     endpoint is up and that a name appears in a catalogue; it does not say the
@@ -151,15 +152,10 @@ async def complete_one_turn(
     not a model that is missing, and writing it down as one would lock the
     operator out of their own jobs until they noticed.
 
-    ``disable_thinking``, ``compat`` and ``reasoning_effort`` are the
-    OpenAI-compatible settings that decide the request body's shape, carried in
-    so that the turn asked here is the turn an agent would ask;
-    ``reasoning_effort`` is also Anthropic's ``llm.anthropic.effort``, sent as
-    ``output_config.effort``. ``num_ctx`` and ``keep_alive`` are
-    Ollama's: the server loads a model at the context size the request names
-    and keeps it for the time the request names, so a probe asked without them
-    leaves the model loaded at the server's own default and the job's first
-    call pays a full reload. See ``_completion_request``.
+    ``settings`` are the settings the request is shaped from, as an agent's
+    would be (the provider's own switches, its window, its keep-alive);
+    ``None`` reads the shipped defaults. ``effort`` is the effort the run
+    sends: the model's own, else the provider's global one.
 
     Never raises: a probe answers with what happened, including when what
     happened is that nothing did.
@@ -167,82 +163,40 @@ async def complete_one_turn(
     model = str(model or "").strip()
     if not model:
         return False, "no model named"
-    url, headers, body = _completion_request(
-        provider,
-        endpoint,
-        model,
-        api_key,
-        disable_thinking=disable_thinking,
-        compat=compat,
-        reasoning_effort=reasoning_effort,
-        num_ctx=num_ctx,
-        keep_alive=keep_alive,
-    )
-    if url is None:
+    if settings is None:
+        settings = build_settings({})
+    facts = facts_of(provider)
+    request = facts.one_turn_request(settings, endpoint, model, effort)
+    if request is None:
         return False, f"unknown provider: {provider!r}"
+    remedy = facts.silence_remedy(settings)
     try:
         async with _client(COMPLETION_TIMEOUT) as client:
-            answer = await client.post(url, headers=headers, json=body)
+            answer = await client.post(request.url, headers=request.headers, json=request.body)
     except httpx.TimeoutException:
         return None, (
             f"{model!r} did not answer within {int(COMPLETION_TIMEOUT)} s; it may still be "
-            "loading — try again once it is warm. Nothing was written down for it."
-            + _thinking_remediation(provider, disable_thinking)
+            "loading — try again once it is warm. Nothing was written down for it." + remedy
         )
     except httpx.HTTPError as exc:
         return False, redact_url(f"{model!r} could not be reached: {type(exc).__name__}: {exc}")
     if answer.status_code >= 400:
         return False, f"{model!r} answered HTTP {answer.status_code}"
-    if not _said_something(provider, answer):
+    if not _said_something(facts, answer):
         # A 2xx with nothing in it is the failure this check exists for: a
         # proxy that answers politely for a model it cannot serve, a response
-        # whose only candidate was filtered away.
-        # The full stop belongs to this sentence, not to the remedy that may
-        # follow it: without it the two ran together as
-        # "…answered nothing A reasoning model answers…".
-        return False, f"{model!r} answered nothing." + _thinking_remediation(
-            provider, disable_thinking
-        )
+        # whose only candidate was filtered away. The full stop belongs to
+        # this sentence, not to the remedy that may follow it.
+        return False, f"{model!r} answered nothing." + remedy
     return True, f"{model!r} answered"
 
 
-# The setting whose default a reasoning model on Ollama fails the gate at, and
-# the sentence that names it. A measured trial: a 12B reasoning model answered
-# nothing in 55 s at the default and answered in 243 ms with the setting on,
-# and with ``core.llm.require_probe`` on the API refuses every job until an
-# operator finds the switch. The default stays — an operator who wants the
-# model's reasoning gets it — but the wall names its door.
-THINKING_SETTING = "core.llm.ollama.disable_thinking"
-
-
-def _thinking_remediation(provider: str, disable_thinking: bool) -> str:
-    """What to try when an Ollama model spends its budget thinking, or ``""``."""
-    if provider != "ollama" or disable_thinking:
-        return ""
-    return (
-        f" A reasoning model answers in its thinking channel and leaves the answer empty:"
-        f" set {THINKING_SETTING} to true, which asks Ollama for the answer without the"
-        f" reasoning, and test again."
-    )
-
-
-def _spoken(value: Any) -> str:
-    """One message field as the text it holds, or nothing when it holds none.
-
-    ``str(value or "")`` read a structured ``reasoning`` — an object rather
-    than a string, which some builds send — as an answer, because a non-empty
-    dict stringifies to something truthy. A field that is not text did not say
-    anything this check can read.
-    """
-    return value.strip() if isinstance(value, str) else ""
-
-
-def _said_something(provider: str, answer: httpx.Response) -> bool:
+def _said_something(facts: Any, answer: httpx.Response) -> bool:
     """Whether the provider's answer carries text or a tool call.
 
-    Read per provider because the four put it in four places. A body that is
-    not JSON, or JSON of a shape this does not know, counts as an answer: the
-    endpoint said something, and inventing a failure from a shape nobody
+    The adapter reads its own answer shape (``LLMProvider.said_something``). A
+    body that is not JSON, or JSON that is not an object, counts as an answer:
+    the endpoint said something, and inventing a failure from a shape nobody
     anticipated would be worse than missing an empty one.
     """
     try:
@@ -251,185 +205,7 @@ def _said_something(provider: str, answer: httpx.Response) -> bool:
         return bool(answer.content)
     if not isinstance(payload, dict):
         return bool(payload)
-    if provider in ("openai",):
-        choices = payload.get("choices")
-        if not isinstance(choices, list) or not choices:
-            return False
-        message = (choices[0] or {}).get("message") or {}
-        # Reasoning text counts. A local server serving a reasoning model with
-        # thinking left on puts the whole answer in ``reasoning_content``
-        # (``reasoning`` on some builds) and hands back an empty ``content``:
-        # the model loaded, the key was accepted and the endpoint spoke, which
-        # is everything this check is asked to establish. An empty body with
-        # no reasoning and no tool call is still nothing.
-        return bool(
-            _spoken(message.get("content"))
-            or _spoken(message.get("reasoning_content"))
-            or _spoken(message.get("reasoning"))
-            or message.get("tool_calls")
-        )
-    if provider == "ollama":
-        # Thinking counts, for the same reason ``reasoning_content`` counts
-        # above: a reasoning model given eight tokens spends them in its
-        # thinking channel and answers with an empty ``response``. The model
-        # loaded and the endpoint spoke, which is everything this check is
-        # asked to establish — and refusing it locked every reasoning model on
-        # Ollama out of a deployment that gates jobs on the probe. ``/api/chat``
-        # puts the same two fields under ``message``; a proxy may answer in
-        # either shape, so both are read.
-        message = payload.get("message")
-        message = message if isinstance(message, dict) else {}
-        return bool(
-            _spoken(payload.get("response"))
-            or _spoken(payload.get("thinking"))
-            or _spoken(message.get("content"))
-            or _spoken(message.get("thinking"))
-            or message.get("tool_calls")
-        )
-    if provider == "anthropic":
-        content = payload.get("content")
-        if not isinstance(content, list) or not content:
-            return False
-        # A thinking block counts, for the reason reasoning text counts above:
-        # a model that thinks by default may spend the probe's eight tokens
-        # thinking, and its block, with its signature, is the model speaking.
-        # On Claude Haiku 5.5 the block's text is empty by default and its
-        # signature carries the thinking.
-        return any(
-            str(part.get("text") or "").strip()
-            or part.get("name")
-            or (part.get("type") == "thinking" and str(part.get("signature") or "").strip())
-            or (part.get("type") == "redacted_thinking" and part.get("data"))
-            for part in content
-            if isinstance(part, dict)
-        )
-    if provider == "gemini":
-        candidates = payload.get("candidates")
-        if not isinstance(candidates, list) or not candidates:
-            return False
-        parts = ((candidates[0] or {}).get("content") or {}).get("parts") or []
-        return any(str(part.get("text") or "").strip() for part in parts)
-    return bool(payload)
-
-
-def _openai_extras(
-    base: str, disable_thinking: bool, compat: str, reasoning_effort: str = ""
-) -> dict[str, Any]:
-    """The request fields beyond OpenAI's basic ones this endpoint would get in a run.
-
-    Decided by the provider's own two functions rather than by a second copy of
-    the rule here: ``sends_llama_cpp_extras`` says whether this endpoint takes
-    them at all — a hosted OpenAI-compatible API answers an unknown body field
-    with 400, so a probe that sent one would fail a model the run can reach —
-    and ``add_thinking_switch`` writes the one field. A probe that asks a
-    different question from the run it gates is the defect this removes: with
-    thinking left on, a local reasoning model spent the probe's eight tokens
-    inside its own chain of thought and answered with an empty string.
-
-    Imported inside the function: this is the API process, and the agents'
-    provider module pulls langchain in behind it.
-    """
-    from maljan.llm.openai_provider import (
-        add_deepseek_thinking_switch,
-        add_thinking_switch,
-        sends_llama_cpp_extras,
-    )
-
-    extras: dict[str, Any] = {}
-    if sends_llama_cpp_extras(base, str(compat or "auto")):
-        add_thinking_switch(extras, bool(disable_thinking))
-    elif compat == "deepseek":
-        add_deepseek_thinking_switch(extras, bool(disable_thinking))
-    # The operator's effort as the run sends it: a value the endpoint does not
-    # know is refused here rather than on the job's first call.
-    effort = str(reasoning_effort or "").strip()
-    if effort:
-        extras["reasoning_effort"] = effort
-    return extras
-
-
-def _completion_request(
-    provider: str,
-    endpoint: str,
-    model: str,
-    api_key: str,
-    *,
-    disable_thinking: bool = False,
-    compat: str = "auto",
-    reasoning_effort: str = "",
-    num_ctx: int | None = None,
-    keep_alive: str | None = None,
-) -> tuple[str | None, dict[str, str], dict[str, Any]]:
-    """The one-turn request each provider takes, as ``(url, headers, body)``.
-
-    ``num_ctx`` and ``keep_alive`` travel to Ollama only, the two fields the
-    agents' provider sends with every call that decide the instance Ollama
-    keeps loaded. The other providers take no such field.
-    """
-    base = str(endpoint or "").rstrip("/")
-    if provider == "openai":
-        return (
-            f"{base or 'https://api.openai.com/v1'}/chat/completions",
-            {"Authorization": f"Bearer {api_key or 'none'}"},
-            {
-                "model": model,
-                "max_tokens": COMPLETION_MAX_TOKENS,
-                "messages": [{"role": "user", "content": COMPLETION_PROMPT}],
-                **_openai_extras(base, disable_thinking, compat, reasoning_effort),
-            },
-        )
-    if provider == "ollama":
-        body: dict[str, Any] = {
-            "model": model,
-            "prompt": COMPLETION_PROMPT,
-            "stream": False,
-            "options": {"num_predict": COMPLETION_MAX_TOKENS},
-        }
-        # Only when the deployment asked for it. Ollama refuses ``think`` for a
-        # model that has no thinking mode, so sending it always would fail the
-        # models that never had the problem.
-        if disable_thinking:
-            body["think"] = False
-        # The job's own window and keep-alive, so the model this loads is the
-        # instance the job's first call finds rather than one it has to reload.
-        if num_ctx:
-            body["options"]["num_ctx"] = int(num_ctx)
-        if keep_alive:
-            body["keep_alive"] = str(keep_alive)
-        return (
-            f"{base or 'http://localhost:11434'}/api/generate",
-            {},
-            body,
-        )
-    if provider == "anthropic":
-        anthropic_body: dict[str, Any] = {
-            "model": model,
-            "max_tokens": COMPLETION_MAX_TOKENS,
-            "messages": [{"role": "user", "content": COMPLETION_PROMPT}],
-        }
-        # The effort a job's every request carries (``llm.anthropic.effort``),
-        # so a level the model does not take fails here, before a job.
-        effort = str(reasoning_effort or "").strip()
-        if effort:
-            anthropic_body["output_config"] = {"effort": effort}
-        # A configured address (``llm.anthropic.base_url``) is asked where a
-        # job would send; the vendor's own name is no address.
-        root = base if "://" in base else "https://api.anthropic.com"
-        return (
-            f"{root}/v1/messages",
-            {"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION},
-            anthropic_body,
-        )
-    if provider == "gemini":
-        return (
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-            {"x-goog-api-key": api_key},
-            {
-                "contents": [{"parts": [{"text": COMPLETION_PROMPT}]}],
-                "generationConfig": {"maxOutputTokens": COMPLETION_MAX_TOKENS},
-            },
-        )
-    return None, {}, {}
+    return bool(facts.said_something(payload))
 
 
 def _listing_failed(endpoint: str, detail: str) -> str:
@@ -441,111 +217,76 @@ def _listing_failed(endpoint: str, detail: str) -> str:
     drops the path, the query and any credential in front of it, which is
     exactly as much as a failure message may carry.
     """
-    from maljan.core.model_assignments import endpoint_label
-
     label = endpoint_label(endpoint)
     return f"model list at {label}: {detail}" if label else f"model list: {detail}"
 
 
-async def _probe_llm_openai(v: dict[str, Any]) -> ProbeResult:
+async def probe_llm(settings: Any) -> ProbeResult:
+    """List the selected provider's models, then ask each model a run would call one turn.
+
+    Every step is the provider's own (``maljan.llm.provider_base``): where its
+    models are listed and how a name is read, which model is asked first, the
+    request and how its answer is read. A provider that lists nothing is asked
+    without a listing.
+    """
     t0 = time.perf_counter()
     deadline = probe_deadline()
-    base = endpoint_where("openai", openai_base_url=v.get("base_url"))
-    headers = {"Authorization": f"Bearer {v.get('api_key') or 'none'}"}
-    ok, detail, r = await _get(f"{base}/models", headers)
-    if not ok or r is None:
-        return ProbeResult(False, _ms(t0), _listing_failed(base, detail))
-    models = [m.get("id", "") for m in r.json().get("data", [])]
-    model = v.get("expert_model") or (models[0] if models else "")
-    pairs = _pairs_to_file(v, "openai", base, str(model))
-    # Every OpenAI-compatible pair, the per-agent ones at their own endpoints
-    # included, is asked with the request body its agent would send: the
-    # thinking switch is a global setting and the dialect decides, per
-    # endpoint, whether it goes on the wire at all.
+    provider = str(settings.llm.provider)
+    facts = facts_of(provider)
+    listing = facts.model_listing(settings)
+    models: list[str] = []
+    said_listing = "no model list"
+    if listing is not None:
+        ok, detail, r = await _get(listing.url, listing.headers)
+        if not ok or r is None:
+            return ProbeResult(False, _ms(t0), _listing_failed(listing.where, detail))
+        try:
+            models = [str(name) for name in listing.names(r.json())]
+        except ValueError:
+            return ProbeResult(
+                False, _ms(t0), _listing_failed(listing.where, f"{detail}; not JSON")
+            )
+        if listing.check is not None:
+            missing = listing.check(settings, models)
+            if missing:
+                return ProbeResult(False, _ms(t0), missing, models)
+        said_listing = f"{len(models)} {listing.noun}"
+    elif facts.one_turn_request(settings, "", "probe") is None:
+        return ProbeResult(False, _ms(t0), f"the {provider!r} provider offers no connection test")
+    model = facts.probed_model(settings, models)
+    pairs = _pairs_to_file(settings, provider, endpoint_for(settings, provider), str(model))
+    # Every pair, the per-agent ones at their own endpoints included, is asked
+    # with the request body its agent would send.
     reached, broken, untried = await _complete_each_pair(
-        "openai",
-        pairs,
-        str(v.get("api_key") or ""),
-        deadline=deadline,
-        disable_thinking=bool(v.get("disable_thinking")),
-        compat=str(v.get("compat") or "auto"),
-        reasoning_effort=str(v.get("reasoning_effort") or ""),
+        settings, provider, pairs, deadline=deadline
     )
-    return _completed(t0, reached, broken, untried, f"{len(models)} models listed", models)
-
-
-async def _probe_llm_anthropic(v: dict[str, Any]) -> ProbeResult:
-    t0 = time.perf_counter()
-    deadline = probe_deadline()
-    headers = {
-        "x-api-key": str(v.get("anthropic_api_key") or ""),
-        "anthropic-version": ANTHROPIC_VERSION,
-    }
-    endpoint = endpoint_where("anthropic", anthropic_base_url=v.get("anthropic_base_url"))
-    root = endpoint if "://" in endpoint else "https://api.anthropic.com"
-    ok, detail, r = await _get(f"{root}/v1/models", headers)
-    if not ok or r is None:
-        return ProbeResult(False, _ms(t0), _listing_failed(root, detail))
-    models = [m.get("id", "") for m in r.json().get("data", [])]
-    model = v.get("anthropic_expert_model") or (models[0] if models else "")
-    # Anthropic has one endpoint, so a per-agent entry differs only in its
-    # model; each is still asked, because the key may be refused for one model
-    # and not another.
-    pairs = _pairs_to_file(v, "anthropic", endpoint, str(model))
-    reached, broken, untried = await _complete_each_pair(
-        "anthropic",
-        pairs,
-        str(v.get("anthropic_api_key") or ""),
-        deadline=deadline,
-        reasoning_effort=str(v.get("anthropic_effort") or ""),
+    return _completed(
+        t0, reached, broken, untried, said_listing, models if listing is not None else None
     )
-    return _completed(t0, reached, broken, untried, f"{len(models)} models listed", models)
 
 
-def _agent_models(
-    v: dict[str, Any], provider: str
-) -> dict[str, tuple[str, str | None, str | None]]:
+def _agent_models(settings: Any, provider: str) -> dict[str, tuple[str, str | None, str | None]]:
     """Every ``llm.agents`` entry served by ``provider``, name to (model, base_url, effort).
 
     An entry names its own provider; one that leaves it empty inherits the
-    global ``llm.provider``. Entries are dicts when they arrive staged from
-    the UI and ``AgentLLMConfig`` objects when they come from the effective
-    settings, so both are read here.
-
-    The base URL comes back beside the model because an entry may point at its
-    own server: asking the global one about a model the agent will look for
-    somewhere else answers a different question. ``None`` means the entry
-    inherits the global endpoint. The effort is the model's own, ``None``
-    where it inherits the provider's global one.
-
-    ``run_probe`` always resolves ``core.llm.provider`` into the inputs, so the
-    fallback below is only reached by a direct call; it reads the field's own
-    default rather than naming a provider here, so an inheriting entry cannot
-    be skipped because two places disagree about what the default is.
+    global ``llm.provider``. The base URL comes back beside the model because
+    an entry may point at its own server: asking the global one about a model
+    the agent will look for somewhere else answers a different question.
+    ``None`` means the entry inherits the global endpoint. The effort is the
+    model's own, ``None`` where it inherits the provider's global one. The
+    models an entry falls back to are asked exactly as its first one is: a
+    fallback is a model the run may call, and the gate refuses a job whose
+    fallback no probe has reached.
     """
-    from maljan.core.config import LLMConfig
-
-    raw = v.get("agents")
-    if not isinstance(raw, dict):
-        return {}
-    global_provider = str(v.get("provider") or LLMConfig.model_fields["provider"].default)
+    global_provider = str(settings.llm.provider)
     out: dict[str, tuple[str, str | None, str | None]] = {}
-    for name, entry in raw.items():
-        if isinstance(entry, dict):
-            data: dict[str, Any] = entry
-        elif hasattr(entry, "model_dump"):
-            data = entry.model_dump(mode="json")
-        else:
-            continue
-        # The models an entry falls back to are asked exactly as its first one
-        # is: a fallback is a model the run may call, and the gate refuses a
-        # job whose fallback no probe has reached.
-        rows = [data, *[row for row in (data.get("fallbacks") or []) if isinstance(row, dict)]]
-        for position, row in enumerate(rows):
-            entry_provider = str(row.get("provider") or "") or global_provider
-            model = str(row.get("model") or "")
-            base_url = str(row.get("base_url") or "").strip() or None
-            effort = str(row.get("effort") or "").strip() or None
+    for name, entry in (settings.llm.agents or {}).items():
+        chain = entry.chain() if hasattr(entry, "chain") else [entry]
+        for position, row in enumerate(chain):
+            entry_provider = str(getattr(row, "provider", "") or "") or global_provider
+            model = str(getattr(row, "model", "") or "")
+            base_url = str(getattr(row, "base_url", "") or "").strip() or None
+            effort = str(getattr(row, "effort", "") or "").strip() or None
             if model and entry_provider == provider:
                 label = str(name) if position == 0 else f"{name} fallback {position}"
                 out[label] = (model, base_url, effort)
@@ -553,7 +294,7 @@ def _agent_models(
 
 
 def _pairs_to_file(
-    v: dict[str, Any], provider: str, base: str, expert_model: str
+    settings: Any, provider: str, base: str, expert_model: str
 ) -> dict[tuple[str, str, str | None], str]:
     """Every ``(endpoint, model, effort)`` this probe will file, each one once.
 
@@ -562,32 +303,21 @@ def _pairs_to_file(
     questions, and each is asked at the effort its run sends.
 
     The selected provider's expert model at its own endpoint, and every
-    per-agent override at *its* own endpoint — a second llama.cpp on another
-    port is the ordinary shape of this deployment, and it is never listed by
-    the global one. A typo in one of those used to surface only when the job
-    reached that agent, minutes in, and a row filed from somebody else's call
-    would be the same silence wearing a green badge.
+    per-agent override at *its* own endpoint — a second server on another
+    port is the ordinary shape of a deployment, and it is never listed by the
+    global one. Keyed on the pair and not on the label, so a deployment that
+    pins five agents to the global model at the global endpoint is one call and
+    one row rather than six of each.
 
-    Keyed on the pair and not on the label, so a deployment that pins five
-    agents to the global model at the global endpoint is one call and one row
-    rather than six of each: on a local server every one of those is a model
-    load, and asking the same question six times answers it no better.
-
-    The endpoint comes from ``endpoint_where`` — the function the submit gate
+    The endpoint comes from ``endpoint_for`` — the function the submit gate
     resolves its own key with — so what is filed and what is looked up are one
     spelling of one address.
     """
     pairs: dict[tuple[str, str, str | None], str] = {
         (base, expert_model, None): f"expert={expert_model} @ {endpoint_label(base)}"
     }
-    for name, (model, agent_base, effort) in sorted(_agent_models(v, provider).items()):
-        endpoint = endpoint_where(
-            provider,
-            agent_base,
-            openai_base_url=v.get("base_url"),
-            ollama_base_url=v.get("ollama_base_url"),
-            anthropic_base_url=v.get("anthropic_base_url"),
-        )
+    for name, (model, agent_base, effort) in sorted(_agent_models(settings, provider).items()):
+        endpoint = endpoint_for(settings, provider, agent_base)
         at = f" at effort {effort}" if effort else ""
         pairs.setdefault(
             (endpoint, model, effort), f"{name}={model}{at} @ {endpoint_label(endpoint)}"
@@ -607,16 +337,11 @@ def _with_own_effort(completion: dict[str, Any], effort: str | None) -> dict[str
 
 
 async def _complete_each_pair(
+    settings: Any,
     provider: str,
     pairs: dict[tuple[str, str, str | None], str],
-    api_key: str,
     *,
     deadline: float,
-    disable_thinking: bool = False,
-    compat: str = "auto",
-    reasoning_effort: str = "",
-    num_ctx: int | None = None,
-    keep_alive: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[str], list[str]]:
     """One completion per pair in turn; what was reached, what failed, what was not tried.
 
@@ -628,17 +353,16 @@ async def _complete_each_pair(
 
     One at a time, and the whole run inside ``LLM_PROBE_BUDGET_SECONDS``. A
     pair is only started when its own budget still fits in what is left of the
-    probe's, so the request cannot run past that however many cold models are
-    named; the rest are handed back as not tried, under the same rule as a
-    timeout — no row, and a sentence saying to ask again.
+    probe's; the rest are handed back as not tried, under the same rule as a
+    timeout — no row, and a sentence saying to ask again. ``deadline`` is taken
+    by the caller as the probe begins.
 
-    ``deadline`` is taken by the caller as the probe begins, so the seconds the
-    catalogue listing spent are seconds this loop no longer has.
-
-    ``reasoning_effort`` is the provider's global effort; a pair that carries
-    its entry's own is asked at that one instead, and its completion names it
-    so the row is filed under it.
+    A pair is asked at its entry's own effort where it carries one, else at
+    the provider's global effort, and its completion names its own so the row
+    is filed under it.
     """
+    from maljan.llm.effort import effort_in_force
+
     reached: list[dict[str, Any]] = []
     broken: list[str] = []
     untried: list[str] = []
@@ -646,16 +370,9 @@ async def _complete_each_pair(
         if time.monotonic() + COMPLETION_TIMEOUT > deadline:
             untried.append(label)
             continue
+        effort, _ = effort_in_force(settings, provider, own_effort)
         answered, said = await complete_one_turn(
-            provider,
-            endpoint=endpoint,
-            model=model,
-            api_key=api_key,
-            disable_thinking=disable_thinking,
-            compat=compat,
-            reasoning_effort=own_effort or reasoning_effort,
-            num_ctx=num_ctx,
-            keep_alive=keep_alive,
+            provider, endpoint=endpoint, model=model, settings=settings, effort=effort
         )
         if answered is None:
             broken.append(f"{label}: {said}")
@@ -675,34 +392,6 @@ async def _complete_each_pair(
         if not answered:
             broken.append(f"{label}: {said}")
     return reached, broken, untried
-
-
-async def _probe_llm_ollama(v: dict[str, Any]) -> ProbeResult:
-    t0 = time.perf_counter()
-    deadline = probe_deadline()
-    base = endpoint_where("ollama", ollama_base_url=v.get("ollama_base_url"))
-    ok, detail, r = await _get(f"{base}/api/tags")
-    if not ok or r is None:
-        return ProbeResult(False, _ms(t0), _listing_failed(base, detail))
-    models = [m.get("name", "") for m in r.json().get("models", [])]
-    expert = v.get("ollama_expert_model") or ""
-    judge = v.get("ollama_judge_model") or ""
-    missing = [m for m in {expert, judge} if m and m not in models]
-    if missing:
-        return ProbeResult(
-            False, _ms(t0), f"{len(models)} models available; missing {missing}", models
-        )
-    pairs = _pairs_to_file(v, "ollama", base, str(expert))
-    reached, broken, untried = await _complete_each_pair(
-        "ollama",
-        pairs,
-        "",
-        deadline=deadline,
-        disable_thinking=bool(v.get("ollama_disable_thinking")),
-        num_ctx=int(v.get("ollama_num_ctx") or 0) or None,
-        keep_alive=str(v.get("ollama_keep_alive") or "") or None,
-    )
-    return _completed(t0, reached, broken, untried, f"{len(models)} models available", models)
 
 
 def _completed(
@@ -738,40 +427,6 @@ def _completed(
         else ", ".join(str(pair["detail"]) for pair in answered) or "nothing to call"
     )
     return ProbeResult(ok, _ms(t0), detail, models, None, {"completions": reached})
-
-
-async def _probe_llm_gemini(v: dict[str, Any]) -> ProbeResult:
-    t0 = time.perf_counter()
-    deadline = probe_deadline()
-    headers = {"x-goog-api-key": str(v.get("gemini_api_key") or "")}
-    ok, detail, r = await _get("https://generativelanguage.googleapis.com/v1beta/models", headers)
-    if not ok or r is None:
-        return ProbeResult(
-            False, _ms(t0), _listing_failed("https://generativelanguage.googleapis.com", detail)
-        )
-    models = [m.get("name", "") for m in r.json().get("models", [])]
-    model = v.get("gemini_expert_model") or (models[0] if models else "")
-    pairs = _pairs_to_file(v, "gemini", endpoint_where("gemini"), str(model))
-    reached, broken, untried = await _complete_each_pair(
-        "gemini", pairs, str(v.get("gemini_api_key") or ""), deadline=deadline
-    )
-    return _completed(t0, reached, broken, untried, f"{len(models)} models listed", models)
-
-
-_LLM_PROBES: dict[str, Callable[[dict[str, Any]], Awaitable[ProbeResult]]] = {
-    "openai": _probe_llm_openai,
-    "anthropic": _probe_llm_anthropic,
-    "ollama": _probe_llm_ollama,
-    "gemini": _probe_llm_gemini,
-}
-
-
-async def probe_llm(v: dict[str, Any]) -> ProbeResult:
-    provider = str(v.get("provider") or "openai")
-    probe = _LLM_PROBES.get(provider)
-    if probe is None:
-        return ProbeResult(False, 0, f"unknown provider: {provider!r}")
-    return await probe(v)
 
 
 async def context_window_facts(settings: Any) -> dict[str, Any]:
@@ -822,42 +477,6 @@ async def context_window_facts(settings: Any) -> dict[str, Any]:
         "setting": configured,
         "remedy": "" if budget.derives or configured > 0 else UNKNOWN_WINDOW_REMEDY,
     }
-
-
-def _ghidra_tool_names(schema: Any) -> list[str]:
-    """The tool names ``GhidraHTTPClient`` derives from the server's schema.
-
-    Same rule as ``_create_langchain_tool``: a tool is its ``path`` with the
-    leading slash dropped and the remaining slashes joined by underscores, so
-    the names the probe lists are the names the model will call.
-    """
-    entries = schema.get("tools", []) if isinstance(schema, dict) else []
-    names: list[str] = []
-    for entry in entries:
-        path = str(entry.get("path", "")) if isinstance(entry, dict) else ""
-        if path:
-            names.append(path.lstrip("/").replace("/", "_"))
-    return names
-
-
-async def probe_ghidra(v: dict[str, Any]) -> ProbeResult:
-    """Fetch the tool schema, which is the authenticated endpoint a job uses first.
-
-    ``/check_connection`` answers 200 without a token, so a probe against it
-    reported a server as reachable while every job then failed with 401 on
-    ``/mcp/schema``. Probing the schema proves the token as well as the
-    address, and hands the editor the manifest for its tick boxes.
-    """
-    t0 = time.perf_counter()
-    headers = {"Authorization": f"Bearer {v['auth_token']}"} if v.get("auth_token") else None
-    ok, detail, r = await _get(f"{str(v.get('url') or '').rstrip('/')}/mcp/schema", headers)
-    if not ok or r is None:
-        return ProbeResult(ok, _ms(t0), detail)
-    try:
-        names = _ghidra_tool_names(r.json())
-    except ValueError:
-        return ProbeResult(False, _ms(t0), f"{detail}; the schema was not JSON")
-    return ProbeResult(True, _ms(t0), f"{len(names)} tools", None, names)
 
 
 def _failure_detail(exc: BaseException) -> str:
@@ -923,28 +542,9 @@ async def in_probe_loop(factory: Callable[[], Awaitable[ProbeResult]]) -> ProbeR
     return await asyncio.to_thread(_probe_in_fresh_loop, factory)
 
 
-_PROBE_CLEANUP_TASKS: set[asyncio.Task[Any]] = set()
-
-
 def _detach_cleanup(coro: Any, label: str) -> None:
-    """Run ``coro`` to completion without making the caller wait for it.
-
-    ``handle.aclose()`` is already internally bounded (``_acleanup``'s own
-    20 s timeout); awaiting it here on top of a failed/timed-out ``aopen``
-    re-adds that whole budget to a probe the operator's own click is
-    documented at 5 s. A strong reference is kept in
-    ``_PROBE_CLEANUP_TASKS`` until it finishes so the task is not garbage
-    collected mid-flight.
-    """
-    task = asyncio.ensure_future(coro)
-    _PROBE_CLEANUP_TASKS.add(task)
-
-    def _done(t: asyncio.Task[Any]) -> None:
-        _PROBE_CLEANUP_TASKS.discard(t)
-        if not t.cancelled() and (exc := t.exception()) is not None:
-            logger.warning("probe cleanup for '%s' failed (non-fatal): %s", label, exc)
-
-    task.add_done_callback(_done)
+    """Run ``coro`` to completion without making the caller wait for it (``server_probe``)."""
+    server_probe.detach_cleanup(coro, label)
 
 
 async def handshake_tools(config: MCPServerConfig, name: str) -> list[str]:
@@ -957,70 +557,13 @@ async def handshake(config: MCPServerConfig, name: str) -> tuple[list[str], dict
     """Attach ``config`` long enough to read its manifest, then let go.
 
     Returns the tool names and, when the server offers ``capabilities``, that
-    manifest as a plain dict — which tools are available on the server's host
-    and why the others are not — so the console can say so before a run.
-
-    The only stdio handshake in the project besides a job's own: it is
-    ``ServerHandle``, so a server that answers here answers the same way in a
-    run. Whatever happens, the handle is eventually closed — a probe that
-    leaves a child process behind turns a mis-typed command into a slow leak
-    of subprocesses, which is exactly what a person clicking "Test" twice
-    would produce.
-
-    A plain ``asyncio.wait_for(handle.aopen(...), 5.0)``
-    does not give up after 5 s when ``aopen`` is wedged. ``wait_for`` cancels
-    the inner coroutine and then *waits for the cancellation to finish* before
-    raising ``TimeoutError`` — and ``aopen``'s own cancellation handler awaits
-    ``_acleanup``, itself bounded at 20 s, so the operator's "Test" click can
-    take ~25 s instead of the documented 5. ``asyncio.wait`` never cancels the
-    handshake: past the budget this simply stops waiting on it and lets it
-    (and its own cleanup) finish in the background, closing the handle once
-    it does.
+    manifest as a plain dict, so the console can say which tools are available
+    on the server's host before a run. ``server_probe.handshake`` does the
+    work, on this module's budget and handle class.
     """
-    from maljan.tools import staging
-
-    handle = ServerHandle(name, config)
-    # Per call, not per server. A probe is not a job, so the directory its
-    # identity names is this call's to take away — and two operators pressing
-    # Test on one server at the same time would otherwise share a leaf, so one
-    # call's cleanup would remove the other call's directory while it was
-    # still using it.
-    probe_key = f"probe-{name}-{uuid.uuid4().hex[:8]}"
-
-    async def _run() -> tuple[list[str], dict[str, Any] | None]:
-        await handle.aopen(probe_key)
-        capabilities = getattr(handle, "capabilities", None)
-        to_dict = getattr(capabilities, "to_dict", None)
-        return handle.all_tool_names(), (to_dict() if callable(to_dict) else None)
-
-    # Every way out of this — the answer, a failure, and the timeout that
-    # raises out of the branch below — leaves the directory removed. A probe
-    # stages nothing, so there is normally nothing there; what makes this worth
-    # the line is that the one path that used to skip it, the timeout, is the
-    # path on which a server *was* started and may have written something.
-    try:
-        task: asyncio.Task[tuple[list[str], dict[str, Any] | None]] = asyncio.ensure_future(_run())
-        done, _pending = await asyncio.wait({task}, timeout=PROBE_BUDGET_SECONDS)
-        if task not in done:
-            # Ask it to stop, but do not wait for that to finish here — that
-            # wait is exactly the ~20 s ``_acleanup`` budget this fix avoids
-            # blocking on. A short, fixed grace period still lets the common
-            # case (a cancellation that responds immediately) close the handle
-            # before this returns; a genuinely wedged server closes later, from
-            # the callback, once its own cancellation finally unwinds.
-            task.cancel()
-            done2, _pending2 = await asyncio.wait({task}, timeout=0.1)
-            if task in done2:
-                await handle.aclose()
-            else:
-                task.add_done_callback(lambda _t: _detach_cleanup(handle.aclose(), probe_key))
-            raise TimeoutError(f"no MCP handshake within {PROBE_BUDGET_SECONDS:.0f} s")
-        try:
-            return task.result()
-        finally:
-            await handle.aclose()
-    finally:
-        staging.remove_job_staging(probe_key)
+    return await server_probe.handshake(
+        config, name, budget=PROBE_BUDGET_SECONDS, handle_factory=ServerHandle
+    )
 
 
 def _probe_config(entry: dict[str, Any], name: str) -> MCPServerConfig:
@@ -1175,30 +718,12 @@ async def _ask_each_model(
     ) -> tuple[bool | None, str]:
         from maljan.llm.effort import effort_in_force
 
+        # The model's own effort (``llm.agents.<key>.effort``), else the
+        # provider's global one, as the run sends it; the request body is the
+        # one the agent's own run would carry, shaped by its provider.
         effort, _ = effort_in_force(settings, provider, own_effort)
         return await complete_one_turn(
-            provider,
-            endpoint=where,
-            model=model,
-            api_key=_provider_key(settings, provider),
-            # An agent's own endpoint gets the body its own run would carry.
-            # Each provider is asked about its own thinking switch — the two
-            # are spelled differently and read by different code — and
-            # ``compat`` belongs to the OpenAI block alone.
-            disable_thinking=(
-                bool(settings.llm.ollama.disable_thinking)
-                if provider == "ollama"
-                else bool(settings.llm.openai.disable_thinking)
-            ),
-            compat=str(settings.llm.openai.compat or "auto"),
-            # The model's own effort (``llm.agents.<key>.effort``), else
-            # the provider's global one, as the run sends it.
-            reasoning_effort=effort or "",
-            # Ollama loads a model at the window and for the keep-alive the
-            # request names; asked the way the job asks, the probe leaves
-            # loaded the instance the job's first call will find.
-            num_ctx=int(settings.llm.ollama.num_ctx) if provider == "ollama" else None,
-            keep_alive=str(settings.llm.ollama.keep_alive) if provider == "ollama" else None,
+            provider, endpoint=where, model=model, settings=settings, effort=effort
         )
 
     own_effort = getattr(agent_llm, "effort", None) if agent_llm else None
@@ -1413,21 +938,6 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
         await container.aclose()
 
 
-def _provider_key(settings: Any, provider: str) -> str:
-    """The credential a provider authenticates with, as a plain string.
-
-    A per-agent entry may point at its own endpoint, but never carries its own
-    key: the credential stays global (``AgentLLMConfig``), so one lookup by
-    provider answers for every agent.
-    """
-    block = getattr(settings.llm, provider, None)
-    secret = getattr(block, "api_key", None)
-    if secret is None:
-        return ""
-    reveal = getattr(secret, "get_secret_value", None)
-    return str(reveal() if callable(reveal) else secret)
-
-
 async def run_agent_probe(name: str, values: dict[str, Any], stored: dict[str, Any]) -> ProbeResult:
     """Probe one agent definition, staged values winning over stored ones.
 
@@ -1443,114 +953,7 @@ async def run_agent_probe(name: str, values: dict[str, Any], stored: dict[str, A
     return await in_probe_loop(lambda: probe_agent({"name": name, "settings": merged}))
 
 
-async def probe_r2(v: dict[str, Any]) -> ProbeResult:
-    """Launch the configured r2mcp and count the tools it offers, in 5 seconds.
-
-    A stdio handshake is the only honest test of a subprocess-backed server: a
-    binary that exists but cannot serve MCP is exactly the failure an operator
-    needs named before a job fails on it.
-    """
-    t0 = time.perf_counter()
-    from maljan.providers.static.r2 import resolve_r2_binary
-
-    configured = str(v.get("binary_path") or "r2mcp")
-    # Resolved as a job resolves it (``R2StaticProvider.open``), so the test
-    # and the run agree on which executable, and on where it was looked for.
-    binary = resolve_r2_binary(configured)
-    if binary.path is None:
-        return ProbeResult(
-            False, _ms(t0), f"{configured!r} was not found; looked in: {binary.described()}"
-        )
-    command = binary.path
-    config = MCPServerConfig(enabled=True, transport="stdio", command=command)
-    try:
-        names = await handshake_tools(config, "r2")
-    except TimeoutError:
-        return ProbeResult(False, _ms(t0), f"no MCP handshake within {PROBE_BUDGET_SECONDS:.0f} s")
-    except FileNotFoundError:
-        return ProbeResult(False, _ms(t0), f"{command!r} not found on PATH")
-    except Exception as exc:  # noqa: BLE001 — reported to the operator, never raised
-        return ProbeResult(False, _ms(t0), f"{type(exc).__name__}: {exc}")
-    return ProbeResult(True, _ms(t0), f"{len(names)} tools offered by {command!r}", None, names)
-
-
-async def probe_capa(v: dict[str, Any]) -> ProbeResult:
-    """Count capa + YARA rule files without touching a sample.
-
-    No live handshake exists for either — both are local libraries reading
-    local rule directories — so the connection test is the same check the
-    provider itself makes before a run: is the library importable, and does
-    each configured directory hold rule files. Naming which of the two is
-    missing here is exactly what stops an operator from discovering an empty
-    ``provides_evidence=False`` run only after a job finishes.
-    """
-    t0 = time.perf_counter()
-    parts: list[str] = []
-    capa_ok = False
-    if importlib.util.find_spec("capa") is None:
-        parts.append("capa library is not installed (uv sync --extra capa)")
-    else:
-        capa_dir = Path(resolve_data(str(v.get("capa_rules_dir") or "")))
-        capa_rules = list(capa_dir.rglob("*.yml")) if capa_dir.is_dir() else []
-        if not capa_dir.is_dir():
-            parts.append(f"capa rules directory {capa_dir} does not exist")
-        elif not capa_rules:
-            parts.append(f"capa rules directory {capa_dir} has no *.yml rules")
-        else:
-            capa_ok = True
-            parts.append(f"{len(capa_rules)} rules under {capa_dir}")
-
-    yara_dir = Path(resolve_data(str(v.get("yara_rules_dir") or "")))
-    yara_files = [*yara_dir.glob("*.yml"), *yara_dir.glob("*.yaml")] if yara_dir.is_dir() else []
-    if not yara_dir.is_dir():
-        parts.append(f"YARA rules directory {yara_dir} does not exist")
-    elif not yara_files:
-        parts.append(f"YARA rules directory {yara_dir} has no rule file")
-    else:
-        parts.append(f"{len(yara_files)} YARA rule file(s) under {yara_dir}")
-
-    return ProbeResult(capa_ok, _ms(t0), "; ".join(parts))
-
-
-async def probe_cape2(v: dict[str, Any]) -> ProbeResult:
-    t0 = time.perf_counter()
-    headers = {"Authorization": f"Token {v['api_token']}"} if v.get("api_token") else None
-    ok, detail, _ = await _get(
-        f"{str(v.get('base_url') or '').rstrip('/')}/apiv2/tasks/view/1/", headers
-    )
-    return ProbeResult(ok, _ms(t0), detail)
-
-
-async def probe_triage(v: dict[str, Any]) -> ProbeResult:
-    token = v.get("api_token")
-    if not token:
-        # No point building a client for a call the token would refuse: a
-        # missing key is reported for what it is, without touching the network.
-        return ProbeResult(False, 0, "no API token configured")
-    t0 = time.perf_counter()
-    headers = {"Authorization": f"Bearer {token}"}
-    ok, detail, _ = await _get(f"{str(v.get('base_url') or '').rstrip('/')}/resources", headers)
-    return ProbeResult(ok, _ms(t0), detail)
-
-
-async def probe_qdrant(v: dict[str, Any]) -> ProbeResult:
-    t0 = time.perf_counter()
-    base = str(v.get("url") or "").rstrip("/")
-    key = v.get("api_key")
-    headers = {"api-key": str(key)} if key else None
-    ok, detail, _ = await _get(f"{base}/readyz", headers)
-    if not ok:
-        return ProbeResult(False, _ms(t0), f"readyz: {detail}")
-    ok2, detail2, _ = await _get(f"{base}/collections/{v.get('collection')}", headers)
-    return ProbeResult(
-        True,
-        _ms(t0),
-        f"ready; collection {v.get('collection')!r} "
-        f"{'exists' if ok2 else 'missing (' + detail2 + '), created on first write'}",
-    )
-
-
-async def probe_redis(v: dict[str, Any]) -> ProbeResult:
+async def probe_redis(v: dict[str, Any] | None = None) -> ProbeResult:
     t0 = time.perf_counter()
     url = str(api_settings.redis_url)  # read-only setting; no candidate value can arrive
     try:
@@ -1562,220 +965,121 @@ async def probe_redis(v: dict[str, Any]) -> ProbeResult:
         return ProbeResult(False, _ms(t0), f"{type(exc).__name__}: {redact_url(str(exc))}")
 
 
-async def probe_virustotal(v: dict[str, Any]) -> ProbeResult:
-    t0 = time.perf_counter()
-    # /ip_addresses/<public ip> validates any key; /users/current needs a user-scoped one.
-    ok, detail, _ = await _get(
-        "https://www.virustotal.com/api/v3/ip_addresses/8.8.8.8",
-        {"x-apikey": str(v.get("api_key") or "")},
+# The probes that are not a provider's: the model probe (every LLM provider
+# answers through its adapter), a tool server of the registry, an agent
+# definition, and the API's own queue. Every other probe id is a registered
+# provider's: static, sandbox, memory backend or reputation source.
+OWN_PROBES = ("llm", "mcp", "agent", "redis")
+
+
+def _provider_probe_kinds() -> dict[str, str]:
+    """Every registered provider's probe id, and which registry holds it."""
+    from maljan.enrichment.sources import reputation_sources
+    from maljan.memory.store_factory import memory_backends
+    from maljan.providers.registry import sandbox_provider_ids, static_provider_ids
+
+    kinds: dict[str, str] = {}
+    for source in reputation_sources():
+        kinds.setdefault(source, "reputation")
+    for backend in memory_backends():
+        kinds.setdefault(backend, "memory")
+    for provider_id in sandbox_provider_ids():
+        kinds.setdefault(provider_id, "sandbox")
+    for provider_id in static_provider_ids():
+        kinds.setdefault(provider_id, "static")
+    return kinds
+
+
+def probe_names() -> list[str]:
+    """Every probe id the settings route answers."""
+    return [*OWN_PROBES, *(k for k in _provider_probe_kinds() if k not in OWN_PROBES)]
+
+
+def known_probe(name: str) -> bool:
+    """Whether ``name`` is a probe the settings route answers."""
+    return name in OWN_PROBES or name in _provider_probe_kinds()
+
+
+def _from_provider(result: Any, t0: float) -> ProbeResult:
+    """A provider's ``ProviderProbe`` as the route's answer."""
+    return ProbeResult(
+        bool(result.ok),
+        int(getattr(result, "latency_ms", 0) or 0) or _ms(t0),
+        str(result.detail),
+        None,
+        getattr(result, "tools", None),
     )
-    return ProbeResult(ok, _ms(t0), detail)
 
 
-async def probe_abuseipdb(v: dict[str, Any]) -> ProbeResult:
-    t0 = time.perf_counter()
-    ok, detail, _ = await _get(
-        "https://api.abuseipdb.com/api/v2/check?ipAddress=8.8.8.8&maxAgeInDays=1",
-        {"Key": str(v.get("api_key") or ""), "Accept": "application/json"},
-    )
-    return ProbeResult(ok, _ms(t0), detail)
+async def _probe_registered_provider(kind: str, name: str, core: Any) -> ProbeResult:
+    """Build provider ``name`` from the candidate settings and ask its own ``probe()``.
 
-
-def _str(v: dict[str, Any], key: str, default: str) -> str:
-    """``v[key]`` as a string, or ``default`` when the key is absent.
-
-    Not ``v.get(key) or default``: an operator-set empty string is a real
-    value for several of these fields (an empty auth scheme sends the token
-    raw; an empty mapping path means "this channel is not published"), and
-    coercing it to the default would silently discard that choice.
+    The test and the job read one object built one way, so they cannot
+    disagree about which address, credential or mapping is in force.
     """
-    value = v.get(key)
-    return str(value) if value is not None else default
+    from maljan.providers.registry import _SANDBOX_REGISTRY, _STATIC_REGISTRY, discover_providers
 
-
-async def probe_rest(v: dict[str, Any]) -> ProbeResult:
-    """Ask the configured sandbox's status endpoint about a task that does not exist.
-
-    Every leaf ``_INPUTS["rest"]`` reads is folded into the ``SandboxRestConfig``
-    handed to the provider — not just the four the HTTP call itself touches —
-    so a staged auth header/scheme or mapping edit is what "Test" actually
-    exercises, the same as saving and running a job would use.
-    """
     t0 = time.perf_counter()
-    from maljan.core.config import (
-        RestAuthConfig,
-        RestMappingConfig,
-        RestReportConfig,
-        RestStatusConfig,
-        SandboxRestConfig,
-    )
-    from maljan.providers.sandbox.rest import RestSandboxProvider
-
-    field_names = v.get("mapping_field_names")
-    open_channels = v.get("mapping_channels")
+    discover_providers()
+    registry = _STATIC_REGISTRY if kind == "static" else _SANDBOX_REGISTRY
     try:
-        rest = SandboxRestConfig(
-            base_url=_str(v, "base_url", ""),
-            auth=RestAuthConfig(
-                header=_str(v, "auth_header", "Authorization"),
-                scheme=_str(v, "auth_scheme", "Bearer"),
-                token=SecretStr(_str(v, "token", "")),
-            ),
-            status=RestStatusConfig(
-                path=_str(v, "status_path", "/samples/{task_id}"),
-                state_path=_str(v, "status_state_path", "$.status"),
-            ),
-            report=RestReportConfig(
-                path=_str(v, "report_path", "/samples/{task_id}/report"),
-                format=_str(v, "report_format", "generic"),  # type: ignore[arg-type]
-            ),
-            mapping=RestMappingConfig(
-                target_sha256=_str(v, "mapping_target_sha256", "$.target.sha256"),
-                processes=_str(v, "mapping_processes", ""),
-                calls=_str(v, "mapping_calls", ""),
-                signatures=_str(v, "mapping_signatures", ""),
-                dns=_str(v, "mapping_dns", ""),
-                http=_str(v, "mapping_http", ""),
-                tcp=_str(v, "mapping_tcp", ""),
-                udp=_str(v, "mapping_udp", ""),
-                hosts=_str(v, "mapping_hosts", ""),
-                domains=_str(v, "mapping_domains", ""),
-                dropped_files=_str(v, "mapping_dropped_files", ""),
-                registry=_str(v, "mapping_registry", ""),
-                field_names=field_names if isinstance(field_names, dict) else {},
-                channels=open_channels if isinstance(open_channels, dict) else {},
-            ),
-            timeout_seconds=int(v.get("timeout_seconds") or 900),
-            poll_interval_seconds=int(v.get("poll_interval_seconds") or 15),
-            verify_tls=bool(v.get("verify_tls", True)),
-        )
-        provider = RestSandboxProvider(rest, compile_mapping(rest.mapping))
-    except (ProviderConfigurationError, ValidationError) as exc:
+        cls: Any = registry[name]
+        provider = cls.from_settings(core)
+    except (ProviderConfigurationError, ValidationError, ValueError) as exc:
         fields = _validation_detail(exc) if isinstance(exc, ValidationError) else str(exc)
         return ProbeResult(False, _ms(t0), fields)
-    result = await provider.probe()
-    return ProbeResult(result.ok, result.latency_ms or _ms(t0), result.detail)
+    return _from_provider(await provider.probe(), t0)
 
 
-PROBES: dict[str, Callable[[dict[str, Any]], Awaitable[ProbeResult]]] = {
-    "llm": probe_llm,
-    "ghidra": probe_ghidra,
-    "r2": probe_r2,
-    "mcp": probe_mcp,
-    "capa_yara": probe_capa,
-    # "capa" aliases "capa_yara" the way "cape" aliases "cape2": an older
-    # stored annotation may still name the tool rather than the provider id.
-    "capa": probe_capa,
-    "cape2": probe_cape2,
-    # "cape" is kept for one release: a stored annotation may still name it.
-    "cape": probe_cape2,
-    "triage": probe_triage,
-    "qdrant": probe_qdrant,
-    "redis": probe_redis,
-    "virustotal": probe_virustotal,
-    "abuseipdb": probe_abuseipdb,
-    "rest": probe_rest,
-    "agent": probe_agent,
-}
+async def _probe_memory_backend(name: str, core: Any) -> ProbeResult:
+    """Build memory backend ``name`` from the candidate settings and ask its ``readiness()``."""
+    from maljan.core.exceptions import MemoryStoreError
+    from maljan.memory.store_factory import build_memory_store
 
-# Which settings each probe reads, and the short name it gets them under.
-_INPUTS: dict[str, dict[str, str]] = {
-    "llm": {
-        "core.llm.provider": "provider",
-        "core.llm.openai.base_url": "base_url",
-        "core.llm.openai.api_key": "api_key",
-        "core.llm.openai.expert_model": "expert_model",
-        "core.llm.openai.judge_model": "judge_model",
-        # The two leaves that shape an OpenAI-compatible request body. A probe
-        # that asked without them asked a question no agent asks.
-        "core.llm.openai.compat": "compat",
-        "core.llm.openai.disable_thinking": "disable_thinking",
-        "core.llm.openai.reasoning_effort": "reasoning_effort",
-        "core.llm.anthropic.api_key": "anthropic_api_key",
-        # Where a job's Anthropic calls go, so the probe asks the same place.
-        "core.llm.anthropic.base_url": "anthropic_base_url",
-        "core.llm.anthropic.expert_model": "anthropic_expert_model",
-        "core.llm.anthropic.judge_model": "anthropic_judge_model",
-        # The effort every Anthropic request carries; a probe without it asks a
-        # question no agent asks.
-        "core.llm.anthropic.effort": "anthropic_effort",
-        "core.llm.ollama.base_url": "ollama_base_url",
-        "core.llm.ollama.expert_model": "ollama_expert_model",
-        "core.llm.ollama.judge_model": "ollama_judge_model",
-        "core.llm.ollama.disable_thinking": "ollama_disable_thinking",
-        # The two leaves that decide which instance Ollama keeps loaded.
-        "core.llm.ollama.num_ctx": "ollama_num_ctx",
-        "core.llm.ollama.keep_alive": "ollama_keep_alive",
-        "core.llm.gemini.api_key": "gemini_api_key",
-        "core.llm.gemini.expert_model": "gemini_expert_model",
-        "core.llm.gemini.judge_model": "gemini_judge_model",
-        "core.llm.agents": "agents",
-    },
-    "ghidra": {
-        "core.static.ghidra.url": "url",
-        "core.static.ghidra.auth_token": "auth_token",
-    },
-    "r2": {
-        "core.static.r2.binary_path": "binary_path",
-    },
-    "mcp": {},
-    "capa_yara": {
-        "core.static.capa.rules_dir": "capa_rules_dir",
-        "core.static.yara.rules_dir": "yara_rules_dir",
-    },
-    "capa": {
-        "core.static.capa.rules_dir": "capa_rules_dir",
-        "core.static.yara.rules_dir": "yara_rules_dir",
-    },
-    "cape2": {
-        "core.sandbox.cape2.base_url": "base_url",
-        "core.sandbox.cape2.api_token": "api_token",
-    },
-    "cape": {
-        "core.sandbox.cape2.base_url": "base_url",
-        "core.sandbox.cape2.api_token": "api_token",
-    },
-    "triage": {
-        "core.sandbox.triage.base_url": "base_url",
-        "core.sandbox.triage.api_token": "api_token",
-    },
-    "qdrant": {
-        "core.memory.qdrant.url": "url",
-        "core.memory.qdrant.collection": "collection",
-        "core.memory.qdrant.api_key": "api_key",
-    },
-    "redis": {},
-    "virustotal": {"api.virustotal_api_key": "api_key"},
-    "abuseipdb": {"api.abuseipdb_api_key": "api_key"},
-    "rest": {
-        "core.sandbox.rest.base_url": "base_url",
-        "core.sandbox.rest.auth.header": "auth_header",
-        "core.sandbox.rest.auth.scheme": "auth_scheme",
-        "core.sandbox.rest.auth.token": "token",
-        "core.sandbox.rest.status.path": "status_path",
-        "core.sandbox.rest.status.state_path": "status_state_path",
-        "core.sandbox.rest.report.path": "report_path",
-        "core.sandbox.rest.report.format": "report_format",
-        "core.sandbox.rest.verify_tls": "verify_tls",
-        "core.sandbox.rest.timeout_seconds": "timeout_seconds",
-        "core.sandbox.rest.poll_interval_seconds": "poll_interval_seconds",
-        "core.sandbox.rest.mapping.target_sha256": "mapping_target_sha256",
-        "core.sandbox.rest.mapping.processes": "mapping_processes",
-        "core.sandbox.rest.mapping.calls": "mapping_calls",
-        "core.sandbox.rest.mapping.signatures": "mapping_signatures",
-        "core.sandbox.rest.mapping.dns": "mapping_dns",
-        "core.sandbox.rest.mapping.http": "mapping_http",
-        "core.sandbox.rest.mapping.tcp": "mapping_tcp",
-        "core.sandbox.rest.mapping.udp": "mapping_udp",
-        "core.sandbox.rest.mapping.hosts": "mapping_hosts",
-        "core.sandbox.rest.mapping.domains": "mapping_domains",
-        "core.sandbox.rest.mapping.dropped_files": "mapping_dropped_files",
-        "core.sandbox.rest.mapping.registry": "mapping_registry",
-        "core.sandbox.rest.mapping.field_names": "mapping_field_names",
-        "core.sandbox.rest.mapping.channels": "mapping_channels",
-    },
-    "agent": {},
-}
+    t0 = time.perf_counter()
+    memory = core.memory.model_copy(update={"backend": name})
+    store: Any = None
+    try:
+        store = await asyncio.to_thread(build_memory_store, memory)
+        said = await asyncio.wait_for(asyncio.to_thread(store.readiness), TIMEOUT)
+        return ProbeResult(True, _ms(t0), str(said))
+    except TimeoutError:
+        return ProbeResult(False, _ms(t0), f"timeout after {int(TIMEOUT)} s")
+    except (MemoryStoreError, Exception) as exc:  # noqa: BLE001 - reported, never raised
+        return ProbeResult(False, _ms(t0), redact_url(f"{type(exc).__name__}: {exc}"))
+    finally:
+        if store is not None:
+            close = getattr(store, "close", None)
+            if callable(close):
+                with contextlib.suppress(Exception):
+                    close()
+
+
+def _api_value(key: str, values: dict[str, Any], stored: dict[str, Any]) -> Any:
+    """An ``api.*`` setting as a probe of these staged values reads it."""
+    _ns, path = split_key(key)
+    if key in values and values[key] is not None:
+        return _unwrap(values[key])
+    if key in stored:
+        return _unwrap(stored[key])
+    if path in API_DEFAULTS:
+        # Editable api.* leaves no longer live on APISettings; their probe-time
+        # default comes from the catalog table instead.
+        return _unwrap(API_DEFAULTS[path])
+    return _unwrap(getattr(api_settings, path, None))
+
+
+async def _probe_reputation_source(
+    name: str, values: dict[str, Any], stored: dict[str, Any]
+) -> ProbeResult:
+    """Ask reputation source ``name``'s own test, with the key it reads."""
+    from maljan.enrichment.sources import credential_of, reputation_sources
+
+    t0 = time.perf_counter()
+    source: Any = reputation_sources()[name]
+    setting = credential_of(source)
+    key = _api_value(setting, values, stored) if setting else ""
+    return _from_provider(await source.probe(str(key or "")), t0)
 
 
 def _unwrap(value: Any) -> Any:
@@ -1797,7 +1101,22 @@ def candidate_settings(values: dict[str, Any], stored: dict[str, Any]) -> Any:
 
 
 async def run_probe(name: str, values: dict[str, Any], stored: dict[str, Any]) -> ProbeResult:
-    probe = PROBES[name]
+    """Run probe ``name`` against the staged values layered over the stored ones.
+
+    A provider's probe is that provider's own (``probe()``, a memory backend's
+    ``readiness()``, a reputation source's ``probe()``), built from the
+    candidate settings; the model probe asks the selected LLM provider's
+    adapter. Deliberately no context-window block on the result: the window
+    is a fact about the endpoint rather than about whether a model answered,
+    and the settings page reads it from its own route.
+    """
+    kinds = _provider_probe_kinds()
+    if name not in OWN_PROBES and name not in kinds:
+        return ProbeResult(False, 0, f"unknown probe: {name!r}")
+    if kinds.get(name) == "reputation":
+        return await in_probe_loop(lambda: _probe_reputation_source(name, values, stored))
+    if name == "redis":
+        return await in_probe_loop(probe_redis)
     try:
         core = candidate_settings(values, stored)
     except (ValueError, ValidationError) as exc:
@@ -1806,26 +1125,13 @@ async def run_probe(name: str, values: dict[str, Any], stored: dict[str, Any]) -
         # rejected, never echo the values.
         fields = _validation_detail(exc) if isinstance(exc, ValidationError) else type(exc).__name__
         return ProbeResult(False, 0, f"invalid candidate values: {fields}")
-    resolved: dict[str, Any] = {}
-    for key, short in _INPUTS[name].items():
-        ns, path = split_key(key)
-        if key in values and values[key] is not None:
-            resolved[short] = values[key]
-        elif key in stored:
-            resolved[short] = stored[key]
-        elif ns == "core":
-            cursor: Any = core
-            for part in path.split("."):
-                cursor = getattr(cursor, part)
-            resolved[short] = _unwrap(cursor)
-        elif path in API_DEFAULTS:
-            # Editable api.* leaves no longer live on APISettings;
-            # their probe-time default comes from the catalog table instead.
-            resolved[short] = _unwrap(API_DEFAULTS[path])
-        else:
-            resolved[short] = _unwrap(getattr(api_settings, path))
-    # Deliberately no context-window block on the probe result. The window is
-    # a fact about the endpoint rather than about whether a model answered, the
-    # settings page reads it from its own route, and computing it here spent up
-    # to three metadata requests per Test press on something no surface drew.
-    return await in_probe_loop(lambda: probe(resolved))
+    if name == "llm":
+        return await in_probe_loop(lambda: probe_llm(core))
+    if name == "mcp":
+        return await in_probe_loop(lambda: probe_mcp({}))
+    if name == "agent":
+        return await in_probe_loop(lambda: probe_agent({}))
+    kind = kinds[name]
+    if kind == "memory":
+        return await in_probe_loop(lambda: _probe_memory_backend(name, core))
+    return await in_probe_loop(lambda: _probe_registered_provider(kind, name, core))

@@ -679,12 +679,6 @@ _FIRST_PIECE: ContextVar[Callable[[], None] | None] = ContextVar(
     "maljan_composer_first_piece", default=None
 )
 
-# The chat model types whose provider makes a cached prefix readable only once
-# an answer to the request that wrote it has begun: concurrent requests sent
-# before that each write the prefix again (Anthropic's prompt caching page,
-# https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
-_CACHES_ONCE_ANSWERED = frozenset({"anthropic-chat"})
-
 
 @dataclass(frozen=True)
 class _Planned:
@@ -745,13 +739,17 @@ def _models_of(llm: Any) -> list[Any]:
 
 
 def _caches_once_answered(llm: Any) -> bool:
-    """Whether a model the reporter calls caches a prefix only once an answer to it has begun."""
+    """Whether a model the reporter calls caches a prefix only once an answer to it has begun.
+
+    The provider that built the model answers (``LLMProvider.caches_once_answered``):
+    concurrent requests sent before the first answer begins each write the
+    prefix again.
+    """
+    from maljan.llm.provider_base import provider_of_model
+
     for model in _models_of(llm):
-        try:
-            kind = model._llm_type
-        except Exception:  # noqa: BLE001 — a model that names no type is not one of them
-            continue
-        if kind in _CACHES_ONCE_ANSWERED:
+        built_by = provider_of_model(model)
+        if built_by is not None and built_by.caches_once_answered:
             return True
     return False
 
@@ -1286,7 +1284,7 @@ class ReportComposer:
         """The sections whose requests share one cacheable prefix, by group: ``{index: key}``.
 
         Only on a model whose provider caches at a breakpoint
-        (:data:`_CACHES_ONCE_ANSWERED`), and only for sections with evidence.
+        (``LLMProvider.caches_once_answered``), and only for sections with evidence.
         A provider's prefix is its tools, then the system prompt, then the
         messages: on the structured path each section sends its own schema as
         a tool, so only sections answering with the same schema (the prose
