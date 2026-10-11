@@ -2916,20 +2916,28 @@ exactly like a built-in one. Every block has the same fields: an `mcp.servers`
 entry, the `static.ghidra` and `static.r2` provider blocks and the CAPE MCP
 block (`sandbox.cape2.mcp`). In the console they are the **Declaration** section
 of a server card (closed by default), and in the catalogue the advanced
-**Declaration** subgroup of each provider block.
+**Declaration** subgroup of each provider block. Nothing reads the declaration
+yet besides `sample_open`: the consumers move onto it one by one, each with the
+same output for the built-ins, and this section says when one does.
 
 | key | meaning |
 | :-- | :-- |
 | `sample_open` | which tool opens a sample, and which select and analyse it (above) |
-| `sample_mount` | the absolute path inside the server that the worker's copy of the sample is mounted at; empty when the server reads the worker's own filesystem |
-| `error_patterns` | how the server's plain-text answers say "error": a list of `{match, code, remediation, tools}`; `match` is a regular expression held against the whole answer, `code` the error code (`tool_failed`, `bad_argument` …), `remediation` what would make the call succeed, `tools` the tools it applies to (empty: all) |
+| `sample_mount` | the absolute path inside the server that the worker's copy of the sample is mounted at (no `..`; written plainly); empty when the server reads the worker's own filesystem |
+| `work_dir` | the directory under the worker's samples directory the sample is copied into for this server (one name); empty when it makes no copy of its own |
+| `error_patterns` | how the server's answers say "error" (below) |
 | `roles` | what the server is for: `reputation`, `decompiler`, `disassembler`, `sandbox`, `rule_scanner`, `strings`, `reference`, `capture`, or any word of your own |
 | `prompt_fragment` | the workflow text shown to an agent only while the server's tools are attached |
 | `required_env_allow` | the environment names the server cannot run without |
+| `variable_names` | environment variable names of the server's that are not secrets, so a remediation naming one is shown as written |
 | `reads_staged_sample` | whether the server's path-taking tools read the sample the platform staged |
+| `platform_owned` | whether the server is the platform's own, whose answers are the platform's code |
+| `auto_name_prefixes` | the prefixes its decompiler writes before an address when it names a function itself (`FUN_`, `fcn.`) |
+| `reference_urls` | reference URL templates for a sample, `https://` and naming `{sha256}`, `{md5}` or `{sha1}` |
 | `tool_facts` | per tool name, what its answer is and where its facts sit (below) |
 
-Each entry of `tool_facts` describes one tool:
+Each entry of `tool_facts` describes one tool, under its own name on its own
+server (not empty, no `__`, the separator of a renamed tool):
 
 | key | meaning |
 | :-- | :-- |
@@ -2937,62 +2945,122 @@ Each entry of `tool_facts` describes one tool:
 | `asserts_techniques` | the tool's technique id is a statement about this sample (a rule that matched it); needs `techniques` |
 | `source` | the name a corroboration row gives an asserting tool (`capa`, `yara`, `sigma` …) |
 | `long_running` | the tool's work grows with the sample and has no wall clock of its own |
+| `timeout_seconds` | the budget the tool itself keeps, where it has one |
+| `memory_peak_mb` | the tool's measured memory peak, where known |
+| `discloses_sample` | the tool sends the sample, or its bytes, out of the deployment |
 | `rows` | the path of the answer's rows |
-| `places` | per kind of place (`offset`, `rva`, `address`, `addresses`, `call_site`, `function`, `pid` …), the path inside a row that holds one |
-| `values` | per kind of value (`text`, `rule`, `namespace`, `value`, `command_line` …), the path inside a row that holds one |
+| `places` | per kind of place (`offset`, `rva`, `address`, `addresses`, `call_site`, `function`, `pid`, `command_line` …), the path inside a row that holds one |
+| `values` | per kind of value (`text`, `rule`, `namespace`, `value` …), the path inside a row that holds one |
 | `techniques` | where the answer names ATT&CK ids: a list of `{path, format}`, `format` being `attck` (an id or a decorated label) or `sigma_tag` (`attack.t1055.012`) |
-| `reputation` | for a reputation lookup: `service` (the name it is attributed to), the paths `stats`, `malicious`, `total`, `labels`, `detections`, `engines`, and `text_pattern`, a regular expression with a `malicious` (and optionally `total`) group for an answer written in prose |
-| `arguments` | per role (`path`, `hash`, `address`, `program` …), the argument a call gives it in |
-| `reader` | a named reader for an answer shape the paths cannot express (`floss`, `capa`, `flows` …); empty reads the paths |
+| `reputation` | for a reputation lookup: `service` (the name it is attributed to), the paths `stats`, `malicious`, `total`, `labels`, `detections`, `engines`, and `text_patterns` (below) |
+| `arguments` | per role (`path`, `hash`, `address`, `program`, `command_lines` …), the argument a call gives it in |
+| `reader` | the answer shape the paths cannot express (below); empty reads the paths |
 | `report_sections` | the report sections whose writer is shown this tool's answers |
 | `words` | words a statement may use to name this tool's entry |
+| `display_name` | the name published text gives the tool |
+| `category` | the tag its description is shown with (`analyze`, `list`, `modify` …) |
 
 **Paths** are JSON-pointer-like: `/strings/*/offset` is the `offset` of every
 item of `strings`; `*` is every item of a list or every value of an object at
-that level, a number is one item, `~1` writes a `/` inside a key and `~0` a
-`~`. `**` is any depth (`/**/attck` is every `attck` key wherever it sits), at
-most once in a path and never in a path read inside a row (`places`, `values`),
-so every read is linear in the size of the answer. A path that names nothing
-reads as absent.
+that level, a number is one item, `~1` writes a `/` inside a key, `~0` a `~`
+and `~2` a `*`. `**` is any depth (`/**/attck` is every `attck` key wherever it
+sits) and `**N` at most N levels (`/**6/attck`), at most once in a path and
+never in a path read inside a row (`places`, `values`), so every read is linear
+in the size of the answer. A path that names nothing reads as absent.
 
-**Vocabulary.** `kind`, `roles`, `source`, `reader`, a technique `format`, a
-place or value name and an error `code` are open: any lowercase word of letters,
-digits and underscores is accepted, so a new kind of tool needs no release to
-be declared. The built-ins use these kinds: `identity`, `signing`,
-`binary_info`, `archive_listing`, `strings`, `decoded_strings`, `iocs`,
-`rule_match`, `command_match`, `reference`, `capabilities`, `reputation`,
-`indicator_reputation`, `submission`, `submission_status`, `status`,
-`api_hash_resolution`, `crypto_constants`, `function_index`, `transform`,
-`carve`, `unpack`, `sample_delivery`, `pcap`, `packet_overview`, `dns`, `http`,
-`open_sample`, `select_sample`, `analyse_sample`, `program_info`,
-`import_listing`, `export_listing`, `function_list`, `segments`, `decompile`,
-`disassembly`, `function_analysis`, `xrefs`, `callers`, `callees`,
-`behaviour_scan`, `call_chains`, `anti_analysis_scan`, `emulation`, `dataflow`,
-`code_gaps`, `function_hash`, `function_hashes`, `call_graph`, `command`,
-`function_matches`, and for the sandbox report `sandbox_report`,
-`sandbox_processes`, `network_flows`, `sandbox_signatures`,
-`sandbox_dropped_files`, `sandbox_registry`, `sandbox_api_calls`,
-`sandbox_mutexes`, `sandbox_services`, `sandbox_channels`, `sandbox_items`,
-`sandbox_status` and `sandbox_sections`.
+**Error patterns.** Each is `{match, code, remediation, remediation_with_path,
+tools, applies_to, multiline, message_group}`, applied in list order:
+
+- the text held is the tool's answer, or, where `applies_to` names
+  `protocol_error`, the message of the MCP protocol error the client reports
+  in its place (`applies_to` defaults to `answer`), stripped of surrounding
+  blanks;
+- a text with a line break never matches a pattern that is not `multiline`;
+- `match` is held against the **whole** text, never a line inside one;
+- the error message is the text, or the group `message_group` names, each line
+  stripped and blank lines dropped;
+- `code` is the error code (`tool_failed`, `bad_argument` …); the remediation is
+  `remediation_with_path` with `{sample_path}` replaced by the path the server
+  can open for the job's sample where that is known, else `remediation`;
+- `tools` limits it to some tools (empty: all).
+
+**Patterns run in linear time.** Every operator regular expression (error
+patterns and reputation `text_patterns`) is compiled and run by RE2, whose
+matching time is linear in the text whatever the pattern, so a sample's
+strings in an answer cannot stall a run. A pattern RE2 cannot compile, a
+back-reference or a lookaround, is refused when it is saved, with the reason.
+`text_patterns` are *searched* for anywhere in a reputation answer written in
+prose, the first pattern that finds a match giving the counts; each names a
+`malicious` group and optionally a `total` one.
+
+**Readers** are named by the answer shape they read, never by a tool, so a
+tool of yours that answers in that shape may name one:
+
+| reader | the answer it reads |
+| :-- | :-- |
+| `pe_header` | a PE header answer: sections and the entry point, read as file layout |
+| `emulated_strings_with_call_sites` | rows of recovered strings, each with the call site that produced it and the routine around it, joined to the encoded blobs a static decoder read at that site |
+| `function_table` | a function index: per function its start, range and what it references |
+| `byte_transform` | the result of byte transforms over a range of the file, with its origin |
+| `unpacked_image` | an unpacked program written out as a file of its own |
+| `flow_table` | flows and DNS queries with their endpoints, from a capture or a sandbox |
+| `dns_query_lines` | a text answer holding one DNS query per line |
+| `report_items` | sandbox report items, each with an id and the fields that place it |
+
+**Vocabulary.** `kind`, `roles`, `source`, `reader`, `category`, a technique
+`format`, a place or value name and an error `code` are open: any lowercase
+word of letters, digits and underscores is accepted, so a new kind of tool
+needs no release to be declared. The built-ins' kinds are as fine as the tables
+the platform reads tools by today, so each table is exactly a set of kinds
+(`CONSUMER_KINDS` in `maljan.core.builtin_declarations`, held tool by tool by a
+test): for example `strings` (the analysis server's printable strings),
+`listing_strings` (a disassembler's string listing), `emulated_strings`,
+`decoded_strings`, `file_iocs`, `text_iocs`, `iocs_with_context`,
+`capability_rules`, `signature_rules`, `event_rules`, `command_match`,
+`file_reputation`, `hash_reputation`, `indicator_report`,
+`indicator_reputation`, `program_info`, `file_info`, `load_sample`,
+`open_sample`, `open_project_program`, `decompile`, `function_disassembly`,
+`disassembly`, `function_list`, `method_list`, `xrefs`, `callers`, `callees`,
+and one `sandbox_<section>` kind per sandbox report tool.
+
+**Which source a tool is read under.** Every ledger entry records, when it is
+written, where its tool's declaration lives: `mcp:<server key>` for a tool
+server's tool, `provider:<id>` for a static provider's (Ghidra, radare2, the
+generic provider, the evidence-only capa/YARA provider) or the CAPE provider's
+own tool, `sandbox` for the sandbox report tools and `pack` for the triage
+pack. A tool is looked up by that recorded source and its name together, never
+by its name alone, an agent's name or today's settings; a tool of yours that
+shares a built-in tool's name never takes the built-in's facts. An entry
+written before sources were recorded is read the way it always was.
 
 **What ships.** The built-in servers (`analysis`, `knowledge`, `network`,
-`threatintel`, `virustotal`), Ghidra, radare2, the CAPE MCP block and the
-platform's in-process tools (the triage pack's steps, the sandbox report tools
-and the evidence-only capa/YARA provider) ship declarations that say what the
-code holds today: `threatintel` and `virustotal` carry the `reputation` role,
-the three file-reading sidecars `reads_staged_sample`, Ghidra its mount
-`/data/samples` and its workflow text, radare2 its workflow text and the error
-sentences r2mcp writes as plain answers. A built-in's stored block takes the
-shipped value of any field it never set, and one the operator set, empty
-included, is kept; a save stores only the fields that differ from the shipped
-value, so the declaration keeps following later releases. A server you add
-starts with no declaration, and a tool of yours that shares a built-in tool's
-name never takes the built-in's: a tool is always looked up by its server and
-its name together.
+`threatintel`, `virustotal`), every tool Ghidra and radare2 advertise, the CAPE
+MCP block and the platform's in-process tools ship declarations that say what
+the code holds today: `threatintel` and `virustotal` carry the `reputation`
+role, the three file-reading sidecars `reads_staged_sample`, `analysis` and the
+triage pack `platform_owned`, Ghidra its mount `/data/samples`, its work
+directory `.work`, its workflow text and its non-secret variable, radare2 its
+work directory `r2-work`, its workflow text and its error patterns (the
+open-first refusal, its log envelope and the sentences r2mcp writes as plain
+answers), VirusTotal its reference URL and its submit tools
+`discloses_sample`, and the threat-intel sidecar both of its prose forms
+(`N/M detections`, `N/M malicious`).
 
-Nothing reads the declaration yet besides `sample_open`: the consumers move
-onto it one by one, each with the same output for the built-ins, and this
-section says when one does.
+**Saving.** A built-in's stored block takes the shipped value of any field it
+never set, and one the operator set, empty included, is kept. A save stores
+only the fields that differ from the shipped value at the time of the save, so
+a value written equal to the shipped one is not recorded and follows later
+releases. A server you add starts with no declaration. A run's settings
+snapshot records only the declaration fields an operator set and names the
+rest by a digest per source (`declaration_digest.<source>`) and one of the
+shipped data (`declaration_digest.shipped`).
+
+**A declaration for a server you add.** `docs/examples/profiles/qu1cksc0pe.declaration.json`
+holds the declaration fields of a Qu1cksc0pe server, its six tools' kinds,
+path argument and budgets. It is not a settings import document (an import of
+`core.mcp.servers` replaces the whole server map): paste its `tool_facts` value
+into the server card's **Tool declarations** box and its other fields into the
+boxes of the same names, and save.
 
 ### A tool server that keeps failing is rested
 
