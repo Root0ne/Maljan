@@ -382,6 +382,7 @@ class AnthropicProvider(LLMProvider):
     """Builds LangChain ChatAnthropic instances."""
 
     name = "anthropic"
+    choice_order = 1
     label = "Anthropic"
     description = "Claude models over the Anthropic API, or an address that serves it."
     hosted = True

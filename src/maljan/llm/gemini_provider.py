@@ -28,6 +28,7 @@ class GeminiProvider(LLMProvider):
     """Builds Gemini ChatModels via langchain-google-genai."""
 
     name = "gemini"
+    choice_order = 3
     label = "Google Gemini"
     description = "Gemini models over Google's Generative Language API."
     hosted = True

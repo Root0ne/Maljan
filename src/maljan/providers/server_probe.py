@@ -46,7 +46,7 @@ async def handshake(
     config: Any,
     name: str,
     *,
-    budget: float = PROBE_BUDGET_SECONDS,
+    budget: float | None = None,
     handle_factory: Callable[[str, Any], Any] | None = None,
 ) -> tuple[list[str], dict[str, Any] | None]:
     """The tool names ``config``'s server offers and its ``capabilities`` manifest, if any.
@@ -61,6 +61,8 @@ async def handshake(
     """
     from maljan.tools import staging
 
+    if budget is None:
+        budget = PROBE_BUDGET_SECONDS
     if handle_factory is None:
         from maljan.providers.servers import ServerHandle
 

@@ -777,9 +777,10 @@ class LLMConfig(BaseModel):
 
         known = provider_names()
         if known and value not in known:
+            # The value itself is not echoed: a rejected setting is reported
+            # by name, never by what was typed into it.
             raise ValueError(
-                f"llm.provider {value!r} is not a registered LLM provider "
-                f"(known: {', '.join(known)})"
+                f"llm.provider names no registered LLM provider (known: {', '.join(known)})"
             )
         return value
 

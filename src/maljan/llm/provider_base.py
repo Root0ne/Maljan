@@ -70,6 +70,8 @@ class LLMProvider:
     """The interface every LLM provider adapter answers; the defaults are a silent provider's."""
 
     name: ClassVar[str] = ""
+    # Where the provider stands among the choices the console offers; lower first.
+    choice_order: ClassVar[int] = 100
     # The console's title and one-line description of this provider.
     label: ClassVar[str] = ""
     description: ClassVar[str] = ""
@@ -265,15 +267,15 @@ def facts_of(name: object) -> type[LLMProvider]:
 
 
 def provider_names() -> list[str]:
-    """Every registered provider's name, in registration order."""
+    """Every registered provider's name, in the order each declares (``choice_order``)."""
     _discover()
     from maljan.llm.registry import _PROVIDER_REGISTRY
 
-    return list(_PROVIDER_REGISTRY)
+    return sorted(_PROVIDER_REGISTRY, key=lambda name: (facts_of(name).choice_order, name))
 
 
 def registered_facts() -> list[type[LLMProvider]]:
-    """The facts of every registered provider, in registration order."""
+    """The facts of every registered provider, in their declared order."""
     return [facts_of(name) for name in provider_names()]
 
 

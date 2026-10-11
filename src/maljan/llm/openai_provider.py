@@ -1066,6 +1066,7 @@ class OpenAIProvider(LLMProvider):
     """Builds LangChain ChatOpenAI instances."""
 
     name = "openai"
+    choice_order = 0
     label = "OpenAI-compatible"
     description = (
         "OpenAI's API or any server that speaks its chat completions: llama.cpp, "

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.settings_probes import PROBES, handshake_tools, probe_mcp, run_mcp_probe
+from app.services.settings_probes import handshake_tools, known_probe, probe_mcp, run_mcp_probe
 
 
 class _Handle:
@@ -172,18 +172,22 @@ async def test_an_unknown_server_is_a_legible_failure():
 
 
 def test_the_probe_is_registered_under_its_own_name():
-    assert "mcp" in PROBES
+    assert known_probe("mcp")
 
 
 @pytest.mark.asyncio
 async def test_the_r2_probe_speaks_the_same_handshake(monkeypatch):
-    from app.services.settings_probes import probe_r2
+    from maljan.core.settings_overrides import build_settings
+    from maljan.providers import servers
     from maljan.providers.static import r2
 
+    provider = r2.R2StaticProvider.from_settings(build_settings({}))
+    _Handle.made = []
+    monkeypatch.setattr(servers, "ServerHandle", _Handle)
     monkeypatch.setattr(
         r2, "resolve_r2_binary", lambda configured, env=None: r2.R2Binary(configured, ())
     )
-    result = await probe_r2({"binary_path": "r2mcp"})
+    result = await provider.probe()
     assert result.ok is True and result.tools == ["open_file", "analyze", "list_imports"]
     assert _Handle.made[-1].config.command == "r2mcp"
     assert handshake_tools is not None

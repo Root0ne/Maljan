@@ -243,6 +243,7 @@ class OllamaProvider(LLMProvider):
     """Builds LangChain ChatOllama instances for local models."""
 
     name = "ollama"
+    choice_order = 2
     label = "Ollama"
     description = "Models served by an Ollama runtime you run, on this machine or another."
     hosted = False

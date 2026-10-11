@@ -139,7 +139,12 @@ class TestAProbeSaysWhereItWent:
         original = probes._get
         probes._get = _refused  # type: ignore[assignment]
         try:
-            result = await probes._probe_llm_ollama({"ollama_base_url": "http://box:11434"})
+            result = await probes.probe_llm(
+                probes.candidate_settings(
+                    {"core.llm.provider": "ollama", "core.llm.ollama.base_url": "http://box:11434"},
+                    {},
+                )
+            )
         finally:
             probes._get = original  # type: ignore[assignment]
 
@@ -160,8 +165,14 @@ class TestAProbeSaysWhereItWent:
         original = probes._get
         probes._get = _refused  # type: ignore[assignment]
         try:
-            result = await probes._probe_llm_openai(
-                {"base_url": f"http://user:{secret}@llm.internal:8080/v1", "api_key": "x"}
+            result = await probes.probe_llm(
+                probes.candidate_settings(
+                    {
+                        "core.llm.openai.base_url": f"http://user:{secret}@llm.internal:8080/v1",
+                        "core.llm.openai.api_key": "x",
+                    },
+                    {},
+                )
             )
         finally:
             probes._get = original  # type: ignore[assignment]
