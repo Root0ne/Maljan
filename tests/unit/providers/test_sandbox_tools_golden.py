@@ -41,7 +41,7 @@ from maljan.providers.sandbox_tools import (
     sandbox_services_and_tasks,
     sandbox_signatures,
 )
-from tests.golden_fixtures import skip_absent_fixture
+from tests.golden_fixtures import golden_stems, read_golden, skip_absent_fixture
 from tests.unit.providers._cape_fixture import no_real_reports_forced
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -83,11 +83,11 @@ def _load_case(name: str) -> tuple[dict[str, Any], dict[str, Any]]:
     if raw_path is None:
         skip_absent_fixture(f"raw CAPE report {name}.json is not under {_globs()}")
     raw = json.loads(raw_path.read_text(encoding="utf-8"))
-    expected = json.loads((GOLDEN / f"{name}.json").read_text(encoding="utf-8"))
+    expected = read_golden(GOLDEN, name)
     return raw, expected
 
 
-_ALL_NAMES: list[str] = sorted(p.stem for p in GOLDEN.glob("*.json"))
+_ALL_NAMES: list[str] = golden_stems(GOLDEN)
 
 
 def test_the_corpus_is_present():

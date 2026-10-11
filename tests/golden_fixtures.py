@@ -15,13 +15,36 @@ run is read.
 
 from __future__ import annotations
 
+import gzip
+import json
 import os
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 ABSENT_FIXTURE_REASON = "golden fixture absent"
+
+# A golden is ``<stem>.json``, or ``<stem>.json.gz`` when its capture script
+# found it too large to keep as text; both read the same.
+_GOLDEN_SUFFIXES = (".json", ".json.gz")
+
+
+def golden_stems(directory: Path) -> list[str]:
+    """The stems of every golden in ``directory``, whichever form each is stored in."""
+    stems: set[str] = set()
+    for suffix in _GOLDEN_SUFFIXES:
+        stems.update(p.name[: -len(suffix)] for p in directory.glob(f"*{suffix}"))
+    return sorted(stems)
+
+
+def read_golden(directory: Path, stem: str) -> Any:
+    """The parsed golden ``stem`` in ``directory``, decompressed where it is stored gzipped."""
+    plain, packed = directory / f"{stem}.json", directory / f"{stem}.json.gz"
+    if packed.is_file():
+        return json.loads(gzip.decompress(packed.read_bytes()).decode("utf-8"))
+    return json.loads(plain.read_text(encoding="utf-8"))
 
 
 def skip_absent_fixture(detail: str) -> None:

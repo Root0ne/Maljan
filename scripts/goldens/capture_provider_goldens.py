@@ -16,8 +16,10 @@ shape changes the report.
 
 from __future__ import annotations
 
+import gzip
 import json
 from pathlib import Path
+from typing import Any
 
 from maljan.agents.dynamic_analyst import assemble_dynamic_prompt
 from maljan.agents.prompt_fragments import format_fragment
@@ -39,6 +41,9 @@ from maljan.providers.static.ghidra import GhidraStaticProvider
 ROOT = Path(__file__).resolve().parents[2]
 PROMPTS = ROOT / "tests" / "fixtures" / "prompts"
 GOLDEN = ROOT / "tests" / "fixtures" / "golden"
+# A golden whose text passes this many bytes is stored gzip-compressed beside
+# its name (``<stem>.json.gz``); the suite's reader takes either form.
+COMPRESS_ABOVE_BYTES = 5 * 1024 * 1024
 CAPE_GLOBS = (
     "data/cape_reports/*.json",
     "data/samples/dynamic/sample_1.json",
@@ -46,7 +51,7 @@ CAPE_GLOBS = (
 )
 
 
-def _prompts() -> tuple[str, str]:
+def build_prompts() -> tuple[str, str]:
     """The static prompt on Ghidra and the dynamic prompt on CAPEv2, each with its tools.
 
     The prompts are built for the tools a request carries; these two are the
@@ -70,9 +75,28 @@ def _prompts() -> tuple[str, str]:
     return static, dynamic
 
 
+def write_golden(directory: Path, stem: str, payload: Any) -> Path:
+    """Write one golden as ``<stem>.json``, or ``<stem>.json.gz`` past the size limit.
+
+    The other form is removed, so a golden that crosses the limit either way
+    is never left behind in both. The gzip header carries no name or time, so
+    the same answer writes the same bytes.
+    """
+    text = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    data = text.encode("utf-8")
+    plain, packed = directory / f"{stem}.json", directory / f"{stem}.json.gz"
+    if len(data) > COMPRESS_ABOVE_BYTES:
+        packed.write_bytes(gzip.compress(data, compresslevel=9, mtime=0))
+        plain.unlink(missing_ok=True)
+        return packed
+    plain.write_bytes(data)
+    packed.unlink(missing_ok=True)
+    return plain
+
+
 def main() -> None:
     PROMPTS.mkdir(parents=True, exist_ok=True)
-    static_prompt, dynamic_prompt = _prompts()
+    static_prompt, dynamic_prompt = build_prompts()
     (GOLDEN / "sandbox_tools").mkdir(parents=True, exist_ok=True)
 
     # With the trailing newline the repository's own end-of-file hook would
@@ -100,11 +124,7 @@ def main() -> None:
                 "sandbox_mutexes": sandbox_mutexes(raw),
                 "sandbox_services_and_tasks": sandbox_services_and_tasks(raw),
             }
-            dest = GOLDEN / "sandbox_tools" / f"{path.stem}.json"
-            dest.write_text(
-                json.dumps(out, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
-                encoding="utf-8",
-            )
+            write_golden(GOLDEN / "sandbox_tools", path.stem, out)
     print(f"prompts -> {PROMPTS}")
     print(f"goldens -> {GOLDEN}")
 
