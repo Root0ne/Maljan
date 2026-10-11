@@ -23,7 +23,7 @@ export default function ConfigurationIndexPage() {
   useEffect(() => {
     if (!schema) return;
     const isSet = (key: string) => values[key]?.is_set === true;
-    if (!llmLooksConfigured(effectiveValue, isSet)) {
+    if (!llmLooksConfigured(effectiveValue, isSet, schema)) {
       router.replace("/settings/setup");
       return;
     }

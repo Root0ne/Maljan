@@ -36,7 +36,7 @@ export default function SetupHubPage() {
   // The display phrase the catalogue serves for a key's choice (`choice_labels`).
   const choiceLabel = (key: string, choice: string) =>
     ctx.entriesByKey[key]?.choice_labels?.[choice] ?? undefined;
-  const configured = llmLooksConfigured(ctx.effectiveValue, isSet);
+  const configured = llmLooksConfigured(ctx.effectiveValue, isSet, ctx.schema);
   const guides = guidesFor(configured);
 
   return (
@@ -61,7 +61,7 @@ export default function SetupHubPage() {
               <p className="text-xs text-text-muted mt-2">
                 <span className="uppercase tracking-wider text-[11px]">Now:</span>{" "}
                 <span data-testid={`guide-status-${guide.id}`}>
-                  {guideStatus(guide.id, ctx.effectiveValue, isSet, choiceLabel)}
+                  {guideStatus(guide.id, ctx.effectiveValue, isSet, choiceLabel, ctx.schema)}
                 </span>
               </p>
               <Link

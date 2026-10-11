@@ -1,5 +1,45 @@
 import { describe, expect, it } from "vitest";
+import type { CatalogEntry, ChoiceFacts, SettingsSchema } from "@/types/settings";
 import { guideStatus, llmLooksConfigured } from "../status";
+
+/** What the API serves on the LLM selector: each provider's own declaration. */
+function llm(provider: string, hosted: boolean, flat: string | null, address: boolean): ChoiceFacts {
+  const prefix = `core.llm.${provider}.`;
+  return {
+    hosted,
+    credential_keys: hosted ? [`${prefix}api_key`, ...(flat ? [flat] : [])] : [],
+    base_url_key: address ? `${prefix}base_url` : null,
+    model_keys: [`${prefix}expert_model`, `${prefix}judge_model`],
+  };
+}
+
+const SCHEMA: SettingsSchema = {
+  groups: [
+    {
+      key: "llm",
+      title: "LLM",
+      description: "",
+      entries: [
+        {
+          key: "core.llm.provider",
+          choices: ["openai", "anthropic", "ollama", "gemini"],
+          choice_titles: {
+            openai: "OpenAI",
+            anthropic: "Anthropic",
+            ollama: "Ollama",
+            gemini: "Google Gemini",
+          },
+          choice_facts: {
+            openai: llm("openai", true, "core.openai_api_key", true),
+            anthropic: llm("anthropic", true, "core.anthropic_api_key", true),
+            gemini: llm("gemini", true, "core.google_api_key", false),
+            ollama: llm("ollama", false, null, true),
+          },
+        } as unknown as CatalogEntry,
+      ],
+    },
+  ],
+};
 
 /** A tiny stand-in for the settings context: a flat map of effective values
  *  plus the set of secret keys the server reports as stored. */
@@ -32,7 +72,7 @@ describe("llmLooksConfigured", () => {
     const values = { "core.llm.provider": "openai" };
     expect(llmLooksConfigured(ctx(values).effective, ctx(values).isSet)).toBe(false);
     const withKey = ctx(values, ["core.llm.openai.api_key"]);
-    expect(llmLooksConfigured(withKey.effective, withKey.isSet)).toBe(true);
+    expect(llmLooksConfigured(withKey.effective, withKey.isSet, SCHEMA)).toBe(true);
   });
 
   /* The same credential also has a flat catalog key, and an operator
@@ -46,20 +86,30 @@ describe("llmLooksConfigured", () => {
     for (const [provider, key] of flat) {
       const values = { "core.llm.provider": provider };
       const withFlat = ctx(values, [key]);
-      expect(llmLooksConfigured(withFlat.effective, withFlat.isSet)).toBe(true);
+      expect(llmLooksConfigured(withFlat.effective, withFlat.isSet, SCHEMA)).toBe(true);
     }
   });
 
   it("does not accept another provider's flat key", () => {
     const withOther = ctx({ "core.llm.provider": "anthropic" }, ["core.openai_api_key"]);
-    expect(llmLooksConfigured(withOther.effective, withOther.isSet)).toBe(false);
+    expect(llmLooksConfigured(withOther.effective, withOther.isSet, SCHEMA)).toBe(false);
+  });
+});
+
+describe("llmLooksConfigured without a schema yet", () => {
+  it("counts a stored key or a set address of the provider's own block", () => {
+    const keyed = ctx({ "core.llm.provider": "openai" }, ["core.llm.openai.api_key"]);
+    expect(llmLooksConfigured(keyed.effective, keyed.isSet)).toBe(true);
+    const local = ctx({ "core.llm.provider": "ollama", "core.llm.ollama.base_url": "http://x" });
+    expect(llmLooksConfigured(local.effective, local.isSet)).toBe(true);
+    expect(llmLooksConfigured(ctx({ "core.llm.provider": "x" }).effective, () => false)).toBe(false);
   });
 });
 
 describe("guideStatus", () => {
   it("names the provider and both models, or says it is not configured", () => {
     const bare = ctx({ "core.llm.provider": "openai" });
-    expect(guideStatus("llm", bare.effective, bare.isSet)).toBe("Not configured");
+    expect(guideStatus("llm", bare.effective, bare.isSet, undefined, SCHEMA)).toBe("Not configured");
     const done = ctx(
       {
         "core.llm.provider": "openai",
@@ -68,7 +118,7 @@ describe("guideStatus", () => {
       },
       ["core.llm.openai.api_key"]
     );
-    expect(guideStatus("llm", done.effective, done.isSet)).toBe(
+    expect(guideStatus("llm", done.effective, done.isSet, undefined, SCHEMA)).toBe(
       "OpenAI · expert gpt-4o · judge gpt-4o-mini"
     );
   });

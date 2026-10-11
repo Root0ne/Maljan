@@ -3,12 +3,8 @@
 import { useState } from "react";
 import type { McpServerEntry } from "@/types/settings";
 import { mapKeyError } from "../../configuration/mapEditorHelpers";
-import {
-  EMPTY_SERVER,
-  RESERVED_SERVER_KEYS,
-  ServerDetail,
-  useServerProbe,
-} from "../../configuration/ServerMapEditor";
+import { EMPTY_SERVER, ServerDetail, useServerProbe } from "../../configuration/ServerMapEditor";
+import { builtinServerKeys, reservedServerKeys } from "@/lib/providerFacts";
 import { useSettingsContext } from "../../configuration/SettingsContext";
 import { stateString, type GuideStepProps } from "./types";
 
@@ -77,7 +73,7 @@ export default function ServerFormStep({
       return;
     }
     const key = newKey.trim();
-    const problem = mapKeyError(key, value, "server", RESERVED_SERVER_KEYS);
+    const problem = mapKeyError(key, value, "server", reservedServerKeys(ctx.schema));
     if (problem) {
       setKeyError(problem);
       return;
@@ -167,6 +163,7 @@ export default function ServerFormStep({
         errors={ctx.errors}
         entryKey={SERVERS_KEY}
         requiredEnv={entry.required_env ?? {}}
+        builtinServers={builtinServerKeys(ctx.schema)}
         editable={entry.editable}
         sections={[section]}
       />

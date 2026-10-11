@@ -69,8 +69,8 @@ export interface AgentLLMOverride {
   model: string;
   temperature?: number | null;
   /** A per-agent endpoint, so two agents can sit on two different local
-   *  servers. Only the `openai` and `ollama` providers accept one; the
-   *  provider's API key stays global. */
+   *  servers. Only a provider that declares one accepts it; the provider's
+   *  API key stays global. */
   base_url?: string | null;
   /** This agent's own reasoning effort for its first model; absent inherits
    *  the provider's global one. The levels come from the backend. */
@@ -99,6 +99,9 @@ export interface LlmGlobalFallback {
   providerValue: string | null;
   /** The effective global model, or `null` when no such leaf exists. */
   modelValue: string | null;
+  /** The providers an agent may give an endpoint of its own, as each
+   *  provider declares in the settings schema. */
+  endpointProviders?: ReadonlySet<string>;
 }
 
 /* A resolved prompt and tool list describe the

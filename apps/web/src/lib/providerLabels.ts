@@ -1,51 +1,26 @@
 /**
  * What the providers and the teams are called, where a reader has to pick one.
  *
- * The submit dialog offered `r2`, `capa_yara`, `generic_mcp`, `ghidra`,
- * `cape2`, `rest`, `triage`, `upload` and `team_lead` — registry keys, every
- * one of them, asked of somebody deciding how to analyse a sample. The key is
- * still worth showing, because it is what the job config carries and what a
- * log line says, so it follows the name rather than standing in for it.
+ * The submit dialog offered registry keys, every one of them, asked of
+ * somebody deciding how to analyse a sample. The key is still worth showing,
+ * because it is what the job config carries and what a log line says, so it
+ * follows the name rather than standing in for it.
  *
- * A key nothing here names is read back from its key rather than dropped: a
- * provider added to the registry appears in this list the day it is
- * registered, and the only cost of not adding it here is that it reads as
- * itself.
+ * A provider's name is the title it declares for itself, served on its
+ * selector's catalog entry (`choice_titles`); a key nothing names is read back
+ * from its key rather than dropped, so a provider added to a registry appears
+ * the day it is registered.
  */
 
 import { humaniseKey } from "./humanise";
 
-/** `static.provider` keys, as their own projects write them. */
-const STATIC_PROVIDER: Record<string, string> = {
-  capa_yara: "capa + YARA",
-  generic_mcp: "Any MCP tool server",
-  ghidra: "Ghidra",
-  r2: "radare2",
-  none: "No static provider",
-};
-
-/** `sandbox.provider` keys. */
-const SANDBOX_PROVIDER: Record<string, string> = {
-  cape2: "CAPE v2",
-  mock: "Mock sandbox",
-  rest: "Any HTTP sandbox",
-  triage: "Hatching Triage",
-  upload: "A report you attach",
-};
-
-function labelled(map: Record<string, string>, key: string): string {
-  const name = map[key] ?? humaniseKey(key);
+/** A provider, named by the title it declares, with its key after it. */
+export function providerLabel(
+  key: string,
+  titles?: Record<string, string> | null
+): string {
+  const name = titles?.[key] ?? humaniseKey(key);
   return name === key ? key : `${name} (${key})`;
-}
-
-/** The static provider, named, with its key after it. */
-export function staticProviderLabel(key: string): string {
-  return labelled(STATIC_PROVIDER, key);
-}
-
-/** The sandbox provider, named, with its key after it. */
-export function sandboxProviderLabel(key: string): string {
-  return labelled(SANDBOX_PROVIDER, key);
 }
 
 /**

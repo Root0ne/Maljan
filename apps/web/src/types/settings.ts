@@ -73,6 +73,34 @@ export interface CatalogEntry {
   /** The short phrase a choice declares for display beside it (a memory
    *  backend's "in-process"), keyed by choice; absent when none declares one. */
   choice_labels?: Record<string, string> | null;
+  /** For a provider selector: the title each registered provider declares
+   *  for itself, its one-line description, and the facts the console reads
+   *  about it (`ChoiceFacts`). The console keeps no table of providers. */
+  choice_titles?: Record<string, string> | null;
+  choice_descriptions?: Record<string, string> | null;
+  choice_facts?: Record<string, ChoiceFacts> | null;
+  /** For the tool-server map: the built-in server keys and the keys no
+   *  operator's server may take, as core defines them. */
+  builtin_servers?: string[] | null;
+  reserved_servers?: string[] | null;
+}
+
+/** What a provider declares about itself, served on its selector's entry.
+ *  Every field is optional: an LLM provider carries the credential and model
+ *  ones, a static or sandbox provider its test and settings introduction. */
+export interface ChoiceFacts {
+  hosted?: boolean;
+  credential_keys?: string[];
+  base_url_key?: string | null;
+  guide_keys?: string[];
+  guide_advanced_keys?: string[];
+  model_keys?: string[];
+  agent_base_url?: boolean;
+  effort_key?: string | null;
+  /** The probe id that tests this choice; null when it has no test. */
+  probe?: string | null;
+  probe_note?: string;
+  intro?: string;
 }
 
 /**
@@ -329,6 +357,8 @@ export interface SettingsGroup {
 
 export interface SettingsSchema {
   groups: SettingsGroup[];
+  /** The label of every connection test the API answers, by probe id. */
+  probe_labels?: Record<string, string>;
 }
 
 export interface SettingValue {

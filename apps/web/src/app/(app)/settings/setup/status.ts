@@ -3,6 +3,8 @@ import {
   BUILTIN_AGENT_KEYS,
 } from "../configuration/agentStaging";
 import type { GuideId } from "./guides";
+import { choiceFacts, choiceTitle, LLM_SELECTOR } from "@/lib/providerFacts";
+import type { SettingsSchema } from "@/types/settings";
 
 /** Reads the value a key currently has — staged if it is staged, else stored.
  *  Exactly `SettingsContextValue.effectiveValue`. */
@@ -13,28 +15,12 @@ export type EffectiveValue = (key: string) => unknown;
  *  does. */
 export type IsSet = (key: string) => boolean;
 
-/** The providers that authenticate with a key rather than a local endpoint. */
-const HOSTED_PROVIDERS = new Set(["openai", "anthropic", "gemini"]);
-
-/** The flat catalog keys that hold the same credential as
- *  `core.llm.<provider>.api_key`: an operator who filled one of these in has
- *  configured that provider just as much as one who filled in the namespaced
- *  leaf, and the hub must not go on calling it unconfigured. */
-const FLAT_API_KEY: Record<string, string> = {
-  openai: "core.openai_api_key",
-  anthropic: "core.anthropic_api_key",
-  gemini: "core.google_api_key",
-};
-
-const PROVIDER_TITLE: Record<string, string> = {
-  openai: "OpenAI",
-  anthropic: "Anthropic",
-  gemini: "Google Gemini",
-  ollama: "Ollama",
-};
-
-export function llmProviderTitle(provider: string): string {
-  return PROVIDER_TITLE[provider] ?? provider;
+/** The provider's title, as it declares it in the settings schema. */
+export function llmProviderTitle(
+  provider: string,
+  schema?: SettingsSchema | null
+): string {
+  return choiceTitle(schema, LLM_SELECTOR, provider);
 }
 
 function text(value: unknown): string {
@@ -59,25 +45,45 @@ const BUILTIN_AGENTS = BUILTIN_AGENT_KEYS;
 
 /**
  * Whether the language-model settings could plausibly run an analysis: a
- * hosted provider with its API key stored, or Ollama with a base URL. Decides
- * whether `/settings/configuration` lands on the console or on the guide hub.
+ * hosted provider with one of its credential keys stored, or a provider run
+ * locally with its address set. Which it is, and which keys hold its
+ * credential and its address, the provider declares in the settings schema.
+ * While the schema is still loading, a stored key or a set address of the
+ * provider's own block counts. Decides whether `/settings/configuration`
+ * lands on the console or on the guide hub.
  */
-export function llmLooksConfigured(effective: EffectiveValue, isSet: IsSet): boolean {
-  const provider = text(effective("core.llm.provider"));
+export function llmLooksConfigured(
+  effective: EffectiveValue,
+  isSet: IsSet,
+  schema?: SettingsSchema | null
+): boolean {
+  const provider = text(effective(LLM_SELECTOR));
   if (!provider) return false;
-  if (HOSTED_PROVIDERS.has(provider)) {
-    const flat = FLAT_API_KEY[provider];
-    return isSet(`core.llm.${provider}.api_key`) || (flat !== undefined && isSet(flat));
+  const facts = choiceFacts(schema, LLM_SELECTOR, provider);
+  const address = facts.base_url_key ?? `core.llm.${provider}.base_url`;
+  if (facts.hosted === undefined) {
+    return isSet(`core.llm.${provider}.api_key`) || text(effective(address)) !== "";
   }
-  return text(effective(`core.llm.${provider}.base_url`)) !== "";
+  if (facts.hosted) {
+    return (facts.credential_keys ?? []).some((key) => isSet(key));
+  }
+  return text(effective(address)) !== "";
 }
 
-function llmStatus(effective: EffectiveValue, isSet: IsSet): string {
-  if (!llmLooksConfigured(effective, isSet)) return "Not configured";
-  const provider = text(effective("core.llm.provider"));
-  const expert = text(effective(`core.llm.${provider}.expert_model`));
-  const judge = text(effective(`core.llm.${provider}.judge_model`));
-  const parts = [llmProviderTitle(provider)];
+function llmStatus(
+  effective: EffectiveValue,
+  isSet: IsSet,
+  schema?: SettingsSchema | null
+): string {
+  if (!llmLooksConfigured(effective, isSet, schema)) return "Not configured";
+  const provider = text(effective(LLM_SELECTOR));
+  const [expertKey, judgeKey] = choiceFacts(schema, LLM_SELECTOR, provider).model_keys ?? [
+    `core.llm.${provider}.expert_model`,
+    `core.llm.${provider}.judge_model`,
+  ];
+  const expert = text(effective(expertKey));
+  const judge = text(effective(judgeKey));
+  const parts = [llmProviderTitle(provider, schema)];
   parts.push(expert ? `expert ${expert}` : "no expert model");
   parts.push(judge ? `judge ${judge}` : "no judge model");
   return parts.join(" · ");
@@ -121,11 +127,12 @@ export function guideStatus(
   id: GuideId,
   effective: EffectiveValue,
   isSet: IsSet,
-  choiceLabel?: ChoiceLabel
+  choiceLabel?: ChoiceLabel,
+  schema?: SettingsSchema | null
 ): string {
   switch (id) {
     case "llm":
-      return llmStatus(effective, isSet);
+      return llmStatus(effective, isSet, schema);
     case "static":
       return text(effective("core.static.provider")) || "none";
     case "sandbox": {

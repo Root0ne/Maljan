@@ -22,6 +22,9 @@ function options(over: Partial<EffortOptions>): EffortOptions {
   };
 }
 
+/** The providers that declare a per-agent endpoint, as the schema serves them. */
+const ENDPOINTS: ReadonlySet<string> = new Set(["openai", "ollama"]);
+
 describe("a per-agent effort field", () => {
   it("offers the levels the backend served, blank inheriting the global value", () => {
     const field = effortField(options({}), "");
@@ -76,12 +79,12 @@ describe("a per-agent effort field", () => {
 
 describe("a stored model choice and its effort", () => {
   it("keeps an effort that is set and drops a blank one", () => {
-    expect(storedChoice({ provider: "openai", model: "m", effort: "high" })).toEqual({
+    expect(storedChoice({ provider: "openai", model: "m", effort: "high" }, ENDPOINTS)).toEqual({
       provider: "openai",
       model: "m",
       effort: "high",
     });
-    expect(storedChoice({ provider: "openai", model: "m", effort: "" })).toEqual({
+    expect(storedChoice({ provider: "openai", model: "m", effort: "" }, ENDPOINTS)).toEqual({
       provider: "openai",
       model: "m",
     });

@@ -27,12 +27,14 @@ function FallbackModels({
   agentKey,
   rows,
   providerChoices,
+  endpointProviders,
   inputClass,
   onChange,
 }: {
   agentKey: string;
   rows: ModelChoice[];
   providerChoices: string[] | null;
+  endpointProviders: ReadonlySet<string>;
   inputClass: string;
   onChange: (rows: ModelChoice[]) => void;
 }) {
@@ -80,7 +82,7 @@ function FallbackModels({
               value={row.model}
               onChange={(e) => put(index, { model: e.target.value })}
             />
-            {hasEndpoint(row.provider) ? (
+            {hasEndpoint(row.provider, endpointProviders) ? (
               <input
                 className={inputClass}
                 aria-label={`${agentKey} fallback ${index + 1} base url`}
@@ -192,6 +194,8 @@ export default function ModelOverrideFields({
    *  is staged — an inline message asks for a provider rather than sending
    *  a request the API would only reject. The base URL is dropped when
    *  blank for the same reason temperature is. */
+  // The providers that declare a per-agent endpoint, as the schema serves them.
+  const endpointProviders = llmGlobal.endpointProviders ?? new Set<string>();
   const putLlm = (key: string, next: Partial<AgentLLMOverride>) => {
     const base: AgentLLMOverride = llmAgents[key] ?? { provider: "", model: "" };
     // An effort belongs to the provider it was chosen for, which for an
@@ -221,14 +225,14 @@ export default function ModelOverrideFields({
     // Dropped rather than carried when the provider has no endpoint to
     // override: switching an entry to Anthropic would otherwise stage a
     // base_url the API rejects, from a field that is no longer on screen.
-    if (merged.base_url && hasEndpoint(provider)) {
+    if (merged.base_url && hasEndpoint(provider, endpointProviders)) {
       stored.base_url = merged.base_url;
     }
     if (merged.effort && merged.effort.trim()) stored.effort = merged.effort.trim();
     // The list is carried whole: a row still being typed is kept on screen
     // (`draftFallbacks`) and staged once it names a provider and a model.
     const fallbacks = (merged.fallbacks ?? [])
-      .map(storedChoice)
+      .map((choice) => storedChoice(choice, endpointProviders))
       .filter((c): c is ModelChoice => c !== null);
     if (fallbacks.length) stored.fallbacks = fallbacks;
     onChangeLlmAgents({ ...llmAgents, [key]: stored });
@@ -241,7 +245,7 @@ export default function ModelOverrideFields({
   const [draftFallbacks, setDraftFallbacks] = useState<Record<string, ModelChoice[]>>({});
   const fallbackRows = (key: string): ModelChoice[] => {
     const draft = draftFallbacks[key];
-    if (draft && draft.some((row) => storedChoice(row) === null)) return draft;
+    if (draft && draft.some((row) => storedChoice(row, endpointProviders) === null)) return draft;
     return llmAgents[key]?.fallbacks ?? [];
   };
   const putFallbacks = (key: string, rows: ModelChoice[]) => {
@@ -348,13 +352,12 @@ export default function ModelOverrideFields({
             />
           </label>
         ) : null}
-        {/* Only the two providers that speak to a server the operator
-            runs: Anthropic and Gemini are vendor APIs with no per-agent
-            endpoint, and `AgentLLMConfig` rejects one set against them. */}
+        {/* Only a provider that declares a per-agent endpoint: a vendor API
+            has none, and `AgentLLMConfig` rejects one set against it. */}
         {(() => {
           const effectiveProvider =
             llmAgents[agentKey]?.provider || llmGlobal.providerValue || "";
-          if (effectiveProvider !== "openai" && effectiveProvider !== "ollama") {
+          if (!hasEndpoint(effectiveProvider, endpointProviders)) {
             return null;
           }
           return (
@@ -381,6 +384,7 @@ export default function ModelOverrideFields({
           agentKey={agentKey}
           rows={fallbackRows(agentKey)}
           providerChoices={llmGlobal.providerChoices}
+          endpointProviders={endpointProviders}
           inputClass={input}
           onChange={(rows) => putFallbacks(agentKey, rows)}
         />

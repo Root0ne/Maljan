@@ -7,28 +7,11 @@ import Link from "next/link";
 import type { ProbeResult } from "@/types/settings";
 import { isProbeStale } from "../setup/probeStale";
 
-/** Every probe id the catalog can carry has a label here; an id that arrives
- *  without one still gets a usable button ("Test <id>") rather than a blank. */
-const PROBE_LABEL: Record<string, string> = {
-  llm: "Test connection & fetch models",
-  r2: "Test radare2 MCP",
-  ghidra: "Test Ghidra MCP",
-  capa_yara: "Test capa + YARA rules",
-  capa: "Test capa + YARA rules",
-  cape2: "Test CAPE connection",
-  cape: "Test CAPE connection",
-  triage: "Test Triage connection",
-  rest: "Test sandbox API",
-  mcp: "Test MCP server",
-  agent: "Resolve agent",
-  qdrant: "Test Qdrant",
-  redis: "Test Redis",
-  virustotal: "Test VirusTotal",
-  abuseipdb: "Test AbuseIPDB",
-};
-
-export function probeLabel(id: string): string {
-  return PROBE_LABEL[id] ?? `Test ${id}`;
+/** A probe's label as the API serves it (the provider's own declaration, or
+ *  the API's for its own probes); an id that arrives without one still gets a
+ *  usable button ("Test <id>") rather than a blank. */
+export function probeLabel(id: string, labels?: Record<string, string> | null): string {
+  return labels?.[id] ?? `Test ${id}`;
 }
 
 export default function GroupHeader({
@@ -41,6 +24,7 @@ export default function GroupHeader({
   onResetGroup,
   guideHref,
   probeInputs,
+  probeLabels,
 }: {
   title: string;
   description: string;
@@ -59,6 +43,8 @@ export default function GroupHeader({
    *  values changed no longer describes what the button would do, so it is
    *  dropped as soon as the fingerprint moves. */
   probeInputs: (probeId: string) => string;
+  /** Each probe's label, as the settings schema serves it. */
+  probeLabels?: Record<string, string> | null;
 }) {
   /** Each entry remembers the fingerprint of the probe's inputs at the moment
    *  the button was pressed: the result stops being shown as soon as those
@@ -137,7 +123,7 @@ export default function GroupHeader({
                     setResults((s) => ({ ...s, [name]: { result: res, inputsWhenRun } }));
                   }}
                 >
-                  {probeLabel(name)}
+                  {probeLabel(name, probeLabels)}
                 </button>
                 {r && r !== "running" && (
                   <span
