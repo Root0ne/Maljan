@@ -46,6 +46,32 @@ def test_the_capability_names_only_the_servers_that_leave_binding_to_the_definit
     assert capability_servers(settings, "no_such_kind") == []
 
 
+def test_a_server_row_stored_with_a_lookup_s_former_kind_is_still_reached() -> None:
+    """A row saved while the lookups declared ``file_reputation`` keeps its lookup."""
+    from maljan.core.declared_reading import declarations
+    from maljan.core.reputation import pack_lookups
+
+    settings = Settings.model_validate(
+        {
+            "mcp": {
+                "servers": {
+                    "virustotal": {
+                        "tool_facts": {
+                            "get_file_report": {
+                                "kind": "file_reputation",
+                                "arguments": {"hash": "hash"},
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    )
+    assert "virustotal" in capability_servers(settings, "reputation")
+    lookups = pack_lookups(settings.mcp.servers, declarations(settings))
+    assert ("virustotal", "get_file_report") in {(lk.server, lk.tool) for lk in lookups}
+
+
 @pytest.mark.parametrize("key", LOOKING_UP)
 def test_a_built_in_row_stored_with_the_former_list_loads_as_the_seed(key: str) -> None:
     seed = _builtin_definitions()[key]

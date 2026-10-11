@@ -688,14 +688,16 @@ def capability_servers(settings: Settings, capability: str) -> list[str]:
     declarations: which servers an agent is given persists nothing.
     """
     from maljan.core.declared_reading import declarations
+    from maljan.core.reputation import kinds_of_capability
 
+    kinds = kinds_of_capability(capability)
     declared = declarations(settings)
     out: list[str] = []
     for name, server in settings.mcp.servers.items():
         held = declared.source(f"mcp:{name}")
         if held is None or list(server.agents or []):
             continue
-        if any(facts.kind == capability for facts in held.tools.values()):
+        if any(facts.kind in kinds for facts in held.tools.values()):
             out.append(str(name))
     return out
 

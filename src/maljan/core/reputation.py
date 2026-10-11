@@ -110,6 +110,18 @@ def is_lookup(facts: ToolFacts | None) -> bool:
     return facts is not None and facts.kind in REPUTATION_KINDS
 
 
+def kinds_of_capability(capability: str) -> frozenset[str]:
+    """The tool kinds a ``ToolRef(kind="capability")`` names: the kind itself.
+
+    ``reputation`` also names the kinds a stored server row may still declare
+    its lookup under (``core.legacy_reputation``), so a row saved then keeps
+    reaching the agents.
+    """
+    from maljan.core.builtin_declarations import REPUTATION_KINDS
+
+    return frozenset(REPUTATION_KINDS) if capability == REPUTATION_KIND else frozenset({capability})
+
+
 # ---------------------------------------------------------------------------
 # Reading an answer
 # ---------------------------------------------------------------------------
