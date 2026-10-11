@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, ClassVar
 
 from maljan.providers.base import (
+    NO_STATIC_PROVIDER,
     STATIC_EVIDENCE_INSTRUCTIONS,
     StaticCapabilities,
     StaticProvider,
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
     from maljan.core.config import Settings
 
 
-@register_static_provider("none")
+@register_static_provider(NO_STATIC_PROVIDER)
 class NullStaticProvider(StaticProvider):
     """No static tool at all.
 

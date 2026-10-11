@@ -110,7 +110,7 @@ def test_every_sandbox_report_tool_is_declared(declared: ToolDeclarations) -> No
 
 def test_every_step_the_triage_pack_records_is_declared(declared: ToolDeclarations) -> None:
     from maljan.analysis import sandbox_sections
-    from maljan.analysis.ghidra_passes import ANTI_ANALYSIS_TOOL
+    from maljan.analysis.anti_analysis import SCAN_TOOL as ANTI_ANALYSIS_TOOL
     from maljan.pipeline import sandbox_status, triage_pack
     from maljan.tools import artefact_index, crypto_constants, upx
 
@@ -159,7 +159,7 @@ def _strip_tool(names: object) -> set[str]:
 
 def _tables() -> dict[str, Callable[[str], bool]]:
     """Each consumer table as a membership test on a bare tool name, as the code reads it."""
-    from maljan.agents import network_analyst, static_analyst
+    from maljan.agents import network_analyst
     from maljan.core import legacy_tool_tables as legacy
     from maljan.reporting import legacy_tool_names
 
@@ -183,7 +183,6 @@ def _tables() -> dict[str, Callable[[str], bool]]:
         "run_state.reputation": names(legacy.FILE_ASSESSMENT_TOOLS),
         "network_analyst._PCAP_TOOLS": names(t for t, _ in network_analyst._PCAP_TOOLS),
         "function_map": names(legacy.FUNCTION_MAP_TOOLS),
-        "static_analyst._LOAD_TOOL": names((static_analyst._LOAD_TOOL,)),
         "evidence_summary.yara_rule_strings": names(legacy.SIGNATURE_RULE_TOOLS),
         "evidence_summary.catalogue_associations": names(legacy.API_CATALOGUE_TOOLS),
         # The reporting consumers read an entry with no recorded source by
@@ -366,10 +365,13 @@ def test_the_required_environment_is_the_declared_one(declared: ToolDeclarations
 
 
 def test_the_non_secret_variable_names_are_the_events_ones(declared: ToolDeclarations) -> None:
-    from maljan.pipeline.events import _OWN_VARIABLE_NAMES
+    from maljan.core.builtin_declarations import shipped_variable_names
+    from maljan.pipeline.events import scrub
 
     declared_names = {n for d in declared.sources() for n in d.variable_names}
-    assert declared_names == set(_OWN_VARIABLE_NAMES)
+    assert declared_names == set(shipped_variable_names())
+    for name in declared_names:
+        assert scrub(f"check {name} and the mount") == f"check {name} and the mount"
 
 
 def test_the_work_directories_are_the_providers(declared: ToolDeclarations) -> None:

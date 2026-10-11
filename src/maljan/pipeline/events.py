@@ -585,10 +585,23 @@ _CREDENTIAL_RUN = re.compile(r"(?:[A-Fa-f0-9]{24,}|[A-Za-z0-9+/_\-]{24,}={0,2})\
 # The environment variables the platform's own sentences name, which the rule
 # above takes for keys by their length. Named one by one rather than by shape:
 # an upper-case run with underscores in it is also what a key can look like,
-# and the remedy "check GHIDRA_CONTAINER_SAMPLES_PATH" read "check ***" on the
-# console, for the one failure whose remedy was that variable. The variable is
-# retired; stored runs written before still name it.
-_OWN_VARIABLE_NAMES = frozenset({"GHIDRA_CONTAINER_SAMPLES_PATH"})
+# and a remedy naming a provider's path variable read "check ***" on the
+# console. Each server and provider declares the variable names its sentences
+# use (``variable_names``), read from the shipped declarations
+# (``builtin_declarations.shipped_variable_names``) and from each provider class
+# registered at runtime (``registry.registered_variable_names``), never from a
+# run's settings, so the rule does not depend on which run publishes; a retired
+# variable stays declared while stored runs still name it.
+
+
+def _own_variable_name(token: str) -> bool:
+    """Whether ``token`` is a variable name a shipped declaration says is not a secret."""
+    from maljan.core.builtin_declarations import shipped_variable_names
+    from maljan.providers.registry import registered_variable_names
+
+    return token in shipped_variable_names() or token in registered_variable_names()
+
+
 # A JSON Web Token, which no length rule can see: it is three base64url runs
 # with dots between them, and this project's own access token is one. The
 # segments are held to a floor so that a dotted module name or a hostname is
@@ -842,7 +855,7 @@ def _looks_like_a_credential(token: str, *, whole: bool = False, alphabet: bool 
     on the worker, and a redaction rule whose answer depended on which run was
     publishing would not be a redaction rule.
     """
-    if _DIGEST.match(token) or _IDENTIFIER.match(token) or token in _OWN_VARIABLE_NAMES:
+    if _DIGEST.match(token) or _IDENTIFIER.match(token) or _own_variable_name(token):
         return False
     lowered = token.lower()
     if any(lowered.startswith(prefix) for prefix in _CREDENTIAL_PREFIXES):
@@ -1495,7 +1508,7 @@ def _readable(token: str, *, path: bool = True) -> bool:
     """Whether the whole run is a name the scrub keeps: a digest, an identifier, one of
     the platform's own variable names, a MIME type, a path (unless ``path`` is false),
     words, or a catalogue name."""
-    if _DIGEST.match(token) or _IDENTIFIER.match(token) or token in _OWN_VARIABLE_NAMES:
+    if _DIGEST.match(token) or _IDENTIFIER.match(token) or _own_variable_name(token):
         return True
     if _MIME_TYPE.match(token) and not _looks_like_a_credential(token.split("/", 1)[1]):
         return True

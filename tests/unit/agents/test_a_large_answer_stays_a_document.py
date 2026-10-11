@@ -761,7 +761,7 @@ class TestTheGuardrailUsesIt:
         assert ledger.rows[-1]["hard_truncated"] is True
 
     def test_the_ghidra_client_does_the_same_thing(self) -> None:
-        from maljan.agents.ghidra_http_client import GhidraHTTPClient
+        from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
 
         ledger = self._Ledger()
         client = GhidraHTTPClient.__new__(GhidraHTTPClient)
@@ -778,7 +778,8 @@ class TestTheGuardrailUsesIt:
     def test_the_guardrail_is_awaited_off_the_loop(self) -> None:
         import inspect
 
-        from maljan.agents import ghidra_http_client, mcp_client
+        from maljan.agents import mcp_client
+        from maljan.providers.static.ghidra import http_client as ghidra_http_client
 
         for module in (mcp_client, ghidra_http_client):
             source = inspect.getsource(module)
@@ -1013,7 +1014,8 @@ class TestAServersParameterNameIsUntrustedText:
         """The claim is one claim, so the arithmetic is one function."""
         import inspect
 
-        from maljan.agents import ghidra_http_client, mcp_client
+        from maljan.agents import mcp_client
+        from maljan.providers.static.ghidra import http_client as ghidra_http_client
 
         narrowing = ("limit", "offset", "pattern")
         for module in (mcp_client, ghidra_http_client):
@@ -1025,7 +1027,7 @@ class TestAServersParameterNameIsUntrustedText:
             assert "shorten_target(limit, narrowing)" in source, module.__name__
 
         from maljan.agents.evidence_recorder import shortened_notice
-        from maljan.agents.ghidra_http_client import GhidraHTTPClient
+        from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
 
         client = GhidraHTTPClient.__new__(GhidraHTTPClient)
         client._max_output_chars = 4000

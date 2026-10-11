@@ -24,8 +24,8 @@ from typing import Any
 import pytest
 from pydantic import SecretStr
 
-from maljan.analysis.ghidra_program import program_name_from_load
 from maljan.core.exceptions import SampleNotOpened
+from maljan.providers.static.ghidra.program import program_name_from_load
 
 
 class TestALoadErrorIsNotASuccess:
@@ -81,31 +81,39 @@ def analyst(monkeypatch: pytest.MonkeyPatch) -> Any:
     return a
 
 
-def _patch_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+def _patch_settings(monkeypatch: pytest.MonkeyPatch, analyst: Any) -> None:
+    """The analyst's own provider: Ghidra over http, with the sink pre-pass on."""
+    from maljan.providers.static.ghidra import GhidraStaticProvider
+
     class _G:
+        enabled = True
         transport = "http"
         url = "http://ghidra.invalid"
         auth_token = SecretStr("")
+        sample_open = None
 
     class _P:
         use_sink_reachability = True
         sink_reachability_max_funcs = 12
 
-    class _S:
-        class static:  # noqa: N801
-            provider = "ghidra"
-            ghidra = _G()
+    provider = GhidraStaticProvider(_G(), _P(), None)  # type: ignore[arg-type]
+    monkeypatch.setattr(analyst, "_provider", lambda: provider, raising=False)
 
-        preprocessing = _P()
 
-    monkeypatch.setattr("maljan.core.config.get_settings", lambda: _S())
+def _shipped_provider(monkeypatch: pytest.MonkeyPatch, analyst: Any, provider_id: str) -> None:
+    """The analyst's own provider: ``provider_id`` as it ships."""
+    from maljan.core.config import Settings
+    from maljan.providers.registry import static_provider_class
+
+    provider = static_provider_class(provider_id).from_settings(Settings())
+    monkeypatch.setattr(analyst, "_provider", lambda: provider, raising=False)
 
 
 class TestThePrePassStopsOnAFailedLoad:
     def test_a_failed_load_stops_the_agent_with_the_servers_words(
         self, analyst: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        _patch_settings(monkeypatch)
+        _patch_settings(monkeypatch, analyst)
         client = _Client(json.dumps({"error": "Failed to load program from: /data/samples/x.exe"}))
         monkeypatch.setattr("httpx.Client", lambda **kw: client)
 
@@ -119,7 +127,7 @@ class TestThePrePassStopsOnAFailedLoad:
         """The wasted work is the least of it — `run_analysis` on a failed load
         analyses the *previous* program, and the graph fetched afterwards is
         that program's."""
-        _patch_settings(monkeypatch)
+        _patch_settings(monkeypatch, analyst)
         client = _Client(json.dumps({"error": "Failed to load program from: /data/samples/x.exe"}))
         monkeypatch.setattr("httpx.Client", lambda **kw: client)
 
@@ -128,34 +136,17 @@ class TestThePrePassStopsOnAFailedLoad:
         assert client.paths == ["load_program"], client.paths
 
 
-class TestThePrePassIsGhidraOnly:
-    """L3 (live-run finding): the pre-pass drives Ghidra's headless REST API
-    directly, but ``cfg.static.ghidra`` keeps its own "http" default
-    regardless of which static provider is actually selected — gating on
-    the transport alone let this run its Ghidra-only calls against an
-    r2/generic_mcp profile too, logging a "load_program did not yield a
-    program" warning for a provider that offers no such tool at all."""
+class TestThePrePassIsTheProvidersOwn:
+    """L3 (live-run finding): the pre-pass used to drive Ghidra's headless REST
+    API whichever static provider was selected, logging a "load_program did
+    not yield a program" warning for a provider that offers no such tool at
+    all. The open and the call graph are now each provider's own answer, so a
+    provider that has neither calls nothing."""
 
     def test_an_r2_provider_never_calls_load_program_and_logs_nothing(
         self, analyst: Any, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:
-        class _G:
-            transport = "http"
-            url = "http://ghidra.invalid"
-            auth_token = SecretStr("")
-
-        class _P:
-            use_sink_reachability = True
-            sink_reachability_max_funcs = 12
-
-        class _S:
-            class static:  # noqa: N801
-                provider = "r2"
-                ghidra = _G()
-
-            preprocessing = _P()
-
-        monkeypatch.setattr("maljan.core.config.get_settings", lambda: _S())
+        _shipped_provider(monkeypatch, analyst, "r2")
         client = _Client("{}")
         monkeypatch.setattr("httpx.Client", lambda **kw: client)
 
@@ -167,23 +158,7 @@ class TestThePrePassIsGhidraOnly:
     def test_a_generic_mcp_provider_is_skipped_the_same_way(
         self, analyst: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        class _G:
-            transport = "http"
-            url = "http://ghidra.invalid"
-            auth_token = SecretStr("")
-
-        class _P:
-            use_sink_reachability = True
-            sink_reachability_max_funcs = 12
-
-        class _S:
-            class static:  # noqa: N801
-                provider = "generic_mcp"
-                ghidra = _G()
-
-            preprocessing = _P()
-
-        monkeypatch.setattr("maljan.core.config.get_settings", lambda: _S())
+        _shipped_provider(monkeypatch, analyst, "generic_mcp")
         client = _Client("{}")
         monkeypatch.setattr("httpx.Client", lambda **kw: client)
 
@@ -194,11 +169,12 @@ class TestThePrePassIsGhidraOnly:
         self, analyst: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Same fixture as TestThePrePassStopsOnAFailedLoad, spelled out here
-        to pin that adding the provider gate did not also change Ghidra's
-        own behaviour: it still reaches ``load_program``."""
-        _patch_settings(monkeypatch)
+        to pin that Ghidra's own behaviour did not change: it still reaches
+        ``load_program``, then reads the call graph."""
+        _patch_settings(monkeypatch, analyst)
         client = _Client(json.dumps({"success": True, "program": "x.exe"}))
         monkeypatch.setattr("httpx.Client", lambda **kw: client)
 
         analyst._compute_sink_priority_hint("/data/samples/x.exe")
         assert client.paths[0] == "load_program", client.paths
+        assert client.paths[-1] == "get_full_call_graph", client.paths

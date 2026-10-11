@@ -49,12 +49,24 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from maljan.core.logger import logger
+from maljan.analysis.anti_analysis import (
+    INSTRUCTION_CATEGORY,
+    TEB_CATEGORY,
+    Code,
+    PassFailed,
+    cpuid_leaf_said,
+    gs_reads,
+    image_of,
+    int3_is_a_trap,
+    operand_value,
+    starts_of,
+)
 
+# Ghidra's own tool, the REST endpoint the scan calls.
 ANTI_ANALYSIS_TOOL = "find_anti_analysis_techniques"
 
 # The formats Ghidra's loader and the scan read.
@@ -87,172 +99,15 @@ GHIDRA_HAS_NO_COPY = (
     "where Ghidra reads"
 )
 
+# What Ghidra's scan looks at, as the pack line says it.
+SCAN_CHECKS_SHORT = "listed API calls, listed x86 instructions, FS:[0x30] and FS:[0x18]"
 
-class GhidraPassFailed(RuntimeError):
-    """A pass that was made and did not complete, with what happened."""
+
+class GhidraPassFailed(PassFailed):
+    """A Ghidra pass that was made and did not complete, with what happened."""
 
 
-_INSTRUCTION_CATEGORY = "suspicious_instruction"
-_TEB_CATEGORY = "peb_teb_access"
 _TEB_OPERAND = re.compile(r"\bFS:\[0x(?:30|18)\]", re.IGNORECASE)
-# x64's TEB is reached through GS: the PEB pointer at GS:[0x60], the TEB's
-# self pointer at GS:[0x30]. Ghidra's scan looks for FS only, so these are read
-# from an x64 file's code bytes (``gs_reads``), in the two forms a compiler
-# writes: ``mov r64, gs:[disp32]`` (GS prefix, REX.W with or without REX.R,
-# 8B, a ModRM of mod 00 and rm 100 with any register, SIB 25, the address) and
-# ``mov rax, gs:[moffs64]`` (GS prefix, REX.W, A1, the address in eight bytes).
-_AMD64_MACHINE = 0x8664
-_GS_READ = re.compile(
-    rb"\x65[\x48\x4c]\x8b[\x04\x0c\x14\x1c\x24\x2c\x34\x3c]\x25([\x30\x60])\x00\x00\x00"
-    rb"|\x65\x48\xa1([\x30\x60])\x00{7}",
-)
-
-# What each stated row is, for matching it to a capa rule (``scan_kind``): the
-# instruction's mnemonic, ``INT`` by its operand, and a TEB/PEB read by the
-# structure it reads (a PEB read through FS:[0x30] on x86 and GS:[0x60] on
-# x64, the TEB's self pointer through FS:[0x18] and GS:[0x30]).
-_PEB_OPERAND = re.compile(r"\b(?:FS:\[0x30\]|GS:\[0x60\])", re.IGNORECASE)
-_TEB_SELF_OPERAND = re.compile(r"\b(?:FS:\[0x18\]|GS:\[0x30\])", re.IGNORECASE)
-
-# Which stated rows a capa rule agrees with, by what capa itself says the rule
-# is: its namespace, and for a rule outside the anti-analysis namespaces its
-# name. Read off capa's own rules:
-#
-# * ``anti-analysis/anti-debugging/debugger-detection`` is where capa files
-#   ``execute anti-debugging instructions`` (two RDTSC, or ICEBP), ``check for
-#   software breakpoints`` (an INT3 compared for) and the PEB flag reads
-#   (``check for PEB BeingDebugged flag``, ``check for PEB NtGlobalFlag
-#   flag``, each a ``match: PEB access``): a debugger question.
-# * ``anti-analysis/anti-vm/vm-detection`` is the virtual machine question
-#   the scan's other instructions ask: a CPUID at the hypervisor leaf, and
-#   SIDT, SGDT, SLDT and STR, which read where a hypervisor moved the
-#   descriptor tables and the task register.
-# * The other anti-analysis namespaces capa uses (anti-av, debugger evasion,
-#   anti-disasm, anti-emulation, anti-forensic, anti-llm, obfuscation,
-#   packer) state something none of the scan's rows is: a stack string is not
-#   an SIDT.
-# * ``PEB access`` is a ``lib/`` rule with no namespace (an FS:[0x30] or
-#   GS:[0x60] read, or WoW64's FS access less 0x2000), and ``access PEB
-#   ldr_data`` (``linking/runtime-linking``) is a ``match: PEB access``: both
-#   say the function reads the PEB.
-#
-# A rule in ``anti-analysis`` with no sub-namespace, or in one this table does
-# not name, states no kind and agrees with every row in its function, as every
-# anti-analysis rule did before; a row whose kind the table does not name
-# agrees with every anti-analysis rule. A namespace is matched with its own
-# sub-namespaces (``anti-analysis/packer`` holds ``anti-analysis/packer/upx``).
-_DEBUGGER_KINDS = ("rdtsc", "int3", "int 0x2d", "peb", "teb")
-_VM_KINDS = ("cpuid", "sidt", "sgdt", "sldt", "str")
-CAPA_NAMESPACE_KINDS: dict[str, tuple[str, ...]] = {
-    "anti-analysis/anti-debugging/debugger-detection": _DEBUGGER_KINDS,
-    "anti-analysis/anti-vm/vm-detection": _VM_KINDS,
-    "anti-analysis/anti-av": (),
-    "anti-analysis/anti-debugging/debugger-evasion": (),
-    "anti-analysis/anti-disasm": (),
-    "anti-analysis/anti-emulation": (),
-    "anti-analysis/anti-forensic": (),
-    "anti-analysis/anti-llm": (),
-    "anti-analysis/obfuscation": (),
-    "anti-analysis/packer": (),
-}
-CAPA_RULE_KINDS: dict[str, tuple[str, ...]] = {
-    "PEB access": ("peb", "teb"),
-    "access PEB ldr_data": ("peb", "teb"),
-}
-# Every kind a stated row can have.
-SCAN_KINDS = frozenset(_DEBUGGER_KINDS + _VM_KINDS)
-
-
-def scan_kind(row: dict[str, Any]) -> str | None:
-    """What a stated row reads or runs, as ``CAPA_NAMESPACE_KINDS`` names it, or ``None``."""
-    what = str(row.get("what") or "").strip()
-    if str(row.get("category") or "") == _TEB_CATEGORY:
-        if _PEB_OPERAND.search(what):
-            return "peb"
-        return "teb" if _TEB_SELF_OPERAND.search(what) else None
-    words = what.upper().split(None, 1)
-    if not words:
-        return None
-    if words[0] in ("INT3", "INT"):
-        operand = _operand_value(words[1].split(None, 1)[0]) if len(words) > 1 else None
-        if words[0] == "INT3" or operand == 3:
-            return "int3"
-        return "int 0x2d" if operand == 0x2D else None
-    kind = words[0].lower()
-    return kind if kind in SCAN_KINDS else None
-
-
-def capa_rule_kinds(rule: str, namespace: str) -> frozenset[str] | None:
-    """The kinds of stated row a capa rule states, or ``None`` for a rule that states none."""
-    named = CAPA_RULE_KINDS.get(str(rule))
-    if named is not None:
-        return frozenset(named)
-    space = str(namespace or "")
-    for prefix, kinds in CAPA_NAMESPACE_KINDS.items():
-        if space == prefix or space.startswith(prefix + "/"):
-            return frozenset(kinds)
-    return None
-
-
-def capa_agrees(rule: str, namespace: str, row_kind: str | None) -> bool:
-    """Whether a capa rule in a row's function agrees with the row, of ``row_kind`` (``scan_kind``).
-
-    A rule outside the anti-analysis namespaces agrees only where
-    ``CAPA_RULE_KINDS`` names it and its kind; an anti-analysis rule that
-    states no kind agrees with every row, and one that states kinds with the
-    rows of those kinds and with a row of no kind.
-    """
-    anti = str(namespace or "").startswith("anti-analysis")
-    if not anti and str(rule) not in CAPA_RULE_KINDS:
-        return False
-    kinds = capa_rule_kinds(rule, namespace)
-    if kinds is None:
-        return True
-    if row_kind is None:
-        return anti
-    return row_kind in kinds
-
-
-# The CPUID leaves a hypervisor answers, and the bytes around a CPUID read.
-_HYPERVISOR_LEAVES = range(0x40000000, 0x40000100)
-_CLEAR_ECX = (b"\x31\xc9", b"\x33\xc9")
-# bt ecx, 31; test ecx, 0x80000000; and ecx, 0x80000000; test ecx, ecx then js.
-_ECX_BIT_31 = (
-    b"\x0f\xba\xe1\x1f",
-    b"\xf7\xc1\x00\x00\x00\x80",
-    b"\x81\xe1\x00\x00\x00\x80",
-    b"\x85\xc9\x78",
-    b"\x85\xc9\x0f\x88",
-)
-# How far past a CPUID the test of ECX's bit 31 is looked for.
-_BIT_TEST_WINDOW = 32
-# The first bytes of an instruction that writes ECX: mov ecx, imm32; mov or
-# xor or sub ecx with a register; pop rcx. A test after one reads another value.
-_WRITES_ECX = (
-    b"\xb9",
-    b"\x89\xc1",
-    b"\x89\xd1",
-    b"\x89\xd9",
-    b"\x89\xf1",
-    b"\x89\xf9",
-    b"\x31\xc9",
-    b"\x33\xc9",
-    b"\x29\xc9",
-    b"\x2b\xc9",
-    b"\x8b\xc8",
-    b"\x8b\xca",
-    b"\x8b\xcb",
-    b"\x8b\xce",
-    b"\x8b\xcf",
-    b"\x59",
-)
-
-
-def _operand_value(text: str) -> int | None:
-    try:
-        return int(text, 0)
-    except ValueError:
-        return None
 
 
 def _is_the_listed_instruction(technique: str, instruction: str) -> bool:
@@ -261,8 +116,8 @@ def _is_the_listed_instruction(technique: str, instruction: str) -> bool:
     found = instruction.strip().upper().split(None, 1)
     if not listed or not found:
         return False
-    listed_operand = _operand_value(listed[1]) if len(listed) > 1 else None
-    found_operand = _operand_value(found[1]) if len(found) > 1 else None
+    listed_operand = operand_value(listed[1]) if len(listed) > 1 else None
+    found_operand = operand_value(found[1]) if len(found) > 1 else None
     # ``INT3`` is the one-byte form of ``INT 3``.
     if found[0] == "INT3" and len(found) == 1:
         found, found_operand = ["INT"], 3
@@ -271,216 +126,6 @@ def _is_the_listed_instruction(technique: str, instruction: str) -> bool:
     if len(listed) > 1:
         return listed_operand is not None and listed_operand == found_operand
     return True
-
-
-class _Code:
-    """The file's bytes around an instruction Ghidra named, when the file is a PE image."""
-
-    def __init__(self, image: Any, function_starts: Iterable[int]) -> None:
-        self.image = image
-        starts = set(function_starts)
-        if image is not None:
-            starts.update(int(start) for start in image.function_starts)
-        self.starts = starts
-
-    def at(self, offset: str) -> int | None:
-        """The file offset of an offset from the image base, or ``None``."""
-        if self.image is None:
-            return None
-        try:
-            found = self.image.offset_of_rva(int(offset, 16))
-        except (TypeError, ValueError):
-            return None
-        return int(found) if found is not None else None
-
-    def byte(self, at: int) -> int | None:
-        data: bytes = self.image.data
-        return data[at] if 0 <= at < len(data) else None
-
-
-def _modrm_length(modrm: int, sib: int | None) -> int:
-    """The length of an ``FF /r`` instruction from its ModRM (and SIB) byte, opcode included."""
-    mod, rm = modrm >> 6, modrm & 7
-    if mod == 3:
-        return 2
-    length = 2
-    if rm == 4:
-        length += 1
-        if mod == 0 and sib is not None and sib & 7 == 5:
-            length += 4
-    elif mod == 0 and rm == 5:
-        length += 4
-    return length + {0: 0, 1: 1, 2: 4}[mod]
-
-
-# The ``FF /r`` forms that transfer control: /2 is a near call, /4 a near jump.
-_FF_TRANSFERS = frozenset({2, 4})
-
-
-def _ends_a_transfer(data: bytes, at: int) -> bool:
-    """Whether the bytes just before ``at`` are a whole near call, jump or return.
-
-    The encodings: ``E8 rel32`` (call), ``E9 rel32`` and ``EB rel8`` (jump),
-    ``C3`` and ``C2 imm16`` (return), and ``FF /2`` or ``FF /4`` in every
-    ModRM form (through a register, ``FF D0`` and with a REX prefix
-    ``41 FF D0``; through memory, ``FF 15 disp32`` and the rest), the length
-    read from the ModRM. A byte sequence that only looks like one makes the
-    check say yes, which leaves an ``INT3`` unstated rather than stated wrongly.
-    """
-    if at >= 5 and data[at - 5] in (0xE8, 0xE9):
-        return True
-    if at >= 2 and data[at - 2] == 0xEB:
-        return True
-    if at >= 1 and data[at - 1] == 0xC3:
-        return True
-    if at >= 3 and data[at - 3] == 0xC2:
-        return True
-    for length in range(2, 8):
-        begin = at - length
-        if begin < 0 or data[begin] != 0xFF:
-            continue
-        modrm = data[begin + 1]
-        if (modrm >> 3) & 7 not in _FF_TRANSFERS:
-            continue
-        sib = data[begin + 2] if begin + 2 < at else None
-        if _modrm_length(modrm, sib) == length:
-            return True
-    return False
-
-
-def _int3_is_a_trap(code: _Code, offset: str) -> bool:
-    """A one-byte ``INT3`` not in a run, not before a function, not right after a transfer.
-
-    Compilers put one ``int 3`` after a call that never returns, and pad with
-    one after a function's last return or jump, where nothing falls through.
-    """
-    at = code.at(offset)
-    if at is None or code.byte(at) != 0xCC:
-        return False
-    if code.byte(at - 1) == 0xCC or code.byte(at + 1) == 0xCC:
-        return False
-    if _ends_a_transfer(code.image.data, at):
-        return False
-    return int(offset, 16) + 1 not in code.starts
-
-
-# What a GS row says when the file's function table holds its address and no
-# decode from a function start there lands on it: the bytes may be the middle
-# of another instruction, or the table may be shaped to hide the read. The row
-# is kept and says so.
-GS_OFF_BOUNDARY = "not on an instruction boundary decoded from the function start"
-
-
-def _instruction_starts(code: bytes, at: int, starts: bytearray, limit: int) -> None:
-    """Mark the instruction starts a decode from ``at`` reaches, up to one already marked.
-
-    The decode runs on to ``limit`` (just past the section's last GS match,
-    after which no start is asked about) or the first byte it cannot read, so
-    a start marked earlier has every start after it on its own path marked
-    too, and stopping there loses nothing. Each byte is marked at most once, so
-    every decode of a section together reads it once: overlapping or nested
-    ranges decode no byte twice.
-    """
-    from maljan.tools.call_sites import decode
-
-    while 0 <= at < limit and not starts[at]:
-        starts[at] = 1
-        instruction = decode(code, at, True)
-        if instruction is None:
-            return
-        at += instruction.length
-
-
-def gs_reads(image: Any) -> list[dict[str, Any]]:
-    """The GS:[0x60] and GS:[0x30] reads in an AMD64 file's code bytes, as TEB/PEB rows.
-
-    Each is a ``peb_teb_access`` row as a Ghidra FS read is: its ``what`` the
-    operand and the bytes read (``GS:[0x60] read (65 48 8b 04 25 60 00 00
-    00)``) and its offset from the image base. Where the file's own function
-    table (``.pdata``) holds the address, the row carries the function that
-    range belongs to (``owner``), the function its agreement with capa is
-    asked about, and the range is decoded from its start
-    (``_instruction_starts``, one bitmap of starts per section, each byte
-    decoded once): a match no decode lands on is still a row, its ``what``
-    ending in ``GS_OFF_BOUNDARY``. Outside every range the byte match is read
-    and the row names no owner. The same file bytes mapped by two sections are
-    one row. No row for a file whose machine field is not AMD64, or for no
-    image.
-    """
-    if image is None or getattr(image, "machine", 0) != _AMD64_MACHINE:
-        return []
-    rows: list[dict[str, Any]] = []
-    seen: set[int] = set()
-    for section in image.code_sections():
-        code = image.section_bytes(section)
-        starts: bytearray | None = None
-        limit = 0
-        for match in _GS_READ.finditer(code):
-            limit = match.start() + 1
-        for match in _GS_READ.finditer(code):
-            raw = section.raw_offset + match.start()
-            if raw in seen:
-                continue
-            seen.add(raw)
-            rva = section.rva + match.start()
-            owner = image.function_at(rva)
-            bounds = image.function_bounds(rva) if owner is not None else None
-            on_a_boundary = True
-            if bounds is not None:
-                if starts is None:
-                    starts = bytearray(len(code))
-                _instruction_starts(code, bounds[0] - section.rva, starts, limit)
-                on_a_boundary = bool(starts[match.start()])
-            address = (match.group(1) or match.group(2))[0]
-            said = match.group().hex(" ")
-            what = f"GS:[{address:#x}] read ({said})"
-            row = {
-                "category": _TEB_CATEGORY,
-                "what": what if on_a_boundary else f"{what}, {GS_OFF_BOUNDARY}",
-                "offset": hex(rva),
-            }
-            if owner is not None:
-                row["owner"] = hex(owner)
-            rows.append(row)
-    return rows
-
-
-def _cpuid_leaf_said(code: _Code, offset: str) -> str:
-    """What the code around a CPUID shows it asks, when it shows the hypervisor question."""
-    at = code.at(offset)
-    if at is None:
-        return ""
-    data = code.image.data
-    if data[at : at + 2] != b"\x0f\xa2":
-        return ""
-    before = at
-    if data[before - 2 : before] in _CLEAR_ECX:
-        before -= 2
-    if before < 5 or data[before - 5] != 0xB8:
-        return ""
-    # A REX prefix makes ``B8`` a move into r8d, not eax.
-    if before >= 6 and 0x40 <= data[before - 6] <= 0x4F:
-        return ""
-    leaf = int.from_bytes(data[before - 4 : before], "little")
-    if leaf in _HYPERVISOR_LEAVES:
-        return f"CPUID (leaf {leaf:#x})"
-    if leaf == 1 and _tests_ecx_bit_31(data[at + 2 : at + 2 + _BIT_TEST_WINDOW]):
-        return "CPUID (leaf 1, then ECX bit 31 tested)"
-    return ""
-
-
-def _tests_ecx_bit_31(after: bytes) -> bool:
-    """Whether ``after`` tests ECX's bit 31 before anything listed writes ECX.
-
-    The window is cut at the first place an ECX write's bytes begin, so a test
-    that may read another value is not taken. The cut is by byte pattern, and
-    errs toward stating nothing.
-    """
-    tests = [i for p in _ECX_BIT_31 if (i := after.find(p)) >= 0]
-    if not tests:
-        return False
-    writes = [i for p in _WRITES_ECX if (i := after.find(p)) >= 0]
-    return min(tests) < min(writes, default=len(after))
 
 
 def read_findings(
@@ -504,7 +149,7 @@ def read_findings(
     runtime reads the PEB too (the UCRT's exit path reads ``NtGlobalFlag``),
     and capa leaves the library functions it recognises out.
     """
-    code = _Code(image, function_starts)
+    code = Code(image, function_starts)
     stated: list[dict[str, Any]] = []
     beside_capa: list[dict[str, Any]] = []
     stated_keys: set[tuple[str, str]] = set()
@@ -518,16 +163,16 @@ def read_findings(
         where = str(row.get("offset") or row.get("address") or "")
         key = (where, instruction.upper() if instruction else f"call {technique}")
         what = ""
-        if category == _INSTRUCTION_CATEGORY:
+        if category == INSTRUCTION_CATEGORY:
             if _is_the_listed_instruction(technique, instruction):
                 mnemonic = instruction.upper().split(None, 1)[0]
                 if mnemonic == "INT3":
-                    what = instruction if _int3_is_a_trap(code, where) else ""
+                    what = instruction if int3_is_a_trap(code, where) else ""
                 elif mnemonic == "CPUID":
-                    what = _cpuid_leaf_said(code, where)
+                    what = cpuid_leaf_said(code, where)
                 else:
                     what = instruction
-        elif category == _TEB_CATEGORY:
+        elif category == TEB_CATEGORY:
             if _TEB_OPERAND.search(instruction):
                 what = instruction
         if not what:
@@ -539,7 +184,7 @@ def read_findings(
         fact = {"category": category, "what": what, "offset": where}
         if row.get("function"):
             fact["function"] = str(row["function"])
-        (beside_capa if category == _TEB_CATEGORY else stated).append(fact)
+        (beside_capa if category == TEB_CATEGORY else stated).append(fact)
     for fact in gs_reads(image):
         key = (fact["offset"], fact["what"])
         if key not in stated_keys:
@@ -578,6 +223,10 @@ class GhidraPasses:
     # Given by every caller: a pass noting under a name of its own would miss
     # the job's note.
     note_key: str = field(kw_only=True)
+    # The id of the provider that scans (``GhidraStaticProvider.id``), which its
+    # answer names as its server, and the formats the scan reads.
+    provider: str = field(default="ghidra", kw_only=True)
+    formats: frozenset[str] = field(default=GHIDRA_FORMATS, kw_only=True)
     _http: Any = field(default=None, init=False, repr=False)
     _program: str = field(default="", init=False)
     _image_base: int | None = field(default=None, init=False)
@@ -648,12 +297,12 @@ class GhidraPasses:
         With none declared, it is loaded, made current and analysed here, as
         this pass always did.
         """
-        from maljan.analysis.ghidra_program import (
+        from maljan.providers.sample_open import SampleNotes, SampleOpener, declared
+        from maljan.providers.static.ghidra.program import (
             SWITCH_PARAM,
             SWITCH_PATH,
             program_name_from_load,
         )
-        from maljan.providers.sample_open import SampleNotes, SampleOpener, declared
 
         def call(tool: str, arguments: dict[str, Any]) -> str:
             try:
@@ -710,7 +359,7 @@ class GhidraPasses:
         return answer
 
     def _open(self) -> None:
-        from maljan.analysis.ghidra_program import program_name_from_load
+        from maljan.providers.static.ghidra.program import program_name_from_load
         from maljan.tools.errors import error_parts
 
         answer = self._open_sample()
@@ -772,7 +421,7 @@ class GhidraPasses:
             findings.append(finding)
         return {
             "tool": ANTI_ANALYSIS_TOOL,
-            "server": "ghidra",
+            "server": self.provider,
             "program": program,
             "image_base": hex(self._image_base or 0),
             "checks": SCAN_CHECKS,
@@ -780,7 +429,7 @@ class GhidraPasses:
             "total_findings": int(answer.get("total_findings") or len(findings)),
             "returned": len(findings),
             "notes": notes,
-            **read_findings(findings, _image_of(host_path), _starts(function_starts)),
+            **read_findings(findings, image_of(host_path), starts_of(function_starts)),
             "findings": findings,
         }
 
@@ -794,37 +443,6 @@ class GhidraPasses:
         return value - base if value >= base else None
 
 
-def _image_of(path: str) -> Any:
-    """The PE image at ``path`` as ``tools.pe_image`` maps it, or ``None``."""
-    if not path:
-        return None
-    from maljan.tools import pe_image
-
-    try:
-        return pe_image.load(path)
-    except (OSError, ValueError):
-        return None
-
-
-def _starts(values: Sequence[Any]) -> list[int]:
-    starts: list[int] = []
-    for value in values:
-        try:
-            starts.append(int(str(value), 16))
-        except ValueError:
-            continue
-    return starts
-
-
 def _raise_on_error(answer: Any, what: str) -> None:
     if isinstance(answer, dict) and answer.get("error"):
         raise GhidraPassFailed(f"Ghidra refused {what}: {str(answer['error'])[:300]}")
-
-
-def run_pass(call: Callable[[], dict[str, Any]], what: str) -> dict[str, Any]:
-    """``call()``, logging a failure before it is handed on."""
-    try:
-        return call()
-    except GhidraPassFailed as failure:
-        logger.warning("Ghidra pass %s did not complete: %s", what, failure)
-        raise

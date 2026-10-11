@@ -23,6 +23,9 @@ _STATIC_REGISTRY: dict[str, type] = {}
 _SANDBOX_REGISTRY: dict[str, type] = {}
 _LOCK = threading.RLock()
 _DISCOVERY_DONE = False
+# Bumped by every registration, so a reading of the registry can be kept until it changes.
+_VERSION = [0]
+_NAMES_HELD: list[object] = [None, frozenset()]
 
 
 def register_static_provider(name: str):  # type: ignore[no-untyped-def]
@@ -32,6 +35,7 @@ def register_static_provider(name: str):  # type: ignore[no-untyped-def]
                 logger.debug("Static provider '%s' re-registered (overwriting).", name)
             cls.id = name  # type: ignore[attr-defined]
             _STATIC_REGISTRY[name] = cls
+            _VERSION[0] += 1
         return cls
 
     return decorator
@@ -44,6 +48,7 @@ def register_sandbox_provider(name: str):  # type: ignore[no-untyped-def]
                 logger.debug("Sandbox provider '%s' re-registered (overwriting).", name)
             cls.id = name  # type: ignore[attr-defined]
             _SANDBOX_REGISTRY[name] = cls
+            _VERSION[0] += 1
         return cls
 
     return decorator
@@ -62,11 +67,9 @@ def discover_providers() -> None:
         import maljan.providers.sandbox.rest  # noqa: F401
         import maljan.providers.sandbox.triage  # noqa: F401
         import maljan.providers.sandbox.upload  # noqa: F401
-        import maljan.providers.static.capa_yara  # noqa: F401
-        import maljan.providers.static.generic_mcp  # noqa: F401
-        import maljan.providers.static.ghidra  # noqa: F401
-        import maljan.providers.static.null  # noqa: F401
-        import maljan.providers.static.r2  # noqa: F401
+        from maljan.providers.static import import_built_ins
+
+        import_built_ins()
 
         _DISCOVERY_DONE = True
 
@@ -89,6 +92,38 @@ def _build(registry: dict[str, type], name: str, cfg: Any, kind: str) -> Any:
             f"Unknown {kind} provider: {name!r}. Available: {available}"
         )
     return cls.from_settings(cfg)  # type: ignore[attr-defined]
+
+
+def forget_static_provider(name: str) -> None:
+    """Take the static provider registered as ``name`` out of the registry (a runtime one)."""
+    with _LOCK:
+        if _STATIC_REGISTRY.pop(name, None) is not None:
+            _VERSION[0] += 1
+
+
+def registered_variable_names() -> frozenset[str]:
+    """The non-secret variable names the providers registered so far declare (``variable_names``).
+
+    Read from the registered classes only, without importing the built-ins:
+    those declare theirs in the shipped declarations.
+    """
+    with _LOCK:
+        version = _VERSION[0]
+        if _NAMES_HELD[0] == version:
+            return _NAMES_HELD[1]  # type: ignore[return-value]
+        classes = list(_STATIC_REGISTRY.values()) + list(_SANDBOX_REGISTRY.values())
+        names: set[str] = set()
+        for cls in classes:
+            names.update(str(name) for name in getattr(cls, "variable_names", ()) or ())
+        held = frozenset(names)
+        _NAMES_HELD[0], _NAMES_HELD[1] = version, held
+        return held
+
+
+def registered_static_provider(name: str) -> type[StaticProvider] | None:
+    """The static provider class registered as ``name``, or ``None`` for no such one."""
+    discover_providers()
+    return _STATIC_REGISTRY.get(str(name or ""))  # type: ignore[return-value]
 
 
 def static_provider_class(name: str) -> type[StaticProvider]:

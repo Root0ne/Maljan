@@ -47,13 +47,14 @@ addresses where it stands and the functions around them.
 
 After them, the deobfuscation passes, last for the same reason. The
 platform's scan of an executable's bytes for the published constants of
-ciphers, hash functions and checksums (``maljan.tools.crypto_constants``;
-Ghidra's ``detect_crypto_constants`` answers "not yet implemented"), then
-Ghidra's anti-analysis scan over the sample (``maljan.analysis.ghidra_passes``),
-of which only the exact part is stated. The node hands the pack the Ghidra it
-may call, or the sentence saying why there is none; a pass that cannot run is
-one entry saying ``no:`` and why, and is not a failure. A call directly to
-``run_pack`` with no Ghidra handed over makes no Ghidra entry.
+ciphers, hash functions and checksums (``maljan.tools.crypto_constants``),
+then a static provider's anti-analysis scan over the sample
+(``maljan.analysis.anti_analysis``), of which only the exact part is stated.
+The node hands the pack the scan the run's static provider offers
+(``StaticProvider.anti_analysis_scan``), or the sentence saying why it cannot
+scan; a pass that cannot run is one entry saying ``no:`` and why, and is not a
+failure. With no provider offering a scan, and in a call directly to
+``run_pack`` with none handed over, there is no anti-analysis entry.
 
 Last of all, for a PE, the function index (``maljan.tools.function_index``):
 every function the run knows, from the file's own tables, capa's starts and
@@ -98,12 +99,14 @@ from typing import Any, cast
 
 from maljan.agents.evidence_recorder import EvidenceRecorder, result_text
 from maljan.analysis import sandbox_sections
-from maljan.analysis.ghidra_passes import (
-    ANTI_ANALYSIS_TOOL,
-    CAPA_RULE_KINDS,
-    GHIDRA_FORMATS,
-    GhidraPasses,
-    capa_agrees,
+from maljan.analysis.anti_analysis import (
+    PASS_FAILED_PREFIX,
+    RULE_KIND,
+    SCAN_KIND,
+    SCAN_TOOL,
+    AntiAnalysisScan,
+    may_agree,
+    rule_agrees,
     run_pass,
     scan_kind,
 )
@@ -515,13 +518,13 @@ class _Pack:
         *,
         reputation: ReputationLookup | None,
         function_matches: FunctionMatches | None,
-        ghidra: GhidraPasses | None = None,
+        anti_analysis: AntiAnalysisScan | None = None,
     ) -> None:
         self.recorder = recorder
         self.inputs = inputs
         self.reputation = reputation
         self.function_matches = function_matches
-        self.ghidra = ghidra
+        self.anti_analysis = anti_analysis
         self.result = PackResult()
         self.started = time.monotonic()
         self.steps_run = 0
@@ -531,9 +534,6 @@ class _Pack:
         # Where capa found functions, for the readers of an image with no
         # function table of its own.
         self.capa_function_starts: list[str] = []
-        # capa's rules as it answered them, which the constant scan's answer
-        # is compared with; empty when capa gave no answer.
-        self.capa_rows: list[dict[str, Any]] = []
         self.reputation_malicious: int | None = None
         # FLOSS, started beside the rest of the pack when it can be. Recorded
         # in its own place at the end, so every id keeps its value.
@@ -683,15 +683,15 @@ class _Pack:
             self._decoded_strings(routed)
             self._resolved_values(routed, format_facts)
             self._crypto_constants(routed)
-            self._ghidra_passes(routed)
+            self._anti_analysis_pass(routed)
             self._function_index(routed)
             self._unpacked_upx(routed, format_facts)
             self._sandbox_sections()
         finally:
             if self._floss_pool is not None:
                 self._floss_pool.shutdown(wait=False)
-            if self.ghidra is not None:
-                self.ghidra.close()
+            if self.anti_analysis is not None:
+                self.anti_analysis.close()
 
         # The recorder holds every entry in the order the ids were issued,
         # the reputation call's included, so it is the one list to publish.
@@ -757,9 +757,6 @@ class _Pack:
         if found is not None:
             self.capa_hits = len(found.get("capabilities") or [])
             self.capa_function_starts = list(found.get("function_starts") or [])
-            self.capa_rows = [
-                row for row in found.get("capabilities") or [] if isinstance(row, dict)
-            ]
         report = observed_report(self.inputs.sandbox_report)
         if report:
             self.record(
@@ -1099,7 +1096,8 @@ class _Pack:
         """The platform's scan of an executable for published constants, read from its bytes.
 
         Given capa's function starts, as the other readings of the bytes are,
-        and compared with capa's own rules afterwards (``_with_capa``).
+        and compared with the rules of the answers of declared kind ``capability_rules``
+        afterwards (``_with_capa``, ``_rule_rows``).
         """
         if routed not in CONSTANT_FORMATS:
             return
@@ -1108,7 +1106,7 @@ class _Pack:
         args: dict[str, Any] = {"path": path}
         if starts:
             args["function_starts"] = f"capa's {len(starts)} function starts"
-        rows = self.capa_rows
+        rows = _rule_rows(self.recorder.entries)
         self.record(
             crypto_constants.TOOL,
             args,
@@ -1117,28 +1115,31 @@ class _Pack:
             ),
         )
 
-    def _ghidra_passes(self, routed: str) -> None:
-        """Ghidra's anti-analysis scan, or the one entry saying why there is none.
+    def _anti_analysis_pass(self, routed: str) -> None:
+        """The static provider's anti-analysis scan, or the one entry saying why there is none.
 
-        Only with a Ghidra handed over by the caller. A reason that holds for
-        the whole deployment is one entry; a scan Ghidra did not complete is a
-        failed entry with Ghidra's words.
+        Only with a scan handed over by the caller, and for a format the scan
+        reads. A reason that holds for the whole deployment is one entry; a
+        scan that did not complete is a failed entry with the scanner's words.
+        Each entry's arguments name the provider that scans, which its line
+        names. A stated match is compared with the rules of every answer of
+        declared kind ``capability_rules`` the pack recorded before it.
         """
-        passes = self.ghidra
-        if passes is None or routed not in GHIDRA_FORMATS:
+        scan = self.anti_analysis
+        if scan is None or routed not in scan.formats:
             return
-        args = {"program": passes.sample_path or "the job's sample"}
-        if passes.unavailable:
-            self._record_absent(ANTI_ANALYSIS_TOOL, args, passes.unavailable)
+        args = {"program": scan.sample_path or "the job's sample", "provider": scan.provider}
+        if scan.unavailable:
+            self._record_absent(SCAN_TOOL, args, scan.unavailable)
             return
         path = self.inputs.sample_path
         starts = list(self.capa_function_starts)
-        rows = self.capa_rows
+        rows = _rule_rows(self.recorder.entries)
         self.record(
-            ANTI_ANALYSIS_TOOL,
+            SCAN_TOOL,
             args,
             lambda: _anti_analysis_with_capa(
-                run_pass(lambda: passes.anti_analysis(path, starts), ANTI_ANALYSIS_TOOL),
+                run_pass(lambda: scan.anti_analysis(path, starts), SCAN_TOOL),
                 rows,
                 starts,
             ),
@@ -1361,7 +1362,7 @@ def run_pack(
     *,
     reputation: ReputationLookup | None = None,
     function_matches: FunctionMatches | None = None,
-    ghidra: GhidraPasses | None = None,
+    anti_analysis: AntiAnalysisScan | None = None,
 ) -> PackResult:
     """Run the whole pack over ``inputs``, recording every step on ``recorder``.
 
@@ -1374,7 +1375,7 @@ def run_pack(
         inputs,
         reputation=reputation,
         function_matches=function_matches,
-        ghidra=ghidra,
+        anti_analysis=anti_analysis,
     ).run()
     budget = int(inputs.evidence_budget_bytes or 0)
     trimmed, _ = apply_budget(budgeted_entries(result.entries), budget)
@@ -1844,7 +1845,7 @@ def _novel_view(entry: LedgerEntry) -> LedgerEntry | None:
         if not new:
             return None
         view = {**data, "found": new, "agreeing": len(rows) - len(new)}
-    elif entry.tool == ANTI_ANALYSIS_TOOL:
+    elif entry.tool == SCAN_TOOL:
         rows = [r for r in data.get("stated") or [] if isinstance(r, dict)]
         new = [r for r in rows if not r.get("capa")]
         if not new:
@@ -1985,7 +1986,7 @@ def _within_room(entry: LedgerEntry, room: int) -> str | None:
     shorter = _SHORTER_RENDERERS.get(entry.tool)
     if shorter is None or not entry.ok or not isinstance(entry.structured, dict):
         return None
-    head = f"[{entry.id}] {_GROUP_LABELS.get(entry.tool, entry.tool)}: "
+    head = f"[{entry.id}] {_label_of(entry)}: "
     try:
         body = shorter(entry.structured, room - len(head))
     except Exception:  # noqa: BLE001 — a renderer must never cost the block
@@ -2006,15 +2007,15 @@ def _pack_line(entry: LedgerEntry) -> str:
     # A reputation lookup, from whichever server answered, reads as the pack's
     # reputation step: answered, failed or not made.
     lookup = is_lookup_entry(entry)
-    label = REPUTATION_STEP if lookup else _GROUP_LABELS.get(entry.tool, entry.tool)
+    label = REPUTATION_STEP if lookup else _label_of(entry)
     if not entry.ok and entry.tool in PASS_TOOLS:
         # A deobfuscation pass that did not run, or ran and broke, is one
         # ``no:`` line with the reason, as a pass that found nothing is.
         said = str(entry.error or entry.output or "")
         if _was_not_made(entry):
             return f"[{entry.id}] {label}: no: {_short(said[len(NOT_RUN_PREFIX) :].strip())}"
-        # The failure is Ghidra's own words; the class they travelled in is not.
-        said = said.removeprefix("GhidraPassFailed: ")
+        # The failure is the scanner's own words; the class they travelled in is not.
+        said = PASS_FAILED_PREFIX.sub("", said, count=1)
         return f"[{entry.id}] {label}: no: the pass failed: {_short(said)}"
     if not entry.ok:
         # A call the pipeline did not make — a lookup with no server to ask,
@@ -2862,14 +2863,11 @@ def _decoded_blobs(data: dict[str, Any], max_chars: int | None = None) -> str:
 # The deobfuscation passes' lines
 # ---------------------------------------------------------------------------
 
-PASS_TOOLS = frozenset({crypto_constants.TOOL, ANTI_ANALYSIS_TOOL, upx.TOOL})
+PASS_TOOLS = frozenset({crypto_constants.TOOL, SCAN_TOOL, upx.TOOL})
 
 # What a pass line says when the room cut its list: how many it shows, and
 # where the rest are.
 PASS_ROOM_SENTENCE = "{shown} of {total} shown; the rest are in this entry's full output"
-
-# What Ghidra's scan looks at, as the pack line says it.
-SCAN_CHECKS_SHORT = "listed API calls, listed x86 instructions, FS:[0x30] and FS:[0x18]"
 
 
 def _with_capa(answer: dict[str, Any], capa_rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -2911,18 +2909,47 @@ def _with_capa(answer: dict[str, Any], capa_rows: list[dict[str, Any]]) -> dict[
     return marked
 
 
+def _rule_rows(entries: Iterable[LedgerEntry]) -> list[dict[str, Any]]:
+    """Every rule row of the ok answers of declared kind ``capability_rules``, in order.
+
+    Read through each answer's declared rows (``ToolFacts.row_values``): its
+    ``rule``, its ``namespace`` and the ``addresses`` it matched at.
+    """
+    rows: list[dict[str, Any]] = []
+    for entry in entries:
+        if not entry.ok or kind_of(entry) != RULE_KIND:
+            continue
+        facts = facts_of(entry)
+        data = entry.structured
+        if facts is None or not isinstance(data, dict):
+            continue
+        for read in facts.row_values(data):
+            addresses = read.get("addresses") or []
+            first = addresses[0] if addresses else []
+            rows.append(
+                {
+                    "rule": str((read.get("rule") or [""])[0] or ""),
+                    "namespace": str((read.get("namespace") or [""])[0] or ""),
+                    "addresses": list(first) if isinstance(first, list) else list(addresses),
+                }
+            )
+    return rows
+
+
 def _anti_analysis_with_capa(
     answer: dict[str, Any], capa_rows: list[dict[str, Any]], starts: list[str]
 ) -> dict[str, Any]:
-    """The anti-analysis answer, each match marked where a capa rule agrees.
+    """The anti-analysis answer, each match marked where a capability rule agrees.
 
-    A match agrees with capa when a capa rule that states the match's kind
-    matched in the same function (``ghidra_passes.capa_agrees``: an
-    anti-analysis rule of the row's kind or of no kind, or ``PEB access`` for
-    a TEB/PEB read): the nearest capa function start at or before the match
-    is the nearest one at or before a capa address. An exact TEB/PEB read
-    (``beside_capa``) is stated only with such a rule in its function;
-    without one it is counted.
+    ``capa_rows`` are the rule rows of the pack's answers of declared kind
+    ``capability_rules`` (``_rule_rows``). A match agrees with a rule when the
+    rule states the match's kind and matched in the same function
+    (``anti_analysis.rule_agrees``: an anti-analysis rule of the row's kind or
+    of no kind, or ``PEB access`` for a TEB/PEB read): the nearest function
+    start at or before the match is the nearest one at or before a rule
+    address. An exact TEB/PEB read (``beside_capa``) is stated only with such
+    a rule in its function; without one it is counted. The mark keeps the
+    field name ``capa`` it has always been stored under.
     """
     if not isinstance(answer, dict) or ("stated" not in answer and "beside_capa" not in answer):
         return answer
@@ -2943,7 +2970,7 @@ def _anti_analysis_with_capa(
     for capa in capa_rows:
         rule = str(capa.get("rule") or "")
         namespace = str(capa.get("namespace") or "")
-        if not (namespace.startswith("anti-analysis") or rule in CAPA_RULE_KINDS):
+        if not may_agree(rule, namespace):
             continue
         for address in capa.get("addresses") or []:
             begin = start_of(str(address))
@@ -2953,7 +2980,7 @@ def _anti_analysis_with_capa(
             by_start.setdefault(begin, []).append((rule, namespace, said))
 
     def agreeing(row: dict[str, Any]) -> list[dict[str, str]]:
-        # A row the file's own function table placed (``ghidra_passes.gs_reads``)
+        # A row the file's own function table placed (``anti_analysis.gs_reads``)
         # is asked about that function; any other by the nearest capa start.
         owner = row.get("owner")
         begin = int(str(owner), 16) if owner else start_of(str(row.get("offset") or ""))
@@ -2961,7 +2988,7 @@ def _anti_analysis_with_capa(
             return []
         kind = scan_kind(row)
         return [
-            said for rule, space, said in by_start.get(begin, ()) if capa_agrees(rule, space, kind)
+            said for rule, space, said in by_start.get(begin, ()) if rule_agrees(rule, space, kind)
         ]
 
     marked = dict(answer)
@@ -3078,14 +3105,37 @@ def _anti_analysis_item(group: tuple[tuple[str, str], list[dict[str, Any]]]) -> 
     return f"{category}: {what} @ {said}{agrees}"
 
 
+# What an anti-analysis answer that names no provider calls the one that scanned.
+UNNAMED_SCANNER = "the static provider"
+
+
+def _scanner(provider: str) -> tuple[str, str]:
+    """The display name of the provider registered as ``provider``, and its scan's checks in short.
+
+    Read from the provider's own declaration (``StaticProvider.display_name``,
+    ``scan_checks_short``); a provider no longer registered is named by its id.
+    """
+    from maljan.providers.registry import registered_static_provider
+
+    cls = registered_static_provider(provider) if provider else None
+    if cls is None:
+        return provider or UNNAMED_SCANNER, ""
+    return cls.display_name(), cls.scan_checks_short
+
+
 def _anti_analysis(data: dict[str, Any], max_chars: int | None = None) -> str:
-    """The exact part of Ghidra's scan, each match once with its places; a ``no:`` without."""
+    """The exact part of a provider's scan, each match once with its places; a ``no:`` without.
+
+    The answer names the provider that scanned (its ``server``), which the
+    line names by its display name.
+    """
     rows = [r for r in (data.get("stated") or []) if isinstance(r, dict)]
     # A TEB/PEB read no capa comparison has stated yet is counted.
     not_stated = int(data.get("not_stated") or 0) + len(data.get("beside_capa") or [])
     total = int(data.get("total_findings") or 0)
     returned = int(data.get("returned") or total)
-    checks = f"Ghidra's scan ({SCAN_CHECKS_SHORT})"
+    name, short = _scanner(str(data.get("server") or ""))
+    checks = f"{name}'s scan ({short})" if short else f"{name}'s scan"
     rest = (
         f"; {_n(not_stated)} more of its matches are not stated (an API call, which the capa and "
         "catalogue lines read, or not the listed instruction or operand)"
@@ -3093,7 +3143,7 @@ def _anti_analysis(data: dict[str, Any], max_chars: int | None = None) -> str:
         else ""
     )
     cut = (
-        f"; Ghidra returned {_n(returned)} of its {_n(total)} matches, in its own order"
+        f"; {name} returned {_n(returned)} of its {_n(total)} matches, in its own order"
         if returned < total
         else ""
     )
@@ -3112,7 +3162,7 @@ def _anti_analysis(data: dict[str, Any], max_chars: int | None = None) -> str:
         else ""
     )
     head = (
-        f"{checks} matched, each as Ghidra's category: what @ offsets (in function)"
+        f"{checks} matched, each as {name}'s category: what @ offsets (in function)"
         f"{also_said}{rest}{cut}"
     )
 
@@ -3288,10 +3338,26 @@ _GROUP_LABELS: dict[str, str] = {
     "resolve_api_hashes": "resolved hashes",
     "decode_string_blobs": "decoded blobs",
     crypto_constants.TOOL: "crypto constants",
-    ANTI_ANALYSIS_TOOL: "anti-analysis (Ghidra)",
+    SCAN_TOOL: "anti-analysis",
     artefact_index.TOOL: "function index",
     upx.TOOL: "UPX unpacking",
 }
+
+
+def _label_of(entry: LedgerEntry) -> str:
+    """What the pack's line calls an entry's step.
+
+    The anti-analysis pass names the provider that scans by its display name:
+    the provider its arguments name, else the server its answer names.
+    """
+    label = _GROUP_LABELS.get(entry.tool, entry.tool)
+    if kind_of(entry) != SCAN_KIND:
+        return label
+    args = entry.args if isinstance(entry.args, dict) else {}
+    data = entry.structured if isinstance(entry.structured, dict) else {}
+    provider = str(args.get("provider") or data.get("server") or "")
+    return f"{label} ({_scanner(provider)[0]})" if provider else label
+
 
 _RENDERERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "identify_file": _identity,
@@ -3323,7 +3389,7 @@ _RENDERERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "resolve_api_hashes": _resolved_hashes,
     "decode_string_blobs": _decoded_blobs,
     crypto_constants.TOOL: _constant_sets,
-    ANTI_ANALYSIS_TOOL: _anti_analysis,
+    SCAN_TOOL: _anti_analysis,
     upx.TOOL: _unpacked,
 }
 
@@ -3336,6 +3402,6 @@ _SHORTER_RENDERERS: dict[str, Callable[[dict[str, Any], int], str]] = {
     "resolve_api_hashes": lambda data, room: _resolved_hashes(data, max_chars=room),
     "decode_string_blobs": lambda data, room: _decoded_blobs(data, max_chars=room),
     crypto_constants.TOOL: lambda data, room: _constant_sets(data, max_chars=room),
-    ANTI_ANALYSIS_TOOL: lambda data, room: _anti_analysis(data, max_chars=room),
+    SCAN_TOOL: lambda data, room: _anti_analysis(data, max_chars=room),
     upx.TOOL: lambda data, room: _unpacked(data, max_chars=room),
 }

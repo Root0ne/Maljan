@@ -68,7 +68,7 @@ class TestBothToolPathsCutAtTheDerivedNumber:
 
     @staticmethod
     def _ghidra(budget: Any, configured: int = 0) -> Any:
-        from maljan.agents.ghidra_http_client import GhidraHTTPClient
+        from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
 
         client = GhidraHTTPClient.__new__(GhidraHTTPClient)
         client._max_output_chars = configured
@@ -148,7 +148,7 @@ class TestAConversationWithNoRoomLeft:
         assert not said.startswith("{"), "no fragment of the answer was handed over"
 
     def test_the_ghidra_path_says_the_same_thing(self) -> None:
-        from maljan.agents.ghidra_http_client import GhidraHTTPClient
+        from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
 
         client = GhidraHTTPClient.__new__(GhidraHTTPClient)
         client._max_output_chars = 0

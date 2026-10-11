@@ -2,10 +2,10 @@
 
 Two passes come after every step the pack had before them, so each earlier id
 is the id it was: the platform's scan for published constants of ciphers,
-hash functions and checksums (``find_crypto_constants``) and Ghidra's
-anti-analysis scan. A pass that cannot run is one entry that says ``no:`` and
-why, never a missing line, and a pass that runs and finds nothing says so in
-one line. Their lines take room from no earlier line at any budget.
+hash functions and checksums (``find_crypto_constants``) and the static
+provider's anti-analysis scan, here Ghidra's. A pass that cannot run is one
+entry that says ``no:`` and why, never a missing line, and a pass that runs and
+finds nothing says so in one line. Their lines take room from no earlier line at any budget.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ import httpx
 import pytest
 
 from maljan.agents.evidence_recorder import EvidenceRecorder
-from maljan.analysis.ghidra_passes import ANTI_ANALYSIS_TOOL, GhidraPasses
+from maljan.analysis.anti_analysis import SCAN_TOOL as ANTI_ANALYSIS_TOOL
 from maljan.pipeline import triage_pack
 from maljan.pipeline.triage_pack import (
     PIPELINE,
@@ -31,6 +31,7 @@ from maljan.pipeline.triage_pack import (
     render_pack,
     run_pack,
 )
+from maljan.providers.static.ghidra.passes import GhidraPasses
 from maljan.schemas.evidence import EvidenceCounter, build_entry, format_entry_id
 from maljan.tools import crypto_constants, rules
 
@@ -89,7 +90,7 @@ def _pack(path: str, file_type: str = "pe", ghidra: GhidraPasses | None = None) 
         strings_head=10,
         capa=CapaSettings(rules_dir="", signatures_dir="", timeout_s=1),
     )
-    return run_pack(recorder, inputs, ghidra=ghidra)
+    return run_pack(recorder, inputs, anti_analysis=ghidra)
 
 
 def _fake_passes(fake: FakeGhidra) -> GhidraPasses:
@@ -174,6 +175,7 @@ class TestGhidraUnavailable:
         ghidra = [e for e in result.entries if e.tool == ANTI_ANALYSIS_TOOL]
         assert len(ghidra) == 1 and ghidra[0].ok is False
         assert ghidra[0].error == "not run: Ghidra is switched off (core.static.ghidra.enabled)"
+        assert ghidra[0].args["provider"] == "ghidra"
         assert _line(result, ANTI_ANALYSIS_TOOL).endswith(
             "anti-analysis (Ghidra): no: Ghidra is switched off (core.static.ghidra.enabled)"
         )
@@ -247,6 +249,7 @@ class TestGhidraAnswers:
     def test_a_runtime_s_peb_read_with_no_capa_rule_is_counted_not_stated(self) -> None:
         """The 32-bit UCRT's exit path reads NtGlobalFlag: 64 a1 30 00 00 00 / 8b 40 68."""
         answer = {
+            "server": "ghidra",
             "stated": [],
             "not_stated": 0,
             "beside_capa": [
@@ -611,26 +614,31 @@ class TestTheNodeRecordsWhatThePackLacks:
         assert "pack_left_out" not in update["triage_facts"]
 
 
-class TestTheNodeSaysWhichGhidra:
-    def _step(self, state: dict[str, Any], **ghidra: Any) -> GhidraPasses:
+class TestTheNodeAsksTheRunsStaticProviders:
+    def _step(
+        self, state: dict[str, Any], provider: str = "ghidra", **ghidra: Any
+    ) -> GhidraPasses | None:
         from maljan.core.config import Settings
         from maljan.core.container import ServiceContainer
-        from maljan.pipeline.nodes import _ghidra_passes_step
+        from maljan.pipeline.nodes import _anti_analysis_step
 
-        settings = Settings(_env_file=None, static={"ghidra": ghidra})
+        settings = Settings(_env_file=None, static={"provider": provider, "ghidra": ghidra})
         container = ServiceContainer(settings, mock=True)
-        return _ghidra_passes_step(container, state)  # type: ignore[arg-type]
+        return _anti_analysis_step(container, state)  # type: ignore[arg-type]
 
     def test_switched_off(self) -> None:
         passes = self._step({}, enabled=False)
+        assert passes is not None
         assert passes.unavailable == "Ghidra is switched off (core.static.ghidra.enabled)"
 
     def test_over_stdio(self) -> None:
         passes = self._step({}, enabled=True, transport="stdio")
+        assert passes is not None
         assert passes.unavailable.startswith("Ghidra is reached over stdio")
 
     def test_with_no_copy_of_the_sample_for_it(self) -> None:
         passes = self._step({}, enabled=True, transport="http", url="http://ghidra.invalid:8089")
+        assert passes is not None
         assert "no copy of the sample" in passes.unavailable
 
     def test_reachable_with_its_copy(self) -> None:
@@ -640,6 +648,28 @@ class TestTheNodeSaysWhichGhidra:
             transport="http",
             url="http://ghidra.invalid:8089",
         )
+        assert passes is not None
         assert passes.unavailable == ""
         assert passes.sample_path == "/data/samples/.work/s.exe"
         assert passes.base_url == "http://ghidra.invalid:8089"
+        assert passes.provider == "ghidra"
+
+    def test_ghidra_in_the_profile_scans_when_another_provider_is_configured(self) -> None:
+        passes = self._step(
+            {"static_sample_paths": {"ghidra": "/data/samples/.work/s.exe"}},
+            provider="r2",
+            enabled=True,
+            transport="http",
+            url="http://ghidra.invalid:8089",
+        )
+        assert passes is not None and passes.sample_path == "/data/samples/.work/s.exe"
+
+    @pytest.mark.parametrize("provider", ["r2", "none", "capa_yara", "generic_mcp"])
+    def test_a_run_whose_providers_have_no_scan_makes_no_entry(
+        self, provider: str, tmp_path: Path
+    ) -> None:
+        assert (
+            self._step({"static_sample_paths": {provider: "/s/x.exe"}}, provider=provider) is None
+        )
+        result = _pack(_sample(tmp_path), ghidra=None)
+        assert ANTI_ANALYSIS_TOOL not in [e.tool for e in result.entries]

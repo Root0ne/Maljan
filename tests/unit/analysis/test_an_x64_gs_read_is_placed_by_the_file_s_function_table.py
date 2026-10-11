@@ -1,6 +1,6 @@
 """An x64 GS read is placed by the file's own function table, and said where it is no boundary.
 
-The GS reads are read from the code bytes (``ghidra_passes.gs_reads``). Where
+The GS reads are read from the code bytes (``anti_analysis.gs_reads``). Where
 the file's ``.pdata`` holds the address, its agreement with capa is asked
 about the function that range belongs to, not the nearest capa start before
 it: a library function capa leaves out is not the user function in front of
@@ -19,8 +19,9 @@ from typing import Any
 
 from tests.unit.tools.synthetic_pe import TEXT_RVA, SyntheticPE
 
-from maljan.analysis.ghidra_passes import GS_OFF_BOUNDARY, gs_reads, read_findings
+from maljan.analysis.anti_analysis import GS_OFF_BOUNDARY, gs_reads
 from maljan.pipeline import triage_pack
+from maljan.providers.static.ghidra.passes import read_findings
 from maljan.tools import pe_image
 
 GS_PEB = b"\x65\x48\x8b\x04\x25\x60\x00\x00\x00"

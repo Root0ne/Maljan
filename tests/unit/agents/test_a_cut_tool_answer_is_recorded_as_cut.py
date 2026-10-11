@@ -38,7 +38,7 @@ def _full_budget() -> Any:
 
 
 def _ghidra(budget: Any) -> Any:
-    from maljan.agents.ghidra_http_client import GhidraHTTPClient
+    from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
 
     client = GhidraHTTPClient.__new__(GhidraHTTPClient)
     client._max_output_chars = 0

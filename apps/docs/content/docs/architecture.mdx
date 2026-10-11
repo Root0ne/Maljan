@@ -490,15 +490,21 @@ the function its place stands in is said to agree with capa there, not
 repeated. Ghidra's own `detect_crypto_constants` answers "not yet implemented",
 so the platform scans itself; the analysis server serves the same function.
 
-Then Ghidra's `find_anti_analysis_techniques` (`analysis.ghidra_passes`), the
-sample opened the way the sink pre-pass opens it (load, switch,
-auto-analysis). Ghidra's answer is kept whole, each address also as an offset
+Then the static provider's anti-analysis scan (`analysis.anti_analysis`),
+asked through `StaticProvider.anti_analysis_scan` of the run's configured
+static provider first and then of each other static provider of the run's
+profile; the first that can scan makes it, a provider's sentence saying why it cannot is recorded only when none can, and with none offering a scan there is no entry.
+Ghidra's is its `find_anti_analysis_techniques`
+(`providers.static.ghidra.passes`), the sample opened the way the sink
+pre-pass opens it (load, switch, auto-analysis). Ghidra's answer is kept whole, each address also as an offset
 from the image base Ghidra reports, and only its exact part is stated: an
 instruction that is the listed one (Ghidra matches mnemonics by prefix, so it
 files `INT3` under `INT 0x2d`), and a read through `FS:[0x30]` or
 `FS:[0x18]` exactly where a capa rule in the same function agrees; the line
-names the rule. Ghidra's scan looks for FS reads only, so an x64 file's code
-bytes are read for the GS ones (`ghidra_passes.gs_reads`): a GS-prefixed
+names the rule and the provider by its display name, and the entry's
+arguments name the provider. The rules compared are the rows of every pack
+answer of declared kind `capability_rules`. Ghidra's scan looks for FS reads only, so an x64 file's code
+bytes are read for the GS ones (`anti_analysis.gs_reads`): a GS-prefixed
 `mov r64, gs:[0x60]` or `gs:[0x30]` (`65 48 8b 04 25` and the address, or
 `65 48 a1` and an eight-byte address) is a TEB/PEB row beside the FS ones,
 stated the same way, in a file whose machine field is AMD64. Where the file's
@@ -512,7 +518,7 @@ decoded at most once, into one map of instruction starts, however many ranges
 overlap or nest. Outside every range the byte match alone is read and the
 nearest capa function start is asked, as for an FS row. The same file bytes mapped by two sections are one
 row. A capa rule agrees with a row of the kind it states, read off
-capa's own namespaces and rule names (`ghidra_passes.CAPA_NAMESPACE_KINDS`):
+capa's own namespaces and rule names (`anti_analysis.RULE_NAMESPACE_KINDS`):
 a `debugger-detection` rule with an `RDTSC`, an `INT3`, an `INT 0x2d` or a
 TEB/PEB read, a `vm-detection` rule with a hypervisor `CPUID`, `SIDT`, `SGDT`,
 `SLDT` or `STR`, capa's `PEB access` (a `lib/` rule with no namespace) and
@@ -532,10 +538,10 @@ a broad list, a language runtime's own included (the MSVC runtime calls
 functions it recognises out and the catalogue line already reads the imports.
 The rest are counted once per place. A scan that
 matched nothing says what it checks, never that the sample has no
-anti-analysis code. The node hands the pack the Ghidra it may call — switched
-on, over `http`, with the mirror the worker made for Ghidra — or the sentence
-saying why there is none, which is one entry `not run: <reason>` whose pack
-line is `no: <reason>`, not a failure. A scan Ghidra did not complete is a
+anti-analysis code. The provider hands the pack its scan — for Ghidra,
+switched on, over `http`, with the mirror the worker made for Ghidra — or the
+sentence saying why it cannot scan, which is one entry `not run: <reason>`
+whose pack line is `no: <reason>`, not a failure. A scan Ghidra did not complete is a
 failed entry with Ghidra's own words (`no: the pass failed: …`).
 
 **The function index** is the pack's last entry, `function_index`
@@ -3058,9 +3064,15 @@ one provider object per id. Everything that depends on the provider follows
 the agent rather than `core.static.provider`: the worker mirrors the sample
 once per provider any such agent of the team (or any agent they can ask)
 opens, so a reverser on Ghidra under another global provider has a path the
-Ghidra container can read; the load of the sample and the sink-reachability
-pre-pass (`providers.static.ghidra.prepare_sample`) run for every agent on
-Ghidra over http and for no other; and submitting a job checks every such
+Ghidra container can read; the open of the sample and the sink-reachability
+pre-pass (`providers.base.prepare_sample`) run for every such agent through
+its own provider object: the provider opens the sample where its session needs
+it (`open_sample`; Ghidra over http loads, switches and analyses it, radare2
+opens its mirror), and a provider that reads a call graph (`call_graph`, in
+the neutral `analysis.sink_reachability.CallGraph`; Ghidra over http does)
+gets the ranked priority functions, followed by its own sentence on what to
+do with them (`priority_follow_up`), while one that reads none gets no hint;
+and submitting a job checks every such
 provider that does not degrade (*A team that needs Ghidra waits for it* in
 [configuration.md](/configuration/)). A provider that degrades and does not
 attach — an r2mcp that is nowhere to be found — lets the static analyst run

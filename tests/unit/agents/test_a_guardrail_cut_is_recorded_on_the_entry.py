@@ -26,7 +26,7 @@ LISTING = "void FUN_00401000(void) {\n  int counter = 0;\n  return;\n}\n" * 400
 
 
 def _client(limit: int) -> Any:
-    from maljan.agents.ghidra_http_client import GhidraHTTPClient
+    from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
 
     client = GhidraHTTPClient.__new__(GhidraHTTPClient)
     client._max_output_chars = limit

@@ -74,7 +74,7 @@ def _analysis_path_in(data: str) -> str | None:
     """The ``analysis_file_path`` spliced into a head chunk, when there is one.
 
     Mirrors the static analyst's own extraction rather than importing it: the
-    static module pulls in Ghidra, RAG and sink-reachability machinery a custom
+    static module pulls in its RAG and sink-reachability machinery a custom
     agent has no business loading.
     """
     stripped = data.strip()
@@ -142,44 +142,26 @@ class ConfigurableAnalyst(BaseAnalyst):
         return _PATH_HEADER.format(path=path) + data
 
     def _priority_hint(self, data: str) -> str:
-        """The static provider's priority-functions hint, for an agent that reads Ghidra.
+        """The static provider's priority-functions hint, for an agent that reads a provider.
 
-        The same load and sink-reachability pre-pass the static analyst runs,
-        for a generic agent whose own provider is Ghidra and whose request
-        carries Ghidra's tools — the reverser a team puts on Ghidra reads the
-        call graph's ranking as the static analyst does. Computed on the chunk
+        The same open and sink-reachability pre-pass the static analyst runs
+        (``providers.base.prepare_sample``), for a generic agent whose request
+        carries its own static provider's tools — the reverser a team puts on
+        a disassembler reads the call graph's ranking as the static analyst
+        does, wherever the provider gives a call graph. Computed on the chunk
         that carries the sample path (the head chunk), once per sample, and
-        ``""`` for every other agent, provider and chunk. A sample Ghidra
-        cannot open raises :class:`SampleNotOpened` here, before the loop.
+        ``""`` for every other agent and chunk and for a provider with no call
+        graph. A sample the provider knows it cannot open raises
+        :class:`SampleNotOpened` here, before the loop.
         """
         if _analysis_path_in(data) is None:
             return ""
         if PROVIDER_FAMILY not in tool_families(self.tools):
             return ""
-        provider_id = str(getattr(self._resolved, "static_provider_id", "") or "")
-        if provider_id != "ghidra":
-            # A provider whose session must open the file first (radare2's)
-            # opens its own mirror before the loop; it has no hint to give.
-            provider = self._own_static_provider()
-            opener = getattr(provider, "open_sample", None)
-            if callable(opener):
-                try:
-                    opener(self._analysis_file_path or _analysis_path_in(data))
-                except Exception as exc:  # noqa: BLE001 — the model's own open is still there
-                    self.logger.debug("the provider did not open the sample early: %s", exc)
-            return ""
+        from maljan.providers.base import prepare_sample
+
         path = self._analysis_file_path or _analysis_path_in(data) or ""
-        container = getattr(self, "_container", None)
-        cfg = getattr(container, "config", None)
-        if cfg is None:
-            from maljan.core.config import get_settings
-
-            cfg = get_settings()
-        from maljan.providers.static.ghidra import prepare_sample
-
-        hint = prepare_sample(
-            cfg, provider_id, path, self.logger, provider=self._own_static_provider()
-        )
+        hint = prepare_sample(self._own_static_provider(), path, self.logger)
         return f"{hint}\n" if hint else ""
 
     # ------------------------------------------------------------------

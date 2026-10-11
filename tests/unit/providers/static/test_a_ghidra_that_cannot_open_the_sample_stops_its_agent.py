@@ -38,17 +38,17 @@ from maljan.agents.base_agent import BaseAnalyst
 from maljan.agents.composition import ResolvedAgent
 from maljan.agents.configurable_analyst import ConfigurableAnalyst
 from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
-from maljan.agents.ghidra_http_client import GhidraHTTPClient
 from maljan.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
 from maljan.core.exceptions import SampleNotOpened
 from maljan.pipeline.events import describe_exception
+from maljan.providers.base import prepare_sample
 from maljan.providers.static.ghidra import (
     GhidraStaticProvider,
     ghidra_not_answering,
     load_failure,
-    prepare_sample,
     sample_not_opened,
 )
+from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
 from maljan.schemas.evidence import EvidenceCounter
 
 CONTAINER_PATH = "/data/samples/.work/abc.exe"
@@ -119,7 +119,7 @@ class TestAGhidraErrorReplyIsAFailedCall:
         assert "No program loaded." in (entry.error or "")
 
     def test_an_answer_that_only_begins_with_the_sentence_is_kept(self) -> None:
-        from maljan.agents.ghidra_http_client import no_program_as_error
+        from maljan.providers.static.ghidra.http_client import no_program_as_error
 
         longer = "No program loaded. Loaded programs: none; open one with load_program."
         assert no_program_as_error(longer, "t") == longer
@@ -259,9 +259,9 @@ def _settings(*, sink: bool = True) -> Any:
     return _S()
 
 
-def _provider() -> GhidraStaticProvider:
-    cfg = _settings().static.ghidra
-    return GhidraStaticProvider(cfg, None, None)  # type: ignore[arg-type]
+def _provider(*, sink: bool = True) -> GhidraStaticProvider:
+    settings = _settings(sink=sink)
+    return GhidraStaticProvider(settings.static.ghidra, settings.preprocessing, None)  # type: ignore[arg-type]
 
 
 class TestTheLoadIsAPrecondition:
@@ -271,7 +271,7 @@ class TestTheLoadIsAPrecondition:
         http = _HttpClient(NOT_FOUND)
         monkeypatch.setattr("httpx.Client", http)
         with pytest.raises(SampleNotOpened) as stopped:
-            prepare_sample(_settings(), "ghidra", CONTAINER_PATH)
+            prepare_sample(_provider(), CONTAINER_PATH)
         assert http.paths == ["load_program"]
         assert f"File not found: {HOST_PATH}" in str(stopped.value)
 
@@ -281,15 +281,28 @@ class TestTheLoadIsAPrecondition:
         http = _HttpClient(NOT_FOUND)
         monkeypatch.setattr("httpx.Client", http)
         with pytest.raises(SampleNotOpened):
-            prepare_sample(_settings(sink=False), "ghidra", CONTAINER_PATH)
+            prepare_sample(_provider(sink=False), CONTAINER_PATH)
 
     def test_an_opened_sample_is_made_current_and_analysed_and_the_pass_is_optional(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         http = _HttpClient(LOADED)
         monkeypatch.setattr("httpx.Client", http)
-        assert prepare_sample(_settings(sink=False), "ghidra", CONTAINER_PATH) == ""
+        assert prepare_sample(_provider(sink=False), CONTAINER_PATH) == ""
         assert http.paths == ["load_program", "switch_program", "run_analysis"]
+
+    def test_with_the_pass_on_the_call_graph_is_read_after_the_open(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        http = _HttpClient(LOADED)
+        monkeypatch.setattr("httpx.Client", http)
+        assert prepare_sample(_provider(), CONTAINER_PATH) == ""
+        assert http.paths == [
+            "load_program",
+            "switch_program",
+            "run_analysis",
+            "get_full_call_graph",
+        ]
 
     def test_the_provider_remembers_and_is_not_asked_again(
         self, monkeypatch: pytest.MonkeyPatch
@@ -299,9 +312,9 @@ class TestTheLoadIsAPrecondition:
         provider = _provider()
         provider.pin_sample(CONTAINER_PATH)
         with pytest.raises(SampleNotOpened):
-            prepare_sample(_settings(), "ghidra", CONTAINER_PATH, provider=provider)
+            prepare_sample(provider, CONTAINER_PATH)
         with pytest.raises(SampleNotOpened):
-            prepare_sample(_settings(), "ghidra", CONTAINER_PATH, provider=provider)
+            prepare_sample(provider, CONTAINER_PATH)
         assert http.paths == ["load_program"]
         assert provider.sample_failure() is not None
 
@@ -310,9 +323,9 @@ class TestTheLoadIsAPrecondition:
     ) -> None:
         http = _HttpClient(LOADED)
         monkeypatch.setattr("httpx.Client", http)
-        provider = _provider()
-        prepare_sample(_settings(sink=False), "ghidra", CONTAINER_PATH, provider=provider)
-        prepare_sample(_settings(sink=False), "ghidra", CONTAINER_PATH, provider=provider)
+        provider = _provider(sink=False)
+        prepare_sample(provider, CONTAINER_PATH)
+        prepare_sample(provider, CONTAINER_PATH)
         assert http.paths == ["load_program", "switch_program", "run_analysis", "switch_program"]
         noted = provider.sample_notes.get("remote http://ghidra.invalid:80", CONTAINER_PATH)
         assert noted is not None and noted.name == "abc.exe" and noted.answer == LOADED
@@ -322,12 +335,12 @@ class TestTheLoadIsAPrecondition:
     ) -> None:
         http = _HttpClient(LOADED)
         monkeypatch.setattr("httpx.Client", http)
-        provider = _provider()
+        provider = _provider(sink=False)
         provider.sample_notes.note(
             "remote http://ghidra.invalid:80", CONTAINER_PATH, "abc.exe", LOADED
         )
         http.switch_refused = True
-        prepare_sample(_settings(sink=False), "ghidra", CONTAINER_PATH, provider=provider)
+        prepare_sample(provider, CONTAINER_PATH)
         assert http.paths == ["switch_program", "load_program", "switch_program", "run_analysis"]
         # The analysis was confirmed, so the path is noted again.
         assert (
@@ -348,20 +361,31 @@ class TestTheLoadIsAPrecondition:
 
         http = _HttpClient(LOADED)
         monkeypatch.setattr("httpx.Client", http)
-        settings = _settings(sink=False)
-        settings.static.ghidra.sample_open = SampleOpenConfig()
+        provider = _provider(sink=False)
+        provider._cfg.sample_open = SampleOpenConfig()
         try:
-            prepare_sample(settings, "ghidra", CONTAINER_PATH, provider=_provider())
+            prepare_sample(provider, CONTAINER_PATH)
         finally:
             from maljan.core.config import GHIDRA_SAMPLE_OPEN
 
-            settings.static.ghidra.sample_open = GHIDRA_SAMPLE_OPEN
+            provider._cfg.sample_open = GHIDRA_SAMPLE_OPEN
         assert http.paths == ["load_program", "switch_program"]
 
-    def test_another_provider_calls_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_ghidra_over_stdio_calls_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         http = _HttpClient(NOT_FOUND)
         monkeypatch.setattr("httpx.Client", http)
-        assert prepare_sample(_settings(), "r2", CONTAINER_PATH) == ""
+        provider = _provider()
+        provider._cfg.transport = "stdio"
+        try:
+            assert prepare_sample(provider, CONTAINER_PATH) == ""
+        finally:
+            provider._cfg.transport = "http"
+        assert http.paths == []
+
+    def test_no_provider_calls_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        http = _HttpClient(NOT_FOUND)
+        monkeypatch.setattr("httpx.Client", http)
+        assert prepare_sample(None, CONTAINER_PATH) == ""
         assert http.paths == []
 
 
@@ -541,6 +565,7 @@ def _generic() -> ConfigurableAnalyst:
     )
     agent = ConfigurableAnalyst("all_tools_reverser_ghidra", resolved, llm=None)  # type: ignore[arg-type]
     agent._analysis_file_path = CONTAINER_PATH
+    agent._container = _Container(_provider())
     return agent
 
 
@@ -652,7 +677,7 @@ class TestAGhidraThatDidNotAnswer:
     ) -> None:
         http = _HttpClient(LOADED, failures=[_refused()])
         monkeypatch.setattr("httpx.Client", http)
-        assert prepare_sample(_settings(sink=False), "ghidra", CONTAINER_PATH) == ""
+        assert prepare_sample(_provider(sink=False), CONTAINER_PATH) == ""
         assert http.paths == ["load_program", "load_program", "switch_program", "run_analysis"]
 
     def test_two_failed_connections_name_the_address_and_not_the_samples_path(
@@ -661,7 +686,7 @@ class TestAGhidraThatDidNotAnswer:
         monkeypatch.setattr("httpx.Client", _HttpClient(LOADED, failures=[_refused(), _refused()]))
         provider = _provider()
         with pytest.raises(SampleNotOpened) as stopped:
-            prepare_sample(_settings(), "ghidra", CONTAINER_PATH, provider=provider)
+            prepare_sample(provider, CONTAINER_PATH)
         said = str(stopped.value)
         assert said == (
             "Ghidra at http://ghidra.invalid:80 did not answer the load of the job's sample "
@@ -679,7 +704,7 @@ class TestAGhidraThatDidNotAnswer:
         monkeypatch.setattr("httpx.Client", http)
         provider = _provider()
         with pytest.raises(SampleNotOpened) as stopped:
-            prepare_sample(_settings(), "ghidra", CONTAINER_PATH, provider=provider)
+            prepare_sample(provider, CONTAINER_PATH)
         assert http.paths == ["load_program"]
         assert f"HTTP {code}" in str(stopped.value)
         assert provider.sample_failure(CONTAINER_PATH) is None
@@ -689,10 +714,8 @@ class TestAGhidraThatDidNotAnswer:
         monkeypatch.setattr("httpx.Client", http)
         provider = _provider()
         with pytest.raises(SampleNotOpened):
-            prepare_sample(_settings(sink=False), "ghidra", CONTAINER_PATH, provider=provider)
-        assert (
-            prepare_sample(_settings(sink=False), "ghidra", CONTAINER_PATH, provider=provider) == ""
-        )
+            prepare_sample(provider, CONTAINER_PATH)
+        assert prepare_sample(provider, CONTAINER_PATH) == ""
 
     def test_the_published_form_keeps_the_address_host_and_the_setting(self) -> None:
         published = describe_exception(ghidra_not_answering("http://localhost:8089", "HTTP 401"))

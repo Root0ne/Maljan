@@ -65,7 +65,6 @@ def test_the_static_analyst_opens_the_pinned_mirror_before_its_loop(
     analyst._host_sample_path = None
     monkeypatch.setattr(analyst, "_try_initialize_mcp", lambda: None)
     monkeypatch.setattr(analyst, "_provider", lambda: provider)
-    monkeypatch.setattr(analyst, "_compute_sink_priority_hint", lambda _path: "")
     monkeypatch.setattr(analyst, "_compute_function_hash_hint", lambda *_a: "")
     monkeypatch.setattr(analyst, "_system_prompt", lambda *_a, **_k: "system")
     monkeypatch.setattr(analyst, "execute_tool_loop", _loop(order))

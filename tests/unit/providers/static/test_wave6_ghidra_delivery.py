@@ -19,6 +19,7 @@ from maljan.agents.static_analyst import (
     _extract_load_hint,
     _extract_sample_hash,
 )
+from maljan.core.config import GHIDRA_SAMPLE_OPEN
 from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
 from maljan.pipeline.nodes import _augment_static_chunks_with_path
 
@@ -157,7 +158,7 @@ class TestSynthesizedPlaceholderChunk:
             self._STATE,  # type: ignore[arg-type]
         )
         data = out[0].content
-        hint = _extract_load_hint(data, frozenset({"load_program"}))
+        hint = _extract_load_hint(data, frozenset({"load_program"}), GHIDRA_SAMPLE_OPEN)
         assert "LOAD THIS BINARY FIRST" in hint
         assert self._STATE["static_sample_path"] in hint
         assert _extract_analysis_path(data) == self._STATE["static_sample_path"]
@@ -172,20 +173,45 @@ class TestExtractLoadHint:
         data = json.dumps(
             {"file": {"sha256": "d" * 64}, "analysis_file_path": "/data/samples/d.apk"}
         )
-        hint = _extract_load_hint(data, frozenset({"load_program"}))
+        hint = _extract_load_hint(data, frozenset({"load_program"}), GHIDRA_SAMPLE_OPEN)
         assert "LOAD THIS BINARY FIRST" in hint
         assert 'load_program(file="/data/samples/d.apk")' in hint
 
+    def test_the_line_names_the_tool_the_provider_declares(self) -> None:
+        from maljan.core.config import SampleOpenConfig
+
+        data = json.dumps({"analysis_file_path": "/data/samples/d.bin"})
+        declared = SampleOpenConfig(open_tool="open_file", path_argument="file_path")
+        hint = _extract_load_hint(data, frozenset({"open_file", "list_functions"}), declared)
+        assert 'call ``open_file(file_path="/data/samples/d.bin")``' in hint
+        assert "load_program" not in hint
+
+    def test_a_declared_tool_not_offered_is_not_named(self) -> None:
+        data = json.dumps({"analysis_file_path": "/data/samples/d.bin"})
+        hint = _extract_load_hint(data, frozenset({"list_functions"}), GHIDRA_SAMPLE_OPEN)
+        assert hint == (
+            "Sample path (use exactly this string wherever a tool asks for a file): "
+            "/data/samples/d.bin\n\n"
+        )
+
+    def test_an_offered_tool_no_declaration_names_is_not_named(self) -> None:
+        data = json.dumps({"analysis_file_path": "/data/samples/d.bin"})
+        hint = _extract_load_hint(data, frozenset({"load_program"}))
+        assert "LOAD THIS BINARY FIRST" not in hint
+
     def test_returns_empty_when_path_missing(self) -> None:
         data = json.dumps({"file": {"sha256": "e" * 64}})
-        assert _extract_load_hint(data, frozenset({"load_program"})) == ""
+        assert _extract_load_hint(data, frozenset({"load_program"}), GHIDRA_SAMPLE_OPEN) == ""
 
     def test_returns_empty_on_non_json_data(self) -> None:
-        assert _extract_load_hint("raw bytes here", frozenset({"load_program"})) == ""
+        assert (
+            _extract_load_hint("raw bytes here", frozenset({"load_program"}), GHIDRA_SAMPLE_OPEN)
+            == ""
+        )
 
     def test_returns_empty_on_empty_input(self) -> None:
-        assert _extract_load_hint("", frozenset({"load_program"})) == ""
+        assert _extract_load_hint("", frozenset({"load_program"}), GHIDRA_SAMPLE_OPEN) == ""
 
     def test_returns_empty_when_path_field_is_not_a_string(self) -> None:
         data = json.dumps({"analysis_file_path": 123})
-        assert _extract_load_hint(data, frozenset({"load_program"})) == ""
+        assert _extract_load_hint(data, frozenset({"load_program"}), GHIDRA_SAMPLE_OPEN) == ""

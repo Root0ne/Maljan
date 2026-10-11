@@ -20,7 +20,7 @@ from typing import Any
 
 import httpx
 
-from maljan.agents.ghidra_http_client import GhidraHTTPClient
+from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
 
 ADDRESS = "0x1360bc02200"
 NAME_ARGUMENTS = ("name", "function_name")
