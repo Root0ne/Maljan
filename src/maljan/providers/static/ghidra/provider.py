@@ -721,11 +721,11 @@ class GhidraStaticProvider(StaticProvider):
         Ghidra is not reached over ``http``; a request that fails raises, and
         the pre-pass reads that as no hint.
 
-        The whole graph, in one answer: the server's ``limit`` defaults to
-        1000 functions when absent and ``0`` means none, and the endpoint has no
-        pages. ``edges`` is the server's text format of one ``CALLER -> CALLEE``
-        line per call, the one ``call_graph_from_text`` reads (the server
-        answers any format it does not know, ``json`` among them, the same way).
+        The whole graph, in one answer: the server's ``limit`` counts distinct
+        call edges, defaults to 1000 when absent, and ``0`` means none; the
+        endpoint has no pages. The server answers ``edges`` (as any format it
+        does not name, ``json`` among them) with one ``CALLER -> CALLEE`` line
+        per call, the text ``call_graph_from_text`` reads.
         """
         if not self._over_http():
             return None
