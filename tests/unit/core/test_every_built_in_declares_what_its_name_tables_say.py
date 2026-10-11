@@ -488,7 +488,7 @@ def test_ghidra_and_radare2_carry_their_workflows_and_radare2_its_errors(
     held = declared.source("provider:ghidra")
     assert held is not None and held.prompt_fragment == ghidra.GHIDRA_WORKFLOW
     assert ghidra.GHIDRA_PROMPT_FRAGMENT == (
-        ghidra.GHIDRA_LEAD + CLAIM_GUIDANCE + "\n\n" + held.prompt_fragment
+        ghidra.GHIDRA_LEAD + ghidra.GHIDRA_GUIDANCE + "\n\n" + held.prompt_fragment
     )
     held_r2 = declared.source("provider:r2")
     assert held_r2 is not None

@@ -120,9 +120,13 @@ def declared_references(
             given.add(url)
             name = "" if isinstance(lookup, str) else str(getattr(lookup, "source", "") or "")
             note = "" if isinstance(lookup, str) else str(getattr(lookup, "note", "") or "")
+            sigma = False if isinstance(lookup, str) else bool(getattr(lookup, "sigma", False))
             refs.append(
                 ExternalReference(
-                    source=name or _host(url), url=url, note=note or SAMPLE_LOOKUP_NOTE
+                    source=name or _host(url),
+                    url=url,
+                    note=note or SAMPLE_LOOKUP_NOTE,
+                    sigma=sigma,
                 )
             )
     for held in declared.sources():

@@ -2594,8 +2594,9 @@ each registry server whose tools are in the list declares (its
 `prompt_fragment`). A static provider's fragment has two parts: its guidance
 about claims (what a claim cites, the ATT&CK focus, and the verification
 discipline with its confidence caps, which every static provider carries,
-whatever it is; a provider that writes its whole fragment itself gets the
-discipline after it), sent with every call on that provider, and the workflow
+whatever it is, in generic words with no named algorithm or technique id —
+Ghidra's keeps the wording, and examples, it has always had; a provider that
+writes its whole fragment itself gets the discipline after it), sent with every call on that provider, and the workflow
 its block declares, sent only when its tools are in the list; `none` says no
 disassembler or decompiler comes with the analyst, and a configured provider
 whose tools did not attach says so. A sandbox's own tool server is named by the

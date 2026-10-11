@@ -3848,15 +3848,17 @@ class SandboxConfig(BaseModel):
 
 
 class ReferenceLookup(BaseModel):
-    """One sample lookup a report links to: a URL template, its name and its note.
+    """One sample lookup a report links to: a URL template, its name, its note, and where else.
 
     Written as a bare template it is linked under the template's host and the
-    note "Sample lookup".
+    note "Sample lookup". ``sigma`` lists the link among the Sigma draft's
+    references too.
     """
 
     url: str
     source: str = ""
     note: str = ""
+    sigma: bool = False
 
     @model_validator(mode="before")
     @classmethod
@@ -3879,6 +3881,7 @@ DEFAULT_REFERENCE_LOOKUPS: tuple[ReferenceLookup, ...] = (
         url="https://www.virustotal.com/gui/file/{sha256}",
         source="VirusTotal",
         note="VT detection summary",
+        sigma=True,
     ),
     ReferenceLookup(
         url="https://bazaar.abuse.ch/sample/{sha256}/",

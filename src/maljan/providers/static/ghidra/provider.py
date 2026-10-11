@@ -22,13 +22,12 @@ from maljan.core.logger import logger
 from maljan.core.settings_overrides import redact_url
 from maljan.core.undeclared_tools import categories_of
 from maljan.providers.base import (
-    CLAIM_GUIDANCE,
+    CLAIM_CITATION,
     MirrorSpec,
     ProviderProbe,
     StaticCapabilities,
     StaticJobContext,
     StaticProvider,
-    with_claim_guidance,
 )
 from maljan.providers.registry import register_static_provider
 from maljan.providers.sample_open import long_running_tools, server_note_key
@@ -43,18 +42,19 @@ if TYPE_CHECKING:
     from maljan.providers.static.ghidra.passes import GhidraPasses
 
 
-# Ghidra's prompt: its opening sentence, the claim guidance every static
-# analyst is given (which goes with every call on a Ghidra run, tools or none),
-# then the workflow its block declares (``core.builtin_declarations``), which
-# goes only where Ghidra's tools do. ``GHIDRA_PROMPT_FRAGMENT`` is the whole
-# fragment with the shipped workflow.
+# Ghidra's prompt: its opening sentence, its guidance about claims (the
+# citation every static analyst is given and the verification discipline in
+# the words Ghidra's prompt has always used; it goes with every call on a
+# Ghidra run, tools or none), then the workflow its block declares
+# (``core.builtin_declarations``), which goes only where Ghidra's tools do.
+# ``GHIDRA_PROMPT_FRAGMENT`` is the whole fragment with the shipped workflow.
 GHIDRA_LEAD = (
     "Analyze binary files (e.g. PE, ELF) utilizing Ghidra through your available tools. "
     "You can decompile functions, find cross-references, extract strings, and more. "
 )
-GHIDRA_GUIDANCE = CLAIM_GUIDANCE
+GHIDRA_GUIDANCE = CLAIM_CITATION + "\n\n" + builtin_declarations.GHIDRA_VERIFICATION_DISCIPLINE
 GHIDRA_WORKFLOW = builtin_declarations.GHIDRA_WORKFLOW
-GHIDRA_PROMPT_FRAGMENT = with_claim_guidance(GHIDRA_LEAD, GHIDRA_WORKFLOW)
+GHIDRA_PROMPT_FRAGMENT = GHIDRA_LEAD + GHIDRA_GUIDANCE + "\n\n" + GHIDRA_WORKFLOW
 
 
 # What an agent on Ghidra is stopped with when Ghidra answered that it could
@@ -351,6 +351,12 @@ class GhidraStaticProvider(StaticProvider):
 
     def prompt_lead(self) -> str:
         return GHIDRA_LEAD
+
+    def prompt_fragment(self) -> str:
+        """Ghidra's lead, its own guidance (its discipline as it has always read), its workflow."""
+        workflow = self.workflow_fragment()
+        text = self.prompt_lead() + self.guidance_fragment()
+        return text + "\n\n" + workflow if workflow.strip() else text
 
     def workflow_fragment(self) -> str:
         """The workflow Ghidra's block declares (``static.ghidra.prompt_fragment``)."""

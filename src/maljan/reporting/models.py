@@ -768,6 +768,10 @@ class ExternalReference(BaseModel):
     source: str  # "VirusTotal", "MalwareBazaar", "MITRE ATT&CK", ...
     url: str
     note: str | None = None
+    # Whether the Sigma draft lists this link among its references, as the
+    # lookup it came from declares (``reporting.reference_urls``' ``sigma``).
+    # Left out of the dump when false, so a stored report dumps as it did.
+    sigma: bool = Field(default=False, exclude_if=lambda value: not value)
 
 
 # ---------------------------------------------------------------------------

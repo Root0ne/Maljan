@@ -491,9 +491,9 @@ def _build_sigma(report: MalwareReport) -> DetectionRule | None:
         logsource = {"product": "windows", "category": "process_creation"}
 
     tags = _sigma_tags(report)
-    # The report's own sample lookups (``reporting.references``): the links
-    # that name this sample, from the sources the run used.
-    lookups = [ref.url for ref in report.references if sha256 and sha256.lower() in ref.url]
+    # The report's sample lookups that declare they apply to the Sigma draft
+    # (``reporting.reference_urls``' ``sigma``; the shipped VirusTotal lookup).
+    lookups = [ref.url for ref in report.references if ref.sigma]
 
     rule_dict: dict[str, Any] = {
         "title": f"Maljan AutoGen - {family}",

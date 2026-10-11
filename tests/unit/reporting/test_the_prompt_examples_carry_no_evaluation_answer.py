@@ -203,8 +203,9 @@ from maljan.pipeline.validation import (
     whole_answer_after_retry_question,
 )
 from maljan.providers.base import (
-    CLAIM_GUIDANCE,
+    CLAIM_CITATION,
     STATIC_EVIDENCE_LEAD,
+    VERIFICATION_DISCIPLINE,
     absent_provider_fragment,
 )
 from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
@@ -1993,12 +1994,13 @@ PROMPTS: dict[str, str] = {
         provider_label="the Ghidra static provider",
     ),
     "analyst tool statement for a request with none": NO_TOOLS_STATEMENT,
-    # The shared claim guidance before it is the text Ghidra's prompt has
-    # always carried (its reworded part is scanned below); what follows it is
-    # the sentence of its own.
+    # The citation before it is the text every static prompt carried before
+    # the leak test; the shared verification discipline after it is scanned
+    # whole, with the sentence of its own.
     "static provider sentence when none is attached": NullStaticProvider.NO_PROVIDER_FRAGMENT[
-        len(STATIC_EVIDENCE_LEAD + CLAIM_GUIDANCE) :
+        len(STATIC_EVIDENCE_LEAD + CLAIM_CITATION) :
     ],
+    "the shared verification discipline, whole": VERIFICATION_DISCIPLINE,
     "a Ghidra that could not open the job's sample, as an ask's caller reads it": str(
         sample_not_opened("File not found: /data/samples/.work/a.bin")
     ),
@@ -2009,7 +2011,7 @@ PROMPTS: dict[str, str] = {
         "No program loaded.", "get_function_count"
     ),
     "static provider sentence when its tools did not attach": absent_provider_fragment("Ghidra")[
-        len(STATIC_EVIDENCE_LEAD + CLAIM_GUIDANCE) :
+        len(STATIC_EVIDENCE_LEAD + CLAIM_CITATION) :
     ],
     "static human-turn tool lines": " ".join(
         [
@@ -2718,3 +2720,40 @@ def test_both_new_capability_terms_are_scanned() -> None:
     text = PROMPTS["capability questions for the anti-analysis and anti-forensics terms"]
 
     assert "claims anti-analysis" in text and "claims anti-forensics" in text
+
+
+# The evaluation-key terms each static provider's whole system prompt carried
+# on dev 767bd97a, for a Windows PE (``format_fragment("pe", "windows")``),
+# with no tools and with the provider expected: the format fragment's
+# ``mutex`` and ``scheduled task``, and the citation's technique ids where the
+# provider's fragment held the citation. A prompt built today from the shipped
+# declarations carries no term beyond its provider's.
+DEV_STATIC_PROMPT_TERMS: dict[str, frozenset[str]] = {
+    "r2": frozenset({"mutex", "scheduled task", "t1027", "t1055", "t1106", "t1140"}),
+    "generic_mcp": frozenset({"mutex", "scheduled task", "t1027", "t1055", "t1106", "t1140"}),
+    "none": frozenset({"mutex", "scheduled task", "t1027", "t1055", "t1106", "t1140"}),
+    "capa_yara": frozenset({"mutex", "scheduled task", "t1055"}),
+}
+
+
+@pytest.mark.parametrize("provider_id", sorted(DEV_STATIC_PROMPT_TERMS))
+@pytest.mark.parametrize("expected", [False, True])
+def test_a_non_ghidra_static_prompt_carries_no_key_term_dev_s_did_not(
+    provider_id: str, expected: bool
+) -> None:
+    from maljan.agents.prompt_fragments import format_fragment
+    from maljan.agents.static_analyst import assemble_static_prompt
+    from maljan.core.config import Settings
+    from maljan.providers.registry import get_static_provider
+
+    settings = Settings(_env_file=None)
+    settings.static.provider = provider_id
+    provider = get_static_provider(settings)
+    prompt = assemble_static_prompt(
+        provider, format_fragment("pe", "windows"), [], provider_expected=expected
+    ).lower()
+    carried = {term for term in KEY_TERMS if term in prompt}
+    assert carried <= DEV_STATIC_PROMPT_TERMS[provider_id], sorted(
+        carried - DEV_STATIC_PROMPT_TERMS[provider_id]
+    )
+    assert VERIFICATION_DISCIPLINE.lower() in prompt

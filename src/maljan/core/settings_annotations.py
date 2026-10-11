@@ -1399,8 +1399,9 @@ ANNOTATIONS: dict[str, Annotation] = {
         "title": "Sample lookups every report links to",
         "description": (
             "Each a URL template naming {sha256}, {md5} or {sha1} and starting with "
-            "https:// (url), the name it is linked under (source) and its note, as JSON, "
-            "linked under References on every report. Shipped with VirusTotal's and "
+            "https:// (url), the name it is linked under (source), its note, and whether "
+            "the Sigma draft lists it too (sigma), as JSON, linked under References on "
+            "every report. Shipped with VirusTotal's and "
             "MalwareBazaar's lookups; remove one and it is no longer linked. A tool "
             "server's own lookups (its declared reference URLs) are linked only on a run "
             "that asked that server."

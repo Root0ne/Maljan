@@ -353,19 +353,29 @@ class TestTheGhidraPrompt:
         dev = GHIDRA_PROMPT_FRAGMENT.replace(reworded, before)
         assert hashlib.sha256(dev.encode()).hexdigest()[:16] == "9be4fea6d9b8c95f"
 
-    def test_its_guidance_is_the_shared_discipline_byte_for_byte(self) -> None:
-        from maljan.providers.base import CLAIM_GUIDANCE
+    def test_its_guidance_is_devs_byte_for_byte(self) -> None:
+        from maljan.core.builtin_declarations import GHIDRA_VERIFICATION_DISCIPLINE
+        from maljan.providers.base import CLAIM_CITATION, DISCIPLINE_HEADING
         from maljan.providers.static.ghidra import GHIDRA_GUIDANCE
 
-        assert GHIDRA_GUIDANCE == CLAIM_GUIDANCE
+        assert GHIDRA_GUIDANCE == CLAIM_CITATION + "\n\n" + GHIDRA_VERIFICATION_DISCIPLINE
+        assert GHIDRA_VERIFICATION_DISCIPLINE.startswith(DISCIPLINE_HEADING)
         assert hashlib.sha256(GHIDRA_GUIDANCE.encode()).hexdigest()[:16] == "97db82324dec815f"
+
+    def test_the_shared_discipline_keeps_its_rules_in_generic_words(self) -> None:
+        from maljan.providers.base import VERIFICATION_DISCIPLINE
+
+        for rule in ("cap CONFIDENCE at 0.7", ">= 2 independent evidence loci", "not obfuscation"):
+            assert rule in VERIFICATION_DISCIPLINE
+        for named in ("RC4", "XOR", "T1027"):
+            assert named not in VERIFICATION_DISCIPLINE
 
 
 class TestEveryStaticProviderCarriesTheDiscipline:
     @pytest.mark.parametrize("provider_id", ["ghidra", "r2", "generic_mcp", "none", "capa_yara"])
     def test_attached_absent_and_tool_free(self, provider_id: str) -> None:
         from maljan.agents.static_analyst import static_provider_parts
-        from maljan.providers.base import VERIFICATION_DISCIPLINE
+        from maljan.providers.base import DISCIPLINE_HEADING, VERIFICATION_DISCIPLINE
         from maljan.providers.registry import get_static_provider
 
         settings = Settings(_env_file=None)
@@ -373,7 +383,9 @@ class TestEveryStaticProviderCarriesTheDiscipline:
         provider = get_static_provider(settings)
         for expected in (False, True):
             body, _statement = static_provider_parts(provider, [], provider_expected=expected)
-            assert body.count(VERIFICATION_DISCIPLINE) == 1, (provider_id, expected)
+            assert body.count(DISCIPLINE_HEADING) == 1, (provider_id, expected)
+            # Ghidra keeps its own wording; every other provider the shared one.
+            assert (VERIFICATION_DISCIPLINE in body) == (provider_id != "ghidra")
 
     def test_a_provider_writing_its_own_fragment_still_gets_it(self) -> None:
         from maljan.agents.static_analyst import static_provider_parts

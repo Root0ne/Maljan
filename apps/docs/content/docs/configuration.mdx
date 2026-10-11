@@ -1617,9 +1617,10 @@ a killed worker's claim expires within 90 s instead of lingering.
 
 `reporting.reference_urls` lists the sample lookups linked under References
 on every report, first: each a URL template (`url`: `https://`, naming
-`{sha256}`, `{md5}` or `{sha1}`), the name it is linked under (`source`) and
-its `note`. It ships with VirusTotal's and MalwareBazaar's lookups, the two
-every report has linked; remove one and it is no longer linked. A tool
+`{sha256}`, `{md5}` or `{sha1}`), the name it is linked under (`source`), its
+`note`, and whether the Sigma draft lists it among its references (`sigma`). It ships with VirusTotal's and MalwareBazaar's lookups, the two
+every report has linked (VirusTotal's with `sigma`, as the draft has always
+referenced it); remove one and it is no longer linked. A tool
 server's own lookups (its declared `reference_urls`) are linked besides, only
 on a run that asked that server. A report keeps its own links live in the
 Markdown.

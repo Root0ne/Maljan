@@ -188,6 +188,35 @@ class TestRansomwareSigma:
         rules = build_detection_rules(ransomware_report)
         assert any(r.kind == "sigma" for r in rules)
 
+    def test_sigma_references_are_devs_under_default_settings(
+        self, ransomware_report: MalwareReport
+    ) -> None:
+        # The shipped VirusTotal lookup applies to the Sigma draft and the
+        # MalwareBazaar one does not, as every draft referenced before.
+        assert [r.source for r in ransomware_report.references][:2] == [
+            "VirusTotal",
+            "MalwareBazaar",
+        ]
+        rules = build_detection_rules(ransomware_report)
+        rule = next(r for r in rules if r.kind == "sigma")
+        sha256 = ransomware_report.identity.hashes.sha256
+        assert yaml.safe_load(rule.body)["references"] == [
+            f"https://www.virustotal.com/gui/file/{sha256}"
+        ]
+
+    def test_a_draft_with_no_sigma_lookup_names_no_references(
+        self, ransomware_report: MalwareReport
+    ) -> None:
+        stripped = ransomware_report.model_copy(
+            update={
+                "references": [
+                    r.model_copy(update={"sigma": False}) for r in ransomware_report.references
+                ]
+            }
+        )
+        rule = next(r for r in build_detection_rules(stripped) if r.kind == "sigma")
+        assert "references" not in yaml.safe_load(rule.body)
+
     def test_sigma_body_parses_as_yaml(self, ransomware_report: MalwareReport) -> None:
         rules = build_detection_rules(ransomware_report)
         rule = next(r for r in rules if r.kind == "sigma")

@@ -42,6 +42,35 @@ if TYPE_CHECKING:
 # opening sentence and the claim guidance every static analyst is given
 # (``providers.base.CLAIM_GUIDANCE``) come before it. A sentence here names only
 # the server's own tools: a tool of another server is named by what it does.
+# Ghidra's verification discipline, as its prompt has always worded it, with
+# its own examples. The shared discipline every other static provider carries
+# (``providers.base.VERIFICATION_DISCIPLINE``) holds the same rules in generic
+# words; this text stays with Ghidra's declaration so a Ghidra run's prompt is
+# unchanged.
+GHIDRA_VERIFICATION_DISCIPLINE: str = (
+    "=== VERIFICATION DISCIPLINE (suppresses confidently-wrong attribution) ===\n"
+    "- A SPECIFIC claim (a named algorithm like RC4/djb2/ROR13, a constant or XOR\n"
+    "  key, or a hash-resolved API) may reach CONFIDENCE >= 0.8 only if you\n"
+    "  FALSIFIED it first: an emulation with a known input against the expected\n"
+    "  output, OR a backward data-flow trace confirming its origin. If no such\n"
+    "  check ran — the code is non-leaf or has syscall/heap side effects, or no\n"
+    "  tool that runs one is attached to this request — cap CONFIDENCE at 0.7.\n"
+    "- A hash-resolution result: read the FULL list of matches. If more than one\n"
+    "  API name collides, do NOT blindly take the best match — disambiguate via\n"
+    "  the likely source DLL, or emit CONFIDENCE <= 0.5.\n"
+    "- A claim is High (>= 0.8) only with >= 2 independent evidence loci (e.g. an\n"
+    "  import AND its call-site). A single locus caps at 0.7. Reconcile any\n"
+    "  contradictory signals before emitting.\n"
+    "- Dynamic API resolution (LoadLibrary + GetProcAddress) is by itself the\n"
+    "  ORDINARY Windows idiom for optional/delay-loaded DLLs — it is NOT evidence\n"
+    "  of packing or obfuscation (T1027) on its own. Only claim T1027 when you\n"
+    "  observe a REAL obfuscation mechanism: a hashing/decrypt loop over API\n"
+    "  names, a high-entropy/packed section, an unpacking stub, or a sparse\n"
+    "  import table that hides the real APIs. A rich, fully-named import table\n"
+    "  (dozens of imports across several DLLs) argues AGAINST packing. Do not\n"
+    "  inflate a plain LoadLibrary/GetProcAddress pair into an obfuscation claim."
+)
+
 GHIDRA_WORKFLOW: str = (
     "=== TOOL USAGE WORKFLOW ===\n"
     "Follow this reverse engineering sequence. Prefer the malware-specific\n"

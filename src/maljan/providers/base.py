@@ -263,12 +263,16 @@ STATIC_EVIDENCE_INSTRUCTIONS = STATIC_EVIDENCE_LEAD + CLAIM_CITATION
 # obfuscation. It is about claims, not about any tool: its one sentence about a
 # check says "no tool that runs one is attached", so it holds on any provider,
 # with tools or none. Every static analyst carries it (``guidance_fragment``,
-# ``static_provider_parts``).
+# ``static_provider_parts``). Worded generically, with no named algorithm or
+# technique id: the leak test scans it whole. Ghidra's declaration keeps the
+# discipline it has always shown, with its own examples
+# (``core.builtin_declarations.GHIDRA_VERIFICATION_DISCIPLINE``).
+DISCIPLINE_HEADING = "=== VERIFICATION DISCIPLINE (suppresses confidently-wrong attribution) ==="
 VERIFICATION_DISCIPLINE = (
-    "=== VERIFICATION DISCIPLINE (suppresses confidently-wrong attribution) ===\n"
-    "- A SPECIFIC claim (a named algorithm like RC4/djb2/ROR13, a constant or XOR\n"
-    "  key, or a hash-resolved API) may reach CONFIDENCE >= 0.8 only if you\n"
-    "  FALSIFIED it first: an emulation with a known input against the expected\n"
+    DISCIPLINE_HEADING + "\n"
+    "- A SPECIFIC claim (a named algorithm, a decoding or cipher routine, a\n"
+    "  constant or key, or a hash-resolved API) may reach CONFIDENCE >= 0.8 only if\n"
+    "  you FALSIFIED it first: an emulation with a known input against the expected\n"
     "  output, OR a backward data-flow trace confirming its origin. If no such\n"
     "  check ran — the code is non-leaf or has syscall/heap side effects, or no\n"
     "  tool that runs one is attached to this request — cap CONFIDENCE at 0.7.\n"
@@ -278,14 +282,14 @@ VERIFICATION_DISCIPLINE = (
     "- A claim is High (>= 0.8) only with >= 2 independent evidence loci (e.g. an\n"
     "  import AND its call-site). A single locus caps at 0.7. Reconcile any\n"
     "  contradictory signals before emitting.\n"
-    "- Dynamic API resolution (LoadLibrary + GetProcAddress) is by itself the\n"
-    "  ORDINARY Windows idiom for optional/delay-loaded DLLs — it is NOT evidence\n"
-    "  of packing or obfuscation (T1027) on its own. Only claim T1027 when you\n"
-    "  observe a REAL obfuscation mechanism: a hashing/decrypt loop over API\n"
-    "  names, a high-entropy/packed section, an unpacking stub, or a sparse\n"
-    "  import table that hides the real APIs. A rich, fully-named import table\n"
-    "  (dozens of imports across several DLLs) argues AGAINST packing. Do not\n"
-    "  inflate a plain LoadLibrary/GetProcAddress pair into an obfuscation claim."
+    "- A dynamic-resolution pattern alone is not obfuscation: resolving APIs at\n"
+    "  run time is the ORDINARY Windows idiom for optional or delay-loaded DLLs.\n"
+    "  Only claim obfuscation when you observe a REAL obfuscation mechanism: a\n"
+    "  hashing/decrypt loop over API names, a high-entropy/packed section, an\n"
+    "  unpacking stub, or a sparse import table that hides the real APIs. A rich,\n"
+    "  fully-named import table (dozens of imports across several DLLs) argues\n"
+    "  AGAINST packing. Do not inflate a plain run-time resolution into an\n"
+    "  obfuscation claim."
 )
 
 # What every static provider's fragment says about claims: what a claim cites,
@@ -310,7 +314,9 @@ def holding_the_discipline(body: str) -> str:
     A provider that writes its whole fragment itself still reaches the model
     with the discipline every static analyst is held to.
     """
-    if VERIFICATION_DISCIPLINE in body:
+    # A provider that carries a discipline of its own (Ghidra's, worded with
+    # its own examples) carries it under the same heading.
+    if DISCIPLINE_HEADING in body:
         return body
     return body.rstrip() + "\n\n" + VERIFICATION_DISCIPLINE if body.strip() else body
 
