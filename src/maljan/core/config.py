@@ -322,7 +322,7 @@ class ModelChoice(BaseModel):
     when neither sets one.
 
     Attributes:
-        provider:    LLM provider name ("openai", "anthropic", "ollama", "gemini").
+        provider:    A registered LLM provider's name (``maljan.llm.registry``).
         model:       Model identifier (e.g. "gpt-4o", "claude-3-5-sonnet",
                      "llama3.1:8b").
         temperature: Optional temperature override.

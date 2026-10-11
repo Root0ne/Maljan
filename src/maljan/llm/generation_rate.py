@@ -1080,9 +1080,13 @@ def _transport_read_timeout(exc: BaseException) -> bool:
     """Whether ``exc`` is, or was caused by, a connection's read timeout.
 
     httpx's own ``TimeoutException`` (from ``httpx``, or ``httpx2``, the fork
-    the OpenAI SDK runs on), or the SDK's wrapper of it
-    (``openai.APITimeoutError``), anywhere in its cause chain.
+    an SDK may run on), or a provider SDK's wrapper of it (an
+    ``APITimeoutError`` exported by a package a registered adapter declares,
+    ``LLMProvider.sdk_packages``), anywhere in its cause chain.
     """
+    from maljan.llm.provider_base import provider_error_packages
+
+    packages = provider_error_packages()
     seen: set[int] = set()
     current: BaseException | None = exc
     while current is not None and id(current) not in seen:
@@ -1092,8 +1096,7 @@ def _transport_read_timeout(exc: BaseException) -> bool:
             if (klass.__module__, klass.__name__) in (
                 ("httpx", "TimeoutException"),
                 ("httpx2", "TimeoutException"),
-                ("openai", "APITimeoutError"),
-            ):
+            ) or (klass.__module__ in packages and klass.__name__ == "APITimeoutError"):
                 return True
         current = current.__cause__ or current.__context__
     return False

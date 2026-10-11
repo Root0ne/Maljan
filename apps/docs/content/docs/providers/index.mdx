@@ -68,7 +68,7 @@ analysis](/usage/running-an-analysis/#what-a-job-may-choose-for-itself).
 ## Per-agent models and fallbacks
 
 `llm.agents` holds one optional entry per agent key — provider, model,
-temperature and, for `openai` and `ollama`, a base URL — so the analysts and the
+temperature and, for a provider that declares one (`openai`, `ollama`), a base URL — so the analysts and the
 judge need not share one model, or one server. It is ordinarily edited from the
 Agents page, one agent at a time.
 
@@ -99,6 +99,24 @@ A per-agent `openai` entry with its own endpoint still authenticates with
 all: one set against them is rejected on save.
 
 </Callout>
+
+## A provider answers for itself
+
+Every fact the platform needs about a provider lives on that provider's adapter
+(`maljan.llm.provider_base.LLMProvider`): which metadata requests describe a
+model's window and which setting declares one, the global effort setting and
+the levels it takes, whether structured output is worth asking for, which SDK
+packages raise its errors and whether its own client retries them, whether a
+model left reasoning spends its output cap on it, whether its requests write the
+prompt cache for an hour (the spend meter prices that write only for that
+provider's models), whether its endpoint serves concurrent requests, whether an
+agent may give it an endpoint of its own, the keyword a call's output cap goes
+under, the reasoning it asks to have sent back, and the one short turn the
+settings probe asks it for and how that answer is read. No shared module names
+a provider. `llm.provider`, an agent entry's provider and a job's
+`llm_provider` each take any registered provider's name, so a provider
+registered at runtime with `register_provider` gets every behaviour by
+subclassing `LLMProvider` and answering for itself.
 
 ## A model is probed before a job may name it
 
