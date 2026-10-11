@@ -46,7 +46,7 @@ class StructuredAnswer(str):
     MCP lets a server answer with ``structuredContent`` (a JSON object) as
     well as its text content. The text is what the model reads, exactly as
     before; the object rides on the string to the evidence recorder, which
-    files it on the ledger entry (``LedgerEntry.structured_content``), so a
+    files it as the entry's ``structured`` (``LedgerEntry.structured_from_server``), so a
     reader of the entry reads the server's own structure whatever its text
     says. A wrapper that returns the answer unchanged keeps it; one that
     builds a new string drops it, and the entry then has none.
@@ -55,9 +55,23 @@ class StructuredAnswer(str):
     structured_content: dict[str, Any] | None = None
 
 
-def with_structured_content(text: str, content: Any) -> str:
-    """``text``, carrying ``content`` when it is the JSON object MCP's ``structuredContent`` is."""
-    if not isinstance(content, dict) or not content:
+def with_structured_content(text: str, content: Any, limit: int) -> str:
+    """``text``, carrying ``content`` when it is the JSON object MCP's ``structuredContent`` is.
+
+    Held to ``limit``, the number of characters the model could be shown of
+    this call's answer (the guardrail's limit for the call): a structure whose
+    JSON is longer is not carried, and the text goes on alone, as it always
+    did. A limit of zero (no room for any answer) carries nothing.
+    """
+    import json
+
+    if not isinstance(content, dict) or not content or limit <= 0:
+        return text
+    try:
+        size = len(json.dumps(content, ensure_ascii=False))
+    except (TypeError, ValueError):
+        return text
+    if size > limit:
         return text
     answer = StructuredAnswer(text)
     answer.structured_content = content
@@ -465,10 +479,16 @@ class MCPLangChainToolkit:
             output = "\n".join(c.text for c in result.content if hasattr(c, "text"))
             # On a thread: shortening a five-megabyte answer is CPU-bound
             # and synchronous, and this is a coroutine serving an agent.
-            shown = await asyncio.to_thread(self._apply_output_guardrail, output, narrowing)
-            # The server's own structured answer, when it gave one, rides on
-            # the text to the ledger; the text the model reads is unchanged.
-            return with_structured_content(shown, getattr(result, "structuredContent", None))
+            from maljan.llm.context_window import output_limit
+
+            # One limit for the whole call: the text's guardrail and the
+            # structure beside it are held to the same number.
+            limit = output_limit(self._max_output_chars, self._context_budget)
+            shown = await asyncio.to_thread(self._apply_output_guardrail, output, narrowing, limit)
+            # The server's own structured answer, when it gave one and it is no
+            # larger than what the model could be shown, rides on the text to
+            # the ledger; the text the model reads is unchanged.
+            return with_structured_content(shown, getattr(result, "structuredContent", None), limit)
         except Exception as exc:
             if guard is not None and not settled:
                 reason = transport_failure(exc)
@@ -498,7 +518,9 @@ class MCPLangChainToolkit:
         clean = " ".join(description.split())
         return f"[{category_tag(name, self._categories.get(name, ''))}] {clean}"
 
-    def _apply_output_guardrail(self, output: str, narrowing: Sequence[str] = ()) -> str:
+    def _apply_output_guardrail(
+        self, output: str, narrowing: Sequence[str] = (), limit: int | None = None
+    ) -> str:
         """Limit tool output size to prevent LLM context overflow.
 
         The limit is ``_max_output_chars`` when the operator set one, and
@@ -551,6 +573,8 @@ class MCPLangChainToolkit:
         Args:
             output: Raw tool output text.
             narrowing: The tool's arguments that narrow or page its answer.
+            limit: The call's limit, when the caller already read it for the
+                same call (the structure beside the answer is held to it too).
 
         Returns:
             Potentially shortened output.
@@ -560,7 +584,8 @@ class MCPLangChainToolkit:
         from maljan.llm.context_window import note_answer_not_shown, output_limit
 
         chars_in = len(output)
-        limit = output_limit(self._max_output_chars, self._context_budget)
+        if limit is None:
+            limit = output_limit(self._max_output_chars, self._context_budget)
 
         if limit <= 0:
             note_answer_not_shown(chars_in)

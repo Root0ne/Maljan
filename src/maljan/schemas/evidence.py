@@ -340,15 +340,17 @@ class LedgerEntry(BaseModel):
         ),
     )
 
-    structured_content: dict[str, Any] | None = Field(
-        default=None,
-        # Like ``facts``: an entry with none dumps as it always did.
-        exclude_if=lambda value: value is None,
+    structured_from_server: bool = Field(
+        default=False,
+        # Like ``facts``: an entry without one dumps as it always did.
+        exclude_if=lambda value: value is False,
         description=(
-            "The structured answer the tool's server returned beside a prose text (MCP "
-            "structuredContent), kept only where the text is not JSON, the object is not the "
-            "text wrapped again and the answer was not cut; structured holds the same object. "
-            "The text in output is what the model read. None otherwise."
+            "Whether structured is the structured answer the tool's server returned beside a "
+            "prose text (MCP structuredContent) rather than the text parsed: kept only where "
+            "the text is not JSON, the object is not the text wrapped again, its JSON is no "
+            "longer than the model could be shown of the call, the answer was not cut, and "
+            "the evidence budget had room for it after every text. The text in output is what "
+            "the model read."
         ),
     )
 
@@ -509,7 +511,7 @@ def build_entry(
         seq=seq,
         source=source or None,
         facts=facts,
-        structured_content=content,
+        structured_from_server=content is not None,
         reputation=_reputation_at_write(
             facts,
             ok=ok and not repeated_of and not cut,
@@ -561,29 +563,46 @@ def _structured_beside(content: Any, text: str, parsed: Any) -> dict[str, Any] |
 
 
 def stored_bytes(entry: LedgerEntry) -> int:
-    """What the entry keeps: the full parsed result when there is one, else the text.
+    """What the entry's answer costs: the full parsed result when there is one, else the text.
 
     The row persists both columns, so what is written is their sum; what the
     budget charges is the larger of the two, because the text is a prefix of
     the result's JSON and charging it twice would halve the budget for
     nothing. A structure the server returned beside a prose text
-    (``structured_content``) is no prefix of it, so the two are charged
-    together.
+    (``structured_from_server``) is not the answer's cost: it is charged on
+    its own (:func:`beside_bytes`), after every text.
     """
     text = len(entry.output.encode("utf-8", errors="ignore"))
-    if entry.structured is None:
+    if entry.structured is None or getattr(entry, "structured_from_server", False):
         return text
     try:
         parsed = len(json.dumps(entry.structured, ensure_ascii=False).encode("utf-8"))
     except (TypeError, ValueError):
         return text
-    if getattr(entry, "structured_content", None) is not None:
-        return text + parsed
     return max(text, parsed)
 
 
+def beside_bytes(entry: LedgerEntry) -> int:
+    """What a structure the server returned beside a prose text costs; 0 for every other entry."""
+    if not getattr(entry, "structured_from_server", False) or entry.structured is None:
+        return 0
+    try:
+        return len(json.dumps(entry.structured, ensure_ascii=False).encode("utf-8"))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _drop_beside(entry: LedgerEntry) -> None:
+    entry.structured = None
+    entry.structured_from_server = False
+
+
 def apply_budget(
-    entries: list[LedgerEntry], budget_bytes: int, *, already_spent: int = 0
+    entries: list[LedgerEntry],
+    budget_bytes: int,
+    *,
+    already_spent: int = 0,
+    already_beside: int = 0,
 ) -> tuple[int, int]:
     """Drop the outputs that overrun ``budget_bytes``, in call order.
 
@@ -595,6 +614,14 @@ def apply_budget(
     The entries themselves stay: which tool was called, with what, and whether
     it worked is the cheap half of the record and the half a reader needs in
     order to know something is missing.
+
+    A structure a server returned beside a prose text (``structured_from_server``)
+    never costs an answer anything. Every text is decided first, exactly as
+    with no structure at all, and ``spent`` counts texts only, so a later loop's
+    texts are decided as they would be with none. The structures are then kept
+    in call order while the budget left after every text, less the structures
+    kept before (``already_beside``, :func:`beside_bytes`), holds them; one that
+    does not fit is dropped and its text stays.
     """
     if budget_bytes <= 0:
         return 0, already_spent
@@ -612,7 +639,16 @@ def apply_budget(
             continue
         entry.output = ""
         entry.structured = None
-        entry.structured_content = None
+        entry.structured_from_server = False
         entry.truncated = True
         trimmed += 1
+    room = budget_bytes - spent - max(0, already_beside)
+    for entry in entries:
+        size = beside_bytes(entry)
+        if not size:
+            continue
+        if size <= room:
+            room -= size
+            continue
+        _drop_beside(entry)
     return trimmed, spent

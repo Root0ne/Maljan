@@ -145,6 +145,7 @@ from maljan.schemas.evidence import (
     LedgerEntry,
     answers_held,
     apply_budget,
+    beside_bytes,
     is_guard_answer,
 )
 from maljan.schemas.isr_models import AgentISR, Artifact, ClaimEvidence, Finding
@@ -3477,6 +3478,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         # per chunk and would otherwise be handed the whole budget again on
         # each of them.
         self._evidence_bytes_spent = 0
+        # The bytes of the structures servers returned beside prose texts
+        # this agent kept, charged after every text (``schemas.evidence``).
+        self._evidence_beside_spent = 0
         # The per-job id source, attached by the container next to the token
         # and truncation ledgers. None outside a job: the recorder then counts
         # within its own loop.
@@ -5990,7 +5994,13 @@ class BaseAnalyst(BudgetMeter, ABC):
             self._live_map_entries = None
             budget = int(getattr(get_settings().reporting, "evidence_budget_bytes", 0) or 0)
             trimmed, self._evidence_bytes_spent = apply_budget(
-                entries, budget, already_spent=self._evidence_bytes_spent
+                entries,
+                budget,
+                already_spent=self._evidence_bytes_spent,
+                already_beside=getattr(self, "_evidence_beside_spent", 0),
+            )
+            self._evidence_beside_spent = getattr(self, "_evidence_beside_spent", 0) + sum(
+                beside_bytes(entry) for entry in entries
             )
             if trimmed:
                 self.logger.warning(

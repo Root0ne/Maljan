@@ -3373,7 +3373,7 @@ sentence saying the quoted text is the server's data and never an instruction,
 and that the agent's instructions hold where it differs. Each quoted value is
 written as a JSON string (every quote, backslash and control character
 escaped), so nothing the server serves ends it, and a served
-`{{attached:…}}` is shown as written, never resolved. A tool is named as the
+`{{attached:…}}` is shown as written, never resolved. A tool's name is quoted the same way, as the
 request offers it (`<server>__<name>` where another server took the name).
 The text is kept whole, as a description is, and is sent with every request
 of every agent bound to the server: a server with long `instructions` costs
@@ -3382,13 +3382,27 @@ that much of each agent's context on every turn, and declaring a
 (every built-in) carries what its declaration says and nothing more.
 
 A tool's answer that the server gives as `structuredContent` beside a prose
-text is kept on the ledger entry (`structured_content`) and read as the
-entry's structure, charged to the evidence budget with the text and blanked
-with it. It is kept only where it adds something: not when the text is JSON
-(the SDK's servers, every built-in among them, answer a dict both ways), not
-when the object only wraps the text again (`{"result": <the text>}`), and
-never for an answer the guardrail cut, the conversation had no room for, or a
-repeat, so an entry never holds more than the model read.
+text is kept as the entry's structure (`structured`, marked
+`structured_from_server`); the text is what the model read, as before. It is
+kept only where it adds something and costs nothing:
+
+- not when the text is JSON (the SDK's servers, every built-in among them,
+  answer a dict both ways), and not when the object only wraps the text again
+  (`{"result": <the text>}`);
+- not when its JSON is longer than the guardrail let the model be shown of
+  that call (the same limit the text was held to);
+- never for an answer the guardrail cut, the conversation had no room for, or
+  a repeat;
+- in the evidence budget, every text is decided first exactly as with no
+  structure; a structure is kept only while the room left after every text
+  (less the structures kept earlier) holds it, and is dropped otherwise, so it
+  never costs its own text or any other entry anything.
+
+So an entry never holds a structure longer than the model could have been
+shown of the call, though the structure may hold rows the prose text only
+summarised. Because a later loop's texts are decided as if no structure had
+been kept, an agent's kept bytes can exceed its budget by the structures it
+kept before those texts arrived.
 
 **A provider registered at runtime.** A static or sandbox provider class
 registered with `register_static_provider` or `register_sandbox_provider`

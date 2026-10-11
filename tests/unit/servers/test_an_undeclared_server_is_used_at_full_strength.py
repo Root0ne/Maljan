@@ -149,7 +149,7 @@ def test_its_own_words_reach_the_prompt_quoted_as_its_data(attached: list[Any]) 
         ("scan_rules", "Scan the file with the server's rules."),
         ("read_capture", "Read packets from a capture."),
     ):
-        assert f'`{name}`: "{said}"' in statement
+        assert f'"{name}": "{said}"' in statement
 
 
 def test_its_words_are_shown_only_while_its_tools_are_attached(attached: list[Any]) -> None:
@@ -204,10 +204,12 @@ def test_its_structured_answer_is_filed_and_the_text_is_the_servers(
 
     (entry,) = asyncio.run(_run())
     assert entry.output == "1 rule matched"
-    assert entry.structured_content == STRUCTURED
     assert entry.structured == STRUCTURED
     dumped = entry.model_dump(mode="json")
-    assert dumped["structured_content"] == STRUCTURED
+    # Held once, as the entry's structure, with a flag saying where it came from.
+    assert dumped["structured"] == STRUCTURED
+    assert dumped["structured_from_server"] is True
+    assert "structured_content" not in dumped
     sections = {s.key: s for s in build_sections([entry])}
     assert any(entry.id in s.evidence_ids for s in sections.values())
 
@@ -245,7 +247,7 @@ def test_an_entry_dump_with_no_structured_answer_is_unchanged() -> None:
     entry = build_entry(
         entry_id="ev_0001", seq=1, agent="a", tool="t", args={}, server=None, output="{}"
     )
-    assert "structured_content" not in json.loads(entry.model_dump_json())
+    assert "structured_from_server" not in json.loads(entry.model_dump_json())
 
 
 # ---------------------------------------------------------------------------
@@ -308,44 +310,130 @@ def test_an_answer_whose_text_already_is_its_structure_changes_nothing(
     entries = asyncio.run(_run())
     assert [e.tool for e in entries] == ["rows", "note"]
     for entry in entries:
-        assert entry.structured_content is None
+        assert not entry.structured_from_server
         dev = _as_dev_writes_it(entry)
         assert entry.model_dump_json() == dev.model_dump_json()
         assert stored_bytes(entry) == stored_bytes(dev)
     assert entries[0].structured == ROWS
 
 
-def _prose_entry(**over: Any) -> Any:
+def _prose_entry(
+    n: int = 1, structure: Any = None, text: str = "1 rule matched", **over: Any
+) -> Any:
     from maljan.schemas.evidence import build_entry
 
     return build_entry(
-        entry_id="ev_0001",
-        seq=1,
+        entry_id=f"ev_{n:04d}",
+        seq=n,
         agent="a",
         tool="scan_rules",
         args={},
         server=SERVER,
-        output="1 rule matched",
+        output=text,
         source=f"mcp:{SERVER}",
-        structured_content=STRUCTURED,
+        structured_content=STRUCTURED if structure is None else structure,
         **over,
     )
 
 
-def test_a_prose_answer_keeps_its_structure_charged_to_the_budget() -> None:
-    from maljan.schemas.evidence import apply_budget, stored_bytes
+def _text_entry(n: int, size: int) -> Any:
+    from maljan.schemas.evidence import build_entry
+
+    return build_entry(
+        entry_id=f"ev_{n:04d}", seq=n, agent="a", tool="t", args={}, server=None, output="x" * size
+    )
+
+
+def _without_structures(entries: list[Any]) -> list[Any]:
+    """The same entries as dev writes them: the text alone."""
+    return [
+        e.model_copy(update={"structured": None, "structured_from_server": False}) for e in entries
+    ]
+
+
+def _outcome(entries: list[Any]) -> list[tuple[str, bool]]:
+    return [(e.output, e.truncated) for e in entries]
+
+
+def test_a_prose_answer_keeps_its_structure_beside_its_text_in_the_budget() -> None:
+    from maljan.schemas.evidence import apply_budget, beside_bytes, stored_bytes
 
     entry = _prose_entry()
-    assert entry.structured_content == STRUCTURED == entry.structured
+    assert entry.structured == STRUCTURED and entry.structured_from_server
     parsed = len(json.dumps(STRUCTURED, ensure_ascii=False).encode("utf-8"))
-    assert stored_bytes(entry) == len(b"1 rule matched") + parsed
+    assert stored_bytes(entry) == len(b"1 rule matched")
+    assert beside_bytes(entry) == parsed
 
-    kept, spent = apply_budget([_prose_entry()], stored_bytes(entry))
-    assert (kept, spent) == (0, stored_bytes(entry))
-    over = _prose_entry()
-    trimmed, _ = apply_budget([over], stored_bytes(entry) - 1)
-    assert trimmed == 1
-    assert over.output == "" and over.structured is None and over.structured_content is None
+    kept = _prose_entry()
+    assert apply_budget([kept], len(b"1 rule matched") + parsed) == (0, len(b"1 rule matched"))
+    assert kept.structured == STRUCTURED
+    # Room for the text and not for the structure: the structure goes, the text stays.
+    tight = _prose_entry()
+    assert apply_budget([tight], len(b"1 rule matched") + parsed - 1) == (0, 14)
+    assert tight.output == "1 rule matched" and not tight.truncated
+    assert tight.structured is None and not tight.structured_from_server
+
+
+def test_a_huge_structure_beside_a_short_text_never_costs_the_text_or_a_later_entry() -> None:
+    from maljan.schemas.evidence import apply_budget
+
+    huge = {"rows": [{"rule": f"rule_{i:05d}", "pad": "p" * 90} for i in range(6000)]}
+    assert len(json.dumps(huge)) > 600_000
+    budget = 524_288
+    entries = [_prose_entry(1, huge), _text_entry(2, 200_000), _text_entry(3, 200_000)]
+    dev = _without_structures(entries)
+    assert apply_budget(entries, budget) == apply_budget(dev, budget)
+    assert _outcome(entries) == _outcome(dev)
+    assert entries[0].output == "1 rule matched"
+    assert entries[0].structured is None and not entries[0].structured_from_server
+
+
+def test_a_structure_that_fits_but_would_crowd_later_entries_is_dropped() -> None:
+    from maljan.schemas.evidence import apply_budget
+
+    structure = {"rows": ["r" * 1000 for _ in range(300)]}  # about 300 KB
+    budget = 524_288
+    entries = [_prose_entry(1, structure), _text_entry(2, 200_000), _text_entry(3, 200_000)]
+    dev = _without_structures(entries)
+    assert apply_budget(entries, budget) == apply_budget(dev, budget)
+    assert _outcome(entries) == _outcome(dev)
+    assert all(not e.truncated for e in entries)
+    assert entries[0].structured is None
+
+    # With the texts decided, a structure the room left holds is kept.
+    small = {"rows": ["r" * 1000 for _ in range(50)]}
+    roomy = [_prose_entry(1, small), _text_entry(2, 200_000), _text_entry(3, 200_000)]
+    dev = _without_structures(roomy)
+    assert apply_budget(roomy, budget) == apply_budget(dev, budget)
+    assert _outcome(roomy) == _outcome(dev)
+    assert roomy[0].structured == small
+
+
+def test_a_later_loop_s_texts_are_decided_as_with_no_structure() -> None:
+    from maljan.schemas.evidence import apply_budget, beside_bytes
+
+    small = {"rows": ["r" * 1000 for _ in range(50)]}
+    budget = 260_000
+    first = [_prose_entry(1, small), _text_entry(2, 150_000)]
+    _, spent = apply_budget(first, budget)
+    assert first[0].structured == small
+    second = [_text_entry(3, 100_000)]
+    dev_first = _without_structures([_prose_entry(1, small), _text_entry(2, 150_000)])
+    _, dev_spent = apply_budget(dev_first, budget)
+    assert spent == dev_spent
+    dev_second = [_text_entry(3, 100_000)]
+    apply_budget(dev_second, budget, already_spent=dev_spent)
+    apply_budget(second, budget, already_spent=spent, already_beside=beside_bytes(first[0]))
+    assert _outcome(second) == _outcome(dev_second)
+
+
+def test_a_structure_longer_than_the_model_could_be_shown_is_not_carried() -> None:
+    from maljan.agents.mcp_client import structured_content_of, with_structured_content
+
+    assert structured_content_of(with_structured_content("1 rule matched", STRUCTURED, 10_000))
+    held = with_structured_content("1 rule matched", STRUCTURED, len(json.dumps(STRUCTURED)) - 1)
+    assert held == "1 rule matched" and structured_content_of(held) is None
+    assert structured_content_of(with_structured_content("x", STRUCTURED, 0)) is None
 
 
 @pytest.mark.parametrize(
@@ -354,22 +442,11 @@ def test_a_prose_answer_keeps_its_structure_charged_to_the_budget() -> None:
 )
 def test_an_answer_cut_or_not_shown_keeps_no_uncut_structure(cut: dict[str, Any]) -> None:
     entry = _prose_entry(**cut)
-    assert entry.structured_content is None
+    assert not entry.structured_from_server
     assert entry.structured is None
-    assert "structured_content" not in json.loads(entry.model_dump_json())
+    assert "structured_from_server" not in json.loads(entry.model_dump_json())
 
 
 def test_an_object_that_only_wraps_the_text_again_adds_nothing() -> None:
-    from maljan.schemas.evidence import build_entry
-
-    entry = build_entry(
-        entry_id="ev_0001",
-        seq=1,
-        agent="a",
-        tool="note",
-        args={},
-        server=SERVER,
-        output="a plain note",
-        structured_content={"result": "a plain note"},
-    )
-    assert entry.structured_content is None and entry.structured is None
+    entry = _prose_entry(text="a plain note", structure={"result": "a plain note"})
+    assert not entry.structured_from_server and entry.structured is None
