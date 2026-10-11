@@ -1,9 +1,10 @@
 """Name the sandbox format behind a report payload, and the sample in front of one.
 
-``sniff_format`` is used by the upload provider to decide which normaliser
-handles an attached report, and by the Triage adapter to confirm what it just
-fetched. Kept a pure function over a plain ``dict`` — no I/O, no provider
-imports — so both call sites can use it without a dependency on each other.
+``sniff_format`` is used by the upload route and the upload provider to name
+an attached report's format from the declared formats
+(``maljan.core.report_formats``). Kept a pure function over a plain ``dict``
+— no I/O, no provider imports — so both call sites can use it without a
+dependency on each other.
 
 ``detect_sample_format`` and ``option_for_format`` are the submit-side pair:
 what a sample on disk is, and which of the operator's per-format settings that
@@ -13,10 +14,11 @@ through them, so one file type means the same thing to all of them.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
-Format = Literal["cape2", "cuckoo", "triage", "unknown"]
+from maljan.core.report_formats import UNKNOWN_FORMAT, ReportFormat, sniff
 
 # The key an operator writes for "every format I did not name".
 FALLBACK_FORMAT_KEY = "*"
@@ -63,29 +65,15 @@ def cape_platform(platform: str) -> str:
     return CAPE_PLATFORMS.get((platform or "").strip().lower(), "")
 
 
-def sniff_format(payload: dict[str, Any]) -> Format:
-    """Name the sandbox that produced ``payload``, most specific first.
+def sniff_format(payload: dict[str, Any], formats: Iterable[ReportFormat] | None = None) -> str:
+    """Name the format that produced ``payload``: the first declared format that recognises it.
 
-    Triage first: its overview carries ``analysis`` plus a non-empty
-    ``tasks``, which no CAPE report has. ``tasks`` comes as a list in Triage's
-    own documentation and as a dict keyed by task id from the live API, so
-    both shapes count. CAPE next: ``CAPE`` as a top-level key, or a version string
-    naming it. Cuckoo last, as the generic ``info`` + ``behavior`` shape CAPE
-    inherited from it — so it can only be reached once CAPE has been ruled out.
+    ``formats`` are the effective declarations (``report_formats.effective_formats``
+    over ``sandbox.upload.formats``); ``None`` reads the built-ins alone. The
+    built-ins try Triage first (``analysis`` plus a non-empty ``tasks``), then
+    CAPE (a ``CAPE`` block or a version string naming it), then Cuckoo (the
+    generic ``info`` + ``behavior`` shape CAPE inherited). ``"unknown"`` where
+    none recognises it.
     """
-    if not isinstance(payload, dict) or not payload:
-        return "unknown"
-    analysis = payload.get("analysis")
-    tasks = payload.get("tasks")
-    if isinstance(analysis, dict) and isinstance(tasks, (list, dict)) and tasks:
-        return "triage"
-    if isinstance(payload.get("CAPE"), (dict, list)):
-        return "cape2"
-    info_field = payload.get("info")
-    info = info_field if isinstance(info_field, dict) else {}
-    version = str(info.get("version") or "")
-    if "cape" in version.lower():
-        return "cape2"
-    if isinstance(payload.get("behavior"), dict) and info:
-        return "cuckoo"
-    return "unknown"
+    found = sniff(payload, formats)
+    return found.name if found is not None else UNKNOWN_FORMAT

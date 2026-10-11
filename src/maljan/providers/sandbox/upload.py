@@ -14,10 +14,10 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+from maljan.core.report_formats import ReportFormat, effective_formats, sniff
 from maljan.providers.base import SandboxCapabilities, SandboxProvider
 from maljan.providers.errors import ProviderError
 from maljan.providers.registry import register_sandbox_provider
-from maljan.providers.sandbox.formats import sniff_format
 from maljan.schemas.sandbox_report import (
     cape_report_to_sandbox_report,
     triage_overview_to_sandbox_report,
@@ -25,6 +25,7 @@ from maljan.schemas.sandbox_report import (
 
 if TYPE_CHECKING:
     from maljan.core.config import SandboxUploadConfig, Settings
+    from maljan.core.report_formats import SignatureScale
     from maljan.schemas.sandbox_report import SandboxRun
 
 
@@ -49,7 +50,11 @@ class UploadSandboxProvider(SandboxProvider):
         # a blob that fails to parse or sniff leaves this None and
         # capabilities falls back to "generic" exactly as before — the real
         # error still surfaces from attach_report()/fetch() when read.
+        # The reader of the sniffed format, which is what report_format names.
         self._sniffed_format: Literal["cape2", "cuckoo", "triage"] | None = None
+        # The declared format the pending blob sniffed as, for its signature scale.
+        self._declared: ReportFormat | None = None
+        self._formats = effective_formats(cfg.formats)
 
     @classmethod
     def from_settings(cls, cfg: Settings) -> UploadSandboxProvider:
@@ -77,14 +82,15 @@ class UploadSandboxProvider(SandboxProvider):
         """
         self._blob, self._filename = blob, filename
         try:
-            fmt = sniff_format(self._parse(blob))
+            found = sniff(self._parse(blob), self._formats)
         except ProviderError:
-            fmt = "unknown"
-        # "unknown" is not one of SandboxCapabilities.report_format's Literal
-        # members; attach_report()/fetch() already refuse an unknown format
-        # with a worded ProviderError, so capabilities just falls back to
-        # "generic" for it rather than raising here, ahead of that message.
-        self._sniffed_format = fmt if fmt in ("cape2", "cuckoo", "triage") else None
+            found = None
+        # A format no reader reads, or a blob no format recognises, has no
+        # report_format; attach_report()/fetch() refuse either with a worded
+        # ProviderError, so capabilities just falls back to "generic" for it
+        # rather than raising here, ahead of that message.
+        self._declared = found
+        self._sniffed_format = (found.reader or None) if found is not None else None
 
     def submit(self, sample_path: str | Path) -> str:
         raise ProviderError(
@@ -119,8 +125,8 @@ class UploadSandboxProvider(SandboxProvider):
         from maljan.schemas.sandbox_report import SandboxRun
 
         payload = self._parse(blob)
-        fmt = sniff_format(payload)
-        if fmt == "unknown":
+        found = sniff(payload, self._formats)
+        if found is None:
             # Never a legitimate target regardless of ``allowed_formats``:
             # ``SandboxReport.source_format`` has no "unknown" member, so
             # letting this through to ``cape_report_to_sandbox_report`` would
@@ -131,13 +137,19 @@ class UploadSandboxProvider(SandboxProvider):
                 "Could not recognise the uploaded report's sandbox format; accepted "
                 f"formats are {', '.join(sorted(self._cfg.allowed_formats))}."
             )
-        if fmt not in set(self._cfg.allowed_formats):
+        if found.name not in set(self._cfg.allowed_formats):
             raise ProviderError(
-                f"Uploaded report sniffed as {fmt!r}; accepted formats are "
+                f"Uploaded report sniffed as {found.name!r}; accepted formats are "
                 f"{', '.join(sorted(self._cfg.allowed_formats))}."
             )
-        # ``fmt`` is narrowed to Literal["cape2", "cuckoo", "triage"] here:
-        # "unknown" raised above is the only member neither reader accepts.
+        # The declared format names the reader; the format's own name is never
+        # branched on here.
+        fmt = found.reader
+        if not fmt:
+            raise ProviderError(
+                f"Uploaded report sniffed as {found.name!r}, a format declared without a "
+                "reader; no analysis can read it yet."
+            )
         if fmt == "triage":
             # An uploaded Triage report is an overview.json alone — no
             # per-task behavioural reports rode along with it, so
@@ -155,6 +167,10 @@ class UploadSandboxProvider(SandboxProvider):
             report=report,
             raw=payload,
         )
+
+    def signature_scale(self, run: SandboxRun) -> SignatureScale | None:
+        """The scale the declared format of the attached report names."""
+        return self._declared.signature_scale if self._declared is not None else None
 
     def fetch(self, task_id: str) -> SandboxRun:
         if self._blob is None:

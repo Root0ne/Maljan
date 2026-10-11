@@ -1,0 +1,309 @@
+"""What a sandbox report format says about itself, as data.
+
+A report format is recognised, read and rated through its declaration, never
+through code written against its name. A declaration says:
+
+* ``detect``: how a payload is recognised as this format. It is a list of
+  groups; the format matches when every test of any one group holds. A test
+  names a field path and what the value there must be: one of ``types``
+  (``object``, ``array``, ``string``, ``number``, ``boolean``, ``null``),
+  non-empty, or holding ``contains`` in its text (a string, number or boolean,
+  compared without regard to case);
+* ``task_id_paths``: where the source sandbox's own task id sits, first path
+  that holds a value wins;
+* ``target_sha256_paths``: where the report's claimed target sha256 sits, first
+  path that holds a non-empty value wins;
+* ``reader``: which of the platform's report readers reads a report of this
+  format into the internal sandbox report (``cape2``, ``cuckoo``, ``triage``),
+  empty for a format no reader reads yet;
+* ``signature_scale``: what a signature's severity number means, as the rung
+  of the five-word severity ladder each score from 1 up names; absent where the
+  format documents no scale.
+
+The built-in formats (:data:`BUILTIN_REPORT_FORMATS`) reproduce what the
+platform recognised and read before formats were declared. An operator
+declares more in ``sandbox.upload.formats``; a declared format with a built-in
+name replaces that built-in in its place, and a new name is tried before the
+built-ins, because the operator's format is the more specific knowledge
+(:func:`effective_formats`).
+
+Field paths are the tool declarations' (``maljan.core.tool_declarations``):
+``/``-separated keys, ``*`` for every item, ``**`` for any depth, read in time
+linear in the payload.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from maljan.core.tool_declarations import VOCABULARY_PATTERN, parse_path, select
+
+# The name a payload no format recognises is given.
+UNKNOWN_FORMAT = "unknown"
+
+# The platform's report readers, by the id a declaration names one with.
+ReaderId = Literal["cape2", "cuckoo", "triage"]
+
+ValueType = Literal["object", "array", "string", "number", "boolean", "null"]
+SeverityRung = Literal["Critical", "High", "Medium", "Low", "Informational"]
+
+
+def _type_of(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int | float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, Mapping):
+        return "object"
+    if isinstance(value, list | tuple):
+        return "array"
+    return ""
+
+
+def _text(value: Any) -> str:
+    """A scalar's text, empty for a container or an empty value."""
+    if not value or isinstance(value, Mapping | list | tuple):
+        return ""
+    return str(value)
+
+
+class FieldTest(BaseModel):
+    """One test on the value at a field path."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    types: list[ValueType] = Field(default_factory=list)
+    non_empty: bool = False
+    contains: str = ""
+
+    @field_validator("path")
+    @classmethod
+    def _path_parses(cls, value: str) -> str:
+        if not value:
+            raise ValueError("a field test needs a path")
+        parse_path(value)
+        return value
+
+    def holds(self, payload: Any) -> bool:
+        """Whether some value ``path`` names in ``payload`` passes every part of the test."""
+        needle = self.contains.lower()
+        for value in select(payload, self.path):
+            if self.types and _type_of(value) not in self.types:
+                continue
+            if self.non_empty and not value:
+                continue
+            if needle and needle not in _text(value).lower():
+                continue
+            return True
+        return False
+
+
+class SignatureScale(BaseModel):
+    """A signature severity scale: the rung each score from 1 to ``max`` means."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    rungs: list[SeverityRung] = Field(min_length=1)
+
+    @field_validator("name")
+    @classmethod
+    def _named(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("a signature scale needs a name")
+        return value
+
+    @property
+    def max(self) -> int:
+        return len(self.rungs)
+
+    def record(self) -> dict[str, Any]:
+        """The scale as a run records it and the console reads it."""
+        return {"name": self.name, "max": self.max, "rungs": list(self.rungs)}
+
+
+class ReportFormat(BaseModel):
+    """One sandbox report format, declared."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(pattern=VOCABULARY_PATTERN)
+    detect: list[list[FieldTest]] = Field(min_length=1)
+    task_id_paths: list[str] = Field(default_factory=list)
+    target_sha256_paths: list[str] = Field(default_factory=list)
+    reader: ReaderId | Literal[""] = ""
+    signature_scale: SignatureScale | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _not_reserved(cls, value: str) -> str:
+        if value == UNKNOWN_FORMAT:
+            raise ValueError(f"{UNKNOWN_FORMAT!r} names a payload no format recognises")
+        return value
+
+    @field_validator("detect")
+    @classmethod
+    def _groups_hold_tests(cls, value: list[list[FieldTest]]) -> list[list[FieldTest]]:
+        if any(not group for group in value):
+            raise ValueError("every detect group needs at least one test")
+        return value
+
+    @field_validator("task_id_paths", "target_sha256_paths")
+    @classmethod
+    def _paths_parse(cls, value: list[str]) -> list[str]:
+        for path in value:
+            if not path:
+                raise ValueError("an empty field path names nothing")
+            parse_path(path)
+        return value
+
+    def matches(self, payload: Any) -> bool:
+        """Whether every test of some ``detect`` group holds on ``payload``."""
+        return any(all(test.holds(payload) for test in group) for group in self.detect)
+
+    def task_id(self, payload: Any) -> str | None:
+        """The first value a task-id path names that is neither null nor empty text, as text."""
+        for path in self.task_id_paths:
+            for value in select(payload, path):
+                if value is not None and value != "":
+                    return str(value)
+        return None
+
+    def target_sha256(self, payload: Any) -> str:
+        """The first non-empty value a target-hash path names, as text; empty when none."""
+        for path in self.target_sha256_paths:
+            for value in select(payload, path):
+                if value:
+                    return str(value)
+        return ""
+
+
+def _test(path: str, *types: ValueType, non_empty: bool = False, contains: str = "") -> FieldTest:
+    return FieldTest(path=path, types=list(types), non_empty=non_empty, contains=contains)
+
+
+# The CAPE and Cuckoo readers' shared places: CAPE nests the sample's identity
+# under ``target.file``; the flat ``target.sha256`` is read where a report
+# carries it flat.
+_CAPE_TASK_ID = ["/info/id"]
+_CAPE_TARGET = ["/target/file/sha256", "/target/sha256"]
+_LOW_TO_HIGH: list[SeverityRung] = ["Low", "Medium", "High"]
+
+# Most specific first: the first format that matches names the payload.
+BUILTIN_REPORT_FORMATS: tuple[ReportFormat, ...] = (
+    # A Triage overview carries ``analysis`` and a non-empty ``tasks``, a list
+    # in Triage's documentation and an object keyed by task id from its API.
+    ReportFormat(
+        name="triage",
+        detect=[[_test("/analysis", "object"), _test("/tasks", "object", "array", non_empty=True)]],
+        task_id_paths=["/sample/id"],
+        target_sha256_paths=["/sample/sha256"],
+        reader="triage",
+        # A Triage signature's score is its sample-score scale: 1 no malicious
+        # behaviour, 2-5 likely benign, 6-7 suspicious, 8-9 likely malicious,
+        # 10 known bad.
+        signature_scale=SignatureScale(
+            name="Triage 1–10",
+            rungs=[
+                "Informational",
+                "Low",
+                "Low",
+                "Low",
+                "Low",
+                "Medium",
+                "Medium",
+                "High",
+                "High",
+                "Critical",
+            ],
+        ),
+    ),
+    # CAPE: a ``CAPE`` block, or a version string naming it.
+    ReportFormat(
+        name="cape2",
+        detect=[
+            [_test("/CAPE", "object", "array")],
+            [_test("/info", "object"), _test("/info/version", contains="cape")],
+        ],
+        task_id_paths=_CAPE_TASK_ID,
+        target_sha256_paths=_CAPE_TARGET,
+        reader="cape2",
+        signature_scale=SignatureScale(name="CAPE 1–3", rungs=_LOW_TO_HIGH),
+    ),
+    # Cuckoo: the generic ``info`` + ``behavior`` shape CAPE inherited, reached
+    # only once CAPE has been ruled out.
+    ReportFormat(
+        name="cuckoo",
+        detect=[[_test("/behavior", "object"), _test("/info", "object", non_empty=True)]],
+        task_id_paths=_CAPE_TASK_ID,
+        target_sha256_paths=_CAPE_TARGET,
+        reader="cuckoo",
+        signature_scale=SignatureScale(name="Cuckoo 1–3", rungs=_LOW_TO_HIGH),
+    ),
+)
+
+
+def check_declared_formats(value: Sequence[ReportFormat]) -> list[ReportFormat]:
+    """``value`` as a list, refusing two declarations under one name."""
+    seen: set[str] = set()
+    for fmt in value:
+        if fmt.name in seen:
+            raise ValueError(f"report format {fmt.name!r} is declared twice")
+        seen.add(fmt.name)
+    return list(value)
+
+
+def effective_formats(declared: Iterable[ReportFormat] = ()) -> tuple[ReportFormat, ...]:
+    """The formats tried, in order: new declared names, then the built-ins.
+
+    A declared format with a built-in's name takes that built-in's place.
+    """
+    declared = list(declared)
+    by_name = {fmt.name: fmt for fmt in declared}
+    builtin_names = {fmt.name for fmt in BUILTIN_REPORT_FORMATS}
+    new = [fmt for fmt in declared if fmt.name not in builtin_names]
+    return (*new, *(by_name.get(fmt.name, fmt) for fmt in BUILTIN_REPORT_FORMATS))
+
+
+def sniff(payload: Any, formats: Iterable[ReportFormat] | None = None) -> ReportFormat | None:
+    """The first format that recognises ``payload``, or ``None``."""
+    if not isinstance(payload, Mapping) or not payload:
+        return None
+    for fmt in BUILTIN_REPORT_FORMATS if formats is None else formats:
+        if fmt.matches(payload):
+            return fmt
+    return None
+
+
+def format_named(name: str, formats: Iterable[ReportFormat] | None = None) -> ReportFormat | None:
+    """The format declared under ``name``, or ``None``."""
+    for fmt in BUILTIN_REPORT_FORMATS if formats is None else formats:
+        if fmt.name == name:
+            return fmt
+    return None
+
+
+# Where a run summary records the signature scale of the run's sandbox report.
+SIGNATURE_SCALE_KEY = "sandbox_signature_scale"
+
+
+def recorded_signature_scale(container: Any) -> dict[str, Any]:
+    """What a run summary records about the signature scale, from the job's container.
+
+    Nothing where no sandbox report was read; otherwise the key, holding the
+    scale the provider declared or ``None`` where it declared none. A summary
+    without the key (every run recorded before scales were) is read by the
+    console's legacy table.
+    """
+    if getattr(container, "sandbox_normalised", None) is None:
+        return {}
+    scale = getattr(container, "sandbox_signature_scale", None)
+    return {SIGNATURE_SCALE_KEY: dict(scale) if isinstance(scale, Mapping) else None}

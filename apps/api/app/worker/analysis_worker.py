@@ -29,6 +29,7 @@ from arq import cron
 from maljan.agents.base_agent import CANCEL_DELIVERY_GRACE
 from maljan.core.cancellation import Cancellation, JobCancelled
 from maljan.core.config import Settings as _CoreSettings
+from maljan.core.report_formats import recorded_signature_scale
 from maljan.core.settings_catalog import core_catalog
 from maljan.core.settings_overrides import build_settings, public_snapshot, trim_declarations
 from maljan.pipeline.events import MODEL_USAGE as MODEL_USAGE_EVENT
@@ -1601,6 +1602,7 @@ async def keep_the_built_report(
     core_settings: Any,
     override_keys: Any,
     hash_mismatch_reason: str | None,
+    scale_record: Mapping[str, Any] | None = None,
 ) -> bool:
     """Store a report a failed run built, marked incomplete. Never raises.
 
@@ -1628,6 +1630,7 @@ async def keep_the_built_report(
             core_settings=core_settings,
             override_keys=override_keys,
             hash_mismatch_reason=hash_mismatch_reason,
+            scale_record=scale_record,
         )
         run_summary["degraded_mode"] = True
         run_summary["degradation_reasons"] = [
@@ -1762,6 +1765,7 @@ async def keep_the_stopped_run(
             core_settings=core_settings,
             override_keys=override_keys,
             hash_mismatch_reason=hash_mismatch_reason,
+            scale_record=recorded_signature_scale(container),
         )
         async with db_session() as db:
             report = await _store_the_report(
@@ -2746,6 +2750,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             core_settings=core_settings,
             override_keys=overrides,
             hash_mismatch_reason=_report_hash_mismatch_reason,
+            scale_record=recorded_signature_scale(getattr(app, "container", None)),
         )
 
         # A pipeline that produced no report is a failed run, not a
@@ -2937,6 +2942,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     core_settings=core_settings,
                     override_keys=overrides,
                     hash_mismatch_reason=_report_hash_mismatch_reason,
+                    scale_record=recorded_signature_scale(getattr(app, "container", None)),
                 )
             await mark_job_failed(db_session, job_uuid, reason=reason, error_id=error_id)
         else:
@@ -3707,6 +3713,7 @@ def _report_inputs(
     core_settings: Any,
     override_keys: Any,
     hash_mismatch_reason: str | None,
+    scale_record: Mapping[str, Any] | None = None,
 ) -> tuple[dict | None, dict[str, Any]]:
     """The STIX bundle and the run summary a stored report carries.
 
@@ -3743,6 +3750,10 @@ def _report_inputs(
     _run_summary = pipeline_result.get("run_summary")
     _run_summary = dict(_run_summary) if isinstance(_run_summary, dict) else {}
     _run_summary["settings_snapshot"] = settings_snapshot(core_settings, override_keys)
+    # The signature scale the sandbox provider declared for the job's report
+    # (``report_formats.recorded_signature_scale``): the console reads a
+    # signature's number on it, and a summary without it on its legacy table.
+    _run_summary.update(scale_record or {})
     if hash_mismatch_reason:
         # Threaded in here rather than through the pipeline state:
         # the mismatch is known before the graph runs (it is on the

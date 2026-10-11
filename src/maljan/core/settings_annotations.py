@@ -2016,7 +2016,19 @@ ANNOTATIONS.update(
             "title": "Accepted report formats",
             "description": (
                 "Formats the sniffer may accept for an uploaded report: cape2, "
-                "cuckoo, triage. A file that sniffs as anything else is refused."
+                "cuckoo, triage, and the name of any format declared below. A file "
+                "that sniffs as anything else is refused."
+            ),
+            "applies_when": _SANDBOX_UPLOAD,
+        },
+        "sandbox.upload.formats": {
+            "title": "Declared report formats",
+            "description": (
+                "Your own report formats, as JSON: each one's name, how it is "
+                "recognised (detect: groups of field tests), where its task id and "
+                "target sha256 sit (field paths), which reader reads it (cape2, "
+                "cuckoo, triage, or empty), and its signature severity scale. Tried "
+                "before the built-ins; a built-in's name replaces that built-in."
             ),
             "applies_when": _SANDBOX_UPLOAD,
         },
@@ -2291,6 +2303,18 @@ ANNOTATIONS.update(
         ),
         "sandbox.rest.report.pcap_path": _rest(
             "PCAP path", "Optional capture path; empty means this sandbox publishes no PCAP."
+        ),
+        "sandbox.rest.report.signature_scale_rungs": _rest(
+            "Signature scale",
+            "For a generic report: the severity rung each signature score from 1 up "
+            "means, one per line (Informational, Low, Medium, High, Critical). Empty "
+            "draws the scores unrated.",
+            generic_only=True,
+        ),
+        "sandbox.rest.report.signature_scale_name": _rest(
+            "Signature scale name",
+            "The scale's name as the console shows it; empty names it 1–N.",
+            generic_only=True,
         ),
         "sandbox.rest.mapping.target_sha256": _rest(
             "Mapping: sample hash", "JSONPath to the detonated sample's SHA-256.", generic_only=True
