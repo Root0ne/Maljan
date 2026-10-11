@@ -345,6 +345,56 @@ async def test_a_hostile_indicator_never_carries_the_credential_anywhere(
     assert secret not in caplog.text
 
 
+@pytest.mark.asyncio
+async def test_a_url_s_own_query_is_kept_beside_the_declared_params() -> None:
+    source = EnrichmentSource.model_validate(
+        _invented(
+            requests={
+                "domain": {
+                    "url": f"https://{INVENTED_HOST}/v1/lookup?a=1&a=2&fmt=j%20son&v={{value}}",
+                    "params": {"b": "{value}", "key": "{credential}"},
+                }
+            }
+        )
+    )
+    wire = _Wire({"result": {"votes": {"bad": 0}}})
+    secret = _key("q", "k")
+    record = await _ask(
+        ReadySource(key="domainrep", source=source, credential=secret), "domain", "evil.com", wire
+    )
+    (request,) = wire.requests
+    # The URL's pairs first, in order, repeated keys as written; then the declared params.
+    assert list(request.url.params.multi_items()) == [
+        ("a", "1"),
+        ("a", "2"),
+        ("fmt", "j son"),
+        ("v", "evil.com"),
+        ("b", "evil.com"),
+        ("key", secret),
+    ]
+    assert record is not None
+
+
+def test_a_url_s_own_query_alone_is_sent_as_written() -> None:
+    source = EnrichmentSource.model_validate(
+        _invented(requests={"domain": {"url": f"https://{INVENTED_HOST}/v1?x=1&v={{value}}"}})
+    )
+    built = source.requests["domain"].build("evil.com", "")
+    assert built["url"] == f"https://{INVENTED_HOST}/v1?x=1&v=evil.com"
+    assert "params" not in built
+
+
+@pytest.mark.asyncio
+async def test_a_failing_source_is_named_by_its_key_in_the_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import logging
+
+    caplog.set_level(logging.WARNING)
+    await _ask(_ready("virustotal", _key("k")), "domain", "evil.com", _Wire(None, 500))
+    assert "enrich: source virustotal answered HTTP 500." in caplog.text
+
+
 def test_every_placeholder_is_filled_in_one_pass() -> None:
     from maljan.enrichment.declared import _filled
 
@@ -476,6 +526,11 @@ def test_a_stored_entry_under_a_shipped_key_changes_only_what_it_names() -> None
         (_invented(kinds=["domain", "url"]), "asks only about domain and ip"),
         (_invented(kinds=["email"]), "an indicator kind is one of domain, ip"),
         (_invented(requests={}, server="Bad\nName", tool="t"), "server must be the key"),
+        (_invented(arguments={"domain": "q"}), "a REST source takes none"),
+        (
+            _invented(requests={}, server="srv", tool="t", arguments={"ip": "addr"}),
+            "arguments name kinds the source does not answer: ip",
+        ),
     ],
 )
 def test_a_declaration_that_cannot_work_is_refused_in_words(

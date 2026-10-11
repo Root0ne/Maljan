@@ -41,7 +41,7 @@ import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
-from urllib.parse import quote, quote_plus, urlparse
+from urllib.parse import quote, quote_plus, unquote, urlparse
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
@@ -157,14 +157,26 @@ class RestRequest(BaseModel):
         segment in the URL (which never holds the credential), as text in a
         query parameter (which the client URL-encodes), and as an opaque value
         in a header or the JSON body.
+
+        Where the URL carries a query of its own and ``params`` are declared
+        too, the client would send only ``params``; so the URL's own pairs are
+        kept first, in order and repeated keys as written, and the declared
+        ``params`` follow them.
         """
+        url = _filled(self.url, quote(value, safe=""), "")
         built: dict[str, Any] = {
             "method": self.method,
-            "url": _filled(self.url, quote(value, safe=""), ""),
+            "url": url,
             "headers": _filled(self.headers, value, credential),
         }
         if self.params:
-            built["params"] = _filled(self.params, value, credential)
+            params = list(_filled(self.params, value, credential).items())
+            base, mark, query = url.partition("?")
+            if mark:
+                own = [pair.partition("=") for pair in query.split("&") if pair]
+                params = [(unquote(k), unquote(v)) for k, _, v in own] + params
+                built["url"] = base
+            built["params"] = params
         if self.json_body is not None:
             built["json"] = _filled(self.json_body, value, credential)
         return built
@@ -299,6 +311,13 @@ class EnrichmentSource(BaseModel):
                     + (f"; missing {', '.join(missing)}" if missing else "")
                     + (f"; not in kinds {', '.join(extra)}" if extra else "")
                 )
+        if self.arguments and not by_server:
+            raise ValueError("arguments name a server tool's argument; a REST source takes none")
+        unused = [k for k in self.arguments if k not in self.kinds]
+        if unused:
+            raise ValueError(
+                f"arguments name kinds the source does not answer: {', '.join(unused)}"
+            )
         names = [f.name for f in self.record]
         if len(set(names)) != len(names):
             raise ValueError("record names a field twice")
@@ -374,7 +393,12 @@ def effective_sources(stored: Mapping[str, Any] | None) -> dict[str, EnrichmentS
             check_source_key(key)
             out[key] = EnrichmentSource.model_validate(entry)
         except (ValidationError, ValueError, TypeError):
-            logger.warning("enrich: a source is not a valid declaration; left out.")
+            # The key is named only once it is a valid slug: one that is not
+            # could carry anything into the log.
+            if _KEY_RE.match(key):
+                logger.warning("enrich: source %s is not a valid declaration; left out.", key)
+            else:
+                logger.warning("enrich: a source with an invalid key is left out.")
     return out
 
 
@@ -520,7 +544,7 @@ class SourceAsker:
             else:
                 answer = await self._ask_rest(ready, kind, value)
         except Exception as exc:  # noqa: BLE001 — one source's failure is no lookup
-            logger.warning("enrich: a source failed (%s).", type(exc).__name__)
+            logger.warning("enrich: source %s failed (%s).", ready.key, type(exc).__name__)
             return None
         if answer is None:
             return None
@@ -534,7 +558,7 @@ class SourceAsker:
         if not argument and self.tool_arguments is not None:
             argument = self.tool_arguments(source.server, source.tool).get(kind)
         if not argument:
-            logger.warning("enrich: a server source names no argument for a kind; not asked.")
+            logger.warning("enrich: source %s names no argument for a kind; not asked.", ready.key)
             return None
         return await self.tool_caller(source.server, source.tool, {argument: value})
 
@@ -543,29 +567,31 @@ class SourceAsker:
         request = source.requests[kind]  # type: ignore[index]
         built = request.build(value, ready.credential)
         if urlparse(built["url"]).hostname != request.host:
-            logger.warning("enrich: a source request left its declared host; refused.")
+            logger.warning("enrich: source %s request left its declared host; refused.", ready.key)
             return None
         pace = self._paces.setdefault(ready.key, asyncio.Semaphore(1))
         async with pace:
             try:
                 resp = await self.http.request(**built, timeout=source.timeout_seconds)
             except httpx.HTTPError as exc:
-                logger.warning("enrich: a source request failed (%s).", type(exc).__name__)
+                logger.warning(
+                    "enrich: source %s request failed (%s).", ready.key, type(exc).__name__
+                )
                 return None
             if source.rate_limit_seconds:
                 await asyncio.sleep(source.rate_limit_seconds)
         if resp.status_code == 404:
             return None
         if resp.status_code >= 400:
-            logger.warning("enrich: a source answered HTTP %d.", int(resp.status_code))
+            logger.warning("enrich: source %s answered HTTP %d.", ready.key, int(resp.status_code))
             return None
         if urlparse(str(resp.request.url)).hostname != request.host:
-            logger.warning("enrich: a source answered from another host; discarded.")
+            logger.warning("enrich: source %s answered from another host; discarded.", ready.key)
             return None
         try:
             data = resp.json()
         except ValueError:
-            logger.warning("enrich: a source answered something other than JSON.")
+            logger.warning("enrich: source %s answered something other than JSON.", ready.key)
             return None
         return data if isinstance(data, dict | list) else None
 
