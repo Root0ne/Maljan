@@ -306,6 +306,68 @@ def mirror_target_for(provider: Any, *, sha256: str, extension: str) -> tuple[Pa
     return host, path_in_server(spec, host)
 
 
+def mirror_server_samples(
+    container: Any,
+    *,
+    temp_path: str,
+    sha256: str,
+    extension: str,
+    copy_fn: Callable[[Path, Path], None],
+    job_id: str = "",
+    already: Iterable[Path] = (),
+) -> tuple[list[Path], dict[str, str]]:
+    """Copy the sample once for each enabled tool server that declares a ``sample_mount``.
+
+    A server that sees the samples directory at a mount of its own is handed
+    the sample there, whether a static provider drives it or an agent is bound
+    to it: the copy goes under its declared ``work_dir`` and the path it opens
+    is that copy under its mount (``providers.base.path_in_server``), as a
+    static provider's is. Returns the host copies this call wrote (a copy in
+    ``already``, written for a static provider, is not written twice) and the
+    path each server opens, by server key. A server that declares no mount
+    reads the worker's own filesystem, or is staged to (``agents.sample_staging``),
+    and gets nothing here. A failure is logged per server, and the rest go on.
+    """
+    from maljan.providers.base import MirrorSpec, path_in_server
+    from maljan.tools.roots import add_sample_root
+
+    from app.worker import sample_files
+
+    written: list[Path] = []
+    copied = set(already)
+    paths: dict[str, str] = {}
+    servers = getattr(getattr(container.config, "mcp", None), "servers", None) or {}
+    for key, cfg in servers.items():
+        if not getattr(cfg, "enabled", True) or not str(getattr(cfg, "sample_mount", "") or ""):
+            continue
+        try:
+            spec = MirrorSpec.of(cfg)
+            host = sample_files.work_dir(spec.work_subdir) / f"{sha256}{extension}"
+            # A directory the sidecars may read a path in, named before any
+            # server starts (see ``mirror_static_samples``).
+            add_sample_root(host.parent)
+            if host not in copied:
+                copy_fn(Path(temp_path), host)
+                written.append(host)
+                copied.add(host)
+            paths[str(key)] = path_in_server(spec, host)
+        except Exception as exc:  # noqa: BLE001 - one server never stops the others
+            logger.warning(
+                "Failed to mirror the sample for a tool server's declared mount (%s).",
+                type(exc).__name__,
+                extra={"job_id": job_id, "component": "sample-mirror"},
+            )
+            continue
+        logger.info(
+            "Mirrored sample to %s for tool server '%s' (%s).",
+            host,
+            key,
+            paths[str(key)],
+            extra={"job_id": job_id, "component": "sample-mirror"},
+        )
+    return written, paths
+
+
 def global_mirror_path(paths: dict[str, str], static_settings: Any) -> str | None:
     """``state["static_sample_path"]``: the globally configured provider's mirror.
 
@@ -2488,6 +2550,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # returns, so the outer finally can always find them)
         static_sample_path: str | None = None
         static_sample_paths: dict[str, str] = {}
+        server_sample_paths: dict[str, str] = {}
         try:
             from minio import Minio
             from pydantic import SecretStr as _SecretStr
@@ -2586,6 +2649,18 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             )
             host_mirrors.extend(new_mirrors)
             static_sample_paths.update(new_sample_paths)
+            # And for each tool server that declares a mount of its own, a
+            # copy under it, whichever agent its tools are bound to.
+            server_mirrors, server_sample_paths = mirror_server_samples(
+                app.container,
+                temp_path=temp_path,
+                sha256=sample_sha256,
+                extension=_orig_ext,
+                copy_fn=sample_files.private_copy,
+                job_id=job_id,
+                already=host_mirrors,
+            )
+            host_mirrors.extend(server_mirrors)
             static_sample_path = global_mirror_path(
                 static_sample_paths, app.container.config.static
             )
@@ -2683,6 +2758,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     sample_path=temp_path,
                     static_sample_path=static_sample_path,
                     static_sample_paths=static_sample_paths,
+                    server_sample_paths=server_sample_paths,
                     # The same instant this job's own duration is measured
                     # from, so the report's elapsed time and the job row
                     # cannot disagree.

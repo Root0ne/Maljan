@@ -916,6 +916,26 @@ def _has_remote_server(registry: Any, tools: list[Any]) -> bool:
     return False
 
 
+def _mounted(container: Any, tools: list[Any], staged: dict[str, str]) -> dict[str, str]:
+    """``staged``, and for each other server behind ``tools`` its copy under its declared mount.
+
+    The worker copies the sample for every tool server that declares a
+    ``sample_mount`` (``container.server_sample_paths``), and the path the
+    server opens is that copy under its mount, as a static provider's is. A
+    server the sample was staged to keeps the path its own staging answered.
+    """
+    from maljan.agents.tool_pinning import server_of
+
+    mounted = getattr(container, "server_sample_paths", None) or {}
+    if not isinstance(mounted, dict) or not mounted:
+        return staged
+    out = dict(staged)
+    for key in dict.fromkeys(server_of(tool) for tool in tools):
+        if key and key not in out and mounted.get(key):
+            out[key] = str(mounted[key])
+    return out
+
+
 def _stage(container: Any, tools: list[Any], job_key: str) -> tuple[dict[str, str], list[str]]:
     """``_astage`` for the synchronous resolver, on the shared agent loop.
 
@@ -982,6 +1002,7 @@ def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAge
 
     deduped = _dedupe(tools)
     staged, staging_reasons = _stage(container, deduped, job_key)
+    staged = _mounted(container, deduped, staged)
     reasons.extend(staging_reasons)
     return ResolvedAgent(
         key=key,
@@ -1052,6 +1073,7 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
     staged, staging_reasons = await _astage(
         container.get_server_registry(), container, deduped, job_key
     )
+    staged = _mounted(container, deduped, staged)
     reasons.extend(staging_reasons)
     return ResolvedAgent(
         key=key,

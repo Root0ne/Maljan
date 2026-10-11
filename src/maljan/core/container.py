@@ -479,6 +479,9 @@ class ServiceContainer:
         # outside a job, and staging is then a no-op.
         self.sample_path: str | None = None
         self.sample_sha256: str = ""
+        # The path each tool server that declares a ``sample_mount`` opens the
+        # worker's copy of the sample at, by server key; empty outside a job.
+        self.server_sample_paths: dict[str, str] = {}
 
         # Per-run LLM token/cost ledger (findings-log §4 Item 1). Agents and the
         # judge add each call's usage; the judge node snapshots it into RunSummary.

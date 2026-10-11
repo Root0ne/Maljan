@@ -172,14 +172,39 @@ def consumer_kinds_in_order(consumer: str) -> tuple[str, ...]:
     return tuple(spec["kinds"])
 
 
+def undeclared_code_kind(entry: Any, tool: str | None = None) -> str:
+    """The code-listing kind an entry's tool's name says, where its source declares nothing for it.
+
+    The one name reading of a code listing (``core.undeclared_tools``), which
+    the agent side reads an undeclared tool by: an entry that recorded its
+    source and stored no kind for its tool is a decompiler's listing when its
+    name says so, here as in the function map. ``""`` for an entry whose tool
+    declares a kind (it keeps that kind) and for one read by the legacy
+    tables.
+    """
+    from maljan.core.undeclared_tools import undeclared_code_kind as named_code_kind
+
+    if read_by_name(entry) or facts_of(entry) is not None:
+        return ""
+    if tool is not None:
+        return named_code_kind(tool)
+    return named_code_kind(declared_name(entry))
+
+
 def is_of(entry: Any, consumer: str, tool: str | None = None) -> bool:
-    """Whether a consumer reads this entry: by its stored kind, or by its legacy table."""
+    """Whether a consumer reads this entry: by its stored kind, or by its legacy table.
+
+    A tool its source declares nothing for is read by the code-listing kind
+    its name says (:func:`undeclared_code_kind`), and by nothing else.
+    """
     name = tool if tool is not None else tool_of(entry)
     if stored(entry):
-        return kind_of(entry) in consumer_kinds(consumer)
-    if source_of(entry) is None:
+        facts = facts_of(entry)
+        if facts is not None:
+            return facts.kind in consumer_kinds(consumer)
+    elif source_of(entry) is None:
         return legacy.in_table(consumer, name)
-    return False
+    return undeclared_code_kind(entry, tool) in consumer_kinds(consumer)
 
 
 def rank_in(entry: Any, consumer: str) -> int:

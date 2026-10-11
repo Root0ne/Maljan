@@ -28,6 +28,20 @@ _VERSION = [0]
 _NAMES_HELD: list[object] = [None, frozenset()]
 
 
+def _declare(name: str, cls: type) -> None:
+    """Read the provider's own declaration of its tools (its class's ``declaration`` hook).
+
+    Under ``provider:<name>``, the source its tools are recorded under. A
+    class whose hook answers ``None`` declares nothing, and a built-in whose
+    block is ``core.tool_declarations.PROVIDER_BLOCKS`` keeps that block.
+    """
+    from maljan.core.tool_declarations import register_provider_declaration
+
+    hook = getattr(cls, "declaration", None)
+    if callable(hook):
+        register_provider_declaration(f"provider:{name}", hook)
+
+
 def register_static_provider(name: str):  # type: ignore[no-untyped-def]
     def decorator(cls: type) -> type:
         with _LOCK:
@@ -36,6 +50,7 @@ def register_static_provider(name: str):  # type: ignore[no-untyped-def]
             cls.id = name  # type: ignore[attr-defined]
             _STATIC_REGISTRY[name] = cls
             _VERSION[0] += 1
+            _declare(name, cls)
         return cls
 
     return decorator
@@ -49,6 +64,7 @@ def register_sandbox_provider(name: str):  # type: ignore[no-untyped-def]
             cls.id = name  # type: ignore[attr-defined]
             _SANDBOX_REGISTRY[name] = cls
             _VERSION[0] += 1
+            _declare(name, cls)
         return cls
 
     return decorator
@@ -96,9 +112,13 @@ def _build(registry: dict[str, type], name: str, cfg: Any, kind: str) -> Any:
 
 def forget_static_provider(name: str) -> None:
     """Take the static provider registered as ``name`` out of the registry (a runtime one)."""
+    from maljan.core.tool_declarations import forget_provider_declaration
+
     with _LOCK:
         if _STATIC_REGISTRY.pop(name, None) is not None:
             _VERSION[0] += 1
+            if name not in _SANDBOX_REGISTRY:
+                forget_provider_declaration(f"provider:{name}")
 
 
 def registered_variable_names() -> frozenset[str]:
@@ -167,7 +187,10 @@ def mirror_work_dirs(cfg: Settings, *, selected_only: bool = True) -> tuple[str,
     and any agent's own) and whose block is switched on. A server's declared
     ``work_dir`` counts only through the provider that copies into it, so a
     name no provider writes to is never swept, cleared or exported. A provider
-    whose construction fails contributes nothing and is logged.
+    whose construction fails contributes nothing and is logged. A tool server
+    that declares a ``sample_mount`` is copied for whatever agent its tools
+    are bound to, so its ``work_dir`` (or the shared default) counts while it
+    is switched on, or always without ``selected_only``.
     """
     from maljan.core.tool_declarations import selected_static_providers
 
@@ -195,6 +218,14 @@ def mirror_work_dirs(cfg: Settings, *, selected_only: bool = True) -> tuple[str,
             continue
         if spec is not None and spec.work_subdir:
             names.setdefault(spec.work_subdir, None)
+    from maljan.providers.base import MirrorSpec
+
+    for server in (getattr(getattr(cfg, "mcp", None), "servers", None) or {}).values():
+        if not str(getattr(server, "sample_mount", "") or ""):
+            continue
+        if selected_only and not getattr(server, "enabled", True):
+            continue
+        names.setdefault(MirrorSpec.of(server).work_subdir, None)
     return tuple(names)
 
 

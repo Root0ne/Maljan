@@ -40,6 +40,36 @@ def tool_error_marker(kind: str, tool: str, **fields: str) -> str:
     return json.dumps({"tool_error": kind, "tool": tool, **fields})
 
 
+class StructuredAnswer(str):
+    """A tool's text answer, carrying the structured answer its server returned beside it.
+
+    MCP lets a server answer with ``structuredContent`` (a JSON object) as
+    well as its text content. The text is what the model reads, exactly as
+    before; the object rides on the string to the evidence recorder, which
+    files it on the ledger entry (``LedgerEntry.structured_content``), so a
+    reader of the entry reads the server's own structure whatever its text
+    says. A wrapper that returns the answer unchanged keeps it; one that
+    builds a new string drops it, and the entry then has none.
+    """
+
+    structured_content: dict[str, Any] | None = None
+
+
+def with_structured_content(text: str, content: Any) -> str:
+    """``text``, carrying ``content`` when it is the JSON object MCP's ``structuredContent`` is."""
+    if not isinstance(content, dict) or not content:
+        return text
+    answer = StructuredAnswer(text)
+    answer.structured_content = content
+    return answer
+
+
+def structured_content_of(value: Any) -> dict[str, Any] | None:
+    """The ``structuredContent`` a tool's answer carries (:class:`StructuredAnswer`), or ``None``."""
+    content = getattr(value, "structured_content", None)
+    return content if isinstance(content, dict) and content else None
+
+
 # What a character cut leaves behind, and the room kept back for it.
 #
 # The marker goes *inside* the limit rather than after it, which is the same
@@ -139,6 +169,11 @@ class MCPLangChainToolkit:
         # declares it (``ToolFacts.category``); an undeclared tool's is read
         # from its name (``core.undeclared_tools.category_tag``).
         self._categories = dict(categories or {})
+        # What the server says about itself when it is initialised (the MCP
+        # ``instructions``), exactly as served; "" for a server that says
+        # nothing. Tool-supplied text: shown to a model only as the server's
+        # quoted words (``agents.prompt_fragments.undeclared_server_text``).
+        self.server_instructions = ""
 
     async def initialize(self) -> None:
         """Initialize the connection to the MCP server and fetch available tools."""
@@ -175,7 +210,8 @@ class MCPLangChainToolkit:
                     stdio_client(self.server_params)
                 )
             self.session = await self._exit_stack.enter_async_context(ClientSession(read, write))
-            await self.session.initialize()
+            initialized = await self.session.initialize()
+            self.server_instructions = str(getattr(initialized, "instructions", "") or "")
 
             # Fetch available tools
             response = await self.session.list_tools()
@@ -428,7 +464,10 @@ class MCPLangChainToolkit:
             output = "\n".join(c.text for c in result.content if hasattr(c, "text"))
             # On a thread: shortening a five-megabyte answer is CPU-bound
             # and synchronous, and this is a coroutine serving an agent.
-            return await asyncio.to_thread(self._apply_output_guardrail, output, narrowing)
+            shown = await asyncio.to_thread(self._apply_output_guardrail, output, narrowing)
+            # The server's own structured answer, when it gave one, rides on
+            # the text to the ledger; the text the model reads is unchanged.
+            return with_structured_content(shown, getattr(result, "structuredContent", None))
         except Exception as exc:
             if guard is not None and not settled:
                 reason = transport_failure(exc)

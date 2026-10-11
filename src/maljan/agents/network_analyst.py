@@ -94,6 +94,28 @@ NO_PACKET_TOOL_LINE = (
     "No packet tool is in your tool list, so base your findings on the structured flows above."
 )
 OTHER_TOOLS_THEN_ANALYZE = "Use the tools in your tool list where they help, then analyze"
+# What it says instead when the request carries tools that declare no kind:
+# any of them may read the capture, and the model, not this line, decides.
+UNDECLARED_TOOLS_LINE = (
+    "Your tool list holds tools that declare no kind; you MAY use any of them that reads the "
+    "capture to confirm packet-level beaconing or tunnelling, but base your findings primarily "
+    "on the structured flows above and do NOT block on the PCAP."
+)
+
+
+def _undeclared_tools_in(tools: Sequence[Any]) -> bool:
+    """Whether the request carries a tool from a declaring source that declares nothing for it.
+
+    Such a tool may read a capture: nothing says it does not. A tool with no
+    source at all (a team ``ask_`` tool) is not one.
+    """
+    from maljan.agents.prompt_fragments import offered
+    from maljan.agents.tool_pinning import declared_facts_of, declared_source_of
+
+    return any(
+        declared_source_of(tool) is not None and declared_facts_of(tool) is None
+        for tool in offered(tools)
+    )
 
 
 def _pcap_tools_in(tools: Sequence[Any]) -> list[tuple[str, str]]:
@@ -387,7 +409,12 @@ class NetworkAnalyst(BaseAnalyst):
                     "primarily on the structured flows above and do NOT block on the "
                     "PCAP.\n\n"
                     if packet_tools
-                    else NO_PACKET_TOOL_LINE + "\n\n"
+                    else (
+                        UNDECLARED_TOOLS_LINE
+                        if _undeclared_tools_in(self.tools)
+                        else NO_PACKET_TOOL_LINE
+                    )
+                    + "\n\n"
                 )
                 prompt_messages = [
                     ("system", self._system_prompt(_network_prompt)),

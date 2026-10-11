@@ -3,9 +3,10 @@
 An invented reverser and an invented rule scanner, declared only as data in
 ``mcp.servers``, get every treatment the built-in tools of the same kinds get:
 the composer's technical sections, "Functions examined", the code-listing
-figures, the rule tables, the technique hits, the recovery record. A tool that
-shares a built-in's name on a server that declares nothing gets nothing from
-the built-in.
+figures, the rule tables, the technique hits, the recovery record. A tool on a
+server that declares nothing for it is read by the one name reading of a code
+listing the agent side reads it by (``core.undeclared_tools``), and by nothing
+else: sharing a built-in's name gives it nothing more.
 """
 
 from __future__ import annotations
@@ -190,12 +191,13 @@ def test_a_ghidra_output_with_its_source_reaches_every_section_its_name_did(
     assert {ghidra.tools[name].kind for name in by_kind - by_name} <= {"function_disassembly"}
 
 
-def test_a_built_in_name_on_a_server_that_declares_nothing_is_shown_nowhere(
+def test_an_undeclared_listing_reaches_the_code_sections_and_nothing_else_does(
     declared: ToolDeclarations,
 ) -> None:
     outputs = [_output("mcp:plain", "decompile_function"), _output("mcp:plain", "list_strings")]
-    for section in _SECTION_KINDS:
-        assert _received(section, outputs) == set()
+    for section, kinds in _SECTION_KINDS.items():
+        expected = {"decompile_function"} if "decompile" in kinds else set()
+        assert _received(section, outputs) == expected
 
 
 def test_a_declared_report_section_routes_a_tool_of_any_kind(
@@ -235,9 +237,10 @@ def test_an_invented_reverser_s_calls_are_functions_examined(declared: ToolDecla
     ]
     sections = {s.key: s for s in build_sections(ledger)}
     examined = sections["functions_examined"]
-    assert examined.evidence_ids == ["ev_0001", "ev_0002"]
-    # The built-in's name on a server that declares nothing is a generic block.
-    assert sections["tool_decompile_function"].evidence_ids == ["ev_0003"]
+    # A tool on a server that declares nothing for it, whose name says it
+    # decompiles, is read as the function map reads it.
+    assert examined.evidence_ids == ["ev_0001", "ev_0002", "ev_0003"]
+    assert "tool_decompile_function" not in sections
 
 
 def test_an_invented_decompiler_s_listing_is_drawn(declared: ToolDeclarations) -> None:
@@ -250,7 +253,7 @@ def test_an_invented_decompiler_s_listing_is_drawn(declared: ToolDeclarations) -
         }
     )
     figures = build_code_listings(report)
-    assert [f.caption for f in figures] == ["Decompiled fn_0"]
+    assert [f.caption for f in figures] == ["Decompiled fn_0", "Decompiled fn_0"]
 
 
 def test_an_invented_rule_scanner_fills_the_capability_table_in_its_own_shape(

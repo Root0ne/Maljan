@@ -64,7 +64,7 @@ if TYPE_CHECKING:
 _LOCK = threading.Lock()
 # The declarations of the settings object last asked for, held with that object
 # so a new settings object (a job's ``install_settings``) builds afresh.
-_HELD: list[Any] = [None, None]
+_HELD: list[Any] = [None, None, -1]
 
 # The version of the stored facts' shape, and the fields of ``ToolFacts`` it holds.
 FACTS_VERSION = 1
@@ -93,14 +93,19 @@ def declarations(settings: Settings | None = None) -> ToolDeclarations:
     its own declarations on the next call. Read only where nothing persisted
     depends on the result (the module docstring).
     """
+    from maljan.core.tool_declarations import declaration_version
+
     if settings is None:
         from maljan.core.config import get_settings
 
         settings = get_settings()
     with _LOCK:
-        if _HELD[0] is not settings:
+        # A provider that registered its declaration since is read too.
+        version = declaration_version()
+        if _HELD[0] is not settings or _HELD[2] != version:
             _HELD[1] = ToolDeclarations.from_settings(settings)
             _HELD[0] = settings
+            _HELD[2] = version
         return _HELD[1]  # type: ignore[no-any-return]
 
 
@@ -109,6 +114,7 @@ def forget() -> None:
     with _LOCK:
         _HELD[0] = None
         _HELD[1] = None
+        _HELD[2] = -1
 
 
 def _field(entry: Any, name: str) -> Any:

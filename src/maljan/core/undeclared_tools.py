@@ -75,6 +75,38 @@ def named_as_function_listing(tool: Any) -> bool:
     return named_as_code_listing(tool) and "function" in _name(tool)
 
 
+def undeclared_code_kind(tool: Any) -> str:
+    """The code-listing kind an undeclared tool's name says it is, ``""`` for none.
+
+    ``decompile`` for a name that says it decompiles, ``function_disassembly``
+    for one that says it disassembles a whole function, ``disassembly`` for
+    one that says it disassembles. The one reading of a code listing by name:
+    the agent side (the function map, the repeat guard) and the report side
+    (figures, "Functions examined", the composer's code bundle) read an
+    undeclared tool by it alike.
+    """
+    if named_as_decompiler(tool):
+        return "decompile"
+    if named_as_function_listing(tool):
+        return "function_disassembly"
+    if named_as_code_listing(tool):
+        return "disassembly"
+    return ""
+
+
+def code_kind(facts: Any, tool: Any) -> str:
+    """The code-listing kind of a tool: its declared kind when it is one, else its name's.
+
+    A declared tool keeps its declared kind (``""`` when that is no code
+    listing); only a tool that declares nothing is read by its name
+    (:func:`undeclared_code_kind`).
+    """
+    kind = _kind(facts)
+    if kind is None:
+        return undeclared_code_kind(tool)
+    return kind if kind in DECOMPILE_KINDS or kind in CODE_LISTING_KINDS else ""
+
+
 def named_as_xrefs(tool: Any) -> bool:
     """Whether an undeclared tool's name says it reads cross-references."""
     return "xref" in _name(tool)
@@ -339,11 +371,14 @@ def entry_lists_a_function(entry: Any) -> bool:
     return lists_a_function(entry_facts(entry), _field(entry, "tool"))
 
 
+def entry_code_kind(entry: Any) -> str:
+    """The code-listing kind of an entry's tool (:func:`code_kind`), ``""`` for none."""
+    return code_kind(entry_facts(entry), _field(entry, "tool"))
+
+
 def entry_lists_any_code(entry: Any) -> bool:
     """Whether an entry's tool lists code, decompiled or as instructions."""
-    facts = entry_facts(entry)
-    tool = _field(entry, "tool")
-    return decompiles(facts, tool) or lists_code(facts, tool)
+    return bool(entry_code_kind(entry))
 
 
 def entry_is_strings_source(entry: Any) -> bool:

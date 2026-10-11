@@ -340,6 +340,18 @@ class LedgerEntry(BaseModel):
         ),
     )
 
+    structured_content: dict[str, Any] | None = Field(
+        default=None,
+        # Like ``facts``: an entry with none dumps as it always did.
+        exclude_if=lambda value: value is None,
+        description=(
+            "The structured answer the tool's server returned beside its text (MCP "
+            "structuredContent), as returned. The text in output is what the model read; "
+            "structured falls back to this object when that text is not JSON. None for a tool "
+            "that returned none."
+        ),
+    )
+
     def to_captured(self) -> CapturedToolOutput:
         """This entry in the shape readers of the previous capture expect."""
         return CapturedToolOutput(
@@ -399,6 +411,7 @@ def build_entry(
     not_shown: bool = False,
     chars_dropped: int = 0,
     source: str | None = None,
+    structured_content: dict[str, Any] | None = None,
 ) -> LedgerEntry:
     """One entry, with the output trimmed and parsed the same way every time.
 
@@ -440,6 +453,11 @@ def build_entry(
     ``chars_dropped`` is what the tool-output guardrail cut from the answer
     before the model read it: ``output`` is what the model was handed, and
     the entry is marked ``truncated`` because it is not the whole answer.
+
+    ``structured_content`` is the structured answer the tool's server
+    returned beside its text (MCP ``structuredContent``): kept as returned,
+    and read as ``structured`` when the text itself is not JSON, so a reader
+    of the entry reads the server's own structure by its shape.
     """
     safe_args = dict(args) if isinstance(args, dict) else {}
     full = str(output or "")
@@ -458,6 +476,13 @@ def build_entry(
     # read from such an output (``_reputation_at_write``).
     cut = bool(not_shown) or len(text) < len(full) or int(chars_dropped) > 0
     structured = None if repeated_of or not_shown else parse_structured(full)
+    content = (
+        dict(structured_content)
+        if isinstance(structured_content, dict) and structured_content and not repeated_of
+        else None
+    )
+    if structured is None and content is not None and not not_shown:
+        structured = content
     return LedgerEntry(
         id=entry_id,
         stage=stage,
@@ -482,6 +507,7 @@ def build_entry(
         seq=seq,
         source=source or None,
         facts=facts,
+        structured_content=content,
         reputation=_reputation_at_write(
             facts,
             ok=ok and not repeated_of and not cut,
@@ -525,13 +551,22 @@ def stored_bytes(entry: LedgerEntry) -> int:
     nothing.
     """
     text = len(entry.output.encode("utf-8", errors="ignore"))
+    content = getattr(entry, "structured_content", None)
+    beside = 0
+    if content is not None and content is not entry.structured:
+        # The server's structured answer is kept beside a text that parsed on
+        # its own: a column of its own, charged as one.
+        try:
+            beside = len(json.dumps(content, ensure_ascii=False).encode("utf-8"))
+        except (TypeError, ValueError):
+            beside = 0
     if entry.structured is None:
-        return text
+        return text + beside
     try:
         parsed = len(json.dumps(entry.structured, ensure_ascii=False).encode("utf-8"))
     except (TypeError, ValueError):
-        return text
-    return max(text, parsed)
+        return text + beside
+    return max(text, parsed) + beside
 
 
 def apply_budget(
@@ -564,6 +599,7 @@ def apply_budget(
             continue
         entry.output = ""
         entry.structured = None
+        entry.structured_content = None
         entry.truncated = True
         trimmed += 1
     return trimmed, spent

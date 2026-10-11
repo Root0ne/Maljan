@@ -141,6 +141,7 @@ class MaljanApp:
         sample_path: str | None = None,
         static_sample_path: str | None = None,
         static_sample_paths: dict[str, str] | None = None,
+        server_sample_paths: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Execute the full analysis pipeline synchronously.
 
@@ -153,6 +154,8 @@ class MaljanApp:
             static_sample_paths: One container-visible path per static provider
                 this job's profile uses, keyed by provider id; the globally
                 configured provider's entry is also ``static_sample_path``.
+            server_sample_paths: The path each tool server that declares a
+                ``sample_mount`` opens the sample at, keyed by server key.
 
         Returns:
             The final state dict including:
@@ -162,7 +165,14 @@ class MaljanApp:
         # Delegate to async implementation so sandbox submission and graph
         # execution share the same event loop (avoids nested asyncio.run).
         return asyncio.run(
-            self.arun(file_hash, file_name, sample_path, static_sample_path, static_sample_paths)
+            self.arun(
+                file_hash,
+                file_name,
+                sample_path,
+                static_sample_path,
+                static_sample_paths,
+                server_sample_paths=server_sample_paths,
+            )
         )
 
     def _infer_sample_platform(
@@ -365,6 +375,7 @@ class MaljanApp:
         static_sample_path: str | None = None,
         static_sample_paths: dict[str, str] | None = None,
         started_at: float | None = None,
+        server_sample_paths: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Execute the full analysis pipeline asynchronously.
 
@@ -384,6 +395,10 @@ class MaljanApp:
             static_sample_paths: One container-visible path per static provider
                 this job's profile uses, keyed by provider id; the globally
                 configured provider's entry is also ``static_sample_path``.
+            server_sample_paths: The path each tool server that declares a
+                ``sample_mount`` opens the sample at, keyed by server key: the
+                worker's copy under that mount, which an agent bound to the
+                server is held to (``agents.composition``).
             started_at: When the caller's own clock says this run began, as a
                 Unix timestamp. The worker starts counting before the sample
                 reaches this method, and the report's elapsed time is the
@@ -433,6 +448,7 @@ class MaljanApp:
                 sample_path=sample_path,
                 static_sample_path=static_sample_path,
                 static_sample_paths=static_sample_paths,
+                server_sample_paths=server_sample_paths,
             )
 
         elapsed = time.time() - start
@@ -451,6 +467,7 @@ class MaljanApp:
         sample_path: str | None,
         static_sample_path: str | None,
         static_sample_paths: dict[str, str] | None,
+        server_sample_paths: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """The sandbox submission and the graph, for ``arun``."""
         # Submit to sandbox if sample_path is provided
@@ -475,6 +492,7 @@ class MaljanApp:
         self.container.sandbox_report = sandbox_report
         self.container.sample_path = sample_path
         self.container.sample_sha256 = file_hash
+        self.container.server_sample_paths = dict(server_sample_paths or {})
 
         initial_state: AnalysisState = {
             "file_hash": file_hash,

@@ -88,15 +88,18 @@ def shown_to_section(section: str, output: dict[str, Any]) -> bool:
     """Whether one captured tool output belongs in a technical section's bundle.
 
     By the output's recorded source: its tool's declared kind is one the
-    section reads, or its declaration names the section. With no source, by
-    the tool's name, as before.
+    section reads, or its declaration names the section. A tool its source
+    declares nothing for reaches the sections that read a function's code
+    when its name says it lists one (``tool_kinds.undeclared_code_kind``), as
+    the function map reads it. With no source, by the tool's name, as before.
     """
     by_name = tool_kinds.shown_by_name(section, output)
     if by_name is not None:
         return by_name
     facts = tool_kinds.facts_of(output)
     if facts is None:
-        return False
+        kind = tool_kinds.undeclared_code_kind(output)
+        return kind in _CODE and kind in _SECTION_KINDS.get(section, ())
     return facts.kind in _SECTION_KINDS.get(section, ()) or section in facts.report_sections
 
 

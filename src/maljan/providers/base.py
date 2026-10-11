@@ -382,6 +382,21 @@ class StaticProvider(ABC):
     def from_settings(cls, cfg: Settings) -> StaticProvider: ...
 
     @classmethod
+    def declaration(cls, cfg: Settings) -> Any:
+        """This provider's own declaration of its tools, or ``None`` for none.
+
+        The declaration fields of an ``MCPServerConfig`` (``tool_facts``,
+        ``roles``, ``prompt_fragment`` …), as an object or a mapping, read
+        under ``provider:<id>`` (``core.tool_declarations``) wherever a
+        built-in's block is read, so a provider registered at runtime declares
+        its tools the way the built-ins do. Read for a provider whose block is
+        not one of ``PROVIDER_BLOCKS``; a provider that drives a server of the
+        registry (``declaration_source`` ``mcp:<key>``) is declared by that
+        server.
+        """
+        return None
+
+    @classmethod
     def display_name(cls) -> str:
         """What published text calls this provider: its choice label, else its title or id."""
         return cls.choice_label or cls.title or cls.id or "static"
@@ -689,6 +704,21 @@ class SandboxProvider(ABC):
     @classmethod
     @abstractmethod
     def from_settings(cls, cfg: Settings) -> SandboxProvider: ...
+
+    @classmethod
+    def declaration(cls, cfg: Settings) -> Any:
+        """This provider's own declaration of its tools, or ``None`` for none.
+
+        The declaration fields of an ``MCPServerConfig`` (``tool_facts``,
+        ``roles``, ``prompt_fragment`` …), as an object or a mapping, read
+        under ``provider:<id>`` (``core.tool_declarations``) wherever a
+        built-in's block is read, so a provider registered at runtime declares
+        its tools the way the built-ins do. Read for a provider whose block is
+        not one of ``PROVIDER_BLOCKS``; a provider that drives a server of the
+        registry (``declaration_source`` ``mcp:<key>``) is declared by that
+        server.
+        """
+        return None
 
     @classmethod
     def display_name(cls) -> str:

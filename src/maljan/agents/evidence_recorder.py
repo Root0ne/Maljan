@@ -24,6 +24,7 @@ import time
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
+from maljan.agents.mcp_client import structured_content_of
 from maljan.agents.tool_fence import fenced
 from maljan.core.exceptions import SampleNotOpened
 from maljan.core.logger import logger
@@ -337,6 +338,7 @@ class EvidenceRecorder:
         cut: int | None = None,
         guard_answer: bool = False,
         source: str | None = None,
+        structured_content: dict[str, Any] | None = None,
     ) -> LedgerEntry:
         """Append one entry and return it, so the caller can quote its id.
 
@@ -352,7 +354,9 @@ class EvidenceRecorder:
         read and is marked ``truncated`` with ``chars_dropped``. ``source`` is
         where the tool's declaration lives (``mcp:<key>``, ``provider:<id>``,
         ``sandbox``, ``pack``), as the caller knows it; it is never guessed
-        later from the tool's name.
+        later from the tool's name. ``structured_content`` is the structured
+        answer the tool's server returned beside its text (MCP
+        ``structuredContent``), filed on the entry as returned.
         """
         if repeated_of:
             repeated_of = self.holder_of(repeated_of)
@@ -380,6 +384,7 @@ class EvidenceRecorder:
             not_shown=not_shown is not None,
             chars_dropped=int(cut or 0) if not_shown is None else 0,
             source=source,
+            structured_content=structured_content,
         )
         self.entries.append(entry)
         self._by_id[entry.id] = entry
@@ -1332,6 +1337,7 @@ def _record_tool(
             args_raw=raw,
             not_shown=not_shown,
             cut=cut,
+            structured_content=None if same else structured_content_of(value),
         )
         # A repeat is noted under the entry that holds its answer, so a later
         # served or refused identical call names that entry, never the repeat.
