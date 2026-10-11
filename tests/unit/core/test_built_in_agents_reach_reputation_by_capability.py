@@ -1,10 +1,11 @@
 """The built-in agents reach reputation by capability, and a stored settings row still loads.
 
-``ToolRef(kind="capability", capability="reputation")`` stands for every
-server that declares a reputation lookup, except a built-in whose seed binds it
-by its own ``agents`` list. With the shipped servers that is VirusTotal's own server alone,
-which the definitions named by key before, so the default profile resolves to
-the same servers it always did. A built-in row stored with that earlier list
+``ToolRef(kind="capability", capability="reputation")`` stands for the built-in
+servers whose seed declares a reputation lookup and is bound by the definitions,
+referenced as a reference by key was; it never reaches more than that. With the
+shipped servers that is VirusTotal's own server alone, which the definitions
+named by key before, so the default profile resolves to the same servers it
+always did. A built-in row stored with that earlier list
 is its seed of an earlier release and loads as the seed.
 """
 
@@ -149,17 +150,28 @@ def test_a_server_named_by_key_and_by_capability_is_attached_once() -> None:
 # them, and dev's answer: every definition's servers (``servers_bound_to``) and
 # server references (``mcp_refs_for``), written on that tree.
 _STORED_ROWS: dict[str, dict[str, Any]] = {
+    "default": {},
+    "vt_enabled": {"mcp": {"servers": {"virustotal": {"enabled": True}}}},
+    "vt_empty_agents": {"mcp": {"servers": {"virustotal": {"enabled": True, "agents": []}}}},
+    # A non-empty list, which leaves out every agent but the one it names.
     "vt_judge": {"mcp": {"servers": {"virustotal": {"enabled": True, "agents": ["judge"]}}}},
     "vt_dynamic": {"mcp": {"servers": {"virustotal": {"enabled": True, "agents": ["dynamic"]}}}},
+    "vt_ticked": {
+        "mcp": {"servers": {"virustotal": {"enabled": True, "tools": ["get_file_report"]}}}
+    },
     "ti_none": {
         "mcp": {"servers": {"threatintel": {"agents": []}, "virustotal": {"enabled": True}}}
     },
-    "default": {},
 }
 
 
 @pytest.mark.parametrize("case", sorted(_STORED_ROWS))
-def test_a_stored_server_row_with_an_agents_list_resolves_as_dev_resolved_it(case: str) -> None:
+def test_every_agent_under_every_team_resolves_as_dev_resolved_it(case: str) -> None:
+    """The servers and server references of every definition under every seeded team.
+
+    The golden was written on dev 2c2522b2, where the built-ins named VirusTotal
+    by key; a capability reference reaches exactly what that did, never more.
+    """
     import json
     from pathlib import Path
 
@@ -167,15 +179,41 @@ def test_a_stored_server_row_with_an_agents_list_resolves_as_dev_resolved_it(cas
 
     golden = Path(__file__).resolve().parents[2] / "fixtures" / "golden" / "agents"
     dev = json.loads((golden / "servers_bound_to_stored_reputation_rows.json").read_text())
-    settings = Settings.model_validate(_STORED_ROWS[case])
-    resolved = {
-        key: [
-            sorted(servers_bound_to(settings, key)),
-            [str(r.server) for r in mcp_refs_for(settings, key)],
-        ]
-        for key in sorted(settings.agents.definitions)
-    }
+    resolved: dict[str, Any] = {}
+    for profile in sorted(Settings.model_validate(_STORED_ROWS[case]).agents.profiles):
+        settings = Settings.model_validate(_STORED_ROWS[case])
+        settings.agents.profile = profile
+        resolved[profile] = {
+            key: [
+                sorted(servers_bound_to(settings, key)),
+                [r.model_dump() for r in mcp_refs_for(settings, key)],
+            ]
+            for key in sorted(settings.agents.definitions)
+        }
     assert resolved == dev[case]
+
+
+def test_the_capability_path_honours_the_server_s_tick_list(monkeypatch: Any) -> None:
+    """A capability reference attaches the server's ticked tools, as a reference by key did."""
+    from langchain_core.tools import StructuredTool
+
+    from maljan.providers.servers import ServerRegistry
+
+    settings = Settings.model_validate(
+        {"mcp": {"servers": {"virustotal": {"enabled": True, "tools": ["get_file_report"]}}}}
+    )
+    registry = ServerRegistry(settings)
+    handle = registry.get("virustotal")
+    handle._all_tools = [
+        StructuredTool.from_function(func=lambda: "x", name=n, description=n)
+        for n in ("get_file_report", "get_ip_report", "submit_file")
+    ]
+    monkeypatch.setattr(handle, "open", lambda *_a, **_k: None)
+    monkeypatch.setattr(registry, "_handle_for", lambda held, _loop: held)
+    (ref,) = [r for r in mcp_refs_for(settings, "static") if r.server == "virustotal"]
+    assert ref == ToolRef(kind="mcp", server="virustotal")
+    tools, _reasons = registry.tools_for_ref(ref, "job")
+    assert [t.name for t in tools] == ["get_file_report"]
 
 
 def test_a_stored_lookup_with_no_rank_keeps_the_shipped_order() -> None:

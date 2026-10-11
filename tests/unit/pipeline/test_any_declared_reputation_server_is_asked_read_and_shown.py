@@ -286,14 +286,22 @@ class TestEveryReaderReadsIt:
         entry = _lookup_entry()
         assert _reputation_asked({"evidence_ledger": [entry.model_dump()]}) is True
 
-    def test_the_built_in_agents_reach_it_by_capability(self, installed: Any) -> None:
-        from maljan.agents.composition import mcp_refs_for
+    def test_it_reaches_only_the_agents_its_own_settings_allow(self, installed: Any) -> None:
+        """A capability reference never broadens access: an operator's server is bound by
+        its own ``agents`` list alone, and reaches no agent that list leaves out."""
+        from maljan.agents.composition import mcp_refs_for, servers_bound_to
 
-        settings = installed(_settings(hashrep=INVENTED))
-        for key in ("static", "network", "judge", "triage", "android_static", "reverser"):
-            servers = [str(r.server) for r in mcp_refs_for(settings, key)]
-            assert "hashrep" in servers and "virustotal" in servers, key
-        assert "hashrep" not in [str(r.server) for r in mcp_refs_for(settings, "dynamic")]
+        everyone = ("static", "dynamic", "network", "judge", "triage", "android_static")
+        unscoped = installed(_settings(hashrep=INVENTED))
+        for key in everyone:
+            assert "hashrep" not in servers_bound_to(unscoped, key), key
+
+        scoped = installed(_settings(hashrep={**INVENTED, "agents": ["judge"]}))
+        assert "hashrep" in servers_bound_to(scoped, "judge")
+        for key in everyone:
+            assert "hashrep" not in [str(r.server) for r in mcp_refs_for(scoped, key)], key
+            if key != "judge":
+                assert "hashrep" not in servers_bound_to(scoped, key), key
 
     def test_the_run_state_block_shows_it(self, installed: Any) -> None:
         installed(_settings(hashrep=INVENTED))

@@ -2213,13 +2213,15 @@ another definition.
 {"kind": "capability", "capability": "reputation"}
 ```
 
-A `capability` reference stands for every server in `mcp.servers` that
-declares a tool of that kind (`tool_facts`), in their configured order, each
-with its whole ticked set, as an `mcp` reference to it would; a server's
-`agents` list adds agents on top, as it always has. The one exception is a
-built-in server whose shipped seed binds it by its own `agents` list (the
-threat-intel sidecar, bound to the judge): the definitions never named it, and
-it stays bound by its list alone, as you store it. The
+A `capability` reference never reaches more than a definition reached
+before. It stands for the built-in servers whose shipped declaration has a tool
+of that kind and whose seed leaves their binding to the definitions (for
+`reputation`, VirusTotal's own server; the threat-intel sidecar's seed binds it
+to the judge by its `agents` list), each referenced exactly as an `mcp`
+reference by key was: a disabled server gives nothing, its tick list and
+allow-list narrow what it gives, and its `agents` list binds it to further
+agents as it always did. A server you add is never reached through a
+capability: bind it by its own `agents` list or by an `mcp` reference. The
 built-in agents that look the sample's hash up (`static`, `network`, the judge,
 `triage`, `android_static`, `reverser`) reach reputation this way: with the
 shipped servers that is VirusTotal's own server, which they named by key
@@ -3100,9 +3102,10 @@ reputation source, whatever the tool is called and however it answers:
   question as asked once the ledger holds a call to one;
 - a failed lookup is the pack's reputation step failing
   (`triage.reputation_failed`, read to the judge as one sentence);
-- the built-in agents that look a hash up reach every such server by
-  capability (below), so a reputation server you add reaches them without a
-  clone.
+- an agent reaches a reputation server you add the way it reaches any server
+  of yours: by the server's `agents` list or an `mcp` reference to it (the
+  built-in agents' capability reference reaches only the shipped VirusTotal
+  server, as their reference by key did; see Delegation).
 
 A tool named like a built-in lookup that declares another kind, or nothing,
 gets none of this. A report stored before the records is read the way it

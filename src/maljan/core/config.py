@@ -1732,15 +1732,15 @@ class ToolRef(BaseModel):
     (``agents.delegation``).
 
     ``kind="capability"`` names a kind of tool (``capability="reputation"``)
-    rather than a server: it stands for every server in ``mcp.servers`` that
-    declares a tool of that kind, in their configured order, each with its
-    whole allow-listed set, as a ``kind="mcp"`` reference to it would
-    (``agents.composition.capability_servers``); a server's ``agents`` list
-    adds agents on top, as it always has. A built-in server whose shipped seed
-    binds it by its own ``agents`` list is the one exception: the definitions
-    never named it, and it stays bound by its list alone. The built-in agents
-    reach reputation this way, so a reputation server an operator adds reaches
-    them without a clone.
+    rather than a server. It never reaches more than a definition reached
+    before: it stands for the built-in servers whose shipped seed declares a
+    tool of that kind and leaves its binding to the definitions (the set the
+    built-in definitions named by key), each referenced exactly as a
+    ``kind="mcp"`` reference by key was, its tick list, allow-list and
+    enabled switch honoured and its ``agents`` list adding agents as it always
+    did (``agents.composition.capability_servers``). A server an operator adds
+    is never reached through a capability: its own ``agents`` list or a
+    reference by key binds it.
     """
 
     kind: Literal["mcp", "provider", "sandbox", "agent", "capability"]
@@ -2708,12 +2708,11 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
     closures, not a transport.
 
     The agents that look the sample's hash up reach reputation by capability
-    (``ToolRef(kind="capability", capability="reputation")``): every server
-    declaring a reputation tool, except a built-in whose seed binds it by its
-    own ``agents`` list. With the shipped servers that is VirusTotal's own
-    server alone, which the definitions named by key before
-    (``FORMER_SEED_TOOLS``); the threat-intel sidecar's seed binds it to the
-    judge by its ``agents`` list.
+    (``ToolRef(kind="capability", capability="reputation")``): the built-in
+    servers whose seed declares a reputation tool and is bound by the
+    definitions, which is VirusTotal's own server alone, the one the
+    definitions named by key before (``FORMER_SEED_TOOLS``); the threat-intel
+    sidecar's seed binds it to the judge by its ``agents`` list.
 
     The judge and the reporter are here so that their LLM and their tool
     servers have the same editing surface as the analysts. Neither can be an
