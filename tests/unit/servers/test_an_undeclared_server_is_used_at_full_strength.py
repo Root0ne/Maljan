@@ -103,8 +103,10 @@ def _settings() -> Settings:
     return settings
 
 
-async def _attach(monkeypatch: pytest.MonkeyPatch) -> tuple[list[Any], Any]:
-    monkeypatch.setattr("maljan.agents.mcp_client.stdio_client", _in_memory(_server()))
+async def _attach(
+    monkeypatch: pytest.MonkeyPatch, server: FastMCP | None = None
+) -> tuple[list[Any], Any]:
+    monkeypatch.setattr("maljan.agents.mcp_client.stdio_client", _in_memory(server or _server()))
     registry = ServerRegistry(_settings())
     tools, reasons = await registry.atools_for("network", "job-1")
     assert reasons == []
@@ -244,3 +246,130 @@ def test_an_entry_dump_with_no_structured_answer_is_unchanged() -> None:
         entry_id="ev_0001", seq=1, agent="a", tool="t", args={}, server=None, output="{}"
     )
     assert "structured_content" not in json.loads(entry.model_dump_json())
+
+
+# ---------------------------------------------------------------------------
+# The structured answer is kept only where it adds something
+# ---------------------------------------------------------------------------
+
+ROWS = {"rows": [{"offset": i, "text": f"value {i}"} for i in range(50)]}
+
+
+def _sdk_shaped_server() -> FastMCP:
+    """Tools typed as the built-in sidecars type theirs: the SDK answers both ways."""
+    server = FastMCP(SERVER)
+
+    @server.tool(description="Rows as a dict.")
+    def rows(path: str) -> dict[str, Any]:
+        return ROWS
+
+    @server.tool(description="A text answer.")
+    def note(path: str) -> str:
+        return "a plain note"
+
+    return server
+
+
+def _as_dev_writes_it(entry: Any) -> Any:
+    from maljan.schemas.evidence import build_entry
+
+    return build_entry(
+        entry_id=entry.id,
+        seq=entry.seq,
+        agent=entry.agent,
+        tool=entry.tool,
+        args=entry.args,
+        server=entry.server,
+        output=entry.output,
+        started_at=entry.started_at,
+        duration_ms=entry.duration_ms,
+        stage=entry.stage,
+        model=entry.model,
+        source=entry.source,
+    )
+
+
+def test_an_answer_whose_text_already_is_its_structure_changes_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from maljan.schemas.evidence import stored_bytes
+
+    async def _run() -> list[Any]:
+        tools, registry = await _attach(monkeypatch, _sdk_shaped_server())
+        try:
+            recorder = EvidenceRecorder("network")
+            recorded = {tool.name: tool for tool in record_tools(tools, recorder)}
+            await recorded["rows"].ainvoke({"path": "sample.bin"})
+            await recorded["note"].ainvoke({"path": "sample.bin"})
+            return recorder.entries
+        finally:
+            await _detach(registry)
+
+    entries = asyncio.run(_run())
+    assert [e.tool for e in entries] == ["rows", "note"]
+    for entry in entries:
+        assert entry.structured_content is None
+        dev = _as_dev_writes_it(entry)
+        assert entry.model_dump_json() == dev.model_dump_json()
+        assert stored_bytes(entry) == stored_bytes(dev)
+    assert entries[0].structured == ROWS
+
+
+def _prose_entry(**over: Any) -> Any:
+    from maljan.schemas.evidence import build_entry
+
+    return build_entry(
+        entry_id="ev_0001",
+        seq=1,
+        agent="a",
+        tool="scan_rules",
+        args={},
+        server=SERVER,
+        output="1 rule matched",
+        source=f"mcp:{SERVER}",
+        structured_content=STRUCTURED,
+        **over,
+    )
+
+
+def test_a_prose_answer_keeps_its_structure_charged_to_the_budget() -> None:
+    from maljan.schemas.evidence import apply_budget, stored_bytes
+
+    entry = _prose_entry()
+    assert entry.structured_content == STRUCTURED == entry.structured
+    parsed = len(json.dumps(STRUCTURED, ensure_ascii=False).encode("utf-8"))
+    assert stored_bytes(entry) == len(b"1 rule matched") + parsed
+
+    kept, spent = apply_budget([_prose_entry()], stored_bytes(entry))
+    assert (kept, spent) == (0, stored_bytes(entry))
+    over = _prose_entry()
+    trimmed, _ = apply_budget([over], stored_bytes(entry) - 1)
+    assert trimmed == 1
+    assert over.output == "" and over.structured is None and over.structured_content is None
+
+
+@pytest.mark.parametrize(
+    "cut",
+    [{"chars_dropped": 40}, {"not_shown": True}, {"max_chars": 4}, {"repeated_of": "ev_0000"}],
+)
+def test_an_answer_cut_or_not_shown_keeps_no_uncut_structure(cut: dict[str, Any]) -> None:
+    entry = _prose_entry(**cut)
+    assert entry.structured_content is None
+    assert entry.structured is None
+    assert "structured_content" not in json.loads(entry.model_dump_json())
+
+
+def test_an_object_that_only_wraps_the_text_again_adds_nothing() -> None:
+    from maljan.schemas.evidence import build_entry
+
+    entry = build_entry(
+        entry_id="ev_0001",
+        seq=1,
+        agent="a",
+        tool="note",
+        args={},
+        server=SERVER,
+        output="a plain note",
+        structured_content={"result": "a plain note"},
+    )
+    assert entry.structured_content is None and entry.structured is None

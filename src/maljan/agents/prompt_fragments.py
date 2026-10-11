@@ -15,7 +15,7 @@ neutral default, which asks for concrete artefacts without naming any OS.
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from maljan.agents.tool_fence import FENCE_STATEMENT
@@ -426,18 +426,37 @@ _DESCRIPTION_TAG = re.compile(r"^\[[A-Z]+\] ")
 
 
 def _quoted(text: str) -> str:
-    """A server's text as one quoted value: its breaks escaped, no ``<<`` left whole."""
-    from maljan.agents.tool_fence import escaped, excerpt_view
+    """A server's text as one quoted value it cannot close: a JSON string.
 
-    return excerpt_view(escaped(" ".join(str(text or "").split())))
+    Whitespace collapsed as a tool's description is, every ``<`` of a ``<<``
+    run and every ``<`` lookalike behind a backslash (``tool_fence.escaped``),
+    then written as JSON writes a string, so every quote, backslash and
+    control character inside is escaped, and every other unprintable
+    character is written as its ``\\uXXXX`` escape. Nothing the server
+    serves can end the value or start a line.
+    """
+    import json
+
+    from maljan.agents.tool_fence import escaped
+
+    body = json.dumps(escaped(" ".join(str(text or "").split())), ensure_ascii=False)
+    return "".join(c if c.isprintable() else f"\\u{ord(c):04x}" for c in body)
 
 
-def undeclared_server_text(server: str, instructions: str, tools: Sequence[object]) -> str:
+def undeclared_server_text(
+    server: str,
+    instructions: str,
+    tools: Sequence[object],
+    *,
+    names: Mapping[str, str] | None = None,
+) -> str:
     """What a server that declares no workflow text says about itself and its offered tools.
 
     ``instructions`` is the MCP ``instructions`` the server served when it was
     initialised, as served; ``tools`` its offered tools, each with the
-    description it gave. Both are tool-supplied text: shown as quoted values
+    description it gave, named as ``names`` maps its own name to the name the
+    request offers it under (a name another server took is offered as
+    ``<server>__<name>``). Both are tool-supplied text: shown as quoted values
     under :data:`UNDECLARED_SERVER_LEAD`, whitespace collapsed as a tool's
     description is (``mcp_client``), and kept whole as descriptions are.
     ``""`` when the server served neither.
@@ -445,7 +464,8 @@ def undeclared_server_text(server: str, instructions: str, tools: Sequence[objec
     from maljan.agents.tool_pinning import DELIVERY_TOOLS
 
     listed = [
-        f"`{name}`: {_quoted(_DESCRIPTION_TAG.sub('', str(getattr(tool, 'description', '') or '')))}"
+        f"`{(names or {}).get(name, name)}`: "
+        f"{_quoted(_DESCRIPTION_TAG.sub('', str(getattr(tool, 'description', '') or '')))}"
         for tool in tools
         for name in (str(getattr(tool, "name", "") or ""),)
         if name and name not in DELIVERY_TOOLS

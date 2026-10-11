@@ -36,8 +36,12 @@ def _server(mount: str = "", work_dir: str = "", enabled: bool = True) -> dict[s
 
 
 class _Container:
-    def __init__(self, settings: Any) -> None:
+    def __init__(self, settings: Any, analysts: tuple[str, ...] = ("static",)) -> None:
         self.config = settings
+        self._analysts = list(analysts)
+
+    def analyst_keys(self) -> list[str]:
+        return list(self._analysts)
 
 
 @pytest.fixture
@@ -48,11 +52,16 @@ def samples(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path / "samples"
 
 
-def _mirror(settings: Any, tmp: Path, already: tuple[Path, ...] = ()) -> Any:
+def _mirror(
+    settings: Any,
+    tmp: Path,
+    already: tuple[Path, ...] = (),
+    analysts: tuple[str, ...] = ("static",),
+) -> Any:
     source = tmp / "download.bin"
     source.write_bytes(b"\x00demo")
     return analysis_worker.mirror_server_samples(
-        _Container(settings),
+        _Container(settings, analysts),
         temp_path=str(source),
         sha256=SHA,
         extension=".bin",
@@ -121,3 +130,9 @@ def test_with_no_mounted_server_nothing_changes() -> None:
     container = type("C", (), {"server_sample_paths": {}})()
     staged = {"s": "/p"}
     assert _mounted(container, [_Tool("s")], staged) is staged
+
+
+def test_a_server_no_agent_of_the_job_binds_is_not_copied(samples: Path, tmp_path: Path) -> None:
+    settings = build_settings({"mcp.servers": {"bound": _server(mount="/srv/in")}})
+    hosts, paths = _mirror(settings, tmp_path, analysts=("dynamic",))
+    assert (hosts, paths) == ([], {})

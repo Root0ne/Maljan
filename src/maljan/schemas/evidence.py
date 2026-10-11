@@ -345,10 +345,10 @@ class LedgerEntry(BaseModel):
         # Like ``facts``: an entry with none dumps as it always did.
         exclude_if=lambda value: value is None,
         description=(
-            "The structured answer the tool's server returned beside its text (MCP "
-            "structuredContent), as returned. The text in output is what the model read; "
-            "structured falls back to this object when that text is not JSON. None for a tool "
-            "that returned none."
+            "The structured answer the tool's server returned beside a prose text (MCP "
+            "structuredContent), kept only where the text is not JSON, the object is not the "
+            "text wrapped again and the answer was not cut; structured holds the same object. "
+            "The text in output is what the model read. None otherwise."
         ),
     )
 
@@ -455,9 +455,11 @@ def build_entry(
     the entry is marked ``truncated`` because it is not the whole answer.
 
     ``structured_content`` is the structured answer the tool's server
-    returned beside its text (MCP ``structuredContent``): kept as returned,
-    and read as ``structured`` when the text itself is not JSON, so a reader
-    of the entry reads the server's own structure by its shape.
+    returned beside its text (MCP ``structuredContent``): kept, and read as
+    ``structured``, only where it adds something the text does not carry
+    (the text is not JSON and the object is not the text wrapped again) and
+    the entry holds the whole answer: an answer cut, not shown or repeated
+    keeps no structure the model did not read.
     """
     safe_args = dict(args) if isinstance(args, dict) else {}
     full = str(output or "")
@@ -477,11 +479,11 @@ def build_entry(
     cut = bool(not_shown) or len(text) < len(full) or int(chars_dropped) > 0
     structured = None if repeated_of or not_shown else parse_structured(full)
     content = (
-        dict(structured_content)
-        if isinstance(structured_content, dict) and structured_content and not repeated_of
+        _structured_beside(structured_content, full, structured)
+        if not (repeated_of or cut)
         else None
     )
-    if structured is None and content is not None and not not_shown:
+    if content is not None:
         structured = content
     return LedgerEntry(
         id=entry_id,
@@ -542,31 +544,42 @@ def _reputation_at_write(
     return record_at_write(facts, ok=ok, output=output, structured=structured, server=server)
 
 
+def _structured_beside(content: Any, text: str, parsed: Any) -> dict[str, Any] | None:
+    """The structured answer a server returned beside ``text``, where it adds something.
+
+    Only a JSON object, and only beside a text that is not JSON itself: a
+    JSON text already is the answer's structure, and the model read it (the
+    MCP SDK's servers return a dict both ways). An object that only wraps the
+    text again (``{"result": <the text>}``, the SDK's form for a text return)
+    adds nothing either. ``None`` in every such case.
+    """
+    if not isinstance(content, dict) or not content or parsed is not None:
+        return None
+    if len(content) == 1 and next(iter(content.values())) == text:
+        return None
+    return dict(content)
+
+
 def stored_bytes(entry: LedgerEntry) -> int:
     """What the entry keeps: the full parsed result when there is one, else the text.
 
     The row persists both columns, so what is written is their sum; what the
     budget charges is the larger of the two, because the text is a prefix of
     the result's JSON and charging it twice would halve the budget for
-    nothing.
+    nothing. A structure the server returned beside a prose text
+    (``structured_content``) is no prefix of it, so the two are charged
+    together.
     """
     text = len(entry.output.encode("utf-8", errors="ignore"))
-    content = getattr(entry, "structured_content", None)
-    beside = 0
-    if content is not None and content is not entry.structured:
-        # The server's structured answer is kept beside a text that parsed on
-        # its own: a column of its own, charged as one.
-        try:
-            beside = len(json.dumps(content, ensure_ascii=False).encode("utf-8"))
-        except (TypeError, ValueError):
-            beside = 0
     if entry.structured is None:
-        return text + beside
+        return text
     try:
         parsed = len(json.dumps(entry.structured, ensure_ascii=False).encode("utf-8"))
     except (TypeError, ValueError):
-        return text + beside
-    return max(text, parsed) + beside
+        return text
+    if getattr(entry, "structured_content", None) is not None:
+        return text + parsed
+    return max(text, parsed)
 
 
 def apply_budget(

@@ -306,6 +306,34 @@ def mirror_target_for(provider: Any, *, sha256: str, extension: str) -> tuple[Pa
     return host, path_in_server(spec, host)
 
 
+def servers_this_job_binds(container: Any) -> set[str] | None:
+    """The tool servers some agent of this job can reach, or ``None`` when the job cannot say.
+
+    Every agent the profile's analysts can reach (``composition.reachable_agents``)
+    and every enabled agent that judges or writes the report, each with the
+    servers bound to it by ``agents`` or by a tool reference
+    (``composition.servers_bound_to``). A container with no profile to read
+    answers ``None``.
+    """
+    keys = getattr(container, "analyst_keys", None)
+    if not callable(keys):
+        return None
+    from maljan.agents.composition import reachable_agents, servers_bound_to
+
+    settings = container.config
+    named = list(keys())
+    named += [
+        key
+        for key, definition in settings.agents.definitions.items()
+        if definition.enabled and definition.role in ("judge", "report") and key not in named
+    ]
+    return {
+        server
+        for key in reachable_agents(settings, named)
+        for server in servers_bound_to(settings, key)
+    }
+
+
 def mirror_server_samples(
     container: Any,
     *,
@@ -316,7 +344,10 @@ def mirror_server_samples(
     job_id: str = "",
     already: Iterable[Path] = (),
 ) -> tuple[list[Path], dict[str, str]]:
-    """Copy the sample once for each enabled tool server that declares a ``sample_mount``.
+    """Copy the sample once for each tool server of this job that declares a ``sample_mount``.
+
+    Only a server some agent of this job can reach (:func:`servers_this_job_binds`)
+    is copied the sample; a server no agent binds gets nothing.
 
     A server that sees the samples directory at a mount of its own is handed
     the sample there, whether a static provider drives it or an agent is bound
@@ -337,8 +368,11 @@ def mirror_server_samples(
     copied = set(already)
     paths: dict[str, str] = {}
     servers = getattr(getattr(container.config, "mcp", None), "servers", None) or {}
+    bound = servers_this_job_binds(container)
     for key, cfg in servers.items():
         if not getattr(cfg, "enabled", True) or not str(getattr(cfg, "sample_mount", "") or ""):
+            continue
+        if bound is not None and str(key) not in bound:
             continue
         try:
             spec = MirrorSpec.of(cfg)
