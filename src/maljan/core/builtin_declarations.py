@@ -144,19 +144,22 @@ R2_OPEN_FILE_FIRST_AT = "call open_file with {sample_path}, then call this tool 
 
 # radare2's log envelope: r2mcp hands back what radare2 logged while running a
 # command inside ``<log>…</log>``. An envelope and nothing else, whose lines
-# are all radare2 log lines (``[LEVEL] text``) with at least one ``[ERROR]`` or
-# ``[FATAL]``, is radare2 saying the command failed with no answer beside it;
-# the message is its lines. A line ends where Python's ``str.splitlines`` ends
-# one, so the pattern and the message read the same lines.
-_LINE_BREAK = r"\n\r\x0b\x0c\x1c-\x1e\x{85}\x{2028}\x{2029}"
-_GAP = rf"[\s{_LINE_BREAK}]"
-_IN_LINE = rf"[^{_LINE_BREAK}]"
-_FIRST = rf"[^\s{_LINE_BREAK}]"
-_LOG_LINE = rf"\[[A-Z]+\][ \t]*{_FIRST}{_IN_LINE}*"
-_FAILURE_LINE = rf"\[(?:ERROR|FATAL)\][ \t]*{_FIRST}{_IN_LINE}*"
+# are all radare2 log lines (``[LEVEL] text``, the level at the start of the
+# line) with at least one ``[ERROR]`` or ``[FATAL]`` line, is radare2 saying the
+# command failed with no answer beside it; the message is its lines. A line
+# ends exactly where Python's ``str.splitlines`` ends one, a line holding only
+# whitespace (as ``str.isspace`` has it, Unicode included) is blank, and a
+# level tag in the middle of a line is part of that line's text.
+_LINE_BREAK = r"\n\x0b\x0c\r\x1c-\x1e\x{85}\x{2028}\x{2029}"
+_IN_LINE_SPACE = r"\t\x1f \x{a0}\x{1680}\x{2000}-\x{200a}\x{202f}\x{205f}\x{3000}"
+_BREAK = rf"[{_LINE_BREAK}]"
+_BLANK = rf"[{_IN_LINE_SPACE}]*"
+_TEXT = rf"[^{_IN_LINE_SPACE}{_LINE_BREAK}][^{_LINE_BREAK}]*"
+_LOG_LINE = rf"{_BLANK}\[[A-Z]+\]{_BLANK}{_TEXT}"
+_FAILURE_LINE = rf"{_BLANK}\[(?:ERROR|FATAL)\]{_BLANK}{_TEXT}"
+_ANY_LINE = rf"(?:{_LOG_LINE}|{_BLANK})"
 R2_LOG_ENVELOPE = (
-    rf"<log>(?P<body>{_GAP}*(?:{_LOG_LINE}{_GAP}*)*{_FAILURE_LINE}"
-    rf"(?:{_GAP}*{_LOG_LINE})*{_GAP}*)</log>"
+    rf"<log>(?P<body>(?:{_ANY_LINE}{_BREAK})*{_FAILURE_LINE}(?:{_BREAK}{_ANY_LINE})*)</log>"
 )
 
 # The ways r2mcp says "error" in place of an answer, in the order they are

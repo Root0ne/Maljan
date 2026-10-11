@@ -192,8 +192,7 @@ def _tables() -> dict[str, Callable[[str], bool]]:
         "markdown._SANDBOX_TOOLS": prefixes(markdown._SANDBOX_TOOLS),
         "triage_pack._REPUTATION_TOOLS": names(triage_pack._REPUTATION_TOOLS),
         "triage_pack.RULE_TOOLS": names(triage_pack.RULE_TOOLS),
-        # ``pipeline/run_state.py:237`` writes the tuple inline.
-        "run_state.reputation": names(("get_file_report", "check_hash", "reputation")),
+        "run_state.reputation": names(_read_inline_tables()["run_state.reputation"]),
         "network_analyst._PCAP_TOOLS": names(t for t, _ in network_analyst._PCAP_TOOLS),
         "function_map": names(
             (
@@ -203,17 +202,63 @@ def _tables() -> dict[str, Callable[[str], bool]]:
                 function_map._INDEX_TOOL,
             )
         ),
-        # ``reporting/renderers/stix_renderer.py``: the recovered-by reader's branches.
-        "stix_renderer.recovering": names(
-            ("floss", stix_renderer.DECODER_TOOL, "strings", "iocs_from_file")
-        ),
+        "stix_renderer.recovering": names(_read_inline_tables()["stix_renderer.recovering"]),
         "stix_renderer.DECODER_TOOL": names((stix_renderer.DECODER_TOOL,)),
         "stix_renderer._STRING_SWEEP_TOOLS": names(stix_renderer._STRING_SWEEP_TOOLS),
-        # ``reporting/figures.py:317``.
-        "figures.code_listing": names(("decompile_function",)),
-        # ``reporting/ledger_projection.py:367``.
-        "ledger_projection.technique_hits": names(("capa",)),
+        "figures.code_listing": names(_read_inline_tables()["figures.code_listing"]),
+        "ledger_projection.technique_hits": names(
+            _read_inline_tables()["ledger_projection.technique_hits"]
+        ),
         "static_analyst._LOAD_TOOL": names((static_analyst._LOAD_TOOL,)),
+    }
+
+
+def _read_inline_tables() -> dict[str, tuple[str, ...]]:
+    """The four tables the code writes inline, read from the code's own source.
+
+    Not copied: a change to any of these lines changes what this reads, and
+    the consumer test then holds the declaration to the new table.
+    """
+    import ast
+    import inspect
+
+    from maljan.pipeline import run_state
+    from maljan.reporting import figures, ledger_projection
+    from maljan.reporting.renderers import stix_renderer
+
+    def literal(pattern: str, text: str) -> tuple[str, ...]:
+        found = re.findall(pattern, text)
+        assert len(found) == 1, (pattern, found)
+        value = ast.literal_eval(found[0])
+        return tuple(value) if isinstance(value, tuple) else (value,)
+
+    state = inspect.getsource(run_state)
+    shown = inspect.getsource(figures)
+    projection = inspect.getsource(ledger_projection)
+    hits = projection.index("static.api_technique_hits.append(")
+    before_hits = projection[:hits]
+    payloads = re.findall(r"_payloads\(ledger, ([^)]*)\)", before_hits)[-1]
+    recovering = inspect.getsource(stix_renderer.emulation_from_ledger)
+    branches = re.findall(r"tool == (\"[a-z_]+\"|DECODER_TOOL)", recovering)
+    return {
+        "run_state.reputation": literal(
+            r"reputation = \[e for e in pack if e\.tool in (\([^)]*\))\]", state
+        ),
+        "figures.code_listing": literal(r'o\.get\("tool_name"\) != ("[a-z_]+")', shown),
+        "ledger_projection.technique_hits": tuple(ast.literal_eval(f"({payloads},)")),
+        "stix_renderer.recovering": tuple(
+            stix_renderer.DECODER_TOOL if b == "DECODER_TOOL" else ast.literal_eval(b)
+            for b in branches
+        ),
+    }
+
+
+def test_the_inline_tables_are_read_as_the_code_writes_them_today() -> None:
+    assert _read_inline_tables() == {
+        "run_state.reputation": ("get_file_report", "check_hash", "reputation"),
+        "figures.code_listing": ("decompile_function",),
+        "ledger_projection.technique_hits": ("capa",),
+        "stix_renderer.recovering": ("floss", "decode_string_blobs", "strings", "iocs_from_file"),
     }
 
 

@@ -92,6 +92,19 @@ def test_the_evidence_providers_entries_record_its_source() -> None:
     assert entries and all(e.source == "provider:capa_yara" for e in entries)
 
 
+def test_the_probe_only_sandbox_entry_records_the_sandbox_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from maljan.reporting import ledger_projection
+
+    seen: list[Any] = []
+    monkeypatch.setattr(
+        ledger_projection, "network_from_ledger", lambda entries: seen.extend(entries)
+    )
+    ledger_projection.network_from_sandbox_report({"network": {"dns": []}})
+    assert [(e.tool, e.source) for e in seen] == [("sandbox_network", "sandbox")]
+
+
 def test_every_triage_pack_entry_records_the_packs_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

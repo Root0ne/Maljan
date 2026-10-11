@@ -2989,6 +2989,14 @@ patterns and reputation `text_patterns`) is compiled and run by RE2, whose
 matching time is linear in the text whatever the pattern, so a sample's
 strings in an answer cannot stall a run. A pattern RE2 cannot compile, a
 back-reference or a lookaround, is refused when it is saved, with the reason.
+RE2's shorthand classes are ASCII only: `\s` is space, tab and the ASCII line
+breaks, `\d` is `0`-`9`, `\w` is `[0-9A-Za-z_]`, and `\b` is a boundary between
+those. A Python pattern ported as it is therefore no longer matches a
+non-breaking space with `\s` or a non-ASCII digit with `\d`, and `\b` sees a
+boundary before a non-ASCII letter. Where Unicode is meant, write the class out:
+`\p{Z}` (Unicode separators) or an explicit list such as
+`[\s\x{a0}\x{2000}-\x{200a}\x{3000}]` for whitespace, `\pN` for digits and `\pL`
+for letters.
 `text_patterns` are *searched* for anywhere in a reputation answer written in
 prose, the first pattern that finds a match giving the counts; each names a
 `malicious` group and optionally a `total` one.
