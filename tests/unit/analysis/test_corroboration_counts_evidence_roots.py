@@ -324,7 +324,15 @@ class TestTheMatrixStatesRootsBesideLayers:
         without = build_capability_matrix(stix_output=None, isr_reports=_isrs())
         # Corroboration reads the sources where the ledger was read; what is
         # published and which layers named it do not.
-        strip = {"evidence_roots", "roots_not_read", "sources", "support", "is_corroborated"}
+        strip = {
+            "evidence_roots",
+            "roots_not_read",
+            "sources",
+            "independent_sources",
+            "source_kinds",
+            "support",
+            "is_corroborated",
+        }
         assert [m.model_dump(exclude=strip) for m in with_roots[1]] == [
             m.model_dump(exclude=strip) for m in without[1]
         ]

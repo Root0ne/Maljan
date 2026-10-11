@@ -45,6 +45,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from maljan.analysis.corroboration import NOT_OBSERVED_SUPPORTS, corroboration_row
 from maljan.analysis.evidence_roots import RootCount, layers_and_roots, run_roots
 from maljan.analysis.technique_ids import attack_reference_id, says_no_technique
 from maljan.core.logger import logger
@@ -123,7 +124,7 @@ def build_capability_matrix(
     if not techniques:
         return [], []
     roots_of = run_roots(ledger) if ledger else None
-    sources_of = _technique_sources(isr_reports, ledger, roots_of)
+    rows = _corroboration_rows(isr_reports, ledger)
 
     out_of_scope = _out_of_scope(list(techniques), sample)
     review = technique_review(stix_output)
@@ -159,14 +160,20 @@ def build_capability_matrix(
         if roots_of is not None:
             for text, ids in info.get("cited") or []:
                 counted.add(*roots_of.of_statement(text, ids))
-        held = sources_of.get(tid.upper()) or {}
-        support = _support_of(held)
-        # Corroboration is two analyst layers in statements of their own, and,
-        # where the ledger was read, two sources of their own that are not all
-        # artefacts of the file: five analysts restating one pack row are one
-        # source, and names and strings show what the sample can do.
-        corroborated = len(independent) >= 2 and (
-            roots_of is None or not held or (len(held) >= 2 and support != _CAPABILITY)
+        row = corroboration_row(rows.get(tid.upper())) if rows else {}
+        held = list(row.get("sources") or [])
+        support = str(row.get("support") or "")
+        # Corroboration is two sayers (analyst layers in statements of their
+        # own, and the rules that assert it) and, where the ledger was read,
+        # the corroboration record's own decision on its sources: one pack row
+        # restated by five analysts is one source, and a technique no source
+        # of which is behaviour is not corroborated.
+        sayers = len(independent) + len(row.get("asserted_by") or [])
+        corroborated = sayers >= 2 and (
+            "sources" not in row
+            or (
+                int(row.get("independent_sources", 0)) >= 2 and support not in NOT_OBSERVED_SUPPORTS
+            )
         )
 
         # Never emit a zero-confidence cell with no evidence and no contributing
@@ -253,7 +260,10 @@ def build_capability_matrix(
                 identical_statements=identical,
                 evidence_roots=list(counted.roots),
                 roots_not_read=list(counted.not_read),
-                sources=sorted(held),
+                sources=held,
+                independent_sources=int(row.get("independent_sources", 0) or 0),
+                is_corroborated=corroborated,
+                source_kinds=dict(row.get("source_kinds") or {}),
                 support=support,
             )
         )
@@ -280,7 +290,9 @@ def build_capability_matrix(
                 identical_statements=identical,
                 evidence_roots=list(counted.roots),
                 roots_not_read=list(counted.not_read),
-                sources=sorted(held),
+                sources=held,
+                independent_sources=int(row.get("independent_sources", 0) or 0),
+                source_kinds=dict(row.get("source_kinds") or {}),
                 support=support,
             )
         )
@@ -291,32 +303,23 @@ def build_capability_matrix(
     return cells, mappings
 
 
-# The support a technique has when every source is an artefact of the file.
-_CAPABILITY = "capability"
+def _corroboration_rows(
+    isr_reports: dict[str, Any] | None, ledger: Sequence[Any] | None
+) -> dict[str, dict[str, Any]]:
+    """The run's corroboration rows (``validation.corroboration``), or none. Never raises.
 
-
-def _technique_sources(
-    isr_reports: dict[str, Any] | None, ledger: Sequence[Any] | None, roots_of: Any
-) -> dict[str, dict[str, str]]:
-    """Per technique, ``{source: reading}`` (``validation.technique_sources``). Never raises."""
-    if roots_of is None:
+    The same rows the judge's count and the run summary read, so the matrix
+    and the judge decide corroboration from one record.
+    """
+    if not ledger:
         return {}
     try:
-        from maljan.pipeline.validation import technique_sources
+        from maljan.pipeline.validation import corroboration
 
-        return technique_sources(isr_reports, ledger, roots_of)
+        return corroboration(isr_reports, ledger)
     except Exception as exc:  # noqa: BLE001 — a fact not read is no fact stated
-        logger.debug("capability_matrix: the technique sources were not read (%s)", exc)
+        logger.debug("capability_matrix: the corroboration rows were not read (%s)", exc)
         return {}
-
-
-def _support_of(held: dict[str, str]) -> str:
-    """``capability`` when every source is an artefact of the file (``validation.support_of``)."""
-    if not held:
-        return ""
-    from maljan.pipeline.validation import support_of
-
-    return support_of(held)
 
 
 # What the judge is called in ``contributing_layers``. It is listed, because a

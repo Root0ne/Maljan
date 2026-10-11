@@ -138,10 +138,10 @@ from maljan.pipeline.nodes import (
     NOT_NAMED_BY_MEDIATOR,
     run_quality_note,
     skipped_analysts_reason,
-    sycophancy_asks_every_analyst,
 )
 from maljan.pipeline.routing import NO_CONTESTED_POINT, NOT_REVISED, POINTS_UNCHANGED
 from maljan.pipeline.run_state import NO_LIMIT, budget_line
+from maljan.pipeline.sycophancy_detector import convergence_sentence
 from maljan.pipeline.validation import (
     _UNPARSED_ANSWER_MESSAGE,
     ANALYST_FEEDBACK_CLOSING,
@@ -227,11 +227,11 @@ from maljan.reporting.models import (
 )
 from maljan.reporting.narrative_agent import (
     _SYSTEM_PROMPT,
-    CAPABILITY_NOTE,
     CLAIMS_IN_FORCE_HEADING,
     EXAMPLE_OBJECT,
     EXPECTED_OBJECT,
     build_prompt_text,
+    support_note,
 )
 from maljan.reporting.renderers.markdown import analyst_list_note
 from maljan.reporting.renderers.stix_renderer import (
@@ -1564,8 +1564,6 @@ PROMPTS: dict[str, str] = {
     "a revision round asking only the analysts the mediator names": " ".join(
         [
             NOT_NAMED_BY_MEDIATOR,
-            sycophancy_asks_every_analyst("sycophancy"),
-            sycophancy_asks_every_analyst("no_consensus"),
             BLOCK_NOT_READ_NOTE,
             ANALYSTS_FIELD_MISSING_NOTE,
             analysts_field_unknown_note(["network", "@@@"]),
@@ -2085,9 +2083,40 @@ PROMPTS: dict[str, str] = {
             )
         },
         None,
-        {"T1112": {"sources": ["ev_0001"], "support": "capability"}},
+        {
+            "T1112": {
+                "sources": ["ev_0001", "ev_0002", "ev_0003"],
+                "independent_sources": 2,
+                "source_kinds": {"artefact": 1, "report": 1, "unplaced": 1},
+                "support": "unobserved",
+            }
+        },
     ),
-    "a published technique every source of which is an artefact": CAPABILITY_NOTE,
+    "a published technique no source of which is behaviour": " ".join(
+        [
+            support_note(
+                TTPMapping(
+                    technique_id="T1112",
+                    technique_name="x",
+                    sources=["ev_0001", "ev_0002"],
+                    source_kinds={"artefact": 2},
+                    support="capability",
+                )
+            ),
+            support_note(
+                TTPMapping(
+                    technique_id="T1112",
+                    technique_name="x",
+                    sources=["ev_0001"],
+                    source_kinds={"report": 1},
+                    support="unobserved",
+                )
+            ),
+        ]
+    ),
+    "a revision that moved towards a peer, told to the mediation": convergence_sentence(
+        [{"agent": "a", "towards": "b", "before": 0.4, "after": 0.95}]
+    ),
     "claims that say only that a library is used": _message_of(
         library_only_claims_violation(
             AgentISR(

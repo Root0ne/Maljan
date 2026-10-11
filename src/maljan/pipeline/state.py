@@ -68,6 +68,15 @@ class AgentArgument(BaseModel):
             "platform put them to the analysts the line names."
         ),
     )
+    converged: list[dict[str, Any]] = Field(
+        default_factory=list,
+        repr=False,
+        description=(
+            "For the mediator: the revisions of the round before it that moved towards a peer "
+            "beyond the sources both cite, with no citation added and no tool call "
+            "(``sycophancy_detector.convergence_flags``), as it was told them."
+        ),
+    )
     revise: list[str] | None = Field(
         default=None,
         repr=False,

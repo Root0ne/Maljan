@@ -38,6 +38,7 @@ from maljan.agents._indicator_denylists import (
     malformed_hash_in,
     whole_value_in,
 )
+from maljan.analysis.corroboration import support_sentence
 from maljan.analysis.technique_ids import attack_reference_id
 from maljan.core.logger import logger
 from maljan.extractors.network_extractor import (
@@ -1685,6 +1686,14 @@ def _attack_patterns_for(
         if not tid or tid in seen:
             continue
         seen.add(tid)
+        # A technique no source of which is behaviour is marked on its
+        # pattern, with the sentence its ATT&CK row prints; ``uses`` stays.
+        support = str(getattr(mapping, "support", "") or "")
+        note = support_sentence(
+            support,
+            getattr(mapping, "source_kinds", None),
+            len(getattr(mapping, "sources", None) or []),
+        )
         pattern = AttackPattern(
             id=_pattern_id_for(tid),
             name=mapping.technique_name or tid,
@@ -1695,6 +1704,8 @@ def _attack_patterns_for(
                     "url": f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}/",
                 }
             ],
+            x_maljan_support=support if note else None,
+            x_maljan_support_note=note or None,
         )
         if malware_id is None or tid in already or pattern.id in already:
             out.append((pattern, None))

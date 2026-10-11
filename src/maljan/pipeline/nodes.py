@@ -104,16 +104,20 @@ from maljan.pipeline.outcome import (
     verdict_reading,
 )
 from maljan.pipeline.routing import (
-    SYCOPHANCY,
     revised_in,
     revision_round_before,
-    route_within_limit,
 )
 from maljan.pipeline.run_state import render_run_state
 from maljan.pipeline.sandbox_status import NOT_RUN as SANDBOX_NOT_RUN
 from maljan.pipeline.sandbox_status import sandbox_status
 from maljan.pipeline.state import AgentArgument, AnalysisState, _merge_stage_results
-from maljan.pipeline.sycophancy_detector import build_revision_directive, detect_sycophancy
+from maljan.pipeline.sycophancy_detector import (
+    build_revision_directive,
+    convergence_flags,
+    convergence_sentence,
+    detect_sycophancy,
+    flagged_analysts,
+)
 from maljan.pipeline.triage_pack import (
     NOT_RUN_PREFIX,
     PIPELINE,
@@ -3732,7 +3736,18 @@ def make_negotiation_node(
         # pairs with an answer revised in the round right before this
         # mediation: an analyst whose revision was not made, or not asked,
         # holds the answer it held before that round.
-        revised_names = revised_in(revision_round_before(state, mediations=iteration + 1))
+        round_before = revision_round_before(state, mediations=iteration + 1)
+        revised_names = revised_in(round_before)
+        # The convergence the round before recorded: a revision that moved
+        # towards a peer beyond the sources both cite. Told to the mediator as
+        # a fact where the stage asks for the check; it decides nothing.
+        converged = (
+            list(round_before.get("converged") or [])
+            if isinstance(round_before, dict) and isinstance(round_before.get("converged"), list)
+            else None
+        )
+        if not bool(getattr(getattr(stage, "debate", None), "sycophancy_check", True)):
+            converged = []
         syco = (
             detect_sycophancy(
                 current_isrs,
@@ -3744,10 +3759,12 @@ def make_negotiation_node(
                     for name, isr in (state.get("isr_reports") or {}).items()
                     if name in revised_names
                 },
+                converged=converged,
             )
             if current_isrs
             else False
         )
+        convergence_said = convergence_sentence(converged or []) if syco else ""
 
         def _judge_evidence() -> list[dict[str, Any]]:
             """The judges' tool calls, drained from every cached role.
@@ -3824,7 +3841,8 @@ def make_negotiation_node(
                     # The same facts the analysts were given, so the mediator
                     # weighs their reports against the record rather than
                     # against each other alone.
-                    facts_block=pack_text(state, container),
+                    facts_block=pack_text(state, container)
+                    + (f"\n\n{convergence_said}" if convergence_said else ""),
                     run_state=render_run_state(state),
                 ),
                 hard_timeout=mediation_timeout,
@@ -3901,15 +3919,15 @@ def make_negotiation_node(
                     kind="system",
                 )
             if syco:
+                argument.converged = list(converged or [])
                 emit_agent_message(
                     container.event_sink,
                     speaker=ROOM_SPEAKER,
                     role="system",
-                    text=(
-                        "Sycophancy detector: agents converged without new evidence — "
-                        "flagged as sycophantic agreement. The next revision round "
-                        "carries a directive to re-argue from evidence rather than "
-                        "defer to peers."
+                    text=convergence_said
+                    or (
+                        "Sycophancy detector: agents converged without new evidence. "
+                        "The mediator was told; it decides nothing."
                     ),
                     round_index=iteration + 1,
                     status="complete",
@@ -4031,18 +4049,31 @@ NOT_ASKED_TO_REVISE = "not asked: no data to revise"
 NOT_NAMED_BY_MEDIATOR = "not asked: not named by the mediator"
 
 
-def sycophancy_asks_every_analyst(reason: str) -> str:
-    """Why a round the mediator's names would have narrowed asked every analyst.
-
-    ``reason`` is the router's reason for opening the round (``sycophancy``
-    for its override, ``no_consensus`` otherwise).
-    """
-    opened = (
-        "A sycophancy override opened the round"
-        if reason == SYCOPHANCY
-        else f"The round opened on {reason}, with sycophancy detected at the mediation before it"
-    )
-    return f"{opened}; every analyst was asked to revise under the devil's-advocate directive."
+def _round_convergence(
+    state: AnalysisState,
+    before: Mapping[str, Any],
+    after: Mapping[str, Any],
+    revised: Sequence[str],
+    round_ledger: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """The round's convergence flags (``sycophancy_detector.convergence_flags``). Never raises."""
+    try:
+        texts: dict[str, str] = {}
+        for row in [*(state.get("evidence_ledger") or []), *round_ledger]:
+            entry_id = str(
+                (row.get("id") if isinstance(row, Mapping) else getattr(row, "id", "")) or ""
+            ).lower()
+            output = row.get("output") if isinstance(row, Mapping) else getattr(row, "output", "")
+            if entry_id:
+                texts[entry_id] = str(output or "")
+        calls: dict[str, int] = {}
+        for row in round_ledger:
+            agent = str(row.get("agent") or "")
+            calls[agent] = calls.get(agent, 0) + 1
+        return convergence_flags(before, after, revised, calls, texts)
+    except Exception as exc:  # noqa: BLE001 — a reading not made is no flag
+        logger.debug("revision: the round's convergence was not read (%s).", exc)
+        return []
 
 
 def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any:
@@ -4066,22 +4097,22 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 mediation = arg
                 break
 
-        syco_detected = state.get("sycophancy_detected", False)
-        revision_directive = build_revision_directive(syco_detected, mediator_feedback)
+        # The analysts a convergence flag at the mediation names: the ones the
+        # round asks get the devil's-advocate directive; nobody else does, and
+        # the flag never widens who is asked.
+        flagged = (
+            flagged_analysts(list(getattr(mediation, "converged", None) or []))
+            if state.get("sycophancy_detected", False)
+            else set()
+        )
+        revision_directive = mediator_feedback
 
         # Whom the round asks: the analysts the mediation named in a contested
-        # point (``AgentArgument.revise``). Names not read, or a sycophancy
-        # override (whose directive is for every analyst), ask every analyst,
+        # point (``AgentArgument.revise``). Names not read ask every analyst,
         # as before, and the round's record says why.
         named = getattr(mediation, "revise", None)
         asked_all = ""
-        if named is not None and syco_detected:
-            # The reason the router opened this round on, read from the same
-            # state and the same rules, quietly.
-            check = bool(getattr(getattr(stage, "debate", None), "sycophancy_check", True))
-            _route, opened_on = route_within_limit(state, sycophancy_check=check, log=False)
-            asked_all, named = sycophancy_asks_every_analyst(opened_on), None
-        elif named is None:
+        if named is None:
             asked_all = str(getattr(mediation, "revise_note", "") or "")
         asked = list(agent_names) if named is None else [n for n in agent_names if n in named]
         contested = list(getattr(mediation, "contradictions", None) or [])
@@ -4159,7 +4190,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
             brief_agent(agent, state, container)
             own_report = reports_in_force.get(name, "")
             peer_reports = {k: v for k, v in reports_in_force.items() if k != name}
-            directive = revision_directive
+            directive = build_revision_directive(name in flagged, revision_directive)
             if named is not None:
                 # A named analyst is shown the contested points that name it
                 # and the peers those points name, not every peer's answer.
@@ -4171,7 +4202,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     reports_in_force,
                     {n: label_of(container, n) for n in [*agent_names, *reports_in_force]},
                 )
-                directive = build_revision_directive(False, feedback)
+                directive = build_revision_directive(name in flagged, feedback)
             # The functions the lines naming this analyst name, and whether
             # each was listed. An analyst with tools is told it can read one
             # the ledger never listed, and its revision is given its tools.
@@ -4428,7 +4459,9 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         if dropped_rows:
             out["dropped_claims"] = dropped_rows
         # What this round did, for the router: how many revisions stood, and
-        # whether each is the answer in force again after whitespace.
+        # whether each is the answer in force again after whitespace; and the
+        # revisions that moved towards a peer beyond the sources both cite,
+        # with no citation added and no tool call (the next mediation is told).
         out["revision_rounds"] = [
             {
                 "round": int(iteration),
@@ -4437,6 +4470,9 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 "identical": bool(made) and identical,
                 "revised": revised_names,
                 "not_revised": not_revised,
+                "converged": _round_convergence(
+                    state, kept_isrs, revised_isrs, revised_names, revision_ledger
+                ),
                 **({"asked_all": asked_all} if asked_all else {}),
             }
         ]

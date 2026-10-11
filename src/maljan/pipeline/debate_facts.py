@@ -509,15 +509,66 @@ def point_key(line: str) -> PointKey:
     return PointKey(analysts=named, entries=entries, hexes=hexes, numbers=numbers, words=words)
 
 
+# How much of the shorter line's content words the other has to hold for two
+# lines with one key to be one point (the overlap coefficient of their word sets).
+SAME_POINT_WORDS_SHARE = 0.5
+# Words every listed line writes and that say nothing of its point.
+_FRAME_WORDS = frozenset({"analyst", "analysts", "claim", "claims", "says", "said", "states"})
+
+
+def content_words(line: str) -> frozenset[str]:
+    """The words of four letters or more a listed line writes about its point.
+
+    Its field, its mark, its ledger ids, hex values and numbers are left out,
+    and so are the names its field gives and the words every line writes.
+    """
+    text = str(line)
+    named = {part for n in read_analysts_field(text) or [] for part in _key(n).split("_")}
+    body = _ANY_MARK.sub(" ", _ANALYSTS_FIELD.sub(" ", text))
+    bare = _HEX_VALUE.sub(" ", _ENTRY_ID.sub(" ", body)).lower()
+    return frozenset(
+        word
+        for word in _WORDS.findall(bare)
+        if len(word) >= 4 and not word.isdigit() and word not in named and word not in _FRAME_WORDS
+    )
+
+
+def _one_point(a: frozenset[str], b: frozenset[str]) -> bool:
+    if not a or not b:
+        return a == b
+    return len(a & b) / min(len(a), len(b)) >= SAME_POINT_WORDS_SHARE
+
+
 def same_points(before: Sequence[str], after: Sequence[str]) -> bool:
     """Whether two mediations' blocking lines are the same contested points.
 
-    The same points, each read by ``point_key``: none resolved and none new.
-    Two empty lists are no contested point and are not the same points.
+    Each line is read by ``point_key`` and its content words
+    (``content_words``). Two lines are one point when their keys are equal and
+    their content words overlap by ``SAME_POINT_WORDS_SHARE``: a resolved point
+    replaced by a new one over the same entry is a change. The same points,
+    none resolved and none new, are the same; two empty lists are no contested
+    point and are not. Linear in the lines: lines of one key are paired in the
+    order of their words, once.
     """
-    if not before or not after:
+    if not before or not after or len(before) != len(after):
         return False
-    return {point_key(line) for line in before} == {point_key(line) for line in after}
+    groups: dict[PointKey, list[frozenset[str]]] = {}
+    for line in before:
+        groups.setdefault(point_key(line), []).append(content_words(line))
+    others: dict[PointKey, list[frozenset[str]]] = {}
+    for line in after:
+        others.setdefault(point_key(line), []).append(content_words(line))
+    if set(groups) != set(others):
+        return False
+    for key, words in groups.items():
+        theirs = others[key]
+        if len(words) != len(theirs):
+            return False
+        order = sorted(words, key=lambda w: sorted(w))
+        their_order = sorted(theirs, key=lambda w: sorted(w))
+        if not all(_one_point(a, b) for a, b in zip(order, their_order, strict=True)):
+            return False
+    return True
 
 
 # The head of the places a revision round is told, after the ledger's counts.

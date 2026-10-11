@@ -207,12 +207,23 @@ _LIST_FIELDS = ("key_findings", "defensive_recommendations")
 # The calls the manual path may make: the answer and the one retry the
 # validation loop gives an answer it finds fault with.
 NARRATIVE_ATTEMPTS = 2
-# Beside a published technique every source of which is an artefact of the file.
-CAPABILITY_NOTE = (
-    "published as a capability, not observed: every source is an artefact of the file "
-    "(names, strings, tables or index rows), with no sandbox observation, code listing or rule "
-    "match among them"
-)
+
+
+def support_note(mapping: Any) -> str:
+    """Beside a published technique no source of which is behaviour: what its sources are.
+
+    ``published as capability, not observed: 3 sources: …; no sandbox
+    observation, code listing or rule match stands behind it`` (or ``as not
+    observed``), from ``corroboration.support_sentence``; ``""`` for any other.
+    """
+    from maljan.analysis.corroboration import support_sentence
+
+    sentence = support_sentence(
+        str(getattr(mapping, "support", "") or ""),
+        getattr(mapping, "source_kinds", None),
+        len(getattr(mapping, "sources", None) or []),
+    )
+    return f"published as {sentence}" if sentence else ""
 
 
 def _parse_keeping_duplicate_keys(text: str) -> dict[str, Any] | None:
@@ -372,11 +383,8 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
             )
             # Published as a capability: every source is an artefact of the
             # file, so the report model is told it was not seen done.
-            capability_note = (
-                f" — {CAPABILITY_NOTE}"
-                if str(getattr(mapping, "support", "") or "") == "capability"
-                else ""
-            )
+            support_said = support_note(mapping)
+            capability_note = f" — {support_said}" if support_said else ""
             lines.append(
                 f"  - {mapping.technique_id} {mapping.technique_name} "
                 f"(conf={confidence_text(mapping.confidence)}, layers={layers}{independent})"

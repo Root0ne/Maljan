@@ -76,7 +76,9 @@ PROPERTY_NOT_CARRIED_CODE = "stix.property_not_carried"
 # Properties the platform's models declare because the export writes them from
 # the run's record, and which a judge object therefore never carries: the
 # judge's copy is recorded as not carried, like an undeclared key, and dropped.
-PLATFORM_ONLY_PROPERTIES: frozenset[str] = frozenset({"x_maljan_evidence_refs"})
+PLATFORM_ONLY_PROPERTIES: frozenset[str] = frozenset(
+    {"x_maljan_evidence_refs", "x_maljan_support", "x_maljan_support_note"}
+)
 
 
 def _not_carried(obj: dict[str, Any]) -> list[str]:

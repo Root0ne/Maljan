@@ -34,9 +34,13 @@ COUNTS = (
     "says 43 from routine 0x4c10 [ev_0019] [ev_0021]. [blocking: restate the counts]"
 )
 COUNTS_REWORDED = (
-    "[analysts: static, triage] The decoder count (57) and the emulated count (43) for "
-    "0x4C10 still disagree in STATIC claim 9 and TRIAGE claim 2 ([ev_0021], [ev_0019]). "
-    "[blocking: the two counts are not one routine's]"
+    "[analysts: static, triage] STATIC claim 9 and TRIAGE claim 2 still say 57 strings, and "
+    "43 from routine 0x4C10 ([ev_0021], [ev_0019]). [blocking: the two counts are not one "
+    "routine's]"
+)
+NEW_POINT_OVER_THE_SAME_ENTRY = (
+    "[analysts: TRIAGE ANALYST, STATIC] TRIAGE claim 6 now places the decoder in the export "
+    "table with 57 and 43 at 0x4c10 [ev_0019] [ev_0021]. [blocking: another reading]"
 )
 EXPORTS = "[analysts: network] NETWORK claim 3 names 5 exports; [ev_0004] states 4. [blocking: x]"
 WORDING = "[analysts: dynamic] DYNAMIC calls the parent unknown. [blocking: wording]"
@@ -92,6 +96,10 @@ class TestAPointIsWhatItIsAbout:
         key = point_key(WORDING)
         assert key.words == ("dynamic", "calls", "the", "parent", "unknown")
         assert point_key(WORDING) != point_key(WORDING.replace("unknown", "the sandbox"))
+
+    def test_a_new_point_over_the_same_entry_and_numbers_is_a_change(self) -> None:
+        assert point_key(COUNTS) == point_key(NEW_POINT_OVER_THE_SAME_ENTRY)
+        assert not same_points([COUNTS], [NEW_POINT_OVER_THE_SAME_ENTRY])
 
     def test_the_same_points_in_another_order_are_the_same(self) -> None:
         assert same_points([COUNTS, EXPORTS], [EXPORTS, COUNTS_REWORDED])

@@ -18,15 +18,14 @@ Decision priority (highest to lowest), in ``debate_route``:
      mediation's (``debate_facts.same_points``: none resolved, none new):
      another round would argue the same points. Judge
      (``contested_points_unchanged``); no consensus is claimed.
-  4. Sycophancy override — if sycophancy AND consensus, force revision.
+  4. Sycophancy is a fact told to the mediator, never a route of its own.
   5. Genuine LLM consensus (no listed line the mediator marked blocking, or
      left unmarked) — judge.
   6. Adaptive termination — statistical confidence convergence, with no
      contradiction standing → judge.
      No contested point — the mediator's final block was read and lists no
-     blocking line, so it names no analyst to revise, and no sycophancy was
-     detected: judge (``no_contested_point``). A round would ask nobody.
-     With sycophancy detected the devil's-advocate round runs as before.
+     blocking line, so it names no analyst to revise: judge
+     (``no_contested_point``). A round would ask nobody.
   7. Default → revision.
 
 The run summary reads its termination reason from the same function, so the
@@ -135,7 +134,6 @@ NO_CONTESTED_POINT = "no_contested_point"
 # none new: the round changed none of them.
 POINTS_UNCHANGED = "contested_points_unchanged"
 # Why a revision round opens.
-SYCOPHANCY = "sycophancy"
 NO_CONSENSUS = "no_consensus"
 
 
@@ -214,13 +212,15 @@ def route_within_limit(
 ) -> tuple[str, str]:
     """The decision with the round limit left aside: ``(route, reason)``.
 
+    ``sycophancy_check`` is accepted for the callers that pass the stage's
+    option; sycophancy decides no route (``sycophancy_detector``).
+
     ``log=False`` is the run summary reading the reason after the fact: the
     decision was logged when the router made it.
     """
     say = logger.info if log else _quiet
     iteration = state.get("iteration_count", 0)
     consensus = state.get("is_consensus", False)
-    syco = state.get("sycophancy_detected", False)
     confidence_history: list[float] = state.get("confidence_history") or []
 
     # A mediation round that ERRORED (a transient blip or a timeout) is not a
@@ -302,15 +302,9 @@ def route_within_limit(
         )
         return "judge", POINTS_UNCHANGED
 
-    # A "consensus" that comes with sycophancy is treated as premature: force
-    # another revision.
-    if syco and consensus and sycophancy_check:
-        say(
-            "Sycophancy override: consensus premature at round %d. Forcing revision.",
-            iteration,
-        )
-        return "revision", SYCOPHANCY
-
+    # Sycophancy is a fact told to the mediator (``sycophancy_detector``); it
+    # never overrides the mediator's consensus or a block with no contested
+    # point, and never opens a round of its own.
     if consensus:
         say("Genuine consensus reached at round %d.", iteration)
         return "judge", CONSENSUS
@@ -328,12 +322,9 @@ def route_within_limit(
 
     # The mediator's block was read and names nobody in a contested point
     # (``AgentArgument.revise == []``): a revision round asks only the analysts
-    # it names, so it would ask nobody. Not read (``None``) is not this, and
-    # neither is a mediation with sycophancy detected: its devil's-advocate
-    # round asks every analyst, as it always did.
+    # it names, so it would ask nobody. Not read (``None``) is not this.
     if (
-        not syco
-        and bool(last)
+        bool(last)
         and getattr(last, "agent_name", "") == "Mediator"
         and getattr(last, "revise", None) == []
     ):

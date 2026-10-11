@@ -47,13 +47,6 @@ ASSERTING_SOURCES: dict[str, str] = {
 }
 
 
-# What the judge is told of a technique every source of which is an artefact.
-CAPABILITY_FACT = (
-    "every source is an artefact of the file (names, strings, tables or index rows); "
-    "no sandbox observation, code listing or rule match"
-)
-
-
 def _source_facts(row: Any) -> str:
     """The sources a corroboration row traces its technique to, as the judge is told them.
 
@@ -62,12 +55,20 @@ def _source_facts(row: Any) -> str:
     a row whose sources are all artefacts of the file says so. ``""`` for a
     row that names no source.
     """
-    if not isinstance(row, dict) or not row.get("sources"):
+    from maljan.analysis.corroboration import support_sentence
+
+    if not isinstance(row, dict) or not isinstance(row.get("sources"), list):
         return ""
     held = [str(x) for x in row["sources"]]
+    if not held:
+        return " [its statements cite no ledger entry or sandbox item]"
     said = f" [traced to {len(held)} cited source(s), each counted once: {', '.join(held)}"
-    if row.get("support") == "capability":
-        said += f"; {CAPABILITY_FACT}"
+    independent = row.get("independent_sources")
+    if isinstance(independent, int) and independent != len(held):
+        said += f"; {independent} of them independent, sources reading one place counted once"
+    sentence = support_sentence(str(row.get("support") or ""), row.get("source_kinds"), len(held))
+    if sentence:
+        said += f"; {sentence}"
     return said + "]"
 
 

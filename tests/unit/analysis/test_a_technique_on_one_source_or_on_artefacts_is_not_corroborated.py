@@ -1,15 +1,20 @@
-"""A technique stands on its sources, counted once each, and on artefacts alone it is a capability.
+"""A technique stands on two sayers and two sources; on artefacts alone it is a capability.
 
-A source of a statement is a cited ledger entry or sandbox item that gives the
-statement a root (``evidence_roots.RunRoots.sources_of_statement``): one pack
-row is one source however many analysts restate it. Each source is a listing
-of code (a tool whose name says it decompiles or disassembles), a run
-observation (its roots are sandbox processes, flows or DNS queries), a rule
-match (an asserting tool's own row) or an artefact of the file (names,
-strings, tables, index rows). A technique every source of which is an artefact
-is published as a capability, not observed: it is not corroborated however
-many layers name it, the report's status says so, and the judge and the report
-models are told. A technique with no source read keeps the rule it had.
+Every ledger entry or sandbox item a statement cites is a source of it, rooted
+or not, and one entry is one source however many analysts restate it
+(``evidence_roots.RunRoots.sources_of_statement``); sources whose roots
+overlap (two tools reading one place) count once. Each source is a listing of
+code (``schemas.evidence.lists_code``), a run observation (sandbox processes,
+flows, DNS queries), a rule match (an asserting tool's row), an artefact of
+the file (a place in it, its tables, the file itself), an external
+assessment of the whole file (a reputation answer), or a citation that gives
+no root. A technique is corroborated with at least two named sources
+(analysts or rules) and, read live, at least two independent sources with a
+behaviour source among them (``corroboration.corroborated``). One no source of
+which is behaviour is published, labelled ``capability`` (every placed source
+an artefact of the file) or ``unobserved``; the ATT&CK row, the judge, the
+report models and the export say what its sources truly are. A row stored
+before sources were read keeps its count.
 
 Every value is synthetic.
 """
@@ -19,31 +24,26 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from maljan.analysis.corroboration import corroborated, corroboration_row
+from maljan.analysis.corroboration import corroborated, corroboration_row, support_sentence
 from maljan.analysis.evidence_roots import (
+    EXTERNAL_ASSESSMENT,
     READING_ARTEFACT,
     READING_CODE,
+    READING_REPORT,
     READING_RULE,
     READING_RUN,
+    READING_UNPLACED,
     reading_of,
     run_roots,
+    summary_of_sources,
 )
 from maljan.extractors.capability_matrix import build_capability_matrix
-from maljan.pipeline.evidence_summary import CAPABILITY_FACT, summarise
-from maljan.pipeline.validation import (
-    CAPABILITY_SUPPORT,
-    corroboration,
-    support_of,
-    technique_sources,
-)
+from maljan.pipeline.evidence_summary import summarise
+from maljan.pipeline.validation import corroboration, support_of, technique_sources
 from maljan.reporting.models import TTPMapping
-from maljan.reporting.narrative_agent import CAPABILITY_NOTE
-from maljan.reporting.renderers.markdown import (
-    CAPABILITY_STATUS,
-    _corroborated_words,
-    capability_words,
-)
-from maljan.schemas.evidence import LedgerEntry
+from maljan.reporting.narrative_agent import support_note
+from maljan.reporting.renderers.markdown import _corroborated_words, support_words
+from maljan.schemas.evidence import LedgerEntry, lists_code
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
 BASE = 0x180000000
@@ -78,7 +78,7 @@ def _ledger() -> list[LedgerEntry]:
             {
                 "image_base": hex(BASE),
                 "results": [
-                    {"rva": "0x5010", "text": "Autorun"},
+                    {"rva": "0x5010", "text": "Autorun", "floss": {"called_at_rva": "0x1200"}},
                     {"rva": "0x5080", "text": "Helper"},
                 ],
             },
@@ -108,6 +108,19 @@ def _ledger() -> list[LedgerEntry]:
             {"capabilities": [{"rule": "set value", "attck": ["T1112"], "addresses": ["0x1300"]}]},
             agent="pipeline",
         ),
+        _entry(
+            "ev_0006",
+            "sandbox_signatures",
+            {"signatures": [{"name": "autostart", "technique_ids": ["T1547.008"]}]},
+            agent="pipeline",
+        ),
+        _entry("ev_0007", "get_file_report", {"detections": 40}, agent="pipeline"),
+        _entry(
+            "ev_0008",
+            "floss",
+            {"strings": [{"string": "Autorun", "called_at_rva": "0x1200"}]},
+            agent="pipeline",
+        ),
     ]
 
 
@@ -119,8 +132,8 @@ def _isr(name: str, *claims: ClaimEvidence) -> AgentISR:
     return AgentISR(agent_id=name, domain=name, claims=list(claims))
 
 
-def _restating(n: int) -> dict[str, AgentISR]:
-    """``n`` analysts restating the pack's two decoded strings, each in its own words."""
+def _restating(n: int, ref: str = "[ev_0002]", tid: str = "T1547.001") -> dict[str, AgentISR]:
+    """``n`` analysts restating one cited entry, each in its own words."""
     words = ["holds", "carries", "keeps", "stores", "contains", "lists"]
     return {
         f"a{i}": _isr(
@@ -128,46 +141,44 @@ def _restating(n: int) -> dict[str, AgentISR]:
             _claim(
                 f'The file {words[i % len(words)]} "Autorun" and "Helper"; analyst {i} '
                 "reads them as an autostart.",
-                "[ev_0002]",
+                ref,
+                tid,
             ),
         )
         for i in range(n)
     }
 
 
+def _readings(held: dict[str, tuple[str, tuple[str, ...]]]) -> dict[str, str]:
+    return {name: reading for name, (reading, _roots) in held.items()}
+
+
 class TestWhatASourceIs:
-    def test_a_listing_of_code_a_run_and_an_artefact(self) -> None:
+    def test_each_kind_is_read_from_the_tool_and_the_roots(self) -> None:
         assert reading_of("decompile_function", ["0x1100 in .text"]) == READING_CODE
         assert reading_of("disassemble_at", []) == READING_CODE
         assert reading_of("sandbox_processes", ["sandbox process 84"]) == READING_RUN
         assert reading_of("pcap_summary", ["network flow tcp to 192.0.2.7:443"]) == READING_RUN
         assert reading_of("decode_string_blobs", ["0x5010 in .data"]) == READING_ARTEFACT
+        assert reading_of("any_lookup", [EXTERNAL_ASSESSMENT]) == READING_REPORT
+        assert reading_of("decode_string_blobs", []) == READING_UNPLACED
 
-    def test_an_entry_the_statement_names_no_row_of_is_no_source(self) -> None:
+    def test_one_rule_names_a_listing_of_code(self) -> None:
+        assert lists_code("Decompile_Function") and lists_code("disassemble")
+        assert not lists_code("get_xrefs_to")
+
+    def test_a_reputation_answer_is_an_external_assessment_of_the_whole_file(self) -> None:
+        assert run_roots(_ledger()).of_entry("ev_0007").roots == [EXTERNAL_ASSESSMENT]
+
+    def test_every_citation_is_a_source_rooted_or_not(self) -> None:
         roots = run_roots(_ledger())
 
         held = roots.sources_of_statement(
-            'The file holds "Autorun"; no process wrote it [ev_0003].', ["ev_0002", "ev_0003"]
+            'The file holds "Autorun"; no process wrote it [ev_0003] [ev_0099].',
+            ["ev_0002", "ev_0003", "ev_0099"],
         )
 
-        assert held == {"ev_0002": READING_ARTEFACT}
-
-    def test_a_run_cited_to_say_it_was_not_seen_supports_nothing(self) -> None:
-        isrs = {
-            "a": _isr(
-                "a",
-                _claim(
-                    '"Autorun" is held; "rundll32.exe x.dll,#1" ran, no write observed [ev_0003].',
-                    "[ev_0002]",
-                ),
-            ),
-            "b": _isr("b", _claim('"rundll32.exe x.dll,#1" wrote the Run value.', "[ev_0003]")),
-        }
-
-        held = technique_sources({"a": isrs["a"]}, _ledger())["T1547.001"]
-        assert held == {"ev_0002": READING_ARTEFACT}
-        held = technique_sources(isrs, _ledger())["T1547.001"]
-        assert held == {"ev_0002": READING_ARTEFACT, "ev_0003": READING_RUN}
+        assert _readings(held) == {"ev_0002": READING_ARTEFACT, "ev_0003": READING_UNPLACED}
 
     def test_of_statement_reads_as_it_did(self) -> None:
         roots = run_roots(_ledger())
@@ -181,12 +192,23 @@ class TestWhatASourceIs:
 
 class TestTheSourcesOfATechnique:
     def test_five_analysts_restating_one_pack_row_are_one_source(self) -> None:
-        held = technique_sources(_restating(5), _ledger())
+        held = technique_sources(_restating(5), _ledger())["T1547.001"]
 
-        assert held["T1547.001"] == {"ev_0002": READING_ARTEFACT}
-        assert support_of(held["T1547.001"]) == CAPABILITY_SUPPORT
+        assert _readings(held) == {"ev_0002": READING_ARTEFACT}
+        assert support_of(held) == "capability"
 
-    def test_a_code_listing_cited_beside_them_is_not_a_capability(self) -> None:
+    def test_two_tools_reading_one_place_are_one_independent_source(self) -> None:
+        isrs = {
+            "a": _isr("a", _claim('"Autorun" [ev_0002]', "[ev_0002]")),
+            "b": _isr("b", _claim('FLOSS decodes "Autorun" [ev_0008]', "[ev_0008]")),
+        }
+
+        summary = summary_of_sources(technique_sources(isrs, _ledger())["T1547.001"])
+
+        assert summary.sources == ("ev_0002", "ev_0008")
+        assert summary.independent == 1
+
+    def test_a_code_listing_cited_beside_them_is_behaviour(self) -> None:
         isrs = _restating(2)
         isrs["reverser"] = _isr(
             "reverser", _claim("Routine 0x180001100 writes the Run value [ev_0004].", "[ev_0004]")
@@ -194,18 +216,28 @@ class TestTheSourcesOfATechnique:
 
         held = technique_sources(isrs, _ledger())["T1547.001"]
 
-        assert held == {"ev_0002": READING_ARTEFACT, "ev_0004": READING_CODE}
+        assert _readings(held) == {"ev_0002": READING_ARTEFACT, "ev_0004": READING_CODE}
         assert support_of(held) == ""
 
-    def test_an_asserting_rule_s_row_is_a_rule_match(self) -> None:
+    def test_an_asserting_rule_s_row_is_a_rule_match_cited_or_asserting(self) -> None:
         held = technique_sources({}, _ledger())
-
-        assert held["T1112"] == {"ev_0005": READING_RULE}
-
-    def test_a_statement_citing_a_rule_s_row_reads_it_as_a_rule_match(self) -> None:
+        assert _readings(held["T1112"]) == {"ev_0005": READING_RULE}
         isrs = {"a": _isr("a", _claim("capa matched at 0x1300 [ev_0005].", "[ev_0005]", "T1112"))}
+        assert _readings(technique_sources(isrs, _ledger())["T1112"]) == {"ev_0005": READING_RULE}
 
-        assert technique_sources(isrs, _ledger())["T1112"] == {"ev_0005": READING_RULE}
+    def test_a_run_cited_for_its_absence_supports_nothing(self) -> None:
+        said = '"rundll32.exe x.dll,#1" ran, and no write was recorded [ev_0003].'
+        held = technique_sources({"a": _isr("a", _claim(said, "[ev_0003]"))}, _ledger())
+        assert _readings(held["T1547.001"]) == {"ev_0003": READING_UNPLACED}
+        wrote = '"rundll32.exe x.dll,#1" wrote the Run value.'
+        held = technique_sources({"b": _isr("b", _claim(wrote, "[ev_0003]"))}, _ledger())
+        assert _readings(held["T1547.001"]) == {"ev_0003": READING_RUN}
+
+    def test_a_technique_on_an_external_assessment_alone_is_unobserved(self) -> None:
+        held = technique_sources(_restating(3, "[ev_0007]"), _ledger())["T1547.001"]
+
+        assert _readings(held) == {"ev_0007": READING_REPORT}
+        assert support_of(held) == "unobserved"
 
     def test_no_ledger_traces_nothing(self) -> None:
         assert technique_sources(_restating(2), []) == {}
@@ -222,18 +254,53 @@ class TestTheSourcesOfATechnique:
             timings.append(time.perf_counter() - start)
         assert timings[1] < timings[0] * 10 * 4 + 0.5
 
+    def test_many_sources_are_joined_in_linear_time(self) -> None:
+        timings = []
+        for n in (2000, 20000):
+            held = {f"ev_{i}": ("artefact", (f"root {i}", f"root {i + 1}")) for i in range(n)}
+            start = time.perf_counter()
+            summary_of_sources(held)
+            timings.append(time.perf_counter() - start)
+        assert timings[1] < timings[0] * 10 * 4 + 0.5
+
 
 class TestTheCorroborationRow:
-    def test_the_row_states_its_sources_and_its_support(self) -> None:
-        rows = corroboration(_restating(5), _ledger())
+    def test_six_analysts_restating_one_signature_are_not_corroborated(self) -> None:
+        row = corroboration(_restating(6, "[ev_0006]", "T1547.008"), _ledger())["T1547.008"]
 
-        row = rows["T1547.001"]
-        assert row["sources"] == ["ev_0002"]
-        assert row["support"] == CAPABILITY_SUPPORT
-        assert len(row["claimed_by"]) == 5
+        assert row["sources"] == ["ev_0006"]
+        assert row["independent_sources"] == 1
+        assert len(row["claimed_by"]) == 6
         assert corroborated(row) is False
 
-    def test_two_sources_one_of_them_code_are_corroborated(self) -> None:
+    def test_a_signature_and_a_citation_placed_nowhere_are_one_independent_source(self) -> None:
+        isrs = _restating(6, "[ev_0006] and the strings [ev_0002]", "T1547.008")
+        for isr in isrs.values():
+            isr.claims[0].claim = "A sandbox signature names an autostart; see the strings."
+
+        row = corroboration(isrs, _ledger())["T1547.008"]
+
+        assert row["sources"] == ["ev_0002", "ev_0006"]
+        assert row["source_kinds"] == {"rule": 1, "unplaced": 1}
+        assert row["independent_sources"] == 1
+        assert corroborated(row) is False
+
+    def test_statements_citing_nothing_have_no_source_and_are_not_corroborated(self) -> None:
+        row = corroboration(_restating(4, "the strings"), _ledger())["T1547.001"]
+
+        assert row["sources"] == []
+        assert corroborated(row) is False
+
+    def test_one_analyst_citing_two_sources_is_not_corroborated(self) -> None:
+        said = "Routine 0x180001100 writes the Run value [ev_0004], capa at 0x1300 [ev_0005]."
+        row = corroboration({"r": _isr("r", _claim(said, "[ev_0004] [ev_0005]"))}, _ledger())[
+            "T1547.001"
+        ]
+
+        assert row["independent_sources"] == 2
+        assert corroborated(row) is False
+
+    def test_two_sayers_and_two_sources_with_code_are_corroborated(self) -> None:
         isrs = _restating(1)
         isrs["reverser"] = _isr(
             "reverser", _claim("Routine 0x180001100 writes the Run value [ev_0004].", "[ev_0004]")
@@ -245,22 +312,31 @@ class TestTheCorroborationRow:
         assert "support" not in row
         assert corroborated(row) is True
 
-    def test_one_source_is_not_corroborated_however_many_name_it(self) -> None:
-        row = {"asserted_by": ["capa"], "claimed_by": ["a", "b"], "sources": ["ev_0005"]}
+    def test_capability_is_never_corroborated(self) -> None:
+        row = corroboration(_restating(5), _ledger())["T1547.001"]
 
+        assert row["support"] == "capability"
         assert corroborated(row) is False
 
     def test_a_row_stored_before_sources_keeps_its_count(self) -> None:
         assert corroborated({"asserted_by": [], "claimed_by": ["a", "b"]}) is True
         assert corroborated(["a"]) is False
 
-    def test_the_row_shape_carries_both(self) -> None:
+    def test_the_row_shape_carries_the_sources(self) -> None:
         row = corroboration_row(
-            {"asserted_by": [], "claimed_by": ["a"], "sources": ["ev_1"], "support": "capability"}
+            {
+                "asserted_by": [],
+                "claimed_by": ["a"],
+                "sources": [],
+                "source_kinds": {"report": 1},
+                "support": "unobserved",
+            }
         )
 
-        assert row["sources"] == ["ev_1"]
-        assert row["support"] == "capability"
+        assert row["sources"] == []
+        assert row["independent_sources"] == 0
+        assert row["source_kinds"] == {"report": 1}
+        assert row["support"] == "unobserved"
 
 
 class TestTheMatrixAndTheReport:
@@ -273,9 +349,22 @@ class TestTheMatrixAndTheReport:
         assert mapping.technique_id == "T1547.001"
         assert len(mapping.independent_layers) == 3
         assert mapping.sources == ["ev_0002"]
-        assert mapping.support == CAPABILITY_SUPPORT
+        assert mapping.support == "capability"
         assert mapping.is_corroborated is False
-        assert cells[0].support == CAPABILITY_SUPPORT
+        assert cells[0].support == "capability"
+        assert cells[0].is_corroborated is False
+
+    def test_the_matrix_and_the_judge_decide_alike(self) -> None:
+        isrs = _restating(1)
+        isrs["reverser"] = _isr(
+            "reverser", _claim("Routine 0x180001100 writes the Run value [ev_0004].", "[ev_0004]")
+        )
+
+        _cells, (mapping,) = build_capability_matrix(
+            stix_output=None, isr_reports=isrs, ledger=_ledger()
+        )
+
+        assert mapping.is_corroborated is corroborated(corroboration(isrs, _ledger())["T1547.001"])
 
     def test_the_status_says_capability_not_observed(self) -> None:
         mapping = TTPMapping(
@@ -284,16 +373,25 @@ class TestTheMatrixAndTheReport:
             contributing_layers=["a", "b", "judge"],
             independent_layers=["a", "b"],
             sources=["ev_0002", "ev_0003"],
+            source_kinds={"artefact": 2},
             support="capability",
             evidence_roots=["0x5010 in .data"],
         )
 
         words = _corroborated_words(mapping, [])
 
-        assert words.startswith(f" {CAPABILITY_STATUS} (2 sources, all artefacts of the file")
+        assert words.startswith(
+            " as a capability, not observed (2 sources: 2 artefacts of the file"
+        )
         assert "named by 2 analyst layers" in words
         assert words.endswith("; one evidence root (0x5010 in .data))")
         assert "corroborated" not in words
+
+    def test_an_external_assessment_is_named_as_what_it_is(self) -> None:
+        said = support_words("unobserved", {"report": 1}, 1, 3)
+
+        assert said.startswith("as not observed (1 source: 1 external assessment of the whole file")
+        assert "artefact" not in said
 
     def test_a_row_stored_before_the_support_renders_as_it_did(self) -> None:
         mapping = TTPMapping(
@@ -308,9 +406,6 @@ class TestTheMatrixAndTheReport:
             ", corroborated (named by 2 analyst layers, each in a statement of its own)"
         )
 
-    def test_one_source_is_counted_in_the_singular(self) -> None:
-        assert capability_words(1, 0).startswith(f"{CAPABILITY_STATUS} (1 source, all")
-
     def test_a_row_one_source_stands_behind_says_so(self) -> None:
         mapping = TTPMapping(
             technique_id="T1027.005",
@@ -318,17 +413,43 @@ class TestTheMatrixAndTheReport:
             contributing_layers=["a", "b"],
             independent_layers=["a", "b"],
             sources=["ev_0005"],
+            independent_sources=1,
             is_corroborated=False,
         )
 
         assert _corroborated_words(mapping, []) == (
             ", not corroborated (2 analyst layers name it; 2 of them in a statement of its own; "
-            "they cite 1 source, each counted once)"
+            "they cite 1 independent source, each counted once)"
         )
+
+    def test_the_export_marks_the_pattern_and_keeps_uses(self) -> None:
+        from maljan.reporting.models import MalwareReport
+        from maljan.reporting.renderers.stix_renderer import _attack_patterns_for
+
+        report = MalwareReport.model_construct(
+            ttp_mappings=[
+                TTPMapping(
+                    technique_id="T1547.001",
+                    technique_name="Run Keys",
+                    sources=["ev_0002"],
+                    source_kinds={"artefact": 1},
+                    support="capability",
+                ),
+                TTPMapping(technique_id="T1027", technique_name="Obfuscated"),
+            ]
+        )
+
+        (capability, uses), (plain, _uses) = _attack_patterns_for(report, "malware--1")
+
+        dumped = capability.model_dump()
+        assert dumped["x_maljan_support"] == "capability"
+        assert dumped["x_maljan_support_note"] == support_sentence("capability", {"artefact": 1}, 1)
+        assert uses is not None and uses.relationship_type == "uses"
+        assert "x_maljan_support" not in plain.model_dump()
 
 
 class TestTheModelsAreTold:
-    def test_the_judge_is_told_the_sources_and_the_capability(self) -> None:
+    def test_the_judge_is_told_the_sources_and_what_they_are(self) -> None:
         isrs = _restating(2)
         traced = corroboration(isrs, _ledger())
 
@@ -336,22 +457,25 @@ class TestTheModelsAreTold:
 
         line = next(x for x in block.splitlines() if "T1547.001" in x)
         assert "[traced to 1 cited source(s), each counted once: ev_0002" in line
-        assert CAPABILITY_FACT in line
+        assert support_sentence("capability", {"artefact": 1}, 1) in line
 
     def test_without_the_rows_the_block_is_as_it_was(self) -> None:
-        isrs = _restating(2)
+        assert "traced to" not in summarise(_restating(2), _ledger())
 
-        assert "traced to" not in summarise(isrs, _ledger())
-
-    def test_the_report_models_are_told_a_capability(self) -> None:
+    def test_the_report_models_are_told_what_the_sources_are(self) -> None:
         from maljan.reporting.composer import _published_techniques
         from maljan.reporting.models import MalwareReport
 
+        capability = TTPMapping(
+            technique_id="T1547.001",
+            technique_name="Run Keys",
+            sources=["ev_0002"],
+            source_kinds={"artefact": 1},
+            support="capability",
+        )
         report = MalwareReport.model_construct(
             ttp_mappings=[
-                TTPMapping(
-                    technique_id="T1547.001", technique_name="Run Keys", support="capability"
-                ),
+                capability,
                 TTPMapping(technique_id="T1027", technique_name="Obfuscated"),
             ],
             run_summary={},
@@ -360,5 +484,8 @@ class TestTheModelsAreTold:
 
         said = _published_techniques(report)
 
-        assert f"- T1547.001 Run Keys — {CAPABILITY_NOTE}" in said
+        assert f"- T1547.001 Run Keys — {support_note(capability)}" in said
+        assert support_note(capability).startswith(
+            "published as capability, not observed: 1 source"
+        )
         assert "- T1027 Obfuscated\n" in said + "\n"

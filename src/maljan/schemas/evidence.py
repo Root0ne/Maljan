@@ -122,6 +122,16 @@ def not_shown_record(chars: int) -> str:
     return f"{_NOT_SHOWN_HEAD}{max(0, int(chars)):,} characters."
 
 
+def lists_code(tool: Any) -> bool:
+    """Whether a tool's name says it decompiles or disassembles: the platform's one rule for it.
+
+    Every reader that asks whether an entry is a listing of code reads it here,
+    so the readers cannot drift apart.
+    """
+    name = str(tool or "").lower()
+    return "decompil" in name or "disassembl" in name
+
+
 def answer_not_shown(entry: Any) -> bool:
     """Whether ``entry`` is a call whose answer the conversation had no room for.
 

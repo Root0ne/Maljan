@@ -97,7 +97,7 @@ from maljan.pipeline.validation import (
     decompiled_functions,
     literal_values,
 )
-from maljan.schemas.evidence import answer_not_shown, entry_ids_in
+from maljan.schemas.evidence import answer_not_shown, entry_ids_in, lists_code
 
 __all__ = [
     "FUNCTION_CLAIM_UNHELD_CODE",
@@ -599,8 +599,7 @@ def function_facts(
         if _is_a_strings_source(str(getattr(entry, "tool", "") or ""))
     ]
     for entry in entries:
-        tool = str(getattr(entry, "tool", "") or "").lower()
-        if "decompil" not in tool and "disassembl" not in tool:
+        if not lists_code(getattr(entry, "tool", "")):
             continue
         entry_id = str(getattr(entry, "id", "") or "")
         output = str(getattr(entry, "output", "") or "")

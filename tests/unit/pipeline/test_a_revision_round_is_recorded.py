@@ -107,6 +107,7 @@ class TestTheRoundRecord:
                 "identical": True,
                 "revised": NAMES,
                 "not_revised": {},
+                "converged": [],
             }
         ]
 
@@ -127,6 +128,7 @@ class TestTheRoundRecord:
                 "identical": False,
                 "revised": NAMES,
                 "not_revised": {},
+                "converged": [],
             }
         ]
 

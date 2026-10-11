@@ -356,6 +356,18 @@ class AttackPattern(STIXObject):
     name: str
     description: str | None = None
     external_references: list[dict] = Field(default_factory=list)
+    # See ``SUPPORT_PROPERTY``.
+    x_maljan_support: str | None = None
+    x_maljan_support_note: str | None = None
+
+
+# How the run's sources stand behind a published technique no source of which
+# is behaviour (``analysis.corroboration.support_label``): ``capability`` or
+# ``unobserved``, written by the export on the technique's attack-pattern with
+# the sentence its ATT&CK row prints (``x_maljan_support_note``). The ``uses``
+# relationship stays as the standard has it; a consumer reads the mark on the
+# pattern it points to. Absent for a technique with a behaviour source.
+SUPPORT_PROPERTY = "x_maljan_support"
 
 
 # ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@ import {
   orderedTactics,
   parseTechniques,
   retiredNote,
+  supportLabel,
   tacticHeaderCount,
   tacticOrder,
 } from "../capabilityHeatmap";
@@ -260,5 +261,44 @@ describe("retiredNote", () => {
     expect(retiredNote({ T1055: { asserted_by: [], claimed_by: [] } }, "T1055")).toBeNull();
     expect(retiredNote({ T1055: ["static"] }, "T1055")).toBeNull();
     expect(retiredNote(null, "T1055")).toBeNull();
+  });
+});
+
+describe("the backend's corroboration record", () => {
+  it("is read where the row carries it, and a matrix row's sources are not layers", () => {
+    const tech = only([
+      row({
+        contributing_layers: ["static", "dynamic"],
+        sources: ["ev_0002"],
+        is_corroborated: false,
+      }),
+    ]);
+    expect(tech.sources).toEqual(["static", "dynamic"]);
+    expect(tech.sourceCount).toBe(1);
+    expect(isCorroborated(tech)).toBe(false);
+  });
+
+  it("labels a capability and never calls it corroborated", () => {
+    const tech = only([
+      row({
+        contributing_layers: ["static", "dynamic", "network"],
+        sources: ["ev_0019", "ev_0020", "ev_0021"],
+        support: "capability",
+        is_corroborated: true,
+      }),
+    ]);
+    expect(supportLabel(tech)).toBe("capability, not observed");
+    expect(isCorroborated(tech)).toBe(false);
+  });
+
+  it("labels a technique on an external assessment alone as not observed", () => {
+    expect(supportLabel(only([row({ support: "unobserved" })]))).toBe("not observed");
+  });
+
+  it("reads a /mitre row's sources as its layers, as before", () => {
+    const tech = only([{ technique_id: "T1055", tactic_id: "TA0005", sources: ["a", "b"] }]);
+    expect(tech.sources).toEqual(["a", "b"]);
+    expect(tech.sourceCount).toBe(0);
+    expect(isCorroborated(tech)).toBe(true);
   });
 });
