@@ -532,7 +532,7 @@ _PACK_TOOLS: dict[str, dict[str, Any]] = {
     },
     "function_matches": {"kind": "function_matches"},
     # The pack's own entry for a reputation lookup that did not happen
-    # (``triage_pack._REPUTATION_TOOLS``, ``run_state``).
+    # (``triage_pack.REPUTATION_STEP``), which ``run_state`` shows beside a lookup.
     "reputation": {"kind": "reputation_not_asked"},
     "pcap_summary": _PCAP_SUMMARY,
     "sandbox_status": {"kind": "sandbox_status"},
@@ -687,7 +687,7 @@ BUILDER_OF_KIND: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 # Each built-in server's declaration. ``roles``: ``reputation`` on the two
-# servers of ``config.REPUTATION_SERVER_KEYS``. ``reads_staged_sample`` on the
+# servers that declare a reputation lookup. ``reads_staged_sample`` on the
 # servers of ``agents.tool_pinning.PINNED_SERVERS``. ``required_env_allow`` as
 # ``config.REQUIRED_ENV_ALLOW``. ``platform_owned`` on the servers of
 # ``agents.evidence_recorder._RESOLVING_SERVERS``. VirusTotal's reference URL
