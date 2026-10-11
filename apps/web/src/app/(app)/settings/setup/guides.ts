@@ -312,14 +312,23 @@ const SANDBOX_GUIDE: GuideDef = {
       (key) => catalogEntry(ctx.schema, key)?.editor === "rest_sandbox"
     );
     const probe = facts.probe ?? undefined;
+    // The leaves a provider declares for its guide, up front and folded; with
+    // none declared, its whole block by each entry's own advanced flag.
+    const declared =
+      facts.guide_keys !== undefined || facts.guide_advanced_keys !== undefined
+        ? {
+            keys: [...(facts.guide_keys ?? []), ...(facts.guide_advanced_keys ?? [])],
+            advanced: facts.guide_advanced_keys ?? [],
+          }
+        : own;
     if (provider && !described) {
-      if (own.keys.length > 0) {
+      if (declared.keys.length > 0) {
         steps.push({
           id: "fields",
           title: `${choiceTitle(ctx.schema, SANDBOX_SELECTOR, provider)} settings`,
           intro: facts.intro,
-          keys: own.keys,
-          advancedKeys: own.advanced,
+          keys: declared.keys,
+          advancedKeys: declared.advanced,
         });
       }
       if (probe) {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import served from "@/test-fixtures/settings-schema.json";
 import type { CatalogEntry, SettingsSchema } from "@/types/settings";
 import { GUIDES, guideById, providerChoiceCopy, type GuideContext } from "../guides";
 
@@ -8,176 +9,31 @@ import { GUIDES, guideById, providerChoiceCopy, type GuideContext } from "../gui
  * step order and the reasons Continue is blocked.
  */
 
-const entry = (key: string): CatalogEntry => ({
-  key,
-  namespace: key.startsWith("api.") ? "api" : "core",
-  path: key.slice(key.indexOf(".") + 1),
-  type: "str",
-  default: "",
-  nullable: false,
-  choices: null,
-  minimum: null,
-  maximum: null,
-  secret: false,
-  group: key.split(".")[1] ?? "",
-  title: key,
-  description: "",
-  applies: "next_job",
-  editable: true,
-  reason: null,
+/** The schema the API serves a fresh deployment, as
+ *  `scripts/dev/write_console_schema.py` writes it (and a test on the API side
+ *  keeps it current): the guides are walked against the real catalogue. */
+const SERVED = served as unknown as SettingsSchema;
+
+/** A memory backend a package might register, with keys but no probe: the one
+ *  thing the served catalogue cannot show. */
+const INVENTED_BACKEND: CatalogEntry = {
+  ...(SERVED.groups.flatMap((g) => g.entries).find((e) => e.key === "core.memory.qdrant.url") as CatalogEntry),
+  key: "core.memory.vectorhub.endpoint",
+  path: "memory.vectorhub.endpoint",
   probe: null,
   applies_when: null,
-  order: 0,
-  choices_from: null,
-  editor: null,
-  subgroup: null,
-  advanced: false,
-  required_env: null,
-});
-
-/** Enough of the catalog for the guides that name key families by prefix. */
-const KEYS = [
-  "core.static.provider",
-  "core.static.r2.binary_path",
-  "core.static.r2.mirror_dir",
-  "core.static.capa.rules_dir",
-  "core.static.yara.rules_dir",
-  "core.static.generic.server",
-  "core.sandbox.provider",
-  "core.sandbox.cape2.base_url",
-  "core.sandbox.cape2.api_token",
-  "core.sandbox.cape2.mcp.enabled",
-  "core.sandbox.cape2.mcp.url",
-  "core.sandbox.triage.api_token",
-  "core.sandbox.upload.allowed_formats",
-  "core.sandbox.rest.base_url",
-  "core.sandbox.rest.submit.method",
-  "core.sandbox.rest.submit.path",
-  "core.sandbox.rest.status.path",
-  "core.sandbox.rest.report.path",
-  "core.sandbox.rest.report.format",
-  "core.memory.backend",
-  "core.memory.qdrant.url",
-  "core.memory.qdrant.api_key",
-  "core.memory.vectorhub.endpoint",
-  "core.memory.top_k",
-];
-
-/** The probe each catalog entry declares, as the catalogue annotations do. */
-const PROBES: Record<string, string> = {
-  "core.memory.qdrant.url": "qdrant",
-};
-
-/** What the API serves on each provider selector and on the server map: the
- *  providers' own declarations, as `provider_facts` gathers them. */
-const ANTHROPIC_LEAVES = [
-  "api_key",
-  "base_url",
-  "allow_plain_http_to_docker_host",
-  "effort",
-  "prompt_cache_ttl",
-];
-const SERVED: Record<string, Partial<CatalogEntry>> = {
-  "core.llm.provider": {
-    choices: ["openai", "anthropic", "ollama", "gemini"],
-    choice_titles: {
-      openai: "OpenAI",
-      anthropic: "Anthropic",
-      ollama: "Ollama",
-      gemini: "Google Gemini",
-    },
-    choice_descriptions: {
-      openai: "Hosted OpenAI models or any OpenAI-compatible server",
-      anthropic: "Claude models via the Anthropic API",
-      ollama: "Models running locally through Ollama",
-      gemini: "Gemini models via Google AI",
-    },
-    choice_facts: {
-      anthropic: {
-        hosted: true,
-        guide_keys: ANTHROPIC_LEAVES.map((leaf) => `core.llm.anthropic.${leaf}`),
-        guide_advanced_keys: ANTHROPIC_LEAVES.slice(1).map((leaf) => `core.llm.anthropic.${leaf}`),
-        model_keys: ["core.llm.anthropic.expert_model", "core.llm.anthropic.judge_model"],
-        probe: "llm",
-      },
-    },
-  },
-  "core.static.provider": {
-    choices: ["none", "ghidra", "r2", "capa_yara", "generic_mcp"],
-    choice_titles: {
-      none: "No static analyser",
-      ghidra: "Ghidra MCP",
-      r2: "radare2 MCP",
-      capa_yara: "capa + YARA",
-      generic_mcp: "Generic MCP server",
-    },
-    choice_descriptions: {
-      none: "The static analyst works from the pre-extracted data only.",
-      ghidra: "A running Ghidra MCP server decompiles and names functions on request.",
-      r2: "A local radare2 binary answers disassembly questions over its MCP server.",
-      capa_yara: "Rule sets on disk name the capabilities and match the file.",
-      generic_mcp: "A server from the tool-server registry supplies the static tools.",
-    },
-    choice_facts: {
-      none: { probe: null, intro: "No static provider." },
-      ghidra: { probe: "ghidra", intro: "Where the Ghidra MCP server listens." },
-      r2: { probe: "r2", intro: "Where the radare2 binary lives." },
-      capa_yara: { probe: "capa_yara", intro: "The rule directories to load." },
-      generic_mcp: { probe: null, intro: "Which configured tool server drives the analyst." },
-    },
-  },
-  "core.static.generic.server": {
-    choices_from: "mcp_servers",
-    applies_when: { "core.static.provider": ["generic_mcp"] },
-  },
-  "core.sandbox.provider": {
-    choices: ["mock", "cape2", "upload", "triage", "rest"],
-    choice_titles: {
-      mock: "Mock sandbox",
-      cape2: "CAPEv2",
-      upload: "Uploaded report",
-      triage: "Hatching Triage",
-      rest: "Generic REST API",
-    },
-    choice_descriptions: {
-      mock: "Built-in fixture reports stand in for a detonation; nothing is executed.",
-      cape2: "A CAPEv2 instance detonates the sample and returns its report.",
-      upload: "No detonation here: an operator attaches a report from another sandbox.",
-      triage: "Triage runs the sample in its cloud and returns the report it produced.",
-      rest: "Any sandbox with an HTTP API, described by the paths the next steps fill in.",
-    },
-    choice_facts: {
-      mock: { probe: null, intro: "Mock sandbox: built-in fixture reports stand in." },
-      cape2: { probe: "cape2", intro: "The API token is stored on the server." },
-      upload: { probe: null, intro: "Which report formats an operator may attach." },
-      triage: { probe: "triage", intro: "The API token is stored on the server." },
-      rest: { probe: "rest", intro: "Where the sandbox API lives." },
-    },
-  },
-  "core.sandbox.cape2.mcp.enabled": { advanced: true },
-  "core.sandbox.cape2.mcp.url": { advanced: true },
-  "core.mcp.servers": {
-    editor: "server_map",
-    builtin_servers: ["analysis", "knowledge", "network", "threatintel", "virustotal"],
-    reserved_servers: ["analysis", "knowledge", "network", "threatintel", "virustotal"],
-  },
 };
 
 const schema: SettingsSchema = {
+  ...SERVED,
   groups: [
-    {
-      key: "all",
-      title: "All",
-      description: "",
-      entries: [...KEYS, "core.llm.provider", "core.mcp.servers"].map((key) => ({
-        ...entry(key),
-        probe: PROBES[key] ?? null,
-        ...(key.startsWith("core.sandbox.rest.") ? { editor: "rest_sandbox" } : {}),
-        ...(SERVED[key] ?? {}),
-      })) as CatalogEntry[],
-    },
+    ...SERVED.groups,
+    { key: "invented", title: "Invented", description: "", entries: [INVENTED_BACKEND] },
   ],
 };
+
+const allKeys = schema.groups.flatMap((g) => g.entries).map((e) => e.key);
+const keysUnder = (prefix: string) => allKeys.filter((key) => key.startsWith(prefix));
 
 function context(
   values: Record<string, unknown> = {},
@@ -343,14 +199,18 @@ describe("the sandbox guide", () => {
     ]);
   });
 
-  it("folds the CAPE MCP sidecar away and blocks on the CAPE probe", () => {
+  it("shows CAPE's token, URL, poll and timeout up front and folds its MCP sidecar away", () => {
     const values = { "core.sandbox.provider": "cape2" };
     const fields = guideById("sandbox")!.steps(context(values))[1];
-    expect(fields.keys).toContain("core.sandbox.cape2.api_token");
-    expect(fields.advancedKeys).toEqual([
-      "core.sandbox.cape2.mcp.enabled",
-      "core.sandbox.cape2.mcp.url",
+    const folded = fields.advancedKeys ?? [];
+    expect(fields.keys!.filter((key) => !folded.includes(key))).toEqual([
+      "core.sandbox.cape2.api_token",
+      "core.sandbox.cape2.base_url",
+      "core.sandbox.cape2.poll_interval_seconds",
+      "core.sandbox.cape2.timeout_seconds",
     ]);
+    expect(folded).toEqual(keysUnder("core.sandbox.cape2.mcp."));
+    expect(folded.length).toBeGreaterThan(0);
     expect(blockedReason("sandbox", "test", context(values))).toBe("run the test first");
     expect(blockedReason("sandbox", "test", context(values, { probes: ["cape2"] }))).toBeNull();
   });
@@ -438,11 +298,8 @@ describe("the memory guide", () => {
     const connection = guideById("memory")!
       .steps(qdrant)
       .find((s) => s.id === "connection");
-    expect(connection?.keys).toEqual([
-      "core.memory.qdrant.url",
-      "core.memory.qdrant.api_key",
-      "core.memory.top_k",
-    ]);
+    expect(connection?.keys).toEqual([...keysUnder("core.memory.qdrant."), "core.memory.top_k"]);
+    expect(connection?.keys).toContain("core.memory.qdrant.url");
     expect(guideById("memory")!.steps(qdrant).find((s) => s.id === "test")?.probe).toBe("qdrant");
   });
 

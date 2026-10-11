@@ -1,45 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { CatalogEntry, ChoiceFacts, SettingsSchema } from "@/types/settings";
+import served from "@/test-fixtures/settings-schema.json";
+import type { SettingsSchema } from "@/types/settings";
 import { guideStatus, llmLooksConfigured } from "../status";
 
-/** What the API serves on the LLM selector: each provider's own declaration. */
-function llm(provider: string, hosted: boolean, flat: string | null, address: boolean): ChoiceFacts {
-  const prefix = `core.llm.${provider}.`;
-  return {
-    hosted,
-    credential_keys: hosted ? [`${prefix}api_key`, ...(flat ? [flat] : [])] : [],
-    base_url_key: address ? `${prefix}base_url` : null,
-    model_keys: [`${prefix}expert_model`, `${prefix}judge_model`],
-  };
-}
-
-const SCHEMA: SettingsSchema = {
-  groups: [
-    {
-      key: "llm",
-      title: "LLM",
-      description: "",
-      entries: [
-        {
-          key: "core.llm.provider",
-          choices: ["openai", "anthropic", "ollama", "gemini"],
-          choice_titles: {
-            openai: "OpenAI",
-            anthropic: "Anthropic",
-            ollama: "Ollama",
-            gemini: "Google Gemini",
-          },
-          choice_facts: {
-            openai: llm("openai", true, "core.openai_api_key", true),
-            anthropic: llm("anthropic", true, "core.anthropic_api_key", true),
-            gemini: llm("gemini", true, "core.google_api_key", false),
-            ollama: llm("ollama", false, null, true),
-          },
-        } as unknown as CatalogEntry,
-      ],
-    },
-  ],
-};
+/** The schema the API serves, with each LLM provider's own declaration. */
+const SCHEMA = served as unknown as SettingsSchema;
 
 /** A tiny stand-in for the settings context: a flat map of effective values
  *  plus the set of secret keys the server reports as stored. */

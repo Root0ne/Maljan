@@ -19,7 +19,7 @@ export interface ProviderChoices {
   staticProviders: string[];
   sandboxProviders: string[];
   profiles: string[];
-  /** The title each provider declares for itself, by key. */
+  /** The words each provider declares for a reader choosing it (its `choice_label`), by key. */
   staticTitles: Record<string, string>;
   sandboxTitles: Record<string, string>;
 }
@@ -41,7 +41,7 @@ export function useProviderChoices(): ProviderChoices {
         const entries = schema.groups.flatMap((g) => g.entries);
         const find = (key: string) => entries.find((e) => e.key === key)?.choices ?? [];
         const titles = (key: string) =>
-          entries.find((e) => e.key === key)?.choice_titles ?? {};
+          entries.find((e) => e.key === key)?.choice_labels ?? {};
         if (!cancelled) {
           setChoices({
             staticProviders: find("core.static.provider"),

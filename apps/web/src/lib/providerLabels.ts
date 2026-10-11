@@ -6,8 +6,8 @@
  * because it is what the job config carries and what a log line says, so it
  * follows the name rather than standing in for it.
  *
- * A provider's name is the title it declares for itself, served on its
- * selector's catalog entry (`choice_titles`); a key nothing names is read back
+ * A provider's name is the words it declares for a reader choosing it, served on its
+ * selector's catalog entry (`choice_labels`); a key nothing names is read back
  * from its key rather than dropped, so a provider added to a registry appears
  * the day it is registered.
  */
