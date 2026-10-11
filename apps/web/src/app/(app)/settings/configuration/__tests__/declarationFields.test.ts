@@ -3,8 +3,11 @@ import {
   readEnvNames,
   readErrorPatterns,
   readMount,
+  readPrefixes,
+  readReferenceUrls,
   readRoles,
   readToolFacts,
+  readWorkDir,
   showJson,
   splitWords,
 } from "../declarationFields";
@@ -54,6 +57,30 @@ describe("the server editor's declaration readers", () => {
     expect(showJson([])).toBe("");
     expect(showJson({})).toBe("");
     expect(showJson({ a: { kind: "strings" } })).toContain('"kind": "strings"');
+  });
+
+  it("refuses a tool name that is empty, padded or a renamed tool", () => {
+    expect(readToolFacts('{"": {"kind": "strings"}}').error).toMatch(/own name/);
+    expect(readToolFacts('{"analysis__capa": {"kind": "strings"}}').error).toMatch(/own name/);
+    expect(readToolFacts('{"__proto__": {"kind": "strings"}}').error).toMatch(/own name/);
+  });
+
+  it("reads a work directory as one name", () => {
+    expect(readWorkDir("r2-work").value).toBe("r2-work");
+    expect(readWorkDir("a/b").error).toMatch(/one directory name/);
+    expect(readWorkDir("..").error).toMatch(/one directory name/);
+  });
+
+  it("reads auto-name prefixes ending in _ or .", () => {
+    expect(readPrefixes("FUN_, fcn.").value).toEqual(["FUN_", "fcn."]);
+    expect(readPrefixes("FUN").error).toMatch(/not a prefix: FUN/);
+  });
+
+  it("reads reference URL templates naming a hash", () => {
+    const url = "https://example.org/sample/{sha256}";
+    expect(readReferenceUrls(url).value).toEqual([url]);
+    expect(readReferenceUrls("http://example.org/{sha256}").error).toMatch(/https/);
+    expect(readReferenceUrls("https://example.org/").error).toMatch(/sha256/);
   });
 
   it("splits words without keeping empty entries", () => {

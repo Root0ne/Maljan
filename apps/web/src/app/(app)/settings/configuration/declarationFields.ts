@@ -66,6 +66,40 @@ export function readMount(text: string): Read<string> {
   return ok(value);
 }
 
+/** The work directory: one directory name, or empty. */
+export function readWorkDir(text: string): Read<string> {
+  const value = text.trim();
+  if (value === "." || value === ".." || value.includes("/") || value.includes("\\")) {
+    return bad("one directory name under the samples directory, not a path");
+  }
+  return ok(value);
+}
+
+/** Auto-name prefixes: letters and digits ending in `_` or `.` (FUN_, fcn.). */
+export function readPrefixes(text: string): Read<string[]> {
+  const prefixes = splitWords(text);
+  const wrong = prefixes.filter((p) => !/^[A-Za-z][A-Za-z0-9]*[_.]$/.test(p));
+  if (wrong.length > 0) {
+    return bad(`not a prefix: ${wrong.join(", ")} (letters and digits ending in _ or .)`);
+  }
+  return ok(prefixes);
+}
+
+/** Reference URL templates, one per line: https, naming {sha256}, {md5} or {sha1}. */
+export function readReferenceUrls(text: string): Read<string[]> {
+  const urls = text
+    .split("\n")
+    .map((u) => u.trim())
+    .filter((u) => u !== "");
+  for (const url of urls) {
+    if (!url.startsWith("https://")) return bad(`${url}: a reference URL starts with https://`);
+    if (!["{sha256}", "{md5}", "{sha1}"].some((p) => url.includes(p))) {
+      return bad(`${url}: name {sha256}, {md5} or {sha1}`);
+    }
+  }
+  return ok(urls);
+}
+
 function parseJson(text: string): Read<unknown> {
   if (text.trim() === "") return ok(undefined);
   try {
@@ -103,6 +137,9 @@ export function readToolFacts(text: string): Read<Record<string, ToolFactsEntry>
   if (parsed.value === undefined) return ok({});
   if (!isObject(parsed.value)) return bad("expected an object keyed by tool name");
   for (const [tool, facts] of Object.entries(parsed.value)) {
+    if (tool.trim() === "" || tool !== tool.trim() || tool.includes("__")) {
+      return bad(`${JSON.stringify(tool)}: a tool's own name, not empty and without "__"`);
+    }
     if (!isObject(facts)) return bad(`${tool}: expected an object with a kind`);
     if (typeof facts.kind !== "string" || !WORD.test(facts.kind)) {
       return bad(`${tool}: kind is a lowercase word such as strings, rule_match or decompile`);

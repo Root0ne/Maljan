@@ -149,11 +149,16 @@ const SERVER_FIELDS = [
   // The server's declaration (`maljan.core.tool_declarations`).
   "sample_open",
   "sample_mount",
+  "work_dir",
   "error_patterns",
   "roles",
   "prompt_fragment",
   "required_env_allow",
+  "variable_names",
   "reads_staged_sample",
+  "platform_owned",
+  "auto_name_prefixes",
+  "reference_urls",
   "tool_facts",
 ] as const;
 

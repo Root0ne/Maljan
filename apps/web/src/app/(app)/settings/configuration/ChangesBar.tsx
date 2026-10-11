@@ -14,6 +14,7 @@ const STATUS_DURATION_MS = 6000;
 export default function ChangesBar() {
   const ctx = useSettingsContext();
   const { pending, hiddenKeys, saving, lastResult } = ctx;
+  const unread = Object.values(ctx.unreadInputs ?? {});
   const [reviewing, setReviewing] = useState(false);
   const [discarding, setDiscarding] = useState(false);
   const [statusVisible, setStatusVisible] = useState(false);
@@ -78,7 +79,7 @@ export default function ChangesBar() {
             <div className="flex items-center gap-4 mt-4 pt-3 border-t border-border">
               <button
                 type="button"
-                disabled={saving}
+                disabled={saving || unread.length > 0}
                 className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent-fill text-white rounded hover:bg-accent-fill-hover disabled:opacity-50"
                 onClick={onApply}
               >
@@ -140,9 +141,15 @@ export default function ChangesBar() {
               </span>
             )}
           </span>
+          {unread.length > 0 && (
+            <span className="text-xs text-status-red" role="alert" data-testid="unread-inputs">
+              {countLabel(unread.length, "field")} not yet a value: {unread[0]}
+            </span>
+          )}
           <button
             type="button"
-            className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent-fill text-white rounded hover:bg-accent-fill-hover"
+            disabled={unread.length > 0}
+            className="px-3 py-1.5 text-xs font-medium uppercase tracking-wider bg-accent-fill text-white rounded hover:bg-accent-fill-hover disabled:opacity-50"
             onClick={() => setReviewing(true)}
           >
             Review

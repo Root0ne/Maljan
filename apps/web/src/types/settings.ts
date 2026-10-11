@@ -106,11 +106,16 @@ export interface McpServerEntry {
    * operator writes one; the API fills a built-in's from what it ships. */
   sample_open?: SampleOpenEntry;
   sample_mount?: string;
+  work_dir?: string;
   error_patterns?: ErrorPatternEntry[];
   roles?: string[];
   prompt_fragment?: string;
   required_env_allow?: string[];
+  variable_names?: string[];
   reads_staged_sample?: boolean;
+  platform_owned?: boolean;
+  auto_name_prefixes?: string[];
+  reference_urls?: string[];
   tool_facts?: Record<string, ToolFactsEntry>;
 }
 
@@ -130,7 +135,11 @@ export interface ErrorPatternEntry {
   match: string;
   code?: string;
   remediation?: string;
+  remediation_with_path?: string;
   tools?: string[];
+  applies_to?: string[];
+  multiline?: boolean;
+  message_group?: string;
 }
 
 /** What one tool's answer is and where its facts sit; every key but `kind` optional. */

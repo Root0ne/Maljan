@@ -1,13 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { McpServerEntry, SampleOpenEntry } from "@/types/settings";
+import { deepEqual } from "./mapEditorHelpers";
+import { useOptionalSettingsContext } from "./SettingsContext";
 import {
   readEnvNames,
   readErrorPatterns,
   readMount,
+  readPrefixes,
+  readReferenceUrls,
   readRoles,
   readToolFacts,
+  readWorkDir,
   showJson,
   type Read,
 } from "./declarationFields";
@@ -41,38 +46,64 @@ const OPEN_FIELDS: { key: keyof SampleOpenEntry; label: string; hint: string }[]
  * A text box whose value is staged only once it reads as one.
  *
  * The typed text is local state, as in the environment fields: a half-typed
- * list is not reformatted under the cursor, and what reaches the staged map is
- * always a value the reader accepted. The reader's message is shown under the
- * box until the text reads.
+ * list is not reformatted under the cursor. While the text does not read, the
+ * box says why and tells the console, which holds Apply: the staged map still
+ * holds the last value that read, which is not what the box shows. When the
+ * staged value changes from outside the box (a discard, a reload), the box
+ * shows it again.
  */
 function ReadField<T>({
+  id,
   label,
   ariaLabel,
-  initial,
+  value,
+  show,
   rows,
   mono,
   read,
   onValue,
 }: {
+  id: string;
   label: string;
   ariaLabel: string;
-  initial: string;
+  value: T;
+  show: (value: T) => string;
   rows: number;
   mono?: boolean;
   read: (text: string) => Read<T>;
   onValue: (value: T) => void;
 }) {
-  const [text, setText] = useState(initial);
+  const ctx = useOptionalSettingsContext();
+  const note = ctx?.noteUnreadInput;
+  const [text, setText] = useState(() => show(value));
   const [error, setError] = useState<string | null>(null);
+  const staged = useRef<T>(value);
+
+  useEffect(() => {
+    if (!deepEqual(value, staged.current)) {
+      staged.current = value;
+      setText(show(value));
+      setError(null);
+      note?.(id, null);
+    }
+    // `show` and `note` are stable for a box; only an outside change of the
+    // value decides whether the text is shown afresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  useEffect(() => () => note?.(id, null), [id, note]);
 
   const stage = (next: string) => {
     setText(next);
     const result = read(next);
     if (result.error !== null) {
       setError(result.error);
+      note?.(id, `${label}: ${result.error}`);
       return;
     }
     setError(null);
+    note?.(id, null);
+    staged.current = result.value;
     onValue(result.value);
   };
 
@@ -99,11 +130,15 @@ function ReadField<T>({
   );
 }
 
+const joinComma = (v: string[]) => v.join(", ");
+const joinLines = (v: string[]) => v.join("\n");
+const asIs = (v: string) => v;
+
 /**
- * The server's declaration: what the platform reads about the server and its
- * tools instead of a table of tool names. Closed by default, since a server
- * an operator adds works with none and a built-in ships its own; a field left
- * as the API showed it keeps following the shipped value.
+ * The server's declaration: the facts the platform will read about this
+ * server and its tools instead of a table of tool names. Closed by default,
+ * since a server an operator adds works with none and a built-in ships its
+ * own; a field left as the API showed it keeps following the shipped value.
  */
 export default function DeclarationFields({
   serverKey,
@@ -115,12 +150,14 @@ export default function DeclarationFields({
   put: (next: Partial<McpServerEntry>) => void;
 }) {
   const open = server.sample_open ?? EMPTY_OPEN;
+  const box = (field: string) => `${serverKey}.${field}`;
   return (
     <details className="border border-border rounded p-2" data-declaration={serverKey}>
       <summary className="text-xs text-text-muted cursor-pointer">Declaration</summary>
       <p className="text-[11px] text-text-secondary mt-1">
-        What the platform reads about this server and its tools. A built-in ships its own;
-        a server you add needs none to work. See the configuration guide for every field.
+        What the platform reads about this server and its tools. A built-in ships its own; a
+        server you add needs none to work. Nothing reads the declaration yet besides
+        sample_open. See the configuration guide for every field.
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs mt-2">
         <fieldset className="sm:col-span-2 border border-border rounded p-2">
@@ -141,30 +178,66 @@ export default function DeclarationFields({
           </div>
         </fieldset>
         <ReadField
+          id={box("sample_mount")}
           label="Sample mount (absolute path inside the server, or empty)"
           ariaLabel={`${serverKey} sample_mount`}
-          initial={server.sample_mount ?? ""}
+          value={server.sample_mount ?? ""}
+          show={asIs}
           rows={1}
           read={readMount}
           onValue={(sample_mount) => put({ sample_mount })}
         />
         <ReadField
+          id={box("work_dir")}
+          label="Work directory (one name under the samples directory, or empty)"
+          ariaLabel={`${serverKey} work_dir`}
+          value={server.work_dir ?? ""}
+          show={asIs}
+          rows={1}
+          read={readWorkDir}
+          onValue={(work_dir) => put({ work_dir })}
+        />
+        <ReadField
+          id={box("roles")}
           label="Roles (comma-separated words)"
           ariaLabel={`${serverKey} roles`}
-          initial={(server.roles ?? []).join(", ")}
+          value={server.roles ?? []}
+          show={joinComma}
           rows={1}
           read={readRoles}
           onValue={(roles) => put({ roles })}
         />
         <ReadField
+          id={box("auto_name_prefixes")}
+          label="Auto-name prefixes (comma-separated, such as FUN_ or fcn.)"
+          ariaLabel={`${serverKey} auto_name_prefixes`}
+          value={server.auto_name_prefixes ?? []}
+          show={joinComma}
+          rows={1}
+          read={readPrefixes}
+          onValue={(auto_name_prefixes) => put({ auto_name_prefixes })}
+        />
+        <ReadField
+          id={box("required_env_allow")}
           label="Required environment names (one per line)"
           ariaLabel={`${serverKey} required_env_allow`}
-          initial={(server.required_env_allow ?? []).join("\n")}
+          value={server.required_env_allow ?? []}
+          show={joinLines}
           rows={2}
           read={readEnvNames}
           onValue={(required_env_allow) => put({ required_env_allow })}
         />
-        <label className="flex items-center gap-1 text-text-secondary self-end">
+        <ReadField
+          id={box("variable_names")}
+          label="Non-secret variable names (one per line)"
+          ariaLabel={`${serverKey} variable_names`}
+          value={server.variable_names ?? []}
+          show={joinLines}
+          rows={2}
+          read={readEnvNames}
+          onValue={(variable_names) => put({ variable_names })}
+        />
+        <label className="flex items-center gap-1 text-text-secondary">
           <input
             type="checkbox"
             aria-label={`${serverKey} reads_staged_sample`}
@@ -173,6 +246,27 @@ export default function DeclarationFields({
           />
           its path-taking tools read the staged sample
         </label>
+        <label className="flex items-center gap-1 text-text-secondary">
+          <input
+            type="checkbox"
+            aria-label={`${serverKey} platform_owned`}
+            checked={server.platform_owned ?? false}
+            onChange={(e) => put({ platform_owned: e.target.checked })}
+          />
+          the platform&apos;s own server
+        </label>
+        <div className="sm:col-span-2">
+          <ReadField
+            id={box("reference_urls")}
+            label="Reference URLs (one per line, naming {sha256}, {md5} or {sha1})"
+            ariaLabel={`${serverKey} reference_urls`}
+            value={server.reference_urls ?? []}
+            show={joinLines}
+            rows={2}
+            read={readReferenceUrls}
+            onValue={(reference_urls) => put({ reference_urls })}
+          />
+        </div>
         <label className="block sm:col-span-2">
           <span className="text-text-muted">Workflow text (shown only while this server is attached)</span>
           <textarea
@@ -185,9 +279,11 @@ export default function DeclarationFields({
         </label>
         <div className="sm:col-span-2">
           <ReadField
-            label="Error patterns (JSON list of {match, code, remediation, tools})"
+            id={box("error_patterns")}
+            label="Error patterns (JSON list of {match, code, remediation, tools, …})"
             ariaLabel={`${serverKey} error_patterns`}
-            initial={showJson(server.error_patterns)}
+            value={server.error_patterns ?? []}
+            show={showJson}
             rows={3}
             mono
             read={readErrorPatterns}
@@ -196,9 +292,11 @@ export default function DeclarationFields({
         </div>
         <div className="sm:col-span-2">
           <ReadField
+            id={box("tool_facts")}
             label="Tool declarations (JSON object keyed by tool name, each with a kind)"
             ariaLabel={`${serverKey} tool_facts`}
-            initial={showJson(server.tool_facts)}
+            value={server.tool_facts ?? {}}
+            show={showJson}
             rows={6}
             mono
             read={readToolFacts}
