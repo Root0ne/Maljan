@@ -129,6 +129,82 @@
             "id": 7
           },
           {
+            "timestamp": "2000-01-01 00:00:01,610",
+            "category": "registry",
+            "api": "RegOpenKeyExW",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {"name": "Registry", "value": "0x80000002"},
+              {"name": "SubKey", "value": "SOFTWARE\\Synthetic\\Policies"},
+              {"name": "Handle", "value": "0x00000114"},
+              {"name": "FullName", "value": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Synthetic\\Policies"}
+            ],
+            "repeated": 0,
+            "id": 10
+          },
+          {
+            "timestamp": "2000-01-01 00:00:01,620",
+            "category": "registry",
+            "api": "RegCreateKeyExW",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {"name": "Registry", "value": "0x80000001"},
+              {"name": "SubKey", "value": "Software\\Synthetic\\Cache"},
+              {"name": "Class", "value": ""},
+              {"name": "Access", "value": "0x000f003f"},
+              {"name": "Handle", "value": "0x00000118"},
+              {"name": "FullName", "value": "HKEY_CURRENT_USER\\Software\\Synthetic\\Cache"},
+              {"name": "Disposition", "value": "1"}
+            ],
+            "repeated": 0,
+            "id": 11
+          },
+          {
+            "timestamp": "2000-01-01 00:00:01,630",
+            "category": "registry",
+            "api": "RegCreateKeyExW",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {"name": "Registry", "value": "0x80000001"},
+              {"name": "SubKey", "value": "Software\\Synthetic\\NoFullName"}
+            ],
+            "repeated": 0,
+            "id": 12
+          },
+          {
+            "timestamp": "2000-01-01 00:00:01,640",
+            "category": "registry",
+            "api": "NtQueryValueKey",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {"name": "KeyHandle", "value": "0x00000100"},
+              {"name": "ValueName", "value": "Version"},
+              {"name": "Type", "value": "1"},
+              {"name": "Information", "value": "2.0"},
+              {"name": "FullName", "value": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Synthetic\\Settings\\Version"}
+            ],
+            "repeated": 0,
+            "id": 13
+          },
+          {
+            "timestamp": "2000-01-01 00:00:01,650",
+            "category": "registry",
+            "api": "NtQueryValueKey",
+            "status": true,
+            "return": "0x00000000",
+            "arguments": [
+              {"name": "KeyHandle", "value": "0x00000100"},
+              {"name": "ValueName", "value": "Locale"},
+              {"name": "FullName", "value": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Synthetic\\Settings\\Locale"}
+            ],
+            "repeated": 0,
+            "id": 14
+          },
+          {
             "timestamp": "2000-01-01 00:00:01,700",
             "category": "filesystem",
             "api": "NtCreateFile",
@@ -192,6 +268,21 @@
             ],
             "repeated": 0,
             "id": 2
+          },
+          {
+            "timestamp": "2000-01-01 00:00:02,300",
+            "category": "services",
+            "api": "CreateServiceW",
+            "status": true,
+            "return": "0x00000130",
+            "arguments": [
+              {"name": "ServiceControlHandle", "value": "0x00000128"},
+              {"name": "DisplayName", "value": "Synthetic Update Service"},
+              {"name": "ServiceName", "value": "SyntheticSvc"},
+              {"name": "BinaryPathName", "value": "C:\\Users\\guest\\AppData\\Roaming\\second.exe --service"}
+            ],
+            "repeated": 0,
+            "id": 3
           }
         ]
       }

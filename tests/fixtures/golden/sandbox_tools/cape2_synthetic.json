@@ -2,6 +2,15 @@
   "sandbox_api_calls": {
     "apis": [
       {
+        "api": "CreateServiceW",
+        "count": 0,
+        "dll": null,
+        "first_args": "[{'name': 'ServiceControlHandle', 'value': '0x00000128'}, {'name': 'DisplayName', 'value': 'Synthetic Update Service'}, {'name': 'ServiceName', 'value': 'SyntheticSvc'}, {'name': 'BinaryPathName', 'value': 'C:\\\\Users\\\\guest\\\\AppData\\\\Roaming\\\\second.exe --service'}]",
+        "first_seen": "2000-01-01 00:00:02,300",
+        "process_count": 0,
+        "processes": []
+      },
+      {
         "api": "NtCreateFile",
         "count": 0,
         "dll": null,
@@ -38,6 +47,15 @@
         "processes": []
       },
       {
+        "api": "NtQueryValueKey",
+        "count": 0,
+        "dll": null,
+        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000100'}, {'name': 'ValueName', 'value': 'Version'}, {'name': 'Type', 'value': '1'}, {'name': 'Information', 'value': '2.0'}, {'name': 'FullName', 'value': 'HKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\Synthetic\\\\Settings\\\\Version'}]",
+        "first_seen": "2000-01-01 00:00:01,640",
+        "process_count": 0,
+        "processes": []
+      },
+      {
         "api": "NtSetValueKey",
         "count": 0,
         "dll": null,
@@ -47,11 +65,29 @@
         "processes": []
       },
       {
+        "api": "RegCreateKeyExW",
+        "count": 0,
+        "dll": null,
+        "first_args": "[{'name': 'Registry', 'value': '0x80000001'}, {'name': 'SubKey', 'value': 'Software\\\\Synthetic\\\\Cache'}, {'name': 'Class', 'value': ''}, {'name': 'Access', 'value': '0x000f003f'}, {'name': 'Handle', 'value': '0x00000118'}, {'name': 'FullName', 'value': 'HKEY_CURRENT_USER\\\\Software\\\\Synthetic\\\\Cache'}, {'name': 'Disposition', 'value': '1'}]",
+        "first_seen": "2000-01-01 00:00:01,620",
+        "process_count": 0,
+        "processes": []
+      },
+      {
         "api": "RegDeleteValueW",
         "count": 0,
         "dll": null,
         "first_args": "[{'name': 'Handle', 'value': '0x00000104'}, {'name': 'ValueName', 'value': 'Trace'}, {'name': 'FullName', 'value': 'HKEY_CURRENT_USER\\\\Software\\\\Synthetic\\\\Trace'}]",
         "first_seen": "2000-01-01 00:00:01,500",
+        "process_count": 0,
+        "processes": []
+      },
+      {
+        "api": "RegOpenKeyExW",
+        "count": 0,
+        "dll": null,
+        "first_args": "[{'name': 'Registry', 'value': '0x80000002'}, {'name': 'SubKey', 'value': 'SOFTWARE\\\\Synthetic\\\\Policies'}, {'name': 'Handle', 'value': '0x00000114'}, {'name': 'FullName', 'value': 'HKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\Synthetic\\\\Policies'}]",
+        "first_seen": "2000-01-01 00:00:01,610",
         "process_count": 0,
         "processes": []
       },
@@ -74,7 +110,7 @@
         "processes": []
       }
     ],
-    "total": 8
+    "total": 12
   },
   "sandbox_dropped_files": {
     "dropped": [
@@ -235,7 +271,7 @@
   "sandbox_processes": {
     "processes": [
       {
-        "call_count": 9,
+        "call_count": 14,
         "command_line": "",
         "first_seen": "2000-01-01 00:00:00,000",
         "name": "synthetic.exe",
@@ -243,7 +279,7 @@
         "ppid": 900
       },
       {
-        "call_count": 2,
+        "call_count": 3,
         "command_line": "",
         "first_seen": "2000-01-01 00:00:02,000",
         "name": "second.exe",
@@ -286,6 +322,31 @@
         "value": null
       },
       {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Synthetic\\Policies",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Synthetic\\Cache",
+        "operation": "create",
+        "value": null
+      },
+      {
+        "key": "Software\\Synthetic\\NoFullName",
+        "operation": "create",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Synthetic\\Settings\\Version",
+        "operation": "query",
+        "value": "2.0"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Synthetic\\Settings\\Locale",
+        "operation": "query",
+        "value": null
+      },
+      {
         "key": "HKEY_CURRENT_USER\\Software\\Synthetic\\Interval",
         "operation": "modify",
         "value": "300"
@@ -296,15 +357,17 @@
         "value": null
       }
     ],
-    "total": 8
+    "total": 13
   },
   "sandbox_services_and_tasks": {
     "commands": [
       "\"C:\\Users\\guest\\AppData\\Roaming\\second.exe\" --run"
     ],
-    "services": [],
+    "services": [
+      "SyntheticSvc"
+    ],
     "tasks": [],
-    "total": 1
+    "total": 2
   },
   "sandbox_signatures": {
     "signatures": [

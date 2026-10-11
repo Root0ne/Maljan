@@ -41,7 +41,7 @@
         "api": "CreateProcessInternalW",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'ApplicationName', 'value': ''}, {'name': 'CommandLine', 'value': '\"C:\\\\Windows\\\\system32\\\\wermgr.exe\" -upload'}, {'name': 'CreationFlags', 'value': '0x00084404', 'pretty_value': 'CREATE_SUSPENDED|CREATE_UNICODE_ENVIRONMENT|EXTENDED_STARTUPINFO_PRESENT|0x00004000'}, {'name': 'ProcessId', 'value': '744'}, {'name': 'ThreadId', 'value': '4588'}, {'name': 'ParentHandle', 'value': '0xfffffff\u2026",
+        "first_args": "[{'name': 'ApplicationName', 'value': ''}, {'name': 'CommandLine', 'value': '\"C:\\\\Windows\\\\system32\\\\wermgr.exe\" -upload'}, {'name': 'CreationFlags', 'value': '0x00084404', 'pretty_value': 'CREATE_SUSPENDED|CREATE_UNICODE_ENVIRONMENT|EXTENDED_STARTUPINFO_PRESENT|0x00004000'}, {'name': 'ProcessId', 'value': '744'}, {'name': 'ThreadId', 'value': '4588'}, {'name': 'ParentHandle', 'value': '0xfffffff…",
         "first_seen": "2026-07-25 17:53:11,782",
         "process_count": 0,
         "processes": []
@@ -50,7 +50,7 @@
         "api": "CreateProcessW",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'ApplicationName', 'value': 'C:\\\\Windows\\\\System32\\\\schtasks.exe'}, {'name': 'CommandLine', 'value': '/C /create /F /sc minute /mo 5 /tn \"PushPrinterConnection application{S3G4C5J6K7S3-F5T6Q1W2S3-G5J7B6V5D3}\" /tr \"C:\\\\Users\\\\Admin\\\\AppData\\\\Roaming\\\\Microsoft\\\\Windows\\\\PushPrinterConnection application\\\\PushPrinterConnections.exe\"'}, {'name': 'CreationFlags', 'value': '0x08000000'}, {'n\u2026",
+        "first_args": "[{'name': 'ApplicationName', 'value': 'C:\\\\Windows\\\\System32\\\\schtasks.exe'}, {'name': 'CommandLine', 'value': '/C /create /F /sc minute /mo 5 /tn \"PushPrinterConnection application{S3G4C5J6K7S3-F5T6Q1W2S3-G5J7B6V5D3}\" /tr \"C:\\\\Users\\\\Admin\\\\AppData\\\\Roaming\\\\Microsoft\\\\Windows\\\\PushPrinterConnection application\\\\PushPrinterConnections.exe\"'}, {'name': 'CreationFlags', 'value': '0x08000000'}, {'n…",
         "first_seen": "2026-08-13 19:26:39,452",
         "process_count": 0,
         "processes": []
@@ -302,7 +302,7 @@
         "api": "NtCreateFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x000014f0'}, {'name': 'DesiredAccess', 'value': '0xc0110080', 'pretty_value': 'GENERIC_READ|GENERIC_WRITE|FILE_READ_ATTRIBUTES|DELETE|SYNCHRONIZE'}, {'name': 'FileName', 'value': 'C:\\\\Windows\\\\SoftwareDistribution\\\\DataStore\\\\Logs\\\\edbtmp.log'}, {'name': 'CreateDisposition', 'value': '1', 'pretty_value': 'FILE_OPEN'}, {'name': 'ShareAccess', 'value': '0'}, {'nam\u2026",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x000014f0'}, {'name': 'DesiredAccess', 'value': '0xc0110080', 'pretty_value': 'GENERIC_READ|GENERIC_WRITE|FILE_READ_ATTRIBUTES|DELETE|SYNCHRONIZE'}, {'name': 'FileName', 'value': 'C:\\\\Windows\\\\SoftwareDistribution\\\\DataStore\\\\Logs\\\\edbtmp.log'}, {'name': 'CreateDisposition', 'value': '1', 'pretty_value': 'FILE_OPEN'}, {'name': 'ShareAccess', 'value': '0'}, {'nam…",
         "first_seen": "2026-07-25 17:52:54,922",
         "process_count": 0,
         "processes": []
@@ -338,7 +338,7 @@
         "api": "NtCreateUserProcess",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'ProcessHandle', 'value': '0x00000210'}, {'name': 'ThreadHandle', 'value': '0x000001fc'}, {'name': 'ProcessDesiredAccess', 'value': '0x02000000'}, {'name': 'ThreadDesiredAccess', 'value': '0x02000000'}, {'name': 'ProcessFileName', 'value': ''}, {'name': 'ThreadName', 'value': ''}, {'name': 'ImagePathName', 'value': 'C:\\\\Windows\\\\system32\\\\wermgr.exe'}, {'name': 'CommandLine', 'value': '\u2026",
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0x00000210'}, {'name': 'ThreadHandle', 'value': '0x000001fc'}, {'name': 'ProcessDesiredAccess', 'value': '0x02000000'}, {'name': 'ThreadDesiredAccess', 'value': '0x02000000'}, {'name': 'ProcessFileName', 'value': ''}, {'name': 'ThreadName', 'value': ''}, {'name': 'ImagePathName', 'value': 'C:\\\\Windows\\\\system32\\\\wermgr.exe'}, {'name': 'CommandLine', 'value': '…",
         "first_seen": "2026-07-25 17:53:11,453",
         "process_count": 0,
         "processes": []
@@ -356,7 +356,7 @@
         "api": "NtDeviceIoControlFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x00000094'}, {'name': 'HandleName', 'value': '\\\\Device\\\\ConDrv'}, {'name': 'IoControlCode', 'value': '0x00500016'}, {'name': 'InputBuffer', 'value': '\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x01\\\\x00\\\\x00\\\\x00\\\\x01\\\\x00\\\\x00\\\\x00\\n\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00`\\\\xf5b\\\\x05\\\\x00\\\\x00\\\\x00\\\\x00\\\\x02\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00h\\\\xf5b\\\\x05\\\\x00\\\\x00\\\\x\u2026",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x00000094'}, {'name': 'HandleName', 'value': '\\\\Device\\\\ConDrv'}, {'name': 'IoControlCode', 'value': '0x00500016'}, {'name': 'InputBuffer', 'value': '\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x01\\\\x00\\\\x00\\\\x00\\\\x01\\\\x00\\\\x00\\\\x00\\n\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00`\\\\xf5b\\\\x05\\\\x00\\\\x00\\\\x00\\\\x00\\\\x02\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00h\\\\xf5b\\\\x05\\\\x00\\\\x00\\\\x…",
         "first_seen": "2026-07-25 17:52:57,403",
         "process_count": 0,
         "processes": []
@@ -410,7 +410,7 @@
         "api": "NtOpenKey",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000264'}, {'name': 'DesiredAccess', 'value': '0x00000009', 'pretty_value': 'KEY_QUERY_VALUE|KEY_ENUMERATE_SUB_KEYS'}, {'name': 'ObjectAttributesHandle', 'value': '0x00000000'}, {'name': 'ObjectAttributesName', 'value': '\\\\Registry\\\\Machine\\\\SYSTEM\\\\CurrentControlSet\\\\Control\\\\Session Manager'}, {'name': 'ObjectAttributes', 'value': 'HKEY_LOCAL_MACHINE\\\\SYSTEM\\\u2026",
+        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000264'}, {'name': 'DesiredAccess', 'value': '0x00000009', 'pretty_value': 'KEY_QUERY_VALUE|KEY_ENUMERATE_SUB_KEYS'}, {'name': 'ObjectAttributesHandle', 'value': '0x00000000'}, {'name': 'ObjectAttributesName', 'value': '\\\\Registry\\\\Machine\\\\SYSTEM\\\\CurrentControlSet\\\\Control\\\\Session Manager'}, {'name': 'ObjectAttributes', 'value': 'HKEY_LOCAL_MACHINE\\\\SYSTEM\\…",
         "first_seen": "2026-07-25 17:52:57,418",
         "process_count": 0,
         "processes": []
@@ -473,7 +473,7 @@
         "api": "NtProtectVirtualMemory",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x74c1c000'}, {'name': 'ModuleName', 'value': 'kernel.appcore.dll'}, {'name': 'NumberOfBytesProtected', 'value': '0x00001000'}, {'name': 'MemoryType', 'value': '0x00000000'}, {'name': 'NewAccessProtection', 'value': '0x00000002', 'pretty_value': 'PAGE_READONLY'}, {'name': 'OldAccessProtection', 'value': '0x000000\u2026",
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x74c1c000'}, {'name': 'ModuleName', 'value': 'kernel.appcore.dll'}, {'name': 'NumberOfBytesProtected', 'value': '0x00001000'}, {'name': 'MemoryType', 'value': '0x00000000'}, {'name': 'NewAccessProtection', 'value': '0x00000002', 'pretty_value': 'PAGE_READONLY'}, {'name': 'OldAccessProtection', 'value': '0x000000…",
         "first_seen": "2026-07-25 17:52:57,418",
         "process_count": 0,
         "processes": []
@@ -491,7 +491,7 @@
         "api": "NtQueryInformationFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x000002b0'}, {'name': 'HandleName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Roaming\\\\Microsoft\\\\Windows\\\\PushPrinterConnection application\\\\34645675765865745'}, {'name': 'FileInformationClass', 'value': '5', 'pretty_value': 'FileStandardInformation'}, {'name': 'FileInformation', 'value': '\\\\x00\\\\x10\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\xa3\\\\x05\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\\u2026",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x000002b0'}, {'name': 'HandleName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Roaming\\\\Microsoft\\\\Windows\\\\PushPrinterConnection application\\\\34645675765865745'}, {'name': 'FileInformationClass', 'value': '5', 'pretty_value': 'FileStandardInformation'}, {'name': 'FileInformation', 'value': '\\\\x00\\\\x10\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\xa3\\\\x05\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\…",
         "first_seen": "2026-07-25 17:52:57,798",
         "process_count": 0,
         "processes": []
@@ -662,7 +662,7 @@
         "api": "NtWriteFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x000002cc'}, {'name': 'HandleName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Roaming\\\\Microsoft\\\\Windows\\\\PushPrinterConnection application\\\\34645675765865745'}, {'name': 'Buffer', 'value': '<?xml version=\"1.0\" encoding=\"UTF-16\"?>\\r\\r\\n<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\\r\\r\\n  <RegistrationInfo>\\r\\r\\n    <Date>2026-07-\u2026",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x000002cc'}, {'name': 'HandleName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Roaming\\\\Microsoft\\\\Windows\\\\PushPrinterConnection application\\\\34645675765865745'}, {'name': 'Buffer', 'value': '<?xml version=\"1.0\" encoding=\"UTF-16\"?>\\r\\r\\n<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\\r\\r\\n  <RegistrationInfo>\\r\\r\\n    <Date>2026-07-…",
         "first_seen": "2026-07-25 17:52:57,449",
         "process_count": 0,
         "processes": []
@@ -743,7 +743,7 @@
         "api": "VarBstrCat",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'bstrLeft', 'value': ''}, {'name': 'bstrRight', 'value': '<?xml version=\"1.0\" encoding=\"UTF-16\"?>\\r\\r\\n<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\\r\\r\\n  <RegistrationInfo>\\r\\r\\n    <Date>2026-07-25T10:52:56</Date>\\r\\r\\n    <Author>DESKTOP-D7VMOBK\\\\Admin</Author>\\r\\r\\n    <URI>\\\\PushPrinterConnection application{S3G4C5J6K7S3-F5T6Q1W2S3-G5J7B6V5D3}<\u2026",
+        "first_args": "[{'name': 'bstrLeft', 'value': ''}, {'name': 'bstrRight', 'value': '<?xml version=\"1.0\" encoding=\"UTF-16\"?>\\r\\r\\n<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\\r\\r\\n  <RegistrationInfo>\\r\\r\\n    <Date>2026-07-25T10:52:56</Date>\\r\\r\\n    <Author>DESKTOP-D7VMOBK\\\\Admin</Author>\\r\\r\\n    <URI>\\\\PushPrinterConnection application{S3G4C5J6K7S3-F5T6Q1W2S3-G5J7B6V5D3}<…",
         "first_seen": "2026-07-25 17:52:57,798",
         "process_count": 0,
         "processes": []
@@ -3691,7 +3691,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Session Manager\\ResourcePolicies",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3701,8 +3701,8 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\Sorting\\Versions\\000603xx",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "kernel32.dll"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Nls\\Sorting\\Ids",
@@ -3716,7 +3716,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CustomLocale\\en-US",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3726,17 +3726,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\ExtendedLocale\\en-US",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\Sorting\\Ids\\en-US",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\Sorting\\Ids\\en",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3746,13 +3746,13 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Lsa\\FipsAlgorithmPolicy\\STE",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Lsa\\FipsAlgorithmPolicy\\Enabled",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "0"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Lsa",
@@ -3761,12 +3761,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Lsa\\FipsAlgorithmPolicy",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Lsa\\FipsAlgorithmPolicy\\MDMEnabled",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3781,7 +3781,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Appx\\AllowDevelopmentWithoutDevLicense",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3791,7 +3791,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AppModelUnlock\\AllowDevelopmentWithoutDevLicense",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3801,7 +3801,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Ole\\AppCompat\\RaiseActivationAuthenticationLevel",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3831,17 +3831,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\GRE_Initialize\\DisableMetaFiles",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\GRE_Initialize\\DisableUmpdBufferSizeCheck",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\Windows Error Reporting\\Debug",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3851,12 +3851,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\PreferExternalManifest",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\MiniNT",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3886,7 +3886,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\Windows Error Reporting",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3901,7 +3901,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\Consent",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3921,7 +3921,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\DebugApplications",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3961,7 +3961,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\Windows Error Reporting",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3971,7 +3971,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\Consent",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4001,7 +4001,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\DebugApplications",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4041,12 +4041,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\Windows Error Reporting",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\Windows Error Reporting",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4351,7 +4351,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\DataCollection",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4361,12 +4361,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\DataCollection\\Users",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\PolicyManager\\default\\System\\ConfigureTelemetryOptInSettingsUx",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4446,7 +4446,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\PolicyManager\\current\\Device\\System",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4461,7 +4461,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SQMClient",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4471,7 +4471,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SQMClient",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4498,64 +4498,9 @@
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\Setup\\SystemSetupInProgress",
         "operation": "query",
         "value": "0"
-      },
-      {
-        "key": "0x80000002",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000254",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000258",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x80000001",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000001f8",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x0000026c",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000002f4",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000310",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000294",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000298",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000002ec",
-        "operation": "query",
-        "value": null
       }
     ],
-    "total": 174
+    "total": 163
   },
   "sandbox_services_and_tasks": {
     "commands": [

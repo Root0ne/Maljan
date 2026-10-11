@@ -3730,7 +3730,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\PreferExternalManifest",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3755,7 +3755,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CustomLocale\\en-US",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3765,17 +3765,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\ExtendedLocale\\en-US",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Wine",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\HARDWARE\\DEVICEMAP\\Scsi\\Scsi Port 0\\Scsi Bus 0\\Target Id 0\\Logical Unit Id 0",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3785,7 +3785,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\HARDWARE\\Description\\System",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3805,57 +3805,57 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\HARDWARE\\ACPI\\DSDT\\VBOX__",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\HARDWARE\\ACPI\\FADT\\VBOX__",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\HARDWARE\\ACPI\\RSDT\\VBOX__",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Oracle\\VirtualBox Guest Additions",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Services\\VBoxGuest",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Services\\VBoxMouse",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Services\\VBoxService",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Services\\VBoxSF",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Services\\VBoxVideo",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{905E63B6-C1BF-494E-B29C-65B732D3D21A}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3965,12 +3965,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{905e63b6-c1bf-494e-b29c-65b732d3d21a}\\PropertyBag",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3995,13 +3995,13 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Lsa\\FipsAlgorithmPolicy\\STE",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Lsa\\FipsAlgorithmPolicy\\Enabled",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "0"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Lsa",
@@ -4010,12 +4010,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Lsa\\FipsAlgorithmPolicy",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Lsa\\FipsAlgorithmPolicy\\MDMEnabled",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4030,7 +4030,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Appx\\AllowDevelopmentWithoutDevLicense",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4040,12 +4040,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AppModelUnlock\\AllowDevelopmentWithoutDevLicense",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\OLE\\AppCompat",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4060,7 +4060,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\AppID\\rundll32.exe",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4070,12 +4070,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Interface\\{027947E1-D731-11CE-A357-000000000001}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Interface\\{027947E1-D731-11CE-A357-000000000001}\\ProxyStubClsid32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4085,7 +4085,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\CLSID\\{1B1CAD8C-2DAB-11D2-B604-00104B703EFD}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4095,7 +4095,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{1B1CAD8C-2DAB-11D2-B604-00104B703EFD}\\TreatAs",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4115,7 +4115,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{1B1CAD8C-2DAB-11D2-B604-00104B703EFD}\\InprocServer32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4165,7 +4165,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{1B1CAD8C-2DAB-11D2-B604-00104B703EFD}\\LocalServer32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4190,17 +4190,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{1B1CAD8C-2DAB-11D2-B604-00104B703EFD}\\Elevation",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Interface\\{1C1C45EE-4395-11D2-B60B-00104B703EFD}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Interface\\{1C1C45EE-4395-11D2-B60B-00104B703EFD}\\ProxyStubClsid32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4210,12 +4210,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Interface\\{423EC01E-2E35-11D2-B604-00104B703EFD}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Interface\\{423EC01E-2E35-11D2-B604-00104B703EFD}\\ProxyStubClsid32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4225,12 +4225,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Interface\\{D4781CD6-E5D3-44DF-AD94-930EFE48A887}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Interface\\{D4781CD6-E5D3-44DF-AD94-930EFE48A887}\\ProxyStubClsid32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4240,12 +4240,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Interface\\{9F6C78EF-FCE5-42FA-ABEA-3E7DF91921DC}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Interface\\{9F6C78EF-FCE5-42FA-ABEA-3E7DF91921DC}\\ProxyStubClsid32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4255,12 +4255,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Interface\\{9556DC99-828C-11CF-A37E-00AA003240C7}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Interface\\{9556DC99-828C-11CF-A37E-00AA003240C7}\\ProxyStubClsid32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4270,7 +4270,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\CLSID\\{D68AF00A-29CB-43FA-8504-CE99A996D9EA}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4280,7 +4280,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{D68AF00A-29CB-43FA-8504-CE99A996D9EA}\\TreatAs",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4300,7 +4300,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{D68AF00A-29CB-43FA-8504-CE99A996D9EA}\\InprocServer32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4350,7 +4350,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{D68AF00A-29CB-43FA-8504-CE99A996D9EA}\\LocalServer32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4375,17 +4375,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{D68AF00A-29CB-43FA-8504-CE99A996D9EA}\\Elevation",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\AMSI\\Providers",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\WBEM\\CIMOM",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4395,42 +4395,42 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Services\\vioscsi",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Services\\viostor",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Services\\VirtIO-FS Service",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Services\\VirtioSerial",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Services\\BALLOON",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Services\\BalloonService",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Services\\netkvm",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\Winsock\\Parameters",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4440,7 +4440,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Winsock",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4450,12 +4450,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\Winsock\\Setup Migration\\Providers",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Services\\Winsock\\Setup Migration\\Providers\\Tcpip",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4480,7 +4480,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Tracing",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4490,7 +4490,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\Setup",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4510,7 +4510,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4520,12 +4520,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Classes",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\AppID\\TiWorker.exe",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4535,7 +4535,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\AppID\\{8D15A4F3-1BE5-4120-8A4D-2EF92A5DD58D}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4555,7 +4555,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\COM3",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4565,12 +4565,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Interface\\{00000134-0000-0000-C000-000000000046}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Interface\\{00000134-0000-0000-C000-000000000046}\\ProxyStubClsid32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4580,7 +4580,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{0823B6F8-F499-4D5E-B885-EA9CB4F43B24}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4605,7 +4605,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{0823B6F8-F499-4d5e-B885-EA9CB4F43B24}\\InprocServer32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4630,7 +4630,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\OLE",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4645,12 +4645,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Interface\\{A70DBECC-3734-4B22-B2D1-648C0E43E177}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Interface\\{A70DBECC-3734-4b22-B2D1-648C0E43E177}\\ProxyStubClsid32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4660,12 +4660,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{75207391-23F2-4396-85F0-8FDB879ED0ED}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{75207391-23F2-4396-85F0-8FDB879ED0ED}\\TreatAs",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4685,7 +4685,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{75207391-23F2-4396-85F0-8FDB879ED0ED}\\InprocServer32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4725,7 +4725,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{75207391-23F2-4396-85F0-8FDB879ED0ED}\\LocalServer32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4745,17 +4745,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{75207391-23F2-4396-85F0-8FDB879ED0ED}\\Elevation",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Interface\\{365DE52E-EE7E-4975-AEC8-06588234BB3C}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Interface\\{365DE52E-EE7E-4975-AEC8-06588234BB3C}\\ProxyStubClsid32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4770,7 +4770,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\SideBySide",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4780,7 +4780,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\Configuration",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4790,13 +4790,13 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\Version",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\Sorting\\Versions\\000603xx",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "kernel32.dll"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Nls\\Sorting\\Ids",
@@ -4805,7 +4805,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4815,7 +4815,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\RebootInProgress",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4835,12 +4835,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\COMPONENTS",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\PackagesPending",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4850,13 +4850,13 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\StoreFormatVersion",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "0\\x00.\\x000\\x00.\\x000\\x00.\\x006\\x00"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\StoreArchitecture",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "\\x00\\x00\\x00"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\Winners",
@@ -4875,13 +4875,13 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\Configuration\\MobileStore",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\Configuration\\MobileStoreVersion",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "2"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\DriverDatabase",
@@ -4890,7 +4890,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\DriverDatabase\\ConfigOptions",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4935,7 +4935,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\DerivedData\\VersionedIndex\\10.0.19041.5967 (WinBuild.160101.0800)\\ComponentFamilies\\PopulateIncomplete",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4945,8 +4945,8 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\ServicingStackVersions\\LastWCPVersionToAccessStore",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "10.0.19041.5967 (WinBuild.160101.0800)"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\ServicingStackVersions\\10.0.19041.5967 (WinBuild.160101.0800)",
@@ -5005,22 +5005,22 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\Configuration\\DontRunPoqexecInSmss",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "0"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\Configuration\\PoqexecCmdline",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Interface\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Interface\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}\\ProxyStubClsid32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5030,12 +5030,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}\\TreatAs",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5055,7 +5055,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}\\InprocServer32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5095,7 +5095,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}\\LocalServer32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5115,22 +5115,22 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{90ED9FAA-A6E5-4671-8E50-1C060F8B9C47}\\Elevation",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\software\\microsoft\\windows\\currentversion\\setup\\PnpLockdownFiles",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Setup\\PnpLockdownFiles\\%SystemRoot%/system32/wuaueng.dll",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\StoreDirty",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5165,7 +5165,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\Setup\\SKUAssemblyInProgress",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5175,8 +5175,8 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\COMPONENTS\\DerivedData\\Components\\amd64_microsoft-windows-w..wsupdateclient-core_31bf3856ad364e35_10.0.19041.5915_none_23579de85f07ef39\\identity",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "Microsoft-Windows-WindowsUpdateClient-Core, Culture=neutral, Version=10.0.19041.5915, PublicKeyToken=31bf3856ad364e35, ProcessorArchitecture=amd64, versionScope=NonSxS"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\Winners\\amd64_microsoft-windows-w..wsupdateclient-core_31bf3856ad364e35_none_54ea0d262e25c877",
@@ -5185,8 +5185,8 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\Winners\\amd64_microsoft-windows-w..wsupdateclient-core_31bf3856ad364e35_none_54ea0d262e25c877\\(Default)",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "10.0"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\Winners\\amd64_microsoft-windows-w..wsupdateclient-core_31bf3856ad364e35_none_54ea0d262e25c877\\10.0",
@@ -5195,8 +5195,8 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\Winners\\amd64_microsoft-windows-w..wsupdateclient-core_31bf3856ad364e35_none_54ea0d262e25c877\\10.0\\(Default)",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "10.0.19041.5915"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\GRE_Initialize",
@@ -5205,17 +5205,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\GRE_Initialize\\DisableMetaFiles",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\GRE_Initialize\\DisableUmpdBufferSizeCheck",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\MiniNT",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5240,7 +5240,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\Windows Error Reporting",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5255,7 +5255,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\Consent",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5275,7 +5275,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Error Reporting\\DebugApplications",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5315,7 +5315,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\Windows Error Reporting",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5325,7 +5325,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\Consent",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5355,7 +5355,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\DebugApplications",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5395,12 +5395,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\Windows Error Reporting",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\Windows Error Reporting",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5410,7 +5410,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Session Manager\\ResourcePolicies",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5715,7 +5715,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\DataCollection",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5725,12 +5725,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\DataCollection\\Users",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\PolicyManager\\default\\System\\ConfigureTelemetryOptInSettingsUx",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5810,7 +5810,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\PolicyManager\\current\\Device\\System",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5825,7 +5825,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SQMClient",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5835,7 +5835,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SQMClient",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5855,12 +5855,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\Windows Error Reporting\\Debug",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\COM3",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5870,7 +5870,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\AppID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5975,17 +5975,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Rpc\\Extensions\\NdrOleExtDLL",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "combase.dll"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\TreatAs",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6005,7 +6005,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\InprocServer32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6045,7 +6045,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\LocalServer32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6065,17 +6065,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{AA65DD7C-83AC-48C0-A6FD-9B61FEBF8800}\\Elevation",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Interface\\{DDA0424F-9478-40FF-9B21-099EC9FFCBAE}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Interface\\{DDA0424F-9478-40FF-9B21-099EC9FFCBAE}\\ProxyStubClsid32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6085,12 +6085,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{A6FF50C0-56C0-71CA-5732-BED303A59628}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{A6FF50C0-56C0-71CA-5732-BED303A59628}\\TreatAs",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6110,7 +6110,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{A6FF50C0-56C0-71CA-5732-BED303A59628}\\InprocServer32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6150,7 +6150,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{A6FF50C0-56C0-71CA-5732-BED303A59628}\\LocalServer32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6170,12 +6170,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\{A6FF50C0-56C0-71CA-5732-BED303A59628}\\Elevation",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\DeliveryOptimization",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6190,22 +6190,22 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\DeliveryOptimization\\Config",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\DeliveryOptimization\\Settings",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\DeliveryOptimization",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\S-1-5-20\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\User Shell Folders",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6215,7 +6215,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList\\S-1-5-20",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6230,7 +6230,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DODownloadMode",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6305,12 +6305,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\DeliveryOptimization",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\PolicyManager\\current\\Device\\DeliveryOptimization",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6335,7 +6335,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitForegroundDownloadBandwidth",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6405,7 +6405,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxForegroundBandwidth",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6480,7 +6480,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxForegroundDownloadBandwidth",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6565,7 +6565,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOSetHoursToLimitBackgroundDownloadBandwidth",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6635,7 +6635,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOPercentageMaxBackgroundBandwidth",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6710,7 +6710,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMaxBackgroundDownloadBandwidth",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6805,7 +6805,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\PolicyManager\\default\\DeliveryOptimization\\DOMonthlyUploadDataCap",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6887,259 +6887,9 @@
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\DeliveryOptimization\\Config\\UploadLimitGBMonth",
         "operation": "query",
         "value": null
-      },
-      {
-        "key": "0x80000001",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x80000002",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000002bc",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000002c0",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x0000030e",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000003b2",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000312",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000003be",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x0000035e",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x0000039a",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000003c2",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000003c6",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000332",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000002fa",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000322",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000003ca",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000003a2",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x0000037a",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x0000032e",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000336",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000003d6",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000003ce",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000003d2",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000408",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000230",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000280",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000238",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000002a4",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000002ac",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000002b0",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x0000038c",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000384",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000003b8",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x0000024c",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000250",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000258",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000264",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000002cc",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000268",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000002d0",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000002f4",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x0000027c",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000002f8",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000224",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x0000023c",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000002b4",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x0000031c",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000320",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000310",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x80000003",
-        "operation": "query",
-        "value": null
       }
     ],
-    "total": 683
+    "total": 633
   },
   "sandbox_services_and_tasks": {
     "commands": [

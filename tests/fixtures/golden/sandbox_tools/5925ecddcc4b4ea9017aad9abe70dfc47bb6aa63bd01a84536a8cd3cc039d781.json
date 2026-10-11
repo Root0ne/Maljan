@@ -5,7 +5,7 @@
         "api": "BCryptImportKeyPair",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'KeyBlob', 'value': 'ECS30\\\\x00\\\\x00\\\\x00\\\\x0b\\\\xfd\\\\x9a\\\\xa60\\\\xf0Ki\\\\x17\\\\xe0\\\\xd6\\\\x13\\\\xce\\\\xb4Rkg=\\\\x99\\\\x8bo\\\\xc4\\\\x0b\\\\x80w~%\\\\xfcVv\\\\x8eQR\\\\xa7t\\\\x1a\\\\xfe\\\\x8cJ\\\\x96s\\\\xb9\\\\xb0\\\\xe2\\\\xfd\\\\xc0\\r8\\\\xb0\\\\xa7\\\\xae\\n\\\\xe5\\\\x02\\\\x9e\\\\xd4\\\\xb6v\\\\xee5\\\\x19\\\\xc4\\\\xbe\\\\x1bZ<@D\\\\xfa<\\\\xe6\\\\x1b\\\\xfb\\\\xda{\\\\x9eu\\\\xe6aE\\\\x0f\\\\x9au\\\\x04?\\\\x80\\\\x8b\\\\x15\\\\xf3\\\\xafL\\\\xc9\\\\xc4s\\\\x82\\\\x17'}, {'name\u2026",
+        "first_args": "[{'name': 'KeyBlob', 'value': 'ECS30\\\\x00\\\\x00\\\\x00\\\\x0b\\\\xfd\\\\x9a\\\\xa60\\\\xf0Ki\\\\x17\\\\xe0\\\\xd6\\\\x13\\\\xce\\\\xb4Rkg=\\\\x99\\\\x8bo\\\\xc4\\\\x0b\\\\x80w~%\\\\xfcVv\\\\x8eQR\\\\xa7t\\\\x1a\\\\xfe\\\\x8cJ\\\\x96s\\\\xb9\\\\xb0\\\\xe2\\\\xfd\\\\xc0\\r8\\\\xb0\\\\xa7\\\\xae\\n\\\\xe5\\\\x02\\\\x9e\\\\xd4\\\\xb6v\\\\xee5\\\\x19\\\\xc4\\\\xbe\\\\x1bZ<@D\\\\xfa<\\\\xe6\\\\x1b\\\\xfb\\\\xda{\\\\x9eu\\\\xe6aE\\\\x0f\\\\x9au\\\\x04?\\\\x80\\\\x8b\\\\x15\\\\xf3\\\\xafL\\\\xc9\\\\xc4s\\\\x82\\\\x17'}, {'name…",
         "first_seen": "2026-07-25 17:53:15,371",
         "process_count": 0,
         "processes": []
@@ -14,7 +14,7 @@
         "api": "CreateProcessInternalW",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'ApplicationName', 'value': ''}, {'name': 'CommandLine', 'value': 'C:\\\\Windows\\\\system32\\\\wermgr.exe'}, {'name': 'CreationFlags', 'value': '0x0800000c', 'pretty_value': 'CREATE_SUSPENDED|DETACHED_PROCESS|CREATE_NO_WINDOW'}, {'name': 'ProcessId', 'value': '4028'}, {'name': 'ThreadId', 'value': '3552'}, {'name': 'ProcessHandle', 'value': '0x000002ac'}, {'name': 'ThreadHandle', 'value': '0\u2026",
+        "first_args": "[{'name': 'ApplicationName', 'value': ''}, {'name': 'CommandLine', 'value': 'C:\\\\Windows\\\\system32\\\\wermgr.exe'}, {'name': 'CreationFlags', 'value': '0x0800000c', 'pretty_value': 'CREATE_SUSPENDED|DETACHED_PROCESS|CREATE_NO_WINDOW'}, {'name': 'ProcessId', 'value': '4028'}, {'name': 'ThreadId', 'value': '3552'}, {'name': 'ProcessHandle', 'value': '0x000002ac'}, {'name': 'ThreadHandle', 'value': '0…",
         "first_seen": "2026-08-10 22:20:13,375",
         "process_count": 0,
         "processes": []
@@ -50,7 +50,7 @@
         "api": "CryptDecrypt",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'CryptKey', 'value': '0x10c2a9f2e60'}, {'name': 'CryptHash', 'value': '0x00000000'}, {'name': 'Buffer', 'value': '\\\\xb7\\\\x03\\\\x00\\\\x00n\\\\x07\\\\x00\\\\x00<mcconf><ver>2000035</ver><gtag>lib163</gtag><servs><srv>36.91.117.231:443</srv><srv>36.89.228.201:443</srv><srv>103.75.32.173:443</srv><srv>45.115.172.105:443</srv><srv>36.95.23.89:443</srv><srv>103.123.86.104:443</srv><srva>94.54.148.227\u2026",
+        "first_args": "[{'name': 'CryptKey', 'value': '0x10c2a9f2e60'}, {'name': 'CryptHash', 'value': '0x00000000'}, {'name': 'Buffer', 'value': '\\\\xb7\\\\x03\\\\x00\\\\x00n\\\\x07\\\\x00\\\\x00<mcconf><ver>2000035</ver><gtag>lib163</gtag><servs><srv>36.91.117.231:443</srv><srv>36.89.228.201:443</srv><srv>103.75.32.173:443</srv><srv>45.115.172.105:443</srv><srv>36.95.23.89:443</srv><srv>103.123.86.104:443</srv><srva>94.54.148.227…",
         "first_seen": "2026-07-25 17:53:15,371",
         "process_count": 0,
         "processes": []
@@ -77,7 +77,7 @@
         "api": "CryptHashData",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'CryptHash', 'value': '0x10c2a9b9940'}, {'name': 'Buffer', 'value': '{BDBC2F92-10E2-489A-87F6-3BAA81222DFE}\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\\u2026",
+        "first_args": "[{'name': 'CryptHash', 'value': '0x10c2a9b9940'}, {'name': 'Buffer', 'value': '{BDBC2F92-10E2-489A-87F6-3BAA81222DFE}\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\…",
         "first_seen": "2026-07-25 17:53:13,340",
         "process_count": 0,
         "processes": []
@@ -329,7 +329,7 @@
         "api": "NtCreateFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x00000324'}, {'name': 'DesiredAccess', 'value': '0x80100080', 'pretty_value': 'GENERIC_READ|FILE_READ_ATTRIBUTES|SYNCHRONIZE'}, {'name': 'FileName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\5925ecddcc4b4ea9017a.exe'}, {'name': 'CreateDisposition', 'value': '1', 'pretty_value': 'FILE_OPEN'}, {'name': 'ShareAccess', 'value': '1', 'pretty_value': 'FILE_SHA\u2026",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x00000324'}, {'name': 'DesiredAccess', 'value': '0x80100080', 'pretty_value': 'GENERIC_READ|FILE_READ_ATTRIBUTES|SYNCHRONIZE'}, {'name': 'FileName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\5925ecddcc4b4ea9017a.exe'}, {'name': 'CreateDisposition', 'value': '1', 'pretty_value': 'FILE_OPEN'}, {'name': 'ShareAccess', 'value': '1', 'pretty_value': 'FILE_SHA…",
         "first_seen": "2026-07-25 17:53:14,981",
         "process_count": 0,
         "processes": []
@@ -365,7 +365,7 @@
         "api": "NtCreateUserProcess",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'ProcessHandle', 'value': '0x000002ac'}, {'name': 'ThreadHandle', 'value': '0x000002a8'}, {'name': 'ProcessDesiredAccess', 'value': '0x02000000'}, {'name': 'ThreadDesiredAccess', 'value': '0x02000000'}, {'name': 'ProcessFileName', 'value': ''}, {'name': 'ThreadName', 'value': ''}, {'name': 'ImagePathName', 'value': 'C:\\\\Windows\\\\system32\\\\wermgr.exe'}, {'name': 'CommandLine', 'value': '\u2026",
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0x000002ac'}, {'name': 'ThreadHandle', 'value': '0x000002a8'}, {'name': 'ProcessDesiredAccess', 'value': '0x02000000'}, {'name': 'ThreadDesiredAccess', 'value': '0x02000000'}, {'name': 'ProcessFileName', 'value': ''}, {'name': 'ThreadName', 'value': ''}, {'name': 'ImagePathName', 'value': 'C:\\\\Windows\\\\system32\\\\wermgr.exe'}, {'name': 'CommandLine', 'value': '…",
         "first_seen": "2026-08-10 22:20:12,875",
         "process_count": 0,
         "processes": []
@@ -383,7 +383,7 @@
         "api": "NtDeviceIoControlFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x000000e4'}, {'name': 'HandleName', 'value': '\\\\Device\\\\KsecDD'}, {'name': 'IoControlCode', 'value': '0x00390400'}, {'name': 'InputBuffer', 'value': 'M<+\\\\x1a\\\\x00\\\\x00\\\\x02\\\\x00\\\\xff\\\\xff\\\\xff\\\\xff\\\\xff\\\\xff\\\\xff\\\\xff\\\\x00\\\\x00\\\\x00\\\\x00\\\\xa3\\\\x04X\\\\xd60\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\xff\\\\xff\\\\xff\\\\xff\\\\xff\\\\xff\\\\xff\\\\xff\\\\x01\\\\x00\\\\x00\\\\x00\\\\x02\\\\x00\\\\x0\u2026",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x000000e4'}, {'name': 'HandleName', 'value': '\\\\Device\\\\KsecDD'}, {'name': 'IoControlCode', 'value': '0x00390400'}, {'name': 'InputBuffer', 'value': 'M<+\\\\x1a\\\\x00\\\\x00\\\\x02\\\\x00\\\\xff\\\\xff\\\\xff\\\\xff\\\\xff\\\\xff\\\\xff\\\\xff\\\\x00\\\\x00\\\\x00\\\\x00\\\\xa3\\\\x04X\\\\xd60\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\xff\\\\xff\\\\xff\\\\xff\\\\xff\\\\xff\\\\xff\\\\xff\\\\x01\\\\x00\\\\x00\\\\x00\\\\x02\\\\x00\\\\x0…",
         "first_seen": "2026-07-25 17:53:15,371",
         "process_count": 0,
         "processes": []
@@ -446,7 +446,7 @@
         "api": "NtOpenKeyEx",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'KeyHandle', 'value': '0x0000033c'}, {'name': 'DesiredAccess', 'value': '0x00000001', 'pretty_value': 'KEY_QUERY_VALUE'}, {'name': 'ObjectAttributesHandle', 'value': '0x00000338'}, {'name': 'ObjectAttributesName', 'value': 'SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Themes\\\\Personalize'}, {'name': 'ObjectAttributes', 'value': 'HKEY_CURRENT_USER\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentV\u2026",
+        "first_args": "[{'name': 'KeyHandle', 'value': '0x0000033c'}, {'name': 'DesiredAccess', 'value': '0x00000001', 'pretty_value': 'KEY_QUERY_VALUE'}, {'name': 'ObjectAttributesHandle', 'value': '0x00000338'}, {'name': 'ObjectAttributesName', 'value': 'SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Themes\\\\Personalize'}, {'name': 'ObjectAttributes', 'value': 'HKEY_CURRENT_USER\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentV…",
         "first_seen": "2026-07-25 17:53:14,996",
         "process_count": 0,
         "processes": []
@@ -482,7 +482,7 @@
         "api": "NtProtectVirtualMemory",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x7ffa067af000'}, {'name': 'ModuleName', 'value': 'kernel.appcore.dll'}, {'name': 'NumberOfBytesProtected', 'value': '0x00001000'}, {'name': 'MemoryType', 'value': '0x00000000'}, {'name': 'NewAccessProtection', 'value': '0x00000002', 'pretty_value': 'PAGE_READONLY'}, {'name': 'OldAccessProtection', 'value': '0x00\u2026",
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x7ffa067af000'}, {'name': 'ModuleName', 'value': 'kernel.appcore.dll'}, {'name': 'NumberOfBytesProtected', 'value': '0x00001000'}, {'name': 'MemoryType', 'value': '0x00000000'}, {'name': 'NewAccessProtection', 'value': '0x00000002', 'pretty_value': 'PAGE_READONLY'}, {'name': 'OldAccessProtection', 'value': '0x00…",
         "first_seen": "2026-07-25 17:53:14,981",
         "process_count": 0,
         "processes": []
@@ -554,7 +554,7 @@
         "api": "NtReadFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x00000324'}, {'name': 'HandleName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\5925ecddcc4b4ea9017a.exe'}, {'name': 'Buffer', 'value': 'MZ\\\\x90\\\\x00\\\\x03\\\\x00\\\\x00\\\\x00\\\\x04\\\\x00\\\\x00\\\\x00\\\\xff\\\\xff\\\\x00\\\\x00\\\\xb8\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00@\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x\u2026",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x00000324'}, {'name': 'HandleName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\5925ecddcc4b4ea9017a.exe'}, {'name': 'Buffer', 'value': 'MZ\\\\x90\\\\x00\\\\x03\\\\x00\\\\x00\\\\x00\\\\x04\\\\x00\\\\x00\\\\x00\\\\xff\\\\xff\\\\x00\\\\x00\\\\xb8\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00@\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x…",
         "first_seen": "2026-07-25 17:53:14,981",
         "process_count": 0,
         "processes": []
@@ -635,7 +635,7 @@
         "api": "RegCreateKeyExA",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'Registry', 'value': '0x80000001', 'pretty_value': 'HKEY_CURRENT_USER'}, {'name': 'SubKey', 'value': \"Software\\\\Sasha's Apps\\\\RegistryDemo\\\\v1.0\"}, {'name': 'Class', 'value': ''}, {'name': 'Access', 'value': '0x0002003f', 'pretty_value': 'KEY_QUERY_VALUE|KEY_SET_VALUE|KEY_CREATE_SUB_KEY|KEY_ENUMERATE_SUB_KEYS|KEY_NOTIFY|KEY_CREATE_LINK|STANDARD_RIGHTS_REQUIRED'}, {'name': 'Handle', 'val\u2026",
+        "first_args": "[{'name': 'Registry', 'value': '0x80000001', 'pretty_value': 'HKEY_CURRENT_USER'}, {'name': 'SubKey', 'value': \"Software\\\\Sasha's Apps\\\\RegistryDemo\\\\v1.0\"}, {'name': 'Class', 'value': ''}, {'name': 'Access', 'value': '0x0002003f', 'pretty_value': 'KEY_QUERY_VALUE|KEY_SET_VALUE|KEY_CREATE_SUB_KEY|KEY_ENUMERATE_SUB_KEYS|KEY_NOTIFY|KEY_CREATE_LINK|STANDARD_RIGHTS_REQUIRED'}, {'name': 'Handle', 'val…",
         "first_seen": "2026-08-10 22:20:11,766",
         "process_count": 0,
         "processes": []
@@ -644,7 +644,7 @@
         "api": "RegCreateKeyExW",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'Registry', 'value': '0x000002a8'}, {'name': 'SubKey', 'value': 'TenantRestrictions\\\\Payload'}, {'name': 'Class', 'value': ''}, {'name': 'Access', 'value': '0x00000010', 'pretty_value': 'KEY_NOTIFY'}, {'name': 'Handle', 'value': '0x000002bc'}, {'name': 'FullName', 'value': 'HKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\Policies\\\\Microsoft\\\\Windows\\\\TenantRestrictions\\\\Payload'}, {'name': 'Disposition',\u2026",
+        "first_args": "[{'name': 'Registry', 'value': '0x000002a8'}, {'name': 'SubKey', 'value': 'TenantRestrictions\\\\Payload'}, {'name': 'Class', 'value': ''}, {'name': 'Access', 'value': '0x00000010', 'pretty_value': 'KEY_NOTIFY'}, {'name': 'Handle', 'value': '0x000002bc'}, {'name': 'FullName', 'value': 'HKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\Policies\\\\Microsoft\\\\Windows\\\\TenantRestrictions\\\\Payload'}, {'name': 'Disposition',…",
         "first_seen": "2026-07-25 17:53:11,903",
         "process_count": 0,
         "processes": []
@@ -806,7 +806,7 @@
         "api": "WriteProcessMemory",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x03bb0000'}, {'name': 'Buffer', 'value': '\\\\xb0\\\\xce\\\\xa5p\\\\xd7k\\\\xca\\\\xf3\\\\xc86\\\\xa3$\\\\xbe\\\\xca\\\\xd01\\\\xa2\\\\x90\\\\x83\\\\xeb\\\\xa9_Y3\\\\x8d\\\\xd4\\\\xd2\\\\xea\\\\xb3\\\\x82h\\\\xf1\\\\xb5\\'\\\\xf4\\\\xec\"\\\\x9a\\\\x1ds\\\\xd4\\\\x11\\\\x1f\\\\xc8\\\\xa6N\\\\xc6\\\\x8f+\\\\xae\\\\x98\\\\x12\\\\xf5m0\\\\xac\\\\xd0\"\\\\xc1\\\\x98f\\\\x05\\\\x11$f\\\\xee\\\\xad\\\\xea\\\\x18\\\\x0f\u2026",
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x03bb0000'}, {'name': 'Buffer', 'value': '\\\\xb0\\\\xce\\\\xa5p\\\\xd7k\\\\xca\\\\xf3\\\\xc86\\\\xa3$\\\\xbe\\\\xca\\\\xd01\\\\xa2\\\\x90\\\\x83\\\\xeb\\\\xa9_Y3\\\\x8d\\\\xd4\\\\xd2\\\\xea\\\\xb3\\\\x82h\\\\xf1\\\\xb5\\'\\\\xf4\\\\xec\"\\\\x9a\\\\x1ds\\\\xd4\\\\x11\\\\x1f\\\\xc8\\\\xa6N\\\\xc6\\\\x8f+\\\\xae\\\\x98\\\\x12\\\\xf5m0\\\\xac\\\\xd0\"\\\\xc1\\\\x98f\\\\x05\\\\x11$f\\\\xee\\\\xad\\\\xea\\\\x18\\\\x0f…",
         "first_seen": "2026-08-10 22:20:12,016",
         "process_count": 0,
         "processes": []
@@ -3450,822 +3450,822 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:560:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:560:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:648:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:648:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:732:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:728:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:816:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:816:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:872:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:872:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:956:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:956:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\RasPbFile",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Instance0:  ESENT Performance Data Schema Version 295",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1000:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1000:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:356:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:376:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:376:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\DBWinMutex",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1060:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1060:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1120:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1244:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1488:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1488:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\AudioResourceAcquisitionMutex",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1684:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1692:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1692:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1792:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1848:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1848:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1940:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2096:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2916:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2916:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:3060:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:3060:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1876:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1876:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\CDPUserSvc_Ready_db7a3b24-68b7-4c2e-8335-533dd99ee0f6_S-1-5-21-1795187001-776152809-4276559823-1000",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:644:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\AccessibilitySoundAgentRunning",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\MSCTF.CtfMonitorInstMutexDefault1",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\MSCTF.CtfServerMutexDefault1",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\InputServiceHostMutex",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:644:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\MSCTF.Asm.MutexDefault1",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\MidiMapper_modLongMessage_RefCnt",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2344:168:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\_Microsoft_EdgeUpdate_logging_mutex_C:ProgramDataMicrosoftEdgeUpdateLogMicrosoftEdgeUpdate.log",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\EdgeUpdate{09E661D0-A0CE-4051-BB50-E021BA16FBFC}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2508:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SessionImmersiveColorMutex",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2508:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_16.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\_SHuassist.mtx",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_32.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_256.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_96.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_48.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_idx.db!rwWriterMutex",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_2560.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_1920.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_1280.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_exif.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_wide_alternate.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_idx.db!IconCacheInit",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_custom_stream.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_wide.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_sr.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_768.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SignalManager_RegistrationCacheMutex",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\ZonesCacheCounterMutex",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\ZonesLockedCacheCounterMutex",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2900:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2900:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:3636:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:3688:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:3688:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:4068:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SteamWebHelper_GPUProcPIDStream_mutex-IPCWrapper",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SteamController_Master_Command_mutex-IPCWrapper",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SteamController_Master_Cursor_Control_mutex-IPCWrapper",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SteamController_Master_Cursor_Data_mutex-IPCWrapper",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SteamController_Master_Visualization_Data_mutex-IPCWrapper",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SteamXInput_mutex-IPCWrapper",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\DirectInput.{89521361-AA8A-11CF-BFC7-444553540000}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\DirectInput.{5944E682-C92E-11CF-BFC7-444553540000}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SteamChrome_ClientStream_4068_41527_client_mutex-IPCWrapper",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SteamChrome_ClientStream_4068_41527_server_mutex-IPCWrapper",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2756:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2756:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1436:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1436:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SteamChrome_MasterStream_spid4068_mutex-IPCWrapper",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:3336:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\__#_KSOLITE_DOMAIN_CONFIG_MUTEX_KEY_#__3336",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\__#_WPSCLOUDSVRAPPLICATION_INSTANCE_EXIST_KEY_#__",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\qing_3.1.0.1810.lock",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2392:168:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:3264:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:4004:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:3584:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:3584:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2868:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\browser.a3ba19ec797144349ea5dbc1b742aca1.26886.e3afed0047b08059.high.dpi1.singleton",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2868:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:828:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2676:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2676:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2604:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2604:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:964:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:964:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2740:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2740:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:4608:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:4608:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:4668:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:4668:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:4732:168:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\EdgeUpdate{9FE41F29-8211-488D-B96A-81FCD0A8ACE3}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\EdgeUpdate{8A5FF6DC-FF03-4CB3-8834-D3AD1DE301DF}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:4732:64:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:3240:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:3240:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:3440:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:4404:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:4404:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:5072:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\mfx_d3d_mutex",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:4164:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2516:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2516:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2108:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\MoUsoCoreworkerRunning",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2108:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:3644:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\ADAP_WMI_ENTRY",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\RefreshRA_Mutex",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\RefreshRA_Mutex_Lib",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\RefreshRA_Mutex_Flag",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:5096:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1236:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2420:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:4304:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:4028:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:4952:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:5300:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\46064a736c13e88206c9ba821b32125edf4962767629ea9b8858d9a75bf513c1",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:5308:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:5308:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:5408:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:5428:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\__#_KCCSDK_NEW_WPS_PROCESS_EXIST_KEY_#__",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\__#_KSOLITE_DOMAIN_CONFIG_MUTEX_KEY_#__5428",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\__#_ACCOUNTSDK_CHECKPDFACCOUNT_KEY_#__",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:5436:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\KWPSBUBBLE_XA_{A515CF22-DCED-77F7-35D5-B514B2AB7AED}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\__#_KSOLITE_DOMAIN_CONFIG_MUTEX_KEY_#__5436",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:5712:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\TenantRestrictions\\Payload",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
@@ -4290,22 +4290,22 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Session Manager\\ResourcePolicies",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Cryptography\\ECCParameters",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Cryptography\\ECCParameters\\nistP384",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Sasha's Apps\\RegistryDemo\\v1.0",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
@@ -4315,7 +4315,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CustomLocale\\en-US",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4325,17 +4325,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\ExtendedLocale\\en-US",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CustomLocale\\tr-TR",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\ExtendedLocale\\tr-TR",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4345,41 +4345,16 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\GRE_Initialize\\DisableMetaFiles",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\GRE_Initialize\\DisableUmpdBufferSizeCheck",
-        "operation": "access",
-        "value": null
-      },
-      {
-        "key": "0x00000262",
         "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000002a8",
-        "operation": "create",
-        "value": null
-      },
-      {
-        "key": "0x80000002",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000340",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x80000001",
-        "operation": "create",
         "value": null
       }
     ],
-    "total": 187
+    "total": 182
   },
   "sandbox_services_and_tasks": {
     "commands": [

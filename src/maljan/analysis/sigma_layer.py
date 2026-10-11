@@ -50,6 +50,7 @@ from sigma.rule import SigmaRule
 from sigma.types import SigmaNumber, SigmaRegularExpression, SigmaString, SpecialChars
 
 from maljan.core.logger import logger
+from maljan.providers.call_arguments import pick_argument
 
 # ---------------------------------------------------------------------------
 # Default rules directory
@@ -577,22 +578,16 @@ class SigmaLayer:
 
 
 def _sandbox_arg_value(args: Any, names: tuple[str, ...]) -> str | None:
-    """Pull the first matching argument value from a CAPE call's ``arguments``.
+    """The value of the first of ``names``, in that order, a sandbox call's ``arguments`` carry.
 
     Handles both the direct-key form (``{"FullName": "..."}``) and the
-    name/value-pair form (``{"name": "FullName", "value": "..."}``).
+    name/value-pair form (``{"name": "FullName", "value": "..."}``); the order
+    of ``names`` decides, never the order the call lists its arguments in.
     """
     if not isinstance(args, list):
         return None
-    for item in args:
-        if not isinstance(item, dict):
-            continue
-        for name in names:
-            if name in item and item[name] not in (None, ""):
-                return str(item[name])
-        if str(item.get("name")) in names and item.get("value") not in (None, ""):
-            return str(item.get("value"))
-    return None
+    value = pick_argument(args, names, accept=lambda v: v not in (None, ""))
+    return None if value is None else str(value)
 
 
 def build_events_from_sandbox(sandbox_report: dict[str, Any] | None) -> list[dict[str, str]]:

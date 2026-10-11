@@ -257,7 +257,7 @@
         "api": "NtCreateFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x0000029c'}, {'name': 'DesiredAccess', 'value': '0x40100080', 'pretty_value': 'GENERIC_WRITE|FILE_READ_ATTRIBUTES|SYNCHRONIZE'}, {'name': 'FileName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\2782DD2729E14013999374\\\\Screenshot.jpg'}, {'name': 'CreateDisposition', 'value': '3', 'pretty_value': 'FILE_OPEN_IF'}, {'name': 'ShareAccess', 'value': '1', 'pretty_value\u2026",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x0000029c'}, {'name': 'DesiredAccess', 'value': '0x40100080', 'pretty_value': 'GENERIC_WRITE|FILE_READ_ATTRIBUTES|SYNCHRONIZE'}, {'name': 'FileName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\2782DD2729E14013999374\\\\Screenshot.jpg'}, {'name': 'CreateDisposition', 'value': '3', 'pretty_value': 'FILE_OPEN_IF'}, {'name': 'ShareAccess', 'value': '1', 'pretty_value…",
         "first_seen": "2026-08-13 20:59:36,245",
         "process_count": 0,
         "processes": []
@@ -347,7 +347,7 @@
         "api": "NtProtectVirtualMemory",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x7ffa09b48000'}, {'name': 'ModuleName', 'value': 'GDI32.dll'}, {'name': 'NumberOfBytesProtected', 'value': '0x00001000'}, {'name': 'MemoryType', 'value': '0x00000000'}, {'name': 'NewAccessProtection', 'value': '0x00000004', 'pretty_value': 'PAGE_READWRITE'}, {'name': 'OldAccessProtection', 'value': '0x00000002',\u2026",
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x7ffa09b48000'}, {'name': 'ModuleName', 'value': 'GDI32.dll'}, {'name': 'NumberOfBytesProtected', 'value': '0x00001000'}, {'name': 'MemoryType', 'value': '0x00000000'}, {'name': 'NewAccessProtection', 'value': '0x00000004', 'pretty_value': 'PAGE_READWRITE'}, {'name': 'OldAccessProtection', 'value': '0x00000002',…",
         "first_seen": "2026-08-13 20:59:35,932",
         "process_count": 0,
         "processes": []
@@ -482,7 +482,7 @@
         "api": "NtWriteFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x0000029c'}, {'name': 'HandleName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\2782DD2729E14013999374\\\\Screenshot.jpg'}, {'name': 'Buffer', 'value': '\\\\xff\\\\xd8\\\\xff\\\\xe0\\\\x00\\\\x10JFIF\\\\x00\\\\x01\\\\x01\\\\x01\\\\x00`\\\\x00`\\\\x00\\\\x00\\\\xff\\\\xdb\\\\x00C\\\\x00\\\\x08\\\\x06\\\\x06\\\\x07\\\\x06\\\\x05\\\\x08\\\\x07\\\\x07\\\\x07\\t\\t\\\\x08\\n\\\\x0c\\\\x14\\r\\\\x0c\\\\x0b\\\\x0b\\\\x0c\\\\x19\\\\x12\\\\x13\\\\x0f\\\\x\u2026",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x0000029c'}, {'name': 'HandleName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\2782DD2729E14013999374\\\\Screenshot.jpg'}, {'name': 'Buffer', 'value': '\\\\xff\\\\xd8\\\\xff\\\\xe0\\\\x00\\\\x10JFIF\\\\x00\\\\x01\\\\x01\\\\x01\\\\x00`\\\\x00`\\\\x00\\\\x00\\\\xff\\\\xdb\\\\x00C\\\\x00\\\\x08\\\\x06\\\\x06\\\\x07\\\\x06\\\\x05\\\\x08\\\\x07\\\\x07\\\\x07\\t\\t\\\\x08\\n\\\\x0c\\\\x14\\r\\\\x0c\\\\x0b\\\\x0b\\\\x0c\\\\x19\\\\x12\\\\x13\\\\x0f\\\\x…",
         "first_seen": "2026-08-13 20:59:36,995",
         "process_count": 0,
         "processes": []
@@ -3149,7 +3149,7 @@
     "registry": [
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\LDAP",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3174,102 +3174,102 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\LDAP\\1940ba18ed66dd2f1c3d.exe",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CLASSES_ROOT\\CLSID\\{A26CEC36-234C-4950-AE16-E34AACE71D0D}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CLASSES_ROOT\\CLSID\\{E9A4A80A-44FE-4DE4-8971-7150B10A5199}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CLASSES_ROOT\\CLSID\\{7693E886-51C9-4070-8419-9F70738EC8FA}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CLASSES_ROOT\\CLSID\\{AC4CE3CB-E1C1-44CD-8215-5A1665509EC2}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CLASSES_ROOT\\CLSID\\{0DBECEC1-9EB3-4860-9C6F-DDBE86634575}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CLASSES_ROOT\\CLSID\\{72B624DF-AE11-4948-A65C-351EB0829419}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CLASSES_ROOT\\CLSID\\{01B90D9A-8209-47F7-9C52-E1244BF50CED}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CLASSES_ROOT\\CLSID\\{E7E79A30-4F2C-4FAB-8D00-394F2D6BBEBE}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CLASSES_ROOT\\CLSID\\{7F12E753-FC71-43D7-A51D-92F35977ABB5}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CLASSES_ROOT\\CLSID\\{AA94DCC2-B8B0-4898-B835-000AABD74393}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CLASSES_ROOT\\CLSID\\{1765E14E-1BD4-462E-B6B1-590BF1262AC6}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CLASSES_ROOT\\CLSID\\{22C21F93-7DDB-411C-9B17-C5B7BD064ABC}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CLASSES_ROOT\\CLSID\\{ED822C8C-D6BE-4301-A631-0E1416BAD28F}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CLASSES_ROOT\\CLSID\\{6D68D1DE-D432-4B0F-923A-091183A9BDA7}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CLASSES_ROOT\\CLSID\\{076C2A6C-F78F-4C46-A723-3583E70876EA}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CLASSES_ROOT\\CLSID\\{C17CABB2-D4A3-47D7-A557-339B2EFBD4F1}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CLASSES_ROOT\\CLSID\\{9CB5172B-D600-46BA-AB77-77BB7E3A00D9}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CLASSES_ROOT\\CLSID\\{FAE3D380-FEA4-4623-8C75-C6B61110B681}\\Instance",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CLASSES_ROOT\\CLSID\\{FAE3D380-FEA4-4623-8C75-C6B61110B681}\\Instance\\Disabled",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3304,8 +3304,8 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Control Panel\\Desktop\\PreferredUILanguages",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "\\x00"
       },
       {
         "key": "HKEY_CURRENT_USER\\Control Panel\\Desktop\\MuiCached",
@@ -3314,8 +3314,8 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Control Panel\\Desktop\\MuiCached\\MachinePreferredUILanguages",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "\\x00"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\GRE_Initialize",
@@ -3324,26 +3324,16 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\GRE_Initialize\\DisableMetaFiles",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\GRE_Initialize\\DisableUmpdBufferSizeCheck",
-        "operation": "access",
-        "value": null
-      },
-      {
-        "key": "0x80000002",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x80000000",
         "operation": "query",
         "value": null
       }
     ],
-    "total": 39
+    "total": 37
   },
   "sandbox_services_and_tasks": {
     "commands": [],

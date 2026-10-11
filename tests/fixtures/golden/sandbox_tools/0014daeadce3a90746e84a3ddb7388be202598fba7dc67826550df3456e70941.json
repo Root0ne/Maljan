@@ -3845,22 +3845,22 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\software",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Local AppWizard-Generated Applications",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Local AppWizard-Generated Applications\\CDB",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Local AppWizard-Generated Applications\\CDB\\Recent File List",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
@@ -3885,7 +3885,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Local AppWizard-Generated Applications\\CDB\\Settings",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
@@ -3900,7 +3900,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CustomLocale\\en-US",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3910,7 +3910,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\ExtendedLocale\\en-US",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3920,7 +3920,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Session Manager\\ResourcePolicies",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3935,13 +3935,13 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\DataStore_V1.0\\Disable",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\DataStore_V1.0\\DataFilePath",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "C:\\Windows\\Fonts\\staticcache.dat"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback",
@@ -3950,82 +3950,82 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane1",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane2",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "SimSun-ExtB"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane3",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "SimSun-ExtG"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane4",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane5",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane6",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane8",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane9",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane10",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane11",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane12",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane13",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane14",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane15",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane16",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4045,12 +4045,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\GRE_Initialize\\DisableMetaFiles",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\GRE_Initialize\\DisableUmpdBufferSizeCheck",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4060,787 +4060,787 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:560:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:560:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:648:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:648:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:732:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:728:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:816:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:816:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:872:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:872:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:956:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Instance0:  ESENT Performance Data Schema Version 295",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:956:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\RasPbFile",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1000:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1000:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:356:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:356:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:376:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:376:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\DBWinMutex",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1060:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1060:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1120:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1244:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1488:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1488:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\AudioResourceAcquisitionMutex",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1684:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1692:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1692:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1792:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1848:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1848:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1940:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2096:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2916:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2916:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:3060:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:3060:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1876:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1876:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\CDPUserSvc_Ready_db7a3b24-68b7-4c2e-8335-533dd99ee0f6_S-1-5-21-1795187001-776152809-4276559823-1000",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:644:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\AccessibilitySoundAgentRunning",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\MSCTF.CtfMonitorInstMutexDefault1",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\MSCTF.CtfServerMutexDefault1",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\InputServiceHostMutex",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:644:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\MSCTF.Asm.MutexDefault1",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\MidiMapper_modLongMessage_RefCnt",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2344:168:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\_Microsoft_EdgeUpdate_logging_mutex_C:ProgramDataMicrosoftEdgeUpdateLogMicrosoftEdgeUpdate.log",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\EdgeUpdate{09E661D0-A0CE-4051-BB50-E021BA16FBFC}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2508:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SessionImmersiveColorMutex",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2508:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_16.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_idx.db!rwWriterMutex",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\_SHuassist.mtx",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_768.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_256.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_32.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_48.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_sr.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_2560.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_1920.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_wide_alternate.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_custom_stream.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_idx.db!IconCacheInit",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_exif.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_wide.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_1280.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SignalManager_RegistrationCacheMutex",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\ZonesCacheCounterMutex",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\ZonesLockedCacheCounterMutex",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\C::Users:Admin:AppData:Local:Microsoft:Windows:Explorer:iconcache_96.db!dfMaintainer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2900:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2900:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:3636:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:3688:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:3688:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:4068:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SteamWebHelper_GPUProcPIDStream_mutex-IPCWrapper",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SteamController_Master_Command_mutex-IPCWrapper",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SteamController_Master_Cursor_Control_mutex-IPCWrapper",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SteamController_Master_Cursor_Data_mutex-IPCWrapper",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SteamController_Master_Visualization_Data_mutex-IPCWrapper",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SteamXInput_mutex-IPCWrapper",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\DirectInput.{89521361-AA8A-11CF-BFC7-444553540000}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\DirectInput.{5944E682-C92E-11CF-BFC7-444553540000}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SteamChrome_ClientStream_4068_41527_client_mutex-IPCWrapper",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SteamChrome_ClientStream_4068_41527_server_mutex-IPCWrapper",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2756:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2756:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1436:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1436:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SteamChrome_MasterStream_spid4068_mutex-IPCWrapper",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:3128:168:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\EdgeUpdate{8061D004-DAFE-413C-AEF6-A3D067FFA5D8}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:3336:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\__#_KSOLITE_DOMAIN_CONFIG_MUTEX_KEY_#__3336",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\__#_WPSCLOUDSVRAPPLICATION_INSTANCE_EXIST_KEY_#__",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\qing_3.1.0.1810.lock",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\softbusfeature_3.1.0.6051.lock",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\upkdcsdk260625_3.1.0.1.lock",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2392:168:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:3264:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:4004:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2284:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2284:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2868:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\browser.a3ba19ec797144349ea5dbc1b742aca1.26886.e3afed0047b08059.high.dpi1.singleton",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2868:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:3800:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:3848:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:3848:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2472:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2472:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1780:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1780:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1892:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1892:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:4792:168:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\EdgeUpdate{8A5FF6DC-FF03-4CB3-8834-D3AD1DE301DF}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\EdgeUpdate{76524F9B-42D7-48C8-B7DF-FAB9E93834BF}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\EdgeUpdate{9FE41F29-8211-488D-B96A-81FCD0A8ACE3}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:4792:64:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:5076:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:5076:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:4148:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:4148:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:4724:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2196:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2196:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:836:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:836:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:3520:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:3520:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:4436:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2184:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\mfx_d3d_mutex",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2260:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\MoUsoCoreworkerRunning",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2260:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1252:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:4996:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:4748:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:1272:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:4856:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:424:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2080:168:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:2924:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:5352:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:5788:304:WilStaging_02",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\SM0:5788:120:WilError_03",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\TenantRestrictions\\Payload",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
@@ -4855,12 +4855,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Cryptography\\ECCParameters",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Cryptography\\ECCParameters\\nistP384",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4870,7 +4870,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\SecurityProviders\\Schannel",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
@@ -4885,27 +4885,27 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Cryptography\\OID",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.10.3.37!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.10.3.37!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4920,8 +4920,8 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\MUI\\StringCacheSettings\\StringCacheGeneration",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "3"
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\MuiCache\\3\\52C64B7E",
@@ -4930,17 +4930,17 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\MuiCache\\3\\52C64B7E\\@%SystemRoot%\\System32\\ci.dll,-100",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "Isolated User Mode (IUM)"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.10.3.42!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.10.3.42!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4950,17 +4950,17 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\MuiCache\\3\\52C64B7E\\@%SystemRoot%\\System32\\ci.dll,-101",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "Enclave"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.64.1.1!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.64.1.1!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4970,17 +4970,17 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\MuiCache\\3\\52C64B7E\\@%SystemRoot%\\system32\\dnsapi.dll,-103",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "Domain Name System (DNS) Server Trust"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.67.1.1!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.67.1.1!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4990,17 +4990,17 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\MuiCache\\3\\52C64B7E\\@%SystemRoot%\\System32\\fveui.dll,-843",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "BitLocker Drive Encryption"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.67.1.2!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.67.1.2!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5010,17 +5010,17 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\MuiCache\\3\\52C64B7E\\@%SystemRoot%\\System32\\fveui.dll,-844",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "BitLocker Data Recovery Agent"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.76.6.1!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.76.6.1!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5030,17 +5030,17 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\MuiCache\\3\\52C64B7E\\@%SystemRoot%\\System32\\wuaueng.dll,-400",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "Windows Update"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.80.1!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.80.1!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5050,17 +5050,17 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\MuiCache\\3\\52C64B7E\\@%SystemRoot%\\system32\\WindowsPowerShell\\v1.0\\powershell.exe,-124",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "Document Encryption"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.92.1.1!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllFindOIDInfo\\1.3.6.1.4.1.311.92.1.1!7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5070,12 +5070,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Local Settings\\MuiCache\\3\\52C64B7E\\@%SystemRoot%\\system32\\NgcRecovery.dll,-100",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "Windows Hello Recovery Key Encryption"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\crypt32",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5090,7 +5090,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CertDllCreateCertificateChainEngine\\Config",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5105,17 +5105,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\SystemCertificates\\Root\\ProtectedRoots",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\SystemCertificates\\AuthRoot",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\SystemCertificates\\AuthRoot\\AutoUpdate",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5125,7 +5125,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\SystemCertificates\\ChainEngine\\Config",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5215,17 +5215,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CertDllCreateCertificateChainEngine\\Config\\Default",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\CI\\Config",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\CI\\Config\\Default",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5440,112 +5440,112 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CertDllOpenStoreProv",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CertDllOpenStoreProv\\#16",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CertDllOpenStoreProv\\Ldap",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 1",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 1\\CertDllOpenStoreProv",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_USERS\\S-1-5-21-1795187001-776152809-4276559823-1000",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\SystemCertificates\\CA\\PhysicalStores",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\SystemCertificates\\CA",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\CA\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\CA\\Certificates",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\CA\\CRLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\CA\\CTLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\SystemCertificates\\CA",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\CA\\Certificates",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\CA\\CRLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\CA\\CTLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\SystemCertificates\\CA\\PhysicalStores",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\SystemCertificates\\CA",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\CA\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\CA\\Certificates",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\CA\\Certificates\\109F1CAED645BB78B3EA2B94C0697C740733031C",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5555,7 +5555,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\CA\\Certificates\\D559A586669B08F46A30A133F8A9ED3D038E2EA8",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5565,7 +5565,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\CA\\Certificates\\FEE449EE0E3965A5246F000E87FDE2A065FD89D4",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5575,12 +5575,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\CA\\CRLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\CA\\CRLs\\A377D1B1C0538833035211F4083D00FECC414DAB",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5590,157 +5590,157 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\CA\\CTLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\SystemCertificates\\CA",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\CA\\Certificates",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\CA\\CRLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\CA\\CTLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\EnterpriseCertificates\\CA\\PhysicalStores",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\EnterpriseCertificates\\CA",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\CA\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\CA\\Certificates",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\CA\\CRLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\CA\\CTLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\SystemCertificates\\Disallowed\\PhysicalStores",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\SystemCertificates\\Disallowed",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\SystemCertificates\\TrustedPublisher\\Safer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\SystemCertificates\\TrustedPublisher\\Safer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\SystemCertificates\\TrustedPublisher\\Safer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\Disallowed\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\Disallowed\\Certificates",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\Disallowed\\CRLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\Disallowed\\CTLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\SystemCertificates\\Disallowed",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\Disallowed\\Certificates",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\Disallowed\\CRLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\Disallowed\\CTLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\SystemCertificates\\Disallowed\\PhysicalStores",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\SystemCertificates\\Disallowed",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\Disallowed\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\Disallowed\\Certificates",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\Disallowed\\CRLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\Disallowed\\CTLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\Disallowed\\CTLs\\27748148BBE67A43CDBFEC6C3784862CE134E6EA",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5750,87 +5750,87 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\SystemCertificates\\Disallowed",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\Disallowed\\Certificates",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\Disallowed\\CRLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\Disallowed\\CTLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\EnterpriseCertificates\\Disallowed\\PhysicalStores",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\EnterpriseCertificates\\Disallowed",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\Disallowed\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\Disallowed\\Certificates",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\Disallowed\\CRLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\Disallowed\\CTLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\SystemCertificates\\Root\\PhysicalStores",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\SystemCertificates\\Root",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\SystemCertificates\\Root\\ProtectedRoots",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\Root\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\Root\\Certificates",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\Root\\CRLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\Root\\CTLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
@@ -5840,27 +5840,27 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\SystemCertificates\\Root\\PhysicalStores",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\SystemCertificates\\Root",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\ROOT\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\ROOT\\Certificates",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\ROOT\\Certificates\\0119E81BE9A14CD8E22F40AC118C687ECBA3F4D8",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5870,7 +5870,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\ROOT\\Certificates\\06F1AA330B927B753A40E68CDF22E34BCBEF3352",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5880,7 +5880,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\ROOT\\Certificates\\18F7C1FCC3090203FD5BAA2F861A754976C8DD25",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5890,7 +5890,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\ROOT\\Certificates\\245C97DF7514E7CF2DF8BE72AE957B9E04741E85",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5900,7 +5900,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\ROOT\\Certificates\\31F9FC8BA3805986B721EA7295C65B3A44534274",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5910,7 +5910,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\ROOT\\Certificates\\3B1EFD3A66EA28B16697394703A72CA340A05BD5",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5920,7 +5920,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\ROOT\\Certificates\\7F88CD7223F3C813818C994614A89C99FA3B5247",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5930,7 +5930,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\ROOT\\Certificates\\8F43288AD272F3103B6FB1428485EA3014C0BCFE",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5940,7 +5940,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\ROOT\\Certificates\\92B46C76E13054E104F230517E6E504D43AB10B5",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5950,7 +5950,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\ROOT\\Certificates\\A43489159A520F0D93D032CCAF37E7FE20A8B419",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5960,7 +5960,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\ROOT\\Certificates\\BE36A4562FB2EE05DBB3D32323ADF445084ED656",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5970,7 +5970,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\ROOT\\Certificates\\CDD4EEAE6000AC7F40C3802C171E30148030C072",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -5980,32 +5980,32 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\ROOT\\CRLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\ROOT\\CTLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\SystemCertificates\\AuthRoot",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot\\Certificates",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot\\Certificates\\02FAF3E291435468607857694DF5E45B68851868",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6015,7 +6015,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot\\Certificates\\0563B8630D62D75ABBC8AB1E4BDFB5A899B24D43",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6025,7 +6025,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot\\Certificates\\2B8F1B57330DBBA2D07A6C51F70EE90DDAB9AD8E",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6035,7 +6035,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot\\Certificates\\4EFC31460C619ECAE59C1BCE2C008036D94C84B8",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6045,7 +6045,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot\\Certificates\\51501FBFCE69189D609CFAF140C576755DCC1FDF",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6055,7 +6055,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot\\Certificates\\742C3192E607E424EB4549542BE1BBC53E6174E2",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6065,7 +6065,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot\\Certificates\\7E04DE896A3E666D00E687D33FFAD93BE83D349E",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6075,7 +6075,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot\\Certificates\\A8985D3A65E5E5C4B2D7D66D40C6DD2FB19C5436",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6085,7 +6085,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot\\Certificates\\B1BC968BD4F49D622AA89A81F2150152A41D829C",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6095,7 +6095,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot\\Certificates\\B51C067CEE2B0C3DF855AB2D92F4FE39D4E70F0E",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6105,7 +6105,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot\\Certificates\\CABD2A79A1076A31F21D253635CB039D4329A5E8",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6115,7 +6115,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot\\Certificates\\D69B561148F01C77C54578C10926DF5B856976AD",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6125,7 +6125,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot\\Certificates\\DDFB16CD4931C973A2037D3FC83A4D7D775D05E4",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6135,7 +6135,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot\\Certificates\\DF3C24F9BFD666761B268073FE06D1CC8D4F82A4",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6145,382 +6145,382 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot\\CRLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\AuthRoot\\CTLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\SystemCertificates\\Root",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\Root\\Certificates",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\Root\\CRLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\Root\\CTLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\EnterpriseCertificates\\Root\\PhysicalStores",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\EnterpriseCertificates\\Root",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\Root\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\Root\\Certificates",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\Root\\CRLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\Root\\CTLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\SystemCertificates\\SmartCardRoot",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\SmartCardRoot\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\SmartCardRoot\\Certificates",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\SmartCardRoot\\CRLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\SmartCardRoot\\CTLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\SystemCertificates\\SmartCardRoot",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\SmartCardRoot\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\SmartCardRoot\\Certificates",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\SmartCardRoot\\CRLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\SmartCardRoot\\CTLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\SystemCertificates\\TrustedPeople\\PhysicalStores",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\SystemCertificates\\TrustedPeople",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\TrustedPeople\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\TrustedPeople\\Certificates",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\TrustedPeople\\CRLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\TrustedPeople\\CTLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\SystemCertificates\\TrustedPeople",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\TrustedPeople\\Certificates",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\TrustedPeople\\CRLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\TrustedPeople\\CTLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\SystemCertificates\\TrustedPeople\\PhysicalStores",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\SystemCertificates\\TrustedPeople",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\TrustedPeople\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\TrustedPeople\\Certificates",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\TrustedPeople\\CRLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\TrustedPeople\\CTLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\SystemCertificates\\TrustedPeople",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\TrustedPeople\\Certificates",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\TrustedPeople\\CRLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\TrustedPeople\\CTLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\EnterpriseCertificates\\TrustedPeople\\PhysicalStores",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\EnterpriseCertificates\\TrustedPeople",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\TrustedPeople\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\TrustedPeople\\Certificates",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\TrustedPeople\\CRLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\TrustedPeople\\CTLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\SystemCertificates\\trust\\PhysicalStores",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\SystemCertificates\\trust",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\trust\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\trust\\Certificates",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\trust\\CRLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\SystemCertificates\\trust\\CTLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\SystemCertificates\\trust",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\trust\\Certificates",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\trust\\CRLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\trust\\CTLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\SystemCertificates\\trust\\PhysicalStores",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\SystemCertificates\\trust",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\trust\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\trust\\Certificates",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\trust\\CRLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\SystemCertificates\\trust\\CTLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\SystemCertificates\\trust",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\trust\\Certificates",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\trust\\CRLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\trust\\CTLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\EnterpriseCertificates\\trust\\PhysicalStores",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\EnterpriseCertificates\\trust",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\Trust\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\Trust\\Certificates",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\Trust\\CRLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\EnterpriseCertificates\\Trust\\CTLs",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Diagnostics",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6530,7 +6530,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\System",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6540,7 +6540,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\Setup",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6550,12 +6550,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\SystemCertificates",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\SystemCertificates",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6565,7 +6565,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\SystemCertificates\\AuthRoot\\AutoUpdate",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -6595,306 +6595,41 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllImportPublicKeyInfoEx2",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 1\\CryptDllImportPublicKeyInfoEx2",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Cryptography\\ECCParameters\\nistP256",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllVerifyEncodedSignature",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 1\\CryptDllVerifyEncodedSignature",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CertDllVerifyCertificateChainPolicy",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 1\\CertDllVerifyCertificateChainPolicy",
-        "operation": "access",
-        "value": null
-      },
-      {
-        "key": "0x80000001",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000290",
-        "operation": "create",
-        "value": null
-      },
-      {
-        "key": "0x00000294",
-        "operation": "create",
-        "value": null
-      },
-      {
-        "key": "0x00000298",
-        "operation": "create",
-        "value": null
-      },
-      {
-        "key": "0x00000262",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000284",
-        "operation": "create",
-        "value": null
-      },
-      {
-        "key": "0x80000002",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000340",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000464",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000468",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x0000046c",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000004b0",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000004b8",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000004bc",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000004b4",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x80000003",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000004c0",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000004c4",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000004c8",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000004cc",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000004d0",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000004d4",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000004d8",
-        "operation": "create",
-        "value": null
-      },
-      {
-        "key": "0x000004dc",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000004e0",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000004e4",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000470",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000474",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000484",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000480",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x0000047c",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000004e8",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000004ec",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000004f0",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000004f4",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000504",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000510",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x0000051c",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000530",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000570",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000578",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000588",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000005a4",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000005b0",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000478",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000005cc",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000005d8",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000005dc",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x000005f8",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000608",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000614",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x0000061c",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000620",
         "operation": "query",
         "value": null
       }
     ],
-    "total": 611
+    "total": 558
   },
   "sandbox_services_and_tasks": {
     "commands": [
