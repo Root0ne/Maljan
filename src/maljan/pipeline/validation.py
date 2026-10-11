@@ -42,11 +42,12 @@ from maljan.analysis.corroboration import corroboration_sources as corroboration
 from maljan.analysis.sandbox_sections import ItemIndex, is_item_id, item_ids_in
 from maljan.analysis.technique_ids import MITRE_ATTACK_SOURCES, TECHNIQUE_ID_EXACT_RE
 from maljan.core.declared_reading import (
+    bare_name,
     consumer_kinds,
+    facts_of,
     legacy_names,
     reads_as,
     shipped_by_name,
-    tools_of_kinds,
 )
 from maljan.core.logger import logger
 from maljan.core.spend import validation_retry
@@ -2929,19 +2930,18 @@ SHIPPED_MATCHER_NAMES: tuple[str, ...] = tuple(
 )
 
 
-def matcher_names() -> tuple[str, ...]:
-    """The rule matchers a sentence may name: the shipped ones and every enabled declared one.
+def matcher_names(ledger: Iterable[Any] | None = None) -> tuple[str, ...]:
+    """The rule matchers a sentence may name: the shipped ones and every one the run used.
 
-    A rule-match tool (a kind of ``validation._RULE_MATCH_SECTION_SOURCES``)
-    of any enabled source is named by its declared display name, else its own
-    name.
+    An entry of ``ledger`` whose tool is a rule matcher (a kind of
+    ``validation._RULE_MATCH_SECTION_SOURCES``) names it by its stored display
+    name, else its own name; read from the entries, never from settings.
     """
     names = set(SHIPPED_MATCHER_NAMES)
-    try:
-        for name, facts in tools_of_kinds(consumer_kinds(_RULE_MATCH_SECTIONS)):
-            names.add(_matcher_name(name, facts))
-    except Exception as exc:  # noqa: BLE001 — unreadable settings name the shipped matchers
-        logger.debug("validation: the declared rule matchers could not be read (%s).", exc)
+    for entry in ledger or ():
+        facts = facts_of(entry)
+        if facts is not None and facts.kind in consumer_kinds(_RULE_MATCH_SECTIONS):
+            names.add(_matcher_name(bare_name(getattr(entry, "tool", "")), facts))
     return tuple(sorted(n for n in names if n))
 
 
@@ -3037,9 +3037,8 @@ class CapabilityGrounding:
         keys: set[str] = set()
         words: list[str] = []
         rule_rows: list[tuple[str, str, str]] = []
-        by_id = {
-            str(getattr(entry, "id", "") or "").strip().lower(): entry for entry in ledger or ()
-        }
+        ledger = list(ledger or ())
+        by_id = {str(getattr(entry, "id", "") or "").strip().lower(): entry for entry in ledger}
         try:
             # A technique only a rule match stands behind — one string of a
             # YARA rule in a large file, with no analyst claiming it — grounds
@@ -3131,7 +3130,7 @@ class CapabilityGrounding:
             # reader, so a cue in one cell never reaches a word in the next.
             evidence_text="\n".join(w for w in words if w).lower(),
             rule_only=tuple(rule_rows),
-            matchers=matcher_names(),
+            matchers=matcher_names(ledger),
         )
 
 
@@ -6622,12 +6621,12 @@ def _tool_words(tool: str) -> set[str]:
 def entry_words(entry: Any) -> frozenset[str]:
     """The words a statement may name ``entry`` by: its tool's name, and the words it declares.
 
-    An entry with no recorded source is read as it always was (:func:`_tool_words`).
+    An entry with no stored facts is read as it always was (:func:`_tool_words`).
     """
-    from maljan.core.declared_reading import facts_of, recorded
+    from maljan.core.declared_reading import facts_of, has_stored_facts
 
     tool = str(getattr(entry, "tool", "") or "")
-    if not recorded(entry):
+    if not has_stored_facts(entry):
         return frozenset(_tool_words(tool))
     facts = facts_of(entry)
     declared = {str(word).lower() for word in facts.words} if facts is not None else set()

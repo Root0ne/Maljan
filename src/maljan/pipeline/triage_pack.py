@@ -108,7 +108,7 @@ from maljan.analysis.ghidra_passes import (
 )
 from maljan.analysis.pcap_summary import conversation_line
 from maljan.analysis.technique_ids import technique_ids_in
-from maljan.core.declared_reading import consumer_kinds, declarations, facts_of, kind_of
+from maljan.core.declared_reading import consumer_kinds, facts_of, kind_of
 from maljan.core.legacy_tool_tables import FILE_ASSESSMENT_TOOLS
 from maljan.core.logger import logger
 from maljan.core.tool_declarations import PACK
@@ -1372,9 +1372,14 @@ def _index_slot(entry: LedgerEntry) -> str:
 
 
 def _pack_tool_of(kind: str, reader: str) -> str:
-    """The pack's own tool declared under ``kind`` (or with ``reader``), for a missing input."""
-    held = declarations().source(PACK)
-    for name, facts in held.tools.items() if held is not None else ():
+    """The pack's own tool declared under ``kind`` (or with ``reader``), for a missing input.
+
+    From the pack's shipped declaration: the pack is the platform's own code.
+    """
+    from maljan.core.builtin_declarations import in_process_declarations
+
+    held = in_process_declarations().get(PACK)
+    for name, facts in held.tool_facts.items() if held is not None else ():
         if (kind and facts.kind == kind) or (reader and facts.reader == reader):
             return name
     return kind or reader

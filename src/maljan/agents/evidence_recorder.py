@@ -59,15 +59,15 @@ def _platforms_own_resolution(entry: Any) -> bool:
     """Whether ``entry`` is an API hash resolution the platform's own resolver answered.
 
     By its declared kind, from a source that declares ``platform_owned``; an
-    entry with no recorded source by the legacy reading and the server it was
+    entry with no stored facts by the legacy reading and the server it was
     made to (``_RESOLVING_SERVERS``).
     """
-    from maljan.core.declared_reading import declarations, kind_of, recorded
+    from maljan.core.declared_reading import declarations, has_stored_facts, kind_of
     from maljan.core.tool_declarations import ToolDeclarations
 
     if kind_of(entry) != "api_hash_resolution":
         return False
-    if not recorded(entry):
+    if not has_stored_facts(entry):
         return str(getattr(entry, "server", "") or "") in _RESOLVING_SERVERS
     ref = ToolDeclarations.source_of(entry)
     held = declarations().source(ref) if ref is not None else None

@@ -23,7 +23,7 @@ from maljan.analysis.technique_ids import (
     sigma_technique_ids,
     technique_ids_in,
 )
-from maljan.core.declared_reading import bare_name, facts_of, reads_as, recorded
+from maljan.core.declared_reading import bare_name, facts_of, has_stored_facts, reads_as
 from maljan.core.tool_declarations import select
 from maljan.memory.attck_loader import technique_label
 
@@ -38,7 +38,7 @@ from maljan.memory.attck_loader import technique_label
 # tool's own name when it gives none). Nothing else asserts: a reference
 # lookup answers what an id is, not what the sample does, and the catalogue's
 # association is read apart by ``catalogue_associations``. An entry written
-# before sources were recorded is read by the facts the platform ships for its
+# before facts were stored is read by the facts the platform ships for its
 # name (``core.declared_reading``).
 
 
@@ -67,11 +67,11 @@ def asserting_labels(ledger: Sequence[Any] | None) -> dict[str, str]:
 def asserted_techniques(entry: Any) -> set[str]:
     """Every technique id an asserting entry's answer names, where its tool declares them.
 
-    An entry with no recorded source is read in the shapes the platform's own
+    An entry with no stored facts is read in the shapes the platform's own
     tools emit (:func:`_technique_ids`), as it always was.
     """
     structured = getattr(entry, "structured", None)
-    if not recorded(entry):
+    if not has_stored_facts(entry):
         return _technique_ids(structured)
     facts = facts_of(entry)
     found: set[str] = set()

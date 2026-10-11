@@ -1008,24 +1008,17 @@ def _attribution_layers() -> list[str]:
 
 
 def _rule_layers() -> list[str]:
-    """Every rule layer the deployment declares: the corroboration name of each asserting tool.
+    """The rule layers the platform ships: the corroboration name of each asserting tool.
 
-    A tool of an enabled source that declares ``asserts_techniques`` is a
-    layer under its declared ``source`` (its own name when it gives none), so
-    a rule matcher an operator plugs in has its line beside the built-ins'.
-    Unreadable settings give the layers the platform ships.
+    Read from the shipped declarations, never from settings, so a stored
+    summary renders the same anywhere. A layer the run's own corroboration
+    rows name (an operator's rule matcher under its stored ``source``) is
+    listed after these, from the summary itself.
     """
-    from maljan.core.declared_reading import declarations, shipped_by_name
+    from maljan.core.declared_reading import shipped_by_name
 
-    try:
-        declared = [
-            (name, facts)
-            for held in declarations().sources(enabled_only=True)
-            for name, facts in held.tools.items()
-        ]
-    except Exception:  # noqa: BLE001 — a report renders even without settings
-        declared = list(shipped_by_name().items())
-    return sorted({facts.source or name for name, facts in declared if facts.asserts_techniques})
+    shipped = shipped_by_name().items()
+    return sorted({facts.source or name for name, facts in shipped if facts.asserts_techniques})
 
 
 # ---------------------------------------------------------------------------

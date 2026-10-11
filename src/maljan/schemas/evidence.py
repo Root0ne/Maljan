@@ -310,6 +310,20 @@ class LedgerEntry(BaseModel):
             "(core.tool_declarations)."
         ),
     )
+    facts: dict[str, Any] | None = Field(
+        default=None,
+        # Like ``source``: an entry with none dumps as it always did.
+        exclude_if=lambda value: value is None,
+        description=(
+            "What the tool declared about its answer when the entry was written, resolved "
+            "under its source (core.declared_reading.facts_record): {'v': 1, 'kind', and "
+            "where set 'reader', 'asserts_techniques', 'source', 'display_name', 'rows', "
+            "'places', 'values', 'techniques', 'reputation', 'words', 'report_sections'}. "
+            "{'v': 1} alone: the source declares nothing for the tool. None on an entry "
+            "written before facts were recorded, which is read by the legacy readers. Read "
+            "later from here, never from the reading process's settings."
+        ),
+    )
 
     def to_captured(self) -> CapturedToolOutput:
         """This entry in the shape readers of the previous capture expect."""
@@ -442,7 +456,17 @@ def build_entry(
         duration_ms=max(0, int(duration_ms)),
         seq=seq,
         source=source or None,
+        facts=_facts_at_write(source, tool),
     )
+
+
+def _facts_at_write(source: str | None, tool: str) -> dict[str, Any] | None:
+    """The tool's declared facts under ``source``, resolved now, to be stored with the entry."""
+    if not source:
+        return None
+    from maljan.core.declared_reading import facts_record
+
+    return facts_record(source, tool)
 
 
 def stored_bytes(entry: LedgerEntry) -> int:

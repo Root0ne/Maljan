@@ -20,6 +20,7 @@ from maljan.core.config import Settings
 from maljan.core.declared_reading import (
     bare_name,
     facts_of,
+    facts_record,
     reads_as,
     shipped_by_name,
 )
@@ -94,8 +95,13 @@ def test_every_built_in_tool_is_read_as_its_table_read_it(
     table = TABLES[consumer]
     differ = []
     for source, tool in _built_in(held):
-        recorded = reads_as({"tool": tool, "source": source}, consumer, declared=held)
-        stored = reads_as({"tool": tool}, consumer, declared=held)
+        written = {
+            "tool": tool,
+            "source": source,
+            "facts": facts_record(source, tool, declared=held),
+        }
+        recorded = reads_as(written, consumer)
+        stored = reads_as({"tool": tool}, consumer)
         if recorded != (tool in table) or stored != (tool in table):
             differ.append((source, tool, recorded, stored))
     assert not differ, differ
@@ -130,7 +136,10 @@ def test_a_name_two_built_in_sources_share_has_one_reading(held: ToolDeclaration
 def test_a_collision_prefix_is_taken_off_a_stored_name_only() -> None:
     assert bare_name("knowledge__capabilities") == "capabilities"
     assert facts_of({"tool": "knowledge__capabilities"}) is not None
-    assert facts_of({"tool": "capa", "source": "mcp:not_a_server"}) is None
+    # Written under a source that declares nothing for it: no facts, whatever the name.
+    assert facts_of({"tool": "capa", "source": "mcp:x", "facts": {"v": 1}}) is None
+    # Written before facts were stored: the legacy reading of its name.
+    assert facts_of({"tool": "capa", "source": "mcp:x"}) is not None
 
 
 def _fixture_ledger(stamp: bool) -> list[object]:

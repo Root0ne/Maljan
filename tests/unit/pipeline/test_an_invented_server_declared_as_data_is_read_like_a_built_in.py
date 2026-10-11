@@ -144,7 +144,7 @@ def test_a_section_opened_by_the_scan_is_a_rule_match(settings: Settings) -> Non
 def test_a_sentence_reporting_the_scans_match_claims_nothing(settings: Settings) -> None:
     from maljan.pipeline.validation import _says_only_that_a_rule_matched, matcher_names
 
-    names = matcher_names()
+    names = matcher_names(_ledger())
     assert {"capa", "yara", "scanengine"} <= set(names)
     assert _says_only_that_a_rule_matched("ScanEngine flagged Loader_Generic", names)
     assert not _says_only_that_a_rule_matched("ScanEngine flagged Loader_Generic")
@@ -170,7 +170,61 @@ def test_the_function_map_and_index_read_inputs_by_kind(settings: Settings) -> N
     assert _index_slot(floss_lookalike) == ""
 
 
-def test_the_scan_is_a_rule_layer(settings: Settings) -> None:
-    from maljan.analysis.run_summary import _rule_layers
+def test_the_scan_is_a_layer_counted_from_the_runs_own_rows(settings: Settings) -> None:
+    from maljan.analysis.run_summary import RunSummaryBuilder, _rule_layers
+    from maljan.pipeline.validation import corroboration
 
-    assert "scanner" in _rule_layers()
+    builder = RunSummaryBuilder(start_time=0.0).set_corroboration(corroboration(None, _ledger()))
+    assert builder._techniques_by_layer["scanner"] == 1
+    # The shipped layers are listed whatever the settings; the scan's comes from its rows.
+    assert "scanner" not in _rule_layers()
+
+
+def _readings(ledger: list[Any]) -> str:
+    import json
+
+    from maljan.analysis.evidence_roots import RunRoots
+    from maljan.pipeline import evidence_summary, validation
+
+    roots = RunRoots(ledger)
+    texts = validation.EntryTexts.from_ledger(ledger)
+    return json.dumps(
+        {
+            "roots": {k: v.roots for k, v in roots.entries.items()},
+            "reasons": {k: v.reason for k, v in roots.entries.items()},
+            "techniques": {k: sorted(v.by_technique) for k, v in roots.entries.items()},
+            "summary": evidence_summary.summarise(None, ledger),
+            "corroboration": validation.corroboration(None, ledger),
+            "matchers": validation.matcher_names(ledger),
+            "words": {k: sorted(texts.words_of(k)) for k in texts.tools},
+        },
+        sort_keys=True,
+        default=str,
+    )
+
+
+def test_a_stored_run_reads_the_same_in_a_process_with_no_operator_settings(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from maljan.schemas.evidence import LedgerEntry
+
+    ledger = _ledger()
+    in_the_worker = _readings(ledger)
+    stored = [entry.model_dump(mode="json") for entry in ledger]
+    assert stored[0]["facts"]["kind"] == "signature_rules"
+    assert stored[2]["facts"] == {"v": 1}
+    # A process with no operator settings: the API, a later stage.
+    monkeypatch.setattr(config_module, "_settings_instance", Settings())
+    reread = [LedgerEntry.model_validate(row) for row in stored]
+    assert _readings(reread) == in_the_worker
+    assert "scanner" in in_the_worker and "scanengine" in in_the_worker
+
+
+def test_an_entry_written_before_facts_were_stored_dumps_as_it_did() -> None:
+    from maljan.schemas.evidence import LedgerEntry
+
+    entry = build_entry(
+        entry_id="ev_0001", seq=1, agent="a", tool="capa", args={}, server=None, output="{}"
+    )
+    assert "facts" not in entry.model_dump()
+    assert LedgerEntry.model_validate(entry.model_dump()).facts is None
