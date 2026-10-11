@@ -3909,6 +3909,10 @@ class ReportingConfig(BaseModel):
     # a live report when the model's answer outgrew it.
     composer_section_max_tokens: Annotated[int, Field(ge=0)] = 0
     composer_per_section_timeout: Annotated[int, Field(ge=1)] = 120
+    # Sample lookup URL templates (``{sha256}``, ``{md5}``, ``{sha1}``) every
+    # report links to, whatever the run used. A tool server's own lookups
+    # (its declared ``reference_urls``) are linked only on a run that asked it.
+    reference_urls: list[str] = Field(default_factory=list)
     # Server-side HTML→PDF export.
     html_export_enabled: bool = True
 
@@ -3932,6 +3936,11 @@ class ReportingConfig(BaseModel):
     # large window that wants the whole of it kept raises this, and pays for it
     # in a JSONB column rather than in the model's context.
     evidence_budget_bytes: Annotated[int, Field(ge=0)] = 524288
+
+    @field_validator("reference_urls")
+    @classmethod
+    def _references_are_templates(cls, value: list[str]) -> list[str]:
+        return check_reference_urls(value)
 
     # How much of a run's tool output is kept in memory, for the length of the
     # job, so a grounding check can ask what the run SAW rather than what the

@@ -34,6 +34,8 @@ import ipaddress
 import re
 import secrets
 from collections.abc import Callable, Iterable
+from contextvars import ContextVar
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlparse
@@ -259,6 +261,14 @@ class MarkdownRenderer:
     # a block with one heading and its subsections, or "" when it has nothing.
 
     def render(self, report: MalwareReport) -> str:
+        # The links this report keeps as links, for the whole of this render.
+        token = _KEPT_LINKS.set(_Kept.of(report))
+        try:
+            return self._render(report)
+        finally:
+            _KEPT_LINKS.reset(token)
+
+    def _render(self, report: MalwareReport) -> str:
         # Each section is wrapped in _safe_section so a single malformed
         # subtree cannot 500 the whole ``/reports/{id}/markdown`` endpoint.
         ctx = _Context.of(report)
@@ -3084,10 +3094,35 @@ def _mark_hosts(text: str, marks: dict[int, str]) -> None:
             _bracket_dots(text, start, end, marks)
 
 
-# The reference services a report links to, each with the shape of its own
-# lookups: a link of that shape, with no query, fragment, userinfo, backslash
-# or dot segment, stays a link; anything else on those hosts is defanged.
-_REFERENCE_LOOKUPS: dict[str, re.Pattern[str]] = {
+# The links a report keeps as links, besides the ATT&CK knowledge base's
+# below: the report's own references and the links its reputation records
+# hold (``_Kept``), read from the report itself and set for one render.
+_KEPT_LINKS: ContextVar[_Kept | None] = ContextVar("markdown_kept_links", default=None)
+
+
+@dataclass(frozen=True)
+class _Kept:
+    """The links one report keeps: its own, and whether it reads the legacy services' shapes."""
+
+    links: frozenset[str]
+    legacy: bool
+
+    @classmethod
+    def of(cls, report: MalwareReport) -> _Kept:
+        links = {str(ref.url) for ref in report.references or () if ref.url}
+        links.update(
+            str(answer.link) for answer in report.reputation or () if getattr(answer, "link", None)
+        )
+        # A report stored before reputation records (``reputation`` absent)
+        # was written when the two lookup services below were linked on every
+        # report; it keeps their shapes as links, as it always rendered them.
+        return cls(frozenset(links), report.reputation is None)
+
+
+# The shapes of the lookups a report stored before declared references linked
+# on every report: read only for such a report (``_Kept.legacy``), so it
+# renders as it always did. A newer report keeps its own links instead.
+_LEGACY_REFERENCE_LOOKUPS: dict[str, re.Pattern[str]] = {
     "www.virustotal.com": re.compile(
         r"/gui/(?:(?:file"
         + _PIPE
@@ -3098,6 +3133,12 @@ _REFERENCE_LOOKUPS: dict[str, re.Pattern[str]] = {
         + r"ip-address)/[A-Za-z0-9.:-]+)/?"
     ),
     "bazaar.abuse.ch": re.compile(r"/sample/[0-9a-f]{64}/?"),
+}
+
+# The ATT&CK knowledge base's lookups, which every report links: a link of
+# that shape, with no query, fragment, userinfo, backslash or dot segment,
+# stays a link; anything else on that host is defanged.
+_REFERENCE_LOOKUPS: dict[str, re.Pattern[str]] = {
     "attack.mitre.org": re.compile(
         r"/(?:"
         + _PIPE.join(
@@ -3127,9 +3168,14 @@ def _reference_lookup(url: str) -> bool:
         parts = urlparse(url)
     except ValueError:
         return False
-    shape = _REFERENCE_LOOKUPS.get((parts.hostname or "").lower())
+    kept = _KEPT_LINKS.get()
+    host = (parts.hostname or "").lower()
+    shape = _REFERENCE_LOOKUPS.get(host)
+    if shape is None and (kept is None or kept.legacy):
+        shape = _LEGACY_REFERENCE_LOOKUPS.get(host)
+    own = kept is not None and url in kept.links
     if (
-        shape is None
+        (shape is None and not own)
         or parts.scheme.lower() != "https"
         or parts.query
         or parts.fragment
@@ -3148,7 +3194,7 @@ def _reference_lookup(url: str) -> bool:
         return False
     if any(mark in path for mark in ("\\", "@", "//", "%")) or "/." in path:
         return False
-    return shape.fullmatch(path) is not None
+    return own or (shape is not None and shape.fullmatch(path) is not None)
 
 
 # A dotted name written wholly in capitals, and a name under ``.onion``.

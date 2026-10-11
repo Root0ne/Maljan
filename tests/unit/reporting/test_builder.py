@@ -65,8 +65,8 @@ class TestMinimalBuild:
         # No judge assessment means no severity. It is not defaulted to a
         # rating the run never established.
         assert report.severity is None
-        # References include VT + MalwareBazaar even with no TTPs
-        assert any(r.source == "VirusTotal" for r in report.references)
+        # A run that asked no lookup service and mapped no technique links nothing.
+        assert report.references == []
 
 
 class TestRansomwareFixture:

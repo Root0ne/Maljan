@@ -1395,6 +1395,15 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "subgroup": "Report content",
     },
+    "reporting.reference_urls": {
+        "title": "Sample lookups every report links to",
+        "description": (
+            "URL templates naming {sha256}, {md5} or {sha1}, each starting with https://, "
+            "linked under References on every report. A tool server's own lookups (its "
+            "declared reference URLs) are linked only on a run that asked that server."
+        ),
+        "subgroup": "Report content",
+    },
     "reporting.default_tlp": {
         "title": "Default TLP marking",
         "description": (
