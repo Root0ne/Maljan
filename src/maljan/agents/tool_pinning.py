@@ -143,6 +143,27 @@ def declared_source_of(tool: Any) -> str | None:
     return None
 
 
+def declared_facts_of(tool: Any) -> Any:
+    """What a tool declares about itself (``core.tool_declarations.ToolFacts``), or ``None``.
+
+    Read by the source the tool was built under (:func:`declared_source_of`)
+    and the name it is offered under, from the live declarations: what the
+    request is about to offer, never a persisted record. A tool nothing
+    stamped, or whose source declares nothing for it, has none; it is never
+    guessed from the tool's name.
+    """
+    source = declared_source_of(tool)
+    if source is None:
+        return None
+    try:
+        from maljan.core.declared_reading import declarations
+
+        return declarations().declaration_for((source, str(getattr(tool, "name", "") or "")))
+    except Exception as exc:  # noqa: BLE001 — an unreadable declaration declares nothing
+        logger.debug("declared facts of a tool not read (%s).", type(exc).__name__)
+        return None
+
+
 def _spellings(
     default_path: str | None, target: str, staged_path: str | None = None
 ) -> frozenset[str]:

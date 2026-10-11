@@ -135,6 +135,7 @@ class _Container:
 
 def test_a_clone_on_r2_gets_the_r2_fragment_in_the_built_in_assembly():
     from maljan.agents.static_analyst import _ISR_HEAD, _ISR_TAIL
+    from maljan.providers.base import VERIFICATION_DISCIPLINE
 
     cfg = Settings(
         _env_file=None,
@@ -152,11 +153,15 @@ def test_a_clone_on_r2_gets_the_r2_fragment_in_the_built_in_assembly():
     statement = tools_statement(
         resolved.tools, provider_label="the r2 static provider", provider_expected=True
     )
+    # A provider that writes its whole fragment itself is followed by the
+    # verification discipline every static analyst is held to.
     assert resolved.prompt == (
         _ISR_HEAD
         + format_fragment("unknown", "unknown")
         + "\n\n"
         + "R2-FRAGMENT"
+        + "\n\n"
+        + VERIFICATION_DISCIPLINE
         + "\n\n"
         + statement
         + _ISR_TAIL
@@ -166,6 +171,8 @@ def test_a_clone_on_r2_gets_the_r2_fragment_in_the_built_in_assembly():
 
 
 def test_an_explicit_prompt_wins_over_the_built_in_assembly():
+    from maljan.providers.base import VERIFICATION_DISCIPLINE
+
     cfg = Settings(
         _env_file=None,
         agents={
@@ -182,7 +189,9 @@ def test_an_explicit_prompt_wins_over_the_built_in_assembly():
     statement = tools_statement(
         resolved.tools, provider_label="the r2 static provider", provider_expected=True
     )
-    assert resolved.prompt == "MINE\n\nR2-FRAGMENT\n\n" + statement
+    assert resolved.prompt == (
+        "MINE\n\nR2-FRAGMENT\n\n" + VERIFICATION_DISCIPLINE + "\n\n" + statement
+    )
     assert resolved.authored_prompt == "MINE"
 
 

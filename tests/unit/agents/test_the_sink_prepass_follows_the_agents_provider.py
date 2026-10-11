@@ -250,7 +250,7 @@ class TestAGenericAgentOnAProvider:
 def test_the_pre_pass_waits_what_one_tool_call_may_take(
     client: _Client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """No fixed request timeout: the deployment's call budget, or none."""
+    """Ghidra's block's own call budget (300 shipped), or the operator's for every server."""
     from maljan.providers.base import prepare_sample
 
     settings = _settings("ghidra")
@@ -265,4 +265,9 @@ def test_the_pre_pass_waits_what_one_tool_call_may_take(
 
     settings.mcp = _Mcp()
     prepare_sample(_ghidra(settings), "/data/samples/x.exe")
-    assert client.timeouts == [None, None, 900.0, 900.0]
+    assert client.timeouts == [300.0, 300.0, 900.0, 900.0]
+
+    settings.static.ghidra.call_timeout_seconds = 0.0
+    settings.mcp.breaker.call_timeout_seconds = 0.0
+    prepare_sample(_ghidra(settings), "/data/samples/x.exe")
+    assert client.timeouts[-2:] == [None, None]

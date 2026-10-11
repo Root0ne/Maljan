@@ -159,7 +159,6 @@ def _strip_tool(names: object) -> set[str]:
 
 def _tables() -> dict[str, Callable[[str], bool]]:
     """Each consumer table as a membership test on a bare tool name, as the code reads it."""
-    from maljan.agents import network_analyst
     from maljan.core import legacy_tool_tables as legacy
     from maljan.reporting import legacy_tool_names
 
@@ -181,7 +180,7 @@ def _tables() -> dict[str, Callable[[str], bool]]:
         "triage_pack._REPUTATION_TOOLS": names(legacy.FILE_ASSESSMENT_TOOLS),
         "triage_pack.RULE_TOOLS": names(legacy.RULE_TOOLS),
         "run_state.reputation": names(legacy.FILE_ASSESSMENT_TOOLS),
-        "network_analyst._PCAP_TOOLS": names(t for t, _ in network_analyst._PCAP_TOOLS),
+        "network_analyst._PCAP_TOOLS": names(legacy.PCAP_TOOLS),
         "function_map": names(legacy.FUNCTION_MAP_TOOLS),
         "evidence_summary.yara_rule_strings": names(legacy.SIGNATURE_RULE_TOOLS),
         "evidence_summary.catalogue_associations": names(legacy.API_CATALOGUE_TOOLS),

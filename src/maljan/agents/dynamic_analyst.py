@@ -1,4 +1,4 @@
-"""Dynamic Analyst agent — evaluates sandbox behavioral logs (CAPEv2/Cuckoo).
+"""Dynamic Analyst agent — evaluates the job's sandbox behavioural report.
 
 Overrides analyze_isr() and revise_isr() to extract structured
 ClaimEvidence objects. Focuses on API call sequences, process injection
@@ -25,14 +25,14 @@ from maljan.agents.prompt_fragments import (
 )
 from maljan.agents.registry import register_agent
 from maljan.agents.static_analyst import _parse_disputes
-from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
+from maljan.core.logger import logger
 from maljan.schemas.isr_models import AgentISR
 
 # The provider- and platform-independent head of the dynamic system prompt: it
-# names the sandbox report shape (CAPEv2/Cuckoo JSON) this analyst reads, but
-# no tool and no operating system. The tool-usage workflow is the sandbox
-# provider's fragment and the artefacts to look for are the sample's format
-# fragment; ``composition.builtin_prompt`` assembles all three.
+# names the sandbox's JSON report this analyst reads, but no sandbox, no tool
+# and no operating system. The tool-usage workflow is the sandbox provider's
+# fragment and the artefacts to look for are the sample's format fragment;
+# ``composition.builtin_prompt`` assembles all three.
 _DYN_HEAD = (
     "You are an expert Dynamic Malware Analyst with deep knowledge of sandbox behavior. "
     "Analyze the call sequences, process trees, file and configuration changes, "
@@ -62,10 +62,9 @@ def assemble_dynamic_prompt(
 
     HEAD, the sample's format fragment, the sandbox's own tool workflow when
     that sandbox's tools are in the list, the sentence about tools, then TAIL.
-    The CAPE workflow names ``submit_file``, ``get_task_report`` and the rest;
-    it used to be sent whatever the sandbox was, so an analyst on the mock
-    sandbox with only the report tools was walked through calls to a server
-    it did not have.
+    A sandbox's workflow names its own server's tools; it used to be sent
+    whatever the sandbox was, so an analyst on the mock sandbox with only the
+    report tools was walked through calls to a server it did not have.
     """
     if for_a_clone:
         # What a clone is seeded with: no sandbox workflow and no sentence
@@ -107,20 +106,42 @@ def sandbox_provider_parts(
     return workflow, statement
 
 
+def sandbox_server_label(sandbox: Any) -> str:
+    """What the sentence about tools calls a sandbox's own tool server, by its display name."""
+    name = ""
+    try:
+        name = str(sandbox.display_name()) if sandbox is not None else ""
+    except Exception as exc:  # noqa: BLE001 — a prompt never fails over a provider's name
+        logger.debug("No display name for the sandbox (%s).", type(exc).__name__)
+    return f"the tool server of the job's sandbox ({name})" if name else ""
+
+
+def _configured_sandbox() -> Any | None:
+    """The deployment's configured sandbox provider, ``None`` when there is none to read."""
+    try:
+        from maljan.core.config import get_settings
+        from maljan.providers.registry import get_sandbox_provider
+
+        return get_sandbox_provider(get_settings())
+    except Exception as exc:  # noqa: BLE001 — a prompt never fails over a provider lookup
+        logger.debug("No sandbox provider for the dynamic prompt (%s).", type(exc).__name__)
+        return None
+
+
 def _dynamic_prompt(tools: Sequence[Any] = ()) -> str:
     """The neutral dynamic prompt, for an analyst built outside a container.
 
-    Against CAPEv2's workflow, the sandbox this project has always measured
-    the dynamic analyst on, and only when the tools it walks through are in
-    the list. A running job sends the container's resolved prompt for the
-    tools the request carries; see ``composition.builtin_prompt`` and
-    ``BaseAnalyst._system_prompt``.
+    With the configured sandbox's own workflow and name, and the workflow only
+    when that sandbox's tools are in the list. A running job sends the
+    container's resolved prompt for the tools the request carries; see
+    ``composition.builtin_prompt`` and ``BaseAnalyst._system_prompt``.
     """
+    sandbox = _configured_sandbox()
     return assemble_dynamic_prompt(
         format_fragment("unknown", "unknown"),
         tools,
-        provider_fragment=CAPE2SandboxProvider.CAPE_PROMPT_FRAGMENT,
-        provider_label="the CAPEv2 tool server",
+        provider_fragment=str(sandbox.dynamic_prompt_fragment() or "") if sandbox else "",
+        provider_label=sandbox_server_label(sandbox),
     )
 
 

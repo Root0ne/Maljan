@@ -404,12 +404,12 @@ def builtin_prompt(
             for_a_clone=for_a_clone,
         )
     if role == "dynamic":
-        from maljan.agents.dynamic_analyst import assemble_dynamic_prompt
+        from maljan.agents.dynamic_analyst import assemble_dynamic_prompt, sandbox_server_label
 
         sandbox = _sandbox_provider(container)
         workflow = str(sandbox.dynamic_prompt_fragment() or "") if sandbox is not None else ""
         offers_tools = sandbox is not None and bool(sandbox.capabilities.provides_tools)
-        label = f"the {sandbox.id} sandbox's own tool server" if sandbox is not None else ""
+        label = sandbox_server_label(sandbox)
         return assemble_dynamic_prompt(
             fragment,
             tools,
@@ -494,14 +494,14 @@ def _provider_parts(
             provider_expected=provider_expected and definition.role == "static" and offers,
         )
     if definition.role == "dynamic":
-        from maljan.agents.dynamic_analyst import sandbox_provider_parts
+        from maljan.agents.dynamic_analyst import sandbox_provider_parts, sandbox_server_label
 
         sandbox = _sandbox_provider(container)
         offers = sandbox is not None and bool(sandbox.capabilities.provides_tools)
         return sandbox_provider_parts(
             tools,
             provider_fragment=str(sandbox.dynamic_prompt_fragment() or "") if sandbox else "",
-            provider_label=f"the {sandbox.id} sandbox's own tool server" if sandbox else "",
+            provider_label=sandbox_server_label(sandbox),
             provider_expected=provider_expected and offers,
         )
     return (tools_statement(tools),)

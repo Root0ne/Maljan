@@ -76,6 +76,10 @@ FUNCTION_MAP_TOOLS = ("resolve_api_hashes", "decode_string_blobs", "floss", "fun
 # evidence-only static provider need not run.
 RULE_TOOLS = ("capa", "yara_scan")
 
+# ``agents.network_analyst``: the packet tools its capture turns named, which
+# it now reads by declared kind (``_PCAP_STEPS``).
+PCAP_TOOLS = ("read_pcap_summary", "extract_dns", "extract_http")
+
 # ``pipeline.evidence_summary``: the one tool whose matches carry a rule's own
 # strings, and the one whose rows are the API catalogue's associations.
 SIGNATURE_RULE_TOOLS = ("yara_scan",)

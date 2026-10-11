@@ -41,6 +41,7 @@ from maljan.agents.delegation import (
     WAITING_ON_EACH_OTHER_REFUSAL,
     _what_an_ask_gets_sentence,
 )
+from maljan.agents.dynamic_analyst import sandbox_server_label
 from maljan.agents.evidence_recorder import earlier_chunk_answer, same_function_notice
 from maljan.agents.judge_agent import (
     COMPACT_BUNDLE_RULES,
@@ -65,7 +66,11 @@ from maljan.agents.judge_agent import (
     verdict_cut_violation,
 )
 from maljan.agents.judge_agent import QUESTION_ROOTS_LABEL as _ROOTS_LABEL
-from maljan.agents.network_analyst import NO_PACKET_TOOL_LINE, OTHER_TOOLS_THEN_ANALYZE
+from maljan.agents.network_analyst import (
+    NO_PACKET_TOOL_LINE,
+    OTHER_TOOLS_THEN_ANALYZE,
+    _flows_label,
+)
 from maljan.agents.prompt_fragments import (
     CLAIM_FORMAT_FRAGMENT,
     ENDPOINTS_ROW_SHAPE,
@@ -200,6 +205,8 @@ from maljan.providers.base import (
     STATIC_EVIDENCE_LEAD,
     absent_provider_fragment,
 )
+from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
+from maljan.providers.sandbox.mock import MockSandboxProvider
 from maljan.providers.static import r2 as _r2
 from maljan.providers.static.ghidra import (
     GHIDRA_GUIDANCE,
@@ -2015,6 +2022,12 @@ PROMPTS: dict[str, str] = {
         ]
     ),
     "network packet-tool lines": f"{NO_PACKET_TOOL_LINE} {OTHER_TOOLS_THEN_ANALYZE}",
+    "the network flows named by the job's sandbox, or by neither": " ".join(
+        [_flows_label(None), _flows_label(CAPE2SandboxProvider), _flows_label(MockSandboxProvider)]
+    ),
+    "a sandbox's own tool server named by its display name": " ".join(
+        [sandbox_server_label(CAPE2SandboxProvider), sandbox_server_label(None)]
+    ),
     "question for an entry said to hold one line": " ".join(
         v.message
         for v in misstated_entry_contents(

@@ -684,6 +684,11 @@ class SandboxProvider(ABC):
     @abstractmethod
     def from_settings(cls, cfg: Settings) -> SandboxProvider: ...
 
+    @classmethod
+    def display_name(cls) -> str:
+        """What a prompt calls this sandbox: its title, else its choice label or id."""
+        return cls.title or cls.choice_label or cls.id or "sandbox"
+
     @property
     def declaration_source(self) -> str:
         """Where this provider's tools are declared (``core.tool_declarations``).
