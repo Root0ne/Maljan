@@ -310,6 +310,8 @@ class CapaYaraStaticProvider(StaticProvider):
     """capa and YARA: evidence for the analyst, not tools for the model."""
 
     # What the console calls this provider and says about it, and its test's label.
+    choice_label = "capa + YARA"
+    choice_order = 2
     title = "capa + YARA"
     description = "Rule sets on disk name the capabilities and match the file; no server to run."
     probe_label = "Test capa + YARA rules"

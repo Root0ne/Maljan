@@ -338,10 +338,18 @@ class SettingsService:
     def validate(self, merged_core: dict[str, Any], merged_api: dict[str, Any]) -> None:
         errors: dict[str, str] = {}
         try:
-            build_settings(merged_core)
+            built = build_settings(merged_core)
         except ValidationError as exc:
             for err in exc.errors():
                 errors[_loc_to_key("core", err["loc"])] = err["msg"]
+        else:
+            # The selected provider's role models are read from its own block,
+            # never borrowed from another provider's.
+            from maljan.llm.provider_base import role_block_problem
+
+            problem = role_block_problem(built)
+            if problem:
+                errors["core.llm.provider"] = problem
         # No ``APISettings(**nest(merged_api))`` here: ``extra="ignore"`` drops
         # everything a catalog ``api.*`` key could supply (every one of them
         # moved off the model), so the call could only ever have failed

@@ -54,12 +54,35 @@ def register_provider(name: str):  # type: ignore[no-untyped-def]
     return decorator
 
 
+# The built-in adapters, each a module named ``maljan.llm.<name>_provider``
+# that registers the provider it is named after.
+_BUILTIN_MODULES: tuple[str, ...] = (
+    "maljan.llm.anthropic_provider",
+    "maljan.llm.gemini_provider",
+    "maljan.llm.ollama_provider",
+    "maljan.llm.openai_provider",
+)
+
+
 def discover_providers() -> None:
     """Import all built-in provider modules to trigger @register_provider decorators."""
-    import maljan.llm.anthropic_provider  # noqa: F401
-    import maljan.llm.gemini_provider  # noqa: F401
-    import maljan.llm.ollama_provider  # noqa: F401
-    import maljan.llm.openai_provider  # noqa: F401
+    import importlib
+
+    for module in _BUILTIN_MODULES:
+        importlib.import_module(module)
+
+
+def discover_provider(name: str) -> None:
+    """Import the one built-in module that registers ``name``, where there is one.
+
+    Asking about one shipped provider then loads that adapter's client library
+    alone, not every adapter's.
+    """
+    import importlib
+
+    module = f"maljan.llm.{name}_provider"
+    if module in _BUILTIN_MODULES:
+        importlib.import_module(module)
 
 
 class LLMProviderRegistry:

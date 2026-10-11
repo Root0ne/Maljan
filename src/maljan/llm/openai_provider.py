@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from maljan.core.config import Settings
+from maljan.core.config import OpenAIConfig, Settings
 from maljan.core.exceptions import LLMError
 from maljan.core.logger import logger
 from maljan.llm.provider_base import (
@@ -1066,6 +1066,8 @@ class OpenAIProvider(LLMProvider):
     """Builds LangChain ChatOpenAI instances."""
 
     name = "openai"
+    window_setting = "core.llm.openai.context_size"
+    settings_model = OpenAIConfig
     choice_order = 0
     label = "OpenAI"
     description = "Hosted OpenAI models or any OpenAI-compatible server"

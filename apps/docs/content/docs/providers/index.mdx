@@ -114,9 +114,17 @@ agent may give it an endpoint of its own, the keyword a call's output cap goes
 under, the reasoning it asks to have sent back, and the one short turn the
 settings probe asks it for and how that answer is read. No shared module names
 a provider. `llm.provider`, an agent entry's provider and a job's
-`llm_provider` each take any registered provider's name, so a provider
-registered at runtime with `register_provider` gets every behaviour by
-subclassing `LLMProvider` and answering for itself.
+`llm_provider` each take any registered provider's name: `llm.provider` is
+refused when saved if nothing registered it, and a stored name registered only
+in another process still loads.
+
+A provider registered at runtime with `register_provider` subclasses
+`LLMProvider` and declares a `settings_model`. Its block lives under
+`llm.<name>` (its credential, address, effort and `expert_model` /
+`judge_model`), is read with that model, and is listed in the catalogue with
+the annotations the adapter declares. A selected provider with no block of its
+own names no role model, and saving it is refused, so it never runs on another
+provider's models.
 
 ## A model is probed before a job may name it
 

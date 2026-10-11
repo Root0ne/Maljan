@@ -453,17 +453,16 @@ async def context_window_facts(settings: Any) -> dict[str, Any]:
     from maljan.agents.composition import window_assignments
     from maljan.llm.context_window import (
         ANSWER_SHARE,
-        UNKNOWN_WINDOW_REMEDY,
         ContextBudget,
         awindow_for_settings,
         generation_reserve,
+        unknown_window_remedy,
     )
 
     configured = int(getattr(settings.preprocessing, "max_tool_output_chars", 0) or 0)
+    assignments = window_assignments(settings)
     try:
-        window = await awindow_for_settings(
-            settings, window_assignments(settings), probe=configured <= 0
-        )
+        window = await awindow_for_settings(settings, assignments, probe=configured <= 0)
     except Exception as exc:  # noqa: BLE001 — a window is never worth a failed page
         logger.warning("the context window could not be learned: %s", type(exc).__name__)
         from maljan.llm.context_window import unknown_window
@@ -480,7 +479,11 @@ async def context_window_facts(settings: Any) -> dict[str, Any]:
         "cap": configured if configured > 0 else budget.cap_without_recording(),
         "derived": configured <= 0,
         "setting": configured,
-        "remedy": "" if budget.derives or configured > 0 else UNKNOWN_WINDOW_REMEDY,
+        "remedy": (
+            ""
+            if budget.derives or configured > 0
+            else unknown_window_remedy(str(a.provider) for a in assignments)
+        ),
     }
 
 
@@ -489,7 +492,9 @@ def _failure_detail(exc: BaseException) -> str:
 
     An exception group is unwrapped to its leaves, because the group's own
     message ("unhandled errors in a TaskGroup") names nothing an operator can
-    act on. A cancellation has no message at all, so it is worded here.
+    act on. A cancellation has no message at all, so it is worded here. A URL
+    in the text loses its credentials: the address came from an operator's
+    setting, and a provider's own failure may carry it whole.
     """
     if isinstance(exc, BaseExceptionGroup):
         leaves = [_failure_detail(e) for e in exc.exceptions]
@@ -497,7 +502,7 @@ def _failure_detail(exc: BaseException) -> str:
     if isinstance(exc, asyncio.CancelledError):
         return "the probe was cancelled before it answered"
     text = str(exc).strip()
-    return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
+    return redact_url(f"{type(exc).__name__}: {text}" if text else type(exc).__name__)
 
 
 def _probe_in_fresh_loop(factory: Callable[[], Awaitable[ProbeResult]]) -> ProbeResult:

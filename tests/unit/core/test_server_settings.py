@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 import sys
-from typing import get_args
 
 import pytest
 from pydantic import SecretStr
@@ -14,7 +13,6 @@ from maljan.core.config import (
     RESERVED_SERVER_KEYS,
     SERVER_KEY_PATTERN,
     MCPServerConfig,
-    SandboxConfig,
     Settings,
 )
 
@@ -75,7 +73,9 @@ def test_static_generic_is_a_reference_to_a_server_key():
 
 
 def test_the_sandbox_gains_rest_with_a_full_default_tree():
-    assert "rest" in get_args(SandboxConfig.model_fields["provider"].annotation)
+    from maljan.providers.registry import sandbox_provider_ids
+
+    assert "rest" in sandbox_provider_ids()
     rest = Settings(_env_file=None).sandbox.rest
     assert rest.base_url == ""
     assert rest.auth.header == "Authorization" and rest.auth.scheme == "Bearer"

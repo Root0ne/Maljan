@@ -38,6 +38,8 @@ class NullStaticProvider(StaticProvider):
     """
 
     # What the console calls this provider and says about it, and its test's label.
+    choice_label = "No static provider"
+    choice_order = 4
     title = "No static analyser"
     description = "The static analyst works from the pre-extracted data only."
     settings_intro = (

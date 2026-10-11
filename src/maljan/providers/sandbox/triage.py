@@ -166,6 +166,16 @@ class TriageSandboxProvider(SandboxProvider):
     """
 
     # What the console calls this provider and says about it, and its test's label.
+    choice_label = "Hatching Triage"
+    guide_leaves = (
+        "api_token",
+        "base_url",
+        "profile",
+        "fetch_pcap",
+        "poll_interval_seconds",
+        "timeout_seconds",
+    )
+    choice_order = 3
     title = "Hatching Triage"
     description = "Triage runs the sample in its cloud and returns the report it produced."
     probe_label = "Test Triage connection"

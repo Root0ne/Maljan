@@ -8,7 +8,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import SecretStr
 
-from maljan.core.config import Settings
+from maljan.core.config import GeminiConfig, Settings
 from maljan.core.exceptions import LLMError
 from maljan.llm.provider_base import (
     COMPLETION_MAX_TOKENS,
@@ -28,6 +28,7 @@ class GeminiProvider(LLMProvider):
     """Builds Gemini ChatModels via langchain-google-genai."""
 
     name = "gemini"
+    settings_model = GeminiConfig
     choice_order = 3
     label = "Google Gemini"
     description = "Gemini models via Google AI"

@@ -386,6 +386,8 @@ class R2StaticProvider(GenericMCPStaticProvider):
     """
 
     # What the console calls this provider and says about it, and its test's label.
+    choice_label = "radare2"
+    choice_order = 1
     title = "radare2 MCP"
     description = "A local radare2 binary answers disassembly questions over its MCP server."
     probe_label = "Test radare2 MCP"

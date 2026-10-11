@@ -4,7 +4,7 @@ from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from maljan.core.config import Settings
+from maljan.core.config import OllamaConfig, Settings
 from maljan.llm.provider_base import (
     COMPLETION_MAX_TOKENS,
     COMPLETION_PROMPT,
@@ -243,6 +243,8 @@ class OllamaProvider(LLMProvider):
     """Builds LangChain ChatOllama instances for local models."""
 
     name = "ollama"
+    window_setting = "core.llm.ollama.num_ctx"
+    settings_model = OllamaConfig
     choice_order = 2
     label = "Ollama"
     description = "Models running locally through Ollama"

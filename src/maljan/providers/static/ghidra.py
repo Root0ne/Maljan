@@ -408,6 +408,8 @@ class GhidraStaticProvider(StaticProvider):
     """
 
     # What the console calls this provider and says about it, and its test's label.
+    choice_label = "Ghidra"
+    choice_order = 0
     title = "Ghidra MCP"
     description = "A running Ghidra MCP server decompiles and names functions on request."
     probe_label = "Test Ghidra MCP"

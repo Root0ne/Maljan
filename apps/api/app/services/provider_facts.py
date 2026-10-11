@@ -54,34 +54,66 @@ def _llm_choices() -> tuple[dict[str, str], dict[str, str], dict[str, dict[str, 
     return titles, descriptions, facts
 
 
+def _expanded(prefix: str, leaves: tuple[str, ...], keys: list[str]) -> list[str]:
+    """Catalog keys for a provider's declared leaves: a leaf ending in "." is every key under it."""
+    out: list[str] = []
+    for leaf in leaves:
+        if leaf.endswith("."):
+            out.extend(key for key in keys if key.startswith(prefix + leaf))
+        elif prefix + leaf in keys:
+            out.append(prefix + leaf)
+    return list(dict.fromkeys(out))
+
+
 def _registry_choices(
-    classes: dict[str, type],
-) -> tuple[dict[str, str], dict[str, str], dict[str, dict[str, Any]]]:
+    selector: str, classes: dict[str, type], keys: list[str]
+) -> tuple[dict[str, str], dict[str, str], dict[str, dict[str, Any]], dict[str, str]]:
     titles: dict[str, str] = {}
     descriptions: dict[str, str] = {}
     facts: dict[str, dict[str, Any]] = {}
+    labels: dict[str, str] = {}
+    namespace = selector.rsplit(".", 1)[0]
     for provider_id, cls in classes.items():
         titles[provider_id] = str(getattr(cls, "title", "") or provider_id)
         descriptions[provider_id] = str(getattr(cls, "description", "") or "")
-        facts[provider_id] = {
+        label = str(getattr(cls, "choice_label", "") or "")
+        if label:
+            labels[provider_id] = label
+        prefix = f"{namespace}.{provider_id}."
+        fact: dict[str, Any] = {
             # A provider with a test of its own names it by its id.
             "probe": provider_id if getattr(cls, "probe_label", "") else None,
             "intro": str(getattr(cls, "settings_intro", "") or ""),
         }
-    return titles, descriptions, facts
+        guide = tuple(getattr(cls, "guide_leaves", ()) or ())
+        folded = tuple(getattr(cls, "guide_advanced_leaves", ()) or ())
+        if guide or folded:
+            fact["guide_keys"] = _expanded(prefix, guide, keys)
+            fact["guide_advanced_keys"] = _expanded(prefix, folded, keys)
+        facts[provider_id] = fact
+    return titles, descriptions, facts, labels
 
 
-def selector_choices() -> dict[
-    str, tuple[dict[str, str], dict[str, str], dict[str, dict[str, Any]]]
-]:
-    """Each provider selector's per-choice titles, descriptions and facts."""
+def selector_choices(
+    keys: list[str],
+) -> dict[str, tuple[dict[str, str], dict[str, str], dict[str, dict[str, Any]], dict[str, str]]]:
+    """Each provider selector's per-choice titles, descriptions, facts and reader labels.
+
+    ``keys`` are the catalog's keys in order, against which a provider's
+    declared guide leaves are expanded.
+    """
     from maljan.providers.registry import _SANDBOX_REGISTRY, _STATIC_REGISTRY, discover_providers
 
     discover_providers()
+    titles, descriptions, facts = _llm_choices()
     return {
-        LLM_SELECTOR: _llm_choices(),
-        STATIC_SELECTOR: _registry_choices(dict(sorted(_STATIC_REGISTRY.items()))),
-        SANDBOX_SELECTOR: _registry_choices(dict(sorted(_SANDBOX_REGISTRY.items()))),
+        LLM_SELECTOR: (titles, descriptions, facts, {}),
+        STATIC_SELECTOR: _registry_choices(
+            STATIC_SELECTOR, dict(sorted(_STATIC_REGISTRY.items())), keys
+        ),
+        SANDBOX_SELECTOR: _registry_choices(
+            SANDBOX_SELECTOR, dict(sorted(_SANDBOX_REGISTRY.items())), keys
+        ),
     }
 
 

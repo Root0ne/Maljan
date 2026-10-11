@@ -15,6 +15,7 @@ from typing import Any
 
 import httpx
 import pytest
+from pydantic import BaseModel, SecretStr
 
 from maljan.core.model_assignments import ModelAssignment, endpoint_for
 from maljan.core.settings_overrides import build_settings
@@ -33,13 +34,30 @@ from maljan.llm.provider_base import (
 
 ACME = "acme"
 ACME_ROOT = "http://acme.local:9000"
+ACME_OWN = "http://acme-own.local:9100"
+
+
+class AcmeSettings(BaseModel):
+    """The invented provider's own block, ``llm.acme``: credential, address, effort, models."""
+
+    api_key: SecretStr | None = None
+    base_url: str | None = None
+    effort: str = ""
+    expert_model: str = "acme-small"
+    judge_model: str = "acme-large"
 
 
 class AcmeProvider(LLMProvider):
     name = ACME
     label = "Acme runtime"
     hosted = False
-    credential_leaf = ""
+    settings_model = AcmeSettings
+    settings_annotations = {
+        "api_key": {"title": "Acme key", "description": "The key Acme takes.", "probe": "llm"},
+        "base_url": {"title": "Acme address", "description": "Where Acme listens.", "probe": "llm"},
+    }
+    credential_leaf = "api_key"
+    base_url_leaf = "base_url"
     sdk_packages = frozenset({"acme_sdk"})
     llm_types = ("acme-chat",)
     per_call_cap_field = "max_new_tokens"
@@ -85,22 +103,23 @@ class AcmeProvider(LLMProvider):
 
     @classmethod
     def model_listing(cls, settings: Any) -> ModelListing:
+        where = cls.endpoint(None, cls.configured_base_url(settings))
         return ModelListing(
-            url=f"{ACME_ROOT}/catalogue",
-            headers={},
+            url=f"{where}/catalogue",
+            headers={"x-acme-key": cls.api_key(settings)},
             names=lambda payload: list(payload.get("names", [])),
-            where=ACME_ROOT,
+            where=where,
         )
-
-    @classmethod
-    def probed_model(cls, settings: Any, listed: list[str]) -> str:
-        return listed[0] if listed else ""
 
     @classmethod
     def one_turn_request(
         cls, settings: Any, endpoint: str, model: str, effort: str | None = None
     ) -> OneTurnRequest:
-        return OneTurnRequest(f"{endpoint}/speak", {}, {"who": model, "effort": effort or ""})
+        return OneTurnRequest(
+            f"{endpoint}/speak",
+            {"x-acme-key": cls.api_key(settings)},
+            {"who": model, "effort": effort or ""},
+        )
 
     @classmethod
     def said_something(cls, payload: Any) -> bool:
@@ -120,6 +139,64 @@ def _acme_registered() -> Iterator[None]:
 
 def _settings(**core: Any) -> Any:
     return build_settings({"llm.provider": ACME, **core})
+
+
+class TestItsOwnSettings:
+    def test_its_block_is_read_with_its_model_and_names_its_role_models(self) -> None:
+        settings = _settings(
+            **{
+                "llm.acme.api_key": "acme-test-key",
+                "llm.acme.base_url": ACME_OWN,
+                "llm.acme.effort": "fierce",
+                "llm.acme.expert_model": "acme-expert",
+                "llm.acme.judge_model": "acme-judge",
+            }
+        )
+        assert isinstance(settings.llm.acme, AcmeSettings)
+        assert settings.llm.expert_model == "acme-expert"
+        assert settings.llm.judge_model == "acme-judge"
+        assert AcmeProvider.api_key(settings) == "acme-test-key"
+        assert endpoint_for(settings, ACME) == ACME_OWN
+
+    def test_its_global_effort_is_its_own_setting(self) -> None:
+        from maljan.llm.effort import effort_in_force, effort_options
+
+        settings = _settings(**{"llm.acme.effort": "gentle"})
+        assert effort_in_force(settings, ACME) == ("gentle", "gentle from llm.acme.effort")
+        assert effort_options(settings, ACME, "m")["global_value"] == "gentle"
+
+    def test_the_catalogue_lists_its_settings(self) -> None:
+        from maljan.core.settings_catalog import core_catalog
+
+        entries = {e.key: e for e in core_catalog()}
+        assert entries["core.llm.acme.api_key"].secret is True
+        assert entries["core.llm.acme.api_key"].title == "Acme key"
+        assert entries["core.llm.acme.base_url"].probe == "llm"
+        assert "core.llm.acme.expert_model" in entries
+
+    def test_a_provider_with_no_block_borrows_no_role_model(self) -> None:
+        from maljan.llm.provider_base import role_block_problem
+
+        class _Bare(LLMProvider):
+            name = "bare"
+
+            def __init__(self, config: Any) -> None:
+                self._config = config
+
+        registry.register_provider("bare")(_Bare)
+        try:
+            settings = build_settings({"llm.provider": "bare"})
+            assert settings.llm.expert_model == "" and settings.llm.judge_model == ""
+            problem = role_block_problem(settings)
+            assert problem is not None and "llm.bare" in problem
+            assert role_block_problem(_settings()) is None
+        finally:
+            registry._PROVIDER_REGISTRY.pop("bare", None)
+            _FACTS.pop("bare", None)
+
+    def test_a_block_for_an_id_registered_elsewhere_still_loads(self) -> None:
+        settings = build_settings({"llm.elsewhere.expert_model": "m"})
+        assert settings.llm.elsewhere == {"expert_model": "m"}
 
 
 class TestSettingsReadTheAdapter:
@@ -210,9 +287,13 @@ class TestTheProbeAsksTheAdapter:
 
         spoken: list[dict[str, Any]] = []
 
+        keys: list[str] = []
+
         def handler(request: httpx.Request) -> httpx.Response:
+            keys.append(request.headers.get("x-acme-key", ""))
+            assert request.url.host == "acme-own.local"
             if request.url.path == "/catalogue":
-                return httpx.Response(200, json={"names": ["tiny"]})
+                return httpx.Response(200, json={"names": ["tiny", "acme-expert"]})
             spoken.append(__import__("json").loads(request.content))
             return httpx.Response(200, json={"said": "hello"})
 
@@ -224,8 +305,18 @@ class TestTheProbeAsksTheAdapter:
                 super().__init__(*args, **kwargs)
 
         monkeypatch.setattr(httpx, "AsyncClient", _Routed)
-        result = await probes.probe_llm(_settings())
+        settings = _settings(
+            **{
+                "llm.acme.api_key": "acme-test-key",
+                "llm.acme.base_url": ACME_OWN,
+                "llm.acme.effort": "fierce",
+                "llm.acme.expert_model": "acme-expert",
+            }
+        )
+        result = await probes.probe_llm(settings)
         assert result.ok, result.detail
-        assert result.models == ["tiny"]
-        assert spoken == [{"who": "tiny", "effort": ""}]
+        assert result.models == ["tiny", "acme-expert"]
+        # The block's own expert model, at its own effort, with its own key.
+        assert spoken == [{"who": "acme-expert", "effort": "fierce"}]
+        assert keys and all(key == "acme-test-key" for key in keys)
         assert facts_of(ACME) is AcmeProvider

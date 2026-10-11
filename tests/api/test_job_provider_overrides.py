@@ -94,25 +94,90 @@ def test_the_overridden_providers_show_up_in_the_snapshot():
     assert snap["sandbox.provider"] == "upload"
 
 
-def test_the_settings_choices_are_the_registry_ids():
-    """The settings model and the registry agree; the job schema reads the registry."""
-    from typing import get_args
+_SETTING_OF = {
+    "llm_provider": "llm.provider",
+    "static_provider": "static.provider",
+    "sandbox_provider": "sandbox.provider",
+}
 
-    from maljan.core.config import SandboxConfig, StaticConfig
+
+def _registered(field: str) -> list[str]:
+    from maljan.llm.provider_base import provider_names
     from maljan.providers.registry import sandbox_provider_ids, static_provider_ids
 
-    static_settings = set(get_args(StaticConfig.model_fields["provider"].annotation))
-    sandbox_settings = set(get_args(SandboxConfig.model_fields["provider"].annotation))
-    assert set(static_provider_ids()) == static_settings
-    assert set(sandbox_provider_ids()) == sandbox_settings
+    return {
+        "llm_provider": provider_names,
+        "static_provider": static_provider_ids,
+        "sandbox_provider": sandbox_provider_ids,
+    }[field]()
+
+
+def _built(field: str, value: str) -> str:
+    from app.worker.analysis_worker import build_job_settings
+
+    settings = build_job_settings({}, {field: value})
+    node = settings
+    for part in _SETTING_OF[field].split("."):
+        node = getattr(node, part)
+    return str(node)
+
+
+@pytest.mark.parametrize("field", sorted(_SETTING_OF))
+def test_every_id_the_job_schema_accepts_builds_the_job_s_settings(field):
+    """The submit check and the worker agree: what is accepted is what runs."""
+    for provider in _registered(field):
+        JobCreateRequest(sample_id=uuid.uuid4(), config={field: provider})
+        assert _built(field, provider) == provider
+
+
+@pytest.fixture
+def client():
+    from unittest.mock import MagicMock
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api.v1.jobs import router
+    from app.database import get_db
+    from app.deps import get_current_user
+
+    app = FastAPI()
+    app.include_router(router, prefix="/api/v1")
+    app.dependency_overrides[get_current_user] = lambda: MagicMock(id=uuid.uuid4())
+    app.dependency_overrides[get_db] = lambda: MagicMock()
+    return TestClient(app)
+
+
+@pytest.mark.parametrize("field", sorted(_SETTING_OF))
+def test_every_id_the_job_schema_refuses_is_a_422_at_submit(client, field):
+    from app.worker.analysis_worker import build_job_settings
+
+    response = client.post(
+        "/api/v1/jobs",
+        json={"sample_id": str(uuid.uuid4()), "config": {field: "not-a-registered-provider"}},
+    )
+    assert response.status_code == 422
+    assert field in response.text
+    with pytest.raises(ValidationError):
+        build_job_settings({}, {field: "not-a-registered-provider"})
+
+
+def test_a_sandbox_registered_at_runtime_is_accepted_and_builds():
+    from maljan.providers import registry
+
+    @registry.register_sandbox_provider("acme-sandbox")
+    class _Acme:  # noqa: B903 — a registration only needs the class
+        pass
+
+    try:
+        JobCreateRequest(sample_id=uuid.uuid4(), config={"sandbox_provider": "acme-sandbox"})
+        assert _built("sandbox_provider", "acme-sandbox") == "acme-sandbox"
+    finally:
+        registry._SANDBOX_REGISTRY.pop("acme-sandbox", None)
 
 
 def test_the_rest_sandbox_is_an_accepted_per_job_override():
-    from typing import get_args
-
-    from maljan.core.config import SandboxConfig
-
-    assert "rest" in get_args(SandboxConfig.model_fields["provider"].annotation)
+    assert "rest" in _registered("sandbox_provider")
     assert _accepted("sandbox_provider", "rest")
     JobCreateRequest(sample_id=uuid.uuid4(), config={"sandbox_provider": "rest"})
 

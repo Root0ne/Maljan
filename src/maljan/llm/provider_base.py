@@ -20,7 +20,7 @@ by where it is, no per-agent endpoint, no probe turn.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, ClassVar, Literal
 
@@ -70,6 +70,14 @@ class LLMProvider:
     """The interface every LLM provider adapter answers; the defaults are a silent provider's."""
 
     name: ClassVar[str] = ""
+    # The model ``llm.<name>`` is read with: the provider's own settings (its
+    # credential, address, effort and role models live here). A provider that
+    # is not a declared field of ``LLMConfig`` keeps its block under its name,
+    # validated against this model, as a memory backend keeps ``memory.<id>``.
+    settings_model: ClassVar[Any] = None
+    # Catalogue annotations for the leaves of ``settings_model``, keyed by the
+    # leaf's path under ``llm.<name>.`` (``"api_key"``).
+    settings_annotations: ClassVar[Mapping[str, Mapping[str, Any]]] = {}
     # Where the provider stands among the choices the console offers; lower first.
     choice_order: ClassVar[int] = 100
     # The console's title and one-line description of this provider.
@@ -120,6 +128,9 @@ class LLMProvider:
     reasoning_passback_keys: ClassVar[tuple[str, ...]] = ()
     # Whether the window-metadata request needs the credential to answer.
     window_probe_needs_key: ClassVar[bool] = False
+    # The settings key an operator declares the served window in, named when
+    # no window could be learned; ``None``: the provider has none.
+    window_setting: ClassVar[str | None] = None
 
     # ── Settings ──────────────────────────────────────────────────────────
 
@@ -262,11 +273,23 @@ def _discover() -> None:
 
 
 def facts_of(name: object) -> type[LLMProvider]:
-    """The adapter class answering for provider ``name``; the silent defaults when none does."""
-    _discover()
+    """The adapter class answering for provider ``name``; the silent defaults when none does.
+
+    A provider not registered yet is looked for in its own built-in module
+    first, so asking about one shipped provider does not load every adapter.
+    """
     from maljan.llm.registry import _PROVIDER_REGISTRY
 
     key = str(name or "")
+    if key not in _PROVIDER_REGISTRY and key not in _FACTS:
+        try:
+            from maljan.llm.registry import discover_provider
+
+            discover_provider(key)
+        except Exception as exc:  # noqa: BLE001 — falls back to discovering every adapter
+            logger.debug("LLM provider %r could not be imported alone (%s).", key, exc)
+        if key not in _PROVIDER_REGISTRY:
+            _discover()
     built = _PROVIDER_REGISTRY.get(key)
     if isinstance(built, type) and issubclass(built, LLMProvider):
         return built
@@ -330,3 +353,39 @@ def reasoning_passback_keys() -> frozenset[str]:
 def effort_providers() -> list[str]:
     """The registered providers that send a reasoning effort."""
     return [name for name in provider_names() if facts_of(name).effort_setting]
+
+
+def undeclared_settings_models() -> dict[str, Any]:
+    """The settings model of each registered provider that is not a declared ``LLMConfig`` field."""
+    from maljan.core.config import LLMConfig
+
+    out: dict[str, Any] = {}
+    for name in provider_names():
+        model = facts_of(name).settings_model
+        if name not in LLMConfig.model_fields and model is not None:
+            out[name] = model
+    return out
+
+
+def role_block_problem(settings: Any) -> str | None:
+    """Why the selected provider's role models cannot be read, or ``None`` when they can.
+
+    The expert and judge models are read from the selected provider's own
+    block; a registered provider that keeps none would otherwise run on another
+    provider's models without a word.
+    """
+    provider = str(getattr(getattr(settings, "llm", None), "provider", "") or "")
+    from maljan.core.config import LLMConfig
+
+    if provider in LLMConfig.model_fields:
+        # A declared block of ``llm``: every shipped provider keeps its own.
+        return None
+    if provider not in provider_names():
+        return None
+    block = facts_of(provider).settings_block(settings)
+    if hasattr(block, "expert_model") and hasattr(block, "judge_model"):
+        return None
+    return (
+        f"the {provider} provider keeps no settings block with expert_model and judge_model "
+        f"(llm.{provider}), so its role models cannot be read"
+    )

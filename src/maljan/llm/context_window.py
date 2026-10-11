@@ -44,7 +44,7 @@ Where the window comes from, in order:
     nobody measured is the platform stating what it does not know; the
     documented :data:`UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS` applies instead and
     every surface says the window is unknown and names
-    :data:`UNKNOWN_WINDOW_REMEDY`.
+    :func:`unknown_window_remedy`.
 
 A probe never fails a run and never blocks a settings save. Everything it can
 end with becomes a :class:`WindowFact` with the reason in words, so an operator
@@ -113,7 +113,7 @@ __all__ = [
     "awindow_for_settings",
     "budget_for_settings",
     "NO_ROOM_BELOW_CHARS",
-    "UNKNOWN_WINDOW_REMEDY",
+    "unknown_window_remedy",
     "UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS",
     "believable",
     "declared_window",
@@ -263,12 +263,27 @@ UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS = 6000
 # the window, which loses the analyst before any tool has run.
 UNKNOWN_WINDOW_CHUNK_TOKENS = 20000
 
+
 # The one thing an operator does about it, named wherever the word ``fallback``
 # is printed.
-UNKNOWN_WINDOW_REMEDY = (
-    "set core.llm.openai.context_size to the window the server was started with, "
-    "or add the model to the vendored context-window table"
-)
+def unknown_window_remedy(providers: Iterable[str] | None = None) -> str:
+    """What to do when no window was learned, naming the providers' own window settings.
+
+    ``providers`` are the providers of the models the window was asked for;
+    ``None`` names every registered provider that declares a window setting
+    (``LLMProvider.window_setting``).
+    """
+    from maljan.llm.provider_base import facts_of, provider_names
+
+    names = provider_names() if providers is None else list(dict.fromkeys(providers))
+    settings = [s for s in (facts_of(name).window_setting for name in names) if s]
+    if not settings:
+        return "add the model to the vendored context-window table"
+    return (
+        f"set {' or '.join(settings)} to the window the server was started with, "
+        "or add the model to the vendored context-window table"
+    )
+
 
 # Where a window was learned. Four words, each of which an operator can act on.
 DECLARED = "declared"
@@ -2152,7 +2167,7 @@ class ContextBudget:
             "cap_smallest": smallest,
             "cap_largest": largest,
             "derives": self.derives,
-            "remedy": "" if self.derives else UNKNOWN_WINDOW_REMEDY,
+            "remedy": "" if self.derives else unknown_window_remedy(),
         }
 
 
@@ -2197,7 +2212,7 @@ def upstream_block_chars(configured: int, budget: Any) -> tuple[int, str]:
             )
     return UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS, (
         f"{UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS} characters — the documented fallback: no "
-        f"window was learned ({UNKNOWN_WINDOW_REMEDY})"
+        f"window was learned ({unknown_window_remedy()})"
     )
 
 

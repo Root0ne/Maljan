@@ -37,6 +37,15 @@ class CAPE2SandboxProvider(SandboxProvider):
     """
 
     # What the console calls this provider and says about it, and its test's label.
+    choice_label = "CAPE v2"
+    guide_leaves = (
+        "api_token",
+        "base_url",
+        "poll_interval_seconds",
+        "timeout_seconds",
+    )
+    guide_advanced_leaves = ("mcp.",)
+    choice_order = 1
     title = "CAPEv2"
     description = "A CAPEv2 instance detonates the sample and returns its report."
     probe_label = "Test CAPE connection"

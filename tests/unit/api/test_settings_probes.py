@@ -1160,3 +1160,21 @@ async def test_rest_probe_never_puts_the_token_in_the_url_or_detail(monkeypatch)
     )
     assert "super-secret-rest-token" not in r.detail
     assert "super-secret-rest-token" not in str(seen["url"])
+
+
+@pytest.mark.asyncio
+async def test_a_provider_that_fails_while_it_is_built_is_reported_without_its_credentials(
+    monkeypatch,
+):
+    """A failure no probe expected still reaches the operator with any URL's credentials cut."""
+    from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
+
+    secret_url = _dsn("http", "user:hunter2", "cape.example:8000")
+
+    def broken(cls, cfg):
+        raise RuntimeError(f"could not prepare {secret_url}")
+
+    monkeypatch.setattr(CAPE2SandboxProvider, "from_settings", classmethod(broken))
+    r = await probes.run_probe("cape2", {}, {})
+    assert r.ok is False
+    assert "hunter2" not in r.detail and "RuntimeError" in r.detail

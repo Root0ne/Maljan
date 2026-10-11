@@ -602,21 +602,23 @@ def resolved_catalog(
     from app.services.provider_facts import selector_choices, server_keys
 
     sources = _choice_sources(servers, profiles, agents)
-    selectors = selector_choices()
+    catalog = full_catalog()
+    selectors = selector_choices([entry.key for entry in catalog])
     builtin, reserved = server_keys()
     out: list[CatalogEntry] = []
-    for entry in full_catalog():
+    for entry in catalog:
         if entry.choices_from and entry.choices_from in sources:
             entry = replace(entry, choices=sources[entry.choices_from])
         if entry.key in selectors:
             # What each provider declares about itself, so the console names,
             # describes and tests a choice without a table of its own.
-            titles, descriptions, facts = selectors[entry.key]
+            titles, descriptions, facts, labels = selectors[entry.key]
             entry = replace(
                 entry,
                 choice_titles=titles,
                 choice_descriptions=descriptions,
                 choice_facts=facts,
+                choice_labels=labels or entry.choice_labels,
             )
         if entry.editor == "server_map":
             entry = replace(

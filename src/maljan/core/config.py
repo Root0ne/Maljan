@@ -646,6 +646,11 @@ class LLMConfig(BaseModel):
     frontier: FrontierConfig = Field(default_factory=FrontierConfig)
     # Per-agent overrides: {"static": AgentLLMConfig(...), "dynamic": ...}
     agents: dict[str, AgentLLMConfig] = Field(default_factory=dict)
+    # A provider registered beyond the four declared here keeps its own block
+    # under its name (``llm.<id>``), validated against the settings model its
+    # adapter declares (``LLMProvider.settings_model``). A block for an id this
+    # process has not registered is kept as it was stored, so it still loads.
+    model_config = ConfigDict(extra="allow")
     # How much of an agent's loop budget one model on its fallback list may
     # spend on a turn before it is treated as stalled and the next model is
     # asked (``maljan.llm.fallback``). A share of the loop rather than a fixed
@@ -771,20 +776,57 @@ class LLMConfig(BaseModel):
     # split and the tools-free text path. Ignored when decomposition is off.
     view_decomposition_mode: Literal["facet", "tier"] = "facet"
 
+    @model_validator(mode="after")
+    def _provider_blocks_read_by_their_models(self) -> "LLMConfig":
+        """Each registered provider's block read with its adapter's settings model.
+
+        A block for an id no adapter in this process registered stays as it was
+        stored; anything that is not a block is not a setting and is dropped,
+        as an unknown key always was.
+        """
+        extra = self.__pydantic_extra__
+        selected = str(self.provider)
+        if not extra and selected in type(self).model_fields:
+            return self
+        from maljan.llm.provider_base import undeclared_settings_models
+
+        models = undeclared_settings_models()
+        if extra is None:
+            extra = {}
+            object.__setattr__(self, "__pydantic_extra__", extra)
+        for key, value in list(extra.items()):
+            model = models.get(key)
+            if model is not None and isinstance(value, dict):
+                extra[key] = model.model_validate(value)
+            elif not isinstance(value, dict | BaseModel):
+                del extra[key]
+        # The selected provider's block with its declared defaults when none is
+        # stored, as a memory backend's settings are.
+        if selected in models and selected not in extra:
+            extra[selected] = models[selected]()
+        return self
+
     def _provider_block(self) -> Any:
-        """The selected provider's own settings block (``llm.<provider>``), else the OpenAI one."""
+        """The selected provider's own settings block (``llm.<provider>``), or ``None``.
+
+        Never another provider's: a provider with no block of its own names no
+        role model (an empty one), and saving such a selection is refused
+        (``provider_base.role_block_problem``).
+        """
         block = getattr(self, str(self.provider), None)
-        return block if hasattr(block, "expert_model") else self.openai
+        return block if hasattr(block, "expert_model") else None
 
     @property
     def expert_model(self) -> str:
         """Returns the expert model name for the currently selected provider."""
-        return self._provider_block().expert_model  # type: ignore[no-any-return]
+        block = self._provider_block()
+        return "" if block is None else str(block.expert_model)
 
     @property
     def judge_model(self) -> str:
         """Returns the judge model name for the currently selected provider."""
-        return self._provider_block().judge_model  # type: ignore[no-any-return]
+        block = self._provider_block()
+        return "" if block is None else str(block.judge_model)
 
 
 # ---------------------------------------------------------------------------
@@ -3496,7 +3538,11 @@ class StaticConfig(BaseModel):
     the default.
     """
 
-    provider: Literal["ghidra", "r2", "capa_yara", "generic_mcp", "none"] = "ghidra"
+    # A registered static provider's id (``maljan.providers.registry``): the
+    # catalogue offers the registered ids and a name nothing registered is
+    # refused where it is saved, as ``llm.provider`` and ``memory.backend``
+    # are; a stored id whose provider is registered only elsewhere still loads.
+    provider: str = "ghidra"
     ghidra: MCPServerConfig = Field(default_factory=lambda: ghidra_block())
     r2: StaticR2Config = Field(default_factory=lambda: r2_block())
 
@@ -3700,7 +3746,9 @@ class SandboxConfig(BaseModel):
         "rest"   — any HTTP sandbox, described by sandbox.rest.*
     """
 
-    provider: Literal["mock", "cape2", "upload", "triage", "rest"] = "mock"
+    # A registered sandbox provider's id, refused where it is saved and read
+    # as stored, as ``static.provider`` is.
+    provider: str = "mock"
     cape2: SandboxCape2Config = Field(default_factory=SandboxCape2Config)
     triage: SandboxTriageConfig = Field(default_factory=SandboxTriageConfig)
     upload: SandboxUploadConfig = Field(default_factory=SandboxUploadConfig)

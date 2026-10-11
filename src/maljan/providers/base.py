@@ -279,6 +279,17 @@ class StaticProvider(ABC):
     description: ClassVar[str] = ""
     probe_label: ClassVar[str] = ""
     settings_intro: ClassVar[str] = ""
+    # Where the provider stands among the settings selector's choices; lower first.
+    choice_order: ClassVar[int] = 100
+    # The words a reader choosing how to analyse a sample sees (the submit
+    # dialog), beside the id; empty reads the title.
+    choice_label: ClassVar[str] = ""
+    # The leaves of the provider's own block (relative to it; one ending in
+    # "." names every leaf under it) the setup guide shows up front, and those
+    # it folds under "Advanced". Neither declared: the guide shows the whole
+    # block by each entry's own advanced flag.
+    guide_leaves: ClassVar[tuple[str, ...]] = ()
+    guide_advanced_leaves: ClassVar[tuple[str, ...]] = ()
 
     @classmethod
     @abstractmethod
@@ -409,6 +420,17 @@ class SandboxProvider(ABC):
     description: ClassVar[str] = ""
     probe_label: ClassVar[str] = ""
     settings_intro: ClassVar[str] = ""
+    # Where the provider stands among the settings selector's choices; lower first.
+    choice_order: ClassVar[int] = 100
+    # The words a reader choosing how to analyse a sample sees (the submit
+    # dialog), beside the id; empty reads the title.
+    choice_label: ClassVar[str] = ""
+    # The leaves of the provider's own block (relative to it; one ending in
+    # "." names every leaf under it) the setup guide shows up front, and those
+    # it folds under "Advanced". Neither declared: the guide shows the whole
+    # block by each entry's own advanced flag.
+    guide_leaves: ClassVar[tuple[str, ...]] = ()
+    guide_advanced_leaves: ClassVar[tuple[str, ...]] = ()
 
     @classmethod
     @abstractmethod

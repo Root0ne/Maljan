@@ -18,7 +18,7 @@ import sys
 import threading
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import CancelledError as _FuturesCancelled
 from concurrent.futures import Future as _ConcurrentFuture
 from concurrent.futures import TimeoutError as _FuturesTimeout
@@ -339,7 +339,7 @@ def ledger_ids_in(msgs: Sequence[Any]) -> list[str]:
     return seen
 
 
-def _message_chars(m: object) -> int:
+def _message_chars(m: object, passback: frozenset[str] | None = None) -> int:
     """Size of a message **as the server will see it**, not just its text.
 
     An assistant turn that requests tools carries ``content == ""`` and puts the
@@ -355,11 +355,17 @@ def _message_chars(m: object) -> int:
     # A thinking model's reasoning that a provider has sent back with the turn
     # (each adapter's ``reasoning_passback_keys``) is read with it too.
     kwargs = getattr(m, "additional_kwargs", None) or {}
-    for key in _passback_keys():
+    for key in _passback_keys() if passback is None else passback:
         reasoning = kwargs.get(key)
         if isinstance(reasoning, str):
             total += len(reasoning)
     return total
+
+
+def _chars_of(messages: Iterable[object], passback: frozenset[str] | None = None) -> int:
+    """Every message's weight in characters, the passback keys read once for all of them."""
+    keys = _passback_keys() if passback is None else passback
+    return sum(_message_chars(m, keys) for m in messages)
 
 
 def _passback_keys() -> frozenset[str]:
@@ -390,7 +396,7 @@ def _reported_request(messages: list, per_token: int) -> tuple[int, int]:
         except (AttributeError, TypeError, ValueError):
             prompt = 0
         if prompt > 0:
-            after = sum(_message_chars(m) for m in messages[index:])
+            after = _chars_of(messages[index:])
             return prompt * max(1, per_token) + after, index
     return 0, -1
 
@@ -415,7 +421,7 @@ def request_chars(
     server last counted (``tool_answer_clearing``): that count still holds it,
     so it comes off the reported figure; the measure already sees the clear.
     """
-    measured = sum(_message_chars(m) for m in messages) + max(0, int(definition_chars))
+    measured = _chars_of(messages) + max(0, int(definition_chars))
     reported = _reported_request_chars(messages, per_token) - max(0, int(cleared_chars))
     return max(measured, reported)
 
@@ -482,7 +488,8 @@ def _trim_for_synthesis(msgs: list, budget: int) -> list:
     Returns ``msgs`` unchanged when it already fits, so the common case is
     untouched and only a conversation that would not finish is altered.
     """
-    if sum(_message_chars(m) for m in msgs) <= budget:
+    passback = _passback_keys()
+    if _chars_of(msgs, passback) <= budget:
         return msgs
 
     head: list = []
@@ -493,9 +500,7 @@ def _trim_for_synthesis(msgs: list, budget: int) -> list:
         head.append(rest.pop(0))
 
     units = _conversation_units(rest)
-    used = sum(_message_chars(m) for m in head) + sum(
-        _message_chars(m) for unit in units for m in unit
-    )
+    used = _chars_of(head, passback) + _chars_of((m for unit in units for m in unit), passback)
 
     # Prose first, oldest first: an assistant turn that called no tool is the
     # model's own commentary, and the evidence is what the salvage is for.
@@ -504,7 +509,7 @@ def _trim_for_synthesis(msgs: list, budget: int) -> list:
             break
         if _is_a_tool_pair(unit):
             continue
-        used -= sum(_message_chars(m) for m in unit)
+        used -= _chars_of(unit, passback)
         units[index] = []
 
     for index, unit in enumerate(units):
@@ -512,7 +517,7 @@ def _trim_for_synthesis(msgs: list, budget: int) -> list:
             break
         if not unit:
             continue
-        used -= sum(_message_chars(m) for m in unit)
+        used -= _chars_of(unit, passback)
         units[index] = []
 
     return [*head, *[m for unit in units for m in unit]]
@@ -3337,7 +3342,7 @@ class BudgetMeter:
                 max_steps=ledger.max_steps,
                 elapsed_s=time.monotonic() - ledger.started,
                 timeout_s=ledger.timeout,
-                prompt_chars=sum(_message_chars(m) for m in messages),
+                prompt_chars=_chars_of(messages),
                 ledger_entries=ledger_entries,
                 final=final,
                 tool_definition_chars=self._definitions_sent(),
@@ -5554,7 +5559,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             meter.admit(
                 kind=kind,
                 model=self._model_label() or _model_label(self.llm),
-                prompt_chars=sum(_message_chars(m) for m in messages)
+                prompt_chars=_chars_of(messages)
                 + self._definitions_sent()
                 + self._replayed_run_state_chars(),
                 cap_tokens=self.output_cap_tokens(),
@@ -5583,8 +5588,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 meter.preview(
                     kind=kind,
                     model=self._model_label() or _model_label(self.llm),
-                    prompt_chars=sum(_message_chars(m) for m in messages)
-                    + self._definitions_sent(),
+                    prompt_chars=_chars_of(messages) + self._definitions_sent(),
                     cap_tokens=self.output_cap_tokens(),
                 )
                 == 0
@@ -6161,8 +6165,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         # arguments never parsed is not sent back to the server.
         keeps_turns = keeps_turns_as_received(getattr(self, "llm", None))
         sendable, _dropped = (msgs, False) if keeps_turns else nudge_turns(msgs)
-        conversation = sum(_message_chars(m) for m in sendable)
-        framing = sum(_message_chars(m) for m in _framing_of(sendable))
+        conversation = _chars_of(sendable)
+        framing = _chars_of(_framing_of(sendable))
         rates = self._rates_sentence(generation_rate, prompt_rate)
         if paced is not None and paced < framing + len(_SYNTHESIS_DIRECTIVE):
             # Not even the task and the pack can be read and answered in the
@@ -6184,7 +6188,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             return ""
 
         trimmed = _trim_for_synthesis(sendable, budget)
-        sent = sum(_message_chars(m) for m in trimmed)
+        sent = _chars_of(trimmed)
         if len(trimmed) < len(msgs):
             self.logger.warning(
                 "%s forced synthesis: trimmed %d of %d messages to fit %d chars%s.",

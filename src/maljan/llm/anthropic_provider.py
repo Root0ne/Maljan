@@ -48,7 +48,7 @@ from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from maljan.core.config import Settings
+from maljan.core.config import AnthropicConfig, Settings
 from maljan.core.exceptions import LLMError
 from maljan.core.logger import logger
 from maljan.llm.provider_base import (
@@ -382,6 +382,7 @@ class AnthropicProvider(LLMProvider):
     """Builds LangChain ChatAnthropic instances."""
 
     name = "anthropic"
+    settings_model = AnthropicConfig
     choice_order = 1
     label = "Anthropic"
     description = "Claude models via the Anthropic API"

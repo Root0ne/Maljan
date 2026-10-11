@@ -100,6 +100,15 @@ def static_provider_class(name: str) -> type[StaticProvider]:
     return cls  # type: ignore[return-value]
 
 
+def sandbox_provider_class(name: str) -> type[SandboxProvider]:
+    """The registered sandbox provider class ``name`` names."""
+    discover_providers()
+    cls = _SANDBOX_REGISTRY.get(name)
+    if cls is None:
+        raise ProviderConfigurationError(f"Unknown sandbox provider: {name!r}")
+    return cls  # type: ignore[return-value]
+
+
 def _block_enabled(cfg: Settings, source: str) -> bool:
     """Whether the server block a provider's declaration names is switched on."""
     from maljan.core.tool_declarations import PROVIDER_BLOCKS, block_at

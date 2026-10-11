@@ -1,30 +1,37 @@
 """The registry ids are the settings vocabulary.
 
-The one invariant worth a test of its own: a provider id exists in exactly two
-places — the registry and the settings ``Literal`` — and they must be the same
-set, or the UI offers a choice nothing can build.
+A provider id is what its registry holds: the settings catalogue offers exactly
+the registered ids, a save refuses any other, and a stored id loads whatever
+this process registered.
 """
 
 from __future__ import annotations
 
-from typing import get_args
-
 import pytest
 
-from maljan.core.config import Settings, StaticConfig
+from maljan.core.config import Settings
+from maljan.core.settings_catalog import core_catalog
+from maljan.core.settings_overrides import build_settings
 from maljan.providers import registry
 
 
+def _choices(key: str) -> list[str]:
+    entry = next(e for e in core_catalog() if e.key == key)
+    assert entry.type == "enum"
+    return list(entry.choices or [])
+
+
 def test_static_ids_equal_the_settings_choices():
-    field = StaticConfig.model_fields["provider"]
-    assert sorted(registry.static_provider_ids()) == sorted(get_args(field.annotation))
+    assert sorted(registry.static_provider_ids()) == sorted(_choices("core.static.provider"))
 
 
 def test_sandbox_ids_equal_the_settings_choices():
-    from maljan.core.config import SandboxConfig
+    assert sorted(registry.sandbox_provider_ids()) == sorted(_choices("core.sandbox.provider"))
 
-    field = SandboxConfig.model_fields["provider"]
-    assert sorted(registry.sandbox_provider_ids()) == sorted(get_args(field.annotation))
+
+def test_a_stored_id_registered_only_elsewhere_still_loads():
+    cfg = build_settings({"static.provider": "elsewhere", "sandbox.provider": "elsewhere"})
+    assert cfg.static.provider == "elsewhere" and cfg.sandbox.provider == "elsewhere"
 
 
 def test_default_settings_build_the_ghidra_and_mock_providers():

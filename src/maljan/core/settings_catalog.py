@@ -154,7 +154,16 @@ def core_leaves() -> list[Leaf]:
         model = backend.settings_model
         if model is not None:
             leaves.extend(_walk(model, f"memory.{backend_id}.", model()))
+    for provider_id, model in _undeclared_llm_providers().items():
+        leaves.extend(_walk(model, f"llm.{provider_id}.", model()))
     return leaves
+
+
+def _undeclared_llm_providers() -> dict[str, Any]:
+    """Registered LLM providers whose settings are not a declared field of ``llm``."""
+    from maljan.llm.provider_base import undeclared_settings_models
+
+    return undeclared_settings_models()
 
 
 def _undeclared_memory_backends() -> dict[str, Any]:
@@ -170,9 +179,19 @@ def _undeclared_memory_backends() -> dict[str, Any]:
 
 
 def _annotation(path: str) -> Any:
-    """``path``'s annotation: the shared table's, else the one its memory backend registered."""
+    """``path``'s annotation: the shared table's, else the one its memory backend or LLM
+    provider declares for the leaves of its own settings."""
     found = ANNOTATIONS.get(path)
-    if found is not None or not path.startswith("memory."):
+    if found is not None:
+        return found
+    if path.startswith("llm."):
+        provider_id, _, leaf = path[len("llm.") :].partition(".")
+        if leaf and provider_id in _undeclared_llm_providers():
+            from maljan.llm.provider_base import facts_of
+
+            return facts_of(provider_id).settings_annotations.get(leaf)
+        return None
+    if not path.startswith("memory."):
         return found
     backend_id, _, leaf = path[len("memory.") :].partition(".")
     backend = _undeclared_memory_backends().get(backend_id)
@@ -189,6 +208,19 @@ def _registry_choices(source: str | None) -> list[str] | None:
         from maljan.llm.provider_base import provider_names
 
         return provider_names()
+    if source in ("static_providers", "sandbox_providers"):
+        from maljan.providers.registry import (
+            sandbox_provider_class,
+            sandbox_provider_ids,
+            static_provider_class,
+            static_provider_ids,
+        )
+
+        static = source == "static_providers"
+        ids = static_provider_ids() if static else sandbox_provider_ids()
+        cls_of = static_provider_class if static else sandbox_provider_class
+        # In the order each provider declares, then by id.
+        return sorted(ids, key=lambda i: (getattr(cls_of(i), "choice_order", 100), i))
     return None
 
 
