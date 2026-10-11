@@ -259,8 +259,8 @@ def _select_open_channels(
     the point of an open channel is that this module does not know what a
     sandbox publishes there. A mapping is kept as it is, anything else is
     wrapped so every row is still a mapping (a name the resolved API names
-    place holds is kept as the text it is), and the cap applies as it does to
-    every other channel.
+    place holds is kept as the text it is). A channel is capped as every other
+    channel is; a place is read whole, as every reader's places are.
     """
     rows: dict[str, list[Any]] = {}
     stats: dict[str, ChannelStats] = {}
@@ -269,13 +269,14 @@ def _select_open_channels(
         label = f"places.{name}" if places else f"channels.{name}"
         try:
             values = (node.value for node in path.finditer(payload))
-            peeked = list(islice(values, MAX_ROWS_PER_CHANNEL + 1))
+            peeked = list(values) if places else list(islice(values, MAX_ROWS_PER_CHANNEL + 1))
         except Exception as exc:  # noqa: BLE001 — a path valid in isolation can still fail on data
             stats[label] = ChannelStats(error=f"{type(exc).__name__}: {exc}")
             continue
-        truncated = len(peeked) > MAX_ROWS_PER_CHANNEL
-        matches = peeked[:MAX_ROWS_PER_CHANNEL]
-        kept = [_open_row(name if places else "", m) for m in matches if m not in (None, "")]
+        truncated = not places and len(peeked) > MAX_ROWS_PER_CHANNEL
+        matches = peeked if places else peeked[:MAX_ROWS_PER_CHANNEL]
+        converted = (_open_row(name if places else "", m) for m in matches)
+        kept = [row for row in converted if row is not None]
         stats[label] = ChannelStats(
             matched=len(matches),
             kept=len(kept),
@@ -288,10 +289,66 @@ def _select_open_channels(
     return rows, stats
 
 
+# The channel a top-level block no path names lands in: ``report.<block>``.
+UNNAMED_BLOCK_PREFIX = "report."
+
+# The top-level block a JSONPath starts in: ``$.name``, ``$['name']`` or
+# ``$["name"]``. A path that starts anywhere else (``$..x``, ``$[*]``, a
+# filter) may reach any block, so it names them all.
+_FIRST_BLOCK_RE = re.compile(r"""^\$(?:\.([A-Za-z_][\w-]*)|\[\s*(?:'([^']*)'|"([^"]*)")\s*\])""")
+
+
+def _named_blocks(cfg: RestMappingConfig) -> set[str] | None:
+    """The top-level blocks the mapping's paths start in, or ``None`` where one may start in any."""
+    paths = [getattr(cfg, channel) for channel in CHANNELS]
+    paths += [cfg.target_sha256, *cfg.channels.values(), *cfg.places.values()]
+    named: set[str] = set()
+    for path in paths:
+        text = str(path or "").strip()
+        if not text:
+            continue
+        found = _FIRST_BLOCK_RE.match(text)
+        if found is None:
+            return None
+        named.add(next(group for group in found.groups() if group is not None))
+    return named
+
+
+def _raw_rows(value: Any) -> list[dict[str, Any]]:
+    """One raw block as channel rows: an object whole, a list's items, any other value wrapped."""
+    if isinstance(value, dict):
+        return [value]
+    if isinstance(value, list):
+        return [item if isinstance(item, dict) else {"value": item} for item in value]
+    return [{"value": value}]
+
+
+def unnamed_blocks(
+    cfg: RestMappingConfig, payload: dict[str, Any]
+) -> dict[str, list[dict[str, Any]]]:
+    """Each top-level block of ``payload`` no mapping path starts in, as a ``report.<block>``.
+
+    One pass over the payload's top-level keys; the blocks are kept whole and
+    carried by reference, never read or copied row by row. A block with no
+    value (empty text, an empty list or object, null) has nothing to read.
+    """
+    named = _named_blocks(cfg)
+    if named is None:
+        return {}
+    return {
+        f"{UNNAMED_BLOCK_PREFIX}{key}": _raw_rows(value)
+        for key, value in payload.items()
+        if key not in named and value not in (None, "", [], {})
+    }
+
+
 def _open_row(place: str, match: Any) -> Any:
-    """One match of an open channel or place, as the row it lands as."""
+    """One match of an open channel or place, as the row it lands as; ``None`` for no value."""
+    if match in (None, ""):
+        return None
     if place == "resolved_apis":
-        return str(match) if not isinstance(match, dict) else str(match.get("value") or "")
+        text = match.get("value") if isinstance(match, dict) else match
+        return str(text) if text not in (None, "") else None
     return match if isinstance(match, dict) else {"value": match}
 
 
@@ -361,6 +418,11 @@ def apply_mapping(
     rows: dict[str, list[Any]] = {c: list(r) for c, (_s, r) in selected.items()}
     open_channels, open_stats = _select_open_channels(compiled, payload)
     stats.update(open_stats)
+    # Every top-level block of the payload no path names, kept whole as a raw
+    # section the analyst reads: the model decides what it means, and no fact
+    # is drawn from it here. An operator's channel of the same name wins.
+    for name, block_rows in unnamed_blocks(compiled.config, payload).items():
+        open_channels.setdefault(name, block_rows)
     open_places, place_stats = _select_open_channels(compiled, payload, places=True)
     stats.update(place_stats)
 

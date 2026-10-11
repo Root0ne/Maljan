@@ -22,9 +22,12 @@ Two ways a report reaches the document:
 * Any other reader fills the parts from what it read, and the document is laid
   out from the form's own fields in the order :func:`compose` declares.
 
-A reader may name a source block by another word than the document does: it
-declares the rename (``ReportReader.renames``) and the block reaches the
-document under the document's word, in the place the source listed it.
+A reader that keeps its source's arrangement
+(``ReportReader.keeps_source_arrangement``) cuts its source with
+``ReportReader.keep_source``. Where the source names a block by another word
+than the document does, the reader declares the rename
+(``ReportReader.renames``) and the block reaches the document under the
+document's word, in the place the source listed it.
 """
 
 from __future__ import annotations

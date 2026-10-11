@@ -19,6 +19,7 @@ consumer can iterate a fresh ``SandboxReport()`` without a null check.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, cast
 from urllib.parse import urlsplit
@@ -561,6 +562,39 @@ CAPE_RENAMES: dict[str, str] = {
 }
 
 
+# The words a document laid out before the parts' words were declared used for
+# the four renamed blocks: every such document was CAPE's shape, whichever
+# sandbox produced it, so a part missing under the document's word is read
+# under the word it had then (:func:`stored_place`).
+STORED_DOCUMENT_WORDS: dict[str, str] = {new: old for old, new in CAPE_RENAMES.items()}
+
+
+def stored_place(document: Any, name: str, default: Any = None) -> Any:
+    """The part ``name`` of ``document``, read under its earlier word where the new one is absent.
+
+    A document checkpointed before the parts were renamed is read as what it
+    holds rather than stated as holding nothing.
+    """
+    from maljan.schemas.sandbox_document import PLACES, place
+
+    found = place(document, name, _ABSENT)
+    if found is not _ABSENT:
+        return found
+    path = PLACES[name]
+    earlier = STORED_DOCUMENT_WORDS.get(path[0])
+    if earlier is None or not isinstance(document, Mapping) or path[0] in document:
+        return default
+    node: Any = document.get(earlier, _ABSENT)
+    for key in path[1:]:
+        if not isinstance(node, Mapping) or key not in node:
+            return default
+        node = node[key]
+    return default if node is _ABSENT else node
+
+
+_ABSENT = object()
+
+
 def _block(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
@@ -578,6 +612,7 @@ def cape_report_to_sandbox_report(
     source_format: str = "cape2",
     task_id: str = "",
     keep_arrangement: bool = True,
+    renames: Mapping[str, str] | None = None,
 ) -> SandboxReport:
     """Read a CAPE/Cuckoo-shaped report into the neutral form.
 
@@ -631,7 +666,8 @@ def cape_report_to_sandbox_report(
     extras: dict[str, Any] = {}
     arrangement: dict[str, list[str]] | None = None
     if keep_arrangement:
-        published, extras, arrangement = decompose(renamed(raw, CAPE_RENAMES))
+        words = CAPE_RENAMES if renames is None else renames
+        published, extras, arrangement = decompose(renamed(raw, words))
     return SandboxReport(
         provider=provider,
         source_format=source_format,
@@ -892,9 +928,39 @@ TRIAGE_OVERVIEW_FILLS: frozenset[str] = frozenset({"signatures", "extracted"})
 # of their own; every other one is kept under its own name.
 _TRIAGE_OVERVIEW_READ: frozenset[str] = frozenset({"sample", "signatures", "extracted"})
 _TRIAGE_SIGNATURE_READ: frozenset[str] = frozenset({"name", "desc", "score", "indicators", "ttp"})
-# The providers that hand this reader task reports to read, for a report that
-# does not say what was read (``read_from``, which a fetched run states).
-TRIAGE_TASK_READERS: frozenset[str] = frozenset({"triage"})
+# A task report's blocks the reader reads into places of their own, and the
+# fields of a flow and of a request it reads; every other one is kept.
+_TRIAGE_TASK_READ: frozenset[str] = frozenset({"processes", "dumped", "network"})
+_TRIAGE_FLOW_READ: frozenset[str] = frozenset(
+    {"proto", "dst", "procid", "pid", "as_num", "as_org", "country"}
+)
+_TRIAGE_REQUEST_READ: frozenset[str] = frozenset(
+    {"domain_req", "domain_resp", "web_req", "web_resp"}
+)
+# The key a kept task block's rows name their task by.
+TASK_KEY = "task_report"
+
+
+def _keep_task_block(
+    channels: dict[str, list[dict[str, Any]]], name: str, task: str, value: Any
+) -> None:
+    """One task report's block, kept as rows of the channel ``name`` that name the task.
+
+    A list's items are the rows (an object as it is, any other item wrapped),
+    an object is one row, any other value one wrapped row; nothing with no
+    value is kept.
+    """
+    if value in (None, "", [], {}):
+        return
+    items = value if isinstance(value, list) else [value]
+    rows = channels.setdefault(name, [])
+    for item in items:
+        if isinstance(item, dict):
+            rows.append({TASK_KEY: task, **item})
+        elif item not in (None, ""):
+            rows.append({TASK_KEY: task, "value": item})
+
+
 TRIAGE_NORMALISER_FILLS: frozenset[str] = frozenset(
     {
         "processes",
@@ -907,6 +973,8 @@ TRIAGE_NORMALISER_FILLS: frozenset[str] = frozenset(
         "network.domains",
         "network.http",
         "extracted",
+        # The task reports' blocks with no place of their own.
+        "channels",
     }
 )
 
@@ -964,10 +1032,21 @@ def triage_overview_to_sandbox_report(
     # Whether any behavioural task report was read: without one, the report is
     # the overview's alone, and says so (``read_from``).
     tasks_read = 0
-    for task in (task_reports or {}).values():
+    extracted = _rows(overview.get("extracted"))
+    channels: dict[str, list[dict[str, Any]]] = {}
+    for task_name, task in (task_reports or {}).items():
         if not isinstance(task, dict):
             continue
         tasks_read += 1
+        # The task report's blocks with no place of their own (its signatures
+        # with their per-process indicators, the task, the errors, ...), kept
+        # whole as ``task.<block>`` channels, each row naming its task; what
+        # it extracted joins the overview's.
+        for block, value in task.items():
+            if block == "extracted":
+                extracted.extend(row for row in _rows(value) if row not in extracted)
+            elif block not in _TRIAGE_TASK_READ:
+                _keep_task_block(channels, f"task.{block}", str(task_name), value)
         lineage = _sample_process_tree(task, sample)
         for proc in task.get("processes") or []:
             if not isinstance(proc, dict):
@@ -995,6 +1074,9 @@ def triage_overview_to_sandbox_report(
 
         net_field = task.get("network")
         net = net_field if isinstance(net_field, dict) else {}
+        for block, value in net.items():
+            if block not in ("flows", "requests"):
+                _keep_task_block(channels, f"task.network.{block}", str(task_name), value)
 
         for flow in _rows(net.get("flows")):
             proto = str(flow.get("proto") or "").lower()
@@ -1003,6 +1085,11 @@ def triage_overview_to_sandbox_report(
                 continue
             row: dict[str, Any] = {"dst": dst_host, "dport": dst_port}
             row.update(_flow_attribution(flow, lineage, marked_by or LINEAGE_STORED_MARKED_BY))
+            # The flow's other fields (its source, times, bytes, protocols,
+            # the name and TLS facts the sandbox recorded), under their own names.
+            flow_extra = {k: v for k, v in flow.items() if k not in _TRIAGE_FLOW_READ}
+            if flow_extra:
+                row["extra"] = flow_extra
             if proto == "tcp":
                 network.tcp.append(row)
             elif proto == "udp":
@@ -1023,6 +1110,9 @@ def triage_overview_to_sandbox_report(
             web_req = web_req_field if isinstance(web_req_field, dict) else None
             web_resp_field = req.get("web_resp")
             web_resp = web_resp_field if isinstance(web_resp_field, dict) else None
+            # The request's own fields beside the four it is read from (the flow
+            # it rode on, its time), kept on each row it gives.
+            req_extra = {k: v for k, v in req.items() if k not in _TRIAGE_REQUEST_READ}
 
             if domain_req is not None:
                 answers = [
@@ -1034,30 +1124,41 @@ def triage_overview_to_sandbox_report(
                     name = str(question.get("name") or "")
                     if not name:
                         continue
-                    network.dns.append(
-                        {
-                            "request": name,
-                            "type": str(question.get("type") or ""),
-                            "answers": answers,
-                        }
-                    )
+                    dns_row: dict[str, Any] = {
+                        "request": name,
+                        "type": str(question.get("type") or ""),
+                        "answers": answers,
+                    }
+                    if req_extra:
+                        dns_row["extra"] = dict(req_extra)
+                    network.dns.append(dns_row)
                     network.domains.append(name)
 
             if web_req is not None:
                 parsed_url = urlsplit(str(web_req.get("url") or ""))
                 headers_field = web_req.get("headers")
                 headers = headers_field if isinstance(headers_field, dict) else {}
-                network.http.append(
-                    {
-                        "host": parsed_url.hostname or "",
-                        "uri": parsed_url.path or "/",
-                        "method": str(web_req.get("method") or ""),
-                        "status": (web_resp or {}).get("status"),
-                        "port": parsed_url.port,
-                        "encrypted": parsed_url.scheme == "https",
-                        "user_agent": str(headers.get("User-Agent") or ""),
-                    }
-                )
+                http_row: dict[str, Any] = {
+                    "host": parsed_url.hostname or "",
+                    "uri": parsed_url.path or "/",
+                    "method": str(web_req.get("method") or ""),
+                    "status": (web_resp or {}).get("status"),
+                    "port": parsed_url.port,
+                    "encrypted": parsed_url.scheme == "https",
+                    "user_agent": str(headers.get("User-Agent") or ""),
+                }
+                # The whole request and answer beyond those fields (the URL with
+                # its query, every header, the answer's own fields).
+                http_extra: dict[str, Any] = dict(req_extra)
+                request_rest = {k: v for k, v in web_req.items() if k != "method"}
+                if request_rest:
+                    http_extra["request"] = request_rest
+                response_rest = {k: v for k, v in (web_resp or {}).items() if k != "status"}
+                if response_rest:
+                    http_extra["response"] = response_rest
+                if http_extra:
+                    http_row["extra"] = http_extra
+                network.http.append(http_row)
     network.hosts = list(hosts_by_ip.values())
 
     return SandboxReport(
@@ -1091,8 +1192,9 @@ def triage_overview_to_sandbox_report(
             if isinstance(s, dict)
         ],
         # The configurations, droppers and credentials Triage extracted, as
-        # its overview lists them.
-        extracted=_rows(overview.get("extracted")),
+        # its overview and its task reports list them.
+        extracted=extracted,
+        channels=channels,
         # The overview's other blocks (the analysis tags, the task list, the
         # per-target summaries, the report version), under their own names.
         extras={k: v for k, v in overview.items() if k not in _TRIAGE_OVERVIEW_READ},

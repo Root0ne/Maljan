@@ -2075,8 +2075,9 @@ ANNOTATIONS.update(
             "title": "Accepted report formats",
             "description": (
                 "Formats the sniffer may accept for an uploaded report: cape2, "
-                "cuckoo, triage, and the name of any format declared in "
-                "sandbox.report_formats. A file "
+                "cuckoo, triage, the name of any format declared in "
+                "sandbox.report_formats, and the id of any report reader "
+                "registered at run time or by an installed package. A file "
                 "that sniffs as anything else is refused."
             ),
             "applies_when": _SANDBOX_UPLOAD,

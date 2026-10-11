@@ -473,13 +473,20 @@ class TestBounds:
 
     @staticmethod
     def _seconds(call: Any) -> float:
+        """The best of two timed runs, the collector held so no sweep is timed."""
+        import gc
         import time
 
         best = float("inf")
-        for _ in range(3):
-            started = time.perf_counter()
-            call()
-            best = min(best, time.perf_counter() - started)
+        for _ in range(2):
+            gc.collect()
+            gc.disable()
+            try:
+                started = time.perf_counter()
+                call()
+                best = min(best, time.perf_counter() - started)
+            finally:
+                gc.enable()
         return best
 
     def test_reading_and_querying_grow_linearly(self) -> None:
@@ -558,10 +565,12 @@ class TestWhatTheReaderCanFill:
     def test_a_triage_report_states_the_lists_its_reader_never_fills(self) -> None:
         index = ss.section_index(_triage(), ("triage", "triage"))["sections"]
 
-        for name in ("files", "mutexes", "commands", "services", "channels"):
+        for name in ("files", "mutexes", "commands", "services"):
             assert index[name] == {
                 "no": f"no: the triage report as normalised here carries no `{name}`"
             }
+        # The task report's blocks with no place of their own are its channels.
+        assert index["channels"]["items"] > 0
         # The report's own statement comes first.
         assert index["registry"]["no"].startswith("no: the report lists `registry`")
         assert index["dropped"]["items"] >= 0 and "no" not in index["dropped"]

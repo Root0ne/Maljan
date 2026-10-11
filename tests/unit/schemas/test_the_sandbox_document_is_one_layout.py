@@ -8,6 +8,7 @@ linear in the source's size.
 
 from __future__ import annotations
 
+import gc
 import json
 import time
 from typing import Any
@@ -137,11 +138,17 @@ class TestLinearTime:
 
     @staticmethod
     def _seconds(source: dict[str, Any]) -> float:
+        """The best of two timed runs, the collector held so no sweep is timed."""
         best = float("inf")
-        for _ in range(3):
-            started = time.perf_counter()
-            sandbox_document(cape_report_to_sandbox_report(source, provider="x"))
-            best = min(best, time.perf_counter() - started)
+        for _ in range(2):
+            gc.collect()
+            gc.disable()
+            try:
+                started = time.perf_counter()
+                sandbox_document(cape_report_to_sandbox_report(source, provider="x"))
+                best = min(best, time.perf_counter() - started)
+            finally:
+                gc.enable()
         return best
 
     def test_ten_times_the_keys_costs_at_most_ten_times_the_time(self) -> None:

@@ -31,6 +31,7 @@ from maljan.core.report_formats import (
     effective_formats,
     format_named,
 )
+from maljan.schemas.sandbox_report import CAPE_RENAMES
 
 if TYPE_CHECKING:
     from maljan.schemas.sandbox_report import Reading, SandboxReport
@@ -50,6 +51,10 @@ class ReportReader(ABC):
     # (``schemas.sandbox_document``): the document of its report is the source,
     # each block where the source put it.
     keeps_source_arrangement: ClassVar[bool] = False
+    # The source's words for blocks the document names otherwise, and the
+    # document's word for each (``schemas.sandbox_document.PLACES``), applied
+    # where the reader keeps its source's arrangement (:meth:`keep_source`).
+    renames: ClassVar[dict[str, str]] = {}
     # Whether the reader recognises a payload on its own: a reader that reads
     # only what it is told to read (a mapping, a fixture) is never sniffed.
     sniffs: ClassVar[bool] = True
@@ -120,6 +125,20 @@ class ReportReader(ABC):
         if declared is not None:
             return declared.display_name or declared.name
         return self.display_name or self.id
+
+    def keep_source(self, report: SandboxReport, payload: dict[str, Any]) -> SandboxReport:
+        """``report`` keeping ``payload``'s own arrangement, renamed blocks under new words.
+
+        For a reader whose source already uses the document's arrangement: the
+        document laid out from ``report`` is then ``payload`` itself
+        (``schemas.sandbox_document.decompose``).
+        """
+        from maljan.schemas.sandbox_document import decompose, renamed
+
+        report.published, report.extras, report.arrangement = decompose(
+            renamed(payload, self.renames)
+        )
+        return report
 
     def _scaled(self, report: SandboxReport, fmt: Any) -> SandboxReport:
         """``report`` carrying the scale its format declares, else the reader's own."""
@@ -285,6 +304,7 @@ class CapeReportReader(ReportReader):
 
     id = "cape2"
     keeps_source_arrangement = True
+    renames = CAPE_RENAMES
 
     def read(
         self,
@@ -298,7 +318,12 @@ class CapeReportReader(ReportReader):
         from maljan.schemas.sandbox_report import cape_report_to_sandbox_report
 
         report = cape_report_to_sandbox_report(
-            payload, provider=provider, source_format=self.id, task_id=task_id
+            payload,
+            provider=provider,
+            source_format=self.id,
+            task_id=task_id,
+            keep_arrangement=self.keeps_source_arrangement,
+            renames=self.renames,
         )
         return self._scaled(report, fmt)
 

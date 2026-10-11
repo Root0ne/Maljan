@@ -56,7 +56,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from maljan.schemas.sandbox_document import place, place_path
-from maljan.schemas.sandbox_report import SECTION_IDS, section_id
+from maljan.schemas.sandbox_report import SECTION_IDS, section_id, stored_place
 
 # The tool name of the pack's index entry, and of the query tool beside it.
 SECTIONS_TOOL = "sandbox_sections"
@@ -359,7 +359,7 @@ class Sections:
 
     def _part(self, name: str) -> list[Any] | None:
         """The part ``name`` of the report where it is a list."""
-        return self._list(place(self.report, name))
+        return self._list(stored_place(self.report, name))
 
     def _read_summary(self, section: Section) -> None:
         names = _SUMMARY_LISTS[section.name]
@@ -540,7 +540,7 @@ class Sections:
 
     def _read_extracted(self, section: Section) -> None:
         """What the sandbox extracted: its lists (configurations, payloads) by name, or the list."""
-        block = place(self.report, "extracted")
+        block = stored_place(self.report, "extracted")
         path = place_path("extracted")
         if isinstance(block, list):
             section.parts.append(_Part(path, path, block))
@@ -672,7 +672,9 @@ class Sections:
     def _number_of(self, section: Section, item_id: str) -> int | None:
         """The item number ``item_id`` names in ``section``, or ``None``."""
         prefix, _, rest = item_id.partition(":")
-        if prefix != section.prefix or not rest:
+        # A prefix an earlier index wrote for this section (``LEGACY_PREFIXES``)
+        # names the same item as the section's own.
+        if SECTION_OF_PREFIX.get(prefix) != section.name or not rest:
             return None
         if section.name == "processes":
             position = self._process_rows.get(item_id)

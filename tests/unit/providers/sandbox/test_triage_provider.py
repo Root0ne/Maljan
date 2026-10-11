@@ -281,14 +281,14 @@ def test_fetch_maps_overview_and_task_report_into_a_sandbox_report():
     # The consumer shape, not Triage's own field names: a flow's combined
     # "host:port" is split, and a DNS/HTTP request is read from its
     # domain_req/domain_resp or web_req/web_resp sub-object.
-    assert report.network.dns == [
+    assert _bare(report.network.dns) == [
         {"request": "update-relay-c9f2.net", "type": "A", "answers": [{"data": "45.33.32.23"}]}
     ]
     assert report.network.domains == ["update-relay-c9f2.net"]
     # Each flow carries the process that made it and whether that process is
     # the sample's tree (the submitted invoice.exe, procid 1000), and the AS
     # facts where Triage recorded them.
-    assert report.network.tcp == [
+    assert _bare(report.network.tcp) == [
         {
             "dst": "45.33.32.23",
             "dport": 443,
@@ -300,11 +300,11 @@ def test_fetch_maps_overview_and_task_report_into_a_sandbox_report():
             "country": "United States",
         }
     ]
-    assert report.network.udp == [
+    assert _bare(report.network.udp) == [
         {"dst": "10.0.2.3", "dport": 53, "procid": 1000, "sample_process_tree": True, "pid": 2100}
     ]
     assert {h["ip"] for h in report.network.hosts} == {"45.33.32.23", "10.0.2.3"}
-    assert report.network.http == [
+    assert _bare(report.network.http) == [
         {
             "host": "update-relay-c9f2.net",
             "uri": "/gate.php",
@@ -316,6 +316,17 @@ def test_fetch_maps_overview_and_task_report_into_a_sandbox_report():
         }
     ]
     assert [d["sha256"] for d in report.dropped_files] == [d["sha256"] for d in task["dumped"]]
+    # Every other field of a flow and a request is kept beside the consumer
+    # fields, under the report's own names.
+    assert report.network.tcp[0]["extra"]["src"] == "10.0.2.15:49512"
+    assert report.network.http[0]["extra"]["request"]["headers"] == {
+        "User-Agent": "Mozilla/5.0 (compatible)"
+    }
+
+
+def _bare(rows):
+    """Rows without the fields the reader keeps beside the consumer shape."""
+    return [{k: v for k, v in row.items() if k != "extra"} for row in rows]
 
 
 def test_the_rendered_dict_names_what_this_sandbox_cannot_provide():
