@@ -355,3 +355,19 @@ def recorded_signature_scale(container: Any) -> dict[str, Any]:
         return {}
     scale = getattr(container, "sandbox_signature_scale", None)
     return {SIGNATURE_SCALE_KEY: dict(scale) if isinstance(scale, Mapping) else None}
+
+
+def declarations_in_effect(declared: Iterable[ReportFormat]) -> list[dict[str, Any]]:
+    """Each declaration as it ran, JSON-ready: a built-in's name merged over the built-in.
+
+    What a run's settings snapshot records for ``sandbox.report_formats``, so a
+    redeclared built-in reads as the declaration the run used rather than as
+    the fields the operator wrote with empty values elsewhere.
+    """
+    builtins = {fmt.name: fmt for fmt in BUILTIN_REPORT_FORMATS}
+    return [
+        (merged_over(builtins[fmt.name], fmt) if fmt.name in builtins else fmt).model_dump(
+            mode="json"
+        )
+        for fmt in declared
+    ]

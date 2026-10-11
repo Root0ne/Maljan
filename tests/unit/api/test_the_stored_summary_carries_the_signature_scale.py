@@ -40,3 +40,21 @@ def test_a_run_whose_provider_declared_no_scale_stores_none() -> None:
 def test_a_run_that_read_no_sandbox_report_stores_no_key() -> None:
     assert SIGNATURE_SCALE_KEY not in _summary({})
     assert SIGNATURE_SCALE_KEY not in _summary(None)
+
+
+def test_the_settings_snapshot_records_the_report_formats_that_ran() -> None:
+    from app.worker.analysis_worker import settings_snapshot
+
+    fork = {"name": "cape2", "signature_scale": {"name": "Fork 1–5", "rungs": ["Low"] * 5}}
+    settings = Settings.model_validate({"sandbox": {"report_formats": [fork]}})
+    (recorded,) = settings_snapshot(settings)["sandbox.report_formats"]
+    assert recorded["signature_scale"]["name"] == "Fork 1–5"
+    assert recorded["reader"] == "cape2"
+    assert recorded["task_id_paths"] == ["/info/id"]
+    assert recorded["detect"]
+
+
+def test_a_run_with_no_declared_formats_records_an_empty_list() -> None:
+    from app.worker.analysis_worker import settings_snapshot
+
+    assert settings_snapshot(Settings(_env_file=None))["sandbox.report_formats"] == []

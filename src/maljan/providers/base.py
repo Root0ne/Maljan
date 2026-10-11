@@ -297,6 +297,17 @@ class SandboxProvider(ABC):
     def attach_report(self, blob: bytes, *, filename: str) -> SandboxRun:
         raise ProviderError("this sandbox does not accept uploaded reports")
 
+    def set_pending_blob(
+        self, blob: bytes, *, filename: str = "report.json", report_format: str | None = None
+    ) -> None:
+        """Hand over an attached report's bytes and the format its upload row recorded.
+
+        A provider that declares ``accepts_uploaded_report`` reads the blob as
+        ``report_format`` when one is given, and refuses in words a format it
+        cannot read; the worker calls this before the run starts.
+        """
+        raise ProviderError("this sandbox does not accept uploaded reports")
+
     def signature_scale(
         self, run: SandboxRun, formats: Iterable[ReportFormat] | None = None
     ) -> SignatureScale | None:

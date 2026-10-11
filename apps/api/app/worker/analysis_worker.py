@@ -29,7 +29,7 @@ from arq import cron
 from maljan.agents.base_agent import CANCEL_DELIVERY_GRACE
 from maljan.core.cancellation import Cancellation, JobCancelled
 from maljan.core.config import Settings as _CoreSettings
-from maljan.core.report_formats import recorded_signature_scale
+from maljan.core.report_formats import declarations_in_effect, recorded_signature_scale
 from maljan.core.settings_catalog import core_catalog
 from maljan.core.settings_overrides import build_settings, public_snapshot, trim_declarations
 from maljan.pipeline.events import MODEL_USAGE as MODEL_USAGE_EVENT
@@ -363,6 +363,9 @@ def settings_snapshot(
     # read from ``overridden_keys`` when it is the overrides mapping itself.
     stored = overridden_keys if isinstance(overridden_keys, Mapping) else {}
     snap = trim_declarations(snap, core_settings, stored)
+    # A report format declared under a built-in's name ran merged over the
+    # built-in; the snapshot records that, not the bare fields it set.
+    snap["sandbox.report_formats"] = declarations_in_effect(core_settings.sandbox.report_formats)
     snap["overridden_keys"] = sorted(overridden_keys or [])
     return snap
 
@@ -2333,9 +2336,9 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # A mock-mode job still resolves sandbox.provider="upload" through
             # build_job_settings, but ServiceContainer.get_sandbox_provider()'s
             # own mock override runs after that and wins, so the object here
-            # can be a MockSandboxProvider with no set_pending_blob at all.
+            # can be a MockSandboxProvider, whose set_pending_blob only refuses.
             # Checked by capability, not by provider id, the same way every
-            # other branch in this layer is: an attribute error escaping to
+            # other branch in this layer is: a raw error escaping to
             # job.error_message would show the user a raw internal exception
             # instead of saying what actually happened. ``StatedFailure``
             # rather than ``ValueError`` for the same reason: this sentence is

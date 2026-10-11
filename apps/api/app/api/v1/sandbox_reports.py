@@ -414,7 +414,9 @@ async def delete_sandbox_report(
     )
 
 
-def _format_response(fmt: ReportFormat, allowed: set[str]) -> SandboxReportFormatResponse:
+def _format_response(
+    fmt: ReportFormat, allowed: set[str], declared: ReportFormat | None
+) -> SandboxReportFormatResponse:
     scale = fmt.signature_scale
     return SandboxReportFormatResponse(
         name=fmt.name,
@@ -426,6 +428,9 @@ def _format_response(fmt: ReportFormat, allowed: set[str]) -> SandboxReportForma
         task_id_paths=list(fmt.task_id_paths),
         target_sha256_paths=list(fmt.target_sha256_paths),
         signature_scale=SignatureScaleResponse(**scale.record()) if scale is not None else None,
+        # Only the fields the operator wrote: the value to copy back into
+        # sandbox.report_formats without pinning the built-in's other fields.
+        declared=declared.model_dump(mode="json", exclude_unset=True) if declared else None,
     )
 
 
@@ -437,5 +442,9 @@ async def list_sandbox_report_formats(
     """Every report format a payload is tried against, in that order, with its declaration."""
     sandbox = await _sandbox_settings(db)
     allowed = set(sandbox.upload.allowed_formats)
-    items = [_format_response(fmt, allowed) for fmt in effective_formats(sandbox.report_formats)]
+    declared = {fmt.name: fmt for fmt in sandbox.report_formats}
+    items = [
+        _format_response(fmt, allowed, declared.get(fmt.name))
+        for fmt in effective_formats(sandbox.report_formats)
+    ]
     return SandboxReportFormatListResponse(items=items, total=len(items))

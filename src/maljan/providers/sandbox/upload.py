@@ -113,6 +113,12 @@ class UploadSandboxProvider(SandboxProvider):
                 f"The attached sandbox report was accepted as format {name!r}, which is no "
                 "longer declared in sandbox.report_formats; declare it again to read it."
             )
+        if name not in set(self._cfg.allowed_formats):
+            raise ProviderError(
+                f"The attached sandbox report was accepted as format {name!r}, which "
+                "sandbox.upload.allowed_formats no longer accepts "
+                f"({', '.join(sorted(self._cfg.allowed_formats))}); add it again to read it."
+            )
         if not found.reader:
             raise ProviderError(
                 f"The attached sandbox report's format {name!r} is declared without a "

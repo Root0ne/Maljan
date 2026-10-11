@@ -644,6 +644,35 @@ async def test_an_attached_report_of_a_format_no_longer_declared_fails_in_words(
     assert "'retired_format', which is no longer declared" in result["error"]
 
 
+@pytest.mark.asyncio
+async def test_an_attached_report_of_a_format_no_longer_allowed_fails_in_words(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+) -> None:
+    """A recorded format taken out of the allow list stops the job with the
+    reason, as a removed declaration does, rather than running without it."""
+    job = _make_job(config={"sandbox_report_id": "0b6c6e0e-0000-4000-8000-000000000000"})
+    sample = _make_sample()
+
+    report_row = MagicMock()
+    report_row.id = uuid.UUID("0b6c6e0e-0000-4000-8000-000000000000")
+    report_row.sample_id = sample.id
+    report_row.storage_path = "sandbox-reports/0b/0b6c.../report.json"
+    report_row.format = "cuckoo"
+    report_row.sample_sha256_match = True
+
+    async def _overrides(db: Any) -> dict[str, Any]:
+        # The settings read still takes its place in the session's sequence.
+        await db.execute(None)
+        return {"sandbox.upload.allowed_formats": ["cape2"]}
+
+    with patch("app.services.settings_service.load_core_overrides", new=_overrides):
+        result = await _run_with_attached_report(mock_ctx, mock_db_session, job, sample, report_row)
+
+    assert result["status"] == "failed", result
+    assert "'cuckoo', which sandbox.upload.allowed_formats no longer accepts" in result["error"]
+
+
 # ---------------------------------------------------------------------------
 # H3 (security hardening): the worker's private sample copies (download +
 # Ghidra mirror) are removed when the job ends, success or failure alike.

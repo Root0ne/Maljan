@@ -159,3 +159,17 @@ def test_a_format_name_longer_than_the_rows_column_cannot_be_declared():
     width = SandboxReportRow.__table__.c.format.type.length
     with pytest.raises(ValidationError, match="pattern"):
         SandboxConfig.model_validate({"report_formats": [{**ACME, "name": "a" * (width + 1)}]})
+
+
+def test_the_listing_serves_each_declaration_as_written_beside_what_is_in_effect(monkeypatch):
+    fork = {"name": "cape2", "signature_scale": {"name": "Fork 1–5", "rungs": ["Low"] * 5}}
+    sandbox = SandboxConfig.model_validate({"report_formats": [ACME, fork]})
+    api, _sample = _client(monkeypatch, sandbox)
+    items = {
+        item["name"]: item for item in api.get("/api/v1/sandbox-report-formats").json()["items"]
+    }
+    # Copying ``declared`` back pins only what the operator wrote.
+    assert items["cape2"]["declared"] == fork
+    assert items["cape2"]["reader"] == "cape2" and items["cape2"]["builtin"] is False
+    assert items["acme"]["declared"]["name"] == "acme"
+    assert items["triage"]["declared"] is None and items["triage"]["builtin"] is True

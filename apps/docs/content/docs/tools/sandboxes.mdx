@@ -139,12 +139,18 @@ example, a CAPE-shaped export whose ticket and digest sit elsewhere:
 ```
 
 `GET /api/v1/sandbox-report-formats` serves every format in the order a
-payload is tried against them, with its declaration and scale.
+payload is tried against them, with the declaration in effect and its scale.
+Each item also carries `declared`: your own declaration as you wrote it, or
+`null` for a built-in served as shipped. Declare only the fields you change:
+copy `declared` back, never the whole item, or every field of a built-in is
+pinned and stops following the shipped declaration. A run's settings snapshot
+records each declaration as it ran, merged over its built-in.
 
 An uploaded report's format is recorded on its row when it is accepted, and the
 run reads the report as that format; it is never sniffed again. If the
-recorded format has since been removed from the declarations, or declared
-without a reader, the job stops with a message saying so.
+recorded format has since been removed from the declarations or from
+`sandbox.upload.allowed_formats`, or declared without a reader, the job stops
+with a message saying so.
 
 ### Signature scales on the run
 

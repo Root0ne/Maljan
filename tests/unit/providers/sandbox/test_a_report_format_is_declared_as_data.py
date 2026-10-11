@@ -437,3 +437,29 @@ def test_every_read_is_linear_on_a_hostile_payload() -> None:
 
 def test_a_signature_scale_reports_its_own_size() -> None:
     assert SignatureScale(name="x", rungs=["Low", "High"]).max == 2
+
+
+def test_a_recorded_format_no_longer_allowed_is_refused_in_words() -> None:
+    provider = _provider([INVENTED], ["cape2"])
+    with pytest.raises(ProviderError, match="no longer accepts"):
+        provider.set_pending_blob(json.dumps(_acme_payload()).encode(), report_format="acme")
+
+
+def test_every_sandbox_provider_declares_the_attached_report_hand_over() -> None:
+    from maljan.providers.sandbox.mock import MockSandboxProvider
+
+    mock = MockSandboxProvider.from_settings(Settings.model_validate({}))
+    with pytest.raises(ProviderError, match="does not accept uploaded reports"):
+        mock.set_pending_blob(b"{}", filename="r.json", report_format="cape2")
+
+
+def test_the_formats_in_effect_record_a_redeclared_built_in_merged() -> None:
+    from maljan.core.report_formats import declarations_in_effect
+
+    declared = _declared(INVENTED, {"name": "cape2", "signature_scale": None})
+    recorded = declarations_in_effect(declared)
+    assert recorded[0] == ReportFormat.model_validate(INVENTED).model_dump(mode="json")
+    assert recorded[1]["reader"] == "cape2"
+    assert recorded[1]["detect"] == BUILTIN_REPORT_FORMATS[1].model_dump(mode="json")["detect"]
+    assert recorded[1]["task_id_paths"] == ["/info/id"]
+    assert recorded[1]["signature_scale"] is None
