@@ -29,6 +29,7 @@ from maljan.agents.prompt_fragments import (
     has_xrefs,
     offered,
     provider_source,
+    resolve_attached,
     stamp_source,
     tool_families,
     tool_names,
@@ -128,7 +129,9 @@ def static_provider_parts(
     # Every static analyst is held to the verification discipline, whatever
     # its provider wrote: a provider that writes its whole fragment itself
     # gets it after that fragment.
-    return holding_the_discipline(body).rstrip(), statement
+    # A part of the provider's declared workflow that names another server's
+    # tool reads as that server's being attached or not.
+    return resolve_attached(holding_the_discipline(body), tools).rstrip(), statement
 
 
 def _static_prompt(provider: Any | None = None, tools: Sequence[Any] = ()) -> str:

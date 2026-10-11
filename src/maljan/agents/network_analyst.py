@@ -111,11 +111,36 @@ def _pcap_tools_in(tools: Sequence[Any]) -> list[tuple[str, str]]:
     return [(named[kind], what) for kind, what in _PCAP_STEPS if kind in named]
 
 
-def primary_evidence_line(sandbox: Any) -> str:
-    """The line that hands the analyst the structured flows, naming the job's sandbox or none."""
+# The annotations the platform's enrichment writes on a flow's host, by the
+# field it writes them under (``enrichment.orchestrator``, the network
+# extractor), and the words the line names each by, in order.
+_ANNOTATIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("ASN", ("asn",)),
+    ("country", ("geo", "country")),
+    ("reputation", ("reputation",)),
+)
+_FIELD = re.compile(r'"([a-z_]{2,20})"\s*:')
+
+
+def _annotations_in(data: str) -> list[str]:
+    """The annotation words for the fields the flows actually carry, read once over ``data``."""
+    present = set(_FIELD.findall(str(data or "")))
+    return [word for word, fields in _ANNOTATIONS if present.intersection(fields)]
+
+
+def primary_evidence_line(sandbox: Any, data: str = "") -> str:
+    """The line that hands the analyst the structured flows, naming the job's sandbox or none.
+
+    It says which annotations the flows carry (ASN, country, reputation) only
+    where the flows in ``data`` carry them.
+    """
+    found = _annotations_in(data)
+    place = [word for word in found if word in ("ASN", "country")]
+    parts = (["/".join(place)] if place else []) + [w for w in found if w not in place]
+    said = ", annotated with " + " and ".join(parts) if parts else ""
     return (
         f"PRIMARY EVIDENCE — {_flows_label(sandbox)} (DNS / HTTP / TCP / UDP / contacted "
-        "hosts, with the annotations the enrichment added):\n"
+        f"hosts{said}):\n"
     )
 
 
@@ -177,7 +202,7 @@ class NetworkAnalyst(BaseAnalyst):
         try:
             return container.get_sandbox_provider()
         except Exception as exc:  # noqa: BLE001 — a prompt never fails over a provider lookup
-            self.logger.debug("No sandbox provider for the flows' label (%s).", exc)
+            self.logger.debug("No sandbox provider for the flows' label (%s).", type(exc).__name__)
             return None
 
     # ------------------------------------------------------------------
@@ -358,7 +383,7 @@ class NetworkAnalyst(BaseAnalyst):
                         "human",
                         "Analyze the network activity below and return a structured "
                         "list of findings.\n\n"
-                        + primary_evidence_line(self._job_sandbox())
+                        + primary_evidence_line(self._job_sandbox(), data)
                         + f"{data}\n\n"
                         f"A raw packet capture is ALSO available at: {pcap_path}\n"
                         f"{peek}"

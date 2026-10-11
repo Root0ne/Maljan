@@ -338,20 +338,38 @@ class TestARunWithNoGhidra:
 
 
 class TestTheGhidraPrompt:
-    def test_it_is_devs_but_for_the_line_that_named_another_servers_tool(self) -> None:
-        from maljan.providers.static.ghidra import GHIDRA_PROMPT_FRAGMENT
+    def _body(self, *servers: str) -> str:
+        from maljan.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
+        from maljan.agents.static_analyst import static_provider_parts
+        from maljan.providers.registry import get_static_provider
 
-        reworded = (
-            "  published constants and where they stand; a crypto-constant tool, where one\n"
-            "  is attached, gives its whole answer (Ghidra's `detect_crypto_constants`\n"
-        )
-        before = (
-            "  published constants and where they stand; `find_crypto_constants` on the\n"
-            "  analysis server gives its whole answer (Ghidra's `detect_crypto_constants`\n"
-        )
-        assert GHIDRA_PROMPT_FRAGMENT.count(reworded) == 1
-        dev = GHIDRA_PROMPT_FRAGMENT.replace(reworded, before)
-        assert hashlib.sha256(dev.encode()).hexdigest()[:16] == "9be4fea6d9b8c95f"
+        settings = Settings(_env_file=None)
+        settings.static.provider = "ghidra"
+        tools = stamp_source([_tool("decompile_function")], PROVIDER_FAMILY)
+        tools += [
+            _tool(f"{server}_tool").model_copy(update={"metadata": {"maljan_server": server}})
+            for server in servers
+        ]
+        body, _statement = static_provider_parts(get_static_provider(settings), tools)
+        return body
+
+    def test_with_the_analysis_server_attached_it_is_devs_byte_for_byte(self) -> None:
+        body = self._body("analysis", "knowledge")
+        assert "`find_crypto_constants` on the\n  analysis server gives" in body
+        assert hashlib.sha256(body.encode()).hexdigest()[:16] == "9be4fea6d9b8c95f"
+
+    def test_without_it_the_line_names_no_other_servers_tool(self) -> None:
+        body = self._body("knowledge")
+        assert "find_crypto_constants" not in body and "{{" not in body
+        assert "a crypto-constant tool, where one\n  is attached, gives" in body
+
+    def test_an_attached_part_is_resolved_in_one_pass(self) -> None:
+        from maljan.agents.prompt_fragments import resolve_attached
+
+        acme = _tool("t").model_copy(update={"metadata": {"maljan_server": "acme"}})
+        text = "use {{attached:acme|`acme_tool`|a scan tool}} now"
+        assert resolve_attached(text, [acme]) == "use `acme_tool` now"
+        assert resolve_attached(text, []) == "use a scan tool now"
 
     def test_its_guidance_is_devs_byte_for_byte(self) -> None:
         from maljan.core.builtin_declarations import GHIDRA_VERIFICATION_DISCIPLINE
@@ -398,3 +416,80 @@ class TestEveryStaticProviderCarriesTheDiscipline:
         )
         body, _statement = static_provider_parts(provider, [])
         assert body == "ACME WORKFLOW\n\n" + VERIFICATION_DISCIPLINE
+
+
+class TestReviewFixes:
+    def test_the_flows_line_names_the_annotations_the_flows_carry(self) -> None:
+        from maljan.agents.network_analyst import primary_evidence_line
+
+        full = primary_evidence_line(None, '{"asn": "AS1", "geo": "NL", "reputation": {}}')
+        assert "annotated with ASN/country and reputation" in full
+        assert "annotated" not in primary_evidence_line(None, '{"dst": "192.0.2.1"}')
+        assert "annotated with reputation" in primary_evidence_line(None, '{"reputation": 1}')
+
+    @pytest.mark.parametrize(
+        ("tool", "holds"),
+        [
+            ("batch_string_anchor_report", True),
+            ("find_undocumented_by_string", True),
+            ("list_strings", True),
+            ("decompile_function", False),
+        ],
+    )
+    def test_ghidras_string_tools_hold_strings_as_on_dev(self, tool: str, holds: bool) -> None:
+        from maljan.core.tool_declarations import ToolDeclarations
+        from maljan.core.undeclared_tools import is_strings_source
+
+        facts = ToolDeclarations.from_settings(Settings()).declaration_for(
+            ("provider:ghidra", tool)
+        )
+        assert is_strings_source(facts, tool) is holds
+
+    def test_a_whole_fragment_stored_on_dev_keeps_its_meaning(self) -> None:
+        from maljan.core.builtin_declarations import GHIDRA_WORKFLOW, R2_WORKFLOW
+        from maljan.providers.static import ghidra
+
+        stored = Settings.model_validate(
+            {
+                "static": {
+                    "ghidra": {"prompt_fragment": ghidra.GHIDRA_LEAD + "edited on dev"},
+                    "r2": {
+                        "prompt_fragment": "Analyze binary files (e.g. PE, ELF) utilizing "
+                        "radare2 through your available tools. edited"
+                    },
+                }
+            }
+        )
+        # Dev read neither leaf: the prompt shows the shipped text.
+        assert stored.static.ghidra.prompt_fragment == GHIDRA_WORKFLOW
+        assert stored.static.r2.prompt_fragment == R2_WORKFLOW
+        own = Settings.model_validate({"static": {"ghidra": {"prompt_fragment": "MY STEPS"}}})
+        assert own.static.ghidra.prompt_fragment == "MY STEPS"
+
+    def test_only_the_mapped_sections_are_read_from_the_unavailable_list(self) -> None:
+        from maljan.analysis.sandbox_sections import NO_UNAVAILABLE, Sections
+
+        held = Sections({"behavior": {}, "unavailable": ["processes", "calls"]})
+        assert held.sections["api_calls"].no == NO_UNAVAILABLE.format(name="api_calls")
+        assert held.sections["processes"].no != NO_UNAVAILABLE.format(name="processes")
+
+    def test_a_disabled_servers_auto_name_prefix_is_not_read(self) -> None:
+        from maljan.core.undeclared_tools import declared_auto_name_pattern
+
+        def settings(enabled: bool) -> Settings:
+            return Settings.model_validate(
+                {
+                    "mcp": {
+                        "servers": {
+                            "rev": {
+                                "command": "x",
+                                "enabled": enabled,
+                                "auto_name_prefixes": ["A_"],
+                            }
+                        }
+                    }
+                }
+            )
+
+        assert declared_auto_name_pattern(settings(True)).fullmatch("a_1234")
+        assert not declared_auto_name_pattern(settings(False)).fullmatch("a_1234")

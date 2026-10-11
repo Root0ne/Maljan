@@ -115,9 +115,12 @@ def reads_xrefs(facts: Any, tool: Any) -> bool:
 
 
 def is_strings_source(facts: Any, tool: Any) -> bool:
-    """Whether a tool's answer holds the sample's strings: by its declared kind, else its name."""
+    """Whether a tool's answer holds the sample's strings: by its declared kind or
+    ``holds_strings``, else its name."""
     kind = _kind(facts)
-    return kind in STRINGS_KINDS if kind is not None else named_as_strings_source(tool)
+    if kind is None:
+        return named_as_strings_source(tool)
+    return kind in STRINGS_KINDS or bool(getattr(facts, "holds_strings", False))
 
 
 # ---------------------------------------------------------------------------
@@ -256,7 +259,7 @@ _HELD_PATTERN: list[Any] = [None, None]
 
 
 def declared_auto_name_pattern(settings: Any = None) -> re.Pattern[str]:
-    """The auto-name pattern for every prefix a source of ``settings`` declares, and the defaults.
+    """The auto-name pattern for every prefix an enabled source declares, and the defaults.
 
     Read from the live declarations (``core.declared_reading.declarations``),
     once per declarations object; settings that cannot be read give the
@@ -270,7 +273,11 @@ def declared_auto_name_pattern(settings: Any = None) -> re.Pattern[str]:
         return auto_name_pattern()
     if _HELD_PATTERN[0] is held:
         return _HELD_PATTERN[1]  # type: ignore[no-any-return]
-    declared = [prefix for source in held.sources() for prefix in source.auto_name_prefixes]
+    # Only the sources this deployment has switched on: a disabled server's
+    # prefix names no function any run can have listed.
+    declared = [
+        prefix for source in held.sources(enabled_only=True) for prefix in source.auto_name_prefixes
+    ]
     pattern = auto_name_pattern(auto_name_words(declared))
     _HELD_PATTERN[0], _HELD_PATTERN[1] = held, pattern
     return pattern

@@ -3629,6 +3629,17 @@ class StaticConfig(BaseModel):
         parse with an empty one (Ghidra's ``sample_open`` among them); a field
         an operator set (to anything, empty included) is kept as set.
         """
+        from maljan.core.legacy_tool_tables import legacy_whole_fragment
+
+        # A provider block's ``prompt_fragment`` is now the workflow alone; a
+        # value stored when it held the whole fragment (which no prompt read)
+        # is read as not set, so the block shows its shipped workflow.
+        for name in ("ghidra", "r2"):
+            block = getattr(self, name)
+            if "prompt_fragment" in block.model_fields_set and legacy_whole_fragment(
+                name, block.prompt_fragment
+            ):
+                block.model_fields_set.discard("prompt_fragment")
         fill_declaration(self.ghidra, ghidra_block())
         fill_declaration(self.r2, r2_block())
         return self

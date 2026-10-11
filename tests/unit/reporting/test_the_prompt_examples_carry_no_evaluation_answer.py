@@ -2034,7 +2034,11 @@ PROMPTS: dict[str, str] = {
         [sandbox_server_label(CAPE2SandboxProvider), sandbox_server_label(None)]
     ),
     "the network analyst's primary-evidence line": " ".join(
-        [primary_evidence_line(None), primary_evidence_line(CAPE2SandboxProvider)]
+        [
+            primary_evidence_line(None),
+            primary_evidence_line(CAPE2SandboxProvider, '{"asn": 1, "geo": "x", "reputation": {}}'),
+            primary_evidence_line(None, '{"country": "x"}'),
+        ]
     ),
     "the served function index's sentence on a disassembler's list": (
         artefact_index.SERVED_FUNCTION_LISTS

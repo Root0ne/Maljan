@@ -129,6 +129,7 @@ GHIDRA_TOOLS: dict[str, dict[str, Any]] = {
     "batch_string_anchor_report": {
         "arguments": {"program": "program"},
         "category": "batch",
+        "holds_strings": True,
         "kind": "batch_analysis",
     },
     "bulk_fuzzy_match": {"category": "batch", "kind": "batch_analysis"},
@@ -348,6 +349,7 @@ GHIDRA_TOOLS: dict[str, dict[str, Any]] = {
     "find_undocumented_by_string": {
         "arguments": {"address": "address", "program": "program"},
         "category": "analyze",
+        "holds_strings": True,
         "kind": "analysis",
     },
     "force_decompile": {

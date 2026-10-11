@@ -3012,7 +3012,7 @@ are ever removed.
 | `work_dir` | the directory under the worker's samples directory the sample is copied into for this server (one name); empty when it makes no copy of its own |
 | `error_patterns` | how the server's answers say "error" (below) |
 | `roles` | what the server is for: `reputation`, `decompiler`, `disassembler`, `sandbox`, `rule_scanner`, `strings`, `reference`, `capture`, or any word of your own |
-| `prompt_fragment` | the workflow text shown to an agent only while the server's tools are in its request: after the sentence about tools for a server of the registry, and, for a static provider's block, after the provider's opening sentence and the claim guidance every static analyst is given (the built-in Ghidra and radare2 blocks and the CAPE MCP block ship their workflows here). A sentence naming another server's tool belongs in that server's own text |
+| `prompt_fragment` | the workflow text shown to an agent only while the server's tools are in its request: after the sentence about tools for a server of the registry, and, for a static provider's block, after the provider's opening sentence and the claim guidance every static analyst is given (the built-in Ghidra and radare2 blocks and the CAPE MCP block ship their workflows here). A sentence naming another server's tool is written `{{attached:<server>|<text while that server's tools are in the request>|<text otherwise>}}` (neither text holding `|` or `}}`); Ghidra's names the analysis server's crypto-constant tool so. A Ghidra or radare2 block that stored the whole fragment of an earlier release (opening with the provider's old lead sentence), which no prompt read, is read as not set |
 | `required_env_allow` | the environment names the server cannot run without |
 | `variable_names` | environment variable names of the server's that are not secrets; those a shipped declaration or a registered provider class (`variable_names`) names are kept whole in published text, read from those so the redaction does not depend on a run's settings |
 | `reads_staged_sample` | whether the server's path-taking tools read the sample the platform staged |
@@ -3037,6 +3037,7 @@ it:
 | `timeout_seconds` | the budget the tool itself keeps, where it has one |
 | `memory_peak_mb` | the tool's measured memory peak, where known |
 | `discloses_sample` | the tool sends the sample, or its bytes, out of the deployment |
+| `holds_strings` | the answer holds the sample's strings as data though its kind is not a strings kind (Ghidra's `batch_string_anchor_report` and `find_undocumented_by_string`); a function claim's quoted value is looked for in it |
 | `rows` | the path of the answer's rows |
 | `places` | per kind of place (`offset`, `rva`, `address`, `addresses`, `call_site`, `function`, `pid`, `command_line` …), the path inside a row that holds one |
 | `values` | per kind of value (`text`, `rule`, `namespace`, `value` …), the path inside a row that holds one |
@@ -3222,7 +3223,8 @@ shape:
   and `function_disassembly` list instructions (the last a whole function),
   `xrefs` reads cross-references, and `strings`, `emulated_strings`,
   `decoded_strings`, `listing_strings`, `listing_all_strings` and
-  `string_search` hold the sample's strings. The decompiled-function list, the
+  `string_search` hold the sample's strings, as does any tool declaring
+  `holds_strings`. The decompiled-function list, the
   function map, a function claim's check, a repeated decompile and the static
   turn's tool line read it so, and a call gives its address in the argument
   `arguments.address` names, then in the shared list (`address`, `addr`,

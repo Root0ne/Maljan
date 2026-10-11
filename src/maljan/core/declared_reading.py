@@ -82,6 +82,7 @@ STORED_FACT_FIELDS: tuple[str, ...] = (
     "words",
     "report_sections",
     "arguments",
+    "holds_strings",
 )
 
 

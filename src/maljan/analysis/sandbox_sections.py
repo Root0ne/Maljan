@@ -55,7 +55,7 @@ from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from maljan.schemas.sandbox_report import section_id
+from maljan.schemas.sandbox_report import SECTION_IDS, section_id
 
 # The tool name of the pack's index entry, and of the query tool beside it.
 SECTIONS_TOOL = "sandbox_sections"
@@ -331,7 +331,9 @@ class Sections:
 
     def _read(self, name: str) -> Section:
         section = Section(name)
-        if name in self._unavailable:
+        # Only the sections a report's ``unavailable`` list names by an id
+        # (``SECTION_IDS``), as before; any other section is read as normalised.
+        if name in SECTION_IDS and name in self._unavailable:
             section.no = NO_UNAVAILABLE.format(name=name)
             return section
         if self._reading is not None and not self._reading.fills.intersection(SECTION_FIELDS[name]):

@@ -503,7 +503,9 @@ class MalwareReportBuilder:
         try:
             operator = list(get_settings().reporting.reference_urls)
         except Exception as exc:  # noqa: BLE001 — a reference is never worth a report
-            logger.debug("MalwareReportBuilder: no operator references read (%s).", exc)
+            logger.debug(
+                "MalwareReportBuilder: no operator references read (%s).", type(exc).__name__
+            )
         try:
             refs = declared_references(self.evidence_ledger, hashes, operator=operator)
         except Exception as exc:  # noqa: BLE001 — a reference is never worth a report

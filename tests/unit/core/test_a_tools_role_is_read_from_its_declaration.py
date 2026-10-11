@@ -141,7 +141,13 @@ class TestAutoNames:
 
     def test_the_run_reads_every_prefix_its_servers_declare(self) -> None:
         settings = Settings.model_validate(
-            {"mcp": {"servers": {"rev": {"command": "x", "auto_name_prefixes": ["PROC_"]}}}}
+            {
+                "mcp": {
+                    "servers": {
+                        "rev": {"command": "x", "enabled": True, "auto_name_prefixes": ["PROC_"]}
+                    }
+                }
+            }
         )
         assert roles.declared_auto_name_pattern(settings).fullmatch("proc_401000")
 

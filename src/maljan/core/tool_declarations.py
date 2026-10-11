@@ -529,7 +529,9 @@ class ToolFacts(BaseModel):
     wall clock of its own; ``timeout_seconds`` is the budget the tool itself
     keeps and ``memory_peak_mb`` its measured peak, where known.
     ``discloses_sample`` marks a tool that sends the sample, or its bytes, out
-    of the deployment.
+    of the deployment. ``holds_strings`` marks a tool whose answer holds the
+    sample's strings as data though its kind is not a strings kind (a report
+    that anchors strings to the functions referring to them).
 
     ``rows`` is the path of the answer's rows; ``places`` names, per kind of
     place (``offset``, ``rva``, ``address``, ``addresses``, ``call_site``,
@@ -559,6 +561,7 @@ class ToolFacts(BaseModel):
     timeout_seconds: float | None = Field(default=None, gt=0)
     memory_peak_mb: int | None = Field(default=None, gt=0)
     discloses_sample: bool = False
+    holds_strings: bool = False
     rows: str = ""
     places: dict[str, str] = Field(default_factory=dict)
     values: dict[str, str] = Field(default_factory=dict)

@@ -41,7 +41,10 @@ if TYPE_CHECKING:
 # only where that server's tools are attached to the agent; the provider's own
 # opening sentence and the claim guidance every static analyst is given
 # (``providers.base.CLAIM_GUIDANCE``) come before it. A sentence here names only
-# the server's own tools: a tool of another server is named by what it does.
+# the server's own tools; a tool of another server is named only inside
+# ``{{attached:<server>|<while that server is attached>|<otherwise>}}``, which
+# the prompt resolves for the servers the request carries
+# (``prompt_fragments.resolve_attached``).
 # Ghidra's verification discipline, as its prompt has always worded it, with
 # its own examples. The shared discipline every other static provider carries
 # (``providers.base.VERIFICATION_DISCIPLINE``) holds the same rules in generic
@@ -95,8 +98,10 @@ GHIDRA_WORKFLOW: str = (
     "- API names resolved by hash (a hashing loop, sparse imports): call\n"
     "  `emulate_hash_batch` to brute-force the obfuscated API names.\n"
     "- Suspected encryption / ransomware: the pack's crypto constants line names the\n"
-    "  published constants and where they stand; a crypto-constant tool, where one\n"
-    "  is attached, gives its whole answer (Ghidra's `detect_crypto_constants`\n"
+    "  published constants and where they stand; "
+    "{{attached:analysis|`find_crypto_constants` on the\n"
+    "  analysis server|a crypto-constant tool, where one\n"
+    "  is attached,}} gives its whole answer (Ghidra's `detect_crypto_constants`\n"
     "  is not implemented).\n"
     "- Trace a key, config value, or decoded buffer through a function:\n"
     "  `analyze_dataflow(address=<addr>, direction=backward|forward)`.\n"

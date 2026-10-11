@@ -356,6 +356,27 @@ def tools_statement(
     return "\n\n".join([statement, *server_fragments(tools)])
 
 
+# A part of a declared fragment that depends on another server being attached:
+# ``{{attached:<server key>|<text while it is attached>|<text otherwise>}}``.
+# Neither text may hold ``|`` or ``}}``.
+_ATTACHED_PART = re.compile(r"\{\{attached:([A-Za-z0-9_.-]+)\|([^|}]*)\|([^|}]*)\}\}")
+
+
+def resolve_attached(text: str, tools: Sequence[object]) -> str:
+    """``text`` with each attached-server part resolved for the servers ``tools`` come from.
+
+    A fragment may name another server's tool only while that server's tools
+    are in the request; otherwise its neutral words are shown. One pass over
+    the text.
+    """
+    if "{{attached:" not in text:
+        return text
+    families = set(tool_families(tools))
+    return _ATTACHED_PART.sub(
+        lambda found: found.group(2) if found.group(1) in families else found.group(3), text
+    )
+
+
 def server_fragments(tools: Sequence[object]) -> list[str]:
     """The workflow text each tool server in ``tools`` declares, in the order the list names them.
 
@@ -374,7 +395,7 @@ def server_fragments(tools: Sequence[object]) -> list[str]:
             continue
         text = str((getattr(tool, "metadata", None) or {}).get(SERVER_FRAGMENT_METADATA_KEY) or "")
         if text.strip():
-            found[server] = text.strip()
+            found[server] = resolve_attached(text.strip(), tools)
     return list(dict.fromkeys(found.values()))
 
 
