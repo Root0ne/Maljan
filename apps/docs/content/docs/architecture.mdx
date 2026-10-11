@@ -357,7 +357,7 @@ The debate ends when nothing is left to settle (`pipeline/debate_facts.py`,
 - The mediator ends each line of its block with `[blocking: <reason>]` or `[not blocking: <reason>]`; consensus is its confidence at the threshold with no line marked blocking, an unmarked line blocks, and the platform overrides a mark in neither direction. The reason may hold one level of brackets (`[not blocking: see [ev_0021]]`); a `[not blocking]` mark with no reason, conflicting marks and a mark that cannot be read block and go to `negotiation.unread_marks`, and a `[blocking]` mark with no reason blocks as it asks.
 - For a listed line whose cited entries (cited by the line or by a claim it names) hold, in a field named for a count or a total, a number the line itself states, every such value is stated; a size or a time is not a count. No call is made for them: they ride on the revision directive of the analysts the line names and on the next mediation's prompt, and a debate that ends at this mediation spends nothing on them.
 - The mediator opens each line with `[analysts: <name>, <name>]`, the analysts who must revise over it, written as their reports are headed. A revision round asks only the analysts the blocking lines name; every other analyst keeps its answer in force, recorded in the round's `not_revised` as `not asked: not named by the mediator`. A named analyst's revision is shown the blocking lines that name it, with the mediator's summary and confidence, and of its peers only the ones those lines name, in the field or by key or label in any case or form; each is shown exactly as a round asking every analyst shows it, its answer in force whole, with no claim picked out by its number. A block that lists no blocking line holds no revision round: the debate goes to the judge as `consensus`; below the threshold, a stable confidence series still ends it as `convergence`, and otherwise it ends as `no_contested_point`. A blocking line without the field or naming no analyst of the debate, or a block that was not read, asks every analyst with every peer's answer, as before, and the round's record says why under `asked_all`.
-- Sycophancy is a rise in likeness beyond shared sources, told and never enforced (`pipeline/sycophancy_detector.py`, `convergence_flags`). After each revision round, for each analyst revised that made no tool call and whose revision cites nothing its answer before the round did not, the words of every ledger entry or sandbox item it and a peer both cite are left out of both, and its answer before the round and its revision are each compared with the peer's answer in force (bag-of-words cosine); a revision above the threshold and above its answer before the round is flagged and recorded on the round (`revision_rounds[].converged`). Two answers alike because they restate the same rows, or alike before the round, are not flagged. A flag is put to the next mediation as a sentence beside the facts block (`convergence_sentence`), kept on the mediation (`AgentArgument.converged`), and gives the devil's-advocate directive to a flagged analyst only where the round asks it; it never overrides the mediator's consensus or a block with no contested point, opens no round and never widens a round that asks only the analysts the mediator named. A stage with `sycophancy_check` off is told nothing. A round record stored before the flags existed is read by whole-answer likeness, as before, and decides no route either.
+- Sycophancy is a rise in likeness beyond shared sources, told and never enforced (`pipeline/sycophancy_detector.py`, `convergence_flags`). After each revision round, for each analyst revised that made no tool call and whose revision cites nothing its answer before the round did not, the words of every ledger entry or sandbox item it and a peer both cite are left out of both, and its answer before the round and its revision are each compared with the peer's answer in force (bag-of-words cosine); a revision above the threshold and above its answer before the round is flagged and recorded on the round (`revision_rounds[].converged`). Two answers alike because they restate the same rows, or alike before the round, are not flagged. A flag is put to the next mediation as a sentence beside the facts block (`convergence_sentence`) and kept on the mediation (`AgentArgument.converged`); no analyst's prompt carries it, it never overrides the mediator's consensus or a block with no contested point, opens no round and never widens a round that asks only the analysts the mediator named. A stage with `sycophancy_check` off is told nothing. A round record stored before the flags existed is read by whole-answer likeness, as before, and decides no route either.
 - For a blocking line naming a function the run knows (an address the line writes, or one a claim it names writes, that is a row of the function index or a function a decompile or disassembly call listed; an offset and its virtual address are one function where an image base the run read joins them), the platform states whether the ledger holds a listing of it and which entries hold it (`debate_facts.place_facts`, `AgentArgument.place_facts`, said to the room as a notice). The analysts the line names in its field (every analyst, for a line with no field) are told it in their revision. An analyst with a tool whose declared arguments take an address (`validation._ADDRESS_ARGUMENTS`, read from each tool's own schema) is also told it can read a function the ledger never listed in this round, and its revision is given its tools: a configurable analyst's revision is its tool loop already, and a built-in analyst's revision runs its tool loop in place of its one tools-free call (`BaseAnalyst.revision_answer`, `safe_revise_isr(read_places=True)`). The model decides whether to read; nothing is adopted or rejected for it, and no call is made for the facts.
 - A revision round whose every revision is the answer in force again, whitespace aside, ends the debate as `converged`; the router reads only the record of the round right before the mediation it routes.
 - A revision round that revised analysts and left the contested points as they were ends the debate as `contested_points_unchanged`, with no consensus claimed. A point is read from its blocking line alone (`debate_facts.point_key`): the analysts its field names, the ledger ids, hex values and decimal numbers it writes (claim numbers aside, since a revision renumbers claims; the mark and its reason aside), and its words where it writes none of those; two mediations whose blocking lines hold the same points, none resolved and none new, are unchanged however the mediator reworded them.
@@ -3837,30 +3837,38 @@ is assembled from what the run gathered rather than recomputed beside it:
   the ones already kept, so each group is credited to the layer of its
   longest statement and a short statement can never absorb two longer ones
   that share only its words; the count does not depend on the order the
-  analysts are read in. `is_corroborated` is two layers credited so
-  (`independent_layers`) or asserting rules, and, where the ledger was read,
-  the corroboration record's own decision on its **sources**
-  (`validation.technique_sources`, `analysis.corroboration.corroborated`): at
-  least two named sources (analysts or rules) and at least two independent
-  sources with a behaviour source among them. Every ledger entry or sandbox
-  item a statement naming the technique cites is a source, rooted or not, and
-  every asserting entry naming it: one pack row is one source however many
-  analysts restate it. Each source is read for what it is
-  (`evidence_roots.reading_of`): a listing of code (`schemas.evidence.lists_code`,
-  the platform's one rule for a tool name that decompiles or disassembles), a
-  run observation (its roots are sandbox processes, flows or DNS queries; one
-  cited by a statement that negates, `_NOT_SEEN_RE` or a negating word, is
-  cited for its absence), a rule match (an asserting tool's row, cited or
-  asserting, rooted or not), an artefact of the file (a place in it, its
-  tables, the file itself), an external assessment of the whole file (a
+  analysts are read in. `is_corroborated` is the corroboration record's own
+  decision (`analysis.corroboration.corroborated`), the one the judge's count
+  and the console read: at least two **independent sayers**
+  (`independent_sayers`: the analyst layers credited so, plus the rules that
+  assert it) and, where the ledger was read, at least two independent
+  **sources** with a behaviour source among them
+  (`validation.technique_sources`). Every ledger entry or sandbox item a
+  statement naming the technique cites is a source, rooted or not, and every
+  asserting entry naming it: one pack row is one source however many analysts
+  restate it. Each source is read for what it is (`evidence_roots.reading_of`):
+  a listing of code (`schemas.evidence.lists_code`, the platform's one rule
+  for a tool name that decompiles or disassembles); a run observation (its
+  roots are sandbox processes, flows or DNS queries); a rule match (an
+  asserting tool's entry whose own rows name the technique, or one the
+  statement places a row of: a capa match by its address, a sandbox signature
+  by its name, `sandbox signature <name>` being a signature row's own root);
+  an artefact of the file (a place in it, its tables, the file itself, or
+  what its answer states as a whole: a count, a scheme, the routine an
+  emulator ran, a value every row holds, which a statement writing it places,
+  `evidence_roots.answer_facts`); an external assessment of the whole file (a
   reputation answer, whose root is "an external assessment of the whole
   file", read from the platform's one table of reputation tools,
-  `evidence_roots.FILE_ASSESSMENT_TOOLS`) or a citation that gives no root.
-  `independent_sources` counts the sources that stand behind a fact, joining
-  those whose roots overlap (two tools reading one place are one source); a
-  citation that gives no root is listed and counted by kind
-  (`source_kinds`) and adds nothing to it, so citing an entry without naming
-  a row of it is never safer than naming one, and a row whose statements cite
+  `evidence_roots.FILE_ASSESSMENT_TOOLS`); or a citation placed nowhere. A run
+  observation or a rule cited by a sentence or evidence item of the statement
+  that negates (`_NOT_SEEN_RE` or a negating word) is cited for its absence and
+  placed nowhere. `independent_sources` counts the sources that stand behind a
+  fact about the technique, joining citations of one reading kind whose roots
+  overlap (two tools reading one string are one source; a rule match and an
+  index row on one function are two methods, never joined); a citation placed
+  nowhere stands behind no fact and an external assessment of the whole file
+  states nothing about any one technique, so both are listed and counted by
+  kind (`source_kinds`) and add nothing to it, and a row whose statements cite
   nothing has no source and is not corroborated. A technique no source of
   which is behaviour is published all the same and labelled:
   `support: capability` where its placed sources are all artefacts of the
@@ -3873,15 +3881,17 @@ is assembled from what the run gathered rather than recomputed beside it:
   evidence summary, the report models' published-techniques lines and the
   export carry alike; a row short of two independent sources adds "they cite
   1 independent source, each counted once". The export keeps `uses` and marks
-  the technique's attack-pattern with `x_maljan_support` (`capability` or
-  `unobserved`) and `x_maljan_support_note` (the sentence); the judge may not
-  write either (`PLATFORM_ONLY_PROPERTIES`). The matrix carries the decision
-  on every cell (`CapabilityCell.is_corroborated`, `support`, `sources`), and
-  the console's capabilities page reads it: a capability shows "capability,
-  not observed" with its source count, never "corroborated". The judge's
-  corroborated count (the verdict line, the degradation gate and the memory
-  case) uses the same rule; a row stored before sources were read keeps the
-  count of named sources.
+  this run's `uses` edge to the technique, a judge-made one included, with
+  `x_maljan_support` (`capability` or `unobserved`) and
+  `x_maljan_support_note` (the sentence): on the edge, not on the
+  attack-pattern whose id every export shares; the judge may not write
+  either (`PLATFORM_ONLY_PROPERTIES`). The matrix carries the decision on
+  every cell (`CapabilityCell.is_corroborated`, `support`, `sources`,
+  `independent_sources`), and the console's capabilities page reads it: a
+  capability shows "capability, not observed" with "N cited, M independent",
+  never "corroborated". The judge's corroborated count (the verdict line,
+  the degradation gate and the memory case) uses the same rule; a row stored
+  before sources were read keeps the count of named sources.
   The row says how many statements were identical or near-identical
   (`identical_statements`); a row fewer than two layers stand behind that way
   prints "not corroborated (N analyst layers name it; K of them in a

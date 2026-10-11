@@ -8,7 +8,7 @@ are left out of both before they are compared, and only a rise across the
 round (the analyst's answer before it against after it, each against the
 peer's) is flagged. A flag is a fact told to the mediator and kept in the
 round's record; it never overrides the mediator's consensus and never widens
-a round that asks only the analysts the mediator named.
+a round that asks only the analysts the mediator named, and no analyst's prompt carries it.
 
 ``detect_sycophancy`` reads the flags the round recorded; given none, it
 compares whole answers by bag-of-words cosine, as it always did.
@@ -37,13 +37,6 @@ SYCOPHANCY_THRESHOLD: float = 0.90
 # Short or empty summaries can trivially produce 1.0 cosine — those should not
 # count as sycophancy but as a content failure.
 MIN_TOTAL_TOKENS: int = 32
-
-DEVIL_ADVOCATE_DIRECTIVE: str = (
-    "IMPORTANT: The other analysts appear to be converging on a shared conclusion. "
-    "You MUST challenge this consensus. Find the strongest counter-evidence in your "
-    "raw data. Identify at least one claim in the current consensus that your data "
-    "does NOT support, and include it in your dissent_items. Do not simply agree."
-)
 
 # Unicode-aware word tokenizer; drops punctuation glued to JSON keys/paths.
 _TOKEN_RE = re.compile(r"\w+", flags=re.UNICODE)
@@ -165,7 +158,7 @@ def detect_sycophancy(
             if sim > threshold:
                 logger.warning(
                     "Sycophancy detected between '%s' and '%s' (sim=%.3f > %.2f). "
-                    "Devil's advocate directive will be injected.",
+                    "The mediator is told.",
                     isrs[i].agent_id,
                     isrs[j].agent_id,
                     sim,
@@ -174,13 +167,6 @@ def detect_sycophancy(
                 return True
 
     return False
-
-
-def build_revision_directive(is_sycophantic: bool, mediator_feedback: str) -> str:
-    """Compose the revision prompt directive for agents."""
-    if is_sycophantic:
-        return f"{DEVIL_ADVOCATE_DIRECTIVE}\n\n{mediator_feedback}"
-    return mediator_feedback
 
 
 def _citations(isr: AgentISR) -> set[str]:
@@ -291,8 +277,3 @@ def convergence_sentence(flags: Sequence[Mapping[str, Any]]) -> str:
         f"sandbox items both answers cite, {said}, with no citation added and no tool call made. "
         "A fact for your reading; it decides nothing."
     )
-
-
-def flagged_analysts(flags: Sequence[Mapping[str, Any]]) -> set[str]:
-    """The analysts the flags name, as moving or as moved towards."""
-    return {str(f.get(key) or "") for f in flags for key in ("agent", "towards")} - {""}

@@ -95,8 +95,11 @@ export interface Technique {
   /** "capability" or "unobserved" when no source of the technique is a
    *  sandbox observation, a code listing or a rule match; "" otherwise. */
   support: string;
-  /** How many ledger entries and sandbox items stand behind it, each once. */
+  /** How many ledger entries and sandbox items it cites, each once. */
   sourceCount: number;
+  /** How many of them are independent (`independent_sources`), or `null` on a
+   *  row stored before it was recorded. */
+  independentCount: number | null;
 }
 
 export interface Tactic {
@@ -112,6 +115,14 @@ export function isCorroborated(technique: Technique): boolean {
   if (technique.support) return false;
   if (technique.corroborated !== null) return technique.corroborated;
   return technique.corroborating.length >= 2;
+}
+
+/** "N cited, M independent" for a row that recorded both, "N cited" otherwise. */
+export function sourceWords(technique: Technique): string {
+  const cited = `${technique.sourceCount} cited`;
+  return technique.independentCount === null
+    ? cited
+    : `${cited}, ${technique.independentCount} independent`;
 }
 
 /** The badge words for a technique no source of which is behaviour, or "". */
@@ -168,6 +179,8 @@ export function parseTechniques(raw: unknown[]): Tactic[] {
     const support = String(t.support ?? "");
     const sourceCount =
       Array.isArray(t.contributing_layers) && Array.isArray(t.sources) ? t.sources.length : 0;
+    const independentCount =
+      typeof t.independent_sources === "number" && sourceCount ? t.independent_sources : null;
     const matches =
       Number(
         t.matches ??
@@ -225,6 +238,10 @@ export function parseTechniques(raw: unknown[]): Tactic[] {
         existing.corroborated === null ? corroborated : existing.corroborated && corroborated !== false;
       existing.support = existing.support || support;
       existing.sourceCount = Math.max(existing.sourceCount, sourceCount);
+      existing.independentCount =
+        existing.independentCount === null
+          ? independentCount
+          : Math.max(existing.independentCount, independentCount ?? 0);
     } else {
       tactic.techniques.push({
         id: techId,
@@ -237,6 +254,7 @@ export function parseTechniques(raw: unknown[]): Tactic[] {
         corroborated,
         support,
         sourceCount,
+        independentCount,
       });
       tactic.technique_count++;
     }

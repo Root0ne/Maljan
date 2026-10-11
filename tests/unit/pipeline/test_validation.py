@@ -46,6 +46,7 @@ _TESTED_APART = (
     "independent_sources",
     "source_kinds",
     "support",
+    "independent_sayers",
 )
 
 

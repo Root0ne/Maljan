@@ -51,6 +51,8 @@ def corroboration_row(row: Mapping[str, Any] | Sequence[str] | None) -> dict[str
             out["source_kinds"] = {str(k): int(v) for k, v in row["source_kinds"].items()}
         if row.get("support"):
             out["support"] = str(row["support"])
+        if isinstance(row.get("independent_sayers"), int):
+            out["independent_sayers"] = int(row["independent_sayers"])
         return out
     return {"asserted_by": [], "claimed_by": [str(x) for x in (row or [])]}
 
@@ -62,7 +64,9 @@ NOT_OBSERVED_SUPPORTS = frozenset({"capability", "unobserved"})
 def corroborated(row: Mapping[str, Any] | Sequence[str] | None) -> bool:
     """Whether a technique is corroborated: two sayers and two sources of their own.
 
-    At least two named sources (analysts or asserting rules), and, for a row
+    At least two sayers (``independent_sayers``: analyst layers with a
+    statement of their own and the asserting rules; on a row stored before
+    it, the named sources), and, for a row
     read with its sources, at least two independent ones (each ledger entry
     or sandbox item once however many agents cite it, sources reading one
     place joined) with some source more than an artefact of the file or an
@@ -71,7 +75,8 @@ def corroborated(row: Mapping[str, Any] | Sequence[str] | None) -> bool:
     row stored before sources were read keeps the count of named sources.
     """
     normalised = corroboration_row(row)
-    if len(corroboration_sources(row)) < 2:
+    sayers = normalised.get("independent_sayers")
+    if (sayers if isinstance(sayers, int) else len(corroboration_sources(row))) < 2:
         return False
     if "sources" not in normalised:
         return True

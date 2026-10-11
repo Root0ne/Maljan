@@ -25,7 +25,6 @@ from maljan.pipeline.state import AgentArgument
 from maljan.pipeline.sycophancy_detector import (
     convergence_flags,
     convergence_sentence,
-    flagged_analysts,
 )
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
@@ -101,7 +100,6 @@ class TestTheFlag:
 
         assert "a moved towards b (similarity 0.40 to 0.95)" in said
         assert "it decides nothing" in said
-        assert flagged_analysts(flags) == {"a", "b"}
         assert convergence_sentence([]) == ""
 
     def test_many_peers_are_read_in_linear_time(self) -> None:

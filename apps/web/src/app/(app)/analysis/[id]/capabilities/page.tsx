@@ -11,6 +11,7 @@ import {
   corroborationSources,
   retiredNote,
   isCorroborated,
+  sourceWords,
   supportLabel,
   orderedTactics,
   parseTechniques,
@@ -210,21 +211,21 @@ export default function AttackTab() {
                             {supportLabel(tech) ? (
                               <span
                                 className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-status-orange/10 text-status-orange"
-                                title={`${supportLabel(tech)}: ${tech.sourceCount} source${tech.sourceCount === 1 ? "" : "s"}, none of them a sandbox observation, a code listing or a rule match`}
+                                title={`${supportLabel(tech)}: sources ${sourceWords(tech)}; none of them a sandbox observation, a code listing or a rule match`}
                               >
                                 {supportLabel(tech)}
                               </span>
                             ) : isCorroborated(tech) ? (
                               <span
                                 className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-status-green/10 text-status-green"
-                                title={`Corroborated: ${tech.corroborating.length} analysis layers (${tech.corroborating.join(", ")})${tech.sourceCount ? ` and ${tech.sourceCount} cited sources` : ""}`}
+                                title={`Corroborated: ${tech.corroborating.length} analysis layers (${tech.corroborating.join(", ")})${tech.sourceCount ? `; sources ${sourceWords(tech)}` : ""}`}
                               >
                                 corroborated
                               </span>
                             ) : (
                               <span
                                 className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-text-muted/10 text-text-muted"
-                                title={tech.sourceCount ? `Not corroborated: ${tech.corroborating.length} analysis layer${tech.corroborating.length === 1 ? "" : "s"} and ${tech.sourceCount} cited source${tech.sourceCount === 1 ? "" : "s"}, short of two independent sayers and sources — weigh with caution` : "Only one analysis layer supports this technique — weigh with caution"}
+                                title={tech.sourceCount ? `Not corroborated: ${tech.corroborating.length} analysis layer${tech.corroborating.length === 1 ? "" : "s"}; sources ${sourceWords(tech)}; short of two independent sayers and sources — weigh with caution` : "Only one analysis layer supports this technique — weigh with caution"}
                               >
                                 single source
                               </span>

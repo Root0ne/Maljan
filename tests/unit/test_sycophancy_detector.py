@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from maljan.pipeline.sycophancy_detector import (
-    DEVIL_ADVOCATE_DIRECTIVE,
-    build_revision_directive,
     detect_sycophancy,
 )
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
@@ -76,25 +74,3 @@ class TestDetectSycophancy:
         isr_b = _make_isr("dynamic", "dynamic", claim)
         isr_c = _make_isr("network", "network", "Beaconing to TOR hidden service exfiltrating data")
         assert detect_sycophancy([isr_a, isr_b, isr_c], threshold=0.70, iteration=1) is True
-
-
-class TestBuildRevisionDirective:
-    def test_no_sycophancy_returns_mediator_feedback(self) -> None:
-        feedback = "Contradiction: static says no network, dynamic says C2."
-        result = build_revision_directive(False, feedback)
-        assert result == feedback
-        assert DEVIL_ADVOCATE_DIRECTIVE not in result
-
-    def test_sycophancy_prepends_directive(self) -> None:
-        feedback = "Please revise."
-        result = build_revision_directive(True, feedback)
-        assert result.startswith(DEVIL_ADVOCATE_DIRECTIVE)
-        assert "Please revise." in result
-
-    def test_sycophancy_empty_feedback(self) -> None:
-        result = build_revision_directive(True, "")
-        assert DEVIL_ADVOCATE_DIRECTIVE in result
-
-    def test_no_sycophancy_empty_feedback(self) -> None:
-        result = build_revision_directive(False, "")
-        assert result == ""

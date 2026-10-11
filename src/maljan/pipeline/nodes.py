@@ -112,11 +112,9 @@ from maljan.pipeline.sandbox_status import NOT_RUN as SANDBOX_NOT_RUN
 from maljan.pipeline.sandbox_status import sandbox_status
 from maljan.pipeline.state import AgentArgument, AnalysisState, _merge_stage_results
 from maljan.pipeline.sycophancy_detector import (
-    build_revision_directive,
     convergence_flags,
     convergence_sentence,
     detect_sycophancy,
-    flagged_analysts,
 )
 from maljan.pipeline.triage_pack import (
     NOT_RUN_PREFIX,
@@ -4097,14 +4095,8 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 mediation = arg
                 break
 
-        # The analysts a convergence flag at the mediation names: the ones the
-        # round asks get the devil's-advocate directive; nobody else does, and
-        # the flag never widens who is asked.
-        flagged = (
-            flagged_analysts(list(getattr(mediation, "converged", None) or []))
-            if state.get("sycophancy_detected", False)
-            else set()
-        )
+        # A convergence flag reached the mediator as a fact and nothing else:
+        # no analyst is told it, and it never widens who is asked.
         revision_directive = mediator_feedback
 
         # Whom the round asks: the analysts the mediation named in a contested
@@ -4190,7 +4182,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
             brief_agent(agent, state, container)
             own_report = reports_in_force.get(name, "")
             peer_reports = {k: v for k, v in reports_in_force.items() if k != name}
-            directive = build_revision_directive(name in flagged, revision_directive)
+            directive = revision_directive
             if named is not None:
                 # A named analyst is shown the contested points that name it
                 # and the peers those points name, not every peer's answer.
@@ -4202,7 +4194,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     reports_in_force,
                     {n: label_of(container, n) for n in [*agent_names, *reports_in_force]},
                 )
-                directive = build_revision_directive(name in flagged, feedback)
+                directive = feedback
             # The functions the lines naming this analyst name, and whether
             # each was listed. An analyst with tools is told it can read one
             # the ledger never listed, and its revision is given its tools.

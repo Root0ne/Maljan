@@ -45,7 +45,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from maljan.analysis.corroboration import NOT_OBSERVED_SUPPORTS, corroboration_row
+from maljan.analysis.corroboration import corroborated as stands_on_two
+from maljan.analysis.corroboration import corroboration_row
 from maljan.analysis.evidence_roots import RootCount, layers_and_roots, run_roots
 from maljan.analysis.technique_ids import attack_reference_id, says_no_technique
 from maljan.core.logger import logger
@@ -168,13 +169,7 @@ def build_capability_matrix(
         # the corroboration record's own decision on its sources: one pack row
         # restated by five analysts is one source, and a technique no source
         # of which is behaviour is not corroborated.
-        sayers = len(independent) + len(row.get("asserted_by") or [])
-        corroborated = sayers >= 2 and (
-            "sources" not in row
-            or (
-                int(row.get("independent_sources", 0)) >= 2 and support not in NOT_OBSERVED_SUPPORTS
-            )
-        )
+        corroborated = stands_on_two(row) if "sources" in row else len(independent) >= 2
 
         # Never emit a zero-confidence cell with no evidence and no contributing
         # source — it is an empty claim the UI would render as a "verified"

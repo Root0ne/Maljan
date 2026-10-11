@@ -8,6 +8,7 @@ import {
   orderedTactics,
   parseTechniques,
   retiredNote,
+  sourceWords,
   supportLabel,
   tacticHeaderCount,
   tacticOrder,
@@ -275,6 +276,7 @@ describe("the backend's corroboration record", () => {
     ]);
     expect(tech.sources).toEqual(["static", "dynamic"]);
     expect(tech.sourceCount).toBe(1);
+    expect(sourceWords(tech)).toBe("1 cited");
     expect(isCorroborated(tech)).toBe(false);
   });
 
@@ -300,5 +302,18 @@ describe("the backend's corroboration record", () => {
     expect(tech.sources).toEqual(["a", "b"]);
     expect(tech.sourceCount).toBe(0);
     expect(isCorroborated(tech)).toBe(true);
+  });
+});
+
+describe("the source count", () => {
+  it("says how many are independent where the row recorded it", () => {
+    const tech = only([
+      row({
+        contributing_layers: ["static", "dynamic"],
+        sources: ["ev_0002", "ev_0008", "ev_0019", "ev_0021"],
+        independent_sources: 2,
+      }),
+    ]);
+    expect(sourceWords(tech)).toBe("4 cited, 2 independent");
   });
 });

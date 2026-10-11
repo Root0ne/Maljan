@@ -9591,6 +9591,7 @@ def corroboration(
     read = run_roots(list(ledger)) if ledger else None
     roots = technique_roots(isrs, ledger, read)
     traced = technique_sources(isrs, ledger, read)
+    sayers = _independent_sayers(isrs)
     out: dict[str, dict[str, list[str]]] = {}
     collected = collect(isrs, ledger)
     for tid in associations:
@@ -9608,6 +9609,11 @@ def corroboration(
                 if label not in asserted:
                     asserted.append(label)
         row: dict[str, Any] = {"asserted_by": sorted(asserted), "claimed_by": sorted(claimed)}
+        # The sayers that said something of their own: analyst layers with a
+        # statement of their own (identical statements counted once, as the
+        # ATT&CK table counts them) and the rules that assert it. The one
+        # count the judge, the table and the console read.
+        row["independent_sayers"] = len(sayers.get(tid, ())) + len(asserted)
         if tid in associations:
             row["associated_by"] = list(associations[tid])
         # Upstream Sigma rules and the case corpus still name ids the
@@ -9637,6 +9643,28 @@ def corroboration(
     return out
 
 
+def _independent_sayers(isrs: dict[str, Any] | None) -> dict[str, list[str]]:
+    """Per technique id, the analyst layers with a statement of their own naming it.
+
+    ``capability_matrix.independent_statements`` over the statements the
+    ATT&CK table reads (``capability_matrix.technique_statements``): two
+    analysts writing one statement are one sayer. Never raises.
+    """
+    try:
+        from maljan.extractors.capability_matrix import (
+            independent_statements,
+            technique_statements,
+        )
+
+        return {
+            str(tid).strip().upper(): independent_statements(statements)[0]
+            for tid, (statements, _cited) in technique_statements(isrs).items()
+        }
+    except Exception as exc:  # noqa: BLE001 — no count read is the count of names
+        logger.debug("corroboration: the independent sayers were not read (%s)", exc)
+        return {}
+
+
 def support_of(sources: Mapping[str, Any]) -> str:
     """The support a technique's sources give it (``evidence_roots.summary_of_sources``).
 
@@ -9655,9 +9683,28 @@ def support_of(sources: Mapping[str, Any]) -> str:
     return summary_of_sources(held).support
 
 
-# A statement that negates what it cites: a run observation it cites is cited
-# for an absence ("the sandbox recorded no HTTP traffic"), not as support.
+# The opening of the root a statement places an entry by when it writes what
+# the answer states as a whole (``evidence_roots.WHOLE_ANSWER_ROOT``).
+_WHOLE_ANSWER_OPENING = "the whole answer of "
+# A statement that negates what it cites: a run observation or a rule it cites
+# is cited for an absence ("the sandbox recorded no HTTP traffic"), not as support.
 _NEGATES_RE = re.compile(r"\b(?:no|not|never|none|nothing|without|neither|nor)\b", re.IGNORECASE)
+
+
+# Where a statement's sentences and its evidence line's items break.
+_CITING_PIECE_BREAK = re.compile(r"(?<=[.!?;])\s+|\n+")
+
+
+def _cites_to_negate(said: str, citation: str) -> bool:
+    """Whether the pieces of ``said`` that cite ``citation`` negate (an absence cited).
+
+    A piece is a sentence or an evidence-line item; the ones that write the
+    citation are read (``_NOT_SEEN_RE``, or a negating word in them). A
+    statement that cites the entry nowhere in its own words is read whole.
+    """
+    pieces = [p for p in _CITING_PIECE_BREAK.split(_read_dashes(said)) if p.strip()]
+    mine = [p for p in pieces if citation.lower() in p.lower()] or [_read_dashes(said)]
+    return any(_NOT_SEEN_RE.search(p) or _NEGATES_RE.search(p) for p in mine)
 
 
 def technique_sources(
@@ -9673,9 +9720,11 @@ def technique_sources(
     entry or sandbox item of this run is a source, rooted or not
     (``RunRoots.sources_of_statement``); one cited by several statements is one
     source, keeping the strongest reading and every root they read. An
-    asserting tool's entry a statement cites is a rule match. A run
-    observation cited by a statement that negates (``_NOT_SEEN_RE``, or a
-    negating word) is cited for its absence: a source, placed nowhere. Empty
+    asserting tool's entry a statement cites is a rule match for the technique
+    only when its own rows name the technique or the statement places one of
+    its rows; otherwise it is placed nowhere. A run observation or a rule cited
+    by a piece of the statement that negates (``_cites_to_negate``) is cited
+    for its absence: a source, placed nowhere. Empty
     without a ledger. ``found`` is the run's ``RunRoots`` where the caller
     already read it.
     """
@@ -9711,14 +9760,34 @@ def technique_sources(
             else:
                 into[source] = (reading, tuple(placed))
 
-    def cited_sources(said: str, cited: list[str]) -> dict[str, tuple[str, tuple[str, ...]]]:
+    invalid = invalid_technique_ids(entries)
+    # The techniques each asserting entry's own rows name.
+    asserts: dict[str, set[str]] = {}
+    for entry in entries:
+        if _base_tool_name(getattr(entry, "tool", "")) in ASSERTING_SOURCES:
+            asserts[str(getattr(entry, "id", "") or "").lower()] = {
+                tid
+                for tid in _technique_ids(getattr(entry, "structured", None))
+                if tid not in invalid
+            }
+
+    def cited_sources(
+        said: str, cited: list[str], tid: str
+    ) -> dict[str, tuple[str, tuple[str, ...]]]:
         held = roots.sources_of_statement(said, cited)
-        text = _read_dashes(said)
-        negates = _NOT_SEEN_RE.search(text) is not None or _NEGATES_RE.search(text) is not None
         found_here: dict[str, tuple[str, tuple[str, ...]]] = {}
         for source, (reading, placed) in held.items():
-            if _base_tool_name(roots.tools.get(source, "")) in ASSERTING_SOURCES:
-                found_here[source] = (READING_RULE, placed)
+            negates = _cites_to_negate(said, source)
+            rows = [root for root in placed if not root.startswith(_WHOLE_ANSWER_OPENING)]
+            if source in asserts:
+                # An asserting entry is a rule match for this technique when
+                # its own rows name it or the statement places one of its rows;
+                # cited otherwise, or to say what it does not hold, it is placed
+                # nowhere.
+                if not negates and (tid in asserts[source] or rows):
+                    found_here[source] = (READING_RULE, tuple(rows))
+                else:
+                    found_here[source] = (READING_UNPLACED, ())
             elif negates and reading == READING_RUN:
                 found_here[source] = (READING_UNPLACED, ())
             else:
@@ -9735,15 +9804,14 @@ def technique_sources(
             ref = str(getattr(claim, "evidence_ref", "") or "")
             said = f"{getattr(claim, 'claim', '') or ''} {ref}"
             cited = [*entry_ids_in(said), *item_ids_in(ref)]
-            add(tid, cited_sources(said, cited))
+            add(tid, cited_sources(said, cited, tid))
         for finding in getattr(isr, "findings", None) or []:
             said = f"{getattr(finding, 'title', '') or ''} {getattr(finding, 'detail', '') or ''}"
             cited = [str(i) for i in getattr(finding, "evidence_ids", None) or [] if i]
             for raw in getattr(finding, "technique_ids", None) or []:
                 tid = str(raw or "").strip().upper()
                 if tid:
-                    add(tid, cited_sources(said, cited))
-    invalid = invalid_technique_ids(entries)
+                    add(tid, cited_sources(said, cited, tid))
     for entry in entries:
         if _base_tool_name(getattr(entry, "tool", "")) not in ASSERTING_SOURCES:
             continue

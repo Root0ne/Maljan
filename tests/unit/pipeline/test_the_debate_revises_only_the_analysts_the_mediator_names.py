@@ -286,9 +286,7 @@ class TestTheRouter:
 
         assert debate_route(state, max_rounds=5) == ("judge", NO_CONTESTED_POINT)
 
-    def test_the_devil_s_advocate_directive_goes_to_a_flagged_analyst_named(self) -> None:
-        from maljan.pipeline.sycophancy_detector import DEVIL_ADVOCATE_DIRECTIVE
-
+    def test_a_flag_reaches_no_analyst_s_prompt(self) -> None:
         argument = _mediator(revise=["static", "dynamic"])
         argument.converged = [
             {"agent": "static", "towards": "network", "before": 0.5, "after": 0.95}
@@ -297,9 +295,8 @@ class TestTheRouter:
 
         assert agents["network"].safe_revise_isr.call_count == 0
         static_args, _kw = agents["static"].safe_revise_isr.call_args
-        dynamic_args, _kw = agents["dynamic"].safe_revise_isr.call_args
-        assert static_args[3].startswith(DEVIL_ADVOCATE_DIRECTIVE)
-        assert not dynamic_args[3].startswith(DEVIL_ADVOCATE_DIRECTIVE)
+        assert "challenge" not in static_args[3].lower()
+        assert "moved towards" not in static_args[3]
 
 
 # ---------------------------------------------------------------------------
