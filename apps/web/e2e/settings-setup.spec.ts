@@ -222,9 +222,10 @@ test.describe("Settings → Setup guides (admin)", () => {
   }) => {
     await page.goto(guidePath("tool-server"));
 
-    // The guide opens on the VirusTotal offer, which registers nothing unless
-    // the button is pressed; adding a server by hand walks straight past it.
-    await expect(page.getByRole("heading", { name: "Connect VirusTotal" })).toBeVisible();
+    // The guide opens on the credential step of the built-in server that
+    // declares one, which obtains nothing unless the button is pressed;
+    // adding a server by hand walks straight past it.
+    await expect(page.getByRole("heading", { name: "Connect VirusTotal MCP" })).toBeVisible();
     await page.getByRole("button", { name: "Continue" }).click();
 
     await expect(page.getByRole("heading", { name: "Which server" })).toBeVisible();

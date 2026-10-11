@@ -224,9 +224,9 @@ describe("the sandbox guide", () => {
 });
 
 describe("the tool-server guide", () => {
-  it("offers VirusTotal first, then asks which server before it shows any field", () => {
+  it("offers each server whose credential can be obtained first, then asks which server", () => {
     expect(stepIds("tool-server", context())).toEqual([
-      "virustotal",
+      "credential-virustotal",
       "which",
       "connection",
       "tools",
@@ -244,18 +244,43 @@ describe("the tool-server guide", () => {
     expect(blockedReason("tool-server", "tools", context({}, { state }))).toBeNull();
   });
 
-  it("never blocks on the VirusTotal step, which is optional", () => {
-    // Registering is one way to get a tool server, not a prerequisite for
-    // adding one by hand, so Continue must pass straight through it.
-    expect(blockedReason("tool-server", "virustotal", context())).toBeNull();
+  it("never blocks on a credential step, which is optional", () => {
+    // Obtaining a credential is one way to get a tool server, not a
+    // prerequisite for adding one by hand, so Continue passes straight through.
+    expect(blockedReason("tool-server", "credential-virustotal", context())).toBeNull();
   });
 
-  it("stages the server map through the VirusTotal step's review keys", () => {
+  it("stages the server map through a credential step's review keys", () => {
     const step = guideById("tool-server")!
       .steps(context())
-      .find((s) => s.id === "virustotal");
-    expect(step?.component).toBe("virustotal");
+      .find((s) => s.id === "credential-virustotal");
+    expect(step?.component).toBe("credential");
+    expect(step?.server).toBe("virustotal");
+    expect(step?.note).toContain("quota");
     expect(step?.reviewKeys).toContain("core.mcp.servers");
+  });
+
+  it("gives a server declared only as data its own credential step", () => {
+    const invented: SettingsSchema = {
+      ...schema,
+      credential_servers: {
+        ...schema.credential_servers,
+        intelhub: { label: "Intel hub", family: "maljan", note: "Issued per deployment." },
+      },
+    };
+    const steps = guideById("tool-server")!.steps({ ...context(), schema: invented });
+    expect(steps.map((s) => s.id).slice(0, 3)).toEqual([
+      "credential-virustotal",
+      "credential-intelhub",
+      "which",
+    ]);
+    const step = steps.find((s) => s.id === "credential-intelhub");
+    expect(step).toMatchObject({
+      title: "Connect Intel hub",
+      component: "credential",
+      server: "intelhub",
+      note: "Issued per deployment.",
+    });
   });
 });
 
@@ -321,9 +346,48 @@ describe("the enrichment guide", () => {
     const steps = guide.steps(context());
     expect(steps.map((s) => s.id)).toEqual(["switch", "virustotal", "abuseipdb", "review"]);
     expect(steps.map((s) => s.probe)).toEqual([undefined, "virustotal", "abuseipdb", undefined]);
+    // The shipped sources' steps read as they did when the guide named them.
+    expect(steps[1]).toMatchObject({
+      title: "VirusTotal",
+      intro: "Leave the key empty to skip VirusTotal. The key is stored on the server and never shown again.",
+      keys: ["api.virustotal_api_key"],
+    });
+    expect(steps[2]).toMatchObject({ title: "AbuseIPDB", keys: ["api.abuseipdb_api_key"] });
     for (const step of steps) {
       expect(step.canContinue?.(context()) ?? null).toBeNull();
     }
+  });
+
+  it("offers a source declared only as data, with its own key in the source map", () => {
+    const invented: SettingsSchema = {
+      ...schema,
+      enrichment_sources: [
+        {
+          key: "domainrep",
+          label: "Domain reputation",
+          kinds: ["domain"],
+          enabled: true,
+          credential_key: null,
+          own_credential: true,
+          server: null,
+          probe: true,
+        },
+        ...(schema.enrichment_sources ?? []),
+      ],
+    };
+    const steps = guideById("enrichment")!.steps({ ...context(), schema: invented });
+    expect(steps.map((s) => s.id)).toEqual([
+      "switch",
+      "domainrep",
+      "virustotal",
+      "abuseipdb",
+      "review",
+    ]);
+    expect(steps[1]).toMatchObject({
+      title: "Domain reputation",
+      keys: ["api.enrichment_sources"],
+      probe: "domainrep",
+    });
   });
 });
 

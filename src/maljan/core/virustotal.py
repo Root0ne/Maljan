@@ -68,12 +68,6 @@ LOOKUP_TOOLS: tuple[str, ...] = (
 # ``submit_local_file`` is stdio-only; ``submit_file`` takes the bytes.
 SUBMIT_TOOLS: tuple[str, ...] = ("submit_file", "submit_local_file")
 
-# What the probe says when the server is configured but never registered.
-NO_TOKEN_DETAIL = (
-    "no agent token: register the VirusTotal agent from the tool-server setup "
-    "guide, or paste a vtai_ token into this server's token field"
-)
-
 
 def stdio_command(command_exists: object = None) -> tuple[str, list[str]]:
     """The command and args that launch ``vt-mcp`` over stdio on this host.

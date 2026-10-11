@@ -15,22 +15,25 @@ registration produces.
 
 <Step>
 
-Open **Settings → Setup guides → Add a tool server → Connect VirusTotal**.
+Open **Settings → Setup guides → Add a tool server → Connect VirusTotal MCP**.
 
 </Step>
 
 <Step>
 
-Press the button. It calls `POST /api/v1/settings/virustotal/register`, which
-asks VirusTotal for an agent token, stores it as this server's `auth_token`
-in its own encrypted row, turns the server on, and answers with the masked
-state and the public handle VirusTotal now knows the deployment by.
+Press **Obtain credential**. It calls
+`POST /api/v1/settings/servers/virustotal/credential`, which performs the
+server's declared `credential_bootstrap` (see [Obtaining a server's
+credential](/configuration/#obtaining-a-servers-credential)): it asks
+VirusTotal for an agent token, stores it as this server's `auth_token` in its
+own encrypted row, turns the server on, and answers with the masked state and
+the public handle VirusTotal now knows the deployment by.
 
 </Step>
 
 <Step>
 
-Test it. Until a token is stored, the Test button answers "no agent token"
+Test it. Until a token is stored, the Test button answers "no credential"
 rather than dialling out.
 
 </Step>

@@ -1,8 +1,13 @@
-"""Orchestrate VT/AbuseIPDB/WHOIS providers and patch a ``MalwareReport`` dict.
+"""Ask the declared enrichment sources and patch a ``MalwareReport`` dict.
 
 The orchestrator is pipeline-side (Python only) — the API worker imports
 it. It mutates *and* returns the dict so callers can choose to persist
 the new copy without read-modify-write race risk.
+
+The sources are the declared ones (:mod:`maljan.enrichment.declared`), each
+ready with its credential: for each indicator kind the report holds a slot
+for, the configured sources that answer that kind are asked in their declared
+order and the first record is kept.
 
 Idempotent: any domain/IP whose ``reputation`` already holds a value is
 skipped. Lookup budgets are enforced per kind (default 25 each) so a
@@ -12,14 +17,19 @@ single enrichment never floods the provider quota.
 from __future__ import annotations
 
 import ipaddress
-import time
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from maljan.core.logger import logger
-from maljan.enrichment.abuseipdb_client import AbuseIPDBClient
-from maljan.enrichment.virustotal_client import VirusTotalClient
+from maljan.enrichment.declared import (
+    ReadySource,
+    SourceAsker,
+    ToolCaller,
+    annotate_age,
+    is_malicious,
+)
 from maljan.enrichment.whois_client import WhoisClient
 from maljan.extractors.attribution import populate_similar_samples
 from maljan.extractors.network_extractor import (
@@ -31,8 +41,11 @@ from maljan.extractors.network_extractor import (
 if TYPE_CHECKING:
     from maljan.memory.long_term_memory import MemoryStore
 
-# Reputation older than this is considered stale and must not drive a verdict.
-_STALE_REPUTATION_DAYS = 90
+# The report's slot for each indicator kind a post-verdict lookup fills: the
+# network list and the field holding the value. ``hash`` and ``url`` have no
+# reputation slot in the report, so a source answering only those is asked
+# nothing here.
+SLOTS: dict[str, tuple[str, str]] = {"domain": ("domains", "fqdn"), "ip": ("ips", "address")}
 
 
 def _has_successful_rep(obj: dict[str, Any]) -> bool:
@@ -45,23 +58,13 @@ def _has_successful_rep(obj: dict[str, Any]) -> bool:
     return isinstance(rep, dict) and bool(rep.get("source"))
 
 
-def _annotate_reputation_age(rep: dict[str, Any]) -> None:
-    """Add ``age_days`` (and ``stale``) from a VT ``last_analysis_date_unix``."""
-    ts = rep.get("last_analysis_date_unix")
-    if isinstance(ts, int) and ts > 0:
-        age_days = (time.time() - ts) / 86400.0
-        rep["age_days"] = round(age_days, 1)
-        if age_days > _STALE_REPUTATION_DAYS:
-            rep["stale"] = True
-
-
 def _carry_cape_context(prev: Any, rep: dict[str, Any]) -> None:
-    """Preserve CAPE-sourced context when live enrichment replaces reputation.
+    """Preserve sandbox-sourced context when live enrichment replaces reputation.
 
     The network extractor seeds ``reputation`` with a deterministic
     ``virustotal_url`` permalink (plus ``hostname`` / ``contacted_ports`` for
-    IPs) straight from the CAPE report. The live VT/AbuseIPDB scores are richer
-    but lack those keys, so fold them forward instead of clobbering them.
+    IPs) straight from the sandbox report. The live records are richer but
+    lack those keys, so fold them forward instead of clobbering them.
     """
     if not isinstance(prev, dict):
         return
@@ -69,18 +72,6 @@ def _carry_cape_context(prev: Any, rep: dict[str, Any]) -> None:
         val = prev.get(key)
         if val is not None and rep.get(key) is None:
             rep[key] = val
-
-
-def _reputation_is_malicious(rep: dict[str, Any] | None) -> bool:
-    """Whether a fresh reputation result indicates a malicious indicator."""
-    if not isinstance(rep, dict) or rep.get("stale"):
-        return False
-    source = rep.get("source")
-    if source == "virustotal":
-        return int(rep.get("malicious") or 0) > 0 or int(rep.get("suspicious") or 0) >= 3
-    if source == "abuseipdb":
-        return int(rep.get("abuse_confidence") or 0) >= 50
-    return False
 
 
 def _is_public_ip(address: str) -> bool:
@@ -109,10 +100,11 @@ def _is_public_fqdn(name: str) -> bool:
     """True for a name a public reputation service can say something about.
 
     IP literals, single-label names and the special-use suffixes are internal
-    infrastructure: sending them to VirusTotal leaks the operator's naming and
-    costs quota for an answer that is always "unknown". The suffixes are the
-    ones the export holds back, read from the one list, so a name this pipeline
-    will not publish is not one it posts to somebody else either.
+    infrastructure: sending them to a reputation service leaks the operator's
+    naming and costs quota for an answer that is always "unknown". The
+    suffixes are the ones the export holds back, read from the one list, so a
+    name this pipeline will not publish is not one it posts to somebody else
+    either.
     """
     host = name.strip().rstrip(".").lower().strip("[]")
     if not host or ".." in host or "." not in host:
@@ -128,25 +120,29 @@ def _is_public_fqdn(name: str) -> bool:
 async def enrich_malware_report(
     malware_report: dict[str, Any],
     *,
-    vt_api_key: str | None,
-    abuseipdb_api_key: str | None,
+    sources: Sequence[ReadySource] = (),
     max_lookups_per_kind: int = 25,
     http_client: httpx.AsyncClient | None = None,
+    tool_caller: ToolCaller | None = None,
+    tool_arguments: Callable[[str, str], Mapping[str, str]] | None = None,
     memory_store: MemoryStore | None = None,
     similar_top_k: int = 5,
 ) -> dict[str, Any]:
     """Populate reputation/asn/geo + attribution.similar_samples in place.
 
-    Returns the (mutated) dict for convenience. Providers without API
-    keys are skipped — the matching fields stay ``None``. When
-    ``memory_store`` is provided, the report's ``attribution.similar_samples``
-    is also populated from the LTM nearest-neighbour search (idempotent —
-    skipped when already filled). The caller is expected to persist the
-    returned dict back to ``AnalysisReport.malware_report``.
+    Returns the (mutated) dict for convenience. Only the ``sources`` that
+    are configured (enabled, holding the credential they need) are asked;
+    a kind no configured source answers keeps its fields ``None``.
+    ``tool_caller`` asks a server source's tool, and ``tool_arguments`` reads
+    the argument a server's tool declares for a kind. When ``memory_store``
+    is provided, the report's ``attribution.similar_samples`` is also
+    populated from the LTM nearest-neighbour search (idempotent — skipped
+    when already filled). The caller is expected to persist the returned
+    dict back to ``AnalysisReport.malware_report``.
     """
     network = malware_report.get("network") or {}
-    domains = network.get("domains") or []
-    ips = network.get("ips") or []
+    domains = network.get(SLOTS["domain"][0]) or []
+    ips = network.get(SLOTS["ip"][0]) or []
 
     # Attribution always runs (even with no network IOCs) so reports that
     # touched nothing on the wire still get a "you have seen this before"
@@ -158,28 +154,29 @@ async def enrich_malware_report(
         logger.info("enrich: no network IOCs in report, skipping reputation lookups.")
         return malware_report
 
+    ready = sorted((s for s in sources if s.configured), key=lambda s: s.source.order)
     own_client = http_client is None
     client = http_client or httpx.AsyncClient(timeout=30.0)
     try:
-        vt: VirusTotalClient | None = None
-        abuse: AbuseIPDBClient | None = None
-        if vt_api_key:
-            try:
-                vt = VirusTotalClient(api_key=vt_api_key, http=client)
-            except ValueError:
-                vt = None
-        if abuseipdb_api_key:
-            try:
-                abuse = AbuseIPDBClient(api_key=abuseipdb_api_key, http=client)
-            except ValueError:
-                abuse = None
+        asker = SourceAsker(client, tool_caller=tool_caller, tool_arguments=tool_arguments)
         whois = WhoisClient(client)
 
-        if vt is None and abuse is None:
-            logger.warning("enrich: no provider API keys available; reputation fields left null.")
+        if not ready:
+            logger.warning("enrich: no enrichment source configured; reputation fields left null.")
 
-        domains_skipped = await _enrich_domains(domains, vt=vt, cap=max_lookups_per_kind)
-        await _enrich_ips(ips, vt=vt, abuse=abuse, whois=whois, cap=max_lookups_per_kind)
+        domains_skipped = await _enrich_domains(
+            domains,
+            sources=[s for s in ready if s.answers("domain")],
+            asker=asker,
+            cap=max_lookups_per_kind,
+        )
+        await _enrich_ips(
+            ips,
+            sources=[s for s in ready if s.answers("ip")],
+            asker=asker,
+            whois=whois,
+            cap=max_lookups_per_kind,
+        )
     finally:
         if own_client:
             await client.aclose()
@@ -193,14 +190,37 @@ async def enrich_malware_report(
     return malware_report
 
 
+async def _first_record(
+    sources: Sequence[ReadySource], asker: SourceAsker, kind: str, value: str
+) -> tuple[ReadySource, dict[str, Any]] | None:
+    """The first source in order that answers ``value`` with a record, and that record."""
+    for source in sources:
+        rep = await asker.ask(source, kind, value)
+        if rep is not None:
+            return source, rep
+    return None
+
+
+def _keep(row: dict[str, Any], found: tuple[ReadySource, dict[str, Any]]) -> None:
+    source, rep = found
+    annotate_age(rep, source.source)
+    _carry_cape_context(row.get("reputation"), rep)
+    row["reputation"] = rep
+    # Feed verified reputation back into the heuristic suspicion flag so an
+    # enriched-malicious indicator is not stuck at is_suspicious=False.
+    if is_malicious(rep, source.source):
+        row["is_suspicious"] = True
+
+
 async def _enrich_domains(
     domains: list[dict[str, Any]],
     *,
-    vt: VirusTotalClient | None,
+    sources: Sequence[ReadySource],
+    asker: SourceAsker,
     cap: int,
 ) -> int:
     skipped = 0
-    if vt is None:
+    if not sources:
         return skipped
     askable: list[dict[str, Any]] = []
     for dom in domains:
@@ -223,24 +243,17 @@ async def _enrich_domains(
     for dom in askable[:cap]:
         if _has_successful_rep(dom):
             continue
-        fqdn = str(dom["fqdn"])
-        rep = await vt.domain_reputation(fqdn)
-        if rep is not None:
-            _annotate_reputation_age(rep)
-            _carry_cape_context(dom.get("reputation"), rep)
-            dom["reputation"] = rep
-            # Feed verified reputation back into the heuristic suspicion flag so
-            # an enriched-malicious domain is not stuck at is_suspicious=False.
-            if _reputation_is_malicious(rep):
-                dom["is_suspicious"] = True
+        found = await _first_record(sources, asker, "domain", str(dom["fqdn"]))
+        if found is not None:
+            _keep(dom, found)
     return skipped
 
 
 async def _enrich_ips(
     ips: list[dict[str, Any]],
     *,
-    vt: VirusTotalClient | None,
-    abuse: AbuseIPDBClient | None,
+    sources: Sequence[ReadySource],
+    asker: SourceAsker,
     whois: WhoisClient,
     cap: int,
 ) -> None:
@@ -267,17 +280,9 @@ async def _enrich_ips(
     for ip in askable[:cap]:
         address = str(ip["address"])
         if not _has_successful_rep(ip):
-            rep: dict[str, Any] | None = None
-            if vt is not None:
-                rep = await vt.ip_reputation(address)
-            if rep is None and abuse is not None:
-                rep = await abuse.ip_check(address)
-            if rep is not None:
-                _annotate_reputation_age(rep)
-                _carry_cape_context(ip.get("reputation"), rep)
-                ip["reputation"] = rep
-                if _reputation_is_malicious(rep):
-                    ip["is_suspicious"] = True
+            found = await _first_record(sources, asker, "ip", address)
+            if found is not None:
+                _keep(ip, found)
         if not ip.get("asn"):
             asn = await whois.asn_lookup(address)
             if asn:

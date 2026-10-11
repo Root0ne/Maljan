@@ -21,7 +21,7 @@ def test_every_probe_the_catalog_names_is_answered():
 
 
 def test_every_registered_provider_has_a_probe_and_nothing_else_does():
-    from maljan.enrichment.sources import reputation_sources
+    from maljan.enrichment.declared import effective_sources
     from maljan.memory.store_factory import memory_backends
     from maljan.providers.registry import sandbox_provider_ids, static_provider_ids
 
@@ -29,7 +29,7 @@ def test_every_registered_provider_has_a_probe_and_nothing_else_does():
         *static_provider_ids(),
         *sandbox_provider_ids(),
         *memory_backends(),
-        *reputation_sources(),
+        *(key for key, source in effective_sources({}).items() if source.probe),
     }
     assert set(probe_names()) == set(OWN_PROBES) | registered
     assert not known_probe("not-a-provider")

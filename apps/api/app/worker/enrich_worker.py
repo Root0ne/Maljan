@@ -324,9 +324,25 @@ async def enrich_threat_intel(
     # Lazy import keeps the API/worker startup graph free of optional
     # maljan-core dependencies.
     from maljan.enrichment import enrich_malware_report
+    from maljan.enrichment.declared import effective_sources
 
-    vt_key = await runtime_config.get_secret("virustotal_api_key") or None
-    abuse_key = await runtime_config.get_secret("abuseipdb_api_key") or None
+    from app.services.enrichment_sources import (
+        ENRICHMENT_SOURCES_PATH,
+        read_setting_secret,
+        ready_sources,
+        stored_map,
+    )
+    from app.services.enrichment_tools import ServerToolCaller
+
+    stored_sources = await runtime_config.get(ENRICHMENT_SOURCES_PATH)
+    # The tool servers are read, and attached, only where a source is asked
+    # through one.
+    tools: ServerToolCaller | None = None
+    if any(s.server for s in effective_sources(stored_map(stored_sources)).values()):
+        tools = ServerToolCaller(await runtime_config.core(), job_key=f"enrich-{report_id}")
+    sources = await ready_sources(
+        stored_sources, read_setting_secret, tools.servers() if tools is not None else None
+    )
 
     before_domain_reps = _count_reputations(payload, "domains")
     before_ip_reps = _count_reputations(payload, "ips")
@@ -336,14 +352,18 @@ async def enrich_threat_intel(
     try:
         updated = await enrich_malware_report(
             payload,
-            vt_api_key=vt_key,
-            abuseipdb_api_key=abuse_key,
+            sources=sources,
             max_lookups_per_kind=await runtime_config.get("enrichment_max_lookups"),
+            tool_caller=tools,
+            tool_arguments=tools.arguments if tools is not None else None,
             memory_store=memory_store,
         )
     except Exception as exc:  # noqa: BLE001
         logger.error("enrich: orchestrator failed (%s)", exc, exc_info=True)
         return {"status": "error", "error": str(exc)[:200]}
+    finally:
+        if tools is not None:
+            await tools.aclose()
 
     async with db_session_factory() as db:
         report = await db.get(AnalysisReport, report_uuid)

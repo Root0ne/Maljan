@@ -64,8 +64,13 @@ export interface GuideStep {
     | "profile-picker"
     | "rest-mapping"
     | "provider-choice"
-    | "virustotal"
+    | "credential"
     | "review";
+  /** The tool server a `credential` step obtains the credential of. */
+  server?: string;
+  /** What a `credential` step tells the operator before the button: the
+   *  server's own declared note. */
+  note?: string;
   /** Which part of a `server-form` / `agent-form` the step draws. The step
    *  components normalise an unknown value to their first section, so a
    *  guide that names none still renders. */
@@ -405,24 +410,33 @@ const SANDBOX_GUIDE: GuideDef = {
 
 /* ------------------------------------------------------------- tool server */
 
+/** One "obtain a credential" step per tool server the schema says declares
+ *  `credential_bootstrap`, in the schema's order. */
+export function credentialSteps(schema: SettingsSchema | null | undefined): GuideStep[] {
+  return Object.entries(schema?.credential_servers ?? {}).map(([server, facts]) => ({
+    id: `credential-${server}`,
+    title: `Connect ${facts.label || server}`,
+    intro:
+      `${facts.label || server} issues its own credential. Obtain one for this deployment; ` +
+      "it is stored encrypted here and the server is turned on.",
+    component: "credential" as const,
+    server,
+    note: facts.note || undefined,
+    reviewKeys: ["core.mcp.servers"],
+  }));
+}
+
 const TOOL_SERVER_GUIDE: GuideDef = {
   id: "tool-server",
   title: "Add a tool server",
   blurb: "Register an MCP server, load its tools and decide which analysts may call them.",
   groupHref: "/settings/configuration/tools/mcp",
-  steps: () => [
-    {
-      // VirusTotal's server is the one tool server nobody has to stand up, so
-      // it comes before the form that registers one by hand: an operator who
-      // only wanted file and IP reputation is finished after this step.
-      id: "virustotal",
-      title: "Connect VirusTotal",
-      intro:
-        "VirusTotal runs its own MCP server. Register this deployment to get an agent token; " +
-        "the token is stored encrypted here and the server is turned on with its lookups ticked.",
-      component: "virustotal",
-      reviewKeys: ["core.mcp.servers"],
-    },
+  steps: (ctx) => [
+    // A server whose credential can be obtained by a button is one nobody
+    // has to stand up, so its step comes before the form that registers a
+    // server by hand: an operator who only wanted that server is finished
+    // after it.
+    ...credentialSteps(ctx.schema),
     {
       id: "which",
       title: "Which server",
@@ -577,32 +591,50 @@ const MEMORY_GUIDE: GuideDef = {
 const ENRICHMENT_GUIDE: GuideDef = {
   id: "enrichment",
   title: "Enable threat-intelligence enrichment",
-  blurb: "Look indicators up against VirusTotal and AbuseIPDB, within a per-analysis budget.",
+  blurb: "Look indicators up against the declared reputation sources, within a per-analysis budget.",
   groupHref: "/settings/configuration/platform/enrichment",
-  steps: () => [
+  steps: (ctx) => [
     {
       id: "switch",
       title: "Enrichment and its budget",
       intro: "The budget caps how many lookups a single analysis may spend.",
       keys: ["api.enrichment_enabled", "api.enrichment_max_lookups"],
     },
-    {
-      id: "virustotal",
-      title: "VirusTotal",
-      intro: "Leave the key empty to skip VirusTotal. The key is stored on the server and never shown again.",
-      keys: ["api.virustotal_api_key"],
-      probe: "virustotal",
-    },
-    {
-      id: "abuseipdb",
-      title: "AbuseIPDB",
-      intro: "Leave the key empty to skip AbuseIPDB. The key is stored on the server and never shown again.",
-      keys: ["api.abuseipdb_api_key"],
-      probe: "abuseipdb",
-    },
+    ...enrichmentSourceSteps(ctx.schema),
     REVIEW_STEP,
   ],
 };
+
+/** The catalog key of the enrichment source map. */
+export const ENRICHMENT_SOURCES_KEY = "api.enrichment_sources";
+
+/** One step per enrichment source the schema lists, in its order: the setting
+ *  that holds its credential, or the source map for one that holds its own,
+ *  and its declared connection test. */
+export function enrichmentSourceSteps(schema: SettingsSchema | null | undefined): GuideStep[] {
+  return (schema?.enrichment_sources ?? []).map((source) => {
+    const label = source.label || source.key;
+    const keys = source.credential_key
+      ? [source.credential_key]
+      : source.own_credential
+        ? [ENRICHMENT_SOURCES_KEY]
+        : [];
+    const intro = source.credential_key
+      ? `Leave the key empty to skip ${label}. The key is stored on the server and never shown again.`
+      : source.own_credential
+        ? `${label} keeps its key as api_key in its entry of the source map; it is stored encrypted and shown masked.`
+        : source.server
+          ? `${label} is asked through the tool server ${source.server}; it needs no key here.`
+          : `${label} needs no key.`;
+    return {
+      id: source.key,
+      title: label,
+      intro,
+      keys,
+      probe: source.probe ? source.key : undefined,
+    };
+  });
+}
 
 /** The catalog key a guide's `provider-choice` step stages. Every guide that
  *  opens on a provider picker names its selector here. */

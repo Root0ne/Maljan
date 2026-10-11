@@ -25,13 +25,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings as api_settings
 from app.models import RuntimeSetting
-from app.services.frontier_arms import (
-    ARMS_KEY,
-    arm_key_key,
-    masked_arms,
-    merge_arm_secrets,
-    split_arm_secrets,
-)
+from app.services.enrichment_sources import SOURCE_SECRETS
+from app.services.frontier_arms import ARMS
+from app.services.nested_secrets import NestedSecretMap
 from app.services.server_map import (
     SERVER_MAP_KEY,
     TOKEN_MASK,
@@ -75,7 +71,22 @@ class SaveResult:
 # The composite catalog leaves whose nested credential is stored as its own
 # runtime-keyed row, and the suffix those rows carry. Resetting the composite
 # resets them; ``save`` prunes the ones whose name left the map.
-_COMPOSITE_SECRET_SUFFIX = {SERVER_MAP_KEY: ".auth_token", ARMS_KEY: ".api_key"}
+#
+# Every composite but the server map keeps its entries' credential the one
+# way ``nested_secrets.NestedSecretMap`` describes: the frontier arms and the
+# enrichment sources.
+NESTED_SECRET_MAPS: tuple[NestedSecretMap, ...] = (ARMS, SOURCE_SECRETS)
+_NESTED_BY_KEY = {spec.key: spec for spec in NESTED_SECRET_MAPS}
+_COMPOSITE_SECRET_SUFFIX = {
+    SERVER_MAP_KEY: ".auth_token",
+    **{spec.key: spec.suffix for spec in NESTED_SECRET_MAPS},
+}
+
+
+def _merge_nested(overrides: dict[str, Any]) -> dict[str, Any]:
+    for spec in NESTED_SECRET_MAPS:
+        overrides = spec.merge(overrides)
+    return overrides
 
 
 def _loc_to_key(ns: str, loc: tuple[Any, ...]) -> str:
@@ -115,7 +126,7 @@ class SettingsService:
                     continue
             else:
                 out[row.key] = row.value
-        return merge_arm_secrets(merge_server_secrets(out))
+        return _merge_nested(merge_server_secrets(out))
 
     async def values(self) -> dict[str, ValueInfo]:
         index = catalog_index()
@@ -152,14 +163,15 @@ class SettingsService:
                     row.updated_by if row is not None else None,
                 )
                 continue
-            if entry.key == ARMS_KEY:
+            nested = _NESTED_BY_KEY.get(entry.key)
+            if nested is not None:
                 # Same split as the server map: the composite row never holds a
-                # key, each set one is its own encrypted row, and what the
-                # editor shows is the mask -- which ``split_arm_secrets`` reads
-                # back as "leave the row alone".
-                stored_arms: Any = row.value if row is not None else default_value
+                # credential, each set one is its own encrypted row, and what
+                # the editor shows is the mask -- which ``NestedSecretMap.split``
+                # reads back as "leave the row alone".
+                stored_composite: Any = row.value if row is not None else default_value
                 out[key] = ValueInfo(
-                    masked_arms(dict(stored_arms or {}), rows),
+                    nested.masked(dict(stored_composite or {}), rows),
                     None,
                     None,
                     "ui" if row is not None else effective_source(overridden=False),
@@ -427,33 +439,36 @@ class SettingsService:
                     )
                 server_map_kept = set(changes[SERVER_MAP_KEY])
 
-        arm_keys: dict[str, str | None] = {}
-        arms_kept: set[str] | None = None
-        if ARMS_KEY in changes:
-            if changes[ARMS_KEY] is None:
+        # Per nested-secret composite in the change: its credentials to write
+        # and the entry names it still holds.
+        nested_writes: list[tuple[NestedSecretMap, dict[str, str | None], set[str]]] = []
+        for spec in NESTED_SECRET_MAPS:
+            if spec.key not in changes:
+                continue
+            if changes[spec.key] is None:
                 # An explicit null drops the override like every other key
-                # (handled below); every per-arm key row goes with it.
-                arms_kept = set()
-            else:
-                stored_arms_map = current.get(ARMS_KEY)
-                changes[ARMS_KEY], arm_keys = split_arm_secrets(
-                    changes[ARMS_KEY],
-                    stored=stored_arms_map if isinstance(stored_arms_map, dict) else None,
+                # (handled below); every per-entry credential row goes with it.
+                nested_writes.append((spec, {}, set()))
+                continue
+            stored_composite = current.get(spec.key)
+            changes[spec.key], secrets = spec.split(
+                changes[spec.key],
+                stored=stored_composite if isinstance(stored_composite, dict) else None,
+            )
+            unstorable = [
+                spec.row_key(name)
+                for name, secret in secrets.items()
+                if secret and not box.is_available()
+            ]
+            if unstorable:
+                raise SettingsValidationError(
+                    {
+                        key: "secrets cannot be stored: SETTINGS_ENCRYPTION_KEY is not set"
+                        for key in unstorable
+                    }
                 )
-                unstorable = [
-                    arm_key_key(name)
-                    for name, api_key in arm_keys.items()
-                    if api_key and not box.is_available()
-                ]
-                if unstorable:
-                    raise SettingsValidationError(
-                        {
-                            key: "secrets cannot be stored: SETTINGS_ENCRYPTION_KEY is not set"
-                            for key in unstorable
-                        }
-                    )
-                if isinstance(changes[ARMS_KEY], dict):
-                    arms_kept = set(changes[ARMS_KEY])
+            if isinstance(changes[spec.key], dict):
+                nested_writes.append((spec, secrets, set(changes[spec.key])))
 
         from app.services.agent_map import (
             AGENT_DEFINITIONS_KEY,
@@ -520,9 +535,9 @@ class SettingsService:
             result.applies[entry.applies] = result.applies.get(entry.applies, 0) + 1
         if server_map_kept is not None:
             await self._save_server_tokens(tokens, server_map_kept)
-        if arms_kept is not None:
+        for spec, secrets, kept in nested_writes:
             await self._save_runtime_secrets(
-                arm_keys, arms_kept, prefix=f"{ARMS_KEY}.", suffix=".api_key", key_of=arm_key_key
+                secrets, kept, prefix=f"{spec.key}.", suffix=spec.suffix, key_of=spec.row_key
             )
         await self.db.commit()
         details = {"changed": list(changes), "before": before, "after": after}

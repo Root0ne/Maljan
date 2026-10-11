@@ -38,6 +38,12 @@ router = APIRouter(prefix="/system", tags=["System"])
 # ---------------------------------------------------------------------------
 
 
+class EnrichmentSourceStatus(BaseModel):
+    key: str
+    label: str
+    configured: bool
+
+
 class SystemStatusResponse(BaseModel):
     app_name: str
     app_version: str
@@ -61,8 +67,14 @@ class SystemStatusResponse(BaseModel):
             "queue could not be read."
         ),
     )
-    has_virustotal_key: bool
-    has_abuseipdb_key: bool
+    enrichment_sources: list[EnrichmentSourceStatus] = Field(
+        default_factory=list,
+        description=(
+            "Every enrichment source in force, in the order they are asked: its key, "
+            "its label and whether it is configured (enabled, holding the credential "
+            "it needs, and its server on for a server source). Never a credential."
+        ),
+    )
     throttle: dict[str, object] | None = Field(
         default=None,
         description=(
@@ -162,6 +174,29 @@ def _grace_secret_state() -> dict[str, object] | None:
     }
 
 
+async def _enrichment_sources() -> list[EnrichmentSourceStatus]:
+    """Each source in force, asked order, with whether it is configured: booleans, no key."""
+    from maljan.enrichment.declared import effective_sources
+
+    from app.services.enrichment_sources import (
+        ENRICHMENT_SOURCES_PATH,
+        read_setting_secret,
+        ready_sources,
+        stored_map,
+    )
+
+    stored = await runtime_config.get(ENRICHMENT_SOURCES_PATH)
+    # The tool servers are read only where a source is asked through one.
+    servers = None
+    if any(s.server for s in effective_sources(stored_map(stored)).values()):
+        servers = (await runtime_config.core()).mcp.servers
+    ready = await ready_sources(stored, read_setting_secret, servers)
+    ready.sort(key=lambda s: s.source.order)
+    return [
+        EnrichmentSourceStatus(key=s.key, label=s.label, configured=s.configured) for s in ready
+    ]
+
+
 @router.get("/status", response_model=SystemStatusResponse, response_model_exclude_none=True)
 async def system_status(
     user: User | None = Depends(optional_current_user),
@@ -177,8 +212,6 @@ async def system_status(
     only for an authenticated admin caller and omitted from the response
     entirely for everyone else.
     """
-    vt_key = await runtime_config.get_secret("virustotal_api_key")
-    abuse_key = await runtime_config.get_secret("abuseipdb_api_key")
     is_admin = user is not None and user.role == "admin"
     return SystemStatusResponse(
         app_name=settings.app_name,
@@ -186,8 +219,7 @@ async def system_status(
         mock_mode_allowed=bool(await runtime_config.get("mock_mode_allowed")),
         enrichment_enabled=bool(await runtime_config.get("enrichment_enabled")),
         enrichment_worker=await _enrichment_worker_state(),
-        has_virustotal_key=bool(vt_key),
-        has_abuseipdb_key=bool(abuse_key),
+        enrichment_sources=await _enrichment_sources(),
         throttle=throttle_state() if is_admin else None,
         audit_write_failures=observability.counters.audit_write_failures if is_admin else None,
         jwt_grace_secret=_grace_secret_state() if is_admin else None,

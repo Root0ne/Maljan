@@ -189,8 +189,37 @@ describe("guideStatus", () => {
       "api.virustotal_api_key",
       "api.abuseipdb_api_key",
     ]);
-    expect(guideStatus("enrichment", onKeys.effective, onKeys.isSet)).toBe(
-      "On · VirusTotal, AbuseIPDB"
+    expect(
+      guideStatus("enrichment", onKeys.effective, onKeys.isSet, undefined, SCHEMA)
+    ).toBe("On · VirusTotal, AbuseIPDB");
+  });
+
+  it("names a source declared only as data once its own key is stored", () => {
+    const schema: SettingsSchema = {
+      ...SCHEMA,
+      enrichment_sources: [
+        ...(SCHEMA.enrichment_sources ?? []),
+        {
+          key: "domainrep",
+          label: "Domain reputation",
+          kinds: ["domain"],
+          enabled: true,
+          credential_key: null,
+          own_credential: true,
+          server: null,
+          probe: true,
+        },
+      ],
+    };
+    const stored = ctx(
+      {
+        "api.enrichment_enabled": true,
+        "api.enrichment_sources": { domainrep: { api_key: "**********" } },
+      },
+      ["api.virustotal_api_key"]
+    );
+    expect(guideStatus("enrichment", stored.effective, stored.isSet, undefined, schema)).toBe(
+      "On · VirusTotal, Domain reputation"
     );
   });
 });

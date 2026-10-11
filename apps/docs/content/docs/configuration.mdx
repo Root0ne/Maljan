@@ -415,6 +415,34 @@ audit row (`settings.probe`) naming the probe, the endpoints it was pointed at
 succeeded. The values themselves are never in the row. The routes are
 admin-only, as they have always been; what was missing was the record.
 
+### Enrichment sources
+
+Post-verdict enrichment asks the sources `api.enrichment_sources` declares,
+laid over the two the platform ships (`virustotal` and `abuseipdb`, whose keys
+stay `api.virustotal_api_key` and `api.abuseipdb_api_key`). An entry under a
+shipped key changes only the fields it names (`{"abuseipdb": {"enabled":
+false}}` turns one off); any other key adds a source. For every domain and IP
+worth asking about, the configured sources that answer that kind are asked in
+their `order`, and the first record is kept in `network.domains[].reputation`
+or `network.ips[].reputation`, where the report, the export and the console
+read it whichever source wrote it.
+
+| Field | Meaning |
+| :-- | :-- |
+| `label`, `enabled`, `order` | the name shown, whether it is asked, and its place (lower first) |
+| `kinds` | the indicator kinds it answers: `ip`, `domain`, `hash`, `url` (the report holds a reputation slot for domains and IPs) |
+| `server`, `tool`, `arguments` | a tool of a server in `mcp.servers` whose `roles` holds `reputation`; the indicator goes in the argument the tool's declaration names for its kind (`tool_facts.<tool>.arguments`), or the one `arguments` names |
+| `requests` | otherwise one https request per kind: `method` (`GET` or `POST`), `url` (`{value}` is the indicator, URL-encoded), `params`, `headers` and `json_body`, where `{credential}` stands for the credential. The host is the URL's own; the credential never goes in the URL's path |
+| `credential`, `api_key` | the settings key the credential is read from, or the source's own key, stored encrypted beside the map and shown masked |
+| `probe` | the request its Test button sends, under the source's key |
+| `timeout_seconds`, `rate_limit_seconds` | per request, and the pause after each one |
+| `answer_root`, `record` | where the answer's object sits, and each field of the record: `name`, `path`, `read` (`count`, `value`, `whole`, `texts` with `limit`) |
+| `record_source`, `malicious_when`, `age_from` | the record's `source` (default: the key), the thresholds that mark an indicator suspicious, and the field holding the answer's date in epoch seconds (older than 90 days is `stale` and marks nothing) |
+
+`GET /api/v1/system/status` lists every source in force as
+`enrichment_sources: [{key, label, configured}]`, and the enrichment guide
+offers one step per source.
+
 ### Where the enrichment runs
 
 `api.enrichment_dedicated_worker` decides whether a report's reputation lookups
@@ -446,8 +474,8 @@ avoids it.
 
 That worker runs `ENRICHMENT_MAX_JOBS` (default 2) at a time. More than one
 because each job waits on somebody else's HTTP; not many more because they
-share one VirusTotal key and one AbuseIPDB key, and those providers rate-limit
-per key rather than per job. `api.enrichment_max_lookups` still caps each
+share each source's one key, and reputation services rate-limit per key rather
+than per job. `api.enrichment_max_lookups` still caps each
 report; this multiplies how many reports are in flight against the same limit.
 
 ### A model is probed before a job may name it
@@ -1819,13 +1847,14 @@ API key is involved. It ships **disabled**, because it needs a credential that
 only a registration produces.
 
 Register from Settings → Setup guides → Add a tool server → **Connect
-VirusTotal**. The button calls
-`POST /api/v1/settings/virustotal/register`, which asks VirusTotal for an
-agent token, stores it as this server's `auth_token` (its own encrypted row,
-like every other tool-server credential), turns the server on and answers with
-the masked state and the public handle VirusTotal now knows this deployment
-by. Registering again replaces the token. Until a token is stored, the Test
-button answers "no agent token" rather than dialling out.
+VirusTotal MCP**. The step is the server's declared `credential_bootstrap`
+(see [Obtaining a server's credential](#obtaining-a-servers-credential)): the
+button calls `POST /api/v1/settings/servers/virustotal/credential`, which asks
+VirusTotal for an agent token, stores it as this server's `auth_token` (its own
+encrypted row, like every other tool-server credential), turns the server on
+and answers with the masked state and the public handle VirusTotal now knows
+this deployment by. Registering again replaces the token. Until a token is
+stored, the Test button answers "no credential" rather than dialling out.
 
 The lookups are ticked by default and are read-only:
 `get_file_report`, `get_url_report`, `get_domain_report`, `get_ip_report`,
@@ -3020,6 +3049,25 @@ are ever removed.
 | `auto_name_prefixes` | the prefixes its decompiler writes before an address when it names a function itself (`FUN_`, `fcn.`); every server's join the shipped ones (`FUN_`, `fcn.`, `sub_`, `func.`, `loc.`, `LAB_`) wherever a function's auto-name is read as its address |
 | `reference_urls` | sample lookup URL templates, `https://` and naming `{sha256}`, `{md5}` or `{sha1}`; a report links them, under the name its lookup's record gives (else the server's label), only when the run recorded an entry from this server. `reporting.reference_urls` holds the lookups linked on every report (shipped with VirusTotal's and MalwareBazaar's) |
 | `tool_facts` | per tool name, what its answer is and where its facts sit (below) |
+| `credential_bootstrap` | how the server's credential is obtained by one request (below); empty when its token is typed in |
+
+#### Obtaining a server's credential
+
+A server whose credential a service issues on request declares
+`credential_bootstrap`: `url` (https only, never taken from the caller), the
+JSON `body` posted (each `{family}` replaced by `family`, the name this
+deployment registers under), `token_json_path` (where the token sits in the
+answer), `token_prefix` (what a real token starts with), `facts` (the answer's
+other values the operator is shown, by path, first non-empty one first) and
+`note` (shown beside the button). The tool-server guide then opens with a
+**Connect** step for that server, and `POST
+/api/v1/settings/servers/<key>/credential` (admin only) sends the request,
+stores the token as the server's `auth_token` in its own encrypted row, turns
+the server on and answers with the masked state and the facts. The token is in
+no log line, audit row or answer; a refusal carries the service's own sentence,
+with a token it still holds masked. Until a token is stored, the server's Test
+button answers "no credential" without dialling. VirusTotal's agent-token
+registration is the built-in `virustotal` server's declaration.
 
 Each entry of `tool_facts` describes one tool, under its own name on its own
 server. A name may hold `__` (`get__thing`); a name spelled as the server's own

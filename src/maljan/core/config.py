@@ -55,6 +55,7 @@ from maljan.core.report_formats import (
 )
 from maljan.core.tool_declarations import (
     VOCABULARY_PATTERN,
+    CredentialBootstrap,
     ErrorPattern,
     ToolFacts,
     check_auto_name_prefixes,
@@ -1340,6 +1341,9 @@ class MCPServerConfig(BaseModel):
     reference_urls: list[str] = Field(default_factory=list)
     # Per tool: what kind of fact its answer is and where the facts sit in it.
     tool_facts: dict[str, ToolFacts] = Field(default_factory=dict)
+    # How the server's credential is obtained by one request, when it can be
+    # (``CredentialBootstrap``); ``None`` for a server whose token is typed in.
+    credential_bootstrap: CredentialBootstrap | None = None
 
     @field_validator("roles")
     @classmethod

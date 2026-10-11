@@ -5,6 +5,7 @@ import type { McpServerEntry, SampleOpenEntry } from "@/types/settings";
 import { deepEqual } from "./mapEditorHelpers";
 import { useOptionalSettingsContext } from "./SettingsContext";
 import {
+  readCredentialBootstrap,
   readEnvNames,
   readErrorPatterns,
   readMount,
@@ -318,6 +319,19 @@ export default function DeclarationFields({
             mono
             read={(text) => readToolFacts(text, serverKey)}
             onValue={(tool_facts) => put({ tool_facts })}
+          />
+        </div>
+        <div className="sm:col-span-2">
+          <ReadField
+            id={box("credential_bootstrap")}
+            label="Credential bootstrap (JSON object: url, body, token_json_path, token_prefix, family, facts, note)"
+            ariaLabel={`${serverKey} credential_bootstrap`}
+            value={server.credential_bootstrap ?? null}
+            show={showJson}
+            rows={4}
+            mono
+            read={readCredentialBootstrap}
+            onValue={(credential_bootstrap) => put({ credential_bootstrap })}
           />
         </div>
       </div>

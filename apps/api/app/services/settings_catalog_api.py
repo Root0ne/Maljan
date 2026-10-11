@@ -59,6 +59,9 @@ API_DEFAULTS: dict[str, Any] = {
     "enrichment_max_lookups": 25,
     "virustotal_api_key": "",
     "abuseipdb_api_key": "",
+    # The operator's enrichment sources, laid over the shipped ones
+    # (``maljan.enrichment.builtin_sources``); empty keeps those as shipped.
+    "enrichment_sources": {},
     "rate_limit_enabled": True,
     "rate_limit_requests": 100,
     "rate_limit_window_seconds": 60,
@@ -207,8 +210,8 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         "group": "enrichment",
         "title": "Post-verdict enrichment",
         "description": (
-            "Look up the report's domains and IPs at VirusTotal and AbuseIPDB "
-            "after every analysis. Providers without a key are skipped."
+            "Look up the report's domains and IPs at every configured enrichment "
+            "source after every analysis. A source without the key it needs is skipped."
         ),
     },
     "enrichment_dedicated_worker": {
@@ -229,7 +232,20 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         "minimum": 1,
         "group": "enrichment",
         "title": "Max lookups per kind",
-        "description": "Cap on domains and on IPs sent to each provider per report.",
+        "description": "Cap on domains and on IPs sent to each source per report.",
+    },
+    "enrichment_sources": {
+        "type": "dict",
+        "group": "enrichment",
+        "title": "Enrichment sources",
+        "description": (
+            "The sources post-verdict enrichment asks, by key: the indicator kinds each "
+            "answers (ip, domain, hash, url), a reputation server's tool or one https "
+            "request per kind, where its credential is read from, and the paths of its "
+            "answer's facts. An entry under a shipped source's key changes only the "
+            "fields it names; any other key adds a source. A source's own api_key is "
+            "stored encrypted on its own and shown here masked."
+        ),
     },
     "virustotal_api_key": {
         "type": "secret",
@@ -471,7 +487,28 @@ def validate_editable_api_value(entry: CatalogEntry, value: Any) -> str | None:
         if value is not None and not isinstance(value, str):
             return "Input should be a valid string"
         return None
+    if entry.type == "dict":
+        if not isinstance(value, dict):
+            return "Input should be a valid object"
+        check = _DICT_CHECKS.get(entry.path)
+        return check(value) if check is not None else None
     return None
+
+
+def _enrichment_sources_problem(value: dict[str, Any]) -> str | None:
+    """Why the enrichment sources these entries leave in force are refused, or ``None``."""
+    from maljan.enrichment.declared import validate_sources
+
+    from app.services.enrichment_sources import credential_problems
+
+    errors = validate_sources(value) or credential_problems(value)
+    if not errors:
+        return None
+    return "; ".join(f"{key}: {why}" if key else why for key, why in errors.items())
+
+
+# The per-key check of an editable ``dict`` leaf's contents.
+_DICT_CHECKS = {"enrichment_sources": _enrichment_sources_problem}
 
 
 def api_catalog() -> list[CatalogEntry]:

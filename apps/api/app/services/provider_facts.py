@@ -123,9 +123,13 @@ def selector_choices(
     }
 
 
-def probe_labels() -> dict[str, str]:
-    """The label of every connection test the settings route answers, by probe id."""
-    from maljan.enrichment.sources import reputation_sources
+def probe_labels(enrichment_sources: Any = None) -> dict[str, str]:
+    """The label of every connection test the settings route answers, by probe id.
+
+    ``enrichment_sources`` is the stored ``api.enrichment_sources`` map: each
+    source in force that declares a test is labelled by its own title.
+    """
+    from maljan.enrichment.declared import effective_sources
     from maljan.memory.store_factory import registered_backends
     from maljan.providers.registry import _SANDBOX_REGISTRY, _STATIC_REGISTRY, discover_providers
 
@@ -139,10 +143,10 @@ def probe_labels() -> dict[str, str]:
     for backend_id, backend in registered_backends().items():
         if backend.probe_label:
             labels.setdefault(backend_id, backend.probe_label)
-    for source_id, source in reputation_sources().items():
-        label = str(getattr(source, "probe_label", "") or "")
-        if label:
-            labels.setdefault(source_id, label)
+    held = enrichment_sources if isinstance(enrichment_sources, dict) else {}
+    for source_id, source in effective_sources(held).items():
+        if source.probe is not None:
+            labels.setdefault(source_id, f"Test {source.title(source_id)}")
     return labels
 
 

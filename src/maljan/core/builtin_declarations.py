@@ -23,6 +23,7 @@ import json
 from functools import cache
 from typing import TYPE_CHECKING, Any
 
+from maljan.core import virustotal
 from maljan.core.builtin_reverser_tools import GHIDRA_TOOLS, R2_TOOLS
 from maljan.core.legacy_reputation import STORED_REPUTATION_KINDS
 from maljan.core.reputation import REPUTATION_KIND
@@ -695,6 +696,28 @@ BUILDER_OF_KIND: dict[str, str] = {
 # The blocks
 # ---------------------------------------------------------------------------
 
+# VirusTotal's agent-token registration (``core.virustotal``): one POST naming
+# the agent family and the ``vt-mcp`` release, one ``vtai_`` token back, and
+# the agent id and public handle the operator recognises the deployment by in
+# VirusTotal's own listing. The note is what the console said beside the
+# button before the step was a declaration.
+_VIRUSTOTAL_BOOTSTRAP: dict[str, Any] = {
+    "url": virustotal.REGISTER_URL,
+    "body": {"agent_family": "{family}", "agent_version": virustotal.VT_MCP_VERSION},
+    "token_json_path": "/agent_token",
+    "token_prefix": "vtai_",
+    "family": virustotal.AGENT_FAMILY,
+    "facts": {"public_handle": "/public_handle", "agent_id": "/agent_id"},
+    "note": (
+        "The agent token is free and is issued to this deployment without an account. "
+        "VirusTotal enforces its own published quotas on it; a lookup over quota comes "
+        "back as a 429 with a retry delay, and the analyst carries on without that answer. "
+        "Only the read-only lookups are ticked. The submit tools upload the sample itself "
+        "to VirusTotal, where it is shared with their customers, so they stay off until "
+        "you tick them in the Tools step."
+    ),
+}
+
 # Each built-in server's declaration. ``roles``: ``reputation`` on the two
 # servers that declare a reputation lookup. ``reads_staged_sample`` on the
 # servers of ``agents.tool_pinning.PINNED_SERVERS``. ``required_env_allow`` as
@@ -731,6 +754,7 @@ _SERVER_BLOCKS: dict[str, dict[str, Any]] = {
         "roles": ["reputation"],
         "reference_urls": ["https://www.virustotal.com/gui/file/{sha256}"],
         "tool_facts": _VIRUSTOTAL_TOOLS,
+        "credential_bootstrap": _VIRUSTOTAL_BOOTSTRAP,
     },
 }
 

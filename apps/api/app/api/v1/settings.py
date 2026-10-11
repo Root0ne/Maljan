@@ -19,8 +19,8 @@ from maljan.core.settings_annotations import (
     RETIRED_SETTINGS,
 )
 from maljan.core.settings_overrides import redact_url
-from maljan.core.virustotal import SERVER_KEY as VIRUSTOTAL_SERVER_KEY
 from maljan.pipeline.conditions import validate_condition
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import end_read_transaction, get_db
@@ -34,6 +34,7 @@ from app.schemas.settings import (
     ConditionValidateRequest,
     ConditionValidateResponse,
     ContextWindowResponse,
+    CredentialBootstrapResponse,
     EffortOptionsResponse,
     ExportResponse,
     GroupDTO,
@@ -52,8 +53,8 @@ from app.schemas.settings import (
     TeamLintResponse,
     ValueDTO,
     ValuesResponse,
-    VirustotalRegisterResponse,
 )
+from app.services import credential_bootstrap
 from app.services.audit import record as audit_record
 from app.services.mapping_preview import PREVIEW_MAX_BYTES, preview_mapping
 from app.services.server_map import SERVER_MAP_KEY, TOKEN_MASK
@@ -65,17 +66,12 @@ from app.services.settings_probes import (
     run_agent_probe,
     run_mcp_probe,
     run_probe,
+    with_staged_sources,
 )
 from app.services.settings_service import (
     SettingsService,
     SettingsValidationError,
     core_settings_cache,
-)
-from app.services.virustotal_register import (
-    RegistrationError,
-    masked_state,
-    register_agent,
-    server_map_with_token,
 )
 
 EXPORT_FORMAT = "maljan-settings/1"
@@ -112,16 +108,45 @@ async def _effective_agents(db: AsyncSession) -> tuple[list[str], list[str]]:
 async def get_schema(
     _: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
 ) -> SchemaResponse:
+    from maljan.core.settings_overrides import build_settings
+
+    from app.services.enrichment_sources import ENRICHMENT_SOURCES_KEY
+    from app.services.settings_service import load_core_overrides
+
     profiles, agents = await _effective_agents(db)
-    return served_schema(await _effective_servers(db), profiles=profiles, agents=agents)
+    stored = await SettingsService(db).load_overrides()
+    try:
+        configs = build_settings(await load_core_overrides(db)).mcp.servers
+    except (ValueError, ValidationError):
+        configs = build_settings({}).mcp.servers
+    return served_schema(
+        await _effective_servers(db),
+        profiles=profiles,
+        agents=agents,
+        enrichment_sources=stored.get(ENRICHMENT_SOURCES_KEY),
+        server_configs=configs,
+    )
 
 
-def served_schema(servers: list[str], *, profiles: list[str], agents: list[str]) -> SchemaResponse:
+def served_schema(
+    servers: list[str],
+    *,
+    profiles: list[str],
+    agents: list[str],
+    enrichment_sources: Any = None,
+    server_configs: dict[str, Any] | None = None,
+) -> SchemaResponse:
     """The settings schema as ``GET /settings/schema`` serves it for these choices.
 
     A pure function of the code and the choices, so the console's tests can
     be fed exactly what the API serves (``scripts/dev/write_console_schema.py``).
+    ``enrichment_sources`` is the stored ``api.enrichment_sources`` map and
+    ``server_configs`` the tool servers in force; the schema says what the
+    console's guides offer for each, never a credential.
     """
+    from app.services.credential_bootstrap import bootstrap_facts
+    from app.services.enrichment_sources import source_facts
+
     by_group: dict[str, list[CatalogEntryDTO]] = {}
     for e in resolved_catalog(servers, profiles=profiles, agents=agents):
         by_group.setdefault(e.group, []).append(CatalogEntryDTO(**e.to_dict()))
@@ -132,7 +157,16 @@ def served_schema(servers: list[str], *, profiles: list[str], agents: list[str])
     ]
     from app.services.provider_facts import probe_labels
 
-    return SchemaResponse(groups=groups, probe_labels=probe_labels())
+    if server_configs is None:
+        from maljan.core.settings_overrides import build_settings
+
+        server_configs = build_settings({}).mcp.servers
+    return SchemaResponse(
+        groups=groups,
+        probe_labels=probe_labels(enrichment_sources),
+        enrichment_sources=source_facts(enrichment_sources),
+        credential_servers=bootstrap_facts(server_configs),
+    )
 
 
 def default_served_schema() -> SchemaResponse:
@@ -619,62 +653,80 @@ async def test_mcp_server(
     return response
 
 
-@router.post("/virustotal/register", response_model=VirustotalRegisterResponse)
-async def register_virustotal_agent(
+@router.post("/servers/{key}/credential", response_model=CredentialBootstrapResponse)
+async def obtain_server_credential(
+    key: str,
     request: Request,
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
-) -> VirustotalRegisterResponse | JSONResponse:
-    """Obtain a VirusTotal agent token, store it encrypted and enable the server.
+) -> CredentialBootstrapResponse | JSONResponse:
+    """Obtain server ``key``'s credential by its declared request, store it and enable it.
 
-    The one call in this module that reaches a third party in order to *write*
-    settings. It takes no body: everything the registration says about this
-    deployment is a constant of the build, and the only variable part -- the
-    token -- is what comes back. A failure against VirusTotal is reported as a
-    502 with their own sentence in it, because the fix is on their side or in
-    the operator's network, not in the stored settings.
+    For any tool server in force that declares ``credential_bootstrap``. The
+    request takes no body: the URL, the body sent and where the token sits are
+    the declaration's (a built-in's, or one an admin saved in the server map),
+    and the only variable part -- the token -- is what comes back. It is
+    stored encrypted and never returned; the answer carries the mask and the
+    facts the declaration names. A failure at the service is a 502 with its
+    own sentence in it, because the fix is on its side or in the operator's
+    network, not in the stored settings.
     """
+    from maljan.core.settings_overrides import build_settings
+
+    from app.services.settings_service import load_core_overrides
+
+    service = SettingsService(db)
+    try:
+        servers = build_settings(await load_core_overrides(db)).mcp.servers
+    except (ValueError, ValidationError):
+        servers = build_settings({}).mcp.servers
+    config = servers.get(key)
+    if config is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such tool server")
+    declared = config.credential_bootstrap
+    if declared is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, "this tool server declares no credential bootstrap"
+        )
+    label = str(config.label or key)
     # The caller was resolved from the database by the dependency above, so
-    # this request is already in a transaction; the registration is a call to
+    # this request is already in a transaction; the bootstrap is a call to
     # somebody else's service and must not be made inside it.
     await end_read_transaction(db)
     try:
-        facts = await register_agent()
-    except RegistrationError as exc:
-        logger.warning("VirusTotal registration failed: %s", log_safe(str(exc)))
+        token, facts = await credential_bootstrap.obtain_credential(declared, label=label)
+    except credential_bootstrap.BootstrapError as exc:
+        # The service's own sentence goes to the admin who pressed the button,
+        # not into the log.
+        logger.warning("credential bootstrap failed for tool server %s", log_safe(key))
         return JSONResponse(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            content={"errors": {"virustotal": str(exc)}},
+            status_code=status.HTTP_502_BAD_GATEWAY, content={"errors": {key: str(exc)}}
         )
 
-    service = SettingsService(db)
     stored = await service.load_overrides()
     current = stored.get(SERVER_MAP_KEY)
-    servers = server_map_with_token(
-        current if isinstance(current, dict) else {}, facts["agent_token"]
+    updated = credential_bootstrap.server_map_with_token(
+        current if isinstance(current, dict) else {}, key, token
     )
     try:
-        await service.save({SERVER_MAP_KEY: servers}, user_id=user.id, ip=_client_ip(request))
+        await service.save({SERVER_MAP_KEY: updated}, user_id=user.id, ip=_client_ip(request))
     except SettingsValidationError as exc:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": exc.errors}
         )
     await audit_record(
-        "settings.virustotal.register",
+        "settings.servers.credential",
         resource_type="settings",
         user_id=user.id,
-        details={
-            "agent_id": log_safe(facts["agent_id"]),
-            "public_handle": log_safe(facts["public_handle"]),
-        },
+        details={"server": log_safe(key), **{k: log_safe(v) for k, v in facts.items()}},
         ip=_client_ip(request),
     )
     runtime_config.invalidate()
     core_settings_cache.invalidate()
-    logger.info("VirusTotal agent registered: %s", log_safe(facts["public_handle"]))
-    entry = servers[VIRUSTOTAL_SERVER_KEY]
-    return VirustotalRegisterResponse(
-        **masked_state(entry if isinstance(entry, dict) else {}, facts)
+    logger.info("credential obtained for tool server %s", log_safe(key))
+    entry = updated[key]
+    return CredentialBootstrapResponse(
+        **credential_bootstrap.masked_state(key, entry if isinstance(entry, dict) else {}, facts)
     )
 
 
@@ -749,9 +801,9 @@ async def test_probe(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> ProbeResponse:
-    if not known_probe(probe):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown probe: {probe}")
     stored = await SettingsService(db).load_overrides()
+    if not known_probe(probe, with_staged_sources(stored, body.values)):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown probe: {probe}")
     # An LLM probe is allowed five minutes at a third-party endpoint; the read
     # that prepared it ends here rather than waiting for the answer.
     await end_read_transaction(db)

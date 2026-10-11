@@ -49,6 +49,7 @@ class TestSystemStatus:
                     side_effect=lambda n: {
                         "enrichment_enabled": True,
                         "mock_mode_allowed": True,
+                        "enrichment_sources": {},
                         # One process: the enrichment is queued beside the
                         # analyses, so there is no second worker to report on.
                         "enrichment_dedicated_worker": False,
@@ -75,9 +76,14 @@ class TestSystemStatus:
             "mock_mode_allowed": True,
             "enrichment_enabled": True,
             "enrichment_worker": "not_required",
-            "has_virustotal_key": True,
-            "has_abuseipdb_key": False,
+            # The shipped sources, in the order they are asked; configured
+            # where the credential setting each names is set.
+            "enrichment_sources": [
+                {"key": "virustotal", "label": "VirusTotal", "configured": True},
+                {"key": "abuseipdb", "label": "AbuseIPDB", "configured": False},
+            ],
         }
+        assert "has_virustotal_key" not in body and "has_abuseipdb_key" not in body
         # Anonymous caller: the throttle/audit fields are admin-only detail,
         # not merely null — they are absent from the payload entirely.
         assert "throttle" not in body
@@ -97,6 +103,7 @@ class TestSystemStatus:
                         side_effect=lambda n: {
                             "enrichment_enabled": True,
                             "mock_mode_allowed": True,
+                            "enrichment_sources": {},
                         }[n]
                     ),
                 ),
@@ -138,6 +145,7 @@ class TestSystemStatus:
                     side_effect=lambda n: {
                         "enrichment_enabled": True,
                         "mock_mode_allowed": False,
+                        "enrichment_sources": {},
                     }[n]
                 ),
             ),
@@ -157,6 +165,58 @@ class TestSystemStatus:
         body_text = resp.text
         assert "vt-supersecret-leak-canary" not in body_text
         assert "abuse-supersecret-leak-canary" not in body_text
+
+    def test_lists_a_source_declared_only_as_data(self, client: TestClient) -> None:
+        """A source no code names is listed beside the shipped ones, with its own key."""
+        fake_settings = MagicMock()
+        fake_settings.app_name = "Maljan"
+        fake_settings.app_version = "0.1.0"
+        own_key = "-".join(["k", "own"])
+        declared = {"domainrep": _invented_source(api_key=own_key), "abuseipdb": {"enabled": False}}
+        with (
+            patch("app.api.v1.system.settings", fake_settings),
+            patch(
+                "app.api.v1.system.runtime_config.get",
+                AsyncMock(
+                    side_effect=lambda n: {
+                        "enrichment_enabled": True,
+                        "mock_mode_allowed": False,
+                        "enrichment_sources": declared,
+                    }[n]
+                ),
+            ),
+            patch(
+                "app.api.v1.system.runtime_config.get_secret",
+                AsyncMock(return_value=""),
+            ),
+        ):
+            resp = client.get("/api/v1/system/status")
+
+        assert resp.status_code == 200
+        assert resp.json()["enrichment_sources"] == [
+            {"key": "domainrep", "label": "Domain reputation", "configured": True},
+            {"key": "virustotal", "label": "VirusTotal", "configured": False},
+            {"key": "abuseipdb", "label": "AbuseIPDB", "configured": False},
+        ]
+        assert own_key not in resp.text
+
+
+def _invented_source(**extra: object) -> dict[str, object]:
+    """A domain reputation REST endpoint declared only as data, asked first."""
+    host = ".".join(["rep", "example", "org"])
+    return {
+        "label": "Domain reputation",
+        "kinds": ["domain"],
+        "order": 5,
+        "requests": {
+            "domain": {
+                "url": f"https://{host}/v1/domain/{{value}}",
+                "headers": {"Authorization": "Bearer {credential}"},
+            }
+        },
+        "record": [{"name": "malicious", "path": "/flagged", "read": "count"}],
+        **extra,
+    }
 
 
 class TestLTMPurge:
