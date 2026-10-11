@@ -682,20 +682,25 @@ def capability_servers(settings: Settings, capability: str) -> list[str]:
     """The servers a ``ToolRef(kind="capability")`` stands for, in their configured order.
 
     Every server in ``mcp.servers`` that declares a tool of kind
-    ``capability`` (``core.tool_declarations``) and leaves its binding to the
-    definitions: a server whose own ``agents`` list names the agents it serves
-    is bound by that list, never by a capability as well. Read from the live
-    declarations: which servers an agent is given persists nothing.
+    ``capability`` (``core.tool_declarations``), whatever its stored
+    ``agents`` list adds on top, except a built-in server whose shipped seed
+    binds it by its own ``agents`` list (``config._builtin_servers``): such a
+    server was never named by the definitions, and stays bound by its list
+    alone, as the operator stores it. Read from the live declarations: which
+    servers an agent is given persists nothing.
     """
+    from maljan.core.config import _builtin_servers
     from maljan.core.declared_reading import declarations
     from maljan.core.reputation import kinds_of_capability
 
     kinds = kinds_of_capability(capability)
     declared = declarations(settings)
+    seeds = _builtin_servers()
     out: list[str] = []
-    for name, server in settings.mcp.servers.items():
+    for name in settings.mcp.servers:
         held = declared.source(f"mcp:{name}")
-        if held is None or list(server.agents or []):
+        seed = seeds.get(str(name))
+        if held is None or (seed is not None and list(seed.agents or [])):
             continue
         if any(facts.kind in kinds for facts in held.tools.values()):
             out.append(str(name))

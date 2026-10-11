@@ -323,6 +323,20 @@ def stored_record(held: Any) -> ReputationRecord | None:
         return None
 
 
+def holds_a_service_answer(entry: Any) -> bool:
+    """Whether an entry's output is the service's own answer, read from its flags alone.
+
+    Not a call that failed (``ok`` false), not a repeat (``repeated_of``: its
+    output points at the earlier entry), and not an answer the platform cut or
+    replaced (``truncated`` with an output left: the answer the conversation
+    had no room for, or one cut to a prefix). An entry the byte budget blanked
+    keeps no output and nothing to read, so it reads as nothing either way.
+    """
+    if _field(entry, "ok") is False or _field(entry, "repeated_of"):
+        return False
+    return not (_field(entry, "truncated") and str(_field(entry, "output") or ""))
+
+
 def reputation_of(entry: Any) -> ReputationRecord | None:
     """The reputation record of an entry, or ``None`` when it holds no reputation answer.
 
@@ -334,7 +348,7 @@ def reputation_of(entry: Any) -> ReputationRecord | None:
     held = stored_record(_field(entry, "reputation"))
     if held is not None:
         return held
-    if _field(entry, "ok") is False:
+    if not holds_a_service_answer(entry):
         return None
     from maljan.core.declared_reading import facts_of
 
@@ -387,8 +401,26 @@ class Lookup:
     enabled: bool
 
 
-def _rank(facts: ToolFacts) -> int:
-    return facts.reputation.rank if facts.reputation is not None else DEFAULT_RANK
+def _shipped_rank(server: str, tool: str) -> int | None:
+    """The rank the platform ships for ``server``'s lookup ``tool``, or ``None``."""
+    from maljan.core.builtin_declarations import server_declaration
+
+    shipped = (server_declaration(server).get("tool_facts") or {}).get(tool) or {}
+    rank = (shipped.get("reputation") or {}).get("rank")
+    return rank if isinstance(rank, int) and not isinstance(rank, bool) else None
+
+
+def _rank(server: str, tool: str, facts: ToolFacts) -> int:
+    """A lookup's rank: as declared; one that declares none takes the shipped rank, else 100.
+
+    A server row stored with an edited ``tool_facts`` block written before
+    ranks were declared keeps its place in the order the platform ships.
+    """
+    declared = facts.reputation
+    if declared is not None and "rank" in declared.model_fields_set:
+        return declared.rank
+    shipped = _shipped_rank(server, tool)
+    return shipped if shipped is not None else DEFAULT_RANK
 
 
 def pack_lookups(servers: Mapping[str, Any], declared: ToolDeclarations) -> list[Lookup]:
@@ -411,7 +443,7 @@ def pack_lookups(servers: Mapping[str, Any], declared: ToolDeclarations) -> list
                         server=str(key),
                         tool=str(name),
                         hash_argument=argument,
-                        rank=_rank(facts),
+                        rank=_rank(str(key), str(name), facts),
                         enabled=bool(getattr(cfg, "enabled", False)),
                     )
                 )

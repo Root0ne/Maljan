@@ -22,7 +22,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 from maljan.core.reputation import ReputationRecord
 from maljan.schemas.stix_models import get_utcnow
@@ -1249,10 +1249,36 @@ class ReputationAnswer(ReputationRecord):
     renderer and the console read it as the worker read it, without settings.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="ignore")
 
     entry_id: str
     tool: str = ""
+
+
+def _readable_reputation(value: Any) -> Any:
+    """A stored report's reputation records, each one that cannot be read left out.
+
+    One malformed record never costs the stored report: it is dropped with a
+    warning, and a field a later version added is ignored (``extra="ignore"``).
+    ``None`` (a report stored before the records), or a value that is not a
+    list, reads as ``None``: the report is read the way a stored one is.
+    """
+    if value is None or not isinstance(value, list):
+        return None
+    from pydantic import ValidationError
+
+    from maljan.core.logger import logger
+
+    kept: list[Any] = []
+    for raw in value:
+        try:
+            kept.append(ReputationAnswer.model_validate(raw))
+        except ValidationError as exc:
+            logger.warning(
+                "report: a reputation record that cannot be read is left out (%d problems).",
+                exc.error_count(),
+            )
+    return kept
 
 
 # ---------------------------------------------------------------------------
@@ -1406,8 +1432,8 @@ class MalwareReport(BaseModel):
     # left out of the dump, so a stored report reads and dumps as it did and
     # its readers read it the way they always did (``core.legacy_reputation``);
     # an empty list says the run's lookups established nothing.
-    reputation: list[ReputationAnswer] | None = Field(
-        default=None, exclude_if=lambda value: value is None
+    reputation: Annotated[list[ReputationAnswer] | None, BeforeValidator(_readable_reputation)] = (
+        Field(default=None, exclude_if=lambda value: value is None)
     )
 
     # --- Professional-report front-matter & spine ---

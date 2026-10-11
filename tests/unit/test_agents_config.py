@@ -27,7 +27,7 @@ def _mcp(server: str) -> dict:
 
 
 # Reputation is reached by capability: every server declaring a reputation
-# lookup that leaves its binding to the definitions (VirusTotal's own server
+# lookup, except a built-in its seed binds by `agents` (VirusTotal's own server
 # with the shipped map, which these definitions named by key before).
 _REPUTATION = {"kind": "capability", "server": None, "name": None, "capability": "reputation"}
 

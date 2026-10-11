@@ -1733,13 +1733,14 @@ class ToolRef(BaseModel):
 
     ``kind="capability"`` names a kind of tool (``capability="reputation"``)
     rather than a server: it stands for every server in ``mcp.servers`` that
-    declares a tool of that kind and leaves its binding to the definitions
-    (an empty ``agents`` list), in their configured order, each with its whole
-    allow-listed set, as a ``kind="mcp"`` reference to it would
-    (``agents.composition.capability_servers``). A server whose own ``agents``
-    list names the agents it serves is bound by that list instead. The
-    built-in agents reach reputation this way, so a reputation server an
-    operator adds reaches them without a clone.
+    declares a tool of that kind, in their configured order, each with its
+    whole allow-listed set, as a ``kind="mcp"`` reference to it would
+    (``agents.composition.capability_servers``); a server's ``agents`` list
+    adds agents on top, as it always has. A built-in server whose shipped seed
+    binds it by its own ``agents`` list is the one exception: the definitions
+    never named it, and it stays bound by its list alone. The built-in agents
+    reach reputation this way, so a reputation server an operator adds reaches
+    them without a clone.
     """
 
     kind: Literal["mcp", "provider", "sandbox", "agent", "capability"]
@@ -2708,10 +2709,11 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
 
     The agents that look the sample's hash up reach reputation by capability
     (``ToolRef(kind="capability", capability="reputation")``): every server
-    declaring a reputation tool that leaves its binding to the definitions.
-    With the shipped servers that is VirusTotal's own server alone, which the
-    definitions named by key before (``FORMER_SEED_TOOLS``); the threat-intel
-    sidecar is bound to the judge by its own ``agents`` list.
+    declaring a reputation tool, except a built-in whose seed binds it by its
+    own ``agents`` list. With the shipped servers that is VirusTotal's own
+    server alone, which the definitions named by key before
+    (``FORMER_SEED_TOOLS``); the threat-intel sidecar's seed binds it to the
+    judge by its ``agents`` list.
 
     The judge and the reporter are here so that their LLM and their tool
     servers have the same editing surface as the analysts. Neither can be an

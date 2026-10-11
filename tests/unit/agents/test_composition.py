@@ -529,7 +529,7 @@ def test_the_built_in_definitions_name_the_servers_their_role_reads():
         return [str(r.server) for r in mcp_refs_for(settings, key)]
 
     # Reputation is reached by capability: the shipped server that declares a
-    # reputation lookup and leaves its binding to the definitions.
+    # reputation lookup and that its seed does not bind by its own agents list.
     assert _servers("static") == ["analysis", "knowledge", "virustotal"]
     assert _servers("network") == ["network", "knowledge", "virustotal"]
     # The judge reaches for reputation on dissent; VirusTotal's own server is

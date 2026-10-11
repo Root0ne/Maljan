@@ -54,8 +54,9 @@ export function reputationFromRecord(
   answer: ReputationAnswer | null | undefined,
 ): Reputation | null {
   if (!answer || typeof answer !== "object") return null;
-  const total = count(answer.total);
-  const engines = total ?? count(answer.engines);
+  // One denominator, as the report states it: the engines the service counted,
+  // else the total of its counts (`ReputationRecord.engine_count`).
+  const engines = count(answer.engines) ?? count(answer.total);
   const labels = Array.isArray(answer.labels)
     ? answer.labels.filter((label): label is string => typeof label === "string" && !!label)
     : [];

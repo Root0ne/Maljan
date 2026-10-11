@@ -442,7 +442,6 @@ _VT_REPUTATION: dict[str, Any] = {
     "first_seen": [
         "/**7/first_submission_date",
         "/**7/first_seen_itw_date",
-        "/**7/creation_date",
     ],
     "last_seen": [
         "/**7/last_analysis_date",

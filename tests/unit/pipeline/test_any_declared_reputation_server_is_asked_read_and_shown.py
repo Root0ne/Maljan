@@ -414,3 +414,127 @@ def test_reading_a_hostile_answer_grows_linearly() -> None:
     small = min(timed(5_000) for _ in range(3))
     large = min(timed(50_000) for _ in range(3))
     assert large < max(small, 0.001) * 30
+
+
+# ---------------------------------------------------------------------------
+# Only a service's own answer becomes a record
+# ---------------------------------------------------------------------------
+
+
+class TestOnlyTheServicesAnswerIsARecord:
+    """A repeat, an answer not shown and one the platform cut hold the platform's text, not the
+    service's: no record is written for them, and none is read back from them."""
+
+    def test_a_repeated_call_gets_no_record(self, installed: Any) -> None:
+        installed(_settings(hashrep=INVENTED))
+        first = _lookup_entry()
+        repeat = _lookup_entry(
+            entry_id="ev_0002", seq=2, output="This call repeats [ev_0001].", repeated_of="ev_0001"
+        )
+        assert first.reputation is not None
+        assert repeat.reputation is None and reputation_of(repeat) is None
+        answers = _reputation_answers([first, repeat])
+        assert [a.entry_id for a in answers] == ["ev_0001"]
+
+    def test_an_answer_not_shown_gets_no_record(self, installed: Any) -> None:
+        installed(_settings(hashrep=INVENTED))
+        entry = _lookup_entry(not_shown=True)
+        assert entry.truncated and entry.reputation is None
+        assert reputation_of(entry) is None
+        assert _reputation_answers([entry]) == []
+
+    def test_an_answer_the_platform_cut_gets_no_record(self, installed: Any) -> None:
+        installed(_settings(hashrep=INVENTED))
+        prose = "HashRep: 9/40 flagged, and more that was cut"
+        cut = _lookup_entry(output=prose, chars_dropped=500)
+        assert cut.truncated and cut.reputation is None and reputation_of(cut) is None
+        prefix = _lookup_entry(output=json.dumps(ANSWER), max_chars=20)
+        assert prefix.truncated and prefix.reputation is None and reputation_of(prefix) is None
+
+    def test_a_stored_entry_is_read_back_only_when_its_flags_say_it_holds_the_answer(
+        self,
+    ) -> None:
+        """Entries written before records (no source, no facts) are read by their flags alone."""
+        from maljan.schemas.evidence import LedgerEntry
+
+        note = "the platform's own words about this call"
+        repeat = LedgerEntry(
+            id="ev_0002",
+            tool="check_hash",
+            server="threatintel",
+            output=note,
+            repeated_of="ev_0001",
+        )
+        not_shown = LedgerEntry(
+            id="ev_0003", tool="check_hash", server="threatintel", output=note, truncated=True
+        )
+        answered = LedgerEntry(
+            id="ev_0004", tool="check_hash", server="threatintel", output="3/9 detections"
+        )
+        blanked = LedgerEntry(
+            id="ev_0005", tool="check_hash", server="threatintel", output="", truncated=True
+        )
+        assert reputation_of(repeat) is None
+        assert reputation_of(not_shown) is None
+        held = reputation_of(answered)
+        assert held is not None and held.malicious == 3
+        blank = reputation_of(blanked)
+        assert blank is None or not blank.says_something()
+
+    def test_a_budget_blank_keeps_the_record_written_from_the_whole_answer(
+        self, installed: Any
+    ) -> None:
+        from maljan.schemas.evidence import apply_budget
+
+        installed(_settings(hashrep=INVENTED))
+        entry = _lookup_entry()
+        trimmed, _spent = apply_budget([entry], 1)
+        assert trimmed == 1 and entry.truncated and not entry.output
+        answer = reputation_of(entry)
+        assert answer is not None and answer.malicious == 9
+
+
+# ---------------------------------------------------------------------------
+# A stored report's records, the dates and the denominator
+# ---------------------------------------------------------------------------
+
+
+def test_one_unreadable_record_never_costs_the_stored_report() -> None:
+    good = {"v": 1, "entry_id": "ev_0001", "service": "HashRep", "malicious": 9, "total": 40}
+    data = json.loads(
+        MalwareReport(identity=SampleIdentity(hashes=FileHashes(sha256=SHA))).model_dump_json()
+    )
+    data["reputation"] = [
+        {**good, "labels": "not a list"},
+        {**good, "entry_id": "ev_0002", "a_later_field": {"x": 1}},
+        "nonsense",
+    ]
+    report = MalwareReport.model_validate(data)
+    assert report.reputation is not None
+    assert [a.entry_id for a in report.reputation] == ["ev_0002"]
+    data["reputation"] = {"not": "a list"}
+    assert MalwareReport.model_validate(data).reputation is None
+
+
+def test_a_build_date_is_never_a_first_seen_date() -> None:
+    from maljan.core.tool_declarations import ToolDeclarations
+
+    held = ToolDeclarations.from_settings(Settings()).declaration_for(
+        ("mcp:virustotal", "get_file_report")
+    )
+    assert held is not None
+    answer = {"data": {"attributes": {"creation_date": 1_600_000_000}}}
+    assert read_answer(held, output=json.dumps(answer), server="virustotal").first_seen is None
+
+
+def test_the_report_states_the_engines_the_service_counted_over_the_total(
+    installed: Any,
+) -> None:
+    facts = json.loads(json.dumps(INVENTED))
+    facts["tool_facts"]["lookup_digest"]["reputation"]["engines"] = "/verdict/engines"
+    installed(_settings(hashrep=facts))
+    answer = {**ANSWER, "verdict": {**ANSWER["verdict"], "engines": 38}}
+    report = _report([_lookup_entry(output=json.dumps(answer))])
+    assert _reputation_row(MarkdownRenderer().render(report)).startswith(
+        "| Reputation | HashRep: 9 of 38 engines flag it as malicious"
+    )

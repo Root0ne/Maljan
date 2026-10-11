@@ -2214,10 +2214,12 @@ another definition.
 ```
 
 A `capability` reference stands for every server in `mcp.servers` that
-declares a tool of that kind (`tool_facts`) and leaves its binding to the
-definitions (an empty `agents` list), in their configured order, each with its
-whole ticked set, as an `mcp` reference to it would; a server whose own
-`agents` list names the agents it serves is bound by that list instead. The
+declares a tool of that kind (`tool_facts`), in their configured order, each
+with its whole ticked set, as an `mcp` reference to it would; a server's
+`agents` list adds agents on top, as it always has. The one exception is a
+built-in server whose shipped seed binds it by its own `agents` list (the
+threat-intel sidecar, bound to the judge): the definitions never named it, and
+it stays bound by its list alone, as you store it. The
 built-in agents that look the sample's hash up (`static`, `network`, the judge,
 `triage`, `android_static`, `reverser`) reach reputation this way: with the
 shipped servers that is VirusTotal's own server, which they named by key

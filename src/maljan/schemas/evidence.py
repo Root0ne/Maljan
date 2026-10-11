@@ -451,6 +451,10 @@ def build_entry(
             ok, error = False, message
             remediation = remediation or hint
     facts = _facts_at_write(source, tool)
+    # The platform cut or replaced the answer: the conversation had no room for
+    # it, or the guardrail or a ceiling left a prefix. No reputation record is
+    # read from such an output (``_reputation_at_write``).
+    cut = bool(not_shown) or len(text) < len(full) or int(chars_dropped) > 0
     structured = None if repeated_of or not_shown else parse_structured(full)
     return LedgerEntry(
         id=entry_id,
@@ -464,7 +468,7 @@ def build_entry(
         error=error,
         remediation=remediation if error else None,
         output=text,
-        truncated=bool(not_shown) or len(text) < len(full) or int(chars_dropped) > 0,
+        truncated=cut,
         chars_dropped=max(0, int(chars_dropped)),
         structured=structured,
         repeated_of=repeated_of,
@@ -478,7 +482,7 @@ def build_entry(
         facts=facts,
         reputation=_reputation_at_write(
             facts,
-            ok=ok and not repeated_of and not not_shown,
+            ok=ok and not repeated_of and not cut,
             output=full,
             structured=structured,
             server=server,

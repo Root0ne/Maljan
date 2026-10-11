@@ -1,8 +1,8 @@
 """The built-in agents reach reputation by capability, and a stored settings row still loads.
 
 ``ToolRef(kind="capability", capability="reputation")`` stands for every
-server that declares a reputation lookup and leaves its binding to the
-definitions. With the shipped servers that is VirusTotal's own server alone,
+server that declares a reputation lookup, except a built-in whose seed binds it
+by its own ``agents`` list. With the shipped servers that is VirusTotal's own server alone,
 which the definitions named by key before, so the default profile resolves to
 the same servers it always did. A built-in row stored with that earlier list
 is its seed of an earlier release and loads as the seed.
@@ -38,9 +38,9 @@ def test_the_default_profile_resolves_to_the_servers_it_always_did() -> None:
         assert resolved == [r for r in _former(key) if r["kind"] == "mcp"], key
 
 
-def test_the_capability_names_only_the_servers_that_leave_binding_to_the_definitions() -> None:
+def test_the_capability_skips_a_built_in_its_seed_binds_by_its_own_agents_list() -> None:
     settings = Settings(_env_file=None)
-    # The threat-intel sidecar declares a lookup and binds itself to the judge.
+    # The threat-intel sidecar declares a lookup and its seed binds it to the judge.
     assert settings.mcp.servers["threatintel"].agents == ["judge"]
     assert capability_servers(settings, "reputation") == ["virustotal"]
     assert capability_servers(settings, "no_such_kind") == []
@@ -143,3 +143,87 @@ def test_a_server_named_by_key_and_by_capability_is_attached_once() -> None:
     )
     settings.agents.definitions["mine"] = definition
     assert [str(r.server) for r in mcp_refs_for(settings, "mine")] == ["virustotal"]
+
+
+# The stored server rows the capability must resolve as dev 2c2522b2 resolved
+# them, and dev's answer: every definition's servers (``servers_bound_to``) and
+# server references (``mcp_refs_for``), written on that tree.
+_STORED_ROWS: dict[str, dict[str, Any]] = {
+    "vt_judge": {"mcp": {"servers": {"virustotal": {"enabled": True, "agents": ["judge"]}}}},
+    "vt_dynamic": {"mcp": {"servers": {"virustotal": {"enabled": True, "agents": ["dynamic"]}}}},
+    "ti_none": {
+        "mcp": {"servers": {"threatintel": {"agents": []}, "virustotal": {"enabled": True}}}
+    },
+    "default": {},
+}
+
+
+@pytest.mark.parametrize("case", sorted(_STORED_ROWS))
+def test_a_stored_server_row_with_an_agents_list_resolves_as_dev_resolved_it(case: str) -> None:
+    import json
+    from pathlib import Path
+
+    from maljan.agents.composition import servers_bound_to
+
+    golden = Path(__file__).resolve().parents[2] / "fixtures" / "golden" / "agents"
+    dev = json.loads((golden / "servers_bound_to_stored_reputation_rows.json").read_text())
+    settings = Settings.model_validate(_STORED_ROWS[case])
+    resolved = {
+        key: [
+            sorted(servers_bound_to(settings, key)),
+            [str(r.server) for r in mcp_refs_for(settings, key)],
+        ]
+        for key in sorted(settings.agents.definitions)
+    }
+    assert resolved == dev[case]
+
+
+def test_a_stored_lookup_with_no_rank_keeps_the_shipped_order() -> None:
+    """An edited VirusTotal row written before ranks keeps VirusTotal ahead of the sidecar."""
+    from maljan.core.declared_reading import declarations
+    from maljan.core.reputation import pack_lookups
+
+    settings = Settings.model_validate(
+        {
+            "mcp": {
+                "servers": {
+                    "virustotal": {
+                        "enabled": True,
+                        "tool_facts": {
+                            "get_file_report": {
+                                "kind": "file_reputation",
+                                "arguments": {"hash": "hash"},
+                                "display_name": "VT (edited)",
+                            }
+                        },
+                    }
+                }
+            }
+        }
+    )
+    lookups = pack_lookups(settings.mcp.servers, declarations(settings))
+    assert [(lk.server, lk.tool, lk.rank) for lk in lookups] == [
+        ("virustotal", "get_file_report", 10),
+        ("threatintel", "check_hash", 20),
+    ]
+
+
+def test_an_operator_lookup_with_no_rank_takes_the_default() -> None:
+    from maljan.core.declared_reading import declarations
+    from maljan.core.reputation import DEFAULT_RANK, pack_lookups
+
+    settings = Settings.model_validate(
+        {
+            "mcp": {
+                "servers": {
+                    "mine": {
+                        "command": "x",
+                        "tool_facts": {"ask": {"kind": "reputation", "arguments": {"hash": "h"}}},
+                    }
+                }
+            }
+        }
+    )
+    held = declarations(settings)
+    ranks = {lk.server: lk.rank for lk in pack_lookups(settings.mcp.servers, held)}
+    assert ranks["mine"] == DEFAULT_RANK

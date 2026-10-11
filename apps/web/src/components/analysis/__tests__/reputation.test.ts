@@ -46,6 +46,10 @@ describe("a recorded reputation answer", () => {
     expect(reputationFromRecord(answer({ total: null, engines: 75 }))?.engines).toBe(75);
   });
 
+  it("states the engines the service counted over its counts' total, as the report does", () => {
+    expect(reputationFromRecord(answer({ total: 72, engines: 70 }))?.engines).toBe(70);
+  });
+
   it("keeps the service's words when there are no counts", () => {
     const reputation = reputationFromRecord(
       answer({ malicious: null, total: null, labels: [], summary: "hash not known" }),
