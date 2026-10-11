@@ -196,7 +196,10 @@ class UploadSandboxProvider(SandboxProvider):
             # ``task_reports`` stays empty and processes/network are thinner
             # than a fetched run's. Still every key the mapper can fill from
             # the overview itself: target, signatures, cti, unavailable.
-            report = triage_overview_to_sandbox_report(payload, provider="upload")
+            # A disputed lineage row names its sandbox as the matched format declares it.
+            report = triage_overview_to_sandbox_report(
+                payload, provider="upload", marked_by=found.display_name or found.name
+            )
         else:
             report = cape_report_to_sandbox_report(payload, provider="upload", source_format=fmt)
         return SandboxRun(

@@ -97,6 +97,23 @@ class TestTheNormalisedFlowSaysWhichProcessMadeIt:
         rows = report.network.tcp
         assert [row.get("sample_process_tree") for row in rows] == [None, None, False]
         assert [row.get("lineage_disputed") for row in rows] == ["marked", "file", None]
+        # Only a marked row names the sandbox whose mark it is.
+        assert [row.get("lineage_marked_by") for row in rows] == ["Triage", None, None]
+
+    def test_a_marked_row_names_the_sandbox_as_the_matched_format_declares_it(self) -> None:
+        processes = [
+            {"procid": 5, "procid_parent": 0, "image": "x.exe", "orig": True},
+            {"procid": 6, "procid_parent": 0, "image": "invoice.exe", "cmd": "invoice.exe"},
+        ]
+        overview = {"sample": {"id": "t1", "target": "invoice.exe", "sha256": "a" * 64}}
+        task = {
+            "processes": processes,
+            "network": {"flows": [{"proto": "tcp", "dst": f"{DOC}:443", "procid": 5}]},
+        }
+        report = triage_overview_to_sandbox_report(
+            overview, task_reports={"behavioral1": task}, marked_by="AcmeBox"
+        )
+        assert report.network.tcp[0]["lineage_marked_by"] == "AcmeBox"
 
     def test_a_mark_and_a_file_name_that_agree_are_the_sample(self) -> None:
         processes = [

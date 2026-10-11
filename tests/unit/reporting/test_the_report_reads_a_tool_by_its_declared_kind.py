@@ -264,8 +264,31 @@ def test_an_operator_tool_of_a_built_in_kind_in_another_shape_is_still_reported(
     )
     held = ToolDeclarations.from_settings(settings)
     monkeypatch.setattr(tool_kinds, "declarations", lambda: held)
-    sections = build_sections([_entry(1, "who", {"label": "a thing"}, "mcp:mine")])
+    sections = build_sections([_entry(1, "who", {"elsewhere": "a thing"}, "mcp:mine")])
     assert any("ev_0001" in s.evidence_ids for s in sections)
+
+
+def _operator_build_seconds(n: int) -> float:
+    ledger = [_entry(i, "who", {"elsewhere": f"thing {i}"}, "mcp:mine") for i in range(1, n + 1)]
+    started = time.perf_counter()
+    build_sections(ledger)
+    return time.perf_counter() - started
+
+
+def test_building_an_operator_tool_s_sections_is_linear(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = Settings.model_validate(
+        {
+            "mcp": {
+                "servers": {"mine": {"command": "x", "tool_facts": {"who": {"kind": "identity"}}}}
+            }
+        }
+    )
+    held = ToolDeclarations.from_settings(settings)
+    monkeypatch.setattr(tool_kinds, "declarations", lambda: held)
+    _operator_build_seconds(200)
+    small = min(_operator_build_seconds(2_000) for _ in range(2))
+    large = min(_operator_build_seconds(20_000) for _ in range(2))
+    assert large < small * 25
 
 
 def test_an_invented_rule_scanner_s_hits_carry_its_declared_name(

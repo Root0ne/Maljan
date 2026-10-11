@@ -99,6 +99,10 @@ class _Sections:
         # Rows a table could not carry past ``MAX_ROWS``, per section, said
         # under it when the sections are handed over.
         self._left_out: dict[str, int] = {}
+        # The ids each section cites, and every id any section cites, so a
+        # citation and the question "was this entry drawn" are one lookup.
+        self._cited: dict[str, set[str]] = {}
+        self._credited: set[str] = set()
 
     def _full(self, section: EvidenceSection, size: int) -> bool:
         if size < MAX_ROWS:
@@ -131,11 +135,18 @@ class _Sections:
 
     def credited(self, entry: LedgerEntry) -> bool:
         """Whether any section built so far cites ``entry``."""
-        return any(entry.id in section.evidence_ids for section in self._by_key.values())
+        return entry.id in self._credited
 
     def cite(self, section: EvidenceSection, entry_id: str) -> None:
-        if entry_id and entry_id not in section.evidence_ids:
+        if not entry_id:
+            return
+        held = self._cited.get(section.key)
+        if held is None:
+            held = self._cited[section.key] = set(section.evidence_ids)
+        if entry_id not in held:
+            held.add(entry_id)
             section.evidence_ids.append(entry_id)
+        self._credited.add(entry_id)
 
     def credit(self, section: EvidenceSection, entry: LedgerEntry) -> None:
         """Cite one entry and record which tool the section came from.
@@ -522,6 +533,11 @@ def _strings(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     acc.credit(table, entry)
 
 
+# The rule tables' titles: ``{tool}`` is the rule tool's declared display name.
+RULE_MATCHES_TITLE = "{tool} rule matches"
+CAPABILITIES_TITLE = "{tool} capabilities"
+
+
 def _rule_rows(entry: LedgerEntry, data: dict[str, Any], key: str) -> Any:
     """A rule answer's rows: where its declaration says, else under ``key`` as the
     built-in rule tools answer."""
@@ -550,7 +566,7 @@ def _yara(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
         return
     table = acc.get(
         "yara_matches",
-        f"{tool_kinds.display_name(entry)} rule matches",
+        RULE_MATCHES_TITLE.format(tool=tool_kinds.display_name(entry)),
         "table",
         columns=["Rule", "Tags", "Where"],
     )
@@ -574,7 +590,7 @@ def _sigma(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
         return
     table = acc.get(
         "sigma_matches",
-        f"{tool_kinds.display_name(entry)} rule matches",
+        RULE_MATCHES_TITLE.format(tool=tool_kinds.display_name(entry)),
         "table",
         columns=["Rule", "Level", "Technique", "Matched fields"],
     )
@@ -607,7 +623,7 @@ def _capa(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
         return
     table = acc.get(
         "capa_capabilities",
-        f"{tool_kinds.display_name(entry)} capabilities",
+        CAPABILITIES_TITLE.format(tool=tool_kinds.display_name(entry)),
         "table",
         columns=["Namespace", "Rule", "ATT&CK", "MBC"],
     )
@@ -1309,8 +1325,9 @@ def build_sections(
             # A purpose-built section reads its kind's answer shape (or the
             # rows a rule tool declares). An operator's own tool of the kind
             # that answers in another shape is still in the report, as the
-            # generic block, rather than drawn as nothing.
-            if not tool_kinds.from_a_builtin_source(entry) and not acc.credited(entry):
+            # generic block, rather than drawn as nothing. An entry with no
+            # source, or from a built-in source, is drawn as it always was.
+            if tool_kinds.from_an_operator_source(entry) and not acc.credited(entry):
                 _fallback(acc, entry)
             continue
         _fallback(acc, entry)

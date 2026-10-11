@@ -35,7 +35,6 @@ from typing import TYPE_CHECKING, Any, Literal
 from maljan.analysis.technique_ids import api_capability_hits, sigma_technique_ids
 from maljan.core.logger import logger
 from maljan.core.tool_declarations import first, select
-from maljan.reporting import legacy_tool_names as legacy
 from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import distinct_signatures, process_identity
 from maljan.reporting.models import (
@@ -64,6 +63,7 @@ from maljan.schemas.sandbox_report import (
     LINEAGE_FILE,
     LINEAGE_MARKED,
     LINEAGE_MARKED_BY_KEY,
+    LINEAGE_MARKED_STORED,
     SAMPLE_TREE_KEY,
 )
 
@@ -940,7 +940,7 @@ def network_from_ledger(
                         if named not in outside.setdefault(address, []):
                             outside[address].append(named)
                     which = str(row.get(LINEAGE_DISPUTED_KEY) or "")
-                    if which == legacy.LINEAGE_MARKED_VALUE:
+                    if which == LINEAGE_MARKED_STORED:
                         which = LINEAGE_MARKED
                     if which in (LINEAGE_MARKED, LINEAGE_FILE) and image:
                         named = f"{image} (procid {row.get('procid')})"

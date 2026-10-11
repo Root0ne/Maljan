@@ -291,8 +291,14 @@ class RestSandboxProvider(SandboxProvider):
 
         fmt = self._cfg.report.format
         if fmt == "triage":
+            from maljan.core.report_formats import format_named
+
+            declared = format_named(fmt)
             report = triage_overview_to_sandbox_report(
-                payload, provider="rest", task_id=str(task_id)
+                payload,
+                provider="rest",
+                task_id=str(task_id),
+                marked_by=(declared.display_name or declared.name) if declared else "",
             )
         elif fmt in ("cape2", "cuckoo"):
             # The same readers the report-upload provider uses, so a CAPE-shaped

@@ -11,6 +11,16 @@ The tables are kept as they were written, keyed by the consumer names of
 ``core.builtin_declarations.CONSUMER_KINDS``; that module's test holds each
 one equal, tool by tool over every built-in tool, to the kinds a declared
 entry is read by. Nothing new is added here: a new reading is a declaration.
+
+Only ``reporting.tool_kinds`` imports this module, and only on its branches
+for an entry with no recorded source (a guard holds both).
+
+Some readers read a source-less entry through :func:`builtin_facts`, the
+shipped declaration of the built-in tool of that name, rather than a table.
+That equals the old reading only while each kind such a reader selects names
+exactly the tools its old table named; ``tests/unit/reporting/
+test_an_entry_without_a_source_is_read_as_before.py`` holds every such set
+equal, so a built-in declaration that changed a kind fails there first.
 """
 
 from __future__ import annotations
@@ -189,11 +199,21 @@ NETWORK_RECORD_TOOLS = frozenset({"sandbox_network", "pcap_summary"})
 CAPTURE_TOOL = "pcap_summary"
 # ``ledger_projection``: the tools whose rule rows became technique hits.
 TECHNIQUE_HIT_TOOLS = ("capa",)
-# The sandbox a disputed lineage row stored without its marker's name was
-# marked by: the only reader that wrote one.
-LINEAGE_MARKED_BY = "Triage"
-# The value a disputed row stored before it was normalised gives a marked process.
-LINEAGE_MARKED_VALUE = "orig"
+# A recovery recorded with no kind (a record stored before kinds were) is read
+# by the tool it names: the tool each recovering kind's stored records name,
+# and the word a partial reason names each kind's entries by.
+STORED_TOOL_BY_KIND: dict[str, str] = {
+    "emulated_strings": EMULATING_TOOL,
+    "decoded_strings": DECODER_TOOL,
+    "strings": PLAIN_STRING_TOOLS[0],
+}
+STORED_WORD_BY_KIND: dict[str, str] = {
+    "emulated_strings": EMULATOR_WORD,
+    "decoded_strings": DECODER_TOOL,
+    "strings": PLAIN_STRING_TOOLS[0],
+}
+# Each ordered table, by the consumer it orders.
+ORDERED: dict[str, tuple[str, ...]] = {"markdown._ANALYSIS_TOOLS": ANALYSIS_TOOLS}
 
 
 def _names(values: Any) -> Callable[[str], bool]:
@@ -254,6 +274,12 @@ def looked_at_the_file(tool: str) -> bool:
     )
 
 
-def analysis_rank(tool: str) -> int:
-    """Where the report listed an analysis tool with no source, in its fixed order."""
-    return ANALYSIS_TOOLS.index(tool) if tool in ANALYSIS_TOOLS else len(ANALYSIS_TOOLS)
+def rank(consumer: str, tool: str) -> int:
+    """Where the report listed a tool with no source, in a consumer's fixed order."""
+    order = ORDERED[consumer]
+    return order.index(tool) if tool in order else len(order)
+
+
+def stored_recovery_kind(tool: str) -> str:
+    """The kind a stored recovery naming ``tool`` (with no kind recorded) is read as."""
+    return next((kind for kind, name in STORED_TOOL_BY_KIND.items() if name == tool), "")

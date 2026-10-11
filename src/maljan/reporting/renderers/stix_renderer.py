@@ -53,7 +53,6 @@ from maljan.extractors.network_extractor import (
     url_host,
 )
 from maljan.pipeline.events import safe_finding_value
-from maljan.reporting import legacy_tool_names as legacy
 from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import distinct_processes
 from maljan.reporting.ledger_report import ANALYST_SECTION_SOURCES
@@ -69,6 +68,7 @@ from maljan.reporting.models import (
     stated_family,
 )
 from maljan.schemas.judgement import indicator_type_for
+from maljan.schemas.sandbox_report import LINEAGE_STORED_MARKED_BY
 from maljan.schemas.stix_models import (
     ATTACK_PATTERN_NAMESPACE,
     EVIDENCE_REFS_PROPERTY,
@@ -2429,15 +2429,16 @@ def _stored_network_record(report: Any, kind: str, key: str) -> str:
     table's address is an unattributed sandbox row, and a name only the
     capture's TLS list holds is a capture-only name. Only such a report is
     read here, and it was stored before entries recorded their source, so its
-    sections are read by the network record tools' names
-    (``legacy_tool_names.NETWORK_RECORD_TOOLS``).
+    sections are read by their tools' names, as an entry with no source is.
     """
     if _field(report, "tool_sightings") is not None:
         return ""
-    tools = {tool for _ids, tool in _section_sightings(report, key)}
-    if kind == "ip" and tools & legacy.NETWORK_RECORD_TOOLS:
+    sighted = [{"tool": tool} for _ids, tool in _section_sightings(report, key)]
+    if kind == "ip" and any(
+        tool_kinds.is_of(held, "evidence_bundles._NETWORK_SANDBOX_TOOLS") for held in sighted
+    ):
         return UNATTRIBUTED_FLOW
-    if kind == "domain" and legacy.CAPTURE_TOOL in tools:
+    if kind == "domain" and any(tool_kinds.is_kind(held, "pcap") for held in sighted):
         return CAPTURE_TLS_NAME
     return ""
 
@@ -2493,8 +2494,8 @@ FILE_ONLY_PROCESS_TEMPLATE = (
     "does not mark as the sample's"
 )
 # The sentences for a row stored before its marker's name was recorded.
-MARKED_ONLY_PROCESS = MARKED_ONLY_PROCESS_TEMPLATE.format(sandbox=legacy.LINEAGE_MARKED_BY)
-FILE_ONLY_PROCESS = FILE_ONLY_PROCESS_TEMPLATE.format(sandbox=legacy.LINEAGE_MARKED_BY)
+MARKED_ONLY_PROCESS = MARKED_ONLY_PROCESS_TEMPLATE.format(sandbox=LINEAGE_STORED_MARKED_BY)
+FILE_ONLY_PROCESS = FILE_ONLY_PROCESS_TEMPLATE.format(sandbox=LINEAGE_STORED_MARKED_BY)
 
 
 def disputed_flow_reason(
@@ -2506,7 +2507,7 @@ def disputed_flow_reason(
     format declares it; a row stored without it names the one sandbox whose
     mark such a row could be.
     """
-    sandbox = str(marked_by or "").strip() or legacy.LINEAGE_MARKED_BY
+    sandbox = str(marked_by or "").strip() or LINEAGE_STORED_MARKED_BY
     parts = []
     if marked_only:
         parts.append(
@@ -2746,7 +2747,15 @@ RECOVERED_BY_EMULATION = "recovered by emulation (decoded strings)"
 # decoder's declared display name, else its tool name.
 DECODED_FROM_THE_BYTES_TEMPLATE = "decoded from the file's own bytes ({tool})"
 # As a record stored before decoders were read by their declaration states it.
-DECODED_FROM_THE_BYTES = DECODED_FROM_THE_BYTES_TEMPLATE.format(tool=legacy.DECODER_TOOL)
+DECODED_FROM_THE_BYTES = DECODED_FROM_THE_BYTES_TEMPLATE.format(
+    tool=tool_kinds.stored_tool_of_kind("decoded_strings")
+)
+
+# Why a recovery record may not be the run's whole: ``{tools}`` names the
+# entries' tools, by their display names.
+EMULATOR_PARTIAL = "no {tools} entry listed every string it recovered"
+DECODER_PARTIAL = "no {tools} entry listed every result it decoded"
+SWEEP_PARTIAL = "no {tools} entry listed every plain string in the file"
 
 # The string kinds that are text the sample hid, as an emulator names a row's
 # scheme: a decoded string, a stack string, a tight string. A static string an
@@ -2769,18 +2778,6 @@ _KIND_SHAPE: dict[str, tuple[str, str]] = {
 }
 
 
-def _recovering_facts(entry: Any) -> Any:
-    """The declaration a recovery record reads an entry by, or ``None``.
-
-    By the entry's recorded source; an entry with no source by the built-in
-    tool of its name, a server's renamed tool (``analysis__floss``) read
-    without its prefix, as before.
-    """
-    if tool_kinds.source_of(entry) is not None:
-        return tool_kinds.facts_of(entry)
-    return legacy.builtin_facts(tool_kinds.tool_of(entry).rsplit("__", 1)[-1])
-
-
 def _rows_and_text(structured: Any, facts: Any) -> tuple[list[Any], str]:
     """An answer's rows and the in-row path of each row's text, as declared or by its kind."""
     rows_path, text_path = _KIND_SHAPE.get(facts.kind, ("", ""))
@@ -2790,18 +2787,18 @@ def _rows_and_text(structured: Any, facts: Any) -> tuple[list[Any], str]:
 
 
 def _is_emulated(how: RecoveredValue) -> bool:
-    """Whether a recovery is an emulator's: its declared kind, or a stored record's tool."""
-    return how.kind == _EMULATED if how.kind else how.tool == legacy.EMULATING_TOOL
+    """Whether a recovery is an emulator's: its recorded kind, or a stored record's tool's."""
+    return tool_kinds.recovery_kind(how) == _EMULATED
 
 
 def _is_decoded(how: RecoveredValue) -> bool:
-    """Whether a recovery is a static decoder's: its declared kind, or a stored record's tool."""
-    return how.kind == _DECODED if how.kind else how.tool == legacy.DECODER_TOOL
+    """Whether a recovery is a static decoder's: its recorded kind, or a stored record's tool's."""
+    return tool_kinds.recovery_kind(how) == _DECODED
 
 
 def _named(how: RecoveredValue) -> str:
     """The name a recovery's tool is stated under: its declared display name, else its name."""
-    return how.named or how.tool
+    return tool_kinds.recovery_name(how)
 
 
 def _emulation_admits(host: str, recovered: str, verdict: Any) -> str | None:
@@ -2886,17 +2883,6 @@ def _add_emulated(
                 listed.append(how)
 
 
-def _tool_words(source: Any, facts: Any, legacy_tool: str) -> tuple[str, str, str]:
-    """How a recovery names its tool, as ``(tool, kind, named)``.
-
-    The entry's tool, its declared kind and display name for an entry that
-    recorded its source; the legacy tool name alone for one that did not.
-    """
-    if facts is None or tool_kinds.source_of(source) is None:
-        return legacy_tool, "", ""
-    return tool_kinds.tool_of(source), facts.kind, facts.display_name
-
-
 def _emulator_provenance(
     row: dict[str, Any], entry: str, facts: Any, source: Any = None
 ) -> RecoveredValue:
@@ -2907,7 +2893,7 @@ def _emulator_provenance(
     """
     function = _in_row(row, facts.places.get("function", ""))
     site = _in_row(row, facts.places.get("call_site", ""))
-    tool, kind, named = _tool_words(source, facts, legacy.EMULATING_TOOL)
+    tool, kind, named = tool_kinds.recovery_tool(source, facts)
     return RecoveredValue(
         tool=tool,
         kind=kind,
@@ -2951,7 +2937,11 @@ def _decoder_provenance(
     calls = [passed_to_words(ref.get("passed_to")) for ref in references]
     # The row's ``floss`` is FLOSS's routine and call site, not the decoder's
     # reading: FLOSS's own entry states it under FLOSS's name.
-    tool, kind, named = _tool_words(source, facts, legacy.DECODER_TOOL)
+    tool, kind, named = (
+        tool_kinds.recovery_tool(source, facts)
+        if facts is not None
+        else (tool_kinds.stored_tool_of_kind(_DECODED), "", "")
+    )
     return RecoveredValue(
         tool=tool,
         kind=kind,
@@ -3025,16 +3015,15 @@ def emulation_from_ledger(ledger: Iterable[Any] | None) -> EmulatedStrings:
     decoders: list[str] = []
     sweeps: list[str] = []
     for entry in ledger or ():
-        facts = _recovering_facts(entry)
+        facts = tool_kinds.recovering_facts(entry)
         if facts is None or facts.kind not in _KIND_SHAPE:
             continue
-        sourced = tool_kinds.source_of(entry) is not None
-        named = (facts.display_name or tool_kinds.tool_of(entry)) if sourced else ""
+        named = tool_kinds.stated_name(entry, facts)
         entry_id = str(getattr(entry, "id", "") or getattr(entry, "entry_id", "") or "")
         structured = getattr(entry, "structured", None)
         rows, text_path = _rows_and_text(structured, facts)
         if facts.kind == _EMULATED:
-            _note(emulators, named or legacy.EMULATOR_WORD)
+            _note(emulators, named)
             floss_whole = floss_whole or _whole_listing(structured, rows)
             scheme_path = facts.values.get("scheme", "")
             for row in rows:
@@ -3049,7 +3038,7 @@ def emulation_from_ledger(ledger: Iterable[Any] | None) -> EmulatedStrings:
                 for value in [text, *decoded_indicators(text)]:
                     _add_emulated(values, value, entry_id, provenance, how, spelled)
         elif facts.kind == _DECODED:
-            _note(decoders, named or legacy.DECODER_TOOL)
+            _note(decoders, named)
             decoder_whole = decoder_whole or _whole_listing(structured, rows)
             for row in rows:
                 if not isinstance(row, dict):
@@ -3064,7 +3053,7 @@ def emulation_from_ledger(ledger: Iterable[Any] | None) -> EmulatedStrings:
                     for value in decoded_indicators(text):
                         _add_emulated(values, value, entry_id, provenance, how, spelled)
         elif facts.kind == _PLAIN:
-            _note(sweeps, named or legacy.PLAIN_STRING_TOOLS[0])
+            _note(sweeps, named)
             strings_whole = strings_whole or _whole_listing(structured, rows)
             plain_texts.extend(
                 (entry_id, str(_first_in_row(row, text_path) or "").lower())
@@ -3080,12 +3069,12 @@ def emulation_from_ledger(ledger: Iterable[Any] | None) -> EmulatedStrings:
     kept, plain = _hold_out_plain(values, plain_texts)
     why: list[str] = []
     if emulators and not floss_whole:
-        why.append(f"no {' or '.join(emulators)} entry listed every string it recovered")
+        why.append(EMULATOR_PARTIAL.format(tools=" or ".join(emulators)))
     if decoders and not decoder_whole:
-        why.append(f"no {' or '.join(decoders)} entry listed every result it decoded")
+        why.append(DECODER_PARTIAL.format(tools=" or ".join(decoders)))
     if kept and not (sweeps and strings_whole):
-        said = " or ".join(sweeps) or legacy.PLAIN_STRING_TOOLS[0]
-        why.append(f"no {said} entry listed every plain string in the file")
+        said = " or ".join(sweeps) or tool_kinds.stored_word_of_kind(_PLAIN)
+        why.append(SWEEP_PARTIAL.format(tools=said))
     # Every string FLOSS recovered is a value of the record, and most are not
     # network values: the stored provenance is kept for the values the decoder
     # read and for the FLOSS values that are a domain, an address or a URL.
@@ -3283,7 +3272,7 @@ def recovered_by_words(record: EmulatedStrings, kind: str, value: str) -> str:
     entry = record.values.get(key)
     if not entry:
         return ""
-    stored = RecoveredValue(tool=legacy.EMULATING_TOOL, entry=entry)
+    stored = RecoveredValue(tool=tool_kinds.stored_tool_of_kind(_EMULATED), entry=entry)
     listed = record.recovered_by.get(key) or [stored]
     # One tool's same recovery from two of its calls (the pack's and an
     # analyst's) is one place with two entries, stated once.
@@ -3735,12 +3724,8 @@ _STRING_SWEEP_TOOLS = "stix_renderer._STRING_SWEEP_TOOLS"
 
 
 def _sweeps_the_strings(row: Any, named: str) -> bool:
-    """Whether an entry is the string sweep's: by its index row's declared kind when it
-    recorded a source, else by its tool's name (``named``, a section's ``tool:<name>``
-    or the corpus's tool) as before."""
-    if row is not None and tool_kinds.source_of(row) is not None:
-        return tool_kinds.is_of(row, _STRING_SWEEP_TOOLS)
-    return named.removeprefix("tool:") in legacy.STRING_SWEEP_TOOLS
+    """Whether an entry is the string sweep's (``tool_kinds.sweeps_the_strings``)."""
+    return tool_kinds.sweeps_the_strings(row, named.removeprefix("tool:"))
 
 
 def _section_text(section: Any) -> list[str]:

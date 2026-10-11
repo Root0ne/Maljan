@@ -10,7 +10,9 @@ selected before.
 
 from __future__ import annotations
 
+import hashlib
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -18,6 +20,7 @@ import pytest
 from maljan.core.builtin_declarations import BUILDER_OF_KIND
 from maljan.reporting import legacy_tool_names as legacy
 from maljan.reporting import tool_kinds
+from maljan.reporting.ledger_report import build_sections
 from maljan.reporting.models import NetworkIP, RecoveredValue
 from maljan.reporting.renderers.stix_renderer import (
     FILE_ONLY_PROCESS,
@@ -253,3 +256,59 @@ def test_a_stored_flow_marked_orig_is_read_as_marked() -> None:
     (ip,) = [ip for ip in network.ips if ip.address == "192.0.2.9"]
     assert ip.marked_only_processes == ["x.exe (procid 5)"]
     assert ip.marked_by is None
+
+
+# ---------------------------------------------------------------------------
+# The sections a source-less ledger rebuilds into
+# ---------------------------------------------------------------------------
+
+ROOT = Path(__file__).resolve().parents[3]
+GOLDEN = ROOT / "tests" / "fixtures" / "golden" / "reporting"
+BENCHMARK = Path(".superpowers") / "sdd" / "mandate-2026-09-17" / "benchmark" / "deepseek"
+# ``build_sections`` over each stored run's whole ledger as dev f96cb89f drew it:
+# the section count and the digest of the sections' JSON (sorted keys).
+STORED_REBUILDS = {
+    "run7": (89, "5622126326362a4b"),
+    "run5": (102, "329861e13d99f920"),
+    "run4": (92, "5b820703de8ef174"),
+    "local8": (40, "03a831e737a44641"),
+}
+
+
+def _dumped(sections: list[Any]) -> list[dict[str, Any]]:
+    return [s.model_dump(mode="json") for s in sections]
+
+
+def test_a_source_less_ledger_rebuilds_the_sections_dev_drew() -> None:
+    from tests.unit.reporting._source_less_ledger import source_less_ledger
+
+    expected = json.loads((GOLDEN / "sections_of_a_source_less_ledger.json").read_text())
+    assert _dumped(build_sections(source_less_ledger())) == expected
+
+
+def _benchmark() -> Path | None:
+    """The stored runs: in this checkout, or in the checkout a worktree belongs to."""
+    for base in (ROOT, *(p for p in ROOT.parents if (p / ".claude" / "worktrees").is_dir())):
+        if (base / BENCHMARK).is_dir():
+            return base / BENCHMARK
+    return None
+
+
+@pytest.mark.parametrize("run", sorted(STORED_REBUILDS))
+def test_a_stored_run_s_ledger_rebuilds_the_sections_dev_drew(run: str) -> None:
+    from maljan.schemas.evidence import LedgerEntry
+
+    root = _benchmark()
+    if root is None or not (root / run / "evidence.json").is_file():
+        pytest.skip("the stored benchmark runs are not on this machine")
+    fields = set(LedgerEntry.model_fields)
+    items = json.loads((root / run / "evidence.json").read_text())["items"]
+    ledger = [
+        LedgerEntry.model_validate(
+            {**{k: v for k, v in item.items() if k in fields}, "id": item["entry_id"]}
+        )
+        for item in items
+    ]
+    sections = build_sections(ledger)
+    text = json.dumps(_dumped(sections), sort_keys=True)
+    assert (len(sections), hashlib.sha256(text.encode()).hexdigest()[:16]) == STORED_REBUILDS[run]

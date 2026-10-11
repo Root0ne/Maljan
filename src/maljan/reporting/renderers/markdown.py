@@ -50,7 +50,6 @@ from maljan.analysis.run_summary import (
     tokens_sentence,
 )
 from maljan.core.logger import logger
-from maljan.reporting import legacy_tool_names as legacy
 from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import distinct_processes, distinct_signatures
 from maljan.reporting.defang import ProseDefanger, defang
@@ -175,15 +174,11 @@ _TACTIC_ORDER: tuple[str, ...] = (
 # The tools an absence line names first, as the ones that looked for behaviour:
 # the kinds of ``CONSUMER_KINDS``, in this order.
 _ANALYSIS_TOOLS = "markdown._ANALYSIS_TOOLS"
-_ANALYSIS_ORDER = tool_kinds.consumer_kinds_in_order(_ANALYSIS_TOOLS)
 
 
 def _analysis_rank(row: Any) -> int:
     """Where an absence line names an entry's tool: the analysis kinds first, in order."""
-    if tool_kinds.source_of(row) is None:
-        return legacy.analysis_rank(tool_kinds.tool_of(row))
-    kind = tool_kinds.kind_of(row)
-    return _ANALYSIS_ORDER.index(kind) if kind in _ANALYSIS_ORDER else len(_ANALYSIS_ORDER)
+    return tool_kinds.rank_in(row, _ANALYSIS_TOOLS)
 
 
 def _looked_at_the_file(row: Any) -> bool:
@@ -194,8 +189,9 @@ def _looked_at_the_file(row: Any) -> bool:
     reputation lookup asks about the sample elsewhere. An entry with no
     source is read by its tool's name, as before.
     """
-    if tool_kinds.source_of(row) is None:
-        return legacy.looked_at_the_file(tool_kinds.tool_of(row))
+    by_name = tool_kinds.looked_at_the_file_by_name(row)
+    if by_name is not None:
+        return by_name
     facts = tool_kinds.facts_of(row)
     return (
         not tool_kinds.is_of(row, _SANDBOX_TOOLS)
@@ -215,9 +211,7 @@ def _capability_rule_hit(hit: dict[str, Any]) -> bool:
 
 def _is_sandbox_status(row: Any) -> bool:
     """Whether an entry is the pack's sentence about the sandbox rather than a call to one."""
-    if tool_kinds.source_of(row) is None:
-        return tool_kinds.tool_of(row) == legacy.SANDBOX_STATUS_TOOL
-    return tool_kinds.kind_of(row) == "sandbox_status"
+    return tool_kinds.is_kind(row, "sandbox_status")
 
 
 # What a sandbox signature or a rule has to name to be printed beside the

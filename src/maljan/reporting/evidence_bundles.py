@@ -21,7 +21,6 @@ from collections.abc import Callable
 from typing import Any
 
 from maljan.analysis.sandbox_sections import ItemIndex
-from maljan.reporting import legacy_tool_names as legacy
 from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import distinct_processes
 from maljan.reporting.models import MalwareReport
@@ -92,10 +91,10 @@ def shown_to_section(section: str, output: dict[str, Any]) -> bool:
     section reads, or its declaration names the section. With no source, by
     the tool's name, as before.
     """
-    name = tool_kinds.tool_of(output)
-    if tool_kinds.source_of(output) is None:
-        return legacy.section_hinted(section, name)
-    facts = tool_kinds.facts_of(output, name)
+    by_name = tool_kinds.shown_by_name(section, output)
+    if by_name is not None:
+        return by_name
+    facts = tool_kinds.facts_of(output)
     if facts is None:
         return False
     return facts.kind in _SECTION_KINDS.get(section, ()) or section in facts.report_sections
@@ -495,16 +494,8 @@ _REPORT_STATE_KINDS = frozenset({"sandbox_status", "sandbox_sections"})
 
 
 def _states_the_report(row: Any) -> bool:
-    if tool_kinds.source_of(row) is None:
-        return tool_kinds.tool_of(row) in legacy.NOT_OBSERVATIONS
+    """Whether a sandbox entry states what the report is or holds (by its kind)."""
     return tool_kinds.kind_of(row) in _REPORT_STATE_KINDS
-
-
-def _is_kind(row: Any, kind: str, legacy_tool: str) -> bool:
-    """Whether a row's declared kind is ``kind``; with no source, its tool is ``legacy_tool``."""
-    if tool_kinds.source_of(row) is None:
-        return tool_kinds.tool_of(row) == legacy_tool
-    return tool_kinds.kind_of(row) == kind
 
 
 def sandbox_item_observation(
@@ -551,12 +542,9 @@ def _answers_about_the_network(row: Any, section: Any) -> bool:
     if tool_kinds.is_of(row, _NETWORK_SANDBOX_TOOLS):
         return True
     name = str(getattr(section, "key", "") or "").removeprefix("sandbox_").lower()
-    if _is_kind(row, "sandbox_items", legacy.SANDBOX_ITEMS_TOOL):
+    if tool_kinds.is_kind(row, "sandbox_items"):
         return name == "items_network"
-    return (
-        _is_kind(row, "sandbox_report_section", legacy.SANDBOX_REPORT_SECTION_TOOL)
-        and name in _NETWORK_REPORT_SECTIONS
-    )
+    return tool_kinds.is_kind(row, "sandbox_report_section") and name in _NETWORK_REPORT_SECTIONS
 
 
 def sample_flow_fact(report: MalwareReport) -> Any:

@@ -215,7 +215,11 @@ from maljan.reporting.composer import (
     section_contract,
 )
 from maljan.reporting.evidence_bundles import sample_flow_fact
-from maljan.reporting.ledger_report import FUNCTION_NOT_SHOWN
+from maljan.reporting.ledger_report import (
+    CAPABILITIES_TITLE,
+    FUNCTION_NOT_SHOWN,
+    RULE_MATCHES_TITLE,
+)
 from maljan.reporting.models import (
     FileHashes,
     MalwareReport,
@@ -239,6 +243,8 @@ from maljan.reporting.renderers.stix_renderer import (
     BENIGN_NAME_RESOLVED,
     CAPTURE_TLS_NAME,
     DECODED_FROM_THE_BYTES_TEMPLATE,
+    DECODER_PARTIAL,
+    EMULATOR_PARTIAL,
     FLOW_OUTSIDE_THE_TREE,
     JUDGE_KEPT_WHEN_TOLD,
     JUDGE_KEPT_WHEN_TOLD_OF_ITS_HOST,
@@ -246,6 +252,7 @@ from maljan.reporting.renderers.stix_renderer import (
     JUDGE_QUESTION_NOT_RECORDED,
     RECOVERED_BY_EMULATION,
     SEARCHED_THE_REPORT,
+    SWEEP_PARTIAL,
     UNATTRIBUTED_FLOW,
     disputed_flow_reason,
     judge_not_told,
@@ -1943,6 +1950,11 @@ PROMPTS: dict[str, str] = {
             disputed_flow_reason(["SearchHost.exe (procid 104)"], ["cmd.exe (procid 7)"]),
             disputed_flow_reason(["SearchHost.exe (procid 104)"], ["cmd.exe (procid 7)"], "CAPE"),
             DECODED_FROM_THE_BYTES_TEMPLATE.format(tool="Unblob"),
+            EMULATOR_PARTIAL.format(tools="MyEmu or AltEmu"),
+            DECODER_PARTIAL.format(tools="Unblob"),
+            SWEEP_PARTIAL.format(tools="texts"),
+            RULE_MATCHES_TITLE.format(tool="MyRules"),
+            CAPABILITIES_TITLE.format(tool="MyRules"),
             RECOVERED_BY_EMULATION,
             not_kept_reason("x", "", "an artifact of the network analyst"),
             public_resolver_reason(
