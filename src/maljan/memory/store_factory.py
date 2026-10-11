@@ -94,7 +94,10 @@ def register_memory_backend(
 
     ``builder`` takes the memory configuration and returns a ``MemoryStore``;
     it reads its own settings with ``backend_settings(memory, backend_id)``.
-    Registering an id again replaces it.
+    Registering an id again replaces it. A package's entry point is best named
+    after the id it registers: a failure to load is then reported against that
+    id alone, where otherwise any selected id nothing registered is reported
+    unavailable with every failure's reason.
     """
     key = _key(backend_id)
     if not key:
@@ -162,11 +165,16 @@ def _backend(settings_or_memory: Any) -> MemoryBackend:
     found = registered_backends().get(backend)
     if found is not None:
         return found
+    # The entry point that failed is matched by name when it carries the
+    # backend's id; any other failed package may be the one that registers
+    # this id, so the selected id is unavailable whenever one failed.
     broken = _UNAVAILABLE.get(backend)
-    if broken is not None:
+    failures = [broken] if broken is not None else list(_UNAVAILABLE.values())
+    if failures:
         raise MemoryBackendNotConfiguredError(
             backend,
-            f"memory backend {backend!r} is unavailable: its package failed to load ({broken})",
+            f"memory backend {backend!r} is unavailable: a backend package failed to load "
+            f"({'; '.join(failures)})",
             unavailable=True,
         )
     known = ", ".join(_BACKENDS) or "none"
@@ -253,16 +261,27 @@ def build_function_hash_store(settings_or_memory: Any) -> FunctionHashIndex | No
     Built once per backend and settings, and handed out again: three steps of
     every run ask for it, and each build opens a client.
     """
+    return _function_hash_store(settings_or_memory, hold=False)
+
+
+def _function_hash_store(settings_or_memory: Any, *, hold: bool) -> FunctionHashIndex | None:
+    """The cached store for the settings, built when they changed; with ``hold``
+    the hold is counted in the same locked section, so no replacement can
+    close the store between handing it out and counting its holder."""
     memory = _memory_config(settings_or_memory)
     backend = _backend(memory)
     fingerprint = _settings_fingerprint(memory, backend.id)
+    superseded = None
     with _FUNCTION_HASH_LOCK:
         held = _FUNCTION_HASH_STORES.get(backend.id)
         if held is not None and held[0] == fingerprint:
-            return held[1]
-        store = build_memory_store(memory).function_hash_store()
-        _FUNCTION_HASH_STORES[backend.id] = (fingerprint, store)
-        superseded = _retire(held[1]) if held is not None else None
+            store = held[1]
+        else:
+            store = build_memory_store(memory).function_hash_store()
+            _FUNCTION_HASH_STORES[backend.id] = (fingerprint, store)
+            superseded = _retire(held[1]) if held is not None else None
+        if hold and store is not None:
+            _LEASES[id(store)] = _LEASES.get(id(store), 0) + 1
     _close(superseded)
     return store
 
@@ -273,11 +292,7 @@ def acquire_function_hash_store(settings_or_memory: Any) -> FunctionHashIndex | 
     A store a settings change replaces is closed only once every holder has
     released it, so a job keeps reading and writing the store it started with.
     """
-    store = build_function_hash_store(settings_or_memory)
-    if store is not None:
-        with _FUNCTION_HASH_LOCK:
-            _LEASES[id(store)] = _LEASES.get(id(store), 0) + 1
-    return store
+    return _function_hash_store(settings_or_memory, hold=True)
 
 
 def release_function_hash_store(store: Any) -> None:

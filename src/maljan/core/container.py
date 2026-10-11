@@ -428,6 +428,9 @@ class ServiceContainer:
         # The function-hash corpus write the judge decided on, as
         # ``(store, sample_id, family, functions)``, held for the same reason.
         self.pending_function_hashes: Any = None
+        # Set by ``aclose``: a hold handed over after teardown (a judge thread a
+        # timeout abandoned) is let go of at once.
+        self._closed = False
         self._sandbox_provider_cache: SandboxProvider | None = None
         self._static_provider_cache: dict[str, StaticProvider] = {}
         self._server_registry_cache: ServerRegistry | None = None
@@ -823,6 +826,26 @@ class ServiceContainer:
             len(case.technique_ids),
         )
         return True
+
+    def hold_function_hashes(
+        self, store: Any, sample_id: str, family: str, functions: list
+    ) -> None:
+        """Take over the judge's hold on ``store`` with the corpus write it decided on.
+
+        The hold ends with the write (``remember_the_run``) or at teardown. A
+        write it replaces lets go of its own store; one handed over after
+        teardown is let go of at once, never written.
+        """
+        from maljan.memory.store_factory import release_function_hash_store
+
+        with self._lock:
+            if self._closed:
+                replaced, self.pending_function_hashes = (store,), None
+            else:
+                replaced = self.pending_function_hashes
+                self.pending_function_hashes = (store, sample_id, family, list(functions))
+        if replaced is not None:
+            release_function_hash_store(replaced[0])
 
     def _remember_the_function_hashes(self) -> bool:
         held, self.pending_function_hashes = self.pending_function_hashes, None
@@ -1334,7 +1357,9 @@ class ServiceContainer:
         """
         # A job that ended before its corpus write (failed, cancelled, or never
         # told to remember) lets go of the function-hash store its judge held.
-        unwritten, self.pending_function_hashes = self.pending_function_hashes, None
+        with self._lock:
+            self._closed = True
+            unwritten, self.pending_function_hashes = self.pending_function_hashes, None
         if unwritten is not None:
             from maljan.memory.store_factory import release_function_hash_store
 

@@ -101,6 +101,7 @@ def _fake_qdrant(monkeypatch: pytest.MonkeyPatch) -> Iterator[type[_FakeQdrant]]
     _FakeQdrant.down = False
     _FakeQdrant.seed = {}
     monkeypatch.setattr("qdrant_client.QdrantClient", _FakeQdrant)
+    monkeypatch.setattr(store_factory, "_UNAVAILABLE", {})
     store_factory.forget_built_stores()
     yield _FakeQdrant
     store_factory.forget_built_stores()
@@ -714,9 +715,10 @@ class TestTheJudgeReadsAndHoldsThroughTheConfiguredBackend:
         provider = SimpleNamespace(
             capabilities=SimpleNamespace(provides_function_hashes=True), function_hashes=_hashes
         )
-        container = SimpleNamespace(
-            config=config, get_static_provider=lambda: provider, pending_function_hashes=None
-        )
+        from maljan.core.container import ServiceContainer
+
+        container = ServiceContainer(config)
+        container.get_static_provider = lambda: provider  # type: ignore[method-assign]
         state = {"static_sample_path": "/mirror/s.bin", "file_hash": "this"}
         with (
             patch("maljan.core.config.get_settings", return_value=config),
@@ -931,3 +933,93 @@ class TestARunningJobKeepsTheStoreItHolds:
             assert store is not None and store.match(["h1"]) == []
             assert _FakeQdrant.built[0].closed == 0
         assert _FakeQdrant.built[0].closed == 1
+
+
+class TestHoldsAreNeverLost:
+    def test_a_hold_is_counted_before_any_replacement_can_close_the_store(self) -> None:
+        """A reader and a settings flipper race; no store is ever closed while held."""
+        import threading
+
+        one = _settings("qdrant")
+        two = Settings(_env_file=None, memory={"qdrant": {"url": URL, "api_key": "two"}})
+        closed_while_held: list[Any] = []
+        stop = threading.Event()
+
+        def _flip() -> None:
+            while not stop.is_set():
+                store_factory.build_function_hash_store(two)
+                store_factory.build_function_hash_store(one)
+
+        flipper = threading.Thread(target=_flip)
+        flipper.start()
+        try:
+            for _ in range(300):
+                store = store_factory.acquire_function_hash_store(one)
+                if store is not None and store._client.closed:
+                    closed_while_held.append(store)
+                store_factory.release_function_hash_store(store)
+        finally:
+            stop.set()
+            flipper.join()
+        assert closed_while_held == []
+
+    def test_a_replaced_pending_write_lets_go_of_its_store(self) -> None:
+        from maljan.core.container import ServiceContainer
+
+        container = ServiceContainer(_settings("qdrant"))
+        first = store_factory.acquire_function_hash_store(_settings("qdrant"))
+        container.hold_function_hashes(first, "a", "FamilyA", [("f", "h")])
+        store_factory.forget_built_stores()  # the first store is now retired, still held
+        second = store_factory.acquire_function_hash_store(_settings("qdrant"))
+        container.hold_function_hashes(second, "b", "FamilyB", [("f", "h")])
+        assert _FakeQdrant.built[0].closed == 1  # let go of when it was replaced
+        assert container.pending_function_hashes[0] is second
+
+    def test_a_hold_handed_over_after_teardown_is_let_go_of_at_once(self) -> None:
+        from maljan.core.container import ServiceContainer
+
+        container = ServiceContainer(_settings("qdrant"))
+        asyncio.run(container.aclose())
+        late = store_factory.acquire_function_hash_store(_settings("qdrant"))
+        store_factory.forget_built_stores()  # retired, held only by the late hand-over
+        container.hold_function_hashes(late, "a", "FamilyA", [("f", "h")])
+        assert container.pending_function_hashes is None
+        assert _FakeQdrant.built[0].closed == 1
+
+
+class TestABrokenPackageWithAnotherEntryPointName:
+    def test_the_selected_id_is_unavailable_with_the_failure(self, monkeypatch: Any) -> None:
+        def _boom() -> None:
+            raise ImportError("vectorhub_client is not installed")
+
+        point = SimpleNamespace(name="vectorhub-plugin", load=lambda: _boom)
+        monkeypatch.setattr(store_factory, "entry_points", lambda group: [point])
+        monkeypatch.setattr(store_factory, "_entry_points_loaded", False)
+        monkeypatch.setattr(store_factory, "_UNAVAILABLE", {})
+        cfg = Settings(_env_file=None, memory={"backend": "vectorhub"})
+        component = TestHealthProbesTheConfiguredBackend._memory_component(cfg)
+        assert component["ok"] is False and component["detail"] == "unavailable"
+        assert "vectorhub_client is not installed" in component["error"]
+
+    def test_with_no_failed_package_an_unknown_id_is_not_configured(self) -> None:
+        cfg = Settings(_env_file=None, memory={"backend": "vectorhub"})
+        component = TestHealthProbesTheConfiguredBackend._memory_component(cfg)
+        assert component["ok"] is None and component["detail"] == "not configured"
+
+
+class TestAnUnchangedStoredChoiceIsNotCheckedAgain:
+    def test_re_sending_the_stored_id_saves_the_other_keys(self) -> None:
+        from app.services.settings_service import SettingsService
+
+        stored = {"core.memory.backend": "vectorhub"}
+        SettingsService(db=None).check_keys(  # type: ignore[arg-type]
+            {"core.memory.backend": "vectorhub", "core.memory.top_k": 4}, stored
+        )
+
+    def test_changing_to_another_unknown_id_is_still_refused(self) -> None:
+        from app.services.settings_service import SettingsService, SettingsValidationError
+
+        with pytest.raises(SettingsValidationError):
+            SettingsService(db=None).check_keys(  # type: ignore[arg-type]
+                {"core.memory.backend": "otherhub"}, {"core.memory.backend": "vectorhub"}
+            )

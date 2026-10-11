@@ -1319,7 +1319,7 @@ def _function_hash_attribution(
             # takes over the hold and lets go once it has written, or at teardown.
             family = _assessed_family(bundle)
             if family:
-                container.pending_function_hashes = (store, sample_id, family, list(functions))
+                container.hold_function_hashes(store, sample_id, family, functions)
                 handed_on = True
             return report
         finally:
