@@ -632,9 +632,11 @@ class LLMConfig(BaseModel):
     Empty dict means all agents share the global expert LLM (default behavior).
     """
 
-    # A registered LLM provider's name (``maljan.llm.registry``); the
-    # catalogue offers the registered names, and a name nothing registered is
-    # refused where it is set.
+    # A registered LLM provider's name (``maljan.llm.registry``). The
+    # catalogue offers the registered names and a name nothing registered is
+    # refused where it is saved, as a memory backend's is: a stored name whose
+    # provider is registered only in another process still loads, and the
+    # registry says so when a model is built for it.
     provider: str = "openai"
     openai: OpenAIConfig = Field(default_factory=OpenAIConfig)
     anthropic: AnthropicConfig = Field(default_factory=AnthropicConfig)
@@ -768,21 +770,6 @@ class LLMConfig(BaseModel):
     # N=3). Both strategies share the equal-budget ``expert_max_tokens // N``
     # split and the tools-free text path. Ignored when decomposition is off.
     view_decomposition_mode: Literal["facet", "tier"] = "facet"
-
-    @field_validator("provider")
-    @classmethod
-    def _a_registered_provider(cls, value: str) -> str:
-        """Refuse a provider name no adapter registered."""
-        from maljan.llm.provider_base import provider_names
-
-        known = provider_names()
-        if known and value not in known:
-            # The value itself is not echoed: a rejected setting is reported
-            # by name, never by what was typed into it.
-            raise ValueError(
-                f"llm.provider names no registered LLM provider (known: {', '.join(known)})"
-            )
-        return value
 
     def _provider_block(self) -> Any:
         """The selected provider's own settings block (``llm.<provider>``), else the OpenAI one."""

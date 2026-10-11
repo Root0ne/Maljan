@@ -127,6 +127,12 @@ class TestSettingsReadTheAdapter:
         assert ACME in provider_names()
         assert _settings().llm.provider == ACME
 
+    def test_a_stored_name_registered_only_elsewhere_still_loads(self) -> None:
+        """Refused where it is saved, not where settings are read, as a memory backend is."""
+        assert build_settings({"llm.provider": "registered-elsewhere"}).llm.provider == (
+            "registered-elsewhere"
+        )
+
     def test_an_entry_may_name_its_own_endpoint_and_one_of_its_efforts(self) -> None:
         from maljan.core.config import ModelChoice
 

@@ -232,6 +232,11 @@ async def probe_llm(settings: Any) -> ProbeResult:
     t0 = time.perf_counter()
     deadline = probe_deadline()
     provider = str(settings.llm.provider)
+    from maljan.llm.provider_base import provider_names
+
+    if provider not in provider_names():
+        # Named by its setting, never by what was typed into it.
+        return ProbeResult(False, _ms(t0), "llm.provider names no registered LLM provider")
     facts = facts_of(provider)
     listing = facts.model_listing(settings)
     models: list[str] = []

@@ -195,7 +195,6 @@ async def test_llm_probe_gemini_ok(monkeypatch):
 async def test_an_unregistered_provider_is_refused_without_raising():
     r = await probes.run_probe("llm", _staged(**{"llm.provider": "bedrock"}), {})
     assert r.ok is False and "llm.provider" in r.detail and "bedrock" not in r.detail
-    assert "invalid candidate values" in r.detail
 
 
 @pytest.mark.asyncio

@@ -307,6 +307,34 @@ class SettingsService:
         if errors:
             raise SettingsValidationError(errors)
 
+    def _with_value_errors(
+        self,
+        refused: SettingsValidationError,
+        changes: dict[str, Any],
+        current: dict[str, Any],
+    ) -> SettingsValidationError:
+        """``refused``, with what ``validate`` says about the keys it did not refuse."""
+        errors = dict(refused.errors)
+        index = catalog_index()
+        merged = dict(current)
+        for key, value in changes.items():
+            if key in errors or key not in index:
+                continue
+            if value is None:
+                merged.pop(key, None)
+            else:
+                merged[key] = value
+        core = {split_key(k)[1]: v for k, v in merged.items() if k.startswith("core.")}
+        api = {split_key(k)[1]: v for k, v in merged.items() if k.startswith("api.")}
+        try:
+            self.validate(core, api)
+        except SettingsValidationError as more:
+            for key, message in more.errors.items():
+                errors.setdefault(key, message)
+        except Exception:  # noqa: BLE001 — the refusal stands on its own
+            pass
+        return SettingsValidationError(errors)
+
     def validate(self, merged_core: dict[str, Any], merged_api: dict[str, Any]) -> None:
         errors: dict[str, str] = {}
         try:
@@ -337,7 +365,12 @@ class SettingsService:
         self, changes: dict[str, Any], *, user_id: uuid.UUID | None, ip: str | None
     ) -> SaveResult:
         current = await self.load_overrides()
-        self.check_keys(changes, current)
+        try:
+            self.check_keys(changes, current)
+        except SettingsValidationError as refused:
+            # Every refused key is named in one answer: what the model would
+            # refuse among the keys that passed is said beside it.
+            raise self._with_value_errors(refused, changes, current) from None
         index = catalog_index()
         # An import document carries the mask wherever a secret was omitted.
         # For a secret leaf the mask means "unchanged", exactly as it does in
