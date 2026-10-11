@@ -174,7 +174,15 @@ def build_job_settings(
             merged["sandbox.provider"] = "upload"
         if job_config.get("profile") is not None:
             merged["agents.profile"] = job_config["profile"]
-    return build_settings(merged)
+    settings = build_settings(merged)
+    # The selected provider's role models come from its own block; a job never
+    # runs with an empty model name borrowed from nowhere.
+    from maljan.llm.provider_base import role_block_problem
+
+    problem = role_block_problem(settings)
+    if problem:
+        raise ValueError(f"llm.provider: {problem}")
+    return settings
 
 
 def retired_environment_lines(environ: Mapping[str, str]) -> list[str]:

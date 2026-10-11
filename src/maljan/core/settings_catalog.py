@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import types
 import typing
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any, Literal, get_args, get_origin
 
@@ -178,7 +179,7 @@ def _undeclared_memory_backends() -> dict[str, Any]:
     }
 
 
-def _annotation(path: str) -> Any:
+def _annotation(path: str, undeclared: Mapping[str, Any] | None = None) -> Any:
     """``path``'s annotation: the shared table's, else the one its memory backend or LLM
     provider declares for the leaves of its own settings."""
     found = ANNOTATIONS.get(path)
@@ -186,7 +187,8 @@ def _annotation(path: str) -> Any:
         return found
     if path.startswith("llm."):
         provider_id, _, leaf = path[len("llm.") :].partition(".")
-        if leaf and provider_id in _undeclared_llm_providers():
+        providers = _undeclared_llm_providers() if undeclared is None else undeclared
+        if leaf and provider_id in providers:
             from maljan.llm.provider_base import facts_of
 
             return facts_of(provider_id).settings_annotations.get(leaf)
@@ -294,8 +296,9 @@ def core_catalog() -> list[CatalogEntry]:
     from the annotation, so an unannotated credential field is still redacted.
     """
     entries: list[CatalogEntry] = []
+    undeclared = _undeclared_llm_providers()
     for leaf in core_leaves():
-        ann = _annotation(leaf.path)
+        ann = _annotation(leaf.path, undeclared)
         ftype, choices, nullable = _field_type(leaf)
         # A str leaf whose choices a core registry holds is an enum of them.
         registry = _registry_choices(ann.get("choices_from") if ann else None)

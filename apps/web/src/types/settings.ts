@@ -92,6 +92,8 @@ export interface ChoiceFacts {
   hosted?: boolean;
   credential_keys?: string[];
   base_url_key?: string | null;
+  /** The keys a setup step shows up front, and those it folds under
+   *  "Advanced"; the same meaning on every provider selector. */
   guide_keys?: string[];
   guide_advanced_keys?: string[];
   model_keys?: string[];

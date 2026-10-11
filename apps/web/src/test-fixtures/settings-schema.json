@@ -243,11 +243,7 @@
         "core.llm.anthropic.prompt_cache_ttl"
        ],
        "guide_keys": [
-        "core.llm.anthropic.api_key",
-        "core.llm.anthropic.base_url",
-        "core.llm.anthropic.allow_plain_http_to_docker_host",
-        "core.llm.anthropic.effort",
-        "core.llm.anthropic.prompt_cache_ttl"
+        "core.llm.anthropic.api_key"
        ],
        "hosted": true,
        "model_keys": [
@@ -288,10 +284,7 @@
         "core.llm.ollama.disable_thinking"
        ],
        "guide_keys": [
-        "core.llm.ollama.base_url",
-        "core.llm.ollama.num_ctx",
-        "core.llm.ollama.keep_alive",
-        "core.llm.ollama.disable_thinking"
+        "core.llm.ollama.base_url"
        ],
        "hosted": false,
        "model_keys": [
@@ -316,10 +309,7 @@
        ],
        "guide_keys": [
         "core.llm.openai.api_key",
-        "core.llm.openai.base_url",
-        "core.llm.openai.disable_thinking",
-        "core.llm.openai.reasoning_effort",
-        "core.llm.openai.repetition_penalty"
+        "core.llm.openai.base_url"
        ],
        "hosted": true,
        "model_keys": [

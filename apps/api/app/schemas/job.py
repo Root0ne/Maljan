@@ -45,9 +45,15 @@ class _KnownJobConfig(BaseModel):
     @field_validator("llm_provider")
     @classmethod
     def _a_registered_llm_provider(cls, value: str | None) -> str | None:
-        from maljan.llm.provider_base import provider_names
+        from maljan.llm.provider_base import missing_block, provider_names
 
-        return _registered(value, provider_names(), "llm_provider")
+        value = _registered(value, provider_names(), "llm_provider")
+        # A provider with no settings block of its own names no role model;
+        # the job would run with none, so it is refused here.
+        problem = missing_block(value) if value is not None else None
+        if problem:
+            raise ValueError(f"llm_provider: {problem}")
+        return value
 
     @field_validator("static_provider")
     @classmethod

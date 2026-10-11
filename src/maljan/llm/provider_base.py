@@ -358,13 +358,42 @@ def effort_providers() -> list[str]:
 def undeclared_settings_models() -> dict[str, Any]:
     """The settings model of each registered provider that is not a declared ``LLMConfig`` field."""
     from maljan.core.config import LLMConfig
+    from maljan.llm.registry import _PROVIDER_REGISTRY
 
+    # Only what is registered already: every built-in adapter is a declared
+    # field of ``LLMConfig``, so nothing is discovered (and no client library
+    # loaded) to answer this.
     out: dict[str, Any] = {}
-    for name in provider_names():
+    for name in list(_PROVIDER_REGISTRY):
+        if name in LLMConfig.model_fields:
+            continue
         model = facts_of(name).settings_model
-        if name not in LLMConfig.model_fields and model is not None:
+        if model is not None:
             out[name] = model
     return out
+
+
+def missing_block(provider: str) -> str | None:
+    """Why ``provider`` has no settings block for its role models, or ``None`` when it has one.
+
+    A declared field of ``LLMConfig`` always has one; a registered provider has
+    one when its adapter declares a settings model.
+    """
+    from maljan.core.config import LLMConfig
+
+    if provider in LLMConfig.model_fields:
+        return None
+    facts = facts_of(provider)
+    if facts is LLMProvider or facts.settings_model is not None:
+        return None
+    return _no_block(provider)
+
+
+def _no_block(provider: str) -> str:
+    return (
+        f"the {provider} provider keeps no settings block with expert_model and judge_model "
+        f"(llm.{provider}), so its role models cannot be read"
+    )
 
 
 def role_block_problem(settings: Any) -> str | None:
@@ -385,7 +414,4 @@ def role_block_problem(settings: Any) -> str | None:
     block = facts_of(provider).settings_block(settings)
     if hasattr(block, "expert_model") and hasattr(block, "judge_model"):
         return None
-    return (
-        f"the {provider} provider keeps no settings block with expert_model and judge_model "
-        f"(llm.{provider}), so its role models cannot be read"
-    )
+    return _no_block(provider)

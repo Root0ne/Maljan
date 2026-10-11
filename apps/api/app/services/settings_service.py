@@ -298,8 +298,11 @@ class SettingsService:
                 and entry.choices is not None
                 and changes[key] is not None
                 and changes[key] != stored.get(key)
-                and str(changes[key]).strip().lower() not in entry.choices
+                and changes[key] not in entry.choices
             ):
+                # Exactly as the registry spells it: a value that differs in
+                # case or spacing names no provider when a job is built, so it
+                # is refused here rather than stored for every job to fail on.
                 # A choice a registry holds (a memory backend, say) is checked
                 # here, where it is saved, rather than wherever the settings
                 # are read: a stored id whose package later breaks still loads.

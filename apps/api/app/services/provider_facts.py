@@ -43,7 +43,13 @@ def _llm_choices() -> tuple[dict[str, str], dict[str, str], dict[str, dict[str, 
             "credential_keys": credential
             + [f"core.{key}" for key in provider.legacy_credential_keys],
             "base_url_key": prefix + provider.base_url_leaf if provider.base_url_leaf else None,
-            "guide_keys": [prefix + leaf for leaf in provider.guide_leaves],
+            # Up front, then folded under "Advanced": the meaning both lists
+            # have on every provider selector.
+            "guide_keys": [
+                prefix + leaf
+                for leaf in provider.guide_leaves
+                if leaf not in provider.guide_advanced_leaves
+            ],
             "guide_advanced_keys": [prefix + leaf for leaf in provider.guide_advanced_leaves],
             "model_keys": [prefix + "expert_model", prefix + "judge_model"],
             "agent_base_url": bool(provider.supports_agent_base_url),

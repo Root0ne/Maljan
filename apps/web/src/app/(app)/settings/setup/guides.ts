@@ -143,7 +143,7 @@ const LLM_GUIDE: GuideDef = {
           facts.hosted === false
             ? `Where the ${choiceTitle(ctx.schema, LLM_SELECTOR, provider)} server listens.`
             : "The key is stored on the server and never shown again.",
-        keys: facts.guide_keys ?? [],
+        keys: [...(facts.guide_keys ?? []), ...(facts.guide_advanced_keys ?? [])],
         advancedKeys: facts.guide_advanced_keys ?? [],
         // The provider may only be staged at this point, and these keys are
         // gated on the *stored* one; the guide has already narrowed them, so

@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import SecretStr
 
 from maljan.core.config import GeminiConfig, Settings
@@ -99,6 +98,10 @@ class GeminiProvider(LLMProvider):
         Returns:
             A ChatGoogleGenerativeAI instance.
         """
+        # Loaded here, not with the module: reading this adapter's facts (the
+        # settings catalogue, a save's validation) never needs the client.
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
         api_key = self._config.llm.gemini.api_key
         if not api_key:
             raise LLMError(
