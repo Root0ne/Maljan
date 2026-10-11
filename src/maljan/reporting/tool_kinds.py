@@ -28,27 +28,13 @@ from collections.abc import Iterable, Mapping
 from functools import cache
 from typing import Any
 
+from maljan.core import declared_reading
 from maljan.core.builtin_declarations import BUILDER_OF_KIND, CONSUMER_KINDS
 from maljan.core.tool_declarations import SourceRef, ToolDeclarations, ToolFacts, renamed_tool
 from maljan.reporting import legacy_tool_names as legacy
 
-# The declarations in force, held with the settings object they were built
-# from; and, per kind, the names its tools' hits carry, held with those.
-_held: list[tuple[Any, ToolDeclarations]] = []
-_memo: list[tuple[ToolDeclarations, dict[str, frozenset[str]]]] = []
-
 # A technique id as an ATT&CK label carries it, written as ATT&CK writes it.
 _TECHNIQUE_ID = re.compile(r"\bT\d{4}(?:\.\d{3})?\b")
-
-
-def declarations() -> ToolDeclarations:
-    """The declarations in force: built from the process's settings, rebuilt when they change."""
-    from maljan.core.config import get_settings
-
-    settings = get_settings()
-    if not _held or _held[0][0] is not settings:
-        _held[:] = [(settings, ToolDeclarations.from_settings(settings))]
-    return _held[0][1]
 
 
 def tool_of(entry: Any) -> str:
@@ -69,31 +55,42 @@ def source_of(entry: Any) -> SourceRef | None:
     return ToolDeclarations.source_of(entry)
 
 
-def facts_of(entry: Any, tool: str | None = None) -> ToolFacts | None:
-    """The declaration an entry's tool is read by.
+def stored(entry: Any) -> bool:
+    """Whether an entry, index row or captured output carries the facts its entry stored."""
+    return declared_reading.has_stored_facts(entry)
 
-    By the entry's recorded source and its tool together; for an entry with no
-    source, the shipped declaration of the built-in tool of that name, which
-    is what such an entry's tool was. ``tool`` overrides the name read from
-    the entry.
+
+def read_by_name(entry: Any) -> bool:
+    """Whether an entry is read by the legacy tables: it recorded no source and no facts."""
+    return not stored(entry) and source_of(entry) is None
+
+
+def facts_of(entry: Any, tool: str | None = None) -> ToolFacts | None:
+    """The facts an entry's tool declared, as the entry stored them when it was written.
+
+    Read through ``core.declared_reading`` from the record the entry (or the
+    index row or captured output it was copied onto) carries, never from the
+    reading process's settings. An entry with a source and no record reads as
+    an undeclared tool; one with no source and no record by the shipped facts
+    of the built-in tool of its exact name, as the report always read it.
+    ``tool`` names the tool for that reading in place of the entry's own.
     """
-    name = tool if tool is not None else tool_of(entry)
-    ref = source_of(entry)
-    if ref is None:
-        return legacy.builtin_facts(name)
-    return declarations().declaration_for((ref, name))
+    if stored(entry):
+        return declared_reading.facts_of(entry)
+    if source_of(entry) is None:
+        return legacy.builtin_facts(tool if tool is not None else tool_of(entry))
+    return None
 
 
 def declared_facts(entry: Any) -> ToolFacts | None:
-    """The declaration of an entry that recorded its source; ``None`` for one that did not.
+    """The stored facts of an entry; ``None`` for one read by the legacy tables.
 
     For a reader that reads declared paths only where a declaration said
     them, and an entry with no source the way it always read it.
     """
-    ref = source_of(entry)
-    if ref is None:
+    if read_by_name(entry):
         return None
-    return declarations().declaration_for((ref, tool_of(entry)))
+    return facts_of(entry)
 
 
 @cache
@@ -172,17 +169,19 @@ def consumer_kinds_in_order(consumer: str) -> tuple[str, ...]:
 
 
 def is_of(entry: Any, consumer: str, tool: str | None = None) -> bool:
-    """Whether a consumer reads this entry: by its declared kind, or by its legacy table."""
+    """Whether a consumer reads this entry: by its stored kind, or by its legacy table."""
     name = tool if tool is not None else tool_of(entry)
+    if stored(entry):
+        return kind_of(entry) in consumer_kinds(consumer)
     if source_of(entry) is None:
         return legacy.in_table(consumer, name)
-    return kind_of(entry, name) in consumer_kinds(consumer)
+    return False
 
 
 def rank_in(entry: Any, consumer: str) -> int:
     """Where a consumer that lists tools in an order puts an entry: its kind's place, or last."""
-    if source_of(entry) is None:
-        return legacy.rank(consumer, tool_of(entry))
+    if not stored(entry) and source_of(entry) is None:
+        return stored_rank(consumer, tool_of(entry))
     order = consumer_kinds_in_order(consumer)
     kind = kind_of(entry)
     return order.index(kind) if kind in order else len(order)
@@ -190,8 +189,8 @@ def rank_in(entry: Any, consumer: str) -> int:
 
 def builder_of(entry: Any) -> str | None:
     """The name of the section builder an entry is drawn with, or ``None`` for the generic block."""
-    if source_of(entry) is None:
-        return legacy.BUILDERS.get(tool_of(entry))
+    if read_by_name(entry):
+        return stored_builder_of(tool_of(entry))
     return BUILDER_OF_KIND.get(kind_of(entry))
 
 
@@ -200,8 +199,8 @@ def shown_by_name(section: str, output: Any) -> bool | None:
 
     ``None`` for an output that recorded its source, which is read by kind.
     """
-    if source_of(output) is None:
-        return legacy.section_hinted(section, tool_of(output))
+    if read_by_name(output):
+        return stored_section_hint(section, tool_of(output))
     return None
 
 
@@ -210,28 +209,21 @@ def looked_at_the_file_by_name(entry: Any) -> bool | None:
 
     ``None`` for an entry that recorded its source, which is read by kind.
     """
-    if source_of(entry) is None:
-        return legacy.looked_at_the_file(tool_of(entry))
+    if read_by_name(entry):
+        return stored_looked_at_the_file(tool_of(entry))
     return None
 
 
-def sources_of_kind(kind: str) -> frozenset[str]:
-    """The names the tools of ``kind`` record their technique hits under, legacy ones included.
+def hit_of_kind(hit: Mapping[str, Any], kind: str) -> bool:
+    """Whether a technique hit came from a tool of ``kind``.
 
-    A tool's declared corroboration name (``ToolFacts.source``), else its own
-    name, for every declared tool of the kind; and the names a stored report's
-    hits of that kind carry. Held with the declarations it was read from.
+    A hit records its tool's kind when it is projected (``kind``); a hit of a
+    report stored before is read by the name it was recorded under.
     """
-    held = declarations()
-    if not _memo or _memo[0][0] is not held:
-        # Held beside the declarations it was read from, never by an address
-        # a later object could take.
-        _memo[:] = [(held, {})]
-    memo = _memo[0][1]
-    if kind not in memo:
-        named = {facts.source or tool for _ref, tool, facts in held.tools_of_kind(kind)}
-        memo[kind] = frozenset(named | stored_hit_sources(kind))
-    return memo[kind]
+    recorded = str(hit.get("kind") or "")
+    if recorded:
+        return recorded == kind
+    return str(hit.get("source") or "") in stored_hit_sources(kind)
 
 
 def stored_hit_sources(kind: str) -> set[str]:
@@ -246,8 +238,8 @@ def recovering_facts(entry: Any) -> ToolFacts | None:
     tool of its name, a server's renamed tool (``analysis__floss``) read
     without its prefix, as before.
     """
-    if source_of(entry) is None:
-        return legacy.builtin_facts(tool_of(entry).rsplit("__", 1)[-1])
+    if read_by_name(entry):
+        return stored_facts_by_name(tool_of(entry).rsplit("__", 1)[-1])
     return facts_of(entry)
 
 
@@ -258,16 +250,41 @@ def recovery_tool(entry: Any, facts: ToolFacts) -> tuple[str, str, str]:
     recorded its source; for one that did not, the tool such a record always
     named and no kind, so it is written as before.
     """
-    if source_of(entry) is None:
+    if read_by_name(entry):
         return stored_tool_of_kind(facts.kind), "", ""
     return tool_of(entry), facts.kind, facts.display_name
 
 
 def stated_name(entry: Any, facts: ToolFacts) -> str:
     """The name a partial reason gives an entry's tool: its display name, or the stored word."""
-    if source_of(entry) is None:
+    if read_by_name(entry):
         return stored_word_of_kind(facts.kind)
     return facts.display_name or tool_of(entry)
+
+
+def stored_builder_of(tool: str) -> str | None:
+    """The section builder a source-less entry of ``tool`` was drawn with."""
+    return legacy.BUILDERS.get(tool)
+
+
+def stored_section_hint(section: str, tool: str) -> bool:
+    """Whether a source-less captured output of ``tool`` was shown to ``section``."""
+    return legacy.section_hinted(section, tool)
+
+
+def stored_looked_at_the_file(tool: str) -> bool:
+    """Whether the report counted a source-less entry of ``tool`` as one that read the file."""
+    return legacy.looked_at_the_file(tool)
+
+
+def stored_facts_by_name(tool: str) -> ToolFacts | None:
+    """The shipped facts of the built-in tool named ``tool``, for a source-less entry."""
+    return legacy.builtin_facts(tool)
+
+
+def stored_rank(consumer: str, tool: str) -> int:
+    """Where a consumer's fixed order listed ``tool`` (a source-less entry)."""
+    return legacy.rank(consumer, tool)
 
 
 def stored_tool_of_kind(kind: str) -> str:
@@ -302,7 +319,7 @@ def sweeps_the_strings(row: Any, named: str) -> bool:
     By its index row's declared kind when it recorded a source; else by its
     tool's name (``named``: a section's or the corpus's tool), as before.
     """
-    if row is not None and source_of(row) is not None:
+    if row is not None and not read_by_name(row):
         return is_of(row, "stix_renderer._STRING_SWEEP_TOOLS")
     return is_of({"tool": named}, "stix_renderer._STRING_SWEEP_TOOLS")
 

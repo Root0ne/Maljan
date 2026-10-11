@@ -278,6 +278,7 @@ class MalwareReportBuilder:
                 truncated=entry.truncated,
                 repeated_of=entry.repeated_of or None,
                 source=entry.source,
+                facts=entry.facts,
             )
             for entry in self.evidence_ledger
         ]

@@ -422,7 +422,7 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
         rule_hits = [
             h
             for h in report.static.api_technique_hits
-            if str(h.get("source") or "") in tool_kinds.sources_of_kind("api_catalogue")
+            if tool_kinds.hit_of_kind(h, "api_catalogue")
         ]
         from maljan.tools.knowledge import RESOLVED_AT_RUNTIME
 

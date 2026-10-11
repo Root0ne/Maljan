@@ -206,7 +206,7 @@ def _capability_rule_hit(hit: dict[str, Any]) -> bool:
     A hit carries the corroboration name of the tool that recorded it
     (``ToolFacts.source``); every tool declaring that kind names its own.
     """
-    return str(hit.get("source") or "") in tool_kinds.sources_of_kind("capability_rules")
+    return tool_kinds.hit_of_kind(hit, "capability_rules")
 
 
 def _is_sandbox_status(row: Any) -> bool:

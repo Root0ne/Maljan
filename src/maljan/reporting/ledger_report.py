@@ -935,7 +935,7 @@ def _reputation_counts(entry: LedgerEntry, data: dict[str, Any]) -> tuple[Any, A
     of the answer or under its ``data`` object, as the report always read
     them, for one that did not.
     """
-    if tool_kinds.source_of(entry) is not None:
+    if not tool_kinds.read_by_name(entry):
         facts = tool_kinds.facts_of(entry)
         declared = facts.reputation if facts is not None else None
         if declared is None:

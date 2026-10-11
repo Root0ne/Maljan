@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 
 from maljan.core.config import Settings
+from maljan.core.declared_reading import facts_record
 from maljan.core.tool_declarations import ToolDeclarations
 from maljan.reporting import tool_kinds
 from maljan.reporting.evidence_bundles import _SECTION_KINDS, _filter_tool_outputs, bundle_for
@@ -80,6 +81,12 @@ SCANNER_TOOLS: dict[str, dict[str, Any]] = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _forget_the_held_declarations() -> Iterator[None]:
+    yield
+    _HELD.clear()
+
+
 @pytest.fixture
 def declared(monkeypatch: pytest.MonkeyPatch) -> Iterator[ToolDeclarations]:
     settings = Settings.model_validate(
@@ -94,12 +101,22 @@ def declared(monkeypatch: pytest.MonkeyPatch) -> Iterator[ToolDeclarations]:
         }
     )
     held = ToolDeclarations.from_settings(settings)
-    monkeypatch.setattr(tool_kinds, "declarations", lambda: held)
+    _HELD[:] = [held]
     yield held
 
 
 def _report(**over: Any) -> MalwareReport:
     return MalwareReport(identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)), **over)
+
+
+# The declarations the invented servers' entries are written under. An entry
+# stores its tool's facts when it is written (``core.declared_reading``), and
+# the report reads only those: nothing here reads the process's settings.
+_HELD: list[ToolDeclarations] = []
+
+
+def _facts(source: str, tool: str) -> dict[str, Any] | None:
+    return facts_record(source, tool, declared=_HELD[0]) if _HELD else None
 
 
 def _output(source: str, tool: str, n: int = 0) -> dict[str, Any]:
@@ -111,11 +128,12 @@ def _output(source: str, tool: str, n: int = 0) -> dict[str, Any]:
         "output": f"answer of {tool}",
         "seq": n,
         "source": source,
+        "facts": _facts(source, tool),
     }
 
 
 def _entry(n: int, tool: str, answer: Any, source: str | None) -> Any:
-    return build_entry(
+    entry = build_entry(
         entry_id=f"ev_{n:04d}",
         seq=n,
         agent="static",
@@ -125,6 +143,9 @@ def _entry(n: int, tool: str, answer: Any, source: str | None) -> Any:
         output=json.dumps(answer),
         source=source,
     )
+    if source is not None:
+        entry.facts = _facts(source, tool)
+    return entry
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +216,7 @@ def test_a_declared_report_section_routes_a_tool_of_any_kind(
         }
     )
     held = ToolDeclarations.from_settings(settings)
-    monkeypatch.setattr(tool_kinds, "declarations", lambda: held)
+    _HELD[:] = [held]
     outputs = [_output("mcp:odd", "notes")]
     assert _received("ransom_note", outputs) == {"notes"}
     assert _received("configuration", outputs) == set()
@@ -263,7 +284,7 @@ def test_an_operator_tool_of_a_built_in_kind_in_another_shape_is_still_reported(
         }
     )
     held = ToolDeclarations.from_settings(settings)
-    monkeypatch.setattr(tool_kinds, "declarations", lambda: held)
+    _HELD[:] = [held]
     sections = build_sections([_entry(1, "who", {"elsewhere": "a thing"}, "mcp:mine")])
     assert any("ev_0001" in s.evidence_ids for s in sections)
 
@@ -284,7 +305,7 @@ def test_building_an_operator_tool_s_sections_is_linear(monkeypatch: pytest.Monk
         }
     )
     held = ToolDeclarations.from_settings(settings)
-    monkeypatch.setattr(tool_kinds, "declarations", lambda: held)
+    _HELD[:] = [held]
     _operator_build_seconds(200)
     small = min(_operator_build_seconds(2_000) for _ in range(2))
     large = min(_operator_build_seconds(20_000) for _ in range(2))
@@ -303,9 +324,10 @@ def test_an_invented_rule_scanner_s_hits_carry_its_declared_name(
             "name": "resolve by hash",
             "matched_apis": ["linking/runtime"],
             "source": "myrules",
+            "kind": "capability_rules",
         }
     ]
-    assert "myrules" in tool_kinds.sources_of_kind("capability_rules")
+    assert tool_kinds.hit_of_kind(static.api_technique_hits[0], "capability_rules")
 
 
 # ---------------------------------------------------------------------------
@@ -366,3 +388,123 @@ def test_an_index_row_carries_the_source_only_when_recorded() -> None:
     assert "source" not in EvidenceIndexRow(id="ev_0001", tool="strings").model_dump()
     row = EvidenceIndexRow(id="ev_0001", tool="strings", source="pack")
     assert row.model_dump()["source"] == "pack"
+
+
+# ---------------------------------------------------------------------------
+# A re-render reads what the worker read
+# ---------------------------------------------------------------------------
+
+
+def _operator_settings() -> Settings:
+    return Settings.model_validate(
+        {
+            "mcp": {
+                "servers": {
+                    "myrep": {
+                        "command": "x",
+                        "tool_facts": {
+                            "lookup_hash": {
+                                "kind": "file_reputation",
+                                "reputation": {
+                                    "service": "AcmeIntel",
+                                    "stats": "/stats",
+                                    "malicious": "/stats/malicious",
+                                },
+                                "display_name": "AcmeIntel",
+                            }
+                        },
+                    },
+                    "myrev": {"command": "y", "tool_facts": REVERSER_TOOLS},
+                    "myscan": {"command": "z", "tool_facts": SCANNER_TOOLS},
+                }
+            }
+        }
+    )
+
+
+def _rendered(report_json: str) -> tuple[str, str, list[str], list[str]]:
+    from maljan.reporting.renderers.html import HtmlRenderer
+    from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+    report = MalwareReport.model_validate_json(report_json)
+    markdown = MarkdownRenderer().render(report)
+    html = HtmlRenderer().render(MalwareReport.model_validate_json(report_json), nonce="fixed")
+    bundle = bundle_for("command_and_control", report, report.technical_evidence)
+    figures = [f.caption for f in build_code_listings(report)]
+    return markdown, html, sorted(o["tool"] for o in bundle["tool_outputs"]), figures
+
+
+def test_a_run_with_an_operator_server_renders_the_same_where_its_settings_are_absent() -> None:
+    from maljan.core import declared_reading
+    from maljan.core.config import get_settings, install_settings
+    from maljan.reporting.models import EvidenceIndexRow
+
+    previous = get_settings()
+    # Written in the worker, under the operator's settings: each entry stores
+    # its tool's facts, and the index rows and captured outputs carry them.
+    install_settings(_operator_settings())
+    declared_reading.forget()
+    try:
+        ledger = [
+            build_entry(
+                entry_id="ev_0001",
+                seq=1,
+                agent="pipeline",
+                tool="lookup_hash",
+                args={},
+                server="myrep",
+                output=json.dumps({"stats": {"malicious": 52, "undetected": 23}}),
+                source="mcp:myrep",
+            ),
+            build_entry(
+                entry_id="ev_0002",
+                seq=2,
+                agent="static",
+                tool="pseudo_c",
+                args={},
+                server="myrev",
+                output="int beacon(void) { return 1; }",
+                source="mcp:myrev",
+            ),
+            build_entry(
+                entry_id="ev_0003",
+                seq=3,
+                agent="static",
+                tool="match_rules",
+                args={},
+                server="myscan",
+                output=json.dumps({"hits": [{"name": "c2", "area": "comm", "ttp": "T1071"}]}),
+                source="mcp:myscan",
+            ),
+        ]
+        assert all(entry.facts and entry.facts.get("kind") for entry in ledger)
+        report = _report(
+            sections=build_sections(ledger),
+            evidence_index=[
+                EvidenceIndexRow(
+                    id=e.id, agent=e.agent, tool=e.tool, source=e.source, facts=e.facts
+                )
+                for e in ledger
+            ],
+            technical_evidence={"static": [e.to_captured().model_dump() for e in ledger]},
+        )
+        stored = report.model_dump_json()
+        in_the_worker = _rendered(stored)
+    finally:
+        install_settings(previous)
+        declared_reading.forget()
+    # Re-rendered by the API, which has none of the operator's servers.
+    install_settings(Settings())
+    declared_reading.forget()
+    try:
+        in_the_api = _rendered(stored)
+    finally:
+        install_settings(previous)
+        declared_reading.forget()
+
+    assert in_the_api == in_the_worker
+    markdown, _html, outputs, figures = in_the_api
+    assert "lookup_hash" in markdown
+    assert "no reputation lookup in this run" not in markdown
+    assert "pseudo_c" in outputs
+    assert figures == ["Decompiled function"]

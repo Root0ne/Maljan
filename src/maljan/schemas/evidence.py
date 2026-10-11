@@ -335,6 +335,7 @@ class LedgerEntry(BaseModel):
             output=self.output,
             seq=max(0, self.seq - 1),
             source=self.source,
+            facts=self.facts,
         )
 
     @classmethod
@@ -356,6 +357,7 @@ class LedgerEntry(BaseModel):
             structured=parse_structured(captured.output),
             seq=seq,
             source=captured.source,
+            facts=captured.facts,
         )
 
 

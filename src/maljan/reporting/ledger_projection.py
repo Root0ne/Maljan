@@ -402,16 +402,15 @@ def static_from_ledger(ledger: list[LedgerEntry]) -> StaticAnalysis | None:
             namespace = _row_text(row, facts.values.get("namespace", ""))
             rule = _row_text(row, facts.values.get("rule", ""))
             for tid in tool_kinds.row_technique_ids(row, facts):
-                static.api_technique_hits.append(
-                    {
-                        "technique_id": tid,
-                        "name": rule,
-                        # No confidence: a rule matched, which is a
-                        # presence and not a probability.
-                        "matched_apis": [namespace] if namespace else [],
-                        "source": hit_source,
-                    }
-                )
+                hit: dict[str, Any] = {
+                    "technique_id": tid,
+                    "name": rule,
+                    # No confidence: a rule matched, which is a
+                    # presence and not a probability.
+                    "matched_apis": [namespace] if namespace else [],
+                    "source": hit_source,
+                }
+                static.api_technique_hits.append(_with_kind(hit, entry, facts))
 
     # An analyst's table of imports or IOCs is not read here. The import table
     # and the string table are what the tools returned, printed as measured,
@@ -465,7 +464,7 @@ def static_from_ledger(ledger: list[LedgerEntry]) -> StaticAnalysis | None:
                 row_hit["resolved_apis"] = matched_at_runtime
             else:
                 row_hit.pop("resolved_apis", None)
-            static.api_technique_hits.append(row_hit)
+            static.api_technique_hits.append(_with_kind(row_hit, entry, tool_kinds.facts_of(entry)))
         if rows:
             seen = True
             if imported_rows:
@@ -571,6 +570,17 @@ def _technique_id(value: Any) -> str:
 # The kinds whose answers are rules that matched the sample and name the
 # technique each one implements (``CONSUMER_KINDS``).
 _TECHNIQUE_HIT_KINDS = tuple(tool_kinds.consumer_kinds_in_order("ledger_projection.technique_hits"))
+
+
+def _with_kind(hit: dict[str, Any], entry: Any, facts: Any) -> dict[str, Any]:
+    """A technique hit with the kind of the tool that recorded it (``kind``).
+
+    What the report reads a hit's tool by; a hit from an entry read by its
+    name is written as it always was, without one.
+    """
+    if facts is not None and not tool_kinds.read_by_name(entry):
+        hit["kind"] = facts.kind
+    return hit
 
 
 def _row_text(row: dict[str, Any], path: str) -> str:

@@ -62,6 +62,14 @@ class CapturedToolOutput(BaseModel):
             "report reads the output's kind by; None where none was recorded."
         ),
     )
+    facts: dict | None = Field(
+        None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "The facts the entry stored when it was written (LedgerEntry.facts), which the "
+            "report reads the output's kind and report sections by; None where none was stored."
+        ),
+    )
 
 
 def _symbol_from_args(args: dict) -> str | None:

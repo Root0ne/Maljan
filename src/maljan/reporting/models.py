@@ -1233,6 +1233,11 @@ class EvidenceIndexRow(BaseModel):
     # sources were recorded, and then left out of the dump, so a stored report
     # reads and dumps as it did.
     source: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    # The facts the entry stored when it was written (``LedgerEntry.facts``),
+    # which the report reads the tool's kind, display name and paths by, so a
+    # re-render reads what the worker read (``core.declared_reading``). ``None``
+    # on a row of an entry that stored none, and then left out of the dump.
+    facts: dict[str, Any] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 # ---------------------------------------------------------------------------

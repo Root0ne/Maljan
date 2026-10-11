@@ -26,7 +26,6 @@ equal, so a built-in declaration that changed a kind fails there first.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from functools import cache
 from typing import Any
 
 from maljan.core.tool_declarations import ToolFacts
@@ -36,28 +35,15 @@ from maljan.core.tool_declarations import ToolFacts
 # ---------------------------------------------------------------------------
 
 
-@cache
 def _builtin_by_name() -> Mapping[str, ToolFacts]:
-    """Every built-in tool's shipped declaration, by its bare name.
+    """Every built-in tool's shipped facts by name (``declared_reading.shipped_by_name``).
 
-    No two built-in sources declare one name with two kinds or two readers
-    (``tests/unit/reporting/test_an_entry_without_a_source_is_read_as_before.py``),
-    so the name alone gives the declaration a stored entry's tool shipped with.
+    Read by the exact name a stored entry holds: the report's tables never
+    took a server's prefix off a name.
     """
-    from maljan.core import builtin_declarations as shipped
+    from maljan.core.declared_reading import shipped_by_name
 
-    blocks: list[Mapping[str, Any]] = [
-        *(shipped.server_declaration(key) for key in shipped.builtin_server_names()),
-        *(shipped.provider_declaration(key) for key in ("ghidra", "r2", "cape2_mcp")),
-    ]
-    found: dict[str, ToolFacts] = {}
-    for cfg in shipped.in_process_declarations().values():
-        for name, facts in cfg.tool_facts.items():
-            found.setdefault(name, facts)
-    for block in blocks:
-        for name, raw in (block.get("tool_facts") or {}).items():
-            found.setdefault(name, ToolFacts.model_validate(raw))
-    return found
+    return shipped_by_name()
 
 
 def builtin_facts(tool: str) -> ToolFacts | None:
@@ -184,7 +170,10 @@ MARKDOWN_SANDBOX_TOOLS = ("sandbox_", "pcap_summary")
 SANDBOX_STATUS_TOOL = "sandbox_status"
 REPUTATION_TOOLS = ("get_file_report", "check_hash", "file_report", "hash_lookup")
 # The technique-hit source a stored report's hits of each kind were recorded under.
-HIT_SOURCES: dict[str, tuple[str, ...]] = {"capability_rules": ("capa",)}
+HIT_SOURCES: dict[str, tuple[str, ...]] = {
+    "capability_rules": ("capa",),
+    "api_catalogue": ("api_capability",),
+}
 
 # ``renderers.stix_renderer``: the recovering tools, the static decoder, the
 # string sweep, and the two network records.
