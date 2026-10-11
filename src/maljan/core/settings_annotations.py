@@ -1161,11 +1161,12 @@ ANNOTATIONS: dict[str, Annotation] = {
     "triage.reputation": {
         "title": "Triage reputation lookup",
         "description": (
-            "'auto' asks the enabled reputation server once for the sample hash: "
-            "VirusTotal's own server when it is enabled, else the threat-intel "
-            "sidecar. 'off' records a skipped entry instead. The call goes through "
-            "the tool server like any agent's call and is recorded under that "
-            "server."
+            "'auto' asks one enabled reputation server once for the sample hash: "
+            "the first server whose tool declares kind 'reputation' and a hash "
+            "argument, lowest declared rank first (VirusTotal's own server before "
+            "the threat-intel sidecar, as shipped). 'off' records a skipped entry "
+            "instead. The call goes through the tool server like any agent's call "
+            "and is recorded under that server."
         ),
         "subgroup": "Triage pack",
     },

@@ -250,15 +250,19 @@ of plain lines.
 
 ## Reputation
 
-A run asks one service about the sample's hash: `get_file_report` on
-VirusTotal's own MCP server when it is configured, `check_hash` on the
-threat-intel sidecar when it is not. The answer is drawn on IDENTITY, beside
-the hashes, under the name of the service that gave it — its engine counts, the
-labels the industry gives the file, and when it was first and last seen.
+A run asks one reputation service about the sample's hash: any server whose
+tool declares `kind: reputation` (VirusTotal's own MCP server before the
+threat-intel sidecar, with the shipped declarations; see
+[reputation lookups](/configuration/#what-a-server-declares-about-its-tools)). The answer is drawn on
+IDENTITY, beside the hashes, under the service's declared name — its engine
+counts, its labels, when it was first and last seen, and a link to the full
+report when the answer carried one.
 
-It is read from that service's ledger entry and from nothing else, so a
-service that is configured and was never asked, or asked and answered nothing,
-draws no section at all.
+It is read from the report's reputation record, which the lookup's
+declaration read from its ledger entry when the entry was written, and from
+nothing else, so a service that is configured and was never asked, or asked
+and answered nothing, draws no section at all. A report stored before the
+records is read from its ledger entry the way the console always read it.
 
 ## A row that says nothing
 

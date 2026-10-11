@@ -222,6 +222,7 @@ export default function AgentFormStep({
         errors={ctx.errors}
         entryKey={DEFINITIONS_KEY}
         sections={[section]}
+        capabilityServers={entry?.capability_servers ?? {}}
       />
     </div>
   );

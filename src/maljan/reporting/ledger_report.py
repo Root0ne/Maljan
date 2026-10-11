@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Any
 
 from maljan.agents.output_shortening import BOOKKEEPING_KEY, our_key_in
 from maljan.analysis.technique_ids import says_no_technique, sigma_technique_ids
+from maljan.core.reputation import reputation_of
 from maljan.core.tool_declarations import first, select
 from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import (
@@ -914,37 +915,20 @@ def _reputation(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> Non
 
     The service answers the counts nested inside its payload, and the generic
     block flattens that into one cell a reader has to scroll to; the count is
-    the one fact of the lookup a report states.
+    the one fact of the lookup a report states. The counts are the record the
+    lookup's declaration read from the answer when the entry was written
+    (``core.reputation``), from any server.
     """
     _generic_kv(acc, entry, data)
-    stats, engines = _reputation_counts(entry, data)
+    answer = reputation_of(entry)
+    if answer is None:
+        return
     section = acc.get(f"tool_{entry.tool}", entry.tool.replace("_", " ").capitalize(), "kv")
-    if isinstance(stats, dict):
-        for name in ("malicious", "suspicious", "undetected", "harmless"):
-            if isinstance(stats.get(name), int):
-                acc.add_row(section, [f"engines {name}", str(stats[name])])
-    if isinstance(engines, int):
-        acc.add_row(section, ["engines", str(engines)])
-
-
-def _reputation_counts(entry: LedgerEntry, data: dict[str, Any]) -> tuple[Any, Any]:
-    """The engine counts object and the engine count of a reputation answer.
-
-    Where the lookup's declaration says they sit (``reputation.stats``,
-    ``reputation.engines``) for an entry that recorded its source; at the top
-    of the answer or under its ``data`` object, as the report always read
-    them, for one that did not.
-    """
-    if not tool_kinds.read_by_name(entry):
-        facts = tool_kinds.facts_of(entry)
-        declared = facts.reputation if facts is not None else None
-        if declared is None:
-            return None, None
-        return first(data, declared.stats), first(data, declared.engines)
-    body = data.get("data") if isinstance(data.get("data"), dict) else data
-    stats = body.get("last_analysis_stats") if isinstance(body, dict) else None
-    coverage = body.get("coverage") if isinstance(body, dict) else None
-    return stats, coverage.get("engines") if isinstance(coverage, dict) else None
+    for name in ("malicious", "suspicious", "undetected", "harmless"):
+        if name in answer.stats:
+            acc.add_row(section, [f"engines {name}", str(answer.stats[name])])
+    if answer.engines is not None:
+        acc.add_row(section, ["engines", str(answer.engines)])
 
 
 # The purpose-built section builders, by name. Which one draws an entry is

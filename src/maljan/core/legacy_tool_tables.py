@@ -7,8 +7,7 @@ entry is read: an entry is read by its tool's declared kind
 facts the platform ships for its name, which are exactly these tables
 (``builtin_declarations.CONSUMER_KINDS``). The tables stay, verbatim as the
 consumers held them, so the tests can hold the declared reading to them tool by
-tool, and for the readers whose own group has not moved yet (the reputation
-tables, which the one reputation path replaces).
+tool.
 
 The guard ``tests/unit/test_the_reading_half_names_no_tool.py`` exempts this
 module and no other.
@@ -19,7 +18,8 @@ from __future__ import annotations
 # ``analysis.evidence_roots``: the tools whose fact is about the file as a whole.
 WHOLE_FILE_TOOLS = frozenset({"hashes", "identify_file", "signing_info"})
 # A third party's assessment of the whole file (a reputation lookup by hash);
-# the triage pack reads it too, until the one reputation path replaces it.
+# the triage pack and the run-state block read the same tables, as the record
+# of the reputation reading before the declared kind replaced them.
 FILE_ASSESSMENT_TOOLS = frozenset({"reputation", "get_file_report", "check_hash"})
 # The tools that answer what something is rather than read the sample.
 REFERENCE_TOOLS = frozenset(

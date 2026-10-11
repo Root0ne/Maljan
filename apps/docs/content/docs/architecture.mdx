@@ -405,9 +405,13 @@ a Mach-O, an APK — is not asked, so it yields no profile and no rule hit)
 and `lolbin_lookup` over the sandbox's command lines; the sandbox
 projections at summary level (processes, network, signatures, dropped
 files, channels) and `pcap_summary` when a capture was fetched; one reputation
-lookup on the sha256 (`get_file_report` on `virustotal` when it is enabled,
+lookup on the sha256 (the first enabled server's tool that declares
+`kind: reputation` and a hash argument, lowest declared rank first: with the
+shipped declarations `get_file_report` on `virustotal` when it is enabled,
 else `check_hash` on `threatintel`), made through the tool server exactly as
-an agent's call is and recorded under that server; `function_matches` when
+an agent's call is and recorded under that server, its answer read once
+through the tool's declared paths into the reputation record every reader
+reads; `function_matches` when
 the configured memory backend keeps a function-hash store and a provider that
 hashes functions is present; and, last, for a PE, `floss`: FLOSS's decoded, stack and tight
 strings, recovered by emulation (the sample is never executed) through the

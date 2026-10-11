@@ -25,8 +25,10 @@ The in-process calls go straight to ``maljan.tools``, the same code the
 analysis sidecar serves, rather than through a subprocess of it. The one
 network call — the reputation lookup — goes through the tool server exactly as
 an agent's call does, and is recorded under that server rather than under the
-pipeline, because which server a ledger entry came from is how the rest of the
-pipeline knows the question was asked.
+pipeline, so the ledger says which service was asked; the tool's declared kind
+(``reputation``) is how the rest of the pipeline knows the question was asked,
+and its answer is read once, through the tool's declared paths, into the
+record every reader reads (``core.reputation``).
 
 A PE's decoded strings come after every other tool. FLOSS runs through
 ``maljan.tools.emulated_strings`` — the function the sidecar's ``floss`` tool
@@ -84,7 +86,6 @@ the pack record, and the run-state block names it and the analysis server's
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -109,8 +110,8 @@ from maljan.analysis.ghidra_passes import (
 from maljan.analysis.pcap_summary import conversation_line
 from maljan.analysis.technique_ids import technique_ids_in
 from maljan.core.declared_reading import consumer_kinds, facts_of, kind_of
-from maljan.core.legacy_tool_tables import FILE_ASSESSMENT_TOOLS
 from maljan.core.logger import logger
+from maljan.core.reputation import ReputationRecord, is_lookup_entry, reputation_of
 from maljan.core.tool_declarations import PACK
 from maljan.extractors.sample_identity import ARCHIVE_FILE_TYPES, DOCUMENT_FILE_TYPES
 from maljan.pipeline.conditions import TriageFacts
@@ -154,7 +155,6 @@ __all__ = [
     "degradation_reason_for",
     "failure_reason",
     "is_pack_reason",
-    "malicious_count",
     "run_is_degraded",
     "reason_sentence",
     "pack_block",
@@ -292,10 +292,12 @@ _BEHAVIOUR_PLATFORM_BY_FORMAT: dict[str, str] = {
     "elf": "linux",
 }
 
-# How a reputation answer says how many engines flagged the hash. The
-# structured form is VirusTotal's own ``last_analysis_stats``; the prose form
-# is what the threat-intel sidecar writes ("55/70 detections").
-_DETECTIONS_RE = re.compile(r"\b(\d+)\s*/\s*\d+\s+detections?\b", re.IGNORECASE)
+# The pack's reputation step. A lookup it could not make is recorded under this
+# name (no enabled lookup, the budget already spent, the call itself raising),
+# and a lookup that was made and failed, whichever server's tool answered, is
+# this step's failure: ``triage.reputation_failed``, one sentence about the
+# lookup (``reason_sentence``).
+REPUTATION_STEP = "reputation"
 
 
 def failure_reason(tool: str) -> str:
@@ -379,18 +381,6 @@ def run_is_degraded(reasons: Sequence[str], informational: Sequence[str] = ()) -
     )
 
 
-# The reputation tools, whichever server answered: their failure is one
-# sentence, about the lookup. ``reputation`` is not a tool any server has: it
-# is what the pack records a lookup it could not make under — no enabled
-# server, the budget already spent, the call itself raising — so an entry
-# under that name never carries a service's answer. That is why the console's
-# own list of reputation tools has only the two real ones: an entry it would
-# draw an IDENTITY section from is always one of those.
-# The platform's one table of them (``legacy_tool_tables.FILE_ASSESSMENT_TOOLS``, until the
-# one reputation path replaces it); the evidence roots read the same kinds.
-_REPUTATION_TOOLS: frozenset[str] = FILE_ASSESSMENT_TOOLS
-
-
 def reason_sentence(reason: str) -> str:
     """A pack reason as a sentence for a prompt; any other reason as it is.
 
@@ -413,7 +403,7 @@ def reason_sentence(reason: str) -> str:
         )
     if tool == "pack":
         return "the triage pack itself failed before it finished"
-    if tool in _REPUTATION_TOOLS:
+    if tool == REPUTATION_STEP:
         return "the triage pack's reputation lookup did not answer"
     return f"the triage pack could not run {tool}"
 
@@ -513,44 +503,6 @@ class PackResult:
             "degradation_reasons": self.degradation_reasons,
             **({"floss": self.floss_schedule} if self.floss_schedule else {}),
         }
-
-
-def malicious_count(output: str) -> int | None:
-    """How many engines a reputation answer says flagged the hash, or ``None``.
-
-    ``None`` is the honest answer for a hash the service does not know, a
-    lookup that failed and an answer in a shape this does not read. Zero
-    means the service answered and counted nothing, which is a different
-    fact and the one a condition wants to tell apart.
-    """
-    text = (output or "").strip()
-    if not text:
-        return None
-    parsed: Any = None
-    if text[0] in "{[":
-        try:
-            parsed = json.loads(text)
-        except (ValueError, TypeError):
-            parsed = None
-    found = _stats_malicious(parsed)
-    if found is not None:
-        return found
-    match = _DETECTIONS_RE.search(text)
-    return int(match.group(1)) if match else None
-
-
-# How deep a server's answer is walked for one key. A reputation answer nests
-# its facts a handful of levels down; a walk with no bound is a walk a hostile
-# answer decides the length of.
-_WALK_DEPTH = 8
-
-
-def _stats_malicious(value: Any, depth: int = _WALK_DEPTH) -> int | None:
-    """``last_analysis_stats.malicious`` wherever it sits in a VirusTotal answer."""
-    stats = _find_key(value, "last_analysis_stats", depth)
-    if isinstance(stats, dict) and isinstance(stats.get("malicious"), int):
-        return int(stats["malicious"])
-    return None
 
 
 class _Pack:
@@ -893,14 +845,14 @@ class _Pack:
             return
         spent = self._over_budget()
         if spent is not None:
-            self._record_not_run("reputation", {"sha256": self.inputs.sha256}, spent)
+            self._record_not_run(REPUTATION_STEP, {"sha256": self.inputs.sha256}, spent)
             return
         try:
             entry = self.reputation(self.recorder)
         except Exception as exc:  # noqa: BLE001 — the lookup degrades, the pack goes on
             message = f"{type(exc).__name__}: {exc}"
             entry = self.recorder.record(
-                tool="reputation",
+                tool=REPUTATION_STEP,
                 args={"sha256": self.inputs.sha256},
                 server=PIPELINE,
                 source=PACK_SOURCE,
@@ -909,13 +861,17 @@ class _Pack:
                 error=message,
                 started_at=time.time(),
             )
-            self._failed("reputation", entry)
+            self._failed(REPUTATION_STEP, entry)
             return
         if not entry.ok:
             if entry.server != PIPELINE:
-                self._failed(entry.tool, entry)
+                self._failed(REPUTATION_STEP, entry)
             return
-        self.reputation_malicious = malicious_count(entry.output)
+        # The count the lookup's declaration read from its answer when the
+        # entry was written (``core.reputation``); ``None`` for an answer that
+        # gave none, which a condition tells apart from zero.
+        answer = reputation_of(entry)
+        self.reputation_malicious = answer.malicious if answer is not None else None
 
     def _function_matches(self) -> None:
         if self.function_matches is None:
@@ -2047,7 +2003,10 @@ def pack_block(entries: list[LedgerEntry], max_chars: int) -> str:
 
 def _pack_line(entry: LedgerEntry) -> str:
     """One entry as one line. Never raises: an unreadable answer is named as such."""
-    label = _GROUP_LABELS.get(entry.tool, entry.tool)
+    # A reputation lookup, from whichever server answered, reads as the pack's
+    # reputation step: answered, failed or not made.
+    lookup = is_lookup_entry(entry)
+    label = REPUTATION_STEP if lookup else _GROUP_LABELS.get(entry.tool, entry.tool)
     if not entry.ok and entry.tool in PASS_TOOLS:
         # A deobfuscation pass that did not run, or ran and broke, is one
         # ``no:`` line with the reason, as a pass that found nothing is.
@@ -2065,8 +2024,9 @@ def _pack_line(entry: LedgerEntry) -> str:
         return f"[{entry.id}] {label}: {verb} ({_short(entry.error or entry.output)})"
     data = entry.structured if isinstance(entry.structured, dict) else None
     render = _RENDERERS.get(entry.tool)
-    if entry.tool in ("get_file_report", "check_hash"):
-        return f"[{entry.id}] reputation: {_reputation_facts(entry)}"
+    answer = reputation_of(entry) if lookup else None
+    if answer is not None:
+        return f"[{entry.id}] {REPUTATION_STEP}: {_reputation_facts(entry, answer)}"
     if getattr(entry, "truncated", False) and not entry.output:
         # apply_budget dropped the result; "recorded" would read as one.
         return f"[{entry.id}] {label}: output dropped (evidence byte budget); call the tool for it"
@@ -3228,63 +3188,45 @@ def _function_matches(data: dict[str, Any]) -> str:
     return f"{text} (families {_names(families)})" if families else text
 
 
-def _reputation_facts(entry: LedgerEntry) -> str:
-    """What the reputation service said, as counts and labels.
+def _reputation_facts(entry: LedgerEntry, answer: ReputationRecord) -> str:
+    """What the reputation service said, as counts and labels, from its read record.
 
-    VirusTotal's answer is read for its engine counts and its popular threat
-    labels; the threat-intel sidecar answers in prose and the first sentence
-    of that is the fact. Neither is graded here.
+    The record is the answer as its lookup's declaration read it
+    (``core.reputation``), from any server. A structured answer that gave its
+    engine counts is stated in words with its labels and detection labels; any
+    other answer is the service's own text, with the count its declared
+    patterns found in it. Neither is graded here.
     """
-    service = "VirusTotal" if entry.server == "virustotal" else str(entry.server or "reputation")
-    data = entry.structured if isinstance(entry.structured, dict) else None
-    if data is not None:
-        stats = _find_key(data, "last_analysis_stats")
-        if isinstance(stats, dict):
-            total = sum(int(v) for v in stats.values() if isinstance(v, int))
-            # In words, never as a fraction. "0/75 malicious" is a score shape a
-            # model reads either way round: a benign control's summary turned
-            # it into "verified clean by 75/75 AV engines".
-            parts = [
-                f"{service}: {int(stats.get('malicious') or 0)} of {total} engines flag it "
-                "as malicious"
-            ]
-            labels: list[str] = []
-            classification = _find_key(data, "popular_threat_classification")
-            if isinstance(classification, dict):
-                label = classification.get("suggested_threat_label")
-                if label:
-                    labels.append(str(label))
-                for key in ("popular_threat_name", "popular_threat_category"):
-                    for row in classification.get(key) or []:
-                        value = row.get("value") if isinstance(row, dict) else row
-                        if value and str(value) not in labels:
-                            labels.append(str(value))
-            if labels:
-                parts.append(f"labels {_names(labels)}")
-            detections = _detection_labels(data)
-            if detections:
-                parts.append(detections)
-            return ", ".join(parts)
-    count = malicious_count(entry.output)
-    text = _short(entry.output)
+    service = answer.service or str(entry.server or REPUTATION_STEP)
+    if (isinstance(entry.structured, dict | list) or not entry.output) and answer.total is not None:
+        # In words, never as a fraction. "0/75 malicious" is a score shape a
+        # model reads either way round: a benign control's summary turned
+        # it into "verified clean by 75/75 AV engines".
+        parts = [
+            f"{service}: {int(answer.malicious or 0)} of {answer.total} engines flag it "
+            "as malicious"
+        ]
+        if answer.labels:
+            parts.append(f"labels {_names(answer.labels)}")
+        detections = _detection_labels(answer.detections)
+        if detections:
+            parts.append(detections)
+        return ", ".join(parts)
+    text = _short(entry.output or answer.summary)
+    count = answer.malicious
     return f"{service} {count} malicious ({text})" if count is not None else f"{service}: {text}"
 
 
-def _detection_labels(data: dict[str, Any]) -> str:
+def _detection_labels(labels: list[str]) -> str:
     """The answer's detection labels, with how many engines gave each.
 
-    VirusTotal's answer through its own MCP server carries ``detections``, one
-    result label per engine that detected the file, and no popular threat
-    classification. The labels are counted exactly as written, most engines
-    first and then in the order the answer lists them, every one of them whole
-    when the pack fits its room and otherwise as many, and as much of each, as
-    the pack's detail level allows, the rest counted; nothing is merged,
-    normalised or read for a family, which is the reader's to decide.
+    One result label per engine that detected the file, as the lookup's
+    declaration read them. The labels are counted exactly as written, most
+    engines first and then in the order the answer lists them, every one of
+    them whole when the pack fits its room and otherwise as many, and as much
+    of each, as the pack's detail level allows, the rest counted; nothing is
+    merged, normalised or read for a family, which is the reader's to decide.
     """
-    rows = _find_key(data, "detections")
-    if not isinstance(rows, list):
-        return ""
-    labels = [" ".join(str(row).split()) for row in rows if isinstance(row, str) and row.strip()]
     if not labels:
         return ""
     counts: dict[str, int] = {}
@@ -3302,25 +3244,6 @@ def _detection_labels(data: dict[str, Any]) -> str:
     if len(ranked) > len(shown):
         text += f" (+{len(ranked) - len(shown)} more distinct labels)"
     return text
-
-
-def _find_key(value: Any, key: str, depth: int = _WALK_DEPTH) -> Any:
-    """The first value under ``key`` within ``depth`` levels, or ``None``."""
-    if depth <= 0:
-        return None
-    if isinstance(value, dict):
-        if key in value:
-            return value[key]
-        for child in value.values():
-            found = _find_key(child, key, depth - 1)
-            if found is not None:
-                return found
-    elif isinstance(value, list):
-        for child in value:
-            found = _find_key(child, key, depth - 1)
-            if found is not None:
-                return found
-    return None
 
 
 # For the tools that answer ``reason`` beside their rows: whether the rows
@@ -3360,8 +3283,6 @@ _GROUP_LABELS: dict[str, str] = {
     STATUS_TOOL: "sandbox",
     "pcap_summary": "pcap",
     "reputation": "reputation",
-    "get_file_report": "reputation",
-    "check_hash": "reputation",
     "function_matches": "function matches",
     "floss": "decoded strings",
     "resolve_api_hashes": "resolved hashes",

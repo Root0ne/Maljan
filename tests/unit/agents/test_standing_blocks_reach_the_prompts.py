@@ -211,7 +211,7 @@ class TestTheJudgesPrompts:
                 reports={"static": "text"},
                 history=[],
                 isr_reports={},
-                ledger_servers={"virustotal"},
+                reputation_asked=True,
                 facts_block=FACTS,
                 run_state=RUN_STATE,
             )

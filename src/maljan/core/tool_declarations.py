@@ -437,18 +437,25 @@ class TechniqueField(BaseModel):
 
 
 class ReputationFacts(BaseModel):
-    """Where a reputation answer holds its counts and labels.
+    """Where a reputation answer holds its counts, labels, dates and link.
 
-    ``service`` is the name the answer is attributed to (empty: the server
-    key). ``stats`` names the object of engine counts; ``malicious`` and
-    ``total`` the two counts (an empty ``total`` is the sum of ``stats``'
-    whole-number values). ``labels`` are the paths of the threat labels, in the
-    order they are read; ``detections`` the list of per-engine result labels;
-    ``engines`` the engine count the service gives beside them.
+    ``service`` is the name the answer is attributed to (empty: the tool's
+    ``display_name``, else the server key). ``stats`` names the object of
+    engine counts; ``malicious``, ``suspicious`` and ``total`` the counts (an
+    empty ``total`` is the sum of ``stats``' whole-number values). ``labels``
+    are the paths of the threat labels, in the order they are read;
+    ``detections`` the list of per-engine result labels; ``engines`` the engine
+    count the service gives beside them. ``first_seen``, ``last_seen`` and
+    ``link`` are paths tried in order, the first that names a value giving it
+    (a date as an ISO-8601 text or whole seconds since the epoch, a link as an
+    ``http(s)`` URL). ``summary`` is the path of the service's own sentence
+    about the sample; empty, an answer written in prose is its own summary.
     ``text_patterns`` read an answer written in prose: regular expressions with
-    a ``malicious`` group and optionally a ``total`` group, each *searched* for
-    anywhere in the answer, the first pattern that finds a match giving the
-    counts.
+    a ``malicious`` group and optionally ``total`` and ``suspicious`` groups,
+    each *searched* for anywhere in the answer, the first pattern that finds a
+    match giving the counts. ``rank`` orders the lookups the triage pack may
+    ask: the lowest rank first, lookups of one rank in the order their servers
+    are configured.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -456,20 +463,28 @@ class ReputationFacts(BaseModel):
     service: str = ""
     stats: str = ""
     malicious: str = ""
+    suspicious: str = ""
     total: str = ""
     labels: tuple[str, ...] = ()
     detections: str = ""
     engines: str = ""
+    first_seen: tuple[str, ...] = ()
+    last_seen: tuple[str, ...] = ()
+    link: tuple[str, ...] = ()
+    summary: str = ""
     text_patterns: tuple[str, ...] = ()
+    rank: int = Field(default=100, ge=0)
 
-    @field_validator("stats", "malicious", "total", "detections", "engines")
+    @field_validator(
+        "stats", "malicious", "suspicious", "total", "detections", "engines", "summary"
+    )
     @classmethod
     def _paths_parse(cls, value: str) -> str:
         return _check_path(value)
 
-    @field_validator("labels")
+    @field_validator("labels", "first_seen", "last_seen", "link")
     @classmethod
-    def _label_paths_parse(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+    def _path_lists_parse(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return tuple(_check_path(v) for v in value)
 
     @field_validator("text_patterns")
@@ -483,14 +498,22 @@ class ReputationFacts(BaseModel):
                 )
         return value
 
-    def counts_in_text(self, text: str) -> tuple[int, int | None] | None:
-        """``(malicious, total)`` from the first text pattern that finds them, or ``None``."""
+    def counts_in_text(self, text: str) -> tuple[int, int | None, int | None] | None:
+        """``(malicious, total, suspicious)`` from the first text pattern that finds them.
+
+        ``None`` when no pattern finds a match; a group a pattern does not
+        have, or one that took part in no match, gives ``None``.
+        """
         for pattern in self.text_patterns:
             found = search_pattern(pattern, text)
             if found is not None:
                 groups = compile_pattern(pattern).groupindex
-                total = found.group("total") if "total" in groups else None
-                return int(found.group("malicious")), int(total) if total else None
+
+                def _group(name: str, held: Any = found, named: Any = groups) -> int | None:
+                    value = held.group(name) if name in named else None
+                    return int(value) if value else None
+
+                return int(found.group("malicious")), _group("total"), _group("suspicious")
         return None
 
 

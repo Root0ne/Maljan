@@ -51,11 +51,15 @@ class TestTheSeed:
         assert virustotal.SERVER_KEY in BUILTIN_SERVER_KEYS
         assert virustotal.SERVER_KEY in RESERVED_SERVER_KEYS
 
-    def test_the_network_analyst_the_judge_and_triage_reference_it(self) -> None:
-        definitions = Settings(_env_file=None).agents.definitions
+    def test_the_network_analyst_the_judge_and_triage_reach_it_by_capability(self) -> None:
+        from maljan.agents.composition import mcp_refs_for
+
+        settings = Settings(_env_file=None)
         ref = ToolRef(kind="mcp", server=virustotal.SERVER_KEY)
+        capability = ToolRef(kind="capability", capability="reputation")
         for key in ("network", "judge", "triage"):
-            assert ref in definitions[key].tools, key
+            assert capability in settings.agents.definitions[key].tools, key
+            assert ref in mcp_refs_for(settings, key), key
 
     def test_the_threat_intel_sidecar_is_left_exactly_as_it_was(self) -> None:
         """The VT REST sidecar keeps its key, its keys and its binding.

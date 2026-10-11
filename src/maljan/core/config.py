@@ -54,6 +54,7 @@ from maljan.core.report_formats import (
     check_declared_formats,
 )
 from maljan.core.tool_declarations import (
+    VOCABULARY_PATTERN,
     ErrorPattern,
     ToolFacts,
     check_auto_name_prefixes,
@@ -1199,12 +1200,6 @@ BUILTIN_SERVER_KEYS: tuple[str, ...] = (
     "threatintel",
     virustotal.SERVER_KEY,
 )
-# The built-in servers that answer "who is this sample": VirusTotal's own
-# server and the REST sidecar that reads VirusTotal and AbuseIPDB. Named as a
-# set rather than found by scanning prose, because what decides whether the
-# question has been asked is which server a ledger entry came from, and a
-# sentence that happens to contain the word "reputation" is not an answer.
-REPUTATION_SERVER_KEYS: tuple[str, ...] = (virustotal.SERVER_KEY, "threatintel")
 RESERVED_SERVER_KEYS: tuple[str, ...] = (
     "analysis",
     "knowledge",
@@ -1735,29 +1730,51 @@ class ToolRef(BaseModel):
     nothing more, so the ask, the answer and everything the callee did on the
     way are in the ledger, the budget and the transcript like any other call
     (``agents.delegation``).
+
+    ``kind="capability"`` names a kind of tool (``capability="reputation"``)
+    rather than a server. It never reaches more than a definition reached
+    before: it stands for the built-in servers whose shipped seed declares a
+    tool of that kind and leaves its binding to the definitions (the set the
+    built-in definitions named by key), each referenced exactly as a
+    ``kind="mcp"`` reference by key was, its tick list, allow-list and
+    enabled switch honoured and its ``agents`` list adding agents as it always
+    did (``agents.composition.capability_servers``). A server an operator adds
+    is never reached through a capability: its own ``agents`` list or a
+    reference by key binds it.
     """
 
-    kind: Literal["mcp", "provider", "sandbox", "agent"]
+    kind: Literal["mcp", "provider", "sandbox", "agent", "capability"]
     server: str | None = None
     name: str | None = None
     agent: str | None = None
+    capability: str | None = None
 
     @model_serializer(mode="wrap")
     def _agent_only_when_named(self, handler: SerializerFunctionWrapHandler) -> Any:
-        """Dump ``agent`` only on an agent reference.
+        """Dump ``agent`` only on an agent reference, ``capability`` only on a capability one.
 
         Every stored definition, every export and every pinned dump was
-        written before the field existed; a reference of any other kind dumps
+        written before the fields existed; a reference of any other kind dumps
         exactly as it always did, so none of them reads as changed.
         """
         dumped = handler(self)
-        if isinstance(dumped, dict) and self.kind != "agent":
-            dumped.pop("agent", None)
+        if isinstance(dumped, dict):
+            if self.kind != "agent":
+                dumped.pop("agent", None)
+            if self.kind != "capability":
+                dumped.pop("capability", None)
         return dumped
 
     @model_validator(mode="after")
     def _shape_matches_the_kind(self) -> "ToolRef":
-        if self.kind == "mcp":
+        if self.kind != "capability" and self.capability is not None:
+            raise ValueError(f"a {self.kind} tool reference names no capability")
+        if self.kind == "capability":
+            if not self.capability or not re.fullmatch(VOCABULARY_PATTERN, self.capability):
+                raise ValueError("a capability tool reference names a tool kind: a lowercase word")
+            if self.server is not None or self.name is not None or self.agent is not None:
+                raise ValueError("a capability tool reference names no server, tool or agent")
+        elif self.kind == "mcp":
             if not self.server:
                 raise ValueError("an mcp tool reference needs a server")
             if self.agent is not None:
@@ -1835,17 +1852,51 @@ FORMER_SEED_PROMPT_DIGESTS: dict[str, frozenset[str]] = {
 }
 
 
+# The reference a seeded definition's capability reference was written as
+# before built-in agents reached reputation by capability: VirusTotal's own
+# server, by key. A stored built-in row whose tool list is its seed's with this
+# in place of the capability reference is the seed of an earlier release, and
+# its list reads as not set (``as_stored_builtin``).
+FORMER_SEED_TOOLS: dict[str, dict[str, Any]] = {
+    "capability:reputation": {"kind": "mcp", "server": virustotal.SERVER_KEY, "name": None},
+}
+
+
+def _is_a_former_seed_tool_list(key: str, tools: Any) -> bool:
+    """Whether ``tools`` is built-in ``key``'s seed list as an earlier release wrote it."""
+    seed = _builtin_definitions().get(key)
+    if seed is None or not isinstance(tools, list) or len(tools) != len(seed.tools):
+        return False
+    former = [
+        FORMER_SEED_TOOLS.get(f"capability:{ref.capability}", ref.model_dump())
+        if ref.kind == "capability"
+        else ref.model_dump()
+        for ref in seed.tools
+    ]
+    if former == [ref.model_dump() for ref in seed.tools]:
+        return False
+    try:
+        stored = [ToolRef.model_validate(ref).model_dump() for ref in tools]
+    except ValueError:
+        return False
+    return stored == former
+
+
 def as_stored_builtin(key: str, entry: dict[str, Any]) -> dict[str, Any]:
     """A stored built-in row with what only means "the seed" taken out.
 
-    Two things read as not set, so the seed's own value applies: an empty tool
-    list (``_without_the_empty_builtin_tool_list``) and a prompt the seed
-    itself shipped with in an earlier release (``FORMER_SEED_PROMPT_DIGESTS``).
+    Three things read as not set, so the seed's own value applies: an empty
+    tool list (``_without_the_empty_builtin_tool_list``), the seed's tool list
+    as an earlier release wrote it (``FORMER_SEED_TOOLS``) and a prompt the
+    seed itself shipped with in an earlier release
+    (``FORMER_SEED_PROMPT_DIGESTS``).
     Every place that compares a stored built-in with its seed reads it
     through here, so the settings model, the settings API and the key
     migration agree on what an edit is.
     """
     out = _without_the_empty_builtin_tool_list(entry)
+    if _is_a_former_seed_tool_list(key, out.get("tools")):
+        out = {k: v for k, v in out.items() if k != "tools"}
     prompt = out.get("prompt")
     if isinstance(prompt, str):
         import hashlib
@@ -2634,6 +2685,13 @@ def stage_list_problems(stages: list[StageDefinition]) -> list[TeamProblem]:
     return problems
 
 
+def _reputation_ref() -> ToolRef:
+    """The reference a built-in agent reaches reputation lookups by: their declared kind."""
+    from maljan.core.reputation import REPUTATION_KIND
+
+    return ToolRef(kind="capability", capability=REPUTATION_KIND)
+
+
 def _builtin_definitions() -> dict[str, AgentDefinition]:
     """The agents the pipeline has always had, as settings.
 
@@ -2649,6 +2707,13 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
     job's sandbox report is already in this process, so the tools over it are
     closures, not a transport.
 
+    The agents that look the sample's hash up reach reputation by capability
+    (``ToolRef(kind="capability", capability="reputation")``): the built-in
+    servers whose seed declares a reputation tool and is bound by the
+    definitions, which is VirusTotal's own server alone, the one the
+    definitions named by key before (``FORMER_SEED_TOOLS``); the threat-intel
+    sidecar's seed binds it to the judge by its ``agents`` list.
+
     The judge and the reporter are here so that their LLM and their tool
     servers have the same editing surface as the analysts. Neither can be an
     analyst: a profile names them from its verdict and report stages.
@@ -2660,7 +2725,7 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
             tools=[
                 ToolRef(kind="mcp", server="analysis"),
                 ToolRef(kind="mcp", server="knowledge"),
-                ToolRef(kind="mcp", server=virustotal.SERVER_KEY),
+                _reputation_ref(),
             ],
         ),
         "dynamic": AgentDefinition(
@@ -2674,7 +2739,7 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
             tools=[
                 ToolRef(kind="mcp", server="network"),
                 ToolRef(kind="mcp", server="knowledge"),
-                ToolRef(kind="mcp", server=virustotal.SERVER_KEY),
+                _reputation_ref(),
             ],
         ),
         JUDGE_AGENT_KEY: AgentDefinition(
@@ -2682,7 +2747,7 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
             label="Judge",
             tools=[
                 ToolRef(kind="mcp", server="knowledge"),
-                ToolRef(kind="mcp", server=virustotal.SERVER_KEY),
+                _reputation_ref(),
             ],
         ),
         REPORTER_AGENT_KEY: AgentDefinition(
@@ -2703,7 +2768,7 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
             tools=[
                 ToolRef(kind="mcp", server="analysis"),
                 ToolRef(kind="mcp", server="knowledge"),
-                ToolRef(kind="mcp", server=virustotal.SERVER_KEY),
+                _reputation_ref(),
             ],
         ),
         "android_static": AgentDefinition(
@@ -2713,7 +2778,7 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
             tools=[
                 ToolRef(kind="mcp", server="analysis"),
                 ToolRef(kind="mcp", server="knowledge"),
-                ToolRef(kind="mcp", server=virustotal.SERVER_KEY),
+                _reputation_ref(),
             ],
         ),
         "reverser": AgentDefinition(
@@ -2723,7 +2788,7 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
             tools=[
                 ToolRef(kind="provider"),
                 ToolRef(kind="mcp", server="knowledge"),
-                ToolRef(kind="mcp", server=virustotal.SERVER_KEY),
+                _reputation_ref(),
             ],
         ),
         # The lead analyst: its tools are the other analysts. It asks the

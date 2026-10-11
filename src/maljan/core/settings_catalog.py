@@ -106,6 +106,11 @@ class CatalogEntry:
     # operator's server may take, served so the console never keeps a copy.
     builtin_servers: list[str] | None = None
     reserved_servers: list[str] | None = None
+    # For the agent definitions: per capability a seeded definition references
+    # (``ToolRef(kind="capability")``), the servers it stands for
+    # (``agents.composition.capability_servers``), served so the console draws
+    # a capability reference with the servers it reaches, never a copy of the rule.
+    capability_servers: dict[str, list[str]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

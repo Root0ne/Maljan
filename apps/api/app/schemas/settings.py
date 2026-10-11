@@ -44,6 +44,7 @@ class CatalogEntryDTO(BaseModel):
     choice_facts: dict[str, dict[str, Any]] | None = None
     builtin_servers: list[str] | None = None
     reserved_servers: list[str] | None = None
+    capability_servers: dict[str, list[str]] | None = None
 
 
 class GroupDTO(BaseModel):

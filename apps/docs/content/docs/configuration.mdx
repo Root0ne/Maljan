@@ -2203,10 +2203,30 @@ it resolved, so what the console shows is what the run reads.
 
 ### Delegation
 
-A definition's `tools` list takes four kinds of reference. `mcp` names a
+A definition's `tools` list takes five kinds of reference. `mcp` names a
 server (and optionally one tool of it), `provider` means the agent's own static
 provider's tools, `sandbox` the in-process tools over the job's sandbox report,
-and `agent` names another definition:
+`capability` names a kind of tool rather than a server, and `agent` names
+another definition.
+
+```json
+{"kind": "capability", "capability": "reputation"}
+```
+
+A `capability` reference never reaches more than a definition reached
+before. It stands for the built-in servers whose shipped declaration has a tool
+of that kind and whose seed leaves their binding to the definitions (for
+`reputation`, VirusTotal's own server; the threat-intel sidecar's seed binds it
+to the judge by its `agents` list), each referenced exactly as an `mcp`
+reference by key was: a disabled server gives nothing, its tick list and
+allow-list narrow what it gives, and its `agents` list binds it to further
+agents as it always did. A server you add is never reached through a
+capability: bind it by its own `agents` list or by an `mcp` reference. The
+built-in agents that look the sample's hash up (`static`, `network`, the judge,
+`triage`, `android_static`, `reverser`) reach reputation this way: with the
+shipped servers that is VirusTotal's own server, which they named by key
+before, so the default team resolves to the same servers; a built-in row stored
+with that earlier list loads as the seed. An `agent` reference:
 
 ```json
 {"kind": "agent", "agent": "static"}
@@ -2999,7 +3019,7 @@ it:
 | `places` | per kind of place (`offset`, `rva`, `address`, `addresses`, `call_site`, `function`, `pid`, `command_line` …), the path inside a row that holds one |
 | `values` | per kind of value (`text`, `rule`, `namespace`, `value` …), the path inside a row that holds one |
 | `techniques` | where the answer names ATT&CK ids: a list of `{path, format}`, `format` being `attck` (an id or a decorated label) or `sigma_tag` (`attack.t1055.012`) |
-| `reputation` | for a reputation lookup: `service` (the name it is attributed to), the paths `stats`, `malicious`, `total`, `labels`, `detections`, `engines`, and `text_patterns` (below) |
+| `reputation` | for a reputation lookup (`kind: reputation`): `service` (the name it is attributed to; empty uses `display_name`, then the server key), the paths `stats`, `malicious`, `suspicious`, `total`, `labels`, `detections`, `engines`, `summary`, the path lists `first_seen`, `last_seen` and `link`, `text_patterns` and `rank` (below) |
 | `arguments` | per role (`path`, `hash`, `address`, `program`, `command_lines` …), the argument a call gives it in |
 | `reader` | the answer shape the paths cannot express (below); empty reads the paths |
 | `report_sections` | the report sections whose writer is shown this tool's answers, beside the sections its `kind` reaches (below) |
@@ -3055,7 +3075,41 @@ boundary before a non-ASCII letter. Where Unicode is meant, write the class out:
 for letters.
 `text_patterns` are *searched* for anywhere in a reputation answer written in
 prose, the first pattern that finds a match giving the counts; each names a
-`malicious` group and optionally a `total` one.
+`malicious` group and optionally `total` and `suspicious` ones.
+
+**Reputation lookups.** Any server whose tool declares `kind: reputation` is a
+reputation source, whatever the tool is called and however it answers:
+
+- the triage pack asks one such tool about the sample's sha256, when it also
+  declares the argument it takes a hash in (`arguments: {hash: <name>}`): the
+  first enabled one, lowest `reputation.rank` first (default 100; the built-in
+  VirusTotal lookup ships rank 10, the threat-intel sidecar's rank 20), lookups
+  of one rank in the order their servers are configured;
+- its answer is read once, when its entry is written, through the declared
+  paths into one record (the service, `malicious`, `suspicious`, `total`,
+  `engines`, the counts object, `labels`, `detections`, `first_seen`,
+  `last_seen`, `link`, `summary`); a count no path gives is looked for in the
+  text by `text_patterns`; a date is kept as the ISO-8601 text it was written
+  in, or converted from whole seconds since the epoch; a link is kept only as
+  an `http(s)` URL; a prose answer with no `summary` path is its own summary;
+- the record is stored on the entry and carried in the report
+  (`MalwareReport.reputation`), and the pack's count condition
+  (`reputation_malicious`), the run-state block, the report's reputation line
+  and the console's reputation section read it, named by the declared service,
+  so a re-render reads what the worker read without the operator's settings;
+- the judge holds a lookup when a tool of this kind is attached to it or a
+  server its definition references declares one, and counts the identity
+  question as asked once the ledger holds a call to one;
+- a failed lookup is the pack's reputation step failing
+  (`triage.reputation_failed`, read to the judge as one sentence);
+- an agent reaches a reputation server you add the way it reaches any server
+  of yours: by the server's `agents` list or an `mcp` reference to it (the
+  built-in agents' capability reference reaches only the shipped VirusTotal
+  server, as their reference by key did; see Delegation).
+
+A tool named like a built-in lookup that declares another kind, or nothing,
+gets none of this. A report stored before the records is read the way it
+always was.
 
 **Readers** are named by the answer shape they read, never by a tool, so a
 tool of yours that answers in that shape may name one:
@@ -3082,7 +3136,7 @@ test): for example `strings` (the analysis server's printable strings),
 `listing_strings` (a disassembler's string listing), `emulated_strings`,
 `decoded_strings`, `file_iocs`, `text_iocs`, `iocs_with_context`,
 `capability_rules`, `signature_rules`, `event_rules`, `command_match`,
-`file_reputation`, `hash_reputation`, `indicator_report`,
+`reputation`, `indicator_report`,
 `indicator_reputation`, `program_info`, `file_info`, `load_sample`,
 `open_sample`, `open_project_program`, `decompile`, `function_disassembly`,
 `disassembly`, `function_list`, `method_list`, `xrefs`, `callers`, `callees`,

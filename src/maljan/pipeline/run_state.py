@@ -27,6 +27,7 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from maljan.core.declared_reading import reads_as
 from maljan.pipeline.triage_pack import (
     INDEX_TOOL,
     NOT_RUN_PREFIX,
@@ -231,10 +232,11 @@ def _lines(
         entry = by_tool.get(tool)
         if entry is not None:
             lines.append(_cut(render_pack([entry], 0)))
-    # ``reputation`` is the pack's own name for a lookup that did not happen;
-    # the block wants it, because why there is no reputation answer is worth
-    # as much to a model as the answer (see ``triage_pack._REPUTATION_TOOLS``).
-    reputation = [e for e in pack if e.tool in ("get_file_report", "check_hash", "reputation")]
+    # A call to any server's reputation lookup, by its declared kind, and the
+    # pack's own entry for a lookup that did not happen (``reputation_not_asked``):
+    # the block wants that too, because why there is no reputation answer is
+    # worth as much to a model as the answer.
+    reputation = [e for e in pack if reads_as(e, "run_state.reputation")]
     if reputation:
         lines.append(_cut(render_pack([reputation[-1]], 0)))
 

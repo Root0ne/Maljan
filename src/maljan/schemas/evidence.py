@@ -324,6 +324,19 @@ class LedgerEntry(BaseModel):
             "later from here, never from the reading process's settings."
         ),
     )
+    reputation: dict[str, Any] | None = Field(
+        default=None,
+        # Like ``facts``: an entry with none dumps as it always did.
+        exclude_if=lambda value: value is None,
+        description=(
+            "A reputation lookup's answer as its declaration read it when the entry was "
+            "written (core.reputation.ReputationRecord): {'v': 1, 'service', and where the "
+            "answer gave them 'malicious', 'suspicious', 'total', 'engines', 'stats', "
+            "'labels', 'detections', 'first_seen', 'last_seen', 'link', 'summary'}. None for "
+            "any other tool, a call that did not answer and an entry written before records "
+            "were. Read later from here, never from the reading process's settings."
+        ),
+    )
 
     def to_captured(self) -> CapturedToolOutput:
         """This entry in the shape readers of the previous capture expect."""
@@ -437,6 +450,12 @@ def build_entry(
             _code, message, hint = returned
             ok, error = False, message
             remediation = remediation or hint
+    facts = _facts_at_write(source, tool)
+    # The platform cut or replaced the answer: the conversation had no room for
+    # it, or the guardrail or a ceiling left a prefix. No reputation record is
+    # read from such an output (``_reputation_at_write``).
+    cut = bool(not_shown) or len(text) < len(full) or int(chars_dropped) > 0
+    structured = None if repeated_of or not_shown else parse_structured(full)
     return LedgerEntry(
         id=entry_id,
         stage=stage,
@@ -449,9 +468,9 @@ def build_entry(
         error=error,
         remediation=remediation if error else None,
         output=text,
-        truncated=bool(not_shown) or len(text) < len(full) or int(chars_dropped) > 0,
+        truncated=cut,
         chars_dropped=max(0, int(chars_dropped)),
-        structured=None if repeated_of or not_shown else parse_structured(full),
+        structured=structured,
         repeated_of=repeated_of,
         args_repaired=bool(args_repaired),
         args_raw=args_raw if args_repaired else None,
@@ -460,7 +479,14 @@ def build_entry(
         duration_ms=max(0, int(duration_ms)),
         seq=seq,
         source=source or None,
-        facts=_facts_at_write(source, tool),
+        facts=facts,
+        reputation=_reputation_at_write(
+            facts,
+            ok=ok and not repeated_of and not cut,
+            output=full,
+            structured=structured,
+            server=server,
+        ),
     )
 
 
@@ -471,6 +497,21 @@ def _facts_at_write(source: str | None, tool: str) -> dict[str, Any] | None:
     from maljan.core.declared_reading import facts_record
 
     return facts_record(source, tool)
+
+
+def _reputation_at_write(
+    facts: dict[str, Any] | None, *, ok: bool, output: str, structured: Any, server: str | None
+) -> dict[str, Any] | None:
+    """A reputation lookup's answer read through its stored facts, to be stored with the entry.
+
+    Read from the whole answer, so a later budget that drops the output keeps
+    what the answer said.
+    """
+    if facts is None or not ok:
+        return None
+    from maljan.core.reputation import record_at_write
+
+    return record_at_write(facts, ok=ok, output=output, structured=structured, server=server)
 
 
 def stored_bytes(entry: LedgerEntry) -> int:

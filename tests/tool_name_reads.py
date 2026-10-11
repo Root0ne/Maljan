@@ -33,7 +33,7 @@ from __future__ import annotations
 import ast
 from typing import NamedTuple
 
-LEGACY_MODULES = ("legacy_tool_names", "legacy_tool_tables")
+LEGACY_MODULES = ("legacy_tool_names", "legacy_tool_tables", "legacy_reputation")
 
 _TOOL_FIELDS = ("tool", "tool_name")
 _TOOL_CALLS = ("tool_of", "section_tool", "declared_name", "_tool", "bare_name", "_base_tool_name")
@@ -392,4 +392,5 @@ NAME_READ_SNIPPETS: tuple[str, ...] = (
     'ok = _tool(entry) == "pe_info"\n',
     "from maljan.core.legacy_tool_tables import RULE_TOOLS\n",
     'ok = "decompil" in entry.tool\n',
+    "from maljan.core.legacy_reputation import stored_report_counts\n",
 )
