@@ -2918,10 +2918,14 @@ exactly like a built-in one. Every block has the same fields: an `mcp.servers`
 entry, the `static.ghidra` and `static.r2` provider blocks and the CAPE MCP
 block (`sandbox.cape2.mcp`). In the console they are the **Declaration** section
 of a server card (closed by default), and in the catalogue the advanced
-**Declaration** subgroup of each provider block. Besides `sample_open`, the
-worker reads `sample_mount` and `work_dir` (below); the other consumers move
-onto the declaration one by one, each with the same output for the built-ins,
-and this section says when one does.
+**Declaration** subgroup of each provider block. The consumers move onto it one
+by one, each with the same output for the built-ins. Read today: `sample_open`;
+the worker reads `sample_mount` and `work_dir` (below); `error_patterns`, for
+every server; and each tool's `kind`, `reader`, `asserts_techniques`, `source`,
+`techniques`, `rows`, `places`, `values`, `words` and `display_name` by the
+evidence summary, the evidence roots, validation, the function map, the triage
+pack's function index and rule check, and the run summary's rule layers (see
+**Who reads a tool's kind** below).
 
 **Where a server sees the sample.** The worker copies the job's sample into
 `work_dir` under `SAMPLES_DIR` (the shared `.work` when a block names none;
@@ -3012,6 +3016,15 @@ tools, applies_to, multiline, message_group}`, applied in list order:
   can open for the job's sample where that is known, else `remediation`;
 - `tools` limits it to some tools (empty: all).
 
+Every server's answers are held against its patterns by one function, the
+registry's servers and the static providers' alike, so an answer a pattern
+matches is filed as a failed call with the pattern's code and remediation, the
+answers of a declared `sample_open` tool and of the select and analyse calls it
+makes included. A server that declares no pattern has its answers passed on as
+they are. `remediation_with_path` names the job's sample where the server's
+path for it is known: for the static providers' servers (the job's mirror);
+an `mcp.servers` entry gets `remediation`.
+
 **Patterns run in linear time.** Every operator regular expression (error
 patterns and reputation `text_patterns`) is compiled and run by RE2, whose
 matching time is linear in the text whatever the pattern, so a sample's
@@ -3041,6 +3054,7 @@ tool of yours that answers in that shape may name one:
 | `unpacked_image` | an unpacked program written out as a file of its own |
 | `flow_table` | flows and DNS queries with their endpoints, from a capture or a sandbox |
 | `dns_query_lines` | a text answer holding one DNS query per line |
+| `packet_lines` | a text answer holding one captured packet per line, with its endpoints |
 | `report_items` | sandbox report items, each with an id and the fields that place it |
 
 **Vocabulary.** `kind`, `roles`, `source`, `reader`, `category`, a technique
@@ -3071,6 +3085,47 @@ read. A tool is looked up by that recorded source and its name together, never
 by its name alone, an agent's name or today's settings; a tool of yours that
 shares a built-in tool's name never takes the built-in's facts. An entry
 written before sources were recorded is read the way it always was.
+
+**The facts an entry stores.** When an entry is written, the facts its tool
+declares under its recorded source are stored with it (`facts` on the ledger
+entry): `{"v": 1, "kind": …}` and, where set, `reader`, `asserts_techniques`,
+`source`, `display_name`, `rows`, `places`, `values`, `techniques`,
+`reputation`, `words` and `report_sections`; `{"v": 1}` alone when the source
+declares nothing for the tool. Everything read from a run later (a later stage,
+a re-render, the API) reads these stored facts, never the reading process's
+settings, so a run reads the same wherever it is opened, and changing a
+declaration later changes only new runs. A record of a newer version is read
+for the fields this release knows, and a record that no longer validates is
+read as declaring nothing, each with a warning. An entry that recorded a source
+but no facts is read as an undeclared tool; an entry written before sources
+were recorded is read the way it always was.
+
+**Who reads a tool's kind.** A tool of yours declared with a built-in's kind is
+treated as the built-in of that kind, and its answer is read in that kind's
+shape:
+
+- a tool with `asserts_techniques` names the techniques its `techniques` paths
+  hold as statements about the sample, under its `source` (its own name when
+  empty), in the judge's evidence summary, the corroboration rows and the run
+  summary's per-source attribution;
+- the evidence roots place an entry by its kind or `reader` (a whole-file fact,
+  a reference lookup, a disassembler's import listing, a capability or
+  signature rule match, recovered strings …); a kind with no reading of its own, or a tool whose `rows` and `places` differ from the shipped tool of its kind,
+  is placed by its `rows` and `places` (`offset` a file offset, `rva`,
+  `call_site` or `function` an offset from the image base, `address` or
+  `addresses` an address, `pid` a sandbox process), else by the address its
+  call was given;
+- validation reads a report section by the kind of the tool that opened it
+  (`capability_rules` and `signature_rules` are rule matches, whose words ground
+  no capability; `strings`, `file_iocs`, `emulated_strings` the sample's own
+  values; `api_catalogue` a reference table), names a rule matcher in a
+  sentence by its `display_name`, and names an entry in a statement by its
+  tool's name and `words`;
+- the function map and the triage pack's function index take
+  `api_hash_resolution`, `decoded_strings`, `emulated_strings` and
+  `function_index` answers by kind, and the report step does not run an
+  evidence-only static provider when the pack already recorded an answer of a
+  kind that provider declares.
 
 **What ships.** The built-in servers (`analysis`, `knowledge`, `network`,
 `threatintel`, `virustotal`), every tool Ghidra and radare2 advertise, the CAPE

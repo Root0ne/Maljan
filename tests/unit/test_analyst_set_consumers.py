@@ -162,7 +162,16 @@ class TestTheRunSummaryRecordsTheProfileThatRan:
         )
         from maljan.analysis.run_summary import _attribution_layers
 
-        assert _attribution_layers() == ["network", "strings", "yara", "sigma"]
+        # The rule layers are every declared asserting tool's corroboration name.
+        assert _attribution_layers() == [
+            "network",
+            "strings",
+            "capa",
+            "lolbin",
+            "sandbox",
+            "sigma",
+            "yara",
+        ]
 
     def test_the_judges_empty_analyst_check_covers_exactly_the_profile(self) -> None:
         _install(profiles={"lean": {"analysts": ["network"]}}, profile="lean")

@@ -230,6 +230,7 @@ READERS: dict[str, str] = {
     "unpacked_image": "an unpacked program written out as a file of its own",
     "flow_table": "flows and DNS queries with their endpoints, from a capture or a sandbox",
     "dns_query_lines": "a text answer holding one DNS query per line",
+    "packet_lines": "a text answer holding one captured packet per line, with its endpoints",
     "report_items": "sandbox report items, each with an id and the fields that place it",
 }
 
@@ -388,7 +389,7 @@ _NETWORK_TOOLS: dict[str, dict[str, Any]] = {
     },
     "extract_http": {"kind": "http", "arguments": {"path": "pcap_path"}},
     "pcap_summary": _PCAP_SUMMARY,
-    "read_pcap_summary": {**_PCAP_SUMMARY, "kind": "packet_overview"},
+    "read_pcap_summary": {**_PCAP_SUMMARY, "kind": "packet_overview", "reader": "packet_lines"},
 }
 
 # The threat-intel sidecar answers in prose. The live sidecar writes
@@ -449,7 +450,7 @@ _VIRUSTOTAL_TOOLS: dict[str, dict[str, Any]] = {
 
 # The platform's sandbox report tools (``providers.sandbox_tools``). Shapes as
 # ``analysis.evidence_roots`` and ``reporting.ledger_report._BUILDERS`` read
-# them; the signatures assert techniques (``evidence_summary.ASSERTING_SOURCES``).
+# them; the signatures assert techniques (``evidence_summary.asserting_source``).
 _SANDBOX_TOOLS: dict[str, dict[str, Any]] = {
     "sandbox_report_section": {"kind": "sandbox_report_section"},
     "sandbox_processes": {
@@ -630,6 +631,9 @@ CONSUMER_KINDS: dict[str, dict[str, Any]] = {
     "figures.code_listing": {"kinds": ["decompile"]},
     "ledger_projection.technique_hits": {"kinds": ["capability_rules"]},
     "static_analyst._LOAD_TOOL": {"kinds": ["load_sample"]},
+    # The single-tool comparisons the reading half made inline.
+    "evidence_summary.yara_rule_strings": {"kinds": ["signature_rules"]},
+    "evidence_summary.catalogue_associations": {"kinds": ["api_catalogue"]},
 }
 
 # Which section builder of ``reporting.ledger_report._BUILDERS`` each kind is
@@ -754,6 +758,11 @@ def builtin_server_names() -> tuple[str, ...]:
 def server_declaration(key: str) -> dict[str, Any]:
     """The declaration fields a built-in server ships with; ``{}`` for any other key."""
     return _block(_SERVER_BLOCKS.get(key, {}))
+
+
+def provider_names() -> tuple[str, ...]:
+    """The provider-owned blocks that ship a declaration."""
+    return tuple(_PROVIDER_BLOCKS)
 
 
 def provider_declaration(provider: str) -> dict[str, Any]:

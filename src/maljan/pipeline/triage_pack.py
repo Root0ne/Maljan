@@ -87,7 +87,7 @@ import hashlib
 import json
 import re
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -97,7 +97,6 @@ from typing import Any, cast
 
 from maljan.agents.evidence_recorder import EvidenceRecorder, result_text
 from maljan.analysis import sandbox_sections
-from maljan.analysis.evidence_roots import FILE_ASSESSMENT_TOOLS
 from maljan.analysis.ghidra_passes import (
     ANTI_ANALYSIS_TOOL,
     CAPA_RULE_KINDS,
@@ -109,7 +108,10 @@ from maljan.analysis.ghidra_passes import (
 )
 from maljan.analysis.pcap_summary import conversation_line
 from maljan.analysis.technique_ids import technique_ids_in
+from maljan.core.declared_reading import consumer_kinds, facts_of, kind_of
+from maljan.core.legacy_tool_tables import FILE_ASSESSMENT_TOOLS
 from maljan.core.logger import logger
+from maljan.core.tool_declarations import PACK
 from maljan.extractors.sample_identity import ARCHIVE_FILE_TYPES, DOCUMENT_FILE_TYPES
 from maljan.pipeline.conditions import TriageFacts
 from maljan.pipeline.sandbox_status import (
@@ -384,8 +386,8 @@ def run_is_degraded(reasons: Sequence[str], informational: Sequence[str] = ()) -
 # under that name never carries a service's answer. That is why the console's
 # own list of reputation tools has only the two real ones: an entry it would
 # draw an IDENTITY section from is always one of those.
-# The platform's one table of them (``evidence_roots.FILE_ASSESSMENT_TOOLS``),
-# which the evidence roots read as an external assessment of the whole file.
+# The platform's one table of them (``legacy_tool_tables.FILE_ASSESSMENT_TOOLS``, until the
+# one reputation path replaces it); the evidence roots read the same kinds.
 _REPUTATION_TOOLS: frozenset[str] = FILE_ASSESSMENT_TOOLS
 
 
@@ -1201,12 +1203,18 @@ class _Pack:
         path = self.inputs.sample_path
         latest: dict[str, LedgerEntry] = {}
         for recorded in self.recorder.entries:
-            if recorded.agent == PIPELINE and recorded.tool in _INDEX_SOURCES:
-                latest[recorded.tool] = recorded
+            slot = _index_slot(recorded) if recorded.agent == PIPELINE else ""
+            if slot:
+                latest[slot] = recorded
         joined: dict[str, tuple[str, dict[str, Any]]] = {}
+        slots: dict[str, str] = {}
         absent: dict[str, str] = {}
-        for tool in _INDEX_SOURCES:
-            entry = latest.get(tool)
+        for slot, kind, reader in _INDEX_INPUTS:
+            entry = latest.get(slot)
+            # Each input is named by the tool that answered it, else by the
+            # pack's own tool of that kind.
+            tool = entry.tool if entry is not None else _pack_tool_of(kind, reader)
+            slots[slot] = tool
             if entry is None:
                 absent[tool] = INDEX_SOURCE_NOT_IN_PACK
             elif entry.ok and isinstance(entry.structured, dict):
@@ -1233,11 +1241,11 @@ class _Pack:
             args,
             lambda: artefact_index.function_index(
                 path,
-                pe_info=joined.get("pe_info"),
-                capa=joined.get("capa"),
-                floss=joined.get("floss"),
-                hashes=joined.get("resolve_api_hashes"),
-                blobs=joined.get("decode_string_blobs"),
+                pe_info=joined.get(slots["pe_info"]),
+                capa=joined.get(slots["capa"]),
+                floss=joined.get(slots["floss"]),
+                hashes=joined.get(slots["hashes"]),
+                blobs=joined.get(slots["blobs"]),
                 absent=absent,
                 ranges_into=ranges,
             ),
@@ -1338,8 +1346,43 @@ def _file_digest(path: str) -> str:
     return hasher.hexdigest()
 
 
-# The pack's answers the function index joins, by tool.
-_INDEX_SOURCES = ("pe_info", "capa", "floss", "resolve_api_hashes", "decode_string_blobs")
+# The pack's answers the function index joins: per input of
+# ``artefact_index.function_index``, the declared kind (or reader) of the answer
+# that fills it (``core.declared_reading``): the PE header, capability rules
+# with their addresses, an emulator's recovered strings with their call sites,
+# an API hash resolution, a static string decoder.
+_INDEX_INPUTS: tuple[tuple[str, str, str], ...] = (
+    ("pe_info", "", "pe_header"),
+    ("capa", "capability_rules", ""),
+    ("floss", "emulated_strings", ""),
+    ("hashes", "api_hash_resolution", ""),
+    ("blobs", "decoded_strings", ""),
+)
+
+
+def _index_slot(entry: LedgerEntry) -> str:
+    """The function index input an entry fills, by its declared kind or reader; ``""`` for none."""
+    facts = facts_of(entry)
+    if facts is None:
+        return ""
+    for slot, kind, reader in _INDEX_INPUTS:
+        if (kind and facts.kind == kind) or (reader and facts.reader == reader):
+            return slot
+    return ""
+
+
+def _pack_tool_of(kind: str, reader: str) -> str:
+    """The pack's own tool declared under ``kind`` (or with ``reader``), for a missing input.
+
+    From the pack's shipped declaration: the pack is the platform's own code.
+    """
+    from maljan.core.builtin_declarations import in_process_declarations
+
+    held = in_process_declarations().get(PACK)
+    for name, facts in held.tool_facts.items() if held is not None else ():
+        if (kind and facts.kind == kind) or (reader and facts.reader == reader):
+            return name
+    return kind or reader
 
 
 # Why the index could not join one of the pack's answers, by case.
@@ -1552,19 +1595,23 @@ def _detail() -> PackDetail:
     return _DETAIL.get()
 
 
-RULE_TOOLS = ("capa", "yara_scan")
+# The kinds of answer whose pack entries mean an evidence-only static provider
+# that answers them need not run (``builtin_declarations.CONSUMER_KINDS``).
+RULE_ANSWERS = "triage_pack.RULE_TOOLS"
 
 
-def rules_already_recorded(rows: Any) -> bool:
-    """Whether the pack recorded an ``ok`` capa or YARA entry in this run.
+def rules_already_recorded(rows: Any, kinds: Iterable[str] | None = None) -> bool:
+    """Whether the pack recorded an ``ok`` entry of a kind the static provider answers.
 
-    The report node asks before running an evidence-only static provider
-    (``capa_yara``): when the pack ran the two tools, the pack is the
-    producer, and the report reads its entries rather than paying the
-    budget again.
+    The report node asks before running an evidence-only static provider:
+    when the pack recorded an answer of a kind that provider's declaration
+    names (``kinds``; the rule kinds when none is given), the pack is the
+    producer, and the report reads its entries rather than paying the budget
+    again. An entry's kind is its tool's declared one (``core.declared_reading``).
     """
+    wanted = frozenset(kinds) if kinds is not None else consumer_kinds(RULE_ANSWERS)
     return any(
-        entry.ok and entry.tool in RULE_TOOLS and entry.agent == PIPELINE
+        entry.ok and entry.agent == PIPELINE and kind_of(entry) in wanted
         for entry in pack_entries(rows)
     )
 

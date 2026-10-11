@@ -119,16 +119,111 @@ class StaticJobContext:
 
 
 @dataclass(frozen=True)
+class EvidenceAnswer:
+    """One answer an evidence-only provider found, keyed by the kind of fact it is.
+
+    ``kind`` is a declared answer kind (``core.tool_declarations.ToolFacts``)
+    and ``payload`` is in that kind's shape; ``tool`` is the name the
+    provider's own declaration gives a tool of that kind, which the ledger
+    entry is recorded under so every reader finds it by its declaration.
+    """
+
+    tool: str
+    kind: str
+    payload: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class StaticEvidenceBundle:
     technique_hits: list[dict[str, Any]] = field(default_factory=list)
     strings: list[dict[str, Any]] = field(default_factory=list)
     technical_evidence: dict[str, str] = field(default_factory=dict)
-    # The rule hits themselves, in the shape the ``capa`` and ``yara_scan``
-    # tools return them. A provider with no tool loop still has to reach the
-    # report the way every other tool does — as ledger entries — and a
-    # rendered Markdown table is not something the section builders can read.
+    # The answers themselves, by kind. A provider with no tool loop still has
+    # to reach the report the way every other tool does — as ledger entries —
+    # and a rendered Markdown table is not something the section builders can
+    # read.
+    entries: tuple[EvidenceAnswer, ...] = ()
+    # The legacy form of the two rule answers (capability rules, signature
+    # rules), read by :meth:`answers` for a bundle built before ``entries``.
     capa_rules: list[dict[str, Any]] = field(default_factory=list)
     yara_matches: list[dict[str, Any]] = field(default_factory=list)
+
+    def answers(self, source: str = "provider:capa_yara") -> tuple[EvidenceAnswer, ...]:
+        """Every answer of the bundle: ``entries``, then the legacy rule fields as answers.
+
+        A legacy field becomes the answer of its kind under the tool
+        ``source``'s declaration names for that kind.
+        """
+        legacy: list[EvidenceAnswer] = []
+        for kind, payload in (
+            ("capability_rules", {"capabilities": self.capa_rules} if self.capa_rules else None),
+            (
+                "signature_rules",
+                {
+                    "matches": self.yara_matches,
+                    "rule_count": len(self.yara_matches),
+                    "filtered": 0,
+                }
+                if self.yara_matches
+                else None,
+            ),
+        ):
+            tool = declared_tool_of_kind(source, kind)
+            if payload is not None and tool:
+                legacy.append(EvidenceAnswer(tool=tool, kind=kind, payload=payload))
+        return (*self.entries, *legacy)
+
+
+def evidence_entries(
+    bundle: StaticEvidenceBundle, counter: Any, stage: str, *, source: str, agent: str
+) -> list[Any]:
+    """An evidence-only provider's bundle as evidence-ledger entries, one per answer, by kind.
+
+    Each answer is recorded under the tool the provider's declaration
+    (``source``) names for its kind, so every reader finds it by that
+    declaration; a bundle in the legacy form is read by
+    :meth:`StaticEvidenceBundle.answers`.
+
+    A provider without a tool loop has no seam that records its calls, so it
+    records them itself. Timing is not available after the fact and is left at
+    zero rather than invented; what matters is that the rows are citable and
+    reach the report's sections through the same path a tool call does.
+
+    ``stage`` is the team stage the entries were recorded in: the report node
+    writes them, so it is that stage's key.
+    """
+    import json
+
+    from maljan.schemas.evidence import build_entry
+
+    out: list[Any] = []
+    for answer in bundle.answers(source):
+        entry_id, seq = counter.next_id()
+        out.append(
+            build_entry(
+                entry_id=entry_id,
+                seq=seq,
+                agent=agent,
+                tool=answer.tool,
+                args={},
+                server=None,
+                source=source,
+                output=json.dumps(answer.payload),
+                stage=stage,
+            )
+        )
+    return out
+
+
+def declared_tool_of_kind(source: str, kind: str) -> str:
+    """The first tool ``source``'s declaration names under ``kind``, ``""`` for none."""
+    from maljan.core.declared_reading import declarations
+
+    held = declarations().source(source)
+    for name, facts in held.tools.items() if held is not None else ():
+        if facts.kind == kind:
+            return name
+    return ""
 
 
 @dataclass(frozen=True)

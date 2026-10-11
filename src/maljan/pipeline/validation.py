@@ -41,6 +41,13 @@ from maljan.analysis.corroboration import corroboration_row as corroboration_row
 from maljan.analysis.corroboration import corroboration_sources as corroboration_sources
 from maljan.analysis.sandbox_sections import ItemIndex, is_item_id, item_ids_in
 from maljan.analysis.technique_ids import MITRE_ATTACK_SOURCES, TECHNIQUE_ID_EXACT_RE
+from maljan.core.declared_reading import (
+    bare_name,
+    consumer_kinds,
+    facts_of,
+    reads_as,
+    shipped_by_name,
+)
 from maljan.core.logger import logger
 from maljan.core.spend import validation_retry
 from maljan.pipeline.events import (
@@ -2887,14 +2894,12 @@ _COMPILED_CAPABILITY_TERMS = tuple(
 # imported API is listed under (``evidence_summary.catalogue_associations``:
 # reference, not evidence), so what it names is nothing the sample was found
 # to do.
-_REFERENCE_SECTION_SOURCES: frozenset[str] = frozenset({"tool:api_capability"})
+_REFERENCE_SECTIONS = "validation._REFERENCE_SECTION_SOURCES"
 
 # The report sections that list values the sample holds — its printable
 # strings, the indicators read out of them and the strings emulation decoded.
 # Their words are the sample's bytes, not anybody's statement about behaviour.
-_SAMPLE_VALUE_SECTION_SOURCES: frozenset[str] = frozenset(
-    {"tool:strings", "tool:iocs_from_file", "tool:floss"}
-)
+_SAMPLE_VALUE_SECTIONS = "validation._SAMPLE_VALUE_SECTION_SOURCES"
 
 # The report sections that list what a rule matcher matched. A rule's name is
 # the rule author's word for a pattern of bytes or instructions, not a
@@ -2902,9 +2907,69 @@ _SAMPLE_VALUE_SECTION_SOURCES: frozenset[str] = frozenset(
 # "check for time delay via GetTickCount" grounded a benign client's
 # "performs keylogging" and "attempts to evade detection and debuggers". The
 # section still counts by its key.
-_RULE_MATCH_SECTION_SOURCES: frozenset[str] = frozenset(
-    {"tool:capa", "tool:yara_scan", "tool:yara"}
+_RULE_MATCH_SECTIONS = "validation._RULE_MATCH_SECTION_SOURCES"
+
+# Each class is the set of kinds ``builtin_declarations.CONSUMER_KINDS`` names
+# for it, read off the tool a section came from (:func:`_section_reads_as`).
+
+
+def _matcher_name(name: str, facts: Any) -> str:
+    return str(facts.display_name or name).strip().lower()
+
+
+# The rule matchers the platform ships, by the names a sentence calls them.
+SHIPPED_MATCHER_NAMES: tuple[str, ...] = tuple(
+    sorted(
+        {
+            _matcher_name(name, facts)
+            for name, facts in shipped_by_name().items()
+            if facts.kind in consumer_kinds(_RULE_MATCH_SECTIONS)
+        }
+    )
 )
+
+
+def matcher_names(ledger: Iterable[Any] | None = None) -> tuple[str, ...]:
+    """The rule matchers a sentence may name: the shipped ones and every one the run used.
+
+    An entry of ``ledger`` whose tool is a rule matcher (a kind of
+    ``validation._RULE_MATCH_SECTION_SOURCES``) names it by its stored display
+    name, else its own name; read from the entries, never from settings.
+    """
+    names = set(SHIPPED_MATCHER_NAMES)
+    for entry in ledger or ():
+        facts = facts_of(entry)
+        if facts is not None and facts.kind in consumer_kinds(_RULE_MATCH_SECTIONS):
+            names.add(_matcher_name(bare_name(getattr(entry, "tool", "")), facts))
+    return tuple(sorted(n for n in names if n))
+
+
+def _section_reads_as(section: Any, consumer: str, by_id: Mapping[str, Any]) -> bool:
+    """Whether a report section came from a tool of a kind ``consumer`` reads.
+
+    The section names the tool that opened it (``tool:<name>``) and cites its
+    entry: the cited entry with that tool is read by its declared kind. A
+    section none of whose citations is in hand is read by the legacy reading
+    of the tool's name (``core.declared_reading``).
+    """
+    opened_by = section_tool(section)
+    if opened_by is None:
+        return False
+    for cited in getattr(section, "evidence_ids", None) or []:
+        entry = by_id.get(str(cited).strip().lower())
+        if entry is not None and str(getattr(entry, "tool", "") or "") == opened_by:
+            return reads_as(entry, consumer)
+    # The legacy reading of the name the section wrote, as an entry with no
+    # source is read: so handing the ledger never changes how it is read.
+    return reads_as({"tool": opened_by.lower()}, consumer)
+
+
+def section_tool(section: Any) -> str | None:
+    """The tool a report section names as the one that opened it (``tool:<name>``), or ``None``."""
+    source = str(getattr(section, "source", "") or "").strip()
+    if not source.lower().startswith("tool:"):
+        return None
+    return source[len("tool:") :]
 
 
 @dataclass(frozen=True)
@@ -2922,6 +2987,10 @@ class CapabilityGrounding:
     # ``(technique id, catalogue name, note)``, the note as the ATT&CK table
     # prints it (``corroboration.rule_match_only``).
     rule_only: tuple[tuple[str, str, str], ...] = ()
+    # The rule matchers a sentence may name (:func:`matcher_names`): a
+    # sentence whose assertion is that one of them matched states nothing
+    # about the sample.
+    matchers: tuple[str, ...] = SHIPPED_MATCHER_NAMES
 
     def grounds(
         self, techniques: Sequence[str], keys: Sequence[str], pattern: re.Pattern[str]
@@ -2952,8 +3021,17 @@ class CapabilityGrounding:
         return f"This run established {techniques}, and has {keys}."
 
     @classmethod
-    def from_report(cls, report: Any, isr_reports: Any = None) -> CapabilityGrounding:
-        """Read a ``MalwareReport`` (and optionally the analysts' ISRs).
+    def from_report(
+        cls, report: Any, isr_reports: Any = None, ledger: Any = None
+    ) -> CapabilityGrounding:
+        """Read a ``MalwareReport`` (and optionally the analysts' ISRs and the run's evidence).
+
+        ``ledger`` is the run's entries, or its ``EntryTexts`` (which holds them).
+
+        A section's class (a reference lookup, the sample's own values, a
+        rule match) is its tool's declared kind, read off the ledger entry the
+        section cites (:func:`_section_reads_as`); handed no ledger, off the
+        name the section records, by the legacy reading.
 
         Never raises: a grounding that cannot be read is an empty one, and an
         empty one grounds nothing — which would fail every term — so a read
@@ -2965,6 +3043,11 @@ class CapabilityGrounding:
         keys: set[str] = set()
         words: list[str] = []
         rule_rows: list[tuple[str, str, str]] = []
+        # The run's evidence as the composer and the narrative round hold it
+        # (``EntryTexts``) gives its entries.
+        held = getattr(ledger, "entries", None)
+        ledger = list(held.values()) if isinstance(held, Mapping) else list(ledger or ())
+        by_id = {str(getattr(entry, "id", "") or "").strip().lower(): entry for entry in ledger}
         try:
             # A technique only a rule match stands behind — one string of a
             # YARA rule in a large file, with no analyst claiming it — grounds
@@ -3019,9 +3102,7 @@ class CapabilityGrounding:
                 # under, not what the sample does: "CreateMutexA | persistence"
                 # grounded a report's "likely uses these registry APIs to
                 # establish persistence". Its words and its key ground nothing.
-                if str(getattr(section, "source", "") or "").strip().lower() in (
-                    _REFERENCE_SECTION_SOURCES
-                ):
+                if _section_reads_as(section, _REFERENCE_SECTIONS, by_id):
                     continue
                 key = str(getattr(section, "key", "") or "").strip().lower()
                 if key:
@@ -3030,8 +3111,8 @@ class CapabilityGrounding:
                 # about what it does: a benign client's settings path
                 # "/SSH/Auth/Credentials" grounded "credential harvesting".
                 # The section still counts by its key.
-                if str(getattr(section, "source", "") or "").strip().lower() in (
-                    _SAMPLE_VALUE_SECTION_SOURCES | _RULE_MATCH_SECTION_SOURCES
+                if _section_reads_as(section, _SAMPLE_VALUE_SECTIONS, by_id) or _section_reads_as(
+                    section, _RULE_MATCH_SECTIONS, by_id
                 ):
                     continue
                 words.append(str(getattr(section, "title", "") or ""))
@@ -3058,6 +3139,7 @@ class CapabilityGrounding:
             # reader, so a cue in one cell never reaches a word in the next.
             evidence_text="\n".join(w for w in words if w).lower(),
             rule_only=tuple(rule_rows),
+            matchers=matcher_names(ledger),
         )
 
 
@@ -3389,13 +3471,20 @@ def _term_ids_said(techniques: Sequence[str]) -> str:
 # steals credentials" and "capa confirms that the sample performs keylogging"
 # claim what the sample does and are read like any other sentence. The
 # capability check's own advice for a rule-only technique is to write the first
-# kind.
-_RULE_MATCH_ASSERTION_RE = re.compile(
-    r"(?:\b(?:yara|capa)\b(?:\s+(?:rules?|signatures?))?|\brules?\b|\bsignatures?\b)"
-    r"(?:\s+\S+){0,6}?\s+(?:matched|matches|match|flagged|flags|hit|hits|fired|fires|reports|"
-    r"reported|lists|listed)\b",
-    re.IGNORECASE,
-)
+# kind. The matchers a sentence may name are the rule-match tools the run's
+# declarations hold, by their display names (:func:`matcher_names`).
+@lru_cache(maxsize=64)
+def _rule_match_assertion_re(names: tuple[str, ...]) -> re.Pattern[str]:
+    matchers = "|".join(re.escape(name) for name in names)
+    return re.compile(
+        rf"(?:\b(?:{matchers})\b(?:\s+(?:rules?|signatures?))?|\brules?\b|\bsignatures?\b)"
+        r"(?:\s+\S+){0,6}?\s+(?:matched|matches|match|flagged|flags|hit|hits|fired|fires|reports|"
+        r"reported|lists|listed)\b",
+        re.IGNORECASE,
+    )
+
+
+_RULE_MATCH_ASSERTION_RE = _rule_match_assertion_re(SHIPPED_MATCHER_NAMES)
 _CONCLUDES_ABOUT_THE_SAMPLE_RE = re.compile(
     r"\b(?:so|therefore|thus|hence|because|since|based|indicat\w*|suggest\w*|show\w*|"
     r"mean\w*|confirm\w*|prov\w*|reveal\w*|demonstrat\w*|consistent)\b"
@@ -3405,9 +3494,11 @@ _CONCLUDES_ABOUT_THE_SAMPLE_RE = re.compile(
 )
 
 
-def _says_only_that_a_rule_matched(sentence: str) -> bool:
+def _says_only_that_a_rule_matched(
+    sentence: str, matchers: tuple[str, ...] = SHIPPED_MATCHER_NAMES
+) -> bool:
     """Whether the sentence's assertion is a rule match and nothing about the sample."""
-    return bool(_RULE_MATCH_ASSERTION_RE.search(sentence)) and not (
+    return bool(_rule_match_assertion_re(matchers).search(sentence)) and not (
         _CONCLUDES_ABOUT_THE_SAMPLE_RE.search(sentence)
     )
 
@@ -3449,7 +3540,7 @@ def ungrounded_capabilities(
         sentences = [
             sentence
             for sentence in _claiming_sentences(pattern, text, masked)
-            if not _says_only_that_a_rule_matched(sentence)
+            if not _says_only_that_a_rule_matched(sentence, grounding.matchers)
         ]
         if not sentences:
             continue
@@ -3485,13 +3576,20 @@ def ungrounded_capabilities(
 
 RULE_MATCH_AS_ACTION_CODE = "report.rule_match_as_action"
 
+
 # The words that make a sentence about a rule match, or an estimate, rather
-# than a statement that the sample does something.
-_RULE_OR_ESTIMATE_RE = re.compile(
-    r"\b(?:rules?|yara|capa|signatures?|match(?:es|ed|ing)?|may|might|could|possibl[ey]|"
-    r"potential(?:ly)?|likely|suggests?|consistent\s+with|indicat\w*|associated\s+with)\b",
-    re.IGNORECASE,
-)
+# than a statement that the sample does something: a rule, a signature, a
+# match, a matcher the run's declarations hold, or an estimate.
+@lru_cache(maxsize=64)
+def _rule_or_estimate_re(names: tuple[str, ...]) -> re.Pattern[str]:
+    matchers = "".join(f"|{re.escape(name)}" for name in names)
+    return re.compile(
+        rf"\b(?:rules?{matchers}|signatures?|match(?:es|ed|ing)?|may|might|could|possibl[ey]|"
+        r"potential(?:ly)?|likely|suggests?|consistent\s+with|indicat\w*|associated\s+with)\b",
+        re.IGNORECASE,
+    )
+
+
 # The words of a sentence about the report or about defending against a
 # technique, which name it without saying the sample does it.
 _ABOUT_NOT_ACTION_RE = re.compile(
@@ -3523,7 +3621,7 @@ def rule_match_statement_violations(text: str, grounding: CapabilityGrounding) -
         sentences = [
             sentence
             for sentence in _claiming_sentences(pattern, text)
-            if not _RULE_OR_ESTIMATE_RE.search(sentence)
+            if not _rule_or_estimate_re(grounding.matchers).search(sentence)
             and not _ABOUT_NOT_ACTION_RE.search(sentence)
             # A field holding the id or the name alone states nothing.
             and sentence.strip(" .").lower() not in {tid.lower(), name.strip().lower()}
@@ -5705,6 +5803,11 @@ class EntryTexts:
 
     texts: Mapping[str, str] = field(default_factory=dict)
     tools: Mapping[str, str] = field(default_factory=dict)
+    # The words a statement may name each entry by (:func:`entry_words`).
+    words: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    # The entries themselves, by id: what a reader of an entry's declared kind
+    # reads (``CapabilityGrounding.from_report``).
+    entries: Mapping[str, Any] = field(default_factory=dict)
     # The entries whose text is known not to be the whole answer — shortened
     # for the model or trimmed by the byte budget. A value absent from one of
     # them may be in the part that is not here, so no absence is read off it.
@@ -5730,12 +5833,15 @@ class EntryTexts:
         ledger = list(ledger or ())
         texts: dict[str, str] = {}
         tools: dict[str, str] = {}
+        words: dict[str, frozenset[str]] = {}
+        entries: dict[str, Any] = {}
         partial: set[str] = set()
         for entry in ledger:
             written = str(getattr(entry, "id", "") or "").strip()
             entry_id = written.lower()
             if not entry_id:
                 continue
+            entries.setdefault(entry_id, entry)
             text = ""
             if corpus is not None:
                 try:
@@ -5748,18 +5854,28 @@ class EntryTexts:
             if text:
                 texts[entry_id] = text
                 tools[entry_id] = str(getattr(entry, "tool", "") or "")
+                words[entry_id] = entry_words(entry)
         holders = repeat_holders(ledger)
         for repeat in holders:
             texts.pop(repeat, None)
             tools.pop(repeat, None)
+            words.pop(repeat, None)
             partial.discard(repeat)
         for repeat, holder in holders.items():
             if holder and holder in texts:
                 texts[repeat] = texts[holder]
                 tools[repeat] = tools[holder]
+                words[repeat] = words[holder]
             if holder in partial:
                 partial.add(repeat)
-        return cls(texts=texts, tools=tools, partial=frozenset(partial))
+        return cls(
+            texts=texts, tools=tools, words=words, entries=entries, partial=frozenset(partial)
+        )
+
+    def words_of(self, entry_id: str) -> frozenset[str]:
+        """The words a statement may name one entry by."""
+        held = self.words.get(entry_id)
+        return held if held is not None else frozenset(_tool_words(self.tools.get(entry_id, "")))
 
     def holds(self, entry_id: str, value: str, *, fields: bool = False) -> bool:
         """Whether this entry's text holds ``value`` as a value of its own, however spelt.
@@ -6474,13 +6590,6 @@ _HOLDS_ONE_LINE_RE = re.compile(
 )
 # How many words before the verb name what the statement is about.
 _SUBJECT_WORDS = 6
-# Words a statement uses for an entry that its tool's own name does not carry.
-_TOOL_WORDS: dict[str, tuple[str, ...]] = {
-    "pcap": ("capture", "packet", "packets", "pcap"),
-    "floss": ("decoded", "emulation", "floss"),
-    "sigma": ("sigma", "rule", "rules"),
-    "yara": ("yara", "rule", "rules"),
-}
 
 
 def _held_values(text: str) -> int:
@@ -6510,11 +6619,31 @@ def _held_values(text: str) -> int:
     return _count(parsed)
 
 
+def _name_words(tool: str) -> set[str]:
+    """The words of a tool's own name: its parts of three letters or more."""
+    return {part for part in re.split(r"[_\W]+", tool.lower()) if len(part) >= 3}
+
+
 def _tool_words(tool: str) -> set[str]:
-    words = {part for part in re.split(r"[_\W]+", tool.lower()) if len(part) >= 3}
-    for part in list(words):
-        words.update(_TOOL_WORDS.get(part, ()))
-    return words
+    """The legacy reading of an entry's words (``core.declared_reading.legacy_tool_words``)."""
+    from maljan.core.declared_reading import legacy_tool_words
+
+    return legacy_tool_words(tool)
+
+
+def entry_words(entry: Any) -> frozenset[str]:
+    """The words a statement may name ``entry`` by: its tool's name, and the words it declares.
+
+    An entry with no stored facts is read as it always was (:func:`_tool_words`).
+    """
+    from maljan.core.declared_reading import facts_of, read_by_name
+
+    tool = str(getattr(entry, "tool", "") or "")
+    if read_by_name(entry):
+        return frozenset(_tool_words(tool))
+    facts = facts_of(entry)
+    declared = {str(word).lower() for word in facts.words} if facts is not None else set()
+    return frozenset(_name_words(tool) | declared)
 
 
 def _statement_subject(
@@ -6536,9 +6665,7 @@ def _statement_subject(
         return by_id
     if not subject & _ENTRY_NOUNS:
         return []
-    return [
-        entry_id for entry_id in cited if subject & _tool_words(entries.tools.get(entry_id, ""))
-    ]
+    return [entry_id for entry_id in cited if subject & entries.words_of(entry_id)]
 
 
 # The words a sentence names a recorded answer by, rather than something the
@@ -9550,8 +9677,9 @@ def corroboration(
 
     ``asserted_by`` is the deterministic sources that assert a technique from
     this sample — a rule that fired on it names its technique; the tools are
-    ``evidence_summary.ASSERTING_SOURCES``, and a reference lookup is never one
-    — and ``claimed_by`` is the agents. Two flat lists, no weights, no score:
+    the ones that declare ``asserts_techniques``
+    (``evidence_summary.asserting_source``), and a reference lookup is never
+    one — and ``claimed_by`` is the agents. Two flat lists, no weights, no score:
     the number that used to live here was a weighted sum over layer weights and cross-layer
     multipliers, and its inputs were constants nobody could derive from
     anything. Two agents and a capa rule naming ``T1055`` is a fact; 0.87 was
@@ -9578,13 +9706,14 @@ def corroboration(
     ``analysis.corroboration.corroborated`` decides on them.
     """
     from maljan.pipeline.evidence_summary import (
-        ASSERTING_SOURCES,
+        asserting_labels,
         catalogue_associations,
         collect,
     )
 
     agents = {str(getattr(isr, "agent_id", "") or name) for name, isr in (isrs or {}).items()}
     associations = catalogue_associations(ledger)
+    labels = asserting_labels(ledger)
     from maljan.analysis.evidence_roots import run_roots, summary_of_sources
 
     # The ledger's roots, read once for both readings below.
@@ -9605,7 +9734,7 @@ def corroboration(
                     claimed.append(source)
             else:
                 # ``collect`` hands back only the asserting tools' own names.
-                label = ASSERTING_SOURCES.get(source, source)
+                label = labels.get(source, source)
                 if label not in asserted:
                     asserted.append(label)
         row: dict[str, Any] = {"asserted_by": sorted(asserted), "claimed_by": sorted(claimed)}
@@ -9759,9 +9888,8 @@ def technique_sources(
         stronger_reading,
     )
     from maljan.pipeline.evidence_summary import (
-        ASSERTING_SOURCES,
-        _base_tool_name,
-        _technique_ids,
+        asserted_techniques,
+        asserting_source,
         invalid_technique_ids,
     )
 
@@ -9787,11 +9915,9 @@ def technique_sources(
     # The techniques each asserting entry's own rows name.
     asserts: dict[str, set[str]] = {}
     for entry in entries:
-        if _base_tool_name(getattr(entry, "tool", "")) in ASSERTING_SOURCES:
+        if asserting_source(entry) is not None:
             asserts[str(getattr(entry, "id", "") or "").lower()] = {
-                tid
-                for tid in _technique_ids(getattr(entry, "structured", None))
-                if tid not in invalid
+                tid for tid in asserted_techniques(entry) if tid not in invalid
             }
 
     def cited_sources(
@@ -9836,11 +9962,11 @@ def technique_sources(
                 if tid:
                     add(tid, cited_sources(said, cited, tid))
     for entry in entries:
-        if _base_tool_name(getattr(entry, "tool", "")) not in ASSERTING_SOURCES:
+        if asserting_source(entry) is None:
             continue
         if getattr(entry, "repeated_of", None):
             continue
-        for tid in _technique_ids(getattr(entry, "structured", None)):
+        for tid in asserted_techniques(entry):
             if tid not in invalid:
                 add(tid, roots.sources_of_assertion(str(getattr(entry, "id", "") or ""), tid))
     return out
@@ -9858,9 +9984,8 @@ def technique_roots(
     """
     from maljan.analysis.evidence_roots import RootCount, run_roots
     from maljan.pipeline.evidence_summary import (
-        ASSERTING_SOURCES,
-        _base_tool_name,
-        _technique_ids,
+        asserted_techniques,
+        asserting_source,
         invalid_technique_ids,
     )
 
@@ -9890,11 +10015,11 @@ def technique_roots(
                     out.setdefault(tid, RootCount()).add(*found.of_statement(said, cited))
     invalid = invalid_technique_ids(entries)
     for entry in entries:
-        if _base_tool_name(getattr(entry, "tool", "")) not in ASSERTING_SOURCES:
+        if asserting_source(entry) is None:
             continue
         if getattr(entry, "repeated_of", None):
             continue
-        for tid in _technique_ids(getattr(entry, "structured", None)):
+        for tid in asserted_techniques(entry):
             if tid not in invalid:
                 out.setdefault(tid, RootCount()).add(
                     *found.of_assertion(str(getattr(entry, "id", "") or ""), tid)

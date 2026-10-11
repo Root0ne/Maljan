@@ -994,8 +994,9 @@ def _attribution_layers() -> list[str]:
 
     Was the literal ``("static", "dynamic", "network", "yara", "sigma")``,
     which named three analysts that a custom profile may not run and missed
-    every analyst it does. The two rule layers stay appended: they are
-    deterministic passes, not analysts, and they run whatever the profile says.
+    every analyst it does. The rule layers follow: deterministic passes, not
+    analysts, which run whatever the profile says, each named as its
+    corroboration rows name it (:func:`_rule_layers`).
     """
     from maljan.agents.composition import current_analyst_keys
 
@@ -1003,7 +1004,21 @@ def _attribution_layers() -> list[str]:
         analysts = current_analyst_keys()
     except Exception:  # noqa: BLE001 — a report renders even without settings
         analysts = ["static", "dynamic", "network"]
-    return [*analysts, "yara", "sigma"]
+    return [*analysts, *_rule_layers()]
+
+
+def _rule_layers() -> list[str]:
+    """The rule layers the platform ships: the corroboration name of each asserting tool.
+
+    Read from the shipped declarations, never from settings, so a stored
+    summary renders the same anywhere. A layer the run's own corroboration
+    rows name (an operator's rule matcher under its stored ``source``) is
+    listed after these, from the summary itself.
+    """
+    from maljan.core.declared_reading import shipped_by_name
+
+    shipped = shipped_by_name().items()
+    return sorted({facts.source or name for name, facts in shipped if facts.asserts_techniques})
 
 
 # ---------------------------------------------------------------------------
