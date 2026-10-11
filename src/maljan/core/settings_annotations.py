@@ -2446,6 +2446,13 @@ ANNOTATIONS.update(
             "namespace the name by platform, e.g. android.permissions.",
             generic_only=True,
         ),
+        "sandbox.rest.mapping.places": _rest(
+            "Mapping: report places",
+            "The report's places with no channel above, as place/JSONPath pairs: "
+            "process_tree, resolved_apis, extracted, procdumps, memory or ids_alerts, "
+            "each match kept as the sandbox published it.",
+            generic_only=True,
+        ),
         "sandbox.rest.mapping.field_names": _rest(
             "Mapping: field renames",
             "Per-row field renames, keyed 'channel.field', e.g. processes.command_line -> cmdline.",

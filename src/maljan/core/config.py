@@ -3885,6 +3885,25 @@ class RestMappingConfig(BaseModel):
     # SandboxReport.channels under that name. Namespace the name by platform,
     # e.g. {"android.permissions": "$.apk.permissions[*]"}.
     channels: dict[str, str] = Field(default_factory=dict)
+    # The report's places with no channel above (``schemas.sandbox_document.
+    # OPEN_PLACES``: the process tree, the resolved API names, what the
+    # sandbox extracted, the process dumps, the memory regions, the IDS
+    # alerts): "<place>" -> JSONPath, each match kept as the sandbox published
+    # it, e.g. {"extracted": "$.configs[*]"}.
+    places: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("places")
+    @classmethod
+    def _places_are_open_places(cls, value: dict[str, str]) -> dict[str, str]:
+        from maljan.schemas.sandbox_document import OPEN_PLACES
+
+        unknown = sorted(set(value) - set(OPEN_PLACES))
+        if unknown:
+            raise ValueError(
+                f"no such report place {', '.join(unknown)}; the places a path may name are "
+                f"{', '.join(OPEN_PLACES)}"
+            )
+        return value
 
 
 class SandboxRestConfig(BaseModel):

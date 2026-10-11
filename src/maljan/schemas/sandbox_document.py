@@ -97,6 +97,19 @@ PLACES: dict[str, Path] = {
 }
 _PATH_PLACES: dict[Path, str] = {path: name for name, path in PLACES.items()}
 
+# The places a reader fills with rows as its sandbox published them, with no
+# row shape of the platform's own to coerce them into: what a mapping
+# (``sandbox.rest.mapping.places``) may point a JSONPath at beside its fixed
+# channels.
+OPEN_PLACES: tuple[str, ...] = (
+    "process_tree",
+    "resolved_apis",
+    "extracted",
+    "procdumps",
+    "memory",
+    "ids_alerts",
+)
+
 # The document's dicts that hold parts, which a source cut by :func:`decompose`
 # keeps the order of. Every other value is one part or one extra block, whole.
 CONTAINERS: frozenset[Path] = frozenset(

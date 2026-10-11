@@ -27,9 +27,12 @@ Three channels are not settings the operator can point anywhere:
   is, and named unavailable exactly when ``calls`` is.
 * Anything else a sandbox publishes goes through ``mapping.channels``, an
   operator-named ``<name> -> JSONPath`` map landing in
-  ``SandboxReport.channels``. Those rows are carried close to the shape the
-  sandbox published them in, because this module has no consumer to coerce
-  them for.
+  ``SandboxReport.channels``, or ``mapping.places``, a ``<place> -> JSONPath``
+  map onto the report's places with no channel of their own (the process
+  tree, the resolved API names, what the sandbox extracted, the dumps, the
+  memory regions, the IDS alerts). Those rows are carried close to the shape
+  the sandbox published them in, because this module has no consumer to
+  coerce them for.
 * ``generic_events`` and ``screenshots`` have no ``RestMappingConfig`` field
   at all. No REST sandbox this mapping has been built against publishes
   either through a documented API, so both are named unavailable
@@ -86,6 +89,13 @@ REST_MAPPING_FILLS: frozenset[str] = frozenset(
         "dropped_files",
         "registry",
         "channels",
+        # The open places, each where ``mapping.places`` names a path for it.
+        "process_tree",
+        "resolved_apis",
+        "extracted",
+        "procdumps",
+        "memory",
+        "ids_alerts",
     }
 )
 
@@ -151,6 +161,8 @@ class CompiledMapping:
     # ``channels.<name>`` paths, compiled the same way as the fixed channels
     # but named by the operator rather than by this module.
     channel_paths: dict[str, Any] = field(default_factory=dict)
+    # ``places.<place>`` paths, onto the report's open places.
+    place_paths: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -187,9 +199,18 @@ def compile_mapping(cfg: RestMappingConfig) -> CompiledMapping:
         for name, expression in cfg.channels.items()
         if expression
     }
+    place_paths = {
+        name: _compile_one(expression, f"places.{name}")
+        for name, expression in cfg.places.items()
+        if expression
+    }
     target = _compile_one(cfg.target_sha256, "target_sha256") if cfg.target_sha256 else None
     return CompiledMapping(
-        config=cfg, target_sha256=target, paths=paths, channel_paths=channel_paths
+        config=cfg,
+        target_sha256=target,
+        paths=paths,
+        channel_paths=channel_paths,
+        place_paths=place_paths,
     )
 
 
@@ -230,20 +251,22 @@ def _normalize_sha256(value: Any) -> tuple[str, str]:
 
 
 def _select_open_channels(
-    compiled: CompiledMapping, payload: dict[str, Any]
-) -> tuple[dict[str, list[dict[str, Any]]], dict[str, ChannelStats]]:
-    """Run the operator's own ``channels.<name>`` paths.
+    compiled: CompiledMapping, payload: dict[str, Any], *, places: bool = False
+) -> tuple[dict[str, list[Any]], dict[str, ChannelStats]]:
+    """Run the operator's own ``channels.<name>`` paths, or its ``places.<place>`` ones.
 
     These have no consumer field to require and no row shape to coerce into:
     the point of an open channel is that this module does not know what a
     sandbox publishes there. A mapping is kept as it is, anything else is
-    wrapped so every row is still a mapping, and the cap applies as it does to
+    wrapped so every row is still a mapping (a name the resolved API names
+    place holds is kept as the text it is), and the cap applies as it does to
     every other channel.
     """
-    rows: dict[str, list[dict[str, Any]]] = {}
+    rows: dict[str, list[Any]] = {}
     stats: dict[str, ChannelStats] = {}
-    for name, path in compiled.channel_paths.items():
-        label = f"channels.{name}"
+    paths = compiled.place_paths if places else compiled.channel_paths
+    for name, path in paths.items():
+        label = f"places.{name}" if places else f"channels.{name}"
         try:
             values = (node.value for node in path.finditer(payload))
             peeked = list(islice(values, MAX_ROWS_PER_CHANNEL + 1))
@@ -252,7 +275,7 @@ def _select_open_channels(
             continue
         truncated = len(peeked) > MAX_ROWS_PER_CHANNEL
         matches = peeked[:MAX_ROWS_PER_CHANNEL]
-        kept = [m if isinstance(m, dict) else {"value": m} for m in matches if m not in (None, "")]
+        kept = [_open_row(name if places else "", m) for m in matches if m not in (None, "")]
         stats[label] = ChannelStats(
             matched=len(matches),
             kept=len(kept),
@@ -263,6 +286,13 @@ def _select_open_channels(
         if kept:
             rows[name] = kept
     return rows, stats
+
+
+def _open_row(place: str, match: Any) -> Any:
+    """One match of an open channel or place, as the row it lands as."""
+    if place == "resolved_apis":
+        return str(match) if not isinstance(match, dict) else str(match.get("value") or "")
+    return match if isinstance(match, dict) else {"value": match}
 
 
 def _select(
@@ -331,6 +361,8 @@ def apply_mapping(
     rows: dict[str, list[Any]] = {c: list(r) for c, (_s, r) in selected.items()}
     open_channels, open_stats = _select_open_channels(compiled, payload)
     stats.update(open_stats)
+    open_places, place_stats = _select_open_channels(compiled, payload, places=True)
+    stats.update(place_stats)
 
     processes = [
         SandboxProcess(
@@ -434,5 +466,11 @@ def apply_mapping(
         channels=open_channels,
         unavailable=unavailable,
         raw=payload,
+        process_tree=open_places.get("process_tree", []),
+        resolved_apis=open_places.get("resolved_apis", []),
+        extracted=open_places.get("extracted", []),
+        procdumps=open_places.get("procdumps", []),
+        memory=open_places.get("memory", []),
+        ids_alerts=open_places.get("ids_alerts", []),
     )
     return MappingResult(report=report, stats=stats)

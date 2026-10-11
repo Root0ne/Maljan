@@ -671,6 +671,14 @@ class TestTheReadersDeclareWhatTheyFill:
             dropped_files="$.d[*]",
             registry="$.r[*]",
             channels={"linux.systemd": "$.sd[*]"},
+            places={
+                "process_tree": "$.behavior.processtree[*]",
+                "resolved_apis": "$.behavior.summary.resolved_apis[*]",
+                "extracted": "$.CAPE.payloads[*]",
+                "procdumps": "$.procdump[*]",
+                "memory": "$.procmemory[*]",
+                "ids_alerts": "$.suricata.alerts[*]",
+            },
         )
         payload = {
             "p": [{"pid": 1, "name": "a", "command_line": "a"}],
@@ -915,9 +923,9 @@ class TestReviewRoundOne:
         assert [i["id"] for i in found.query("procdumps", pid="10").items] == ["dump:1"]
         # A Cuckoo upload keeps them too; a reader that cannot fill them says so.
         assert ss.section_index(raw, ("upload", "cuckoo"))["sections"]["extracted"]["items"] == 2
-        mapped = ss.section_index(raw, ("rest", "generic"))["sections"]
-        assert mapped["extracted"] == {
-            "no": "no: the rest report as normalised here carries no `extracted`"
+        unread = ss.section_index(raw, ("triage", "triage", "tasks"))["sections"]
+        assert unread["procdumps"] == {
+            "no": "no: the triage report as normalised here carries no `procdumps`"
         }
 
     def test_the_extra_places_are_declared_by_every_reader_of_the_cape_shape(self) -> None:
