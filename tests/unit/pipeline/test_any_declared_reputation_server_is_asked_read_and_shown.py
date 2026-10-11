@@ -546,3 +546,32 @@ def test_the_report_states_the_engines_the_service_counted_over_the_total(
     assert _reputation_row(MarkdownRenderer().render(report)).startswith(
         "| Reputation | HashRep: 9 of 38 engines flag it as malicious"
     )
+
+
+def test_the_service_s_name_and_date_cannot_write_markdown_into_the_report(
+    installed: Any,
+) -> None:
+    # A declared service's name and its answer's date are words the report did not
+    # write: a link or markup in them is escaped, and an address is defanged.
+    from maljan.reporting.models import ReputationAnswer
+
+    installed(_settings(hashrep=INVENTED))
+    entry = _lookup_entry()
+    report = _report([entry]).model_copy(
+        update={
+            "reputation": [
+                ReputationAnswer(
+                    entry_id=entry.id,
+                    service="[Rep](https://evil.example/x)",
+                    malicious=3,
+                    engines=10,
+                    last_seen="<b>2026</b> `x` http://evil.example/y",
+                )
+            ]
+        }
+    )
+    row = _reputation_row(MarkdownRenderer().render(report))
+    assert "](https://evil.example" not in row
+    assert "\\[Rep\\]" in row
+    assert "<b>" not in row and "\\<b\\>" in row
+    assert "http://evil.example/y" not in row
