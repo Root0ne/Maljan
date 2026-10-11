@@ -215,9 +215,10 @@ def _all_tools_team() -> dict[str, object]:
 def test_a_custom_team_passes_every_check(tmp_path: Path, wire: str) -> None:
     """Every check reads the custom team from the job's own roster and passes.
 
-    Three of the team's analysts answer alike, so the debate flags their
-    agreement and runs a later revision round: each revision restates the
-    answer in force, and the report's labels number the claims of that answer.
+    Three of the team's analysts answer alike. Likeness is told to the
+    mediator and never overrides its consensus, so the debate holds its one
+    revision round and ends: the revision restates the answer in force, and the
+    report's labels number the claims of that answer.
     """
     rehearsal = Rehearsal(
         scenario="normal",
@@ -234,7 +235,7 @@ def test_a_custom_team_passes_every_check(tmp_path: Path, wire: str) -> None:
     assert custom | {"triage"} <= set(record.claims_in_force)
     assert custom | {"triage"} <= set(record.run_summary["generation"]["output_caps"])
     assert record.required_stages["reversing"] == ["all_tools_reverser_ghidra"]
-    assert observations(record)["negotiation_rounds"] > 2
+    assert observations(record)["negotiation_rounds"] == 2
     # Every answer the stub wrote is held to the one analyst that wrote it.
     writers, unknown = answer_writers(record)
     assert unknown == []

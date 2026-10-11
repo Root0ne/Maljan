@@ -41,14 +41,12 @@ from maljan.pipeline.nodes import (
     NOT_NAMED_BY_MEDIATOR,
     make_negotiation_node,
     make_revision_node,
-    sycophancy_asks_every_analyst,
 )
 from maljan.pipeline.routing import (
     CONSENSUS,
     CONVERGENCE,
     NO_CONSENSUS,
     NO_CONTESTED_POINT,
-    SYCOPHANCY,
     ConsensusRouter,
     debate_route,
 )
@@ -278,29 +276,27 @@ class TestTheRouter:
 
         assert debate_route(state, max_rounds=5) == ("revision", NO_CONSENSUS)
 
-    def test_a_sycophancy_override_still_opens_a_round(self) -> None:
+    def test_sycophancy_never_overrides_the_mediator_s_consensus(self) -> None:
         state = _routed_state(_mediator(revise=[], lines=[]), consensus=True, syco=True)
 
-        assert debate_route(state, max_rounds=5) == ("revision", SYCOPHANCY)
+        assert debate_route(state, max_rounds=5) == ("judge", CONSENSUS)
 
-    def test_sycophancy_below_agreement_still_opens_the_devil_s_advocate_round(self) -> None:
+    def test_sycophancy_never_opens_a_round_with_no_contested_point(self) -> None:
         state = _routed_state(_mediator(revise=[], lines=[]), consensus=False, syco=True)
 
-        assert debate_route(state, max_rounds=5) == ("revision", NO_CONSENSUS)
-        assert debate_route(state, max_rounds=5, sycophancy_check=False) == (
-            "revision",
-            NO_CONSENSUS,
-        )
+        assert debate_route(state, max_rounds=5) == ("judge", NO_CONTESTED_POINT)
 
-    def test_the_devil_s_advocate_round_asks_every_analyst_with_its_directive(self) -> None:
-        from maljan.pipeline.sycophancy_detector import DEVIL_ADVOCATE_DIRECTIVE
+    def test_a_flag_reaches_no_analyst_s_prompt(self) -> None:
+        argument = _mediator(revise=["static", "dynamic"])
+        argument.converged = [
+            {"agent": "static", "towards": "network", "before": 0.5, "after": 0.95}
+        ]
+        _update, agents = _revise(argument, syco=True)
 
-        _update, agents = _revise(_mediator(revise=[], lines=[]), syco=True)
-
-        assert all(agents[name].safe_revise_isr.call_count == 1 for name in NAMES)
-        args, _kw = agents["network"].safe_revise_isr.call_args
-        assert args[3].startswith(DEVIL_ADVOCATE_DIRECTIVE)
-        assert set(args[2]) == {"static", "all_tools_static_r2", "dynamic"}
+        assert agents["network"].safe_revise_isr.call_count == 0
+        static_args, _kw = agents["static"].safe_revise_isr.call_args
+        assert "challenge" not in static_args[3].lower()
+        assert "moved towards" not in static_args[3]
 
 
 # ---------------------------------------------------------------------------
@@ -384,29 +380,13 @@ class TestOnlyTheNamedRevise:
         assert record["revised"] == NAMES
         assert record["asked_all"] == ANALYSTS_FIELD_MISSING_NOTE
 
-    def test_a_sycophancy_round_asks_every_analyst_with_the_whole_feedback(self) -> None:
+    def test_sycophancy_never_widens_a_named_round(self) -> None:
         update, agents = _revise(_mediator(revise=["static"]), syco=True)
 
-        assert all(agents[name].safe_revise_isr.call_count == 1 for name in NAMES)
-        assert update["revision_rounds"][0]["asked_all"] == sycophancy_asks_every_analyst(
-            NO_CONSENSUS
-        )
-        args, _kw = agents["static"].safe_revise_isr.call_args
-        assert set(args[2]) == {"all_tools_static_r2", "dynamic", "network"}
-        assert LINE_NOT_BLOCKING in args[3]
-
-    def test_the_record_names_the_override_where_the_override_opened_the_round(self) -> None:
-        update, _agents = _revise(_mediator(revise=[], lines=[]), syco=True, consensus=True)
-
-        said = update["revision_rounds"][0]["asked_all"]
-        assert said == sycophancy_asks_every_analyst(SYCOPHANCY)
-        assert "sycophancy override" in said
-
-    def test_the_record_names_no_override_where_no_consensus_opened_the_round(self) -> None:
-        update, _agents = _revise(_mediator(revise=["static"]), syco=True, consensus=False)
-
-        said = update["revision_rounds"][0]["asked_all"]
-        assert "no_consensus" in said and "override" not in said
+        assert agents["static"].safe_revise_isr.call_count == 1
+        for name in ("all_tools_static_r2", "dynamic", "network"):
+            assert agents[name].safe_revise_isr.call_count == 0
+        assert "asked_all" not in update["revision_rounds"][0]
 
     def test_a_record_without_a_reading_asks_every_analyst_as_before(self) -> None:
         update, agents = _revise(

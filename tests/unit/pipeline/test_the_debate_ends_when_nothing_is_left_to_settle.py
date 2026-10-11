@@ -9,7 +9,8 @@ The rules, in the order the router applies them:
   whitespace aside, means the debate converged: it ends;
 - a revision round in which no analyst was revised made no change: it ends,
   by consensus where the mediator stated one and as ``not_revised`` otherwise;
-- the sycophancy check sends an agreement it flags back to revise, as it did;
+- a sycophancy flag is a fact told to the mediator: it never sends an
+  agreement back to revise;
 - consensus ends it: the confidence meets the threshold and no listed line is
   one the mediator marked blocking or left unmarked;
 - a stable agreement with no line standing ends it;
@@ -106,7 +107,7 @@ class TestARoundOfIdenticalAnswers:
         assert debate_route(state, max_rounds=9)[0] == "revision"
 
 
-class TestTheSycophancyCheckIsAsItWas:
+class TestTheSycophancyCheckDecidesNoRoute:
     def _agreed(self, **over: Any) -> dict[str, Any]:
         return _state(
             is_consensus=True,
@@ -115,13 +116,13 @@ class TestTheSycophancyCheckIsAsItWas:
             **over,
         )
 
-    def test_flagged_agreement_is_sent_back(self) -> None:
-        assert debate_route(self._agreed(), max_rounds=5) == ("revision", "sycophancy")
+    def test_flagged_agreement_ends_by_consensus(self) -> None:
+        assert debate_route(self._agreed(), max_rounds=5) == ("judge", "consensus")
 
     def test_whatever_the_round_before_added_to_the_ledger(self) -> None:
         state = self._agreed(revision_rounds=[{**_round(identical=False), "new_evidence": 40}])
 
-        assert debate_route(state, max_rounds=5) == ("revision", "sycophancy")
+        assert debate_route(state, max_rounds=5) == ("judge", "consensus")
 
     def test_a_forced_revision_that_returned_the_same_answers_is_not_forced_again(self) -> None:
         state = self._agreed(revision_rounds=[_round(identical=True)])
@@ -147,7 +148,7 @@ class TestTheHardLimit:
 
         assert debate_route(state, max_rounds=5) == ("judge", "consensus")
 
-    def test_a_forced_revision_the_limit_stopped_is_the_limit(self) -> None:
+    def test_a_flagged_agreement_on_the_last_round_ended_by_consensus(self) -> None:
         state = _state(
             iteration_count=5,
             is_consensus=True,
@@ -155,7 +156,7 @@ class TestTheHardLimit:
             discussion_history=[_mediator([])],
         )
 
-        assert debate_route(state, max_rounds=5) == ("judge", "hard_limit")
+        assert debate_route(state, max_rounds=5) == ("judge", "consensus")
 
     def test_at_the_limit_only_the_limit_is_logged(self, caplog: Any) -> None:
         import logging
@@ -198,14 +199,7 @@ class TestTheRunSummarySaysWhatEndedIt:
         assert negotiation.converged_early is False
 
     def test_a_debate_the_limit_ended_says_so(self) -> None:
-        negotiation = self._negotiation(
-            _state(
-                iteration_count=5,
-                is_consensus=True,
-                sycophancy_detected=True,
-                discussion_history=[_mediator([])],
-            )
-        )
+        negotiation = self._negotiation(_state(iteration_count=5))
 
         assert negotiation.termination_reason == "hard_limit"
         assert negotiation.converged_early is False

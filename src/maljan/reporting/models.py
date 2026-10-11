@@ -588,6 +588,28 @@ class CapabilityCell(BaseModel):
     evidence_roots: list[str] = Field(default_factory=list)
     # One ``<entry id>: no: <reason>`` per cited entry that gave no root.
     roots_not_read: list[str] = Field(default_factory=list)
+    # The ledger entries and sandbox items behind the technique: each cited
+    # source that gives a statement naming it a root, and each asserting
+    # entry whose rows name it (``validation.technique_sources``). One entry
+    # is one source however many agents cite it. Empty on rows built without
+    # the ledger.
+    sources: list[str] = Field(default_factory=list)
+    # How many of ``sources`` are independent: sources whose roots overlap
+    # (two tools reading one place) count once.
+    independent_sources: int = 0
+    # The matrix's own decision, the one ``TTPMapping.is_corroborated`` carries
+    # for a published row, so the console reads it rather than recounting.
+    # ``None`` on a cell stored before it was recorded.
+    is_corroborated: bool | None = None
+    # The sources counted by what each is: ``code``, ``run``, ``rule``,
+    # ``artefact`` (a place in the file), ``report`` (an external assessment of
+    # the whole file) or ``unplaced`` (cited, giving no root).
+    source_kinds: dict[str, int] = Field(default_factory=dict)
+    # ``capability`` when no source is behaviour (code, run, rule) and the
+    # placed ones are all artefacts of the file: what the sample can do, not
+    # what it was seen doing; ``unobserved`` when no source is behaviour and
+    # one is an external assessment or none is placed. Empty otherwise.
+    support: str = ""
 
 
 class TTPMapping(BaseModel):
@@ -612,6 +634,12 @@ class TTPMapping(BaseModel):
     # See ``CapabilityCell.evidence_roots`` and ``roots_not_read``.
     evidence_roots: list[str] = Field(default_factory=list)
     roots_not_read: list[str] = Field(default_factory=list)
+    # See ``CapabilityCell.sources``, ``independent_sources``, ``source_kinds``
+    # and ``support``.
+    sources: list[str] = Field(default_factory=list)
+    independent_sources: int = 0
+    source_kinds: dict[str, int] = Field(default_factory=dict)
+    support: str = ""
 
 
 # ---------------------------------------------------------------------------

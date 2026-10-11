@@ -563,11 +563,14 @@ def _where_quoted(line: str, entries: EntryTexts | None) -> str:
 def _published_techniques(report: MalwareReport) -> str:
     """The techniques the report publishes, one line each, for every section's prompt."""
     from maljan.analysis.corroboration import rule_match_only
+    from maljan.reporting.narrative_agent import support_note
 
     rule_only = rule_match_only(report)
     rows = [
         f"- {m.technique_id} {m.technique_name}".rstrip()
         + (f" — {rule_only[m.technique_id]}" if m.technique_id in rule_only else "")
+        # A technique every source of which is an artefact of the file says so.
+        + (f" — {note}" if (note := support_note(m)) else "")
         for m in (getattr(report, "ttp_mappings", None) or [])
         if getattr(m, "technique_id", "")
     ]

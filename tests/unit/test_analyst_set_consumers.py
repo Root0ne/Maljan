@@ -62,10 +62,10 @@ class TestTheRouterRespectsWhicheverProfileIsRunning:
 
         assert _routes_to(cfg, is_consensus=False) == "revision"
 
-    def test_sycophancy_overrides_a_premature_consensus(self) -> None:
+    def test_sycophancy_never_overrides_a_consensus(self) -> None:
         cfg = _install()
 
-        assert _routes_to(cfg, is_consensus=True, sycophancy_detected=True) == "revision"
+        assert _routes_to(cfg, is_consensus=True, sycophancy_detected=True) == "judge"
 
     def test_the_hard_iteration_limit_wins(self) -> None:
         cfg = _install()

@@ -45,6 +45,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from maljan.analysis.corroboration import corroborated as stands_on_two
+from maljan.analysis.corroboration import corroboration_row
 from maljan.analysis.evidence_roots import RootCount, layers_and_roots, run_roots
 from maljan.analysis.technique_ids import attack_reference_id, says_no_technique
 from maljan.core.logger import logger
@@ -123,6 +125,7 @@ def build_capability_matrix(
     if not techniques:
         return [], []
     roots_of = run_roots(ledger) if ledger else None
+    rows = _corroboration_rows(isr_reports, ledger)
 
     out_of_scope = _out_of_scope(list(techniques), sample)
     review = technique_review(stix_output)
@@ -158,6 +161,15 @@ def build_capability_matrix(
         if roots_of is not None:
             for text, ids in info.get("cited") or []:
                 counted.add(*roots_of.of_statement(text, ids))
+        row = corroboration_row(rows.get(tid.upper())) if rows else {}
+        held = list(row.get("sources") or [])
+        support = str(row.get("support") or "")
+        # Corroboration is two sayers (analyst layers in statements of their
+        # own, and the rules that assert it) and, where the ledger was read,
+        # the corroboration record's own decision on its sources: one pack row
+        # restated by five analysts is one source, and a technique no source
+        # of which is behaviour is not corroborated.
+        corroborated = stands_on_two(row) if "sources" in row else len(independent) >= 2
 
         # Never emit a zero-confidence cell with no evidence and no contributing
         # source — it is an empty claim the UI would render as a "verified"
@@ -243,6 +255,11 @@ def build_capability_matrix(
                 identical_statements=identical,
                 evidence_roots=list(counted.roots),
                 roots_not_read=list(counted.not_read),
+                sources=held,
+                independent_sources=int(row.get("independent_sources", 0) or 0),
+                is_corroborated=corroborated,
+                source_kinds=dict(row.get("source_kinds") or {}),
+                support=support,
             )
         )
         if not_published:
@@ -262,12 +279,16 @@ def build_capability_matrix(
                 evidence_quotes=list(evidence),
                 confidence=confidence,
                 contributing_layers=layers,
-                is_corroborated=len(independent) >= 2,
+                is_corroborated=corroborated,
                 technique_id_valid=valid,
                 independent_layers=independent,
                 identical_statements=identical,
                 evidence_roots=list(counted.roots),
                 roots_not_read=list(counted.not_read),
+                sources=held,
+                independent_sources=int(row.get("independent_sources", 0) or 0),
+                source_kinds=dict(row.get("source_kinds") or {}),
+                support=support,
             )
         )
 
@@ -275,6 +296,25 @@ def build_capability_matrix(
     mappings.sort(key=lambda m: -1.0 if m.confidence is None else m.confidence, reverse=True)
     logger.info("capability_matrix: %d cells, %d ttp mappings", len(cells), len(mappings))
     return cells, mappings
+
+
+def _corroboration_rows(
+    isr_reports: dict[str, Any] | None, ledger: Sequence[Any] | None
+) -> dict[str, dict[str, Any]]:
+    """The run's corroboration rows (``validation.corroboration``), or none. Never raises.
+
+    The same rows the judge's count and the run summary read, so the matrix
+    and the judge decide corroboration from one record.
+    """
+    if not ledger:
+        return {}
+    try:
+        from maljan.pipeline.validation import corroboration
+
+        return corroboration(isr_reports, ledger)
+    except Exception as exc:  # noqa: BLE001 — a fact not read is no fact stated
+        logger.debug("capability_matrix: the corroboration rows were not read (%s)", exc)
+        return {}
 
 
 # What the judge is called in ``contributing_layers``. It is listed, because a

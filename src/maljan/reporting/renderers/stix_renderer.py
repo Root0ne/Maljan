@@ -38,6 +38,7 @@ from maljan.agents._indicator_denylists import (
     malformed_hash_in,
     whole_value_in,
 )
+from maljan.analysis.corroboration import support_sentence
 from maljan.analysis.technique_ids import attack_reference_id
 from maljan.core.logger import logger
 from maljan.extractors.network_extractor import (
@@ -1301,7 +1302,12 @@ class ExtendedSTIXRenderer:
         #      it (``judge_postprocess.PLATFORM_ONLY_PROPERTIES``), and nothing
         #      else is kept.
         objects = _with_record_evidence(
-            objects, malware_id, technique_evidence or {}, ledger_order, minted_family_id
+            objects,
+            malware_id,
+            technique_evidence or {},
+            ledger_order,
+            minted_family_id,
+            support=_support_by_pattern(report),
         )
 
         # 9) Report SDO bundles every object_ref. Pre-existing AttackPattern
@@ -1621,12 +1627,30 @@ def _evidence_refs(ids: Any, ledger_order: Mapping[str, int]) -> list[str] | Non
     return held or None
 
 
+def _support_by_pattern(report: Any) -> dict[str, tuple[str, str]]:
+    """Per attack-pattern id, ``(support, sentence)`` for a published technique no
+    source of which is behaviour (``corroboration.support_sentence``)."""
+    out: dict[str, tuple[str, str]] = {}
+    for mapping in getattr(report, "ttp_mappings", None) or []:
+        support = str(getattr(mapping, "support", "") or "")
+        note = support_sentence(
+            support,
+            getattr(mapping, "source_kinds", None),
+            len(getattr(mapping, "sources", None) or []),
+        )
+        tid = str(getattr(mapping, "technique_id", "") or "").strip().upper()
+        if note and tid:
+            out[_pattern_id_for(tid)] = (support, note)
+    return out
+
+
 def _with_record_evidence(
     objects: list[Any],
     malware_id: str | None,
     technique_evidence: Mapping[str, Sequence[str]],
     ledger_order: Mapping[str, int],
     minted_id: str | None = None,
+    support: Mapping[str, tuple[str, str]] | None = None,
 ) -> list[Any]:
     """``objects`` with the property on each object exactly as the record gives it.
 
@@ -1660,6 +1684,21 @@ def _with_record_evidence(
             wanted = None
         if wanted != current:
             obj = obj.model_copy(update={EVIDENCE_REFS_PROPERTY: wanted})
+        if "x_maljan_support" in type(obj).model_fields:
+            uses = (
+                malware_id is not None
+                and getattr(obj, "type", "") == "relationship"
+                and getattr(obj, "relationship_type", "") == "uses"
+                and getattr(obj, "source_ref", None) == malware_id
+            )
+            marked = (
+                (support or {}).get(str(getattr(obj, "target_ref", "") or "")) if uses else None
+            )
+            mark = (marked[0], marked[1]) if marked else (None, None)
+            if (getattr(obj, "x_maljan_support", None), obj.x_maljan_support_note) != mark:
+                obj = obj.model_copy(
+                    update={"x_maljan_support": mark[0], "x_maljan_support_note": mark[1]}
+                )
         out.append(obj)
     return out
 

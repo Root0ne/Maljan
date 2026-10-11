@@ -174,6 +174,7 @@ def _tables() -> dict[str, Callable[[str], bool]]:
 
     return {
         "evidence_roots._WHOLE_FILE_TOOLS": names(evidence_roots._WHOLE_FILE_TOOLS),
+        "evidence_roots.FILE_ASSESSMENT_TOOLS": names(evidence_roots.FILE_ASSESSMENT_TOOLS),
         "evidence_roots._REFERENCE_TOOLS": names(evidence_roots._REFERENCE_TOOLS),
         "evidence_roots._IMPORT_LISTINGS": names(evidence_roots._IMPORT_LISTINGS),
         "evidence_roots._EXPORT_LISTINGS": names(evidence_roots._EXPORT_LISTINGS),

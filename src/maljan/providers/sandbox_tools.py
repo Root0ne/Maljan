@@ -26,6 +26,7 @@ return nothing.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
@@ -245,6 +246,25 @@ def _with_resolver_fact(row: Any) -> Any:
     return row
 
 
+def _signature_techniques(sig: Mapping[str, Any]) -> list[str]:
+    """The ATT&CK ids a sandbox tags one signature with, read from any field it uses.
+
+    The normalised report's ``ttp_tags`` and the raw shapes it is read from
+    (``ttp``, ``ttps``, ``attck_id``, ``technique_ids``), each read as the ids
+    it writes (``analysis.technique_ids.technique_ids_in``); never the
+    signature's name.
+    """
+    from maljan.analysis.technique_ids import technique_ids_in
+
+    found: dict[str, None] = {}
+    for key in ("ttp_tags", "ttp", "ttps", "attck_id", "technique_ids"):
+        value = sig.get(key)
+        for item in value if isinstance(value, list) else [value]:
+            if item:
+                found.update(dict.fromkeys(technique_ids_in(item)))
+    return list(found)
+
+
 def sandbox_signatures(
     report: dict[str, Any] | None, offset: int = 0, limit: int = 0
 ) -> dict[str, Any]:
@@ -263,15 +283,21 @@ def sandbox_signatures(
         for sig in page:
             if not isinstance(sig, dict):
                 continue
-            rows.append(
-                {
-                    "name": sig.get("name") or sig.get("signature") or "",
-                    "description": sig.get("description") or "",
-                    "severity": sig.get("severity"),
-                    "confidence": sig.get("confidence"),
-                    "references": list(sig.get("references") or [])[:5],
-                }
-            )
+            row = {
+                "name": sig.get("name") or sig.get("signature") or "",
+                "description": sig.get("description") or "",
+                "severity": sig.get("severity"),
+                "confidence": sig.get("confidence"),
+                "references": list(sig.get("references") or [])[:5],
+            }
+            # The technique ids the sandbox itself tags the signature with, as
+            # its report declares them, under the key the tool's declaration
+            # reads technique ids from (``technique_ids``). Left out where the
+            # sandbox declares none, so an answer without tags is as it was.
+            tags = _signature_techniques(sig)
+            if tags:
+                row["technique_ids"] = tags
+            rows.append(row)
     total = len(signatures) if isinstance(signatures, list) else 0
     return {"signatures": rows, "total": total, **meta}
 

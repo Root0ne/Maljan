@@ -235,6 +235,9 @@ class Relationship(STIXObject):
     target_ref: str
     # See ``EVIDENCE_REFS_PROPERTY``.
     x_maljan_evidence_refs: list[str] | None = None
+    # See ``SUPPORT_PROPERTY``.
+    x_maljan_support: str | None = None
+    x_maljan_support_note: str | None = None
 
 
 class ConfidenceAnnotatedRelationship(STIXObject):
@@ -285,6 +288,9 @@ class ConfidenceAnnotatedRelationship(STIXObject):
     x_maljan_technique_id: str | None = None
     # See ``EVIDENCE_REFS_PROPERTY``.
     x_maljan_evidence_refs: list[str] | None = None
+    # See ``SUPPORT_PROPERTY``.
+    x_maljan_support: str | None = None
+    x_maljan_support_note: str | None = None
 
     @property
     def is_high_confidence(self) -> bool:
@@ -356,6 +362,17 @@ class AttackPattern(STIXObject):
     name: str
     description: str | None = None
     external_references: list[dict] = Field(default_factory=list)
+
+
+# How the run's sources stand behind a published technique no source of which
+# is behaviour (``analysis.corroboration.support_label``): ``capability`` or
+# ``unobserved``, written by the export on this run's ``uses`` edge to the
+# technique, with the sentence its ATT&CK row prints
+# (``x_maljan_support_note``). On the edge and not on the attack-pattern, whose
+# id is the same in every export: the edge is this run's claim. The
+# relationship type stays ``uses``. Absent for a technique with a behaviour
+# source.
+SUPPORT_PROPERTY = "x_maljan_support"
 
 
 # ---------------------------------------------------------------------------

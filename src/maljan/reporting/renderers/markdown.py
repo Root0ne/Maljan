@@ -4068,6 +4068,35 @@ def _corroborated_words(mapping: Any, rules: list[dict[str, Any]]) -> str:
     return f", {layers_and_roots(independent or named, roots, unread)}"
 
 
+def support_words(support: str, kinds: Any, sources: int, named: int, listed: str = "") -> str:
+    """The status words of a technique no source of which is behaviour.
+
+    ``as a capability, not observed (…)`` or ``as not observed (…)``: its
+    sources counted by kind (each one ledger entry or sandbox item however
+    many analysts cite it), that no sandbox observation, code listing or rule
+    match stands behind it, and how many analyst layers named it.
+    """
+    from maljan.analysis.corroboration import (
+        NO_BEHAVIOUR_SOURCE,
+        sources_phrase,
+        support_label,
+    )
+
+    label = support_label(support)
+    if not label:
+        return ""
+    parts = [f"{sources_phrase(kinds, sources)}; {NO_BEHAVIOUR_SOURCE}"]
+    if named:
+        parts.append(
+            f"named by {named} analyst layer{'' if named == 1 else 's'}, counted as the "
+            "sources they cite"
+        )
+    if listed:
+        parts.append(listed)
+    opening = "as a capability, not observed" if support == "capability" else "as not observed"
+    return f"{opening} ({'; '.join(parts)})"
+
+
 def _layer_words(mapping: Any, rules: list[dict[str, Any]]) -> str:
     """``, corroborated`` for a row two analyst layers named, or ``""``.
 
@@ -4096,13 +4125,32 @@ def _layer_words(mapping: Any, rules: list[dict[str, Any]]) -> str:
         else ""
     )
     listed = rules and all(_resolved_only(hit) for hit in rules)
+    said = support_words(
+        str(getattr(mapping, "support", "") or ""),
+        getattr(mapping, "source_kinds", None),
+        len(getattr(mapping, "sources", None) or []),
+        named,
+        "their statements are listed below the table" if listed else "",
+    )
+    if said:
+        return " " + said
     if not mapping.is_corroborated:
         if named < 2 or not (independent or identical):
             return ""
+        # Where the sources were read, a row they leave short of two says so.
+        cited = len(getattr(mapping, "sources", None) or [])
+        sources = int(getattr(mapping, "independent_sources", 0) or 0) or cited
+        traced = (
+            f"; they cite {sources} independent source{'' if sources == 1 else 's'}, each "
+            "counted once"
+            if cited and sources < 2
+            else ""
+        )
         return (
             f", not corroborated ({named} analyst layers name it; {independent} of them in a "
             "statement of its own"
             + (f"; {repeated}" if repeated else "")
+            + traced
             + ("; their statements are listed below the table" if listed else "")
             + ")"
         )

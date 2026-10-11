@@ -106,10 +106,10 @@ class TestConsensusRouter:
         state = _make_state(iteration=1, consensus=True, sycophancy=False)
         assert router.should_continue(state) == "judge"
 
-    def test_overrides_consensus_when_sycophancy_detected(self) -> None:
+    def test_sycophancy_never_overrides_consensus(self) -> None:
         router = _make_router(max_iterations=5)
         state = _make_state(iteration=1, consensus=True, sycophancy=True)
-        assert router.should_continue(state) == "revision"
+        assert router.should_continue(state) == "judge"
 
     def test_hard_limit_overrides_sycophancy(self) -> None:
         router = _make_router(max_iterations=3)
@@ -213,16 +213,16 @@ class TestConsensusRouter:
         )
         assert router.should_continue(state) == "judge"
 
-    def test_sycophancy_beats_adaptive_termination(self) -> None:
-        """Sycophancy + consensus overrides even a stable confidence history."""
+    def test_sycophancy_decides_no_route_beside_a_stable_history(self) -> None:
+        """Sycophancy is a fact told to the mediator; consensus still ends the debate."""
         router = _make_router(max_iterations=10)
         state = _make_state(
             iteration=3,
             consensus=True,
             sycophancy=True,
-            confidence_history=[0.88, 0.89, 0.88],  # stable → but sycophancy wins
+            confidence_history=[0.88, 0.89, 0.88],
         )
-        assert router.should_continue(state) == "revision"
+        assert router.should_continue(state) == "judge"
 
     def test_empty_confidence_history_no_adaptive(self) -> None:
         """Empty history never triggers adaptive termination."""

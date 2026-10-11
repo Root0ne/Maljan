@@ -8,8 +8,10 @@ similarity check judges a pair only where at least one of the two answers was
 revised in the round being judged. A round in which no analyst was revised
 made no change, and the debate does not go on because of it: the router sends
 the answers in force to the judge, by consensus where the mediator stated one
-and as ``not_revised`` otherwise. Where answers were revised the check and the
-router behave as they did. Every value is synthetic.
+and as ``not_revised`` otherwise. Where answers were revised, the round's
+recorded convergence flags decide the flag (a record without them is read as
+before), and a flag is a fact for the mediator that never sends a consensus
+back to revise. Every value is synthetic.
 """
 
 from __future__ import annotations
@@ -229,15 +231,28 @@ class TestAllEmptyRevisions:
 
 
 class TestConvergingRevisedAnswers:
-    def test_are_flagged_and_sent_back_as_before(self) -> None:
+    def test_a_record_without_flags_is_read_as_before_and_ends_by_consensus(self) -> None:
         after = _mediation_after(REVISED_ROUND, consensus=True)
 
         assert after["sycophancy_detected"] is True
-        assert debate_route(after, max_rounds=5) == ("revision", "sycophancy")
+        assert debate_route(after, max_rounds=5) == ("judge", "consensus")
 
     def test_a_record_with_no_names_is_read_as_before(self) -> None:
         legacy = {"round": 1, "stage": "debate", "made": 2, "identical": False}
         after = _mediation_after(legacy, consensus=True)
 
         assert after["sycophancy_detected"] is True
-        assert debate_route(after, max_rounds=5) == ("revision", "sycophancy")
+        assert debate_route(after, max_rounds=5) == ("judge", "consensus")
+
+    def test_a_round_that_recorded_no_convergence_is_not_flagged(self) -> None:
+        after = _mediation_after({**REVISED_ROUND, "converged": []}, consensus=True)
+
+        assert after["sycophancy_detected"] is False
+
+    def test_a_recorded_convergence_is_flagged_and_put_to_the_mediator(self) -> None:
+        flag = {"agent": "dynamic", "towards": "network", "before": 0.5, "after": 0.97}
+        after = _mediation_after({**REVISED_ROUND, "converged": [flag]}, consensus=True)
+
+        assert after["sycophancy_detected"] is True
+        assert after["discussion_history"][-1].converged == [flag]
+        assert debate_route(after, max_rounds=5) == ("judge", "consensus")

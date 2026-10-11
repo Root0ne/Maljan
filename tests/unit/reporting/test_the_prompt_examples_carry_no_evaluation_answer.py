@@ -120,7 +120,9 @@ from maljan.pipeline.debate_facts import (
     BLOCK_NOT_READ_NOTE,
     analysts_field_unknown_note,
     ledger_count_facts,
+    place_facts,
     with_ledger_facts,
+    with_place_facts,
 )
 from maljan.pipeline.evidence_summary import summarise
 from maljan.pipeline.mediation_models import (
@@ -136,10 +138,10 @@ from maljan.pipeline.nodes import (
     NOT_NAMED_BY_MEDIATOR,
     run_quality_note,
     skipped_analysts_reason,
-    sycophancy_asks_every_analyst,
 )
-from maljan.pipeline.routing import NO_CONTESTED_POINT, NOT_REVISED
+from maljan.pipeline.routing import NO_CONTESTED_POINT, NOT_REVISED, POINTS_UNCHANGED
 from maljan.pipeline.run_state import NO_LIMIT, budget_line
+from maljan.pipeline.sycophancy_detector import convergence_sentence
 from maljan.pipeline.validation import (
     _UNPARSED_ANSWER_MESSAGE,
     ANALYST_FEEDBACK_CLOSING,
@@ -229,6 +231,7 @@ from maljan.reporting.narrative_agent import (
     EXAMPLE_OBJECT,
     EXPECTED_OBJECT,
     build_prompt_text,
+    support_note,
 )
 from maljan.reporting.renderers.markdown import analyst_list_note
 from maljan.reporting.renderers.stix_renderer import (
@@ -1561,12 +1564,11 @@ PROMPTS: dict[str, str] = {
     "a revision round asking only the analysts the mediator names": " ".join(
         [
             NOT_NAMED_BY_MEDIATOR,
-            sycophancy_asks_every_analyst("sycophancy"),
-            sycophancy_asks_every_analyst("no_consensus"),
             BLOCK_NOT_READ_NOTE,
             ANALYSTS_FIELD_MISSING_NOTE,
             analysts_field_unknown_note(["network", "@@@"]),
             NO_CONTESTED_POINT,
+            POINTS_UNCHANGED,
         ]
     ),
     "a chunk still cut after its question": chunk_cut_unread_sentence("chunk 1 of 2"),
@@ -2045,6 +2047,75 @@ PROMPTS: dict[str, str] = {
             [{"id": "ev_0001", "tool": "t", "structured": {"total": 3}}],
             ["a", "b"],
         ),
+    ),
+    "the functions a blocking line names, told to a revision round": with_place_facts(
+        "mediator feedback",
+        place_facts(
+            ["[analysts: a] A claim 1 names 0x1000 and 0x2000 [ev_0002]. [blocking: r]"],
+            {},
+            [
+                {
+                    "id": "ev_0001",
+                    "tool": "decompile_function",
+                    "args": {"address": "0x1000"},
+                    "output": "void f(void) {}",
+                },
+                {
+                    "id": "ev_0002",
+                    "tool": "function_index",
+                    "structured": {"rows": [{"offset": "0x1000"}, {"offset": "0x2000"}]},
+                },
+            ],
+            ["a"],
+        ),
+        can_read=True,
+    ),
+    "evidence summary with the sources each technique traces to": summarise(
+        {
+            "a": AgentISR(
+                agent_id="a",
+                domain="static",
+                claims=[
+                    ClaimEvidence(
+                        claim="x", evidence_ref="[ev_0001]", confidence=0.5, technique_id="T1112"
+                    )
+                ],
+            )
+        },
+        None,
+        {
+            "T1112": {
+                "sources": ["ev_0001", "ev_0002", "ev_0003"],
+                "independent_sources": 2,
+                "source_kinds": {"artefact": 1, "report": 1, "unplaced": 1},
+                "support": "unobserved",
+            }
+        },
+    ),
+    "a published technique no source of which is behaviour": " ".join(
+        [
+            support_note(
+                TTPMapping(
+                    technique_id="T1112",
+                    technique_name="x",
+                    sources=["ev_0001", "ev_0002"],
+                    source_kinds={"artefact": 2},
+                    support="capability",
+                )
+            ),
+            support_note(
+                TTPMapping(
+                    technique_id="T1112",
+                    technique_name="x",
+                    sources=["ev_0001"],
+                    source_kinds={"report": 1},
+                    support="unobserved",
+                )
+            ),
+        ]
+    ),
+    "a revision that moved towards a peer, told to the mediation": convergence_sentence(
+        [{"agent": "a", "towards": "b", "before": 0.4, "after": 0.95}]
     ),
     "claims that say only that a library is used": _message_of(
         library_only_claims_violation(

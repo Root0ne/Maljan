@@ -13,15 +13,19 @@ Decision priority (highest to lowest), in ``debate_route``:
      No change — no analyst was revised in that round (every revision failed,
      wrote nothing, carried no structured report or was not asked): judge, by
      consensus where the mediator stated one, otherwise ``not_revised``.
-  4. Sycophancy override — if sycophancy AND consensus, force revision.
+     Points unchanged — analysts were revised in that round, and this
+     mediation's blocking lines are the same contested points as the last
+     mediation's (``debate_facts.same_points``: none resolved, none new):
+     another round would argue the same points. Judge
+     (``contested_points_unchanged``); no consensus is claimed.
+  4. Sycophancy is a fact told to the mediator, never a route of its own.
   5. Genuine LLM consensus (no listed line the mediator marked blocking, or
      left unmarked) — judge.
   6. Adaptive termination — statistical confidence convergence, with no
      contradiction standing → judge.
      No contested point — the mediator's final block was read and lists no
-     blocking line, so it names no analyst to revise, and no sycophancy was
-     detected: judge (``no_contested_point``). A round would ask nobody.
-     With sycophancy detected the devil's-advocate round runs as before.
+     blocking line, so it names no analyst to revise: judge
+     (``no_contested_point``). A round would ask nobody.
   7. Default → revision.
 
 The run summary reads its termination reason from the same function, so the
@@ -125,8 +129,11 @@ NOT_REVISED = "not_revised"
 # The last mediation's final block was read and lists no blocking line: it
 # names no analyst to revise, so no revision round is held.
 NO_CONTESTED_POINT = "no_contested_point"
+# The round before this mediation revised analysts, and this mediation's
+# blocking lines are the last mediation's contested points, none resolved and
+# none new: the round changed none of them.
+POINTS_UNCHANGED = "contested_points_unchanged"
 # Why a revision round opens.
-SYCOPHANCY = "sycophancy"
 NO_CONSENSUS = "no_consensus"
 
 
@@ -168,10 +175,45 @@ def revised_in(record: dict[str, Any] | None) -> set[str] | None:
     return {str(name) for name in names}
 
 
+def last_two_mediations(history: Any) -> tuple[Any, Any] | None:
+    """The two latest mediator contributions of ``history``, earlier first, or ``None``."""
+    found: list[Any] = []
+    for argument in reversed(list(history or [])):
+        if getattr(argument, "agent_name", "") == "Mediator":
+            found.append(argument)
+            if len(found) == 2:
+                return found[1], found[0]
+    return None
+
+
+def points_unchanged(state: Any) -> bool:
+    """Whether the last mediation's blocking lines are the one before's contested points.
+
+    Read from the two mediations' structured answers (``contradictions``,
+    the lines each marked blocking or left unmarked), and only where both
+    were made (``status`` complete).
+    """
+    from maljan.pipeline.debate_facts import same_points
+
+    pair = last_two_mediations(state.get("discussion_history") or [])
+    if pair is None:
+        return False
+    before, after = pair
+    if any(getattr(a, "status", "complete") != "complete" for a in pair):
+        return False
+    return same_points(
+        list(getattr(before, "contradictions", None) or []),
+        list(getattr(after, "contradictions", None) or []),
+    )
+
+
 def route_within_limit(
     state: Any, *, sycophancy_check: bool = True, log: bool = True
 ) -> tuple[str, str]:
     """The decision with the round limit left aside: ``(route, reason)``.
+
+    ``sycophancy_check`` is accepted for the callers that pass the stage's
+    option; sycophancy decides no route (``sycophancy_detector``).
 
     ``log=False`` is the run summary reading the reason after the fact: the
     decision was logged when the router made it.
@@ -179,7 +221,6 @@ def route_within_limit(
     say = logger.info if log else _quiet
     iteration = state.get("iteration_count", 0)
     consensus = state.get("is_consensus", False)
-    syco = state.get("sycophancy_detected", False)
     confidence_history: list[float] = state.get("confidence_history") or []
 
     # A mediation round that ERRORED (a transient blip or a timeout) is not a
@@ -249,15 +290,21 @@ def route_within_limit(
         )
         return "judge", NOT_REVISED
 
-    # A "consensus" that comes with sycophancy is treated as premature: force
-    # another revision.
-    if syco and consensus and sycophancy_check:
+    # Analysts were revised in the round before, and the contested points this
+    # mediation lists are the ones the last listed, none resolved and none new:
+    # the round changed no point, and another would argue the same ones. The
+    # answers in force go to the judge, and no agreement is claimed.
+    if revised is not None and int(revised.get("made") or 0) > 0 and points_unchanged(state):
         say(
-            "Sycophancy override: consensus premature at round %d. Forcing revision.",
+            "The round before round %d revised analysts and left the contested points as they "
+            "were; routing to judge with the answers in force.",
             iteration,
         )
-        return "revision", SYCOPHANCY
+        return "judge", POINTS_UNCHANGED
 
+    # Sycophancy is a fact told to the mediator (``sycophancy_detector``); it
+    # never overrides the mediator's consensus or a block with no contested
+    # point, and never opens a round of its own.
     if consensus:
         say("Genuine consensus reached at round %d.", iteration)
         return "judge", CONSENSUS
@@ -275,12 +322,9 @@ def route_within_limit(
 
     # The mediator's block was read and names nobody in a contested point
     # (``AgentArgument.revise == []``): a revision round asks only the analysts
-    # it names, so it would ask nobody. Not read (``None``) is not this, and
-    # neither is a mediation with sycophancy detected: its devil's-advocate
-    # round asks every analyst, as it always did.
+    # it names, so it would ask nobody. Not read (``None``) is not this.
     if (
-        not syco
-        and bool(last)
+        bool(last)
         and getattr(last, "agent_name", "") == "Mediator"
         and getattr(last, "revise", None) == []
     ):

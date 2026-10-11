@@ -89,6 +89,17 @@ export interface Technique {
    *  did. A producer named it and the report keeps the claim; the card says
    *  the claim was not published rather than drawing it as a capability. */
   notPublished: string;
+  /** The backend's own corroboration decision (`is_corroborated`), or `null`
+   *  on a row stored before it was recorded, which is then counted here. */
+  corroborated: boolean | null;
+  /** "capability" or "unobserved" when no source of the technique is a
+   *  sandbox observation, a code listing or a rule match; "" otherwise. */
+  support: string;
+  /** How many ledger entries and sandbox items it cites, each once. */
+  sourceCount: number;
+  /** How many of them are independent (`independent_sources`), or `null` on a
+   *  row stored before it was recorded. */
+  independentCount: number | null;
 }
 
 export interface Tactic {
@@ -98,9 +109,27 @@ export interface Tactic {
   techniques: Technique[];
 }
 
-/** A technique stands on more than one independent observation. */
+/** A technique stands on more than one independent observation: the backend's
+ *  decision where it recorded one, else two layers with a statement each. */
 export function isCorroborated(technique: Technique): boolean {
+  if (technique.support) return false;
+  if (technique.corroborated !== null) return technique.corroborated;
   return technique.corroborating.length >= 2;
+}
+
+/** "N cited, M independent" for a row that recorded both, "N cited" otherwise. */
+export function sourceWords(technique: Technique): string {
+  const cited = `${technique.sourceCount} cited`;
+  return technique.independentCount === null
+    ? cited
+    : `${cited}, ${technique.independentCount} independent`;
+}
+
+/** The badge words for a technique no source of which is behaviour, or "". */
+export function supportLabel(technique: Technique): string {
+  if (technique.support === "capability") return "capability, not observed";
+  if (technique.support === "unobserved") return "not observed";
+  return "";
 }
 
 /**
@@ -139,11 +168,19 @@ export function parseTechniques(raw: unknown[]): Tactic[] {
     // technique into one mislabeled "Unknown Tactic".
     const tacticId = String(t.tactic_id || t.tactic || "TA0000");
     let tacticName = String(t.tactic_name ?? "");
-    const sources = Array.isArray(t.sources)
-      ? (t.sources as unknown[]).map(String)
-      : Array.isArray(t.contributing_layers)
+    // The layers: a matrix row's `contributing_layers`; a /mitre row's
+    // `sources`. A matrix row's own `sources` are ledger entries, not layers.
+    const sources = Array.isArray(t.contributing_layers)
       ? (t.contributing_layers as unknown[]).map(String)
+      : Array.isArray(t.sources)
+      ? (t.sources as unknown[]).map(String)
       : [];
+    const corroborated = typeof t.is_corroborated === "boolean" ? t.is_corroborated : null;
+    const support = String(t.support ?? "");
+    const sourceCount =
+      Array.isArray(t.contributing_layers) && Array.isArray(t.sources) ? t.sources.length : 0;
+    const independentCount =
+      typeof t.independent_sources === "number" && sourceCount ? t.independent_sources : null;
     const matches =
       Number(
         t.matches ??
@@ -197,6 +234,14 @@ export function parseTechniques(raw: unknown[]): Tactic[] {
         : existing.sources.filter((source) => !isJudge(source));
       existing.valid = existing.valid && valid;
       existing.notPublished = existing.notPublished || notPublished;
+      existing.corroborated =
+        existing.corroborated === null ? corroborated : existing.corroborated && corroborated !== false;
+      existing.support = existing.support || support;
+      existing.sourceCount = Math.max(existing.sourceCount, sourceCount);
+      existing.independentCount =
+        existing.independentCount === null
+          ? independentCount
+          : Math.max(existing.independentCount, independentCount ?? 0);
     } else {
       tactic.techniques.push({
         id: techId,
@@ -206,6 +251,10 @@ export function parseTechniques(raw: unknown[]): Tactic[] {
         corroborating: independent ?? sources.filter((source) => !isJudge(source)),
         valid,
         notPublished,
+        corroborated,
+        support,
+        sourceCount,
+        independentCount,
       });
       tactic.technique_count++;
     }

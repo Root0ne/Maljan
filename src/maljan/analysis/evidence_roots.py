@@ -41,8 +41,10 @@ A root is derived from what the entry already holds, never guessed:
   network item is read from a ``sandbox_items`` answer or the whole
   ``sandbox_network`` answer of the same ledger, and an item id is read only
   in a run whose ledger holds the section index, against that index;
-* **the whole file**: hashes, file identification, signing, a file
-  reputation answer.
+* **the whole file**: hashes, file identification, signing;
+* **an external assessment of the whole file**: a file reputation answer, a
+  third party's verdict on the file and no reading of its bytes
+  (``FILE_ASSESSMENT_TOOLS``, the platform's one table of reputation tools).
 
 Each file has its own layout: an entry is about the sample only when the
 path it names is the sample's, or it names no path and its server's program
@@ -88,6 +90,7 @@ from maljan.analysis.sandbox_sections import (
 from maljan.schemas.evidence import repeat_holders
 
 WHOLE_FILE = "the whole file"
+EXTERNAL_ASSESSMENT = "an external assessment of the whole file"
 PE_HEADER = "the PE header"
 IMPORT_TABLE = "the import table"
 EXPORT_TABLE = "the export table"
@@ -117,6 +120,13 @@ NOTHING_TO_PLACE = "no: {tool}'s answer carries no offset, address, section, eve
 BY_NAME_ONLY = "no: the call names its function by name, not by address"
 REPEAT_LOOP = "no: {entry} repeats an entry that holds no answer"
 SIGNATURE_UNPLACED = "no: a sandbox signature names no process or event"
+# A sandbox signature or rule row placed by its own name: a statement that
+# names the signature places it.
+SIGNATURE_ROOT = "sandbox signature {name}"
+# What an entry's answer states as a whole (a count, a scheme, the routine an
+# emulator ran, a value every row holds), as a source a statement places by
+# writing that value (``RunRoots.sources_of_statement``).
+WHOLE_ANSWER_ROOT = "the whole answer of {entry}"
 MATCH_UNPLACED = "no: the match names no command line of a process the sandbox recorded"
 SHARED_COMMAND = "no: more than one process the sandbox recorded has this command line"
 NAMES_NO_ROW = "no: the statement names none of {entry}'s rows"
@@ -136,7 +146,11 @@ BLOB_UNMATCHED = (
 )
 
 # The tools whose fact is about the file as a whole.
-_WHOLE_FILE_TOOLS = frozenset({"hashes", "identify_file", "signing_info", "get_file_report"})
+_WHOLE_FILE_TOOLS = frozenset({"hashes", "identify_file", "signing_info"})
+# The tools whose answer is a third party's assessment of the whole file (a
+# reputation lookup by hash): the platform's one table of them, which the pack
+# reads too.
+FILE_ASSESSMENT_TOOLS = frozenset({"reputation", "get_file_report", "check_hash"})
 # The tools that answer what something is rather than read the sample.
 _REFERENCE_TOOLS = frozenset(
     {
@@ -1097,6 +1111,9 @@ def _read_entry(entry: Any, found: EntryRoots, joins: _Joins) -> EntryRoots:
     if tool in _WHOLE_FILE_TOOLS:
         found.add(WHOLE_FILE)
         return found
+    if tool in FILE_ASSESSMENT_TOOLS:
+        found.add(EXTERNAL_ASSESSMENT)
+        return found
     data = _structured(entry)
     args = getattr(entry, "args", None) or {}
     if tool == "pe_info" and isinstance(data, Mapping):
@@ -1189,7 +1206,16 @@ def _read_entry(entry: Any, found: EntryRoots, joins: _Joins) -> EntryRoots:
         for command in args.get("command_lines") or []:
             _command_root(found, str(command or "").strip(), joins, tids)
     elif tool == "sandbox_signatures":
-        found.reason = SIGNATURE_UNPLACED
+        for row in _rows(data, "signatures"):
+            name = str(row.get("name") or "").strip()
+            if name:
+                found.add(
+                    SIGNATURE_ROOT.format(name=_written(name)),
+                    values=(name,),
+                    techniques=_row_techniques(row),
+                )
+        if not found.roots:
+            found.reason = SIGNATURE_UNPLACED
     elif tool == ITEMS_TOOL:
         for row in _rows(data, "items"):
             item = str(row.get("id") or "").lower()
@@ -1280,10 +1306,16 @@ class RunRoots:
         # The run's sandbox section index: an item id is read only against it.
         self.items: ItemIndex | None = item_index_of(entries)
         self.entries: dict[str, EntryRoots] = {}
+        # Each entry's tool, lower-cased, for what kind of reading it is.
+        self.tools: dict[str, str] = {}
+        # What each entry's answer states as a whole (``answer_facts``).
+        self.answers: dict[str, AnswerFacts] = {}
         for entry in entries:
             eid = str(getattr(entry, "id", "") or "").strip().lower()
             if not eid or getattr(entry, "repeated_of", None):
                 continue
+            self.tools[eid] = _tool(entry).lower()
+            self.answers[eid] = answer_facts(_structured(entry))
             file = files.of(entry)
             if file is None:
                 self.entries[eid] = EntryRoots(reason=FILE_UNTOLD)
@@ -1297,6 +1329,8 @@ class RunRoots:
         for repeat, holder in repeat_holders(entries).items():
             held = self.entries.get(holder) if holder else None
             self.entries[repeat] = held or EntryRoots(reason=REPEAT_LOOP.format(entry=repeat))
+            if held and holder in self.tools:
+                self.tools[repeat] = self.tools[holder]
 
     def of_entry(self, entry_id: str) -> EntryRoots:
         eid = str(entry_id or "").strip().lower()
@@ -1365,13 +1399,13 @@ class RunRoots:
             return "", NO_ITEM.format(item=found)
         return _item_root(found, self._joins)
 
-    def of_statement(self, text: str, entry_ids: Iterable[str]) -> tuple[list[str], list[str]]:
-        """``(roots, no: reasons)`` for one statement citing ``entry_ids``.
+    def _citations(
+        self, text: str, entry_ids: Iterable[str]
+    ) -> list[tuple[str, list[str], list[str]]]:
+        """``(citation, roots, no: reasons)`` per citation of one statement, in its order.
 
-        A sandbox item id is a citation where ``entry_ids`` carries it (read
-        from a citing field) or the statement cites it in brackets, in a run
-        whose ledger holds the section index; the statement's own words are
-        never read for one.
+        Items first, then entries, as ``of_statement`` reads them. An empty
+        list is a statement citing nothing.
         """
         written = list(dict.fromkeys(str(i).strip().lower() for i in entry_ids if str(i).strip()))
         ids = [i for i in written if not is_item_id(i)]
@@ -1380,33 +1414,107 @@ class RunRoots:
             if self.items is not None
             else []
         )
-        if not ids and not items:
-            return [], [NO_CITATION]
-        roots: dict[str, None] = {}
-        reasons: list[str] = []
+        out: list[tuple[str, list[str], list[str]]] = []
         for item in items:
             label, reason = self.of_item(item)
-            if label:
-                roots[label] = None
-            else:
-                reasons.append(f"{item}: {reason}")
+            out.append((item, [label] if label else [], [] if label else [f"{item}: {reason}"]))
         for eid in ids:
             found = self.of_entry(eid)
             if not found.roots:
-                reasons.append(f"{eid}: {found.reason or NOTHING_TO_PLACE.format(tool=eid)}")
+                out.append(
+                    (eid, [], [f"{eid}: {found.reason or NOTHING_TO_PLACE.format(tool=eid)}"])
+                )
                 continue
             # An entry of one root, every row of it placed, gives that root.
             if len(found.roots) == 1 and not found.unplaced_values and not found.unplaced:
-                roots.update(dict.fromkeys(found.roots))
+                out.append((eid, list(found.roots), []))
                 continue
             # Otherwise the statement picks its rows out; one picking none out
             # gives no root for the entry: which row it read is not a fact.
             named, unplaced = self._named(text, found)
-            roots.update(dict.fromkeys(found.ordered(named)))
-            reasons += [f"{eid}: {reason}" for reason in unplaced]
+            reasons = [f"{eid}: {reason}" for reason in unplaced]
             if not named and not unplaced:
                 reasons.append(f"{eid}: {NAMES_NO_ROW.format(entry=eid)}")
+            out.append((eid, found.ordered(named), reasons))
+        return out
+
+    def of_statement(self, text: str, entry_ids: Iterable[str]) -> tuple[list[str], list[str]]:
+        """``(roots, no: reasons)`` for one statement citing ``entry_ids``.
+
+        A sandbox item id is a citation where ``entry_ids`` carries it (read
+        from a citing field) or the statement cites it in brackets, in a run
+        whose ledger holds the section index; the statement's own words are
+        never read for one.
+        """
+        cited = self._citations(text, entry_ids)
+        if not cited:
+            return [], [NO_CITATION]
+        roots: dict[str, None] = {}
+        reasons: list[str] = []
+        for _citation, held, said in cited:
+            roots.update(dict.fromkeys(held))
+            reasons += said
         return list(roots), reasons
+
+    def sources_of_statement(
+        self, text: str, entry_ids: Iterable[str]
+    ) -> dict[str, tuple[str, tuple[str, ...]]]:
+        """``{citation: (reading, roots)}`` for every citation of the statement.
+
+        A citation is a source of the statement, rooted or not: one ledger
+        entry, or one sandbox item, is one source however many statements cite
+        it. The reading is what the source is (``reading_of``) and the roots
+        are the ones it gives this statement. A citation that is no entry of
+        this ledger, or no item of its sandbox report, is no source.
+        """
+        out: dict[str, tuple[str, tuple[str, ...]]] = {}
+        for citation, held, _said in self._citations(text, entry_ids):
+            if not held and not self._known(citation):
+                continue
+            if not held and self._answer_places(citation, text):
+                held = [WHOLE_ANSWER_ROOT.format(entry=citation)]
+            out[citation] = (self.reading(citation, held), tuple(held))
+        return out
+
+    def _answer_places(self, citation: str, text: str) -> bool:
+        """Whether ``text`` places ``citation`` by what its answer states as a whole.
+
+        Only an answer about the file: a reference lookup, a reputation answer
+        and an answer whose rows are a run's (sandbox processes, flows, DNS
+        queries) are never placed so. The value has to sit in a piece of the
+        statement (a sentence or an evidence item) that cites the entry.
+        """
+        facts = self.answers.get(citation)
+        if facts is None or facts.empty():
+            return False
+        tool = self.tools.get(citation, "")
+        if tool in _REFERENCE_TOOLS or tool in FILE_ASSESSMENT_TOOLS:
+            return False
+        found = self.of_entry(citation)
+        if any(str(root).startswith(_RUN_ROOT_OPENINGS) for root in found.roots):
+            return False
+        pieces = [p for p in _PIECE_BREAK.split(str(text or "")) if citation in p.lower()]
+        said = statement_values(" ".join(pieces) if pieces else str(text or ""))
+        return facts.written_in(said, found.layout)
+
+    def _known(self, citation: str) -> bool:
+        """Whether a citation is an entry of this ledger or an item of its sandbox report."""
+        found = str(citation or "").strip().lower()
+        if is_item_id(found):
+            return self.items is not None and self.items.known(found)
+        return found in self.entries
+
+    def sources_of_assertion(
+        self, entry_id: str, technique_id: str
+    ) -> dict[str, tuple[str, tuple[str, ...]]]:
+        """``{entry: ("rule", roots)}`` for an asserting entry whose rows name the technique."""
+        roots, _reasons = self.of_assertion(entry_id, technique_id)
+        return {str(entry_id).strip().lower(): (READING_RULE, tuple(roots))}
+
+    def reading(self, citation: str, roots: Sequence[str]) -> str:
+        """What one cited source is (``reading_of``), from its tool and the roots it gives."""
+        tool = self.tools.get(str(citation).strip().lower(), "")
+        return reading_of(tool, roots)
 
     def of_assertion(self, entry_id: str, technique_id: str) -> tuple[list[str], list[str]]:
         """``(roots, no: reasons)`` for the rows of an asserting entry that name the technique."""
@@ -1422,6 +1530,243 @@ class RunRoots:
         if len(found.roots) == 1 and not found.unplaced_values and not unplaced:
             return list(found.roots), []
         return [], [f"{eid}: {unplaced or NO_ROW_NAMES_TECHNIQUE.format(entry=eid)}"]
+
+
+# A key of an answer whose integer is a count the answer states as a whole.
+_ANSWER_COUNT_KEY = re.compile(r"total|count|decoded|recovered|matched", re.IGNORECASE)
+# A value written as an identifier: four characters or more, a digit or ``_`` in it.
+_ANSWER_TOKEN = re.compile(r"^(?=[\w.\-]*[\d_])[\w.\-]{4,64}$")
+_STATEMENT_NUMBER = re.compile(r"(?<![\w.])\d+(?![\w])")
+# Where a statement's sentences and its evidence line's items break.
+_PIECE_BREAK = re.compile(r"(?<=[.!?;])\s+|\n+")
+_STATEMENT_TOKEN = re.compile(r"[\w.\-]{4,64}")
+
+
+@dataclass(frozen=True)
+class StatementValues:
+    """The numbers, addresses and identifier-shaped words one statement writes."""
+
+    numbers: frozenset[int]
+    addresses: frozenset[int]
+    tokens: frozenset[str]
+
+
+def statement_values(text: str) -> StatementValues:
+    """What ``text`` writes, read once. Linear in the text."""
+    from maljan.pipeline.validation import _addresses_written
+
+    said = str(text or "")
+    return StatementValues(
+        numbers=frozenset(int(n) for n in _STATEMENT_NUMBER.findall(said) if len(n) <= 18),
+        addresses=frozenset(_addresses_written(said)),
+        tokens=frozenset(t.strip(".-").casefold() for t in _STATEMENT_TOKEN.findall(said)),
+    )
+
+
+@dataclass(frozen=True)
+class AnswerFacts:
+    """What an entry's answer states as a whole: counts, addresses and identifier values.
+
+    Read from the answer's top-level fields (and one level into a mapping), a
+    top-level list of plain values, and the fields every row of its first list
+    of rows holds alike: a count, a scheme, the routine an emulator ran.
+    """
+
+    numbers: frozenset[int] = frozenset()
+    addresses: frozenset[int] = frozenset()
+    tokens: frozenset[str] = frozenset()
+
+    def empty(self) -> bool:
+        return not (self.numbers or self.addresses or self.tokens)
+
+    def written_in(self, said: StatementValues, layout: Layout) -> bool:
+        """Whether the statement writes one of these values."""
+        if self.numbers & said.numbers or self.tokens & said.tokens:
+            return True
+        if not self.addresses or not said.addresses:
+            return False
+        mine = {rva for value in self.addresses for rva in layout.rvas_of(value)} | set(
+            self.addresses
+        )
+        return any(
+            value in mine or any(rva in mine for rva in layout.rvas_of(value))
+            for value in said.addresses
+        )
+
+
+def _answer_value(key: str, value: Any, facts: dict[str, set[Any]]) -> None:
+    if isinstance(value, bool) or value is None:
+        return
+    if isinstance(value, int):
+        # A count of zero is an absence: it places nothing.
+        if value and _ANSWER_COUNT_KEY.search(str(key)):
+            facts["numbers"].add(value)
+        return
+    if not isinstance(value, str):
+        return
+    text = value.strip()
+    number = _hex(text) if text.lower().startswith("0x") else None
+    if number is not None:
+        facts["addresses"].add(number)
+    elif _ANSWER_TOKEN.match(text):
+        facts["tokens"].add(text.casefold())
+
+
+def answer_facts(structured: Any) -> AnswerFacts:
+    """The ``AnswerFacts`` of one entry's structured answer. Linear in the answer."""
+    if not isinstance(structured, Mapping):
+        return AnswerFacts()
+    facts: dict[str, set[Any]] = {"numbers": set(), "addresses": set(), "tokens": set()}
+    rows: list[Any] | None = None
+    for key, value in structured.items():
+        if isinstance(value, Mapping):
+            for inner, held in value.items():
+                _answer_value(str(inner), held, facts)
+        elif isinstance(value, list):
+            if value and all(not isinstance(v, Mapping | list) for v in value):
+                for held in value:
+                    _answer_value(str(key), held, facts)
+            elif rows is None and value and all(isinstance(v, Mapping) for v in value):
+                rows = value
+        else:
+            _answer_value(str(key), value, facts)
+    if rows:
+        shared = {
+            k: v for k, v in rows[0].items() if not isinstance(v, Mapping | list) and v is not None
+        }
+        for row in rows[1:]:
+            shared = {k: v for k, v in shared.items() if row.get(k) == v}
+            if not shared:
+                break
+        for key, value in shared.items():
+            _answer_value(str(key), value, facts)
+    return AnswerFacts(
+        numbers=frozenset(facts["numbers"]),
+        addresses=frozenset(facts["addresses"]),
+        tokens=frozenset(facts["tokens"]),
+    )
+
+
+# What a source of a statement is (``RunRoots.reading``).
+READING_CODE = "code"
+READING_RUN = "run"
+READING_ARTEFACT = "artefact"
+# An asserting tool's own row naming the technique: a rule match.
+READING_RULE = "rule"
+# A third party's assessment of the whole file: neither behaviour nor an
+# artefact of the file.
+READING_REPORT = "report"
+# A citation that gives the statement no root: it is cited, and which of its
+# facts the statement reads is not a fact.
+READING_UNPLACED = "unplaced"
+# The readings that are more than an artefact of the file: what the sample was
+# seen doing, the code that does it, or a rule that matched it.
+BEHAVIOUR_READINGS = frozenset({READING_CODE, READING_RUN, READING_RULE})
+# The readings that add nothing to a technique's independent sources: a
+# citation placed nowhere stands behind no fact, and an external assessment of
+# the whole file states nothing about any one technique.
+_NOT_INDEPENDENT_READINGS = frozenset({READING_UNPLACED, READING_REPORT})
+# Which reading a source merged from several statements keeps: the strongest.
+_READING_RANK = {
+    READING_CODE: 5,
+    READING_RUN: 5,
+    READING_RULE: 5,
+    READING_REPORT: 3,
+    READING_ARTEFACT: 2,
+    READING_UNPLACED: 1,
+}
+# The fixed openings of the roots a run observation gives.
+_RUN_ROOT_OPENINGS = tuple(
+    template.split("{", 1)[0] for template in (PROCESS_ROOT, FLOW_ROOT, DNS_ROOT)
+)
+
+
+def reading_of(tool: str, roots: Iterable[str]) -> str:
+    """What one source is, read from its tool's name and the roots it gives.
+
+    ``code``: the tool's name says it decompiles or disassembles
+    (``schemas.evidence.lists_code``, the platform's one rule for a listing);
+    ``run``: a root is a sandbox process, network flow or DNS query, what a
+    sandbox or a capture recorded while the sample ran; ``report``: a root is
+    an external assessment of the whole file; ``artefact``: its roots are
+    places in the file, its tables or the file itself; ``unplaced``: it gives
+    the statement no root.
+    """
+    from maljan.schemas.evidence import lists_code
+
+    held = [str(root) for root in roots]
+    if lists_code(tool):
+        return READING_CODE
+    if any(root.startswith(_RUN_ROOT_OPENINGS) for root in held):
+        return READING_RUN
+    if any(root == EXTERNAL_ASSESSMENT or root.startswith(EXTERNAL_ASSESSMENT) for root in held):
+        return READING_REPORT
+    return READING_ARTEFACT if held else READING_UNPLACED
+
+
+def stronger_reading(a: str, b: str) -> str:
+    """The reading a source keeps when two statements read it differently."""
+    return a if _READING_RANK.get(a, 0) >= _READING_RANK.get(b, 0) else b
+
+
+@dataclass(frozen=True)
+class SourceSummary:
+    """A technique's sources, read once (``summary_of_sources``).
+
+    ``sources`` names every cited entry or item; ``independent`` counts the
+    ones that stand behind a fact about this technique, with citations of one
+    reading kind whose roots overlap joined (two tools reading one string are
+    one source; a rule match and an index row on one function are two): a
+    citation placed nowhere stands behind no fact, and an external assessment
+    of the whole file states nothing about any one technique, so both are
+    listed and counted by kind and add nothing to ``independent``; ``kinds``
+    counts the sources by reading; ``support`` is
+    ``capability`` when no source is behaviour and the placed ones are all
+    artefacts of the file, ``unobserved`` when no source is behaviour and one
+    is an external assessment or none is placed, and ``""`` otherwise.
+    """
+
+    sources: tuple[str, ...]
+    independent: int
+    kinds: dict[str, int]
+    support: str
+
+
+SUPPORT_CAPABILITY = "capability"
+SUPPORT_UNOBSERVED = "unobserved"
+
+
+def summary_of_sources(held: Mapping[str, tuple[str, Sequence[str]]]) -> SourceSummary:
+    """The ``SourceSummary`` of ``{source: (reading, roots)}``. Linear in the roots."""
+    names = sorted(held)
+    parent = {name: name for name in names}
+
+    def find(name: str) -> str:
+        while parent[name] != name:
+            parent[name] = parent[parent[name]]
+            name = parent[name]
+        return name
+
+    # Sources reading one place in one way are one: two artefact tools reading
+    # one string, two listings of one function. A rule match and an index row
+    # on one function are two readings by two methods, never joined.
+    first: dict[tuple[str, str], str] = {}
+    for name in names:
+        for root in held[name][1]:
+            other = first.setdefault((held[name][0], str(root)), name)
+            if other != name:
+                parent[find(name)] = find(other)
+    independent = len(
+        {find(name) for name in names if held[name][0] not in _NOT_INDEPENDENT_READINGS}
+    )
+    kinds: dict[str, int] = {}
+    for name in names:
+        kinds[held[name][0]] = kinds.get(held[name][0], 0) + 1
+    support = ""
+    if names and not any(k in BEHAVIOUR_READINGS for k in kinds):
+        placed = {k for k in kinds if k != READING_UNPLACED}
+        support = SUPPORT_CAPABILITY if placed == {READING_ARTEFACT} else SUPPORT_UNOBSERVED
+    return SourceSummary(tuple(names), independent, kinds, support)
 
 
 def run_roots(ledger: Sequence[Any] | None) -> RunRoots:

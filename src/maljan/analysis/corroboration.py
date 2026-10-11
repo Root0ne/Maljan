@@ -39,8 +39,51 @@ def corroboration_row(row: Mapping[str, Any] | Sequence[str] | None) -> dict[str
             out["evidence_roots"] = [str(x) for x in row["evidence_roots"]]
         if row.get("roots_not_read"):
             out["roots_not_read"] = [str(x) for x in row["roots_not_read"]]
+        # The ledger entries and sandbox items its statements cite, each one
+        # source however many agents cite it (``validation.technique_sources``):
+        # kept when the row was read with them, an empty list included.
+        if isinstance(row.get("sources"), list):
+            out["sources"] = [str(x) for x in row["sources"]]
+            out["independent_sources"] = int(
+                row.get("independent_sources", len(out["sources"])) or 0
+            )
+        if isinstance(row.get("source_kinds"), Mapping):
+            out["source_kinds"] = {str(k): int(v) for k, v in row["source_kinds"].items()}
+        if row.get("support"):
+            out["support"] = str(row["support"])
+        if isinstance(row.get("independent_sayers"), int):
+            out["independent_sayers"] = int(row["independent_sayers"])
         return out
     return {"asserted_by": [], "claimed_by": [str(x) for x in (row or [])]}
+
+
+# The supports under which no source is behaviour: never corroborated.
+NOT_OBSERVED_SUPPORTS = frozenset({"capability", "unobserved"})
+
+
+def corroborated(row: Mapping[str, Any] | Sequence[str] | None) -> bool:
+    """Whether a technique is corroborated: two sayers and two sources of their own.
+
+    At least two sayers (``independent_sayers``: analyst layers with a
+    statement of their own and the asserting rules; on a row stored before
+    it, the named sources), and, for a row
+    read with its sources, at least two independent ones (each ledger entry
+    or sandbox item once however many agents cite it, sources reading one
+    place joined) with some source more than an artefact of the file or an
+    external assessment (``support`` neither ``capability`` nor
+    ``unobserved``). A row with statements and no cited source has none. A
+    row stored before sources were read keeps the count of named sources.
+    """
+    normalised = corroboration_row(row)
+    sayers = normalised.get("independent_sayers")
+    if (sayers if isinstance(sayers, int) else len(corroboration_sources(row))) < 2:
+        return False
+    if "sources" not in normalised:
+        return True
+    return (
+        int(normalised.get("independent_sources", 0)) >= 2
+        and normalised.get("support") not in NOT_OBSERVED_SUPPORTS
+    )
 
 
 def rule_match_only(report: Any) -> dict[str, str]:
@@ -141,3 +184,53 @@ def published_count(corroboration: Mapping[str, Any] | None) -> int:
         for row in (corroboration or {}).values()
         if not corroboration_row(row).get("not_published")
     )
+
+
+# What each kind of source is called where a row counts them, singular and plural.
+_KIND_WORDS: dict[str, tuple[str, str]] = {
+    "artefact": (
+        "artefact of the file (a name, string, table or index row)",
+        "artefacts of the file (names, strings, tables or index rows)",
+    ),
+    "report": ("external assessment of the whole file", "external assessments of the whole file"),
+    "unplaced": ("citation that gives no root", "citations that give no root"),
+}
+_KIND_ORDER = ("artefact", "report", "unplaced")
+NO_BEHAVIOUR_SOURCE = "no sandbox observation, code listing or rule match stands behind it"
+
+
+def support_label(support: str) -> str:
+    """The words a published technique's support is named by: ``capability, not observed``."""
+    if support == "capability":
+        return "capability, not observed"
+    if support == "unobserved":
+        return "not observed"
+    return ""
+
+
+def sources_phrase(kinds: Mapping[str, int] | None, total: int) -> str:
+    """``3 sources: 2 artefacts of the file (…), 1 citation that gives no root``.
+
+    The kinds a technique with no behaviour source has, each counted, in one
+    order; the total alone where the kinds were not recorded.
+    """
+    said = f"{total} source{'' if total == 1 else 's'}"
+    parts = [
+        f"{int(n)} {_KIND_WORDS[kind][0 if int(n) == 1 else 1]}"
+        for kind in _KIND_ORDER
+        if (n := (kinds or {}).get(kind))
+    ]
+    return f"{said}: {', '.join(parts)}" if parts else said
+
+
+def support_sentence(support: str, kinds: Mapping[str, int] | None, total: int) -> str:
+    """One sentence on a technique no source of which is behaviour, or ``""``.
+
+    It names the label, counts its sources by kind and says that no sandbox
+    observation, code listing or rule match stands behind it: the facts the
+    judge, the report models, the ATT&CK table and the export are told alike.
+    """
+    label = support_label(support)
+    if not label:
+        return ""
+    return f"{label}: {sources_phrase(kinds, total)}; {NO_BEHAVIOUR_SOURCE}"

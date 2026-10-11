@@ -47,8 +47,42 @@ ASSERTING_SOURCES: dict[str, str] = {
 }
 
 
-def summarise(isrs: dict[str, Any] | None, ledger: Sequence[Any] | None = None) -> str:
-    """The evidence summary block, or "" when nothing named a technique."""
+def _source_facts(row: Any) -> str:
+    """The sources a corroboration row traces its technique to, as the judge is told them.
+
+    Each source is one ledger entry or sandbox item however many sources
+    above name the technique from it (``validation.technique_sources``), and
+    a row whose sources are all artefacts of the file says so. ``""`` for a
+    row that names no source.
+    """
+    from maljan.analysis.corroboration import support_sentence
+
+    if not isinstance(row, dict) or not isinstance(row.get("sources"), list):
+        return ""
+    held = [str(x) for x in row["sources"]]
+    if not held:
+        return " [its statements cite no ledger entry or sandbox item]"
+    said = f" [traced to {len(held)} cited source(s), each counted once: {', '.join(held)}"
+    independent = row.get("independent_sources")
+    if isinstance(independent, int) and independent != len(held):
+        said += f"; {independent} of them independent, sources reading one place counted once"
+    sentence = support_sentence(str(row.get("support") or ""), row.get("source_kinds"), len(held))
+    if sentence:
+        said += f"; {sentence}"
+    return said + "]"
+
+
+def summarise(
+    isrs: dict[str, Any] | None,
+    ledger: Sequence[Any] | None = None,
+    traced: dict[str, Any] | None = None,
+) -> str:
+    """The evidence summary block, or "" when nothing named a technique.
+
+    ``traced`` is the run's corroboration rows (``validation.corroboration``):
+    with them, each line also states the ledger sources its technique traces
+    to, a fact beside the sources that named it.
+    """
     rows = collect(isrs, ledger)
     if not rows:
         return ""
@@ -64,7 +98,10 @@ def summarise(isrs: dict[str, Any] | None, ledger: Sequence[Any] | None = None) 
             f"{name} ({confidence:.2f})" if confidence is not None else name
             for name, confidence in sources
         )
-        lines.append(f"- {technique_label(tid)}: {len(sources)} source(s) — {rendered}")
+        lines.append(
+            f"- {technique_label(tid)}: {len(sources)} source(s) — {rendered}"
+            + _source_facts((traced or {}).get(tid))
+        )
     return "\n".join(lines)
 
 

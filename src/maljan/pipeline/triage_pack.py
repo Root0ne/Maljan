@@ -97,6 +97,7 @@ from typing import Any, cast
 
 from maljan.agents.evidence_recorder import EvidenceRecorder, result_text
 from maljan.analysis import sandbox_sections
+from maljan.analysis.evidence_roots import FILE_ASSESSMENT_TOOLS
 from maljan.analysis.ghidra_passes import (
     ANTI_ANALYSIS_TOOL,
     CAPA_RULE_KINDS,
@@ -383,7 +384,9 @@ def run_is_degraded(reasons: Sequence[str], informational: Sequence[str] = ()) -
 # under that name never carries a service's answer. That is why the console's
 # own list of reputation tools has only the two real ones: an entry it would
 # draw an IDENTITY section from is always one of those.
-_REPUTATION_TOOLS: frozenset[str] = frozenset({"reputation", "get_file_report", "check_hash"})
+# The platform's one table of them (``evidence_roots.FILE_ASSESSMENT_TOOLS``),
+# which the evidence roots read as an external assessment of the whole file.
+_REPUTATION_TOOLS: frozenset[str] = FILE_ASSESSMENT_TOOLS
 
 
 def reason_sentence(reason: str) -> str:

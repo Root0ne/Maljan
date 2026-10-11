@@ -109,7 +109,10 @@
         "description": "Writes a Run key",
         "name": "persistence_run_key",
         "references": [],
-        "severity": 3
+        "severity": 3,
+        "technique_ids": [
+          "T1547.001"
+        ]
       }
     ],
     "total": 1

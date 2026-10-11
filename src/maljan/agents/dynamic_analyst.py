@@ -317,8 +317,9 @@ class DynamicAnalyst(BaseAnalyst):
             [
                 (
                     "system",
-                    # A revision is one tools-free call: the prompt says so.
-                    self._system_prompt(_dynamic_prompt, tools=()) + "\n\n"
+                    # A revision is one tools-free call unless it may read a
+                    # function the ledger never listed: the prompt says which.
+                    self._system_prompt(_dynamic_prompt, tools=self.revision_tools()) + "\n\n"
                     "You are in a negotiation round. You MUST:\n"
                     "1. List any peer claims you still DISPUTE in a DISPUTES section.\n"
                     "2. Revise your own claims based on new evidence.\n"
@@ -346,9 +347,7 @@ class DynamicAnalyst(BaseAnalyst):
         # that obeys it puts a JSON fence into the revised report, and nothing
         # downstream of here — the claim parser, the transcript, the Composer —
         # should ever see it.
-        content = self._capture_findings(
-            self.ask_the_model(self.frame_messages(messages), what="revision")
-        )
+        content = self._capture_findings(self.revision_answer(messages))
 
         claims = self._read_claims(content, revision_round)
         dissent = _parse_disputes(content)
