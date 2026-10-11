@@ -49,9 +49,13 @@ from maljan.core import virustotal
 from maljan.core.tool_declarations import (
     ErrorPattern,
     ToolFacts,
+    check_auto_name_prefixes,
     check_env_names,
     check_mount,
+    check_reference_urls,
     check_roles,
+    check_tool_facts_keys,
+    check_work_dir,
     fill_declaration,
 )
 
@@ -1179,7 +1183,10 @@ class MCPServerConfig(BaseModel):
     # server that the worker's sample mirror is mounted at; empty when the
     # server reads the worker's own filesystem.
     sample_mount: str = ""
-    # How the server's plain-text answers say "error" instead of answering.
+    # The directory under the worker's samples directory it copies the sample
+    # into for this server; empty when it makes no copy of its own.
+    work_dir: str = ""
+    # How the server's answers say "error" instead of answering.
     error_patterns: list[ErrorPattern] = Field(default_factory=list)
     # What the server is for (``reputation``, ``decompiler``, ``sandbox`` …).
     roles: list[str] = Field(default_factory=list)
@@ -1187,8 +1194,19 @@ class MCPServerConfig(BaseModel):
     prompt_fragment: str = ""
     # The environment names the server cannot run without.
     required_env_allow: list[str] = Field(default_factory=list)
+    # Environment variable names of the server's that are not secrets, so a
+    # remediation naming one is not masked.
+    variable_names: list[str] = Field(default_factory=list)
     # Whether the server's path-taking tools read the sample the platform staged.
     reads_staged_sample: bool = False
+    # Whether the server is the platform's own (its answers are the platform's
+    # code, such as the API names its hash resolution reads).
+    platform_owned: bool = False
+    # The prefixes the server's decompiler writes before an address when it
+    # names a function itself (``FUN_``, ``fcn.``).
+    auto_name_prefixes: list[str] = Field(default_factory=list)
+    # Reference URL templates for a sample (``{sha256}``, ``{md5}``, ``{sha1}``).
+    reference_urls: list[str] = Field(default_factory=list)
     # Per tool: what kind of fact its answer is and where the facts sit in it.
     tool_facts: dict[str, ToolFacts] = Field(default_factory=dict)
 
@@ -1197,15 +1215,35 @@ class MCPServerConfig(BaseModel):
     def _roles_are_words(cls, value: list[str]) -> list[str]:
         return check_roles(value)
 
-    @field_validator("required_env_allow")
+    @field_validator("required_env_allow", "variable_names")
     @classmethod
-    def _required_names_are_env_names(cls, value: list[str]) -> list[str]:
+    def _names_are_env_names(cls, value: list[str]) -> list[str]:
         return check_env_names(value)
 
     @field_validator("sample_mount")
     @classmethod
     def _mount_is_absolute(cls, value: str) -> str:
         return check_mount(value)
+
+    @field_validator("work_dir")
+    @classmethod
+    def _work_dir_is_one_name(cls, value: str) -> str:
+        return check_work_dir(value)
+
+    @field_validator("auto_name_prefixes")
+    @classmethod
+    def _prefixes_are_prefixes(cls, value: list[str]) -> list[str]:
+        return check_auto_name_prefixes(value)
+
+    @field_validator("reference_urls")
+    @classmethod
+    def _references_are_templates(cls, value: list[str]) -> list[str]:
+        return check_reference_urls(value)
+
+    @field_validator("tool_facts")
+    @classmethod
+    def _tool_names_are_names(cls, value: dict[str, ToolFacts]) -> dict[str, ToolFacts]:
+        return check_tool_facts_keys(value)
 
     @model_validator(mode="after")
     def _refuse_the_composed_names(self) -> "MCPServerConfig":

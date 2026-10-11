@@ -28,7 +28,7 @@ def test_a_built_in_saved_with_its_shipped_declaration_stores_none_of_it() -> No
     for name in ("tool_facts", "roles", "required_env_allow", "reads_staged_sample"):
         assert name not in stored, name
     loaded = Settings.model_validate({"mcp": {"servers": out}}).mcp.servers["analysis"]
-    assert loaded.tool_facts["capa"].kind == "rule_match"
+    assert loaded.tool_facts["capa"].kind == "capability_rules"
 
 
 def test_a_built_in_saved_without_the_fields_keeps_following_them() -> None:
@@ -67,4 +67,4 @@ def test_a_malformed_declaration_is_refused_with_the_field_named() -> None:
     assert any(key.startswith("mine.tool_facts") for key in exc.value.errors)
     with pytest.raises(ServerMapError) as exc:
         validate_server_map({"mine": _entry(error_patterns=[{"match": "(open"}])})
-    assert any("not a valid regular expression" in m for m in exc.value.errors.values())
+    assert any("linear time" in m for m in exc.value.errors.values())

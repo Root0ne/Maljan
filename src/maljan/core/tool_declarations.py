@@ -20,39 +20,51 @@ The declaration lives in three places, all with this one schema:
 
 One merge rule applies to a built-in block: a declaration field the stored
 block never set takes the built-in's value; a field the operator set, even to
-an empty value, is kept as set (:func:`fill_declaration`). A server that is
-not a built-in starts from nothing and inherits nothing, so a user tool that
-shares a built-in tool's name never takes the built-in's declaration.
+an empty value, is kept as set (:func:`fill_declaration`). A save stores a
+built-in's field only where it differs from the shipped value at the time of
+the save (:func:`strip_declaration_defaults`), so a value written equal to the
+shipped one is not recorded and follows later releases. A server that is not a
+built-in starts from nothing and inherits nothing.
 
 The read API (:class:`ToolDeclarations`, :func:`declaration_for`,
-:func:`tools_of_kind`, :func:`servers_with_role`) resolves a ledger entry by
-its source and tool together. The source is the server key for a tool server,
-``pack`` for the triage pack, ``sandbox`` for the platform's sandbox report
-tools and ``provider:<id>`` for a static provider's own tools; a bare tool name
-is never looked up on its own.
+:func:`tools_of_kind`, :func:`servers_with_role`) resolves a ledger entry by the
+source the entry recorded when it was written (``LedgerEntry.source``:
+``mcp:<key>``, ``provider:<id>``, ``sandbox``, ``pack``) and its tool name
+together. An entry with no recorded source (every entry written before sources
+were recorded) resolves to nothing and is read by the legacy readers; nothing
+is ever looked up by a bare tool name, an agent's name or today's settings.
 
 Vocabulary values (a tool's ``kind``, a server's ``roles``, the names of place
-and value fields, a technique ``format``, a ``reader`` id) are an open set:
-any lowercase word of letters, digits and underscores is accepted, so a new
-kind of tool needs no code change to be declared. The values the built-ins use
-are listed in ``apps/docs/content/docs/configuration.mdx``.
+and value fields, a technique ``format``, a ``reader`` id, a ``category``) are
+an open set: any lowercase word of letters, digits and underscores is accepted,
+so a new kind of tool needs no code change to be declared. The values the
+built-ins use are listed in ``apps/docs/content/docs/configuration.mdx``.
 
 Field paths (``rows``, ``places``, ``values``, technique and reputation paths)
-are JSON-pointer-like: ``/`` separated keys, ``~0`` for ``~`` and ``~1`` for
-``/`` inside a key, ``*`` for every item of a list or every value of an object
-at that level, and ``**`` for any depth (zero or more levels), at most once in
-a path and never in a path read inside a row. :func:`select` reads one in time
-linear in the size of the answer.
+are JSON-pointer-like: ``/`` separated keys, ``~0`` for ``~``, ``~1`` for ``/``
+and ``~2`` for ``*`` inside a key, ``*`` for every item of a list or every value
+of an object at that level, ``**`` for any depth (zero or more levels) and
+``**N`` for at most N levels, at most once in a path and never in a path read
+inside a row. :func:`select` reads one in time linear in the size of the answer.
+
+Regular expressions an operator declares (error patterns, reputation text
+patterns) are compiled and run by RE2 (``google-re2``), which matches in time
+linear in the answer whatever the pattern; a pattern RE2 cannot compile (a
+back-reference, a lookaround) is refused when it is saved.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
+import posixpath
 import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 if TYPE_CHECKING:
     from maljan.core.config import MCPServerConfig, Settings
@@ -63,10 +75,16 @@ _VOCABULARY_RE = re.compile(VOCABULARY_PATTERN)
 # An environment variable name, as a POSIX shell spells one.
 ENV_NAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*$"
 _ENV_NAME_RE = re.compile(ENV_NAME_PATTERN)
+# A tool's argument name: an identifier, as a JSON schema property is written.
+_ARGUMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,127}$")
+# The separator a registry joins a server key and a tool name with when two
+# servers offer the same name; a declared tool name may not hold it.
+RENAMED_TOOL_SEPARATOR = "__"
 
-# The two path wildcards.
+# The two path wildcards; ``**N`` bounds the depth.
 EVERY = "*"
 ANY_DEPTH = "**"
+_ANY_DEPTH_RE = re.compile(r"^\*\*(\d{0,4})$")
 
 
 def _word(value: str, what: str) -> str:
@@ -82,12 +100,40 @@ def _words(values: Iterable[str], what: str) -> list[str]:
     return [_word(v, what) for v in values]
 
 
+def check_tool_name(value: str, what: str = "tool name") -> str:
+    """A declared tool name: not empty, no surrounding blanks, no renamed-tool separator."""
+    if not value or value != value.strip():
+        raise ValueError(f"{what} {value!r} must be a tool's name, not empty or padded")
+    if RENAMED_TOOL_SEPARATOR in value:
+        raise ValueError(
+            f"{what} {value!r} holds '{RENAMED_TOOL_SEPARATOR}', the separator of a renamed "
+            "tool; declare the tool under its own name on its own server"
+        )
+    return value
+
+
 # ---------------------------------------------------------------------------
 # Field paths
 # ---------------------------------------------------------------------------
 
 
-def parse_path(path: str, *, in_row: bool = False) -> tuple[str, ...]:
+@dataclass(frozen=True)
+class _Deep:
+    """A ``**`` segment: descend any number of levels, or at most ``bound``."""
+
+    bound: int | None
+
+
+def _segment(raw: str) -> str | _Deep:
+    deep = _ANY_DEPTH_RE.match(raw)
+    if deep:
+        return _Deep(int(deep.group(1)) if deep.group(1) else None)
+    if raw == EVERY:
+        return EVERY
+    return raw.replace("~2", "*").replace("~1", "/").replace("~0", "~")
+
+
+def parse_path(path: str, *, in_row: bool = False) -> tuple[str | _Deep, ...]:
     """The segments of a declared field path, or ``ValueError`` saying what is wrong.
 
     ``""`` is no path (nothing declared). Every other path starts with ``/``.
@@ -98,8 +144,8 @@ def parse_path(path: str, *, in_row: bool = False) -> tuple[str, ...]:
         return ()
     if not path.startswith("/"):
         raise ValueError(f"field path {path!r} must start with '/'")
-    segments = tuple(part.replace("~1", "/").replace("~0", "~") for part in path[1:].split("/"))
-    deep = sum(1 for part in segments if part == ANY_DEPTH)
+    segments = tuple(_segment(part) for part in path[1:].split("/"))
+    deep = sum(1 for part in segments if isinstance(part, _Deep))
     if deep > 1:
         raise ValueError(f"field path {path!r} may hold '**' once, and holds it {deep} times")
     if deep and in_row:
@@ -126,25 +172,26 @@ def _step(node: Any, segment: str) -> Iterator[Any]:
             yield node[index]
 
 
-def _walk(nodes: Iterable[Any], segments: Sequence[str]) -> list[Any]:
+def _walk(nodes: Iterable[Any], segments: Sequence[Any]) -> list[Any]:
     current = list(nodes)
     for segment in segments:
         current = [found for node in current for found in _step(node, segment)]
     return current
 
 
-def _subtree(node: Any) -> list[Any]:
-    """Every node under ``node``, itself first, in document order, without recursion."""
+def _subtree(node: Any, bound: int | None) -> list[Any]:
+    """Every node under ``node`` within ``bound`` levels, itself first, in document order."""
     out: list[Any] = []
-    stack = [node]
+    stack: list[tuple[Any, int]] = [(node, 0)]
     while stack:
-        current = stack.pop()
+        current, depth = stack.pop()
         out.append(current)
-        stack.extend(reversed(list(_children(current))))
+        if bound is None or depth < bound:
+            stack.extend((child, depth + 1) for child in reversed(list(_children(current))))
     return out
 
 
-def select(document: Any, path: str | Sequence[str]) -> list[Any]:
+def select(document: Any, path: str | Sequence[Any]) -> list[Any]:
     """Every value ``path`` names in ``document``, in document order.
 
     A path that names nothing gives ``[]``; ``""`` gives ``[]`` too (nothing is
@@ -154,12 +201,14 @@ def select(document: Any, path: str | Sequence[str]) -> list[Any]:
     segments = parse_path(path) if isinstance(path, str) else tuple(path)
     if not segments:
         return []
-    if ANY_DEPTH not in segments:
+    cut = next((i for i, s in enumerate(segments) if isinstance(s, _Deep)), None)
+    if cut is None:
         return _walk([document], segments)
-    cut = segments.index(ANY_DEPTH)
+    deep = segments[cut]
+    assert isinstance(deep, _Deep)
     roots = _walk([document], segments[:cut])
     rest = segments[cut + 1 :]
-    under = [node for root in roots for node in _subtree(root)]
+    under = [node for root in roots for node in _subtree(root, deep.bound)]
     return _walk(under, rest) if rest else under
 
 
@@ -174,35 +223,101 @@ def _check_path(value: str, *, in_row: bool = False) -> str:
     return value
 
 
+# ---------------------------------------------------------------------------
+# Patterns: RE2, linear in the answer whatever the pattern
+# ---------------------------------------------------------------------------
+
+
+@lru_cache(maxsize=4096)
+def compile_pattern(pattern: str) -> Any:
+    """``pattern`` compiled by RE2, or ``ValueError`` saying why RE2 refuses it."""
+    import re2
+
+    # A refused pattern is answered with the reason below, not written to the
+    # process's standard error by the engine as well.
+    options = re2.Options()
+    options.log_errors = False
+    try:
+        return re2.compile(pattern, options)
+    except Exception as exc:  # noqa: BLE001 — RE2 raises its own error type
+        detail = str(exc.args[0] if exc.args else exc)
+        if detail.startswith("b'") or detail.startswith('b"'):
+            detail = detail[2:-1]
+        raise ValueError(
+            f"{pattern!r} is not a pattern the platform can run in linear time ({detail}); "
+            "back-references and lookarounds are not available"
+        ) from exc
+
+
 def _check_regex(value: str, what: str) -> str:
     try:
-        re.compile(value)
-    except re.error as exc:
-        raise ValueError(f"{what} {value!r} is not a valid regular expression ({exc})") from exc
+        compile_pattern(value)
+    except ValueError as exc:
+        raise ValueError(f"{what}: {exc}") from exc
     return value
+
+
+def search_pattern(pattern: str, text: str) -> Any:
+    """The first match of ``pattern`` anywhere in ``text``, or ``None``."""
+    return compile_pattern(pattern).search(text)
+
+
+def fullmatch_pattern(pattern: str, text: str) -> Any:
+    """``pattern`` held against the whole of ``text``, or ``None``."""
+    return compile_pattern(pattern).fullmatch(text)
+
+
+def message_lines(text: str) -> str:
+    """An error message as the platform files it: each line stripped, blank lines dropped."""
+    return "\n".join(line.strip() for line in str(text).splitlines() if line.strip())
 
 
 # ---------------------------------------------------------------------------
 # The schema
 # ---------------------------------------------------------------------------
 
+# Where an error pattern is held: a tool's own answer, or the message of the
+# MCP protocol error the client reports in place of an answer.
+ERROR_TARGETS: tuple[str, ...] = ("answer", "protocol_error")
+# The placeholder a remediation names the job's sample path with.
+SAMPLE_PATH_PLACEHOLDER = "{sample_path}"
+
 
 class ErrorPattern(BaseModel):
-    """One way a server's plain-text answer says "error" instead of answering.
+    """One way a server's answer says "error" instead of answering.
 
-    ``match`` is a regular expression held against the *whole* answer, never a
-    line inside one: a listing of the sample's own strings can hold any
-    sentence, and a string the sample carries is not the tool failing. ``code``
-    is the error code the entry is filed under (``tool_failed``,
-    ``bad_argument`` …); ``remediation`` what would make the call succeed, or
-    empty; ``tools`` the tools it applies to, empty for every tool of the
-    server.
+    How it is applied, in order:
+
+    * the text is the tool's answer (``applies_to`` holding ``answer``) or the
+      message of the MCP protocol error the client reports in its place
+      (``protocol_error``), stripped of surrounding blanks;
+    * a text holding a line break never matches a pattern that is not
+      ``multiline``;
+    * ``match`` is held against the *whole* text (a full match, never a line
+      inside one: a listing of the sample's own strings can hold any sentence,
+      and a string the sample carries is not the tool failing);
+    * the error message is the text, or the group ``message_group`` names, each
+      line stripped and blank lines dropped (:func:`message_lines`);
+    * ``code`` is the error code the entry is filed under (``tool_failed``,
+      ``bad_argument`` …), and the remediation is ``remediation_with_path``
+      with ``{sample_path}`` replaced by the path the server can open for the
+      job's sample where that is known, else ``remediation`` (empty: none);
+    * ``tools`` names the tools it applies to, empty for every tool of the
+      server.
+
+    Patterns are compiled and run by RE2, in time linear in the text.
     """
+
+    model_config = ConfigDict(frozen=True)
 
     match: str
     code: str = "tool_failed"
     remediation: str = ""
-    tools: list[str] = Field(default_factory=list)
+    remediation_with_path: str = ""
+    tools: tuple[str, ...] = ()
+    applies_to: tuple[str, ...] = ("answer",)
+    multiline: bool = False
+    message_group: str = ""
 
     @field_validator("match")
     @classmethod
@@ -216,11 +331,54 @@ class ErrorPattern(BaseModel):
     def _code_is_a_word(cls, value: str) -> str:
         return _word(value, "error code")
 
-    def matches(self, tool: str, answer: str) -> bool:
-        """Whether ``answer`` from ``tool`` is this error."""
-        if self.tools and tool not in self.tools:
-            return False
-        return re.fullmatch(self.match, answer) is not None
+    @field_validator("tools")
+    @classmethod
+    def _tools_are_names(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return tuple(check_tool_name(v, "error pattern tool") for v in value)
+
+    @field_validator("applies_to")
+    @classmethod
+    def _targets_are_known(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if not value:
+            raise ValueError("applies_to names at least one of: " + ", ".join(ERROR_TARGETS))
+        for target in value:
+            if target not in ERROR_TARGETS:
+                raise ValueError(
+                    f"applies_to {target!r} is not one of: " + ", ".join(ERROR_TARGETS)
+                )
+        return value
+
+    @model_validator(mode="after")
+    def _the_message_group_is_in_the_pattern(self) -> ErrorPattern:
+        if self.message_group and self.message_group not in (
+            compile_pattern(self.match).groupindex
+        ):
+            raise ValueError(f"message_group {self.message_group!r} is not a group of the match")
+        if self.remediation_with_path and SAMPLE_PATH_PLACEHOLDER not in self.remediation_with_path:
+            raise ValueError(f"remediation_with_path needs {SAMPLE_PATH_PLACEHOLDER}")
+        return self
+
+    def matches(self, tool: str, text: str, *, target: str = "answer") -> bool:
+        """Whether ``text`` from ``tool`` is this error, by the rules above."""
+        return self.message(tool, text, target=target) is not None
+
+    def message(self, tool: str, text: str, *, target: str = "answer") -> str | None:
+        """The error message ``text`` files under, or ``None`` when it is not this error."""
+        if target not in self.applies_to or (self.tools and tool not in self.tools):
+            return None
+        text = str(text).strip()
+        if "\n" in text and not self.multiline:
+            return None
+        found = fullmatch_pattern(self.match, text)
+        if found is None:
+            return None
+        return message_lines(found.group(self.message_group) if self.message_group else text)
+
+    def remediation_for(self, sample_path: str | None) -> str:
+        """The remediation, naming ``sample_path`` where the pattern has a form for it."""
+        if sample_path and self.remediation_with_path:
+            return self.remediation_with_path.replace(SAMPLE_PATH_PLACEHOLDER, sample_path)
+        return self.remediation
 
 
 class TechniqueField(BaseModel):
@@ -231,6 +389,8 @@ class TechniqueField(BaseModel):
     ``analysis.technique_ids.technique_ids_in`` reads one; ``sigma_tag`` for a
     Sigma tag (``attack.t1055.012``). Open vocabulary.
     """
+
+    model_config = ConfigDict(frozen=True)
 
     path: str
     format: str = "attck"
@@ -257,18 +417,22 @@ class ReputationFacts(BaseModel):
     whole-number values). ``labels`` are the paths of the threat labels, in the
     order they are read; ``detections`` the list of per-engine result labels;
     ``engines`` the engine count the service gives beside them.
-    ``text_pattern`` reads an answer written in prose: a regular expression
-    with a ``malicious`` group and optionally a ``total`` group.
+    ``text_patterns`` read an answer written in prose: regular expressions with
+    a ``malicious`` group and optionally a ``total`` group, each *searched* for
+    anywhere in the answer, the first pattern that finds a match giving the
+    counts.
     """
+
+    model_config = ConfigDict(frozen=True)
 
     service: str = ""
     stats: str = ""
     malicious: str = ""
     total: str = ""
-    labels: list[str] = Field(default_factory=list)
+    labels: tuple[str, ...] = ()
     detections: str = ""
     engines: str = ""
-    text_pattern: str = ""
+    text_patterns: tuple[str, ...] = ()
 
     @field_validator("stats", "malicious", "total", "detections", "engines")
     @classmethod
@@ -277,66 +441,91 @@ class ReputationFacts(BaseModel):
 
     @field_validator("labels")
     @classmethod
-    def _label_paths_parse(cls, value: list[str]) -> list[str]:
-        return [_check_path(v) for v in value]
+    def _label_paths_parse(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return tuple(_check_path(v) for v in value)
 
-    @field_validator("text_pattern")
+    @field_validator("text_patterns")
     @classmethod
-    def _text_pattern_names_its_count(cls, value: str) -> str:
-        if not value:
-            return value
-        _check_regex(value, "reputation text pattern")
-        if "malicious" not in re.compile(value).groupindex:
-            raise ValueError("a reputation text pattern needs a group named 'malicious'")
+    def _text_patterns_name_their_count(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        for pattern in value:
+            _check_regex(pattern, "reputation text pattern")
+            if "malicious" not in compile_pattern(pattern).groupindex:
+                raise ValueError(
+                    f"reputation text pattern {pattern!r} needs a group named 'malicious'"
+                )
         return value
+
+    def counts_in_text(self, text: str) -> tuple[int, int | None] | None:
+        """``(malicious, total)`` from the first text pattern that finds them, or ``None``."""
+        for pattern in self.text_patterns:
+            found = search_pattern(pattern, text)
+            if found is not None:
+                groups = compile_pattern(pattern).groupindex
+                total = found.group("total") if "total" in groups else None
+                return int(found.group("malicious")), int(total) if total else None
+        return None
 
 
 class ToolFacts(BaseModel):
     """What one tool's answer is, and where its facts sit in it.
 
-    ``kind`` says what kind of fact the answer is (open vocabulary: ``strings``,
-    ``decoded_strings``, ``rule_match``, ``decompile``, ``disassembly``,
-    ``xrefs``, ``callers``, ``callees``, ``function_list``, ``reputation``,
-    ``sandbox_report``, ``pcap`` …). ``asserts_techniques`` marks a tool whose
-    technique id is a statement about this sample (a rule that matched it), and
-    ``source`` the name a corroboration row gives it (``sigma`` for both Sigma
-    tools). ``long_running`` marks a tool whose work grows with the sample and
-    has no wall clock of its own.
+    ``kind`` says what kind of fact the answer is (open vocabulary; the
+    built-ins' kinds are as fine as the tables the core reads them by).
+    ``asserts_techniques`` marks a tool whose technique id is a statement about
+    this sample (a rule that matched it), and ``source`` the name a
+    corroboration row gives it (``sigma`` for both Sigma tools).
+    ``long_running`` marks a tool whose work grows with the sample and has no
+    wall clock of its own; ``timeout_seconds`` is the budget the tool itself
+    keeps and ``memory_peak_mb`` its measured peak, where known.
+    ``discloses_sample`` marks a tool that sends the sample, or its bytes, out
+    of the deployment.
 
     ``rows`` is the path of the answer's rows; ``places`` names, per kind of
     place (``offset``, ``rva``, ``address``, ``addresses``, ``call_site``,
-    ``function``, ``pid`` …), the path inside a row that holds one; ``values``
-    names, per kind of value (``text``, ``rule``, ``namespace``, ``value`` …),
-    the path inside a row that holds one. ``techniques`` lists where the answer
-    names technique ids. ``reputation`` is set on a reputation lookup.
-    ``arguments`` names, per role (``path``, ``hash``, ``address``, ``name`` …),
-    the argument a call gives it in. ``reader`` names a reader a consumer keeps
-    for an answer shape the paths cannot express (empty: the generic reading of
-    the paths). ``report_sections`` lists the report sections whose writer is
-    shown this tool's answers, and ``words`` the words a statement may use to
-    name this tool's entry.
+    ``function``, ``pid``, ``command_line`` …), the path inside a row that
+    holds one; ``values`` names, per kind of value (``text``, ``rule``,
+    ``namespace``, ``value`` …), the path inside a row that holds one.
+    ``techniques`` lists where the answer names technique ids. ``reputation``
+    is set on a reputation lookup. ``arguments`` names, per role (``path``,
+    ``hash``, ``address``, ``program``, ``command_lines`` …), the argument a
+    call gives it in.
+
+    ``reader`` names a reader of an answer *shape* the paths cannot express
+    (``emulated_strings_with_call_sites``, ``flow_table`` …; empty: the generic
+    reading of the paths); never a tool's name. ``report_sections`` lists the
+    report sections whose writer is shown this tool's answers, ``words`` the
+    words a statement may use to name this tool's entry, ``display_name`` the
+    name published text gives the tool, and ``category`` the tag its
+    description is shown with.
     """
+
+    model_config = ConfigDict(frozen=True)
 
     kind: str
     asserts_techniques: bool = False
     source: str = ""
     long_running: bool = False
+    timeout_seconds: float | None = Field(default=None, gt=0)
+    memory_peak_mb: int | None = Field(default=None, gt=0)
+    discloses_sample: bool = False
     rows: str = ""
     places: dict[str, str] = Field(default_factory=dict)
     values: dict[str, str] = Field(default_factory=dict)
-    techniques: list[TechniqueField] = Field(default_factory=list)
+    techniques: tuple[TechniqueField, ...] = ()
     reputation: ReputationFacts | None = None
     arguments: dict[str, str] = Field(default_factory=dict)
     reader: str = ""
-    report_sections: list[str] = Field(default_factory=list)
-    words: list[str] = Field(default_factory=list)
+    report_sections: tuple[str, ...] = ()
+    words: tuple[str, ...] = ()
+    display_name: str = ""
+    category: str = ""
 
     @field_validator("kind")
     @classmethod
     def _kind_is_a_word(cls, value: str) -> str:
         return _word(value, "tool kind")
 
-    @field_validator("source", "reader")
+    @field_validator("source", "reader", "category")
     @classmethod
     def _optional_word(cls, value: str, info: Any) -> str:
         return _word(value, info.field_name) if value else value
@@ -361,14 +550,14 @@ class ToolFacts(BaseModel):
     def _argument_roles_are_words(cls, value: dict[str, str]) -> dict[str, str]:
         for role, name in value.items():
             _word(role, "argument role")
-            if not name:
-                raise ValueError(f"arguments.{role} needs an argument name")
+            if not _ARGUMENT_RE.match(name or ""):
+                raise ValueError(f"arguments.{role} {name!r} is not an argument name")
         return value
 
     @field_validator("report_sections")
     @classmethod
-    def _sections_are_words(cls, value: list[str]) -> list[str]:
-        return _words(value, "report section")
+    def _sections_are_words(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return tuple(_words(value, "report section"))
 
     @model_validator(mode="after")
     def _a_source_is_an_asserting_tool_s(self) -> ToolFacts:
@@ -396,13 +585,25 @@ class ToolFacts(BaseModel):
 DECLARATION_FIELDS: tuple[str, ...] = (
     "sample_open",
     "sample_mount",
+    "work_dir",
     "error_patterns",
     "roles",
     "prompt_fragment",
     "required_env_allow",
+    "variable_names",
     "reads_staged_sample",
+    "platform_owned",
+    "auto_name_prefixes",
+    "reference_urls",
     "tool_facts",
 )
+# The declaration fields a settings snapshot records only where an operator
+# set them (the shipped values are named by a digest instead).
+SNAPSHOT_DIGESTED_FIELDS: tuple[str, ...] = tuple(
+    f for f in DECLARATION_FIELDS if f != "sample_open"
+)
+# The placeholders a reference URL template may name.
+REFERENCE_PLACEHOLDERS: tuple[str, ...] = ("{sha256}", "{md5}", "{sha1}")
 
 
 def check_roles(value: list[str]) -> list[str]:
@@ -417,11 +618,50 @@ def check_env_names(value: list[str]) -> list[str]:
 
 
 def check_mount(value: str) -> str:
-    if value and not value.startswith("/"):
+    """An absolute path inside the server, written plainly, or empty."""
+    if not value:
+        return value
+    if not value.startswith("/"):
         raise ValueError(
             f"sample_mount {value!r} must be an absolute path inside the server, or empty "
             "when the server reads the worker's own filesystem"
         )
+    if any(part == ".." for part in value.split("/")):
+        raise ValueError(f"sample_mount {value!r} may not hold a '..' segment")
+    return posixpath.normpath(value)
+
+
+def check_work_dir(value: str) -> str:
+    """One directory name under the worker's samples directory, or empty."""
+    if value and (value in (".", "..") or "/" in value or "\\" in value):
+        raise ValueError(f"work_dir {value!r} is one directory name, not a path")
+    return value
+
+
+def check_auto_name_prefixes(value: list[str]) -> list[str]:
+    for prefix in value:
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9]*[_.]", prefix):
+            raise ValueError(
+                f"auto_name_prefixes {prefix!r} is letters and digits ending in '_' or '.', "
+                "as a decompiler writes before the address (FUN_, fcn.)"
+            )
+    return value
+
+
+def check_reference_urls(value: list[str]) -> list[str]:
+    for template in value:
+        if not template.startswith("https://"):
+            raise ValueError(f"reference URL {template!r} must start with https://")
+        if not any(p in template for p in REFERENCE_PLACEHOLDERS):
+            raise ValueError(
+                f"reference URL {template!r} names none of: " + ", ".join(REFERENCE_PLACEHOLDERS)
+            )
+    return value
+
+
+def check_tool_facts_keys(value: dict[str, Any]) -> dict[str, Any]:
+    for name in value:
+        check_tool_name(name, "tool_facts key")
     return value
 
 
@@ -447,6 +687,9 @@ def fill_declaration(stored: MCPServerConfig, default: MCPServerConfig) -> MCPSe
     an operator who cleared a built-in's prompt fragment meant it. A filled
     field stays unset, so the block keeps following the built-in's value and a
     save that strips it (:func:`strip_declaration_defaults`) stores nothing.
+    ``model_fields_set`` is a merge aid only: a ``model_dump`` and
+    ``model_validate`` round trip marks every field set, so no consumer may
+    read an operator's intent from it.
     """
     for name in DECLARATION_FIELDS:
         if name not in stored.model_fields_set:
@@ -460,7 +703,9 @@ def strip_declaration_defaults(dumped: dict[str, Any], default: MCPServerConfig)
     The tool-server map is stored whole on every save, so a row that carried
     each default would freeze the built-in's declaration at the day of the
     save and a later release could never correct it. A value that differs
-    from the default, an empty one included, is the operator's and is stored.
+    from the default, an empty one included, is the operator's and is stored;
+    a value equal to the shipped one at the time of the save is not recorded,
+    and follows later releases.
     """
     reference = default.model_dump(mode="json")
     return {
@@ -470,23 +715,24 @@ def strip_declaration_defaults(dumped: dict[str, Any], default: MCPServerConfig)
     }
 
 
+def declaration_digest(cfg: Any) -> str:
+    """A short digest of one block's whole declaration, as it is in force."""
+    dumped = cfg.model_dump(mode="json") if isinstance(cfg, BaseModel) else dict(cfg)
+    body = {name: dumped.get(name) for name in DECLARATION_FIELDS}
+    text = json.dumps(body, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
 # ---------------------------------------------------------------------------
 # The read API
 # ---------------------------------------------------------------------------
 
 SourceKind = Literal["mcp", "provider", "sandbox", "pack"]
 
-# The ledger's name for the triage pack, which records every step with this
-# server and this agent (``pipeline.triage_pack``).
-PACK_LEDGER_NAME = "pipeline"
-# The agent the evidence-only rule provider records its entries under
-# (``providers.static.capa_yara.ledger_entries``), with no server.
-EVIDENCE_PROVIDER_AGENT = "capa_yara"
-
 
 @dataclass(frozen=True)
 class SourceRef:
-    """Where a tool comes from: a tool server, a static provider, or the platform."""
+    """Where a tool comes from: a tool server, a provider, or the platform."""
 
     kind: SourceKind
     key: str = ""
@@ -518,27 +764,38 @@ class Declared:
     enabled: bool = True
     sample_open: Any = None
     sample_mount: str = ""
+    work_dir: str = ""
     error_patterns: tuple[ErrorPattern, ...] = ()
     roles: tuple[str, ...] = ()
     prompt_fragment: str = ""
     required_env_allow: tuple[str, ...] = ()
+    variable_names: tuple[str, ...] = ()
     reads_staged_sample: bool = False
+    platform_owned: bool = False
+    auto_name_prefixes: tuple[str, ...] = ()
+    reference_urls: tuple[str, ...] = ()
     tools: Mapping[str, ToolFacts] = field(default_factory=dict)
 
     @classmethod
     def of(cls, source: SourceRef, cfg: Any, *, enabled: bool, label: str = "") -> Declared:
+        copied = cfg.model_copy(deep=True) if isinstance(cfg, BaseModel) else cfg
         return cls(
             source=source,
-            label=label or str(getattr(cfg, "label", "") or source.key or source.kind),
+            label=label or str(getattr(copied, "label", "") or source.key or source.kind),
             enabled=enabled,
-            sample_open=getattr(cfg, "sample_open", None),
-            sample_mount=str(getattr(cfg, "sample_mount", "") or ""),
-            error_patterns=tuple(getattr(cfg, "error_patterns", ()) or ()),
-            roles=tuple(getattr(cfg, "roles", ()) or ()),
-            prompt_fragment=str(getattr(cfg, "prompt_fragment", "") or ""),
-            required_env_allow=tuple(getattr(cfg, "required_env_allow", ()) or ()),
-            reads_staged_sample=bool(getattr(cfg, "reads_staged_sample", False)),
-            tools=dict(getattr(cfg, "tool_facts", {}) or {}),
+            sample_open=getattr(copied, "sample_open", None),
+            sample_mount=str(getattr(copied, "sample_mount", "") or ""),
+            work_dir=str(getattr(copied, "work_dir", "") or ""),
+            error_patterns=tuple(getattr(copied, "error_patterns", ()) or ()),
+            roles=tuple(getattr(copied, "roles", ()) or ()),
+            prompt_fragment=str(getattr(copied, "prompt_fragment", "") or ""),
+            required_env_allow=tuple(getattr(copied, "required_env_allow", ()) or ()),
+            variable_names=tuple(getattr(copied, "variable_names", ()) or ()),
+            reads_staged_sample=bool(getattr(copied, "reads_staged_sample", False)),
+            platform_owned=bool(getattr(copied, "platform_owned", False)),
+            auto_name_prefixes=tuple(getattr(copied, "auto_name_prefixes", ()) or ()),
+            reference_urls=tuple(getattr(copied, "reference_urls", ()) or ()),
+            tools=dict(getattr(copied, "tool_facts", {}) or {}),
         )
 
 
@@ -553,10 +810,10 @@ class ToolDeclarations:
 
     Built from the effective settings: every server of ``mcp.servers``, the
     static providers' own blocks (``static.ghidra``, ``static.r2``; the
-    ``generic_mcp`` provider reads the server it names), and the platform's
-    in-process sources (``pack``, ``sandbox``, ``provider:capa_yara``), whose
-    declarations are built-in data only: their answers are the platform's own
-    code.
+    ``generic_mcp`` provider reads the server it names), the CAPE provider's
+    MCP block (``provider:cape2``), and the platform's in-process sources
+    (``pack``, ``sandbox``, ``provider:capa_yara``), whose declarations are
+    built-in data only: their answers are the platform's own code.
     """
 
     def __init__(self, sources: Iterable[Declared]) -> None:
@@ -584,6 +841,14 @@ class ToolDeclarations:
                     enabled="generic_mcp" in selected,
                 )
             )
+        sources.append(
+            Declared.of(
+                SourceRef("provider", "cape2"),
+                settings.sandbox.cape2.mcp,
+                enabled=str(settings.sandbox.provider) == "cape2",
+                label="CAPE MCP",
+            )
+        )
         for source, cfg in in_process_declarations().items():
             enabled = source.kind != "provider" or source.key in selected
             sources.append(Declared.of(source, cfg, enabled=enabled))
@@ -595,71 +860,87 @@ class ToolDeclarations:
     def source(self, ref: SourceRef | str) -> Declared | None:
         return self._sources.get(SourceRef.parse(ref) if isinstance(ref, str) else ref)
 
-    def source_of(self, entry: Any, *, provider: str | None = None) -> SourceRef | None:
-        """The source a ledger entry's tool came from.
+    @staticmethod
+    def source_of(entry: Any) -> SourceRef | None:
+        """The source a ledger entry recorded when it was written, or ``None``.
 
-        A named server is that server (the triage pack's own name, with its own
-        agent, is the pack). An entry with no server came from the
-        evidence-only provider (by its agent), from ``provider`` (the static
-        provider of the agent that made the call) when that provider declares
-        the tool, else from the platform's sandbox report tools when they do.
+        Only the recorded ``source`` decides: an entry written before sources
+        were recorded, or one whose recorded source does not parse, has none,
+        and is read by the legacy readers. A server, an agent or a tool name
+        is never read for it.
         """
-        server = _field(entry, "server")
-        tool = str(_field(entry, "tool") or "")
-        if server:
-            if server == PACK_LEDGER_NAME and _field(entry, "agent") == PACK_LEDGER_NAME:
-                return PACK
-            return SourceRef("mcp", str(server))
-        if _field(entry, "agent") == EVIDENCE_PROVIDER_AGENT:
-            return SourceRef("provider", EVIDENCE_PROVIDER_AGENT)
-        if provider:
-            ref = SourceRef("provider", provider)
-            held = self._sources.get(ref)
-            if held is not None and tool in held.tools:
-                return ref
-        sandbox = self._sources.get(SANDBOX)
-        if sandbox is not None and tool in sandbox.tools:
-            return SANDBOX
-        return SourceRef("provider", provider) if provider else None
+        recorded = _field(entry, "source")
+        if not recorded:
+            return None
+        try:
+            return SourceRef.parse(str(recorded))
+        except ValueError:
+            return None
 
-    def declaration_for(self, entry: Any, *, provider: str | None = None) -> ToolFacts | None:
+    def declaration_for(self, entry: Any) -> ToolFacts | None:
         """The declaration of one tool, by its source and its name together.
 
-        ``entry`` is a ledger entry (or a mapping with ``server``, ``agent`` and
-        ``tool``), or a ``(source, tool)`` pair whose source is a
-        :class:`SourceRef` or its text (``mcp:analysis``). A tool server's tool
-        renamed with its own server's prefix (``knowledge__capabilities``) is
-        read without that prefix; no other prefix is taken off.
+        ``entry`` is a ledger entry (or a mapping with ``source`` and ``tool``),
+        or a ``(source, tool)`` pair whose source is a :class:`SourceRef` or its
+        text (``mcp:analysis``). A tool server's tool renamed with its own
+        server's prefix (``knowledge__capabilities``) is read without that
+        prefix; no other prefix is taken off.
         """
         if isinstance(entry, tuple):
             raw, tool = entry
             ref: SourceRef | None = SourceRef.parse(raw) if isinstance(raw, str) else raw
         else:
-            ref = self.source_of(entry, provider=provider)
+            ref = self.source_of(entry)
             tool = str(_field(entry, "tool") or "")
         if ref is None:
             return None
         held = self._sources.get(ref)
         if held is None:
             return None
-        if ref.kind == "mcp" and tool.startswith(f"{ref.key}__"):
-            tool = tool[len(ref.key) + 2 :]
+        if ref.kind == "mcp" and tool.startswith(f"{ref.key}{RENAMED_TOOL_SEPARATOR}"):
+            tool = tool[len(ref.key) + len(RENAMED_TOOL_SEPARATOR) :]
         return held.tools.get(tool)
 
     def tools_of_kind(
-        self, kind: str, *, enabled_only: bool = False
+        self, kind: str | Iterable[str], *, enabled_only: bool = False
     ) -> list[tuple[SourceRef, str, ToolFacts]]:
-        """Every declared tool of ``kind``, as ``(source, tool, declaration)``."""
+        """Every declared tool of ``kind`` (or of any of several), as ``(source, tool, facts)``."""
+        kinds = {kind} if isinstance(kind, str) else set(kind)
         return [
             (d.source, name, facts)
             for d in self.sources(enabled_only=enabled_only)
             for name, facts in d.tools.items()
-            if facts.kind == kind
+            if facts.kind in kinds
         ]
 
     def servers_with_role(self, role: str, *, enabled_only: bool = False) -> list[SourceRef]:
         """Every source that declares ``role``."""
         return [d.source for d in self.sources(enabled_only=enabled_only) if role in d.roles]
+
+    def digests(self) -> dict[str, str]:
+        """Per source, a short digest of its declaration as it is in force."""
+        return {
+            str(d.source): declaration_digest(
+                {
+                    "sample_open": d.sample_open.model_dump(mode="json")
+                    if isinstance(d.sample_open, BaseModel)
+                    else d.sample_open,
+                    "sample_mount": d.sample_mount,
+                    "work_dir": d.work_dir,
+                    "error_patterns": [p.model_dump(mode="json") for p in d.error_patterns],
+                    "roles": list(d.roles),
+                    "prompt_fragment": d.prompt_fragment,
+                    "required_env_allow": list(d.required_env_allow),
+                    "variable_names": list(d.variable_names),
+                    "reads_staged_sample": d.reads_staged_sample,
+                    "platform_owned": d.platform_owned,
+                    "auto_name_prefixes": list(d.auto_name_prefixes),
+                    "reference_urls": list(d.reference_urls),
+                    "tool_facts": {n: f.model_dump(mode="json") for n, f in d.tools.items()},
+                }
+            )
+            for d in self._sources.values()
+        }
 
 
 def _selected_providers(settings: Settings) -> set[str]:
@@ -679,15 +960,13 @@ def _declarations(settings: Settings | None) -> ToolDeclarations:
     return ToolDeclarations.from_settings(settings)
 
 
-def declaration_for(
-    entry: Any, *, settings: Settings | None = None, provider: str | None = None
-) -> ToolFacts | None:
+def declaration_for(entry: Any, *, settings: Settings | None = None) -> ToolFacts | None:
     """The declaration of a ledger entry's tool (see :meth:`ToolDeclarations.declaration_for`)."""
-    return _declarations(settings).declaration_for(entry, provider=provider)
+    return _declarations(settings).declaration_for(entry)
 
 
 def tools_of_kind(
-    kind: str, *, settings: Settings | None = None, enabled_only: bool = False
+    kind: str | Iterable[str], *, settings: Settings | None = None, enabled_only: bool = False
 ) -> list[tuple[SourceRef, str, ToolFacts]]:
     """Every declared tool of ``kind`` (see :meth:`ToolDeclarations.tools_of_kind`)."""
     return _declarations(settings).tools_of_kind(kind, enabled_only=enabled_only)

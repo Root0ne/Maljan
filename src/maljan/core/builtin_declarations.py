@@ -10,16 +10,20 @@ Only the declaration fields are here. A built-in server's connection settings
 stay in ``config._builtin_servers``; its declaration is merged from this
 module under whatever an operator stored (``tool_declarations.fill_declaration``).
 
-The two static providers' workflow prompts and radare2's error sentences live
+The two static providers' workflow prompts and radare2's error patterns live
 here as the text of their declarations, and the adapters read them from here,
-so there is one copy of each.
+so there is one copy of each. The Ghidra and radare2 tool tables are data in
+``maljan.core.builtin_reverser_tools``.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 from functools import cache
 from typing import TYPE_CHECKING, Any
 
+from maljan.core.builtin_reverser_tools import GHIDRA_TOOLS, R2_TOOLS
 from maljan.tools.errors import BAD_ARGUMENT, TOOL_FAILED
 
 if TYPE_CHECKING:
@@ -133,15 +137,42 @@ R2_PROMPT_FRAGMENT: str = (
     "   summarising call over many narrow ones.\n"
 )
 
-# What r2mcp is told after an answer that says no file is open.
+# What r2mcp is told after an answer that says no file is open, without and
+# with the path radare2 can open for the job's sample.
 R2_OPEN_FILE_FIRST = "call open_file with the path you are given, then call this tool again"
+R2_OPEN_FILE_FIRST_AT = "call open_file with {sample_path}, then call this tool again"
 
-# The replies r2mcp gives in place of an answer, as it writes them. r2mcp sends
-# these as an ordinary text result rather than as an MCP error, so without this
-# list the ledger filed "Invalid regex used in filter parameter, try a simpler
-# expression" as a successful ``list_strings`` whose output was that sentence.
-# Each is held against the whole reply, never a line inside one.
+# radare2's log envelope: r2mcp hands back what radare2 logged while running a
+# command inside ``<log>…</log>``. An envelope and nothing else, whose lines
+# are all radare2 log lines (``[LEVEL] text``) with at least one ``[ERROR]`` or
+# ``[FATAL]``, is radare2 saying the command failed with no answer beside it;
+# the message is its lines. A line ends where Python's ``str.splitlines`` ends
+# one, so the pattern and the message read the same lines.
+_LINE_BREAK = r"\n\r\x0b\x0c\x1c-\x1e\x{85}\x{2028}\x{2029}"
+_GAP = rf"[\s{_LINE_BREAK}]"
+_IN_LINE = rf"[^{_LINE_BREAK}]"
+_FIRST = rf"[^\s{_LINE_BREAK}]"
+_LOG_LINE = rf"\[[A-Z]+\][ \t]*{_FIRST}{_IN_LINE}*"
+_FAILURE_LINE = rf"\[(?:ERROR|FATAL)\][ \t]*{_FIRST}{_IN_LINE}*"
+R2_LOG_ENVELOPE = (
+    rf"<log>(?P<body>{_GAP}*(?:{_LOG_LINE}{_GAP}*)*{_FAILURE_LINE}"
+    rf"(?:{_GAP}*{_LOG_LINE})*{_GAP}*)</log>"
+)
+
+# The ways r2mcp says "error" in place of an answer, in the order they are
+# held: the open-first refusal it raises as an MCP protocol error, its log
+# envelope, and the sentences it writes as an ordinary text result (without
+# these the ledger filed "Invalid regex used in filter parameter, try a simpler
+# expression" as a successful ``list_strings`` whose output was that sentence).
 R2_ERROR_PATTERNS: tuple[dict[str, Any], ...] = (
+    {
+        "match": r"(?:\w+: )?Use the open_file method before calling any other method\b.*",
+        "code": TOOL_FAILED,
+        "applies_to": ["protocol_error"],
+        "remediation": R2_OPEN_FILE_FIRST,
+        "remediation_with_path": R2_OPEN_FILE_FIRST_AT,
+    },
+    {"match": R2_LOG_ENVELOPE, "code": TOOL_FAILED, "multiline": True, "message_group": "body"},
     {"match": r"Invalid regex used in filter parameter\b.*", "code": BAD_ARGUMENT},
     {"match": r"Invalid parameter '[^']*':.*", "code": BAD_ARGUMENT},
     {"match": r"Invalid params:.*", "code": BAD_ARGUMENT},
@@ -152,11 +183,13 @@ R2_ERROR_PATTERNS: tuple[dict[str, Any], ...] = (
         "match": r"Cannot run (?:commands|script files) without calling the `open_file` tool.*",
         "code": TOOL_FAILED,
         "remediation": R2_OPEN_FILE_FIRST,
+        "remediation_with_path": R2_OPEN_FILE_FIRST_AT,
     },
     {
         "match": r"No file is currently open\..*",
         "code": TOOL_FAILED,
         "remediation": R2_OPEN_FILE_FIRST,
+        "remediation_with_path": R2_OPEN_FILE_FIRST_AT,
     },
     {
         "match": r"Failed to (?:open file|initialize r(?:adare)?2(?: core)?)\b.*",
@@ -169,19 +202,36 @@ R2_ERROR_PATTERNS: tuple[dict[str, Any], ...] = (
 # Shared tool facts
 # ---------------------------------------------------------------------------
 
-# Where an asserting tool's answer names technique ids: under these keys at any
-# depth, as ``pipeline.evidence_summary._technique_ids`` reads every source.
+# Where an asserting tool's answer names technique ids: under these keys within
+# six levels, as ``pipeline.evidence_summary._technique_ids`` reads every source.
 TECHNIQUES_ANYWHERE: tuple[dict[str, str], ...] = (
-    {"path": "/**/technique_id", "format": "attck"},
-    {"path": "/**/attck", "format": "attck"},
-    {"path": "/**/technique_ids", "format": "attck"},
-    {"path": "/**/tags", "format": "sigma_tag"},
+    {"path": "/**6/technique_id", "format": "attck"},
+    {"path": "/**6/attck", "format": "attck"},
+    {"path": "/**6/technique_ids", "format": "attck"},
+    {"path": "/**6/tags", "format": "sigma_tag"},
 )
 
 _PATH = {"path": "path", "carved": "carved_path"}
 
-_CAPA: dict[str, Any] = {
-    "kind": "rule_match",
+# The answer shapes a reader is named by (documented in the configuration
+# guide's tool declarations section). Each is a shape the paths alone cannot
+# express; a shape the paths express has no reader.
+READERS: dict[str, str] = {
+    "pe_header": "a PE header answer: sections and the entry point, read as file layout",
+    "emulated_strings_with_call_sites": (
+        "rows of recovered strings, each with the call site that produced it and the "
+        "routine around it, joined to the encoded blobs a static decoder read at that site"
+    ),
+    "function_table": "a function index: per function its start, range and what it references",
+    "byte_transform": "the result of byte transforms over a range of the file, with its origin",
+    "unpacked_image": "an unpacked program written out as a file of its own",
+    "flow_table": "flows and DNS queries with their endpoints, from a capture or a sandbox",
+    "dns_query_lines": "a text answer holding one DNS query per line",
+    "report_items": "sandbox report items, each with an id and the fields that place it",
+}
+
+_CAPABILITY_RULES: dict[str, Any] = {
+    "kind": "capability_rules",
     "asserts_techniques": True,
     "source": "capa",
     "long_running": True,
@@ -190,10 +240,10 @@ _CAPA: dict[str, Any] = {
     "values": {"rule": "/rule", "namespace": "/namespace"},
     "techniques": list(TECHNIQUES_ANYWHERE),
     "arguments": {"path": "path"},
-    "reader": "capa",
+    "display_name": "capa",
 }
-_YARA: dict[str, Any] = {
-    "kind": "rule_match",
+_SIGNATURE_RULES: dict[str, Any] = {
+    "kind": "signature_rules",
     "asserts_techniques": True,
     "source": "yara",
     "rows": "/matches/*",
@@ -201,22 +251,23 @@ _YARA: dict[str, Any] = {
     "values": {"rule": "/rule"},
     "techniques": list(TECHNIQUES_ANYWHERE),
     "arguments": _PATH,
-    "reader": "yara",
     "words": ["yara", "rule", "rules"],
+    "display_name": "YARA",
 }
 
 
-def _sigma(argument: str) -> dict[str, Any]:
+def _event_rules(argument: str) -> dict[str, Any]:
     return {
-        "kind": "rule_match",
+        "kind": "event_rules",
         "asserts_techniques": True,
         "source": "sigma",
         "rows": "/matches/*",
-        "values": {"command_line": "/matched_fields/CommandLine"},
+        "places": {"command_line": "/matched_fields/CommandLine"},
+        "values": {"rule": "/rule", "title": "/title"},
         "techniques": list(TECHNIQUES_ANYWHERE),
         "arguments": {argument: argument},
-        "reader": "sigma",
         "words": ["sigma", "rule", "rules"],
+        "display_name": "Sigma",
     }
 
 
@@ -227,17 +278,18 @@ _STRINGS: dict[str, Any] = {
     "values": {"text": "/text"},
     "arguments": _PATH,
 }
-_FLOSS: dict[str, Any] = {
-    "kind": "decoded_strings",
+_EMULATED_STRINGS: dict[str, Any] = {
+    "kind": "emulated_strings",
     "long_running": True,
     "rows": "/strings/*",
     "places": {"call_site": "/called_at_rva", "function": "/function_rva"},
     "values": {"text": "/string", "scheme": "/kind"},
     "arguments": _PATH,
-    "reader": "floss",
+    "reader": "emulated_strings_with_call_sites",
     "words": ["decoded", "emulation", "floss"],
+    "display_name": "FLOSS",
 }
-_BLOBS: dict[str, Any] = {
+_DECODED_STRINGS: dict[str, Any] = {
     "kind": "decoded_strings",
     "rows": "/results/*",
     "places": {"rva": "/rva"},
@@ -250,7 +302,6 @@ _API_HASHES: dict[str, Any] = {
     "places": {"rva": "/occurrences/*/rva"},
     "values": {"name": "/readings/*/name"},
     "arguments": _PATH,
-    "reader": "resolve_api_hashes",
 }
 
 
@@ -262,87 +313,100 @@ def _file(kind: str, reader: str = "") -> dict[str, Any]:
 
 
 _REFERENCE = {"kind": "reference"}
+_API_CATALOGUE = {"kind": "api_catalogue"}
 _CAPABILITIES = {"kind": "capabilities"}
-_LOLBIN: dict[str, Any] = {
+_COMMAND_MATCH: dict[str, Any] = {
     "kind": "command_match",
     "asserts_techniques": True,
     "source": "lolbin",
     "techniques": list(TECHNIQUES_ANYWHERE),
     "arguments": {"command_lines": "command_lines"},
-    "reader": "lolbin",
 }
 _PCAP_WORDS = ["capture", "packet", "packets", "pcap"]
 _PCAP_SUMMARY: dict[str, Any] = {
     "kind": "pcap",
     "arguments": {"path": "pcap_path"},
-    "reader": "flows",
+    "reader": "flow_table",
     "words": _PCAP_WORDS,
 }
 
 # The analysis sidecar's tools. Answer shapes from ``analysis.evidence_roots``
-# ``_read_entry``; capa and FLOSS long-running as the sidecar's own manifest
-# (``services/analysis-mcp/server.py`` TOOL_NEEDS) declares them.
+# ``_read_entry``; capa and FLOSS long-running and YARA's own budget as the
+# sidecar's manifest (``services/analysis-mcp/server.py`` TOOL_NEEDS) declares.
 _ANALYSIS_TOOLS: dict[str, dict[str, Any]] = {
-    "apk_info": _file("binary_info", "binary_info"),
+    "apk_info": _file("format_info"),
     "archive_list": _file("archive_listing"),
-    "capa": _CAPA,
+    "capa": _CAPABILITY_RULES,
     "capabilities": _CAPABILITIES,
     "carve_payloads": _file("carve"),
-    "decode_string_blobs": _BLOBS,
-    "document_info": _file("binary_info"),
-    "elf_info": _file("binary_info", "binary_info"),
+    "decode_string_blobs": _DECODED_STRINGS,
+    "document_info": _file("document_info"),
+    "elf_info": _file("format_info"),
     "find_crypto_constants": _file("crypto_constants"),
-    "floss": _FLOSS,
-    "function_index": {**_file("function_index", "function_index")},
+    "floss": _EMULATED_STRINGS,
+    "function_index": {**_file("function_index", "function_table")},
     "hashes": _file("identity"),
     "identify_file": _file("identity"),
-    "iocs_from_file": _file("iocs"),
-    "iocs_from_text": {"kind": "iocs", "arguments": {"text": "text"}},
-    "macho_info": _file("binary_info", "binary_info"),
-    "pe_info": _file("binary_info", "pe_info"),
+    "iocs_from_file": _file("file_iocs"),
+    "iocs_from_text": {"kind": "text_iocs", "arguments": {"text": "text"}},
+    "macho_info": _file("format_info"),
+    "pe_info": _file("format_info", "pe_header"),
     "put_sample": {"kind": "sample_delivery"},
     "put_sample_begin": {"kind": "sample_delivery"},
     "put_sample_chunk": {"kind": "sample_delivery"},
     "put_sample_finish": {"kind": "sample_delivery"},
     "resolve_api_hashes": _API_HASHES,
-    "sigma_match": _sigma("events"),
-    "sigma_match_sandbox": _sigma("report"),
+    "sigma_match": _event_rules("events"),
+    "sigma_match_sandbox": _event_rules("report"),
     "signing_info": _file("signing"),
     "strings": _STRINGS,
-    "transform_bytes": _file("transform", "transform_bytes"),
-    "unpack_upx": _file("unpack", "unpack_upx"),
-    "yara_scan": _YARA,
+    "transform_bytes": _file("transform", "byte_transform"),
+    "unpack_upx": _file("unpack", "unpacked_image"),
+    "yara_scan": {**_SIGNATURE_RULES, "timeout_seconds": 60},
 }
 
 _KNOWLEDGE_TOOLS: dict[str, dict[str, Any]] = {
-    "api_capability": _REFERENCE,
+    "api_capability": _API_CATALOGUE,
     "attck_lookup": _REFERENCE,
     "attck_validate": _REFERENCE,
     "capabilities": _CAPABILITIES,
     "family_lookup": _REFERENCE,
-    "lolbin_lookup": _LOLBIN,
+    "lolbin_lookup": _COMMAND_MATCH,
     "resolve_technique": _REFERENCE,
     "similar_cases": _REFERENCE,
 }
 
 _NETWORK_TOOLS: dict[str, dict[str, Any]] = {
     "capabilities": _CAPABILITIES,
-    "extract_dns": {"kind": "dns", "arguments": {"path": "pcap_path"}, "reader": "extract_dns"},
+    "extract_dns": {
+        "kind": "dns",
+        "arguments": {"path": "pcap_path"},
+        "reader": "dns_query_lines",
+    },
     "extract_http": {"kind": "http", "arguments": {"path": "pcap_path"}},
     "pcap_summary": _PCAP_SUMMARY,
     "read_pcap_summary": {**_PCAP_SUMMARY, "kind": "packet_overview"},
 }
 
-# The threat-intel sidecar answers in prose: "55/70 detections"
-# (``pipeline.triage_pack._DETECTIONS_RE``).
+# The threat-intel sidecar answers in prose. The live sidecar writes
+# "42/71 malicious" (``services/threatintel-mcp/server.py``), which the console
+# reads (``reputation.ts``); its mock writes "55/70 detections", which the pack
+# reads (``pipeline.triage_pack._DETECTIONS_RE``). Both are declared.
 _THREATINTEL_TOOLS: dict[str, dict[str, Any]] = {
     "capabilities": _CAPABILITIES,
-    "check_domain_reputation": {"kind": "indicator_reputation", "arguments": {"domain": "domain"}},
+    "check_domain_reputation": {
+        "kind": "indicator_reputation",
+        "arguments": {"domain": "domain"},
+    },
     "check_hash": {
-        "kind": "reputation",
+        "kind": "hash_reputation",
         "arguments": {"hash": "file_hash"},
+        "display_name": "Threat intelligence",
         "reputation": {
-            "text_pattern": r"(?i)\b(?P<malicious>\d+)\s*/\s*(?P<total>\d+)\s+detections?\b"
+            "text_patterns": [
+                r"(?i)\b(?P<malicious>\d+)\s*/\s*(?P<total>\d+)\s+detections?\b",
+                r"(?i)\b(?P<malicious>\d+)\s*/\s*(?P<total>\d+)\s+malicious\b",
+            ]
         },
     },
     "check_ip_reputation": {"kind": "indicator_reputation", "arguments": {"ip": "ip_address"}},
@@ -351,185 +415,47 @@ _THREATINTEL_TOOLS: dict[str, dict[str, Any]] = {
 
 # VirusTotal's own server: the lookups and submit tools of ``core.virustotal``;
 # the file report's shape as ``pipeline.triage_pack._reputation_facts``,
-# ``_stats_malicious`` and ``_detection_labels`` and
-# ``reporting.ledger_report._reputation`` read it.
+# ``_find_key`` (eight levels) and ``_detection_labels`` read it.
 _VT_REPUTATION: dict[str, Any] = {
     "service": "VirusTotal",
-    "stats": "/**/last_analysis_stats",
-    "malicious": "/**/last_analysis_stats/malicious",
+    "stats": "/**7/last_analysis_stats",
+    "malicious": "/**7/last_analysis_stats/malicious",
     "labels": [
-        "/**/popular_threat_classification/suggested_threat_label",
-        "/**/popular_threat_classification/popular_threat_name/*/value",
-        "/**/popular_threat_classification/popular_threat_category/*/value",
+        "/**7/popular_threat_classification/suggested_threat_label",
+        "/**7/popular_threat_classification/popular_threat_name/*/value",
+        "/**7/popular_threat_classification/popular_threat_category/*/value",
     ],
-    "detections": "/**/detections",
-    "engines": "/**/coverage/engines",
+    "detections": "/**7/detections",
+    "engines": "/**7/coverage/engines",
 }
 _VIRUSTOTAL_TOOLS: dict[str, dict[str, Any]] = {
     "get_analysis": {"kind": "submission_status"},
-    "get_domain_report": {"kind": "indicator_reputation"},
+    "get_domain_report": {"kind": "indicator_report"},
     "get_file_report": {
-        "kind": "reputation",
+        "kind": "file_reputation",
         "arguments": {"hash": "hash"},
         "reputation": _VT_REPUTATION,
+        "display_name": "VirusTotal",
     },
-    "get_ip_report": {"kind": "indicator_reputation"},
+    "get_ip_report": {"kind": "indicator_report"},
     "get_submission": {"kind": "submission_status"},
-    "get_url_report": {"kind": "indicator_reputation"},
-    "submit_file": {"kind": "submission"},
-    "submit_local_file": {"kind": "submission"},
+    "get_url_report": {"kind": "indicator_report"},
+    "submit_file": {"kind": "submission", "discloses_sample": True},
+    "submit_local_file": {"kind": "submission", "discloses_sample": True},
 }
-
-# The report sections each reversing tool's answers are shown to, as
-# ``reporting.evidence_bundles._SECTION_TOOL_HINTS`` matches them by name.
-_SECTIONS: dict[str, list[str]] = {
-    "list_imports": ["discovery"],
-    "list_strings": [
-        "cli_flags",
-        "persistence_detail",
-        "ransom_note",
-        "communications",
-        "command_and_control",
-        "string_resolution",
-        "host_identifiers",
-    ],
-    "decompile_function": [
-        "cli_flags",
-        "discovery",
-        "persistence_detail",
-        "evasion_antiforensics",
-        "command_and_control",
-        "string_resolution",
-        "configuration",
-        "commands",
-        "payloads",
-    ],
-    "list_segments": ["packing_obfuscation", "payloads"],
-    "find_anti_analysis_techniques": ["packing_obfuscation", "evasion_antiforensics"],
-    "detect_malware_behaviors": ["packing_obfuscation", "evasion_antiforensics"],
-    "analyze_function_complete": ["cli_flags", "commands"],
-    "detect_crypto_constants": ["encryption_scheme", "configuration"],
-    "emulate_function": ["encryption_scheme", "string_resolution", "configuration"],
-    "emulate_hash_batch": ["encryption_scheme", "string_resolution", "configuration"],
-    "analyze_dataflow": ["encryption_scheme", "configuration"],
-    "analyze_api_call_chains": [
-        "discovery",
-        "persistence_detail",
-        "communications",
-        "command_and_control",
-        "string_resolution",
-        "commands",
-    ],
-    "extract_iocs_with_context": [
-        "ransom_note",
-        "communications",
-        "command_and_control",
-        "configuration",
-        "payloads",
-        "host_identifiers",
-    ],
-}
-
-
-def _reversing(tools: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """``tools`` with each one's report sections added where it has any."""
-    return {
-        name: ({**facts, "report_sections": _SECTIONS[name]} if name in _SECTIONS else facts)
-        for name, facts in tools.items()
-    }
-
-
-_ADDRESS = {"address": "address"}
-
-# Ghidra's tools the code names: the open/select/analyse tools of its
-# ``sample_open`` (the open and the analysis long-running, as
-# ``providers.sample_open.long_running_tools`` holds them),
-# the program and listing tools of ``analysis.evidence_roots``, the function
-# tools of ``reporting.ledger_report`` and ``reporting.figures``, the load tool
-# of ``agents.static_analyst``, the passes of ``analysis.ghidra_passes`` and
-# ``analysis.function_hash_attribution``, and the workflow's tools.
-_GHIDRA_TOOLS: dict[str, dict[str, Any]] = _reversing(
-    {
-        "load_program": {
-            "kind": "open_sample",
-            "long_running": True,
-            "arguments": {"path": "file"},
-        },
-        "switch_program": {"kind": "select_sample", "arguments": {"program": "program"}},
-        "run_analysis": {
-            "kind": "analyse_sample",
-            "long_running": True,
-            "arguments": {"program": "program"},
-        },
-        "get_current_program_info": {"kind": "program_info"},
-        "list_imports": {"kind": "import_listing"},
-        "list_exports": {"kind": "export_listing"},
-        "list_strings": {"kind": "strings"},
-        "list_functions": {"kind": "function_list"},
-        "list_segments": {"kind": "segments"},
-        "decompile_function": {"kind": "decompile", "arguments": _ADDRESS},
-        "disassemble_function": {"kind": "disassembly", "arguments": _ADDRESS},
-        "analyze_function_complete": {"kind": "function_analysis", "arguments": _ADDRESS},
-        "get_xrefs_to": {"kind": "xrefs", "arguments": _ADDRESS},
-        "get_function_xrefs": {"kind": "xrefs", "arguments": _ADDRESS},
-        "get_function_callers": {"kind": "callers", "arguments": _ADDRESS},
-        "get_function_callees": {"kind": "callees", "arguments": _ADDRESS},
-        "detect_malware_behaviors": {"kind": "behaviour_scan"},
-        "analyze_api_call_chains": {"kind": "call_chains"},
-        "find_anti_analysis_techniques": {"kind": "anti_analysis_scan"},
-        "extract_iocs_with_context": {
-            "kind": "iocs",
-            "rows": "/iocs/*",
-            "places": {"address": "/address"},
-            "values": {"value": "/value"},
-        },
-        "detect_crypto_constants": {"kind": "crypto_constants"},
-        "emulate_function": {"kind": "emulation", "arguments": _ADDRESS},
-        "emulate_hash_batch": {"kind": "emulation"},
-        "analyze_dataflow": {"kind": "dataflow", "arguments": _ADDRESS},
-        "find_code_gaps": {"kind": "code_gaps"},
-        "get_function_hash": {"kind": "function_hash", "arguments": _ADDRESS},
-        "get_bulk_function_hashes": {"kind": "function_hashes"},
-        "get_full_call_graph": {"kind": "call_graph"},
-    }
-)
-
-# radare2's tools the code names: the open tool and the function tools of
-# ``providers.static.r2``, the workflow's tools, the listings of
-# ``analysis.evidence_roots`` and the r2 commands of
-# ``reporting.ledger_report._FUNCTION_TOOLS`` / ``_FUNCTION_LIST_TOOLS``.
-_R2_TOOLS: dict[str, dict[str, Any]] = _reversing(
-    {
-        "open_file": {"kind": "open_sample", "arguments": {"path": "file_path"}},
-        "analyze": {"kind": "analyse_sample"},
-        "show_info": {"kind": "program_info"},
-        "list_imports": {"kind": "import_listing"},
-        "list_exports": {"kind": "export_listing"},
-        "list_strings": {"kind": "strings"},
-        "list_functions": {"kind": "function_list"},
-        "decompile_function": {"kind": "decompile", "arguments": _ADDRESS},
-        "disassemble_function": {"kind": "disassembly", "arguments": _ADDRESS},
-        "disassemble": {"kind": "disassembly", "arguments": _ADDRESS},
-        "xrefs_to": {"kind": "xrefs", "arguments": _ADDRESS},
-        "run_command": {"kind": "command"},
-        "pdf": {"kind": "disassembly"},
-        "pdc": {"kind": "decompile"},
-        "afl": {"kind": "function_list"},
-    }
-)
 
 # The platform's sandbox report tools (``providers.sandbox_tools``). Shapes as
 # ``analysis.evidence_roots`` and ``reporting.ledger_report._BUILDERS`` read
 # them; the signatures assert techniques (``evidence_summary.ASSERTING_SOURCES``).
 _SANDBOX_TOOLS: dict[str, dict[str, Any]] = {
-    "sandbox_report_section": {"kind": "sandbox_report", "reader": "sandbox_section"},
+    "sandbox_report_section": {"kind": "sandbox_report_section"},
     "sandbox_processes": {
         "kind": "sandbox_processes",
         "rows": "/processes/*",
         "places": {"pid": "/pid"},
         "values": {"command_line": "/command_line", "name": "/name"},
     },
-    "sandbox_network": {"kind": "network_flows", "reader": "flows"},
+    "sandbox_network": {"kind": "sandbox_network", "reader": "flow_table"},
     "sandbox_signatures": {
         "kind": "sandbox_signatures",
         "asserts_techniques": True,
@@ -542,11 +468,11 @@ _SANDBOX_TOOLS: dict[str, dict[str, Any]] = {
     "sandbox_mutexes": {"kind": "sandbox_mutexes"},
     "sandbox_services_and_tasks": {"kind": "sandbox_services"},
     "sandbox_channels": {"kind": "sandbox_channels"},
-    "sandbox_items": {"kind": "sandbox_items", "reader": "items"},
+    "sandbox_items": {"kind": "sandbox_items", "reader": "report_items"},
 }
 
 # The triage pack's steps (``pipeline.triage_pack``), each recorded under the
-# pack's own name. The in-process implementations answer as the sidecar's
+# pack's own source. The in-process implementations answer as the sidecar's
 # tools of the same name do, so they declare the same facts.
 _PACK_TOOLS: dict[str, dict[str, Any]] = {
     **{
@@ -563,7 +489,6 @@ _PACK_TOOLS: dict[str, dict[str, Any]] = {
             "archive_list",
             "strings",
             "iocs_from_file",
-            "yara_scan",
             "capa",
             "sigma_match_sandbox",
             "floss",
@@ -574,16 +499,17 @@ _PACK_TOOLS: dict[str, dict[str, Any]] = {
             "unpack_upx",
         )
     },
-    "api_capability": _REFERENCE,
-    "lolbin_lookup": _LOLBIN,
+    "yara_scan": _SIGNATURE_RULES,
+    "api_capability": _API_CATALOGUE,
+    "lolbin_lookup": _COMMAND_MATCH,
     "find_anti_analysis_techniques": {
         "kind": "anti_analysis_scan",
-        "report_sections": _SECTIONS["find_anti_analysis_techniques"],
+        "report_sections": ["packing_obfuscation", "evasion_antiforensics"],
     },
     "function_matches": {"kind": "function_matches"},
     # The pack's own entry for a reputation lookup that did not happen
     # (``triage_pack._REPUTATION_TOOLS``, ``run_state``).
-    "reputation": {"kind": "reputation"},
+    "reputation": {"kind": "reputation_not_asked"},
     "pcap_summary": _PCAP_SUMMARY,
     "sandbox_status": {"kind": "sandbox_status"},
     "sandbox_sections": {"kind": "sandbox_sections"},
@@ -600,13 +526,145 @@ _PACK_TOOLS: dict[str, dict[str, Any]] = {
 }
 
 # ---------------------------------------------------------------------------
+# Which kinds each consumer's table is
+# ---------------------------------------------------------------------------
+
+# Each name table the core reads tools by, as the set of kinds that is exactly
+# that table over every built-in tool (``tests/unit/core/
+# test_every_built_in_declares_what_its_name_tables_say.py`` holds each one
+# equal, tool by tool). A consumer that moves onto the declaration reads the
+# kinds named here. ``legacy_names`` are names a table holds that no built-in
+# tool has; a consumer keeps them for stored runs and servers declared by name.
+CONSUMER_KINDS: dict[str, dict[str, Any]] = {
+    "evidence_roots._WHOLE_FILE_TOOLS": {"kinds": ["identity", "signing", "file_reputation"]},
+    "evidence_roots._REFERENCE_TOOLS": {
+        "kinds": ["reference", "api_catalogue", "capabilities", "indicator_report"]
+    },
+    "evidence_roots._IMPORT_LISTINGS": {
+        "kinds": ["import_listing"],
+        "legacy_names": ["get_imports"],
+    },
+    "evidence_roots._EXPORT_LISTINGS": {
+        "kinds": ["export_listing"],
+        "legacy_names": ["get_exports"],
+    },
+    "evidence_roots._PROGRAM_TOOLS": {
+        "kinds": ["program_info"],
+        "legacy_names": ["get_program_info", "program_info", "get_current_program"],
+    },
+    "evidence_roots._OPEN_TOOLS": {"kinds": ["load_sample", "open_project_program", "open_sample"]},
+    "evidence_bundles._STRING_TOOLS": {
+        "kinds": ["strings", "emulated_strings", "file_iocs", "listing_strings"]
+    },
+    "evidence_bundles._NETWORK_SANDBOX_TOOLS": {"kinds": ["sandbox_network", "pcap"]},
+    "evidence_bundles.SANDBOX_TOOL_PREFIXES": {
+        "kinds": [
+            "sandbox_report_section",
+            "sandbox_processes",
+            "sandbox_network",
+            "sandbox_signatures",
+            "sandbox_dropped_files",
+            "sandbox_registry",
+            "sandbox_api_calls",
+            "sandbox_mutexes",
+            "sandbox_services",
+            "sandbox_channels",
+            "sandbox_items",
+            "sandbox_status",
+            "sandbox_sections",
+            "pcap",
+        ]
+    },
+    "ledger_report._FUNCTION_TOOLS": {
+        "kinds": ["decompile", "function_disassembly"],
+        "legacy_names": ["decompile", "get_function", "analyze_function", "pdf", "pdc"],
+    },
+    "ledger_report._FUNCTION_LIST_TOOLS": {
+        "kinds": ["function_list", "method_list"],
+        "legacy_names": ["get_functions", "afl"],
+    },
+    "validation._REFERENCE_SECTION_SOURCES": {"kinds": ["api_catalogue"]},
+    "validation._SAMPLE_VALUE_SECTION_SOURCES": {
+        "kinds": ["strings", "file_iocs", "emulated_strings"]
+    },
+    "validation._RULE_MATCH_SECTION_SOURCES": {
+        "kinds": ["capability_rules", "signature_rules"],
+        "legacy_names": ["yara"],
+    },
+    "markdown._ANALYSIS_TOOLS": {
+        "kinds": [
+            "capability_rules",
+            "signature_rules",
+            "command_match",
+            "api_catalogue",
+            "strings",
+        ]
+    },
+    "markdown._REPUTATION_TOOLS": {
+        "kinds": ["file_reputation", "hash_reputation"],
+        "legacy_names": ["file_report", "hash_lookup"],
+    },
+    "markdown._SANDBOX_TOOLS": {"same_as": "evidence_bundles.SANDBOX_TOOL_PREFIXES"},
+    "triage_pack._REPUTATION_TOOLS": {
+        "kinds": ["file_reputation", "hash_reputation", "reputation_not_asked"]
+    },
+    "triage_pack.RULE_TOOLS": {"kinds": ["capability_rules", "signature_rules"]},
+    "run_state.reputation": {
+        "kinds": ["file_reputation", "hash_reputation", "reputation_not_asked"]
+    },
+    "network_analyst._PCAP_TOOLS": {"kinds": ["packet_overview", "dns", "http"]},
+    "function_map": {
+        "kinds": ["api_hash_resolution", "decoded_strings", "emulated_strings", "function_index"]
+    },
+    "stix_renderer.recovering": {
+        "kinds": ["emulated_strings", "decoded_strings", "strings", "file_iocs"]
+    },
+    "stix_renderer.DECODER_TOOL": {"kinds": ["decoded_strings"]},
+    "stix_renderer._STRING_SWEEP_TOOLS": {"kinds": ["strings", "file_iocs", "text_iocs"]},
+    "figures.code_listing": {"kinds": ["decompile"]},
+    "ledger_projection.technique_hits": {"kinds": ["capability_rules"]},
+    "static_analyst._LOAD_TOOL": {"kinds": ["load_sample"]},
+}
+
+# Which section builder of ``reporting.ledger_report._BUILDERS`` each kind is
+# drawn with. A kind not named here gets the generic block.
+BUILDER_OF_KIND: dict[str, str] = {
+    "identity": "_identity",
+    "signing": "_signing",
+    "format_info": "_binary_info",
+    "strings": "_strings",
+    "text_iocs": "_iocs",
+    "file_iocs": "_iocs",
+    "signature_rules": "_yara",
+    "event_rules": "_sigma",
+    "capability_rules": "_capa",
+    "sandbox_processes": "_sandbox_processes",
+    "sandbox_network": "_sandbox_network",
+    "sandbox_signatures": "_sandbox_signatures",
+    "sandbox_dropped_files": "_sandbox_dropped",
+    "sandbox_registry": "_sandbox_registry",
+    "sandbox_api_calls": "_sandbox_apis",
+    "sandbox_mutexes": "_sandbox_mutexes",
+    "sandbox_services": "_sandbox_services",
+    "sandbox_report_section": "_sandbox_section",
+    "sandbox_items": "_sandbox_items",
+    "sandbox_status": "_sandbox_status",
+    "pcap": "_pcap",
+    "file_reputation": "_reputation",
+    "hash_reputation": "_reputation",
+}
+
+# ---------------------------------------------------------------------------
 # The blocks
 # ---------------------------------------------------------------------------
 
 # Each built-in server's declaration. ``roles``: ``reputation`` on the two
 # servers of ``config.REPUTATION_SERVER_KEYS``. ``reads_staged_sample`` on the
 # servers of ``agents.tool_pinning.PINNED_SERVERS``. ``required_env_allow`` as
-# ``config.REQUIRED_ENV_ALLOW``.
+# ``config.REQUIRED_ENV_ALLOW``. ``platform_owned`` on the servers of
+# ``agents.evidence_recorder._RESOLVING_SERVERS``. VirusTotal's reference URL
+# as ``reporting.builder._build_references`` and
+# ``reporting.detection_signatures`` write it.
 _SERVER_BLOCKS: dict[str, dict[str, Any]] = {
     "analysis": {
         "roles": ["rule_scanner", "strings", "decoder"],
@@ -616,6 +674,7 @@ _SERVER_BLOCKS: dict[str, dict[str, Any]] = {
             "MALJAN_SAMPLE_ROOTS",
         ],
         "reads_staged_sample": True,
+        "platform_owned": True,
         "tool_facts": _ANALYSIS_TOOLS,
     },
     "knowledge": {
@@ -631,38 +690,50 @@ _SERVER_BLOCKS: dict[str, dict[str, Any]] = {
         "tool_facts": _NETWORK_TOOLS,
     },
     "threatintel": {"roles": ["reputation"], "tool_facts": _THREATINTEL_TOOLS},
-    "virustotal": {"roles": ["reputation"], "tool_facts": _VIRUSTOTAL_TOOLS},
+    "virustotal": {
+        "roles": ["reputation"],
+        "reference_urls": ["https://www.virustotal.com/gui/file/{sha256}"],
+        "tool_facts": _VIRUSTOTAL_TOOLS,
+    },
 }
 
 # The static providers' own blocks (``static.ghidra``, ``static.r2``) and the
 # CAPE MCP sidecar's (``sandbox.cape2.mcp``). Ghidra's mount is the container
 # path its provider mirrors to (``providers.static.ghidra`` ``mirror_spec``);
 # its ``sample_open`` is ``config.GHIDRA_SAMPLE_OPEN``, set where it has always
-# been set. radare2 reads the worker's own filesystem.
+# been set; its work directory and radare2's are the worker's
+# (``apps/api/app/worker/sample_files.WORK_SUBDIR`` / ``R2_WORK_SUBDIR``); its
+# non-secret variable is ``pipeline.events._OWN_VARIABLE_NAMES``. The
+# auto-name prefixes together are ``pipeline.validation._GENERIC_FUNCTION_NAME``'s.
 _PROVIDER_BLOCKS: dict[str, dict[str, Any]] = {
     "ghidra": {
         "sample_mount": "/data/samples",
+        "work_dir": ".work",
         "roles": ["decompiler", "disassembler"],
         "prompt_fragment": GHIDRA_PROMPT_FRAGMENT,
-        "tool_facts": _GHIDRA_TOOLS,
+        "variable_names": ["GHIDRA_CONTAINER_SAMPLES_PATH"],
+        "auto_name_prefixes": ["FUN_", "LAB_", "SUB_"],
+        "tool_facts": GHIDRA_TOOLS,
     },
     "r2": {
+        "work_dir": "r2-work",
         "roles": ["decompiler", "disassembler"],
         "prompt_fragment": R2_PROMPT_FRAGMENT,
         "error_patterns": list(R2_ERROR_PATTERNS),
-        "tool_facts": _R2_TOOLS,
+        "auto_name_prefixes": ["fcn.", "loc.", "sub.", "func."],
+        "tool_facts": R2_TOOLS,
     },
     "cape2_mcp": {"roles": ["sandbox"]},
 }
 
 # The platform's own in-process sources, declared like any server.
 _IN_PROCESS_BLOCKS: dict[str, dict[str, Any]] = {
-    "pack": {"label": "Triage pack", "tool_facts": _PACK_TOOLS},
+    "pack": {"label": "Triage pack", "platform_owned": True, "tool_facts": _PACK_TOOLS},
     "sandbox": {"label": "Sandbox report", "roles": ["sandbox"], "tool_facts": _SANDBOX_TOOLS},
     "provider:capa_yara": {
         "label": "capa and YARA",
         "roles": ["rule_scanner"],
-        "tool_facts": {"capa": _CAPA, "yara_scan": _YARA},
+        "tool_facts": {"capa": _CAPABILITY_RULES, "yara_scan": _SIGNATURE_RULES},
     },
 }
 
@@ -696,12 +767,28 @@ def _deep(value: Any) -> Any:
 
 
 @cache
-def in_process_declarations() -> dict[SourceRef, MCPServerConfig]:
-    """The platform's in-process sources, each as a block of declaration fields."""
+def _in_process_validated() -> dict[str, MCPServerConfig]:
     from maljan.core.config import MCPServerConfig
+
+    return {key: MCPServerConfig.model_validate(_block(b)) for key, b in _IN_PROCESS_BLOCKS.items()}
+
+
+def in_process_declarations() -> dict[SourceRef, MCPServerConfig]:
+    """The platform's in-process sources, each as a fresh block of declaration fields."""
     from maljan.core.tool_declarations import SourceRef
 
     return {
-        SourceRef.parse(key): MCPServerConfig.model_validate(_block(block))
-        for key, block in _IN_PROCESS_BLOCKS.items()
+        SourceRef.parse(key): cfg.model_copy(deep=True)
+        for key, cfg in _in_process_validated().items()
     }
+
+
+def shipped_digest() -> str:
+    """A short digest of every declaration this module ships, for a run's record."""
+    body = {
+        "servers": _SERVER_BLOCKS,
+        "providers": _PROVIDER_BLOCKS,
+        "in_process": _IN_PROCESS_BLOCKS,
+    }
+    text = json.dumps(body, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]

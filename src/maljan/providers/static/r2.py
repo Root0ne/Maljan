@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from maljan.core import builtin_declarations
 from maljan.core.logger import logger
+from maljan.core.tool_declarations import ErrorPattern
 from maljan.providers.base import MirrorSpec
 from maljan.providers.errors import ProviderError
 from maljan.providers.registry import register_static_provider
@@ -33,11 +34,23 @@ if TYPE_CHECKING:
 
     from maljan.core.config import Settings
 
+# radare2's error patterns are its declaration's (``core.builtin_declarations``),
+# held by the general rule (``core.tool_declarations.ErrorPattern``) and run by
+# RE2: the open-first refusal r2mcp raises as an MCP protocol error, its
+# ``<log>`` envelope of radare2 log lines with an ``[ERROR]`` or ``[FATAL]``
+# among them and nothing else, and the sentences it writes as an ordinary text
+# result. Each is held against the whole reply, never a line inside one: a
+# listing of the sample's own strings can hold any sentence.
+_R2_PATTERNS: tuple[ErrorPattern, ...] = tuple(
+    ErrorPattern.model_validate(p) for p in builtin_declarations.R2_ERROR_PATTERNS
+)
+_R2_OPEN_FIRST = next(p for p in _R2_PATTERNS if "protocol_error" in p.applies_to)
+_R2_LOG_ENVELOPE = next(p for p in _R2_PATTERNS if p.multiline)
+_R2_ERROR_REPLIES = tuple(
+    p for p in _R2_PATTERNS if p is not _R2_OPEN_FIRST and p is not _R2_LOG_ENVELOPE
+)
 # What a model is told after an answer that says no file is open.
 _R2_OPEN_FILE_FIRST = builtin_declarations.R2_OPEN_FILE_FIRST
-# The same advice when the path radare2 can open for this sample is known: it
-# names it, so a model whose open failed is not left to guess it.
-_R2_OPEN_FILE_FIRST_AT = "call open_file with {readable}, then call this tool again"
 # What a failed open is told: the path it tried and the one radare2 can open.
 _R2_OPEN_FAILED_AT = (
     "open_file could not open {tried}; the path radare2 can open for this sample is "
@@ -48,34 +61,6 @@ _R2_OPEN_FAILED_ON_ITS_OWN = (
     "it with the server log"
 )
 _R2_OPEN_TOOL = "open_file"
-# The open-first refusal r2mcp raises as a protocol error rather than writing as
-# a reply; it reaches the tool layer as the MCP client's failure marker.
-_R2_OPEN_FIRST_ERROR = re.compile(
-    r"(?:\w+: )?Use the open_file method before calling any other method\b.*"
-)
-# The replies r2mcp gives in place of an answer, as it writes them: the
-# radare2 declaration's error patterns (``core.builtin_declarations``). r2mcp
-# sends these as an ordinary text result rather than as an MCP error, so
-# without them the ledger filed "Invalid regex used in filter parameter, try a
-# simpler expression" as a successful ``list_strings`` whose output was that
-# sentence. Matched against the whole reply, never a line inside one: a listing
-# of the sample's own strings can hold any sentence, and a string the sample
-# carries is not the tool failing.
-_R2_ERROR_REPLIES: tuple[tuple[re.Pattern[str], str, str | None], ...] = tuple(
-    (re.compile(p["match"]), p["code"], p.get("remediation") or None)
-    for p in builtin_declarations.R2_ERROR_PATTERNS
-)
-
-
-# r2mcp hands back what radare2 logged while running a command inside a
-# ``<log>…</log>`` envelope. A reply that is that envelope and nothing else, and
-# whose lines are all radare2 log lines with at least one ``[ERROR]`` or
-# ``[FATAL]``, is radare2 saying the command failed ("[ERROR] Cannot find
-# function in 0x…") with no answer beside it. An envelope in front of an answer is not a failure.
-_R2_LOG_ENVELOPE = re.compile(r"<log>(?P<body>.*)</log>", re.DOTALL)
-# The levels radare2 logs a failure at; ``FATAL`` is the more severe of the two.
-_R2_FAILURE_LEVELS = frozenset({"ERROR", "FATAL"})
-_R2_LOG_LINE = re.compile(r"\[(?P<level>[A-Z]+)\]\s*\S.*")
 
 
 # radare2's words for a function tool called at an address its analysis holds no
@@ -121,16 +106,7 @@ def _unanalysed_address(tool: str, logged: str) -> str | None:
 
 def _r2_logged_error(text: str) -> str | None:
     """radare2's own error lines, when ``text`` is only a log envelope of them."""
-    envelope = _R2_LOG_ENVELOPE.fullmatch(text)
-    if envelope is None:
-        return None
-    lines = [line.strip() for line in envelope.group("body").splitlines() if line.strip()]
-    matched = [_R2_LOG_LINE.fullmatch(line) for line in lines]
-    if not lines or not all(matched):
-        return None
-    if not any(m is not None and m.group("level") in _R2_FAILURE_LEVELS for m in matched):
-        return None
-    return "\n".join(lines)
+    return _R2_LOG_ENVELOPE.message("", text)
 
 
 def r2_error_reply(
@@ -173,13 +149,14 @@ def r2_error_reply(
         return tool_error(TOOL_FAILED, logged, tool=tool, remediation=told.format(address=address))
     if not text or "\n" in text:
         return None
-    for pattern, code, remediation in _R2_ERROR_REPLIES:
-        if pattern.fullmatch(text):
-            if remediation == _R2_OPEN_FILE_FIRST:
-                remediation = _open_first(readable)
-            elif tool == _R2_OPEN_TOOL and text.startswith("Failed to open file") and tried:
-                remediation = _open_failed(tried, readable)
-            return tool_error(code, text, tool=tool, remediation=remediation)
+    for pattern in _R2_ERROR_REPLIES:
+        message = pattern.message(tool, text)
+        if message is None:
+            continue
+        remediation: str | None = pattern.remediation_for(readable) or None
+        if tool == _R2_OPEN_TOOL and text.startswith("Failed to open file") and tried:
+            remediation = _open_failed(tried, readable)
+        return tool_error(pattern.code, message, tool=tool, remediation=remediation)
     return None
 
 
@@ -191,7 +168,7 @@ def _failure_message(failure: dict[str, Any] | None) -> str:
 
 def _open_first(readable: str | None) -> str:
     """The open-first advice, naming the path radare2 can open when it is known."""
-    return _R2_OPEN_FILE_FIRST_AT.format(readable=readable) if readable else _R2_OPEN_FILE_FIRST
+    return _R2_OPEN_FIRST.remediation_for(readable)
 
 
 def _open_failed(tried: str, readable: str | None) -> str:
@@ -209,7 +186,7 @@ def _open_first_marker(reply: Any) -> str | None:
     if parts is None:
         return None
     _code, message, _remediation = parts
-    return message if _R2_OPEN_FIRST_ERROR.fullmatch(message.strip()) else None
+    return message if _R2_OPEN_FIRST.message("", message, target="protocol_error") else None
 
 
 def _reading_error_replies(
