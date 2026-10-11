@@ -1297,7 +1297,9 @@ def _function_hash_attribution(
 
         cfg = get_settings()
         provider = container.get_static_provider()
-        pre = provider.preprocessing()
+        from maljan.providers.base import preprocessing_of
+
+        pre = preprocessing_of(provider)
         static_path = state.get("static_sample_path")
         if not (
             pre.use_function_hash_attribution
@@ -1332,7 +1334,7 @@ def _function_hash_attribution(
                     store.match([h for _n, h in functions], exclude_sample_id=sample_id or None),
                     max_families=pre.function_hash_max_matches,
                 ),
-                source=provider.id,
+                source=str(getattr(provider, "id", "") or ""),
             )
             # Only under a grounded family, so an UNKNOWN verdict cannot pollute
             # the attribution corpus; held, not written, so a job that fails after
@@ -1431,20 +1433,19 @@ def _anti_analysis_step(container: ServiceContainer, state: AnalysisState) -> An
     configured = str(cfg.static.provider)
     budget = deployment_call_budget(cfg)
     for provider_id in dict.fromkeys([configured, *paths]):
-        try:
-            provider = container.get_static_provider(provider_id)
-        except Exception as exc:  # noqa: BLE001 — no provider, nothing to ask
-            logger.debug(
-                "triage pack: no static provider to ask for a scan (%s)", type(exc).__name__
-            )
-            continue
         own = paths.get(provider_id)
         path = own or (state.get("static_sample_path") if provider_id == configured else None)
-        scan = provider.anti_analysis_scan(
-            StaticJobContext(mirror_sample_path=str(path) if path else None),
-            notes=getattr(container, "sample_notes", None),
-            call_budget=budget,
-        )
+        try:
+            scan = container.get_static_provider(provider_id).anti_analysis_scan(
+                StaticJobContext(mirror_sample_path=str(path) if path else None),
+                notes=getattr(container, "sample_notes", None),
+                call_budget=budget,
+            )
+        except Exception as exc:  # noqa: BLE001 — a provider that cannot say is not asked
+            logger.debug(
+                "triage pack: a static provider gave no scan to make (%s)", type(exc).__name__
+            )
+            continue
         if scan is not None:
             return scan
     return None

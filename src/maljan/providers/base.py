@@ -480,6 +480,19 @@ class StaticProvider(ABC):
         return None
 
 
+def preprocessing_of(provider: Any) -> Any:
+    """The preprocessing settings ``provider`` reads (``StaticProvider.preprocessing``).
+
+    The deployment's for an object that does not answer the question itself.
+    """
+    own = getattr(provider, "preprocessing", None)
+    if callable(own):
+        return own()
+    from maljan.core.config import get_settings
+
+    return get_settings().preprocessing
+
+
 def prepare_sample(provider: StaticProvider | None, path: str, log: Any = None) -> str:
     """Open the job's sample on an agent's static provider, then its priority-functions hint.
 

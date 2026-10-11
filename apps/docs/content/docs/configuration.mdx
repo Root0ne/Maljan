@@ -1315,9 +1315,10 @@ of starting another child;
 `ANSWER_SHARE`, the share of the window one tool answer is sized from, stays a
 documented derivation constant; the Ghidra sink pre-pass — run for every agent
 whose own static provider is Ghidra, the static analyst, a clone of it and a
-generic agent given Ghidra's tools alike — waits one tool call's
-deployment budget (`core.mcp.breaker.call_timeout_seconds`, derived as that
-row says), or as long as Ghidra takes with none.
+generic agent given Ghidra's tools alike, as the provider's own open and call
+graph — waits one tool call's deployment budget per request
+(`core.mcp.breaker.call_timeout_seconds`, derived as that row says), or as
+long as Ghidra takes with none.
 
 **The spend ceiling.** `core.llm.max_spend_usd_per_job` is the most one job may
 spend on its models, in US dollars. It has no default: while it is empty a job
@@ -2133,7 +2134,8 @@ image base; the seeded prompt tells it to go there first, to confirm or refute
 each upstream finding at function level, and then to look for what only
 reading the code shows: command dispatch, environment checks, persistence and
 cleanup, the logic that decides when and how it contacts a remote host, and
-the routines that decode its data. An agent on Ghidra — the reverser given
+the routines that decode its data. An agent on a static provider that reads
+a call graph — Ghidra over http, the reverser given
 `static_provider: "ghidra"` included — also gets the sink-reachability
 pre-pass's priority functions on its first turn, and the sample is mirrored for
 its provider even when that is not the deployment's global one.
@@ -2992,7 +2994,7 @@ are ever removed.
 | `roles` | what the server is for: `reputation`, `decompiler`, `disassembler`, `sandbox`, `rule_scanner`, `strings`, `reference`, `capture`, or any word of your own |
 | `prompt_fragment` | the workflow text shown to an agent only while the server's tools are attached |
 | `required_env_allow` | the environment names the server cannot run without |
-| `variable_names` | environment variable names of the server's that are not secrets, so a remediation naming one is shown as written |
+| `variable_names` | environment variable names of the server's that are not secrets; those a shipped declaration names are kept whole in published text, read from the shipped declarations so the redaction does not depend on a run's settings |
 | `reads_staged_sample` | whether the server's path-taking tools read the sample the platform staged |
 | `platform_owned` | whether the server is the platform's own, whose answers are the platform's code |
 | `auto_name_prefixes` | the prefixes its decompiler writes before an address when it names a function itself (`FUN_`, `fcn.`) |

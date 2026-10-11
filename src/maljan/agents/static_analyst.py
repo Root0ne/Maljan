@@ -353,7 +353,9 @@ class StaticAnalyst(BaseAnalyst):
         from maljan.core.config import get_settings
 
         cfg = get_settings()
-        pre = self._provider().preprocessing()
+        from maljan.providers.base import preprocessing_of
+
+        pre = preprocessing_of(self._provider())
         if not pre.use_function_hash_attribution:
             return ""
         if not self._provider().capabilities.provides_function_hashes:
