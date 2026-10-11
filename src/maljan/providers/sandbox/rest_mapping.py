@@ -46,6 +46,7 @@ from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
 from maljan.providers.errors import ProviderConfigurationError
+from maljan.schemas.sandbox_report import section_id
 
 if TYPE_CHECKING:
     from maljan.core.config import RestMappingConfig
@@ -403,7 +404,8 @@ def apply_mapping(
     unavailable_set.update({"generic_events", "screenshots"})
     if "calls" in unavailable_set:
         unavailable_set.add("apistats")
-    unavailable = sorted(unavailable_set)
+    # Named by the platform's own section ids, not the mapping's channel words.
+    unavailable = sorted({section_id(channel) for channel in unavailable_set})
     for channel, stat in stats.items():
         if stat.error:
             logger.warning(

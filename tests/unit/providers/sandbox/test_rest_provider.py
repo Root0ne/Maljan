@@ -294,7 +294,7 @@ def test_a_generic_golden_report_names_every_unmapped_channel_unavailable():
     unavailable = set(report.unavailable)
     # Every channel this mapping left unpointed (http, udp, hosts, domains)
     # plus the three that never have a settings field of their own.
-    for channel in ("http", "udp", "hosts", "domains", "generic_events", "screenshots"):
+    for channel in ("http", "udp", "hosts", "domains", "events", "screenshots"):
         assert channel in unavailable, f"{channel!r} should be named unavailable"
     # And every channel the mapping does point at produced at least one row.
     assert report.processes and report.signatures and report.network.dns

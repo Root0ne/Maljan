@@ -138,8 +138,8 @@ async def test_the_unmapped_channels_are_named_rather_than_left_empty(stub, tmp_
     unavailable = set(run.report.unavailable)
     # The xyz mapping never populates these two; a report that quietly left
     # them empty instead of naming them would read like a clean sample.
-    assert {"generic_events", "screenshots"} <= unavailable
-    assert unavailable == {"domains", "generic_events", "hosts", "http", "screenshots", "udp"}
+    assert {"events", "screenshots"} <= unavailable
+    assert unavailable == {"domains", "events", "hosts", "http", "screenshots", "udp"}
     await container.aclose()
 
 

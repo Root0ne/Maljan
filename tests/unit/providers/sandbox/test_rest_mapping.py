@@ -17,6 +17,7 @@ from maljan.providers.sandbox.rest_mapping import (
     compile_mapping,
 )
 from maljan.reporting.ledger_projection import network_from_sandbox_report
+from maljan.schemas.sandbox_report import section_id
 from tests.unit._ledger_helpers import sandbox_view
 
 GOLDEN = Path(__file__).resolve().parents[3] / "fixtures" / "golden" / "rest_mapping"
@@ -54,14 +55,15 @@ def test_an_unmapped_channel_is_reported_as_unavailable():
     compiled = compile_mapping(RestMappingConfig(processes="$.p[*]"))
     result = apply_mapping(compiled, {"p": [{"pid": 1}]}, provider="rest", task_id="t")
     assert "processes" not in result.report.unavailable
-    # generic_events/screenshots have no RestMappingConfig field at all, so
+    # The events and screenshots have no RestMappingConfig field at all, so
     # they are always unavailable; apistats is derived from calls, which is
-    # unmapped here too, so it joins them.
-    assert set(result.report.unavailable) == (set(CHANNELS) - {"processes"}) | {
-        "generic_events",
-        "screenshots",
-        "apistats",
-    }
+    # unmapped here too, so it joins them. Each is named by the platform's
+    # section id, never the mapping's channel word.
+    assert set(result.report.unavailable) == {
+        section_id(channel) for channel in set(CHANNELS) - {"processes"}
+    } | {"events", "screenshots", "apistats"}
+    assert "api_calls" in result.report.unavailable
+    assert not {"calls", "generic_events"} & set(result.report.unavailable)
 
 
 def test_rows_missing_a_required_field_are_dropped_and_counted():
@@ -218,7 +220,7 @@ def test_every_consumer_channel_is_populated_or_named_unavailable():
         ("dropped_files", report.dropped_files),
     ]
     for name, value in channels:
-        assert bool(value) or name in unavailable, (
+        assert bool(value) or section_id(name) in unavailable, (
             f"{name!r} is empty and not named in `unavailable`: "
             "a rendered report would read like a clean sample for it"
         )

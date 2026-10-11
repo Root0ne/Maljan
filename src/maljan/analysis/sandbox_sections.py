@@ -55,6 +55,8 @@ from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from maljan.schemas.sandbox_report import section_id
+
 # The tool name of the pack's index entry, and of the query tool beside it.
 SECTIONS_TOOL = "sandbox_sections"
 ITEMS_TOOL = "sandbox_items"
@@ -95,15 +97,6 @@ ITEM_ID_RE = re.compile(
     re.IGNORECASE,
 )
 
-# The name a sandbox report gives a section in its own ``unavailable`` list
-# (``TriageSandboxProvider.UNAVAILABLE``), for the sections it can name.
-_UNAVAILABLE_NAMES: dict[str, str] = {
-    "api_calls": "calls",
-    "registry": "registry",
-    "events": "generic_events",
-    "apistats": "apistats",
-    "screenshots": "screenshots",
-}
 
 # The ``behavior.summary`` lists each summary-read section is read from, in order.
 _SUMMARY_LISTS: dict[str, tuple[str, ...]] = {
@@ -318,8 +311,10 @@ class Sections:
         summary = self._behavior.get("summary")
         self._summary: Mapping[str, Any] = summary if isinstance(summary, Mapping) else {}
         unavailable = report.get("unavailable")
+        # By the platform's section ids; a report stored before they were
+        # normalised is read through the legacy words (``section_id``).
         self._unavailable = (
-            {str(name) for name in unavailable or () if isinstance(name, str)}
+            {section_id(name) for name in unavailable or () if isinstance(name, str)}
             if isinstance(unavailable, list)
             else set()
         )
@@ -336,9 +331,8 @@ class Sections:
 
     def _read(self, name: str) -> Section:
         section = Section(name)
-        listed = _UNAVAILABLE_NAMES.get(name)
-        if listed and listed in self._unavailable:
-            section.no = NO_UNAVAILABLE.format(name=listed)
+        if name in self._unavailable:
+            section.no = NO_UNAVAILABLE.format(name=name)
             return section
         if self._reading is not None and not self._reading.fills.intersection(SECTION_FIELDS[name]):
             section.no = self._reading.no(name)
