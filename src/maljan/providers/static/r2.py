@@ -15,7 +15,7 @@ import json
 import os
 import re
 import shutil
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -24,10 +24,11 @@ from maljan.core import builtin_declarations
 from maljan.core.logger import logger
 from maljan.core.tool_declarations import ErrorPattern
 from maljan.providers.base import MirrorSpec
+from maljan.providers.declared_errors import PROTOCOL_ERROR, declared_error
 from maljan.providers.errors import ProviderError
 from maljan.providers.registry import register_static_provider
 from maljan.providers.static.generic_mcp import GenericMCPStaticProvider
-from maljan.tools.errors import TOOL_FAILED, error_parts, tool_error
+from maljan.tools.errors import error_parts, tool_error
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
@@ -116,8 +117,14 @@ def r2_error_reply(
     tried: str | None = None,
     readable: str | None = None,
     analysed: bool = False,
+    patterns: Sequence[ErrorPattern] = _R2_PATTERNS,
 ) -> dict[str, Any] | None:
     """The structured failure for one r2mcp reply that is an error, else ``None``.
+
+    Read by the one function every server's answers are read by
+    (``providers.declared_errors.declared_error``) against ``patterns``, the
+    radare2 block's declared error patterns; this adapter adds only its own
+    remediations around a failure.
 
     ``None`` for anything that is not one of r2mcp's own error sentences as the
     whole reply, a log envelope holding nothing but radare2's log lines with
@@ -134,30 +141,25 @@ def r2_error_reply(
     call analyses that address; ``analysed`` says the adapter already ran
     ``af`` there, and the remediation then names what is left.
     """
-    marker = _open_first_marker(reply)
-    if marker is not None:
-        return tool_error(TOOL_FAILED, marker, tool=tool, remediation=_open_first(readable))
-    if not isinstance(reply, str):
+    found = declared_error(patterns, tool, reply)
+    if found is None:
         return None
-    text = reply.strip()
-    logged = _r2_logged_error(text)
-    if logged is not None:
-        address = _unanalysed_address(tool, logged)
-        if address is None:
-            return tool_error(TOOL_FAILED, logged, tool=tool)
-        told = _R2_NO_FUNCTION_AFTER_AF if analysed else _R2_NO_FUNCTION_NO_AF
-        return tool_error(TOOL_FAILED, logged, tool=tool, remediation=told.format(address=address))
-    if not text or "\n" in text:
-        return None
-    for pattern in _R2_ERROR_REPLIES:
-        message = pattern.message(tool, text)
-        if message is None:
-            continue
-        remediation: str | None = pattern.remediation_for(readable) or None
-        if tool == _R2_OPEN_TOOL and text.startswith("Failed to open file") and tried:
-            remediation = _open_failed(tried, readable)
+    pattern, message, target = found
+    remediation: str | None = pattern.remediation_for(readable) or None
+    if target == PROTOCOL_ERROR:
         return tool_error(pattern.code, message, tool=tool, remediation=remediation)
-    return None
+    address = _unanalysed_address(tool, message) if pattern.multiline else None
+    if address is not None:
+        told = _R2_NO_FUNCTION_AFTER_AF if analysed else _R2_NO_FUNCTION_NO_AF
+        remediation = told.format(address=address)
+    elif (
+        tool == _R2_OPEN_TOOL
+        and isinstance(reply, str)
+        and reply.strip().startswith("Failed to open file")
+        and tried
+    ):
+        remediation = _open_failed(tried, readable)
+    return tool_error(pattern.code, message, tool=tool, remediation=remediation)
 
 
 def _failure_message(failure: dict[str, Any] | None) -> str:
@@ -178,21 +180,11 @@ def _open_failed(tried: str, readable: str | None) -> str:
     return _R2_OPEN_FAILED_ON_ITS_OWN.format(tried=tried)
 
 
-def _open_first_marker(reply: Any) -> str | None:
-    """The message of the MCP client's failure marker for r2mcp's open-first error, or ``None``."""
-    if not (isinstance(reply, dict) or (isinstance(reply, str) and reply.lstrip().startswith("{"))):
-        return None
-    parts = error_parts(reply)
-    if parts is None:
-        return None
-    _code, message, _remediation = parts
-    return message if _R2_OPEN_FIRST.message("", message, target="protocol_error") else None
-
-
 def _reading_error_replies(
     tool: Any,
     readable: Callable[[], str | None] | None = None,
     run_command: Callable[..., Awaitable[Any]] | None = None,
+    patterns: Sequence[ErrorPattern] = _R2_PATTERNS,
 ) -> Any:
     """``tool``, rebuilt so an r2mcp error reply comes back as the structured failure.
 
@@ -226,6 +218,7 @@ def _reading_error_replies(
             reply,
             tried=str(tried) if tried else None,
             readable=readable() if readable is not None else None,
+            patterns=patterns,
         )
         address = _unanalysed_address(name, _failure_message(failure))
         if address is not None and run_command is not None:
@@ -243,6 +236,7 @@ def _reading_error_replies(
                     reply,
                     readable=readable() if readable is not None else None,
                     analysed=True,
+                    patterns=patterns,
                 )
                 if failure is None and isinstance(reply, str):
                     # The entry says what produced the answer: the adapter's
@@ -391,6 +385,20 @@ class R2StaticProvider(GenericMCPStaticProvider):
     rather than a failed job.
     """
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # This adapter reads its block's declared error patterns itself, by the
+        # same function, to add its own remediations and the analyse-and-ask-again
+        # step (``_reading_error_replies``).
+        self._handle.reads_own_errors = True
+
+    def _error_patterns(self) -> tuple[ErrorPattern, ...]:
+        """The radare2 block's declared error patterns; the shipped ones with no block."""
+        config = getattr(self._handle, "config", None)
+        if config is None:
+            return _R2_PATTERNS
+        return tuple(getattr(config, "error_patterns", None) or ())
+
     @property
     def declaration_source(self) -> str:
         """radare2's own block, not a registry server: ``provider:r2``."""
@@ -458,6 +466,7 @@ class R2StaticProvider(GenericMCPStaticProvider):
                 tool,
                 self._held_path,
                 run_command if tool.name in _R2_FUNCTION_TOOLS else None,
+                self._error_patterns(),
             )
             for tool in tools
         ]

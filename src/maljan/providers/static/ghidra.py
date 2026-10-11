@@ -520,7 +520,7 @@ class GhidraStaticProvider(StaticProvider):
 
             self._run_async(client.initialize())
             self._toolkit = client
-            self._all_tools = self._pin_load_program_path(list(client.get_tools()))
+            self._all_tools = self._pin_load_program_path(self._reading_errors(client.get_tools()))
             self.tools = list(self._all_tools)
             logger.info("Initialized Ghidra HTTP tools: %d.", len(self.tools))
             return
@@ -553,9 +553,21 @@ class GhidraStaticProvider(StaticProvider):
 
         self._run_async(toolkit.initialize())
         self._toolkit = toolkit  # type: ignore[assignment]
-        self._all_tools = self._pin_load_program_path(list(toolkit.get_tools()))
+        self._all_tools = self._pin_load_program_path(self._reading_errors(toolkit.get_tools()))
         self.tools = list(self._all_tools)
         logger.info("Initialized Ghidra MCP tools: %d.", len(self.tools))
+
+    def _reading_errors(self, tools: Any) -> list[Any]:
+        """The tools, each answer held against this block's declared error patterns.
+
+        By the one function every server's answers are read by
+        (``providers.declared_errors``); a block that declares none keeps its
+        tools as they are.
+        """
+        from maljan.providers.declared_errors import with_declared_errors
+
+        patterns = tuple(getattr(self._cfg, "error_patterns", None) or ())
+        return with_declared_errors(list(tools), patterns, self._held_path)
 
     def _run_async(self, coro: Any) -> None:
         """Run an MCP-client init coroutine on the *shared agent loop*.

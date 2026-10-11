@@ -284,6 +284,14 @@ class ServerHandle:
         # handle; a handle built outside one has none and offers its open tool
         # as it is.
         self.sample_notes: Any = None
+        # How this server's answers say "error" is its declaration
+        # (``error_patterns``), read by one function for every server
+        # (``providers.declared_errors``). An adapter that reads them itself,
+        # with a step of its own around a failure, sets ``reads_own_errors``;
+        # ``error_sample_path`` answers the path the server can open for the
+        # job's sample, which a remediation may name.
+        self.reads_own_errors = False
+        self.error_sample_path: Callable[[], str | None] | None = None
         # This handle's own process, for a local server's note key; a number
         # never reused, unlike an object's id.
         from maljan.providers.sample_open import new_instance
@@ -999,6 +1007,12 @@ class ServerHandle:
             for name in (str(getattr(tool, "name", "")),)
             if name not in withheld and (keep is None or name in keep)
         ]
+        if not self.reads_own_errors:
+            from maljan.providers.declared_errors import with_declared_errors
+
+            offered = with_declared_errors(
+                offered, self.config.error_patterns, self.error_sample_path
+            )
         # A server that declares its open tool has that tool answered through
         # the job's note: a path opened once is not opened again.
         return wrap_open_tool(

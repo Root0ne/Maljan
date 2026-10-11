@@ -82,6 +82,14 @@ class GenericMCPStaticProvider(StaticProvider):
         self._prompt_fragment_text = prompt_fragment_text
         self._job = StaticJobContext()
         self.tools: list[Any] = []
+        # A declared error's remediation may name the path the server can open
+        # for the job's sample: the job's mirror.
+        self._handle.error_sample_path = self._mirror_path
+
+    def _mirror_path(self) -> str | None:
+        """The path the server can open for the job's sample, ``None`` before a job."""
+        held = getattr(self._job, "mirror_sample_path", None)
+        return held if isinstance(held, str) and held else None
 
     @property
     def sample_notes(self) -> Any:
