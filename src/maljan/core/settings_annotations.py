@@ -2016,21 +2016,23 @@ ANNOTATIONS.update(
             "title": "Accepted report formats",
             "description": (
                 "Formats the sniffer may accept for an uploaded report: cape2, "
-                "cuckoo, triage, and the name of any format declared below. A file "
+                "cuckoo, triage, and the name of any format declared in "
+                "sandbox.report_formats. A file "
                 "that sniffs as anything else is refused."
             ),
             "applies_when": _SANDBOX_UPLOAD,
         },
-        "sandbox.upload.formats": {
+        "sandbox.report_formats": {
             "title": "Declared report formats",
             "description": (
-                "Your own report formats, as JSON: each one's name, how it is "
-                "recognised (detect: groups of field tests), where its task id and "
-                "target sha256 sit (field paths), which reader reads it (cape2, "
-                "cuckoo, triage, or empty), and its signature severity scale. Tried "
-                "before the built-ins; a built-in's name replaces that built-in."
+                "Your own sandbox report formats, as JSON, read by every sandbox "
+                "provider and by report upload: each one's name (at most 32 "
+                "characters), how it is recognised (detect: groups of field tests), "
+                "where its task id and target sha256 sit (field paths), which reader "
+                "reads it (cape2, cuckoo, triage, or empty), and its signature "
+                "severity scale. A new name is tried before the built-ins; a "
+                "built-in's name is merged over that built-in, field by field."
             ),
-            "applies_when": _SANDBOX_UPLOAD,
         },
     }
 )

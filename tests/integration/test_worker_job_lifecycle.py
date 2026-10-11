@@ -441,6 +441,7 @@ async def test_mock_mode_with_an_attached_report_fails_with_a_worded_message(
     report_row.id = uuid.UUID("0b6c6e0e-0000-4000-8000-000000000000")
     report_row.sample_id = sample.id
     report_row.storage_path = "sandbox-reports/0b/0b6c.../report.json"
+    report_row.format = "cape2"
 
     def _make_result(obj: Any) -> MagicMock:
         m = MagicMock()
@@ -584,6 +585,7 @@ async def test_a_hash_mismatch_on_the_attached_report_is_recorded_as_a_degradati
     report_row.id = uuid.UUID("0b6c6e0e-0000-4000-8000-000000000000")
     report_row.sample_id = sample.id
     report_row.storage_path = "sandbox-reports/0b/0b6c.../report.json"
+    report_row.format = "cape2"
     report_row.sample_sha256_match = False
 
     result = await _run_with_attached_report(mock_ctx, mock_db_session, job, sample, report_row)
@@ -607,6 +609,7 @@ async def test_a_matching_attached_report_records_no_such_degradation(
     report_row.id = uuid.UUID("0b6c6e0e-0000-4000-8000-000000000000")
     report_row.sample_id = sample.id
     report_row.storage_path = "sandbox-reports/0b/0b6c.../report.json"
+    report_row.format = "cape2"
     report_row.sample_sha256_match = True
 
     result = await _run_with_attached_report(mock_ctx, mock_db_session, job, sample, report_row)
@@ -616,6 +619,29 @@ async def test_a_matching_attached_report_records_no_such_degradation(
     reason = "uploaded sandbox report's target hash differs from the sample"
     assert reason not in (saved_report.run_summary.get("degradation_reasons") or [])
     assert reason not in (saved_report.malware_report.get("degradation_reasons") or [])
+
+
+@pytest.mark.asyncio
+async def test_an_attached_report_of_a_format_no_longer_declared_fails_in_words(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+) -> None:
+    """The run reads the format the upload row recorded; one no longer declared
+    stops the job with the reason rather than running without the evidence."""
+    job = _make_job(config={"sandbox_report_id": "0b6c6e0e-0000-4000-8000-000000000000"})
+    sample = _make_sample()
+
+    report_row = MagicMock()
+    report_row.id = uuid.UUID("0b6c6e0e-0000-4000-8000-000000000000")
+    report_row.sample_id = sample.id
+    report_row.storage_path = "sandbox-reports/0b/0b6c.../report.json"
+    report_row.format = "retired_format"
+    report_row.sample_sha256_match = True
+
+    result = await _run_with_attached_report(mock_ctx, mock_db_session, job, sample, report_row)
+
+    assert result["status"] == "failed", result
+    assert "'retired_format', which is no longer declared" in result["error"]
 
 
 # ---------------------------------------------------------------------------

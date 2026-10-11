@@ -9,10 +9,10 @@ through code written against its name. A declaration says:
   (``object``, ``array``, ``string``, ``number``, ``boolean``, ``null``),
   non-empty, or holding ``contains`` in its text (a string, number or boolean,
   compared without regard to case);
-* ``task_id_paths``: where the source sandbox's own task id sits, first path
-  that holds a value wins;
-* ``target_sha256_paths``: where the report's claimed target sha256 sits, first
-  path that holds a non-empty value wins;
+* ``task_id_paths``: where the source sandbox's own task id sits; the first
+  string or number (not empty text) a path names wins, anything else is absent;
+* ``target_sha256_paths``: where the report's claimed target sha256 sits; the
+  first non-empty string or number a path names wins;
 * ``reader``: which of the platform's report readers reads a report of this
   format into the internal sandbox report (``cape2``, ``cuckoo``, ``triage``),
   empty for a format no reader reads yet;
@@ -22,14 +22,18 @@ through code written against its name. A declaration says:
 
 The built-in formats (:data:`BUILTIN_REPORT_FORMATS`) reproduce what the
 platform recognised and read before formats were declared. An operator
-declares more in ``sandbox.upload.formats``; a declared format with a built-in
-name replaces that built-in in its place, and a new name is tried before the
-built-ins, because the operator's format is the more specific knowledge
+declares more in ``sandbox.report_formats``, read by every sandbox provider
+and by the upload route alike. A new name is tried before the built-ins,
+because the operator's format is the more specific knowledge; a declaration
+under a built-in's name is merged over that built-in field by field, in its
+place, so a field it does not set keeps the shipped value
 (:func:`effective_formats`).
 
 Field paths are the tool declarations' (``maljan.core.tool_declarations``):
-``/``-separated keys, ``*`` for every item, ``**`` for any depth, read in time
-linear in the payload.
+``/``-separated keys and ``*`` for every item, read in time linear in the
+payload. ``**`` (any depth) is refused here: recognising a report and finding
+its id need only anchored places, and a whole-tree walk per test would make
+each upload cost a multiple of the report's size.
 """
 
 from __future__ import annotations
@@ -37,12 +41,17 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from maljan.core.tool_declarations import VOCABULARY_PATTERN, parse_path, select
+from maljan.core.tool_declarations import parse_path, select
 
 # The name a payload no format recognises is given.
 UNKNOWN_FORMAT = "unknown"
+
+# A format's name is stored on the upload row (``sandbox_reports.format``,
+# ``String(32)``), so a name is a lowercase word of at most that many characters.
+FORMAT_NAME_MAX = 32
+FORMAT_NAME_PATTERN = rf"^[a-z][a-z0-9_]{{0,{FORMAT_NAME_MAX - 1}}}$"
 
 # The platform's report readers, by the id a declaration names one with.
 ReaderId = Literal["cape2", "cuckoo", "triage"]
@@ -67,6 +76,22 @@ def _type_of(value: Any) -> str:
     return ""
 
 
+def _check_anchored(path: str) -> str:
+    """``path`` parsed, refusing an empty path and ``**``."""
+    if not path:
+        raise ValueError("an empty field path names nothing")
+    if any(not isinstance(segment, str) for segment in parse_path(path)):
+        raise ValueError(f"field path {path!r}: a report-format path may not hold '**'")
+    return path
+
+
+def _scalar(value: Any) -> bool:
+    """Whether ``value`` is a string or a number (a boolean is neither)."""
+    return isinstance(value, str) or (
+        isinstance(value, int | float) and not isinstance(value, bool)
+    )
+
+
 def _text(value: Any) -> str:
     """A scalar's text, empty for a container or an empty value."""
     if not value or isinstance(value, Mapping | list | tuple):
@@ -89,8 +114,7 @@ class FieldTest(BaseModel):
     def _path_parses(cls, value: str) -> str:
         if not value:
             raise ValueError("a field test needs a path")
-        parse_path(value)
-        return value
+        return _check_anchored(value)
 
     def holds(self, payload: Any) -> bool:
         """Whether some value ``path`` names in ``payload`` passes every part of the test."""
@@ -135,8 +159,10 @@ class ReportFormat(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(pattern=VOCABULARY_PATTERN)
-    detect: list[list[FieldTest]] = Field(min_length=1)
+    name: str = Field(pattern=FORMAT_NAME_PATTERN)
+    # Empty only on a declaration merged over a built-in that keeps the
+    # built-in's detection; a new format must declare it (``check_declared_formats``).
+    detect: list[list[FieldTest]] = Field(default_factory=list)
     task_id_paths: list[str] = Field(default_factory=list)
     target_sha256_paths: list[str] = Field(default_factory=list)
     reader: ReaderId | Literal[""] = ""
@@ -156,13 +182,17 @@ class ReportFormat(BaseModel):
             raise ValueError("every detect group needs at least one test")
         return value
 
+    @model_validator(mode="after")
+    def _detect_set_is_not_empty(self) -> ReportFormat:
+        if "detect" in self.model_fields_set and not self.detect:
+            raise ValueError("detect needs at least one group; leave it out to keep a built-in's")
+        return self
+
     @field_validator("task_id_paths", "target_sha256_paths")
     @classmethod
     def _paths_parse(cls, value: list[str]) -> list[str]:
         for path in value:
-            if not path:
-                raise ValueError("an empty field path names nothing")
-            parse_path(path)
+            _check_anchored(path)
         return value
 
     def matches(self, payload: Any) -> bool:
@@ -170,18 +200,18 @@ class ReportFormat(BaseModel):
         return any(all(test.holds(payload) for test in group) for group in self.detect)
 
     def task_id(self, payload: Any) -> str | None:
-        """The first value a task-id path names that is neither null nor empty text, as text."""
+        """The first string or number a task-id path names, not empty text, as text."""
         for path in self.task_id_paths:
             for value in select(payload, path):
-                if value is not None and value != "":
+                if _scalar(value) and value != "":
                     return str(value)
         return None
 
     def target_sha256(self, payload: Any) -> str:
-        """The first non-empty value a target-hash path names, as text; empty when none."""
+        """The first non-empty string or number a target-hash path names, as text, else empty."""
         for path in self.target_sha256_paths:
             for value in select(payload, path):
-                if value:
+                if _scalar(value) and value:
                     return str(value)
         return ""
 
@@ -252,25 +282,43 @@ BUILTIN_REPORT_FORMATS: tuple[ReportFormat, ...] = (
 
 
 def check_declared_formats(value: Sequence[ReportFormat]) -> list[ReportFormat]:
-    """``value`` as a list, refusing two declarations under one name."""
+    """``value`` as a list, refusing two declarations under one name and a new
+    format that does not say how it is recognised."""
+    builtin_names = {fmt.name for fmt in BUILTIN_REPORT_FORMATS}
     seen: set[str] = set()
     for fmt in value:
         if fmt.name in seen:
             raise ValueError(f"report format {fmt.name!r} is declared twice")
         seen.add(fmt.name)
+        if fmt.name not in builtin_names and not fmt.detect:
+            raise ValueError(f"report format {fmt.name!r} needs detect: how a report is recognised")
     return list(value)
+
+
+def merged_over(builtin: ReportFormat, declared: ReportFormat) -> ReportFormat:
+    """``declared`` over ``builtin``: each field ``declared`` set, the shipped value elsewhere."""
+    return builtin.model_copy(
+        update={field: getattr(declared, field) for field in declared.model_fields_set}
+    )
 
 
 def effective_formats(declared: Iterable[ReportFormat] = ()) -> tuple[ReportFormat, ...]:
     """The formats tried, in order: new declared names, then the built-ins.
 
-    A declared format with a built-in's name takes that built-in's place.
+    A declaration under a built-in's name is merged over that built-in, in its
+    place (:func:`merged_over`).
     """
     declared = list(declared)
     by_name = {fmt.name: fmt for fmt in declared}
     builtin_names = {fmt.name for fmt in BUILTIN_REPORT_FORMATS}
     new = [fmt for fmt in declared if fmt.name not in builtin_names]
-    return (*new, *(by_name.get(fmt.name, fmt) for fmt in BUILTIN_REPORT_FORMATS))
+    return (
+        *new,
+        *(
+            merged_over(fmt, by_name[fmt.name]) if fmt.name in by_name else fmt
+            for fmt in BUILTIN_REPORT_FORMATS
+        ),
+    )
 
 
 def sniff(payload: Any, formats: Iterable[ReportFormat] | None = None) -> ReportFormat | None:

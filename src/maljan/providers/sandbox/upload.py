@@ -3,18 +3,20 @@
 Whatever sandbox a shop already runs, this provider is the answer to it:
 export the report, attach it to the sample, and the pipeline runs from those
 bytes as if they had come from a live detonation. It never submits anything
-and never reaches the network — the report is already evidence, and the
-format is sniffed again from the bytes on every load rather than trusted from
-the upload row, because the row is metadata and the bytes are the evidence.
+and never reaches the network — the report is already evidence. It is read as
+the format the upload row recorded when the route accepted it, so the format
+the console shows for the row is the one the run reads; a blob handed over
+with no recorded format is sniffed against the declared formats.
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from maljan.core.report_formats import ReportFormat, effective_formats, sniff
+from maljan.core.report_formats import ReportFormat, effective_formats, format_named, sniff
 from maljan.providers.base import SandboxCapabilities, SandboxProvider
 from maljan.providers.errors import ProviderError
 from maljan.providers.registry import register_sandbox_provider
@@ -34,12 +36,14 @@ class UploadSandboxProvider(SandboxProvider):
     """A sandbox that runs nothing and reads what the operator already has.
 
     This is the answer to "any sandbox": whatever your shop runs,
-    export its report and attach it to the sample. The format is sniffed again
-    here rather than trusted from the upload row, because the row is metadata
-    and the bytes are the evidence.
+    export its report and attach it to the sample. A report attached through
+    the upload route is read as the format its row recorded when it was
+    accepted (``report_format``), never sniffed again, so the row the console
+    shows and the run that reads it always agree; only a blob handed over with
+    no recorded format is sniffed.
     """
 
-    def __init__(self, cfg: SandboxUploadConfig) -> None:
+    def __init__(self, cfg: SandboxUploadConfig, formats: Iterable[ReportFormat] = ()) -> None:
         self._cfg = cfg
         self._blob: bytes | None = None
         self._filename = "report.json"
@@ -50,15 +54,17 @@ class UploadSandboxProvider(SandboxProvider):
         # a blob that fails to parse or sniff leaves this None and
         # capabilities falls back to "generic" exactly as before — the real
         # error still surfaces from attach_report()/fetch() when read.
-        # The reader of the sniffed format, which is what report_format names.
+        # The reader of the pending blob's format, which is what report_format names.
         self._sniffed_format: Literal["cape2", "cuckoo", "triage"] | None = None
-        # The declared format the pending blob sniffed as, for its signature scale.
+        # The declared format the pending blob is read as, for its signature scale.
         self._declared: ReportFormat | None = None
-        self._formats = effective_formats(cfg.formats)
+        # The format the upload row recorded for the pending blob, if any.
+        self._recorded: str | None = None
+        self._formats = effective_formats(formats)
 
     @classmethod
     def from_settings(cls, cfg: Settings) -> UploadSandboxProvider:
-        return cls(cfg.sandbox.upload)
+        return cls(cfg.sandbox.upload, cfg.sandbox.report_formats)
 
     @property
     def capabilities(self) -> SandboxCapabilities:
@@ -73,24 +79,46 @@ class UploadSandboxProvider(SandboxProvider):
             degrade_on_failure=True,
         )
 
-    def set_pending_blob(self, blob: bytes, *, filename: str = "report.json") -> None:
-        """Hand over the bytes the worker just read from storage.
+    def set_pending_blob(
+        self, blob: bytes, *, filename: str = "report.json", report_format: str | None = None
+    ) -> None:
+        """Hand over the bytes the worker just read from storage, and the format its row recorded.
 
+        A recorded format that is no longer declared, or is declared without a
+        reader, is refused here in words: the run would otherwise read nothing.
         Idempotent the same way ``open()`` is elsewhere in this layer: a
         second call before the first is ever read simply replaces the pending
         blob rather than layering state on top of it.
         """
-        self._blob, self._filename = blob, filename
-        try:
-            found = sniff(self._parse(blob), self._formats)
-        except ProviderError:
-            found = None
-        # A format no reader reads, or a blob no format recognises, has no
-        # report_format; attach_report()/fetch() refuse either with a worded
-        # ProviderError, so capabilities just falls back to "generic" for it
-        # rather than raising here, ahead of that message.
+        self._blob, self._filename, self._recorded = blob, filename, report_format
+        found: ReportFormat | None
+        if report_format is not None:
+            found = self._recorded_format(report_format)
+        else:
+            try:
+                found = sniff(self._parse(blob), self._formats)
+            except ProviderError:
+                found = None
+        # A blob no format recognises has no report_format; attach_report()
+        # and fetch() refuse it with a worded ProviderError, so capabilities
+        # just falls back to "generic" for it rather than raising here.
         self._declared = found
         self._sniffed_format = (found.reader or None) if found is not None else None
+
+    def _recorded_format(self, name: str) -> ReportFormat:
+        """The declaration of the format an upload row recorded, refused in words where unusable."""
+        found = format_named(name, self._formats)
+        if found is None:
+            raise ProviderError(
+                f"The attached sandbox report was accepted as format {name!r}, which is no "
+                "longer declared in sandbox.report_formats; declare it again to read it."
+            )
+        if not found.reader:
+            raise ProviderError(
+                f"The attached sandbox report's format {name!r} is declared without a "
+                "reader; no analysis can read it yet."
+            )
+        return found
 
     def submit(self, sample_path: str | Path) -> str:
         raise ProviderError(
@@ -121,11 +149,17 @@ class UploadSandboxProvider(SandboxProvider):
             raise ProviderError("The attached sandbox report is not a JSON object.")
         return payload
 
-    def attach_report(self, blob: bytes, *, filename: str = "report.json") -> SandboxRun:
+    def attach_report(
+        self, blob: bytes, *, filename: str = "report.json", report_format: str | None = None
+    ) -> SandboxRun:
         from maljan.schemas.sandbox_report import SandboxRun
 
         payload = self._parse(blob)
-        found = sniff(payload, self._formats)
+        found = (
+            self._recorded_format(report_format)
+            if report_format is not None
+            else sniff(payload, self._formats)
+        )
         if found is None:
             # Never a legitimate target regardless of ``allowed_formats``:
             # ``SandboxReport.source_format`` has no "unknown" member, so
@@ -168,11 +202,13 @@ class UploadSandboxProvider(SandboxProvider):
             raw=payload,
         )
 
-    def signature_scale(self, run: SandboxRun) -> SignatureScale | None:
+    def signature_scale(
+        self, run: SandboxRun, formats: Iterable[ReportFormat] | None = None
+    ) -> SignatureScale | None:
         """The scale the declared format of the attached report names."""
         return self._declared.signature_scale if self._declared is not None else None
 
     def fetch(self, task_id: str) -> SandboxRun:
         if self._blob is None:
             raise ProviderError("No sandbox report is attached to this job.")
-        return self.attach_report(self._blob, filename=self._filename)
+        return self.attach_report(self._blob, filename=self._filename, report_format=self._recorded)

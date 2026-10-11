@@ -34,6 +34,7 @@ from maljan.core.settings_catalog import core_catalog
 from maljan.core.settings_overrides import build_settings, public_snapshot, trim_declarations
 from maljan.pipeline.events import MODEL_USAGE as MODEL_USAGE_EVENT
 from maljan.pipeline.outcome import absent_analysis_message
+from maljan.providers.errors import ProviderError
 from pydantic import ValidationError
 from sqlalchemy import Select, delete, func, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -2151,6 +2152,10 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 _attached_storage_path = str(attached_report.storage_path)
                 _attached_row_id = attached_report.id
                 _attached_hash_matches = attached_report.sample_sha256_match
+                # The format the upload route recorded when it accepted the
+                # report: the run reads the blob as that format, never sniffs
+                # it again, so the row and the run cannot disagree.
+                _attached_format = str(attached_report.format)
 
             # The reads above opened a transaction of their own after the
             # commit. Ending it here is what makes the session's whole life
@@ -2341,10 +2346,18 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     f"sandbox provider ({sandbox_provider.id!r}) cannot accept an "
                     "uploaded report."
                 )
-            sandbox_provider.set_pending_blob(
-                await asyncio.to_thread(get_object, _attached_storage_path),
-                filename=f"{_attached_row_id}.json",
-            )
+            _attached_blob = await asyncio.to_thread(get_object, _attached_storage_path)
+            try:
+                sandbox_provider.set_pending_blob(
+                    _attached_blob,
+                    filename=f"{_attached_row_id}.json",
+                    report_format=_attached_format,
+                )
+            except ProviderError as exc:
+                # A recorded format no longer declared, or declared without a
+                # reader: the attached evidence cannot be read, and the run
+                # says so rather than going on without it.
+                raise StatedFailure(str(exc)) from exc
 
         # Announce which analysts are about to run so the frontend can show
         # them. The active profile, not the class registry: a job that runs

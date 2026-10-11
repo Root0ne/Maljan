@@ -3589,17 +3589,6 @@ class SandboxUploadConfig(BaseModel):
 
     max_report_bytes: Annotated[int, Field(ge=1)] = 67_108_864  # 64 MiB
     allowed_formats: list[str] = Field(default_factory=lambda: ["cape2", "cuckoo", "triage"])
-    # The operator's own report formats (``maljan.core.report_formats``): how
-    # each is recognised, where its task id and target hash sit, which reader
-    # reads it and its signature scale. Tried before the built-ins; a built-in
-    # name replaces that built-in. A new name is accepted once it is also in
-    # ``allowed_formats``.
-    formats: list[ReportFormat] = Field(default_factory=list)
-
-    @field_validator("formats")
-    @classmethod
-    def _formats_unique(cls, value: list[ReportFormat]) -> list[ReportFormat]:
-        return check_declared_formats(value)
 
 
 class RestAuthConfig(BaseModel):
@@ -3716,6 +3705,18 @@ class SandboxConfig(BaseModel):
     triage: SandboxTriageConfig = Field(default_factory=SandboxTriageConfig)
     upload: SandboxUploadConfig = Field(default_factory=SandboxUploadConfig)
     rest: SandboxRestConfig = Field(default_factory=SandboxRestConfig)
+    # The operator's own report formats (``maljan.core.report_formats``): how
+    # each is recognised, where its task id and target hash sit, which reader
+    # reads it and its signature scale. Read by every provider and by the
+    # upload route. A new name is tried before the built-ins and is accepted
+    # for upload once it is also in ``upload.allowed_formats``; a built-in's
+    # name is merged over that built-in field by field.
+    report_formats: list[ReportFormat] = Field(default_factory=list)
+
+    @field_validator("report_formats")
+    @classmethod
+    def _report_formats_unique(cls, value: list[ReportFormat]) -> list[ReportFormat]:
+        return check_declared_formats(value)
 
 
 # ---------------------------------------------------------------------------

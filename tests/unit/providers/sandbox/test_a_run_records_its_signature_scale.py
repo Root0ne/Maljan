@@ -133,14 +133,15 @@ class _Provider(SandboxProvider):
     def capabilities(self) -> Any:
         return None
 
-    def signature_scale(self, run: SandboxRun) -> SignatureScale | None:
+    def signature_scale(self, run: SandboxRun, formats: Any = None) -> SignatureScale | None:
         if self._fails:
             raise RuntimeError("no scale")
         return self._scale
 
 
-def _app() -> Any:
+def _app(settings: Settings | None = None) -> Any:
     app = object.__new__(MaljanApp)
+    app.config = settings or Settings.model_validate({})
     app.container = SimpleNamespace(sandbox_normalised=None, sandbox_signature_scale=None)
     return app
 
@@ -160,3 +161,37 @@ def test_a_scale_lookup_that_raises_leaves_the_run_unrated() -> None:
     app._note_the_reader(_Provider(None, fails=True), _run("cape2", "cape2"))
     assert app.container.sandbox_normalised is not None
     assert app.container.sandbox_signature_scale is None
+
+
+FORK = {
+    "name": "cape2",
+    "signature_scale": {"name": "Fork 1–5", "rungs": ["Low", "Low", "Medium", "High", "Critical"]},
+}
+
+
+def test_a_live_run_records_the_scale_of_a_redeclared_built_in() -> None:
+    settings = _settings(provider="cape2", report_formats=[FORK])
+    app = _app(settings)
+    app._note_the_reader(CAPE2SandboxProvider.from_settings(settings), _run("cape2", "cape2"))
+    assert app.container.sandbox_signature_scale["name"] == "Fork 1–5"
+    assert app.container.sandbox_signature_scale["max"] == 5
+
+
+def test_a_rest_report_of_a_redeclared_built_in_takes_the_declared_scale() -> None:
+    settings = _settings(
+        provider="rest",
+        rest={"base_url": "https://xyz.example/api", "report": {"format": "cape2"}},
+        report_formats=[FORK],
+    )
+    app = _app(settings)
+    app._note_the_reader(RestSandboxProvider.from_settings(settings), _run("rest", "cape2"))
+    assert app.container.sandbox_signature_scale["name"] == "Fork 1–5"
+
+
+def test_an_uploaded_report_of_a_redeclared_built_in_takes_the_same_scale() -> None:
+    settings = _settings(provider="upload", report_formats=[FORK])
+    upload = UploadSandboxProvider.from_settings(settings)
+    upload.set_pending_blob(first_cape_report_path().read_bytes(), report_format="cape2")
+    app = _app(settings)
+    app._note_the_reader(upload, upload.fetch("uploaded"))
+    assert app.container.sandbox_signature_scale["name"] == "Fork 1–5"

@@ -17,7 +17,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.v1 import sandbox_reports as module
-from maljan.core.config import SandboxUploadConfig
+from maljan.core.config import SandboxConfig
 
 SHA = "c" * 64
 
@@ -45,7 +45,7 @@ def _acme(sha: str = SHA) -> bytes:
     ).encode()
 
 
-def _client(monkeypatch: pytest.MonkeyPatch, upload: SandboxUploadConfig) -> tuple[TestClient, Any]:
+def _client(monkeypatch: pytest.MonkeyPatch, sandbox: SandboxConfig) -> tuple[TestClient, Any]:
     from app.database import get_db
     from app.deps import get_current_user, require_active_user
 
@@ -55,7 +55,7 @@ def _client(monkeypatch: pytest.MonkeyPatch, upload: SandboxUploadConfig) -> tup
     user = MagicMock(id=uuid.uuid4())
     sample = MagicMock(id=uuid.uuid4(), sha256=SHA, uploaded_by=user.id)
     monkeypatch.setattr(module, "_load_sample", MagicMock(return_value=sample))
-    monkeypatch.setattr(module, "_upload_settings", AsyncMock(return_value=upload))
+    monkeypatch.setattr(module, "_sandbox_settings", AsyncMock(return_value=sandbox))
     monkeypatch.setattr(module, "put_object", AsyncMock())
     monkeypatch.setattr(module, "_persist", MagicMock(side_effect=lambda db, row: row))
     monkeypatch.setattr(module.audit, "record", AsyncMock())
@@ -73,10 +73,13 @@ def _upload(api: TestClient, sample: Any, blob: bytes) -> Any:
 
 
 def test_a_format_declared_only_as_data_is_accepted_named_and_read(monkeypatch):
-    upload = SandboxUploadConfig.model_validate(
-        {"formats": [ACME], "allowed_formats": ["cape2", "cuckoo", "triage", "acme"]}
+    sandbox = SandboxConfig.model_validate(
+        {
+            "report_formats": [ACME],
+            "upload": {"allowed_formats": ["cape2", "cuckoo", "triage", "acme"]},
+        }
     )
-    api, sample = _client(monkeypatch, upload)
+    api, sample = _client(monkeypatch, sandbox)
     r = _upload(api, sample, _acme())
     assert r.status_code == 201, r.text
     body = r.json()
@@ -87,8 +90,10 @@ def test_a_format_declared_only_as_data_is_accepted_named_and_read(monkeypatch):
 
 
 def test_a_declared_format_reads_a_disagreeing_hash_as_a_warning(monkeypatch):
-    upload = SandboxUploadConfig.model_validate({"formats": [ACME], "allowed_formats": ["acme"]})
-    api, sample = _client(monkeypatch, upload)
+    sandbox = SandboxConfig.model_validate(
+        {"report_formats": [ACME], "upload": {"allowed_formats": ["acme"]}}
+    )
+    api, sample = _client(monkeypatch, sandbox)
     r = _upload(api, sample, _acme("d" * 64))
     assert r.status_code == 201, r.text
     assert r.json()["sample_sha256_match"] is False
@@ -96,23 +101,25 @@ def test_a_declared_format_reads_a_disagreeing_hash_as_a_warning(monkeypatch):
 
 
 def test_a_declared_format_outside_the_allowed_list_is_refused(monkeypatch):
-    upload = SandboxUploadConfig.model_validate({"formats": [ACME]})
-    api, sample = _client(monkeypatch, upload)
+    sandbox = SandboxConfig.model_validate({"report_formats": [ACME]})
+    api, sample = _client(monkeypatch, sandbox)
     r = _upload(api, sample, _acme())
     assert r.status_code == 415
     assert "cape2, cuckoo, triage" in r.json()["detail"]
 
 
 def test_without_the_declaration_the_payload_is_not_the_invented_format(monkeypatch):
-    api, sample = _client(monkeypatch, SandboxUploadConfig(allowed_formats=["acme"]))
+    api, sample = _client(
+        monkeypatch, SandboxConfig.model_validate({"upload": {"allowed_formats": ["acme"]}})
+    )
     assert _upload(api, sample, _acme()).status_code == 415
 
 
 def test_the_declared_formats_are_served_in_the_order_they_are_tried(monkeypatch):
-    upload = SandboxUploadConfig.model_validate(
-        {"formats": [ACME], "allowed_formats": ["triage", "acme"]}
+    sandbox = SandboxConfig.model_validate(
+        {"report_formats": [ACME], "upload": {"allowed_formats": ["triage", "acme"]}}
     )
-    api, _sample = _client(monkeypatch, upload)
+    api, _sample = _client(monkeypatch, sandbox)
     r = api.get("/api/v1/sandbox-report-formats")
     assert r.status_code == 200, r.text
     body = r.json()
@@ -131,3 +138,24 @@ def test_the_declared_formats_are_served_in_the_order_they_are_tried(monkeypatch
     assert items["cape2"]["signature_scale"]["name"] == "CAPE 1–3"
     assert items["triage"]["signature_scale"]["max"] == 10
     assert items["cape2"]["target_sha256_paths"] == ["/target/file/sha256", "/target/sha256"]
+
+
+def test_a_declared_format_without_a_reader_is_refused_at_upload_in_words(monkeypatch):
+    sandbox = SandboxConfig.model_validate(
+        {"report_formats": [{**ACME, "reader": ""}], "upload": {"allowed_formats": ["acme"]}}
+    )
+    api, sample = _client(monkeypatch, sandbox)
+    r = _upload(api, sample, _acme())
+    assert r.status_code == 422
+    assert "declared without a reader" in r.json()["detail"]
+    module.put_object.assert_not_awaited()
+
+
+def test_a_format_name_longer_than_the_rows_column_cannot_be_declared():
+    from pydantic import ValidationError
+
+    from app.models.sandbox_report import SandboxReportRow
+
+    width = SandboxReportRow.__table__.c.format.type.length
+    with pytest.raises(ValidationError, match="pattern"):
+        SandboxConfig.model_validate({"report_formats": [{**ACME, "name": "a" * (width + 1)}]})

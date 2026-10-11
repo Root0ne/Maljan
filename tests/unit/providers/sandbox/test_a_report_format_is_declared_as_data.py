@@ -18,9 +18,10 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from maljan.core.config import SandboxUploadConfig, Settings
+from maljan.core.config import SandboxConfig, Settings
 from maljan.core.report_formats import (
     BUILTIN_REPORT_FORMATS,
+    FORMAT_NAME_MAX,
     ReportFormat,
     SignatureScale,
     effective_formats,
@@ -179,6 +180,11 @@ INVENTED = {
 }
 
 
+def _declared(*formats: dict[str, Any]) -> list[ReportFormat]:
+    """``formats`` as ``sandbox.report_formats`` validates them."""
+    return SandboxConfig.model_validate({"report_formats": list(formats)}).report_formats
+
+
 def _acme_payload(sha: str = SHA) -> dict[str, Any]:
     return {
         "producer": {"name": "ACME detonator 3"},
@@ -191,8 +197,7 @@ def _acme_payload(sha: str = SHA) -> dict[str, Any]:
 
 
 def test_a_declared_format_is_recognised_and_read_with_no_code_of_its_own() -> None:
-    upload = SandboxUploadConfig.model_validate({"formats": [INVENTED]})
-    formats = effective_formats(upload.formats)
+    formats = effective_formats(_declared(INVENTED))
     payload = _acme_payload()
     fmt = sniff(payload, formats)
     assert fmt is not None and fmt.name == "acme"
@@ -204,8 +209,7 @@ def test_a_declared_format_is_recognised_and_read_with_no_code_of_its_own() -> N
 
 
 def test_a_declared_format_is_tried_before_the_built_ins() -> None:
-    upload = SandboxUploadConfig.model_validate({"formats": [INVENTED]})
-    assert [fmt.name for fmt in effective_formats(upload.formats)] == [
+    assert [fmt.name for fmt in effective_formats(_declared(INVENTED))] == [
         "acme",
         "triage",
         "cape2",
@@ -213,20 +217,66 @@ def test_a_declared_format_is_tried_before_the_built_ins() -> None:
     ]
 
 
-def test_a_declared_built_in_name_replaces_that_built_in_in_its_place() -> None:
-    own_cape = {**INVENTED, "name": "cape2", "task_id_paths": ["/run/ticket"]}
-    upload = SandboxUploadConfig.model_validate({"formats": [own_cape]})
-    formats = effective_formats(upload.formats)
+def test_a_declared_built_in_name_is_merged_over_that_built_in_field_by_field() -> None:
+    shipped = BUILTIN_REPORT_FORMATS[1]
+    formats = effective_formats(
+        _declared({"name": "cape2", "signature_scale": {"name": "Fork 1–5", "rungs": ["Low"] * 5}})
+    )
     assert [fmt.name for fmt in formats] == ["triage", "cape2", "cuckoo"]
-    assert format_named("cape2", formats) is upload.formats[0]
-    assert format_named("cape2") is BUILTIN_REPORT_FORMATS[1]
+    merged = format_named("cape2", formats)
+    assert merged is not None and merged is not shipped
+    assert merged.signature_scale is not None and merged.signature_scale.name == "Fork 1–5"
+    # Every field the declaration left out keeps the shipped value.
+    assert merged.detect == shipped.detect
+    assert merged.task_id_paths == shipped.task_id_paths
+    assert merged.target_sha256_paths == shipped.target_sha256_paths
+    assert merged.reader == shipped.reader
+    assert format_named("cape2") is shipped
+
+
+def test_a_built_in_field_set_to_nothing_is_kept_as_set() -> None:
+    merged = format_named(
+        "cape2", effective_formats(_declared({"name": "cape2", "signature_scale": None}))
+    )
+    assert merged is not None and merged.signature_scale is None
+    assert merged.detect == BUILTIN_REPORT_FORMATS[1].detect
+
+
+def test_a_new_format_must_say_how_it_is_recognised() -> None:
+    with pytest.raises(ValidationError, match="needs detect"):
+        _declared({k: v for k, v in INVENTED.items() if k != "detect"})
 
 
 def test_settings_carry_a_declared_format_through_a_round_trip() -> None:
-    settings = Settings.model_validate({"sandbox": {"upload": {"formats": [INVENTED]}}})
-    dumped = settings.sandbox.upload.model_dump(mode="json")
-    again = SandboxUploadConfig.model_validate(dumped)
-    assert again.formats == settings.sandbox.upload.formats
+    settings = Settings.model_validate({"sandbox": {"report_formats": [INVENTED]}})
+    dumped = settings.sandbox.model_dump(mode="json")
+    again = SandboxConfig.model_validate(dumped)
+    assert again.report_formats == settings.sandbox.report_formats
+
+
+def test_a_format_name_fits_the_upload_rows_column() -> None:
+    from app.models.sandbox_report import SandboxReportRow
+
+    assert SandboxReportRow.__table__.c.format.type.length == FORMAT_NAME_MAX
+    assert ReportFormat.model_validate({**INVENTED, "name": "a" * FORMAT_NAME_MAX}).name
+
+
+def test_a_task_id_or_hash_is_a_string_or_a_number_and_anything_else_is_absent() -> None:
+    fmt = ReportFormat.model_validate(
+        {
+            **INVENTED,
+            "task_id_paths": ["/ids/*"],
+            "target_sha256_paths": ["/hashes/*"],
+        }
+    )
+    payload = {
+        "ids": [None, "", False, True, [], {}, ["x"], {"a": 1}, 0],
+        "hashes": [[SHA], {"s": SHA}, True, SHA],
+    }
+    assert fmt.task_id(payload) == "0"
+    assert fmt.target_sha256(payload) == SHA
+    assert fmt.task_id({"ids": [False, {"a": 1}]}) is None
+    assert fmt.target_sha256({"hashes": [0, [SHA]]}) == ""
 
 
 @pytest.mark.parametrize(
@@ -234,7 +284,11 @@ def test_settings_carry_a_declared_format_through_a_round_trip() -> None:
     [
         ({"name": "unknown"}, "no format recognises"),
         ({"name": "Acme"}, "pattern"),
-        ({"detect": []}, "at least 1"),
+        ({"name": "a" * (FORMAT_NAME_MAX + 1)}, "pattern"),
+        ({"detect": []}, "at least one group"),
+        ({"detect": [[{"path": "/**/marker"}]]}, "may not hold '**'"),
+        ({"task_id_paths": ["/**"]}, "may not hold '**'"),
+        ({"target_sha256_paths": ["/a/**2/sha256"]}, "may not hold '**'"),
         ({"detect": [[]]}, "at least one test"),
         ({"detect": [[{"path": "producer"}]]}, "must start with '/'"),
         ({"detect": [[{"path": ""}]]}, "needs a path"),
@@ -259,7 +313,7 @@ def test_a_declaration_the_platform_cannot_read_is_refused(
 
 def test_two_declarations_under_one_name_are_refused() -> None:
     with pytest.raises(ValidationError, match="declared twice"):
-        SandboxUploadConfig.model_validate({"formats": [INVENTED, INVENTED]})
+        _declared(INVENTED, INVENTED)
 
 
 # ---------------------------------------------------------------------------
@@ -272,7 +326,8 @@ def _provider(formats: list[dict[str, Any]], allowed: list[str]) -> UploadSandbo
         {
             "sandbox": {
                 "provider": "upload",
-                "upload": {"formats": formats, "allowed_formats": allowed},
+                "report_formats": formats,
+                "upload": {"allowed_formats": allowed},
             }
         }
     )
@@ -297,6 +352,31 @@ def test_a_declared_format_without_a_reader_is_refused_in_words() -> None:
     assert provider.capabilities.report_format == "generic"
     with pytest.raises(ProviderError, match="declared without a reader"):
         provider.fetch("uploaded")
+
+
+def test_a_recorded_format_is_read_as_recorded_and_never_sniffed_again() -> None:
+    # A report the built-ins would sniff as Cuckoo, recorded as cape2, is read
+    # by the cape2 reader with the cape2 scale: the row,
+    # not a second sniff, says what the bytes are.
+    provider = _provider([], ["cape2", "cuckoo"])
+    provider.set_pending_blob(json.dumps(_acme_payload()).encode(), report_format="cape2")
+    assert provider.capabilities.report_format == "cape2"
+    run = provider.fetch("uploaded")
+    assert run.report.source_format == "cape2"
+    scale = provider.signature_scale(run)
+    assert scale is not None and scale.name == "CAPE 1–3"
+
+
+def test_a_recorded_format_no_longer_declared_is_refused_in_words() -> None:
+    provider = _provider([], ["acme"])
+    with pytest.raises(ProviderError, match="no longer declared"):
+        provider.set_pending_blob(json.dumps(_acme_payload()).encode(), report_format="acme")
+
+
+def test_a_recorded_format_now_declared_without_a_reader_is_refused_in_words() -> None:
+    provider = _provider([{**INVENTED, "reader": ""}], ["acme"])
+    with pytest.raises(ProviderError, match="declared without a reader"):
+        provider.set_pending_blob(json.dumps(_acme_payload()).encode(), report_format="acme")
 
 
 def test_a_declared_format_not_in_the_allowed_list_is_refused() -> None:
@@ -340,15 +420,15 @@ def _seconds(payload: dict[str, Any], formats: tuple[ReportFormat, ...]) -> floa
 
 
 def test_every_read_is_linear_on_a_hostile_payload() -> None:
-    deep_format = ReportFormat.model_validate(
+    wide_format = ReportFormat.model_validate(
         {
-            "name": "deep",
-            "detect": [[{"path": "/**/producer/name", "contains": "acme"}]],
-            "task_id_paths": ["/**/ticket"],
-            "target_sha256_paths": ["/rows/*/digest", "/**/sha256"],
+            "name": "wide",
+            "detect": [[{"path": "/rows/*/producer/name", "contains": "acme"}]],
+            "task_id_paths": ["/rows/*/ticket", "/info/*/id"],
+            "target_sha256_paths": ["/rows/*/digest", "/info/*/sha256"],
         }
     )
-    formats = effective_formats([deep_format])
+    formats = effective_formats([wide_format])
     small, large = _hostile(2_000), _hostile(20_000)
     assert sniff(large, formats) is None
     ratio = _seconds(large, formats) / max(_seconds(small, formats), 1e-6)

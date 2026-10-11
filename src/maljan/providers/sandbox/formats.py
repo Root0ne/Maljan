@@ -69,7 +69,7 @@ def sniff_format(payload: dict[str, Any], formats: Iterable[ReportFormat] | None
     """Name the format that produced ``payload``: the first declared format that recognises it.
 
     ``formats`` are the effective declarations (``report_formats.effective_formats``
-    over ``sandbox.upload.formats``); ``None`` reads the built-ins alone. The
+    over ``sandbox.report_formats``); ``None`` reads the built-ins alone. The
     built-ins try Triage first (``analysis`` plus a non-empty ``tasks``), then
     CAPE (a ``CAPE`` block or a version string naming it), then Cuckoo (the
     generic ``info`` + ``behavior`` shape CAPE inherited). ``"unknown"`` where

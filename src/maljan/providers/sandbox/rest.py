@@ -39,8 +39,10 @@ from maljan.providers.sandbox.triage import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from maljan.core.config import SandboxRestConfig, Settings
-    from maljan.core.report_formats import SignatureScale
+    from maljan.core.report_formats import ReportFormat, SignatureScale
     from maljan.providers.sandbox.rest_mapping import CompiledMapping
     from maljan.schemas.sandbox_report import SandboxRun
 
@@ -254,11 +256,13 @@ class RestSandboxProvider(SandboxProvider):
             self._sleep(interval)
             interval = min(interval * _BACKOFF_FACTOR, _MAX_INTERVAL_SECONDS)
 
-    def signature_scale(self, run: SandboxRun) -> SignatureScale | None:
+    def signature_scale(
+        self, run: SandboxRun, formats: Iterable[ReportFormat] | None = None
+    ) -> SignatureScale | None:
         """The mapping's declared scale for a report read through it, else the format's."""
         if run.report.source_format == "generic":
             return self._cfg.report.signature_scale()
-        return super().signature_scale(run)
+        return super().signature_scale(run, formats)
 
     def fetch(self, task_id: str) -> SandboxRun:
         from maljan.schemas.sandbox_report import (

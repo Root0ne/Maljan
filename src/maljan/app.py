@@ -223,11 +223,14 @@ class MaljanApp:
 
     def _note_the_reader(self, provider: Any, run: Any) -> None:
         """Which reader produced this job's report, and the signature scale its provider gives."""
+        from maljan.core.report_formats import effective_formats
         from maljan.schemas.sandbox_report import reader_of
 
         self.container.sandbox_normalised = reader_of(run.report)
         try:
-            scale = provider.signature_scale(run)
+            scale = provider.signature_scale(
+                run, effective_formats(self.config.sandbox.report_formats)
+            )
         except Exception as exc:  # noqa: BLE001 — a scale is a reading aid, never a reason to fail
             logger.warning("Sandbox signature scale unavailable: %s", exc)
             scale = None

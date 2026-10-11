@@ -6,7 +6,7 @@ nothing is stored before it is known to be a sandbox report: stream to a size
 cap, inflate a gzip under the same cap, parse the JSON, sniff the format, and
 only then put the object. The format, its task id and its target hash are read
 from the declared report formats (``maljan.core.report_formats``, built-ins
-plus ``sandbox.upload.formats``), never from a format's name in this route. A
+plus ``sandbox.report_formats``), never from a format's name in this route. A
 claimed target hash that disagrees with the sample is
 a warning carried into the run summary, not a refusal — re-hashing a sample the
 sandbox unpacked is a legitimate reason for the two to differ. The comparison
@@ -56,7 +56,7 @@ from app.services import audit
 from app.services.settings_service import effective_core_settings
 
 if TYPE_CHECKING:
-    from maljan.core.config import SandboxUploadConfig
+    from maljan.core.config import SandboxConfig
 
 logger = get_logger("api.sandbox_reports")
 
@@ -72,13 +72,13 @@ _CHUNK = 64 * 1024
 _TASK_ID_MAX_LENGTH = 128
 
 
-async def _upload_settings(db: AsyncSession) -> SandboxUploadConfig:
+async def _sandbox_settings(db: AsyncSession) -> SandboxConfig:
     core = await effective_core_settings(db)
-    return core.sandbox.upload
+    return core.sandbox
 
 
 async def _max_report_bytes(db: AsyncSession) -> int:
-    return int((await _upload_settings(db)).max_report_bytes)
+    return int((await _sandbox_settings(db)).upload.max_report_bytes)
 
 
 async def _maybe_await(value: Any) -> Any:
@@ -199,6 +199,16 @@ async def _read_payload(file: UploadFile, db: AsyncSession) -> tuple[bytes, dict
     return body, payload
 
 
+def _read_declared(
+    payload: dict[str, Any], formats: tuple[ReportFormat, ...]
+) -> tuple[ReportFormat | None, str | None, str]:
+    """The format that recognises ``payload``, its task id and its claimed target hash."""
+    fmt = sniff(payload, formats)
+    if fmt is None:
+        return None, None, ""
+    return fmt, _task_id_of(payload, fmt), fmt.target_sha256(payload)
+
+
 def _task_id_of(payload: dict[str, Any], fmt: ReportFormat) -> str | None:
     """The source sandbox's task id, where the format declares it, cut to the column width."""
     raw = fmt.task_id(payload)
@@ -254,19 +264,30 @@ async def upload_sandbox_report(
 ) -> SandboxReportResponse:
     sample = await _maybe_await(_load_sample(db, sample_id, user))
     body, payload = await _read_payload(file, db)
-    upload = await _upload_settings(db)
+    sandbox = await _sandbox_settings(db)
     # The format is named, and its task id and target hash read, from the
-    # declared formats alone: a format added as data needs no code here.
-    fmt = sniff(payload, effective_formats(upload.formats))
-    allowed = set(upload.allowed_formats)
+    # declared formats alone: a format added as data needs no code here. The
+    # walk is linear in the report, and a large report is still a walk, so it
+    # runs in a worker thread rather than on the event loop.
+    fmt, task_id, target_sha = await asyncio.to_thread(
+        _read_declared, payload, effective_formats(sandbox.report_formats)
+    )
+    allowed = set(sandbox.upload.allowed_formats)
     if fmt is None or fmt.name not in allowed:
         raise HTTPException(
             status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             f"Unrecognised sandbox report format. Accepted: {', '.join(sorted(allowed))}",
         )
+    if not fmt.reader:
+        # Stored, it would be evidence no run can read: the job would go on
+        # without it. Refused here, where the operator is told why.
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"The report is format {fmt.name!r}, which is declared without a reader; "
+            "no analysis can read it yet.",
+        )
     report_id = uuid.uuid4()
     storage_path = f"sandbox-reports/{sample.sha256[:2]}/{sample.sha256}/{report_id}.json"
-    target_sha = fmt.target_sha256(payload)
     matches = bool(target_sha) and target_sha.lower() == sample.sha256.lower()
     now = datetime.now(UTC)
     # Insert before the storage write, not after: a row that fails to persist
@@ -283,7 +304,7 @@ async def upload_sandbox_report(
                 sample_id=sample.id,
                 storage_path=storage_path,
                 format=fmt.name,
-                task_id=_task_id_of(payload, fmt),
+                task_id=task_id,
                 size_bytes=len(body),
                 sha256_of_blob=hashlib.sha256(body).hexdigest(),
                 sample_sha256_match=matches,
@@ -397,6 +418,7 @@ def _format_response(fmt: ReportFormat, allowed: set[str]) -> SandboxReportForma
     scale = fmt.signature_scale
     return SandboxReportFormatResponse(
         name=fmt.name,
+        # A declaration merged over a built-in is the operator's, not the shipped one.
         builtin=any(fmt is builtin for builtin in BUILTIN_REPORT_FORMATS),
         allowed=fmt.name in allowed,
         reader=fmt.reader,
@@ -413,7 +435,7 @@ async def list_sandbox_report_formats(
     db: AsyncSession = Depends(get_db),
 ) -> SandboxReportFormatListResponse:
     """Every report format a payload is tried against, in that order, with its declaration."""
-    upload = await _upload_settings(db)
-    allowed = set(upload.allowed_formats)
-    items = [_format_response(fmt, allowed) for fmt in effective_formats(upload.formats)]
+    sandbox = await _sandbox_settings(db)
+    allowed = set(sandbox.upload.allowed_formats)
+    items = [_format_response(fmt, allowed) for fmt in effective_formats(sandbox.report_formats)]
     return SandboxReportFormatListResponse(items=items, total=len(items))
