@@ -810,18 +810,32 @@ LINEAGE_MARKED_STORED = "orig"
 
 
 def _reach(parent: dict[Any, Any], roots: set[Any]) -> set[Any]:
-    """Every listed process whose parent chain reaches one of ``roots``, the roots included."""
-    tree: set[Any] = set()
+    """Every listed process whose parent chain reaches one of ``roots``, the roots included.
+
+    Each process's answer is settled once: a chain is walked only up to the
+    first process already settled, and every process on it takes that answer,
+    so a long chain or many processes cost time linear in the list.
+    """
+    settled: dict[Any, bool] = {}
     for procid in parent:
-        seen: set[Any] = set()
-        current = procid
-        while current and current not in seen:
-            if current in roots:
-                tree.add(procid)
+        chain: list[Any] = []
+        on_chain: set[Any] = set()
+        current, reaches = procid, False
+        while current:
+            if current in settled:
+                reaches = settled[current]
                 break
-            seen.add(current)
+            if current in roots:
+                reaches = settled[current] = True
+                break
+            if current in on_chain:
+                break
+            on_chain.add(current)
+            chain.append(current)
             current = parent.get(current)
-    return tree
+        for node in chain:
+            settled[node] = reaches
+    return {procid for procid in parent if settled.get(procid)}
 
 
 class _Lineage:
@@ -1044,7 +1058,10 @@ def triage_overview_to_sandbox_report(
         # it extracted joins the overview's.
         for block, value in task.items():
             if block == "extracted":
-                extracted.extend(row for row in _rows(value) if row not in extracted)
+                # Each row as the task lists it, naming its task: a row the
+                # overview lists too is kept twice rather than compared with
+                # every row before it.
+                extracted.extend({TASK_KEY: str(task_name), **row} for row in _rows(value))
             elif block not in _TRIAGE_TASK_READ:
                 _keep_task_block(channels, f"task.{block}", str(task_name), value)
         lineage = _sample_process_tree(task, sample)

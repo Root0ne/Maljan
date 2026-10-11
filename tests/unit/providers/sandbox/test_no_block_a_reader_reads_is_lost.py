@@ -64,7 +64,9 @@ class TestATriageTaskReportKeepsItsBlocks:
 
     def test_what_the_task_extracted_joins_the_extracted_section(self) -> None:
         document = _triage_document()
-        assert {"config": {"family": "f", "c2": ["192.0.2.9:443"]}} in document["extracted"]
+        assert {TASK_KEY: "behavioral1", "config": {"family": "f", "c2": ["192.0.2.9:443"]}} in (
+            document["extracted"]
+        )
         index = ss.section_index(document, ("triage", "triage", "tasks"))["sections"]
         assert index["extracted"]["items"] == 1
         assert index["channels"]["items"] >= 3

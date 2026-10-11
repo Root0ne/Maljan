@@ -260,21 +260,32 @@ def _select_open_channels(
     sandbox publishes there. A mapping is kept as it is, anything else is
     wrapped so every row is still a mapping (a name the resolved API names
     place holds is kept as the text it is). A channel is capped as every other
-    channel is; a place is read whole, as every reader's places are.
+    channel is. A place is read whole, bounded by the report's own size: a path
+    that names each node of the report at most once matches no more nodes than
+    the report holds, so one that matches more repeats nodes and is cut there,
+    and says so (``truncated``), never past what the report itself holds.
     """
     rows: dict[str, list[Any]] = {}
     stats: dict[str, ChannelStats] = {}
     paths = compiled.place_paths if places else compiled.channel_paths
+    bound = node_count(payload) if places and paths else MAX_ROWS_PER_CHANNEL
     for name, path in paths.items():
         label = f"places.{name}" if places else f"channels.{name}"
         try:
             values = (node.value for node in path.finditer(payload))
-            peeked = list(values) if places else list(islice(values, MAX_ROWS_PER_CHANNEL + 1))
+            peeked = list(islice(values, (bound if places else MAX_ROWS_PER_CHANNEL) + 1))
         except Exception as exc:  # noqa: BLE001 — a path valid in isolation can still fail on data
             stats[label] = ChannelStats(error=f"{type(exc).__name__}: {exc}")
             continue
-        truncated = not places and len(peeked) > MAX_ROWS_PER_CHANNEL
-        matches = peeked if places else peeked[:MAX_ROWS_PER_CHANNEL]
+        limit = bound if places else MAX_ROWS_PER_CHANNEL
+        truncated = len(peeked) > limit
+        matches = peeked[:limit]
+        if truncated and places:
+            logger.warning(
+                "rest mapping: a place path matched more nodes than the report holds (%d); "
+                "it repeats nodes and was cut there.",
+                limit,
+            )
         converted = (_open_row(name if places else "", m) for m in matches)
         kept = [row for row in converted if row is not None]
         stats[label] = ChannelStats(
@@ -340,6 +351,24 @@ def unnamed_blocks(
         for key, value in payload.items()
         if key not in named and value not in (None, "", [], {})
     }
+
+
+def node_count(payload: Any) -> int:
+    """How many values ``payload`` holds, itself and every one nested in it, counted once each.
+
+    Walked with a stack, never recursion, so a deeply nested report costs time
+    linear in its size and no call depth.
+    """
+    count = 0
+    stack: list[Any] = [payload]
+    while stack:
+        value = stack.pop()
+        count += 1
+        if isinstance(value, dict):
+            stack.extend(value.values())
+        elif isinstance(value, list):
+            stack.extend(value)
+    return count
 
 
 def _open_row(place: str, match: Any) -> Any:
