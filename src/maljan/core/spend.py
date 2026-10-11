@@ -104,7 +104,7 @@ import math
 import re
 import threading
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -696,12 +696,19 @@ class SpendMeter:
         *,
         table: Mapping[str, Price] | None = None,
         clock: Callable[[], datetime] | None = None,
-        hour_writes: bool = False,
+        hour_writes: bool | Iterable[str] = False,
     ) -> None:
         self.ceiling_usd = None if ceiling_usd is None else float(ceiling_usd)
-        # Whether a request may write the prompt cache for an hour (the
-        # Anthropic provider's ``prompt_cache_ttl``), which admission prices.
-        self.hour_writes = bool(hour_writes)
+        # Which models' requests may write the prompt cache for an hour, which
+        # admission prices and a write reported without its lifetime is
+        # settled as: ``True`` every model, ``False`` none, or the names of the
+        # models whose provider says so (``LLMProvider.writes_hour_caches``).
+        if isinstance(hour_writes, bool):
+            self._hour_models: frozenset[str] | None = None
+            self.hour_writes = hour_writes
+        else:
+            self._hour_models = frozenset(_clean(name) for name in hour_writes if name)
+            self.hour_writes = bool(self._hour_models)
         self._lock = threading.Lock()
         # Woken whenever a reservation goes, for a call waiting on one.
         self._drained = threading.Condition(self._lock)
@@ -777,12 +784,18 @@ class SpendMeter:
     @classmethod
     def from_settings(cls, cfg: Any) -> SpendMeter:
         llm = getattr(cfg, "llm", None)
-        anthropic = getattr(llm, "anthropic", None)
         return cls(
             getattr(llm, "max_spend_usd_per_job", None),
             getattr(llm, "model_prices", None) or {},
-            hour_writes=str(getattr(anthropic, "prompt_cache_ttl", "") or "") == "1h",
+            hour_writes=hour_cache_models(cfg),
         )
+
+    def writes_hour_caches(self, model: str) -> bool:
+        """Whether ``model``'s requests may write the prompt cache for an hour."""
+        if self._hour_models is None:
+            return self.hour_writes
+        name = _clean(model)
+        return name in self._hour_models or _untagged(name) in self._hour_models
 
     # ── Prices ────────────────────────────────────────────────────────────
 
@@ -815,7 +828,7 @@ class SpendMeter:
             return None
         in_force = price.at(_sent_at(usage, self._clock()))
         if (
-            self.hour_writes
+            self.writes_hour_caches(model)
             and usage.get("cache_write_input_tokens")
             and "cache_write_1h_input_tokens" not in usage
         ):
@@ -1160,7 +1173,7 @@ class SpendMeter:
         price = self.price_now(model)
         if price is None:
             return None
-        return price.for_admission(int(prompt_tokens), self.hour_writes).cost(
+        return price.for_admission(int(prompt_tokens), self.writes_hour_caches(model)).cost(
             {"input_tokens": int(prompt_tokens), "output_tokens": int(output_tokens)}
         )
 
@@ -1305,7 +1318,7 @@ class SpendMeter:
                 continue
             name = _clean(model)
             prompt, prompt_said = self._tail_prompt_locked(kind, int(allowed))
-            price = row_price.at(now).for_admission(prompt, self.hour_writes)
+            price = row_price.at(now).for_admission(prompt, self.writes_hour_caches(model))
             answer, answer_said = self._planned_answer_locked(kind, name, int(cap))
             if not answer:
                 continue
@@ -1464,7 +1477,7 @@ class SpendMeter:
             return None
         return row.highest_over(
             now, _default_deadline() if deadline_s is None else deadline_s
-        ).for_admission(prompt_tokens, self.hour_writes)
+        ).for_admission(prompt_tokens, self.writes_hour_caches(model))
 
     def preview(
         self,
@@ -1908,3 +1921,36 @@ class SpendMeter:
                     "cost and the job spent at least that"
                 )
             return out
+
+
+def hour_cache_models(cfg: Any) -> frozenset[str]:
+    """The models these settings call whose provider writes the prompt cache for an hour.
+
+    Each provider answers for itself (``LLMProvider.writes_hour_caches``), and
+    only the models that provider serves are priced that way: a job whose
+    agents run on another provider is not charged one provider's hour rate
+    because of that provider's setting. The models are the global ones and
+    every agent entry's, its fallbacks included. Never raises: settings it
+    cannot read name no model.
+    """
+    try:
+        from maljan.llm.provider_base import facts_of
+
+        llm = cfg.llm
+        pairs: list[tuple[str, str]] = []
+        provider = str(llm.provider)
+        pairs.extend((provider, str(m)) for m in (llm.expert_model, llm.judge_model))
+        for entry in (getattr(llm, "agents", None) or {}).values():
+            chain = entry.chain() if hasattr(entry, "chain") else [entry]
+            pairs.extend((str(c.provider), str(c.model)) for c in chain)
+        writes: dict[str, bool] = {}
+        out: set[str] = set()
+        for name, model in pairs:
+            if name not in writes:
+                writes[name] = bool(facts_of(name).writes_hour_caches(cfg))
+            if writes[name] and model:
+                out.add(model)
+        return frozenset(out)
+    except Exception as exc:  # noqa: BLE001 — a price knob is never worth a failed job
+        logger.debug("spend: the hour-cache providers could not be read (%s).", exc)
+        return frozenset()

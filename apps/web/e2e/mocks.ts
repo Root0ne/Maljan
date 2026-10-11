@@ -1,5 +1,6 @@
 import type { Page, Route, WebSocketRoute } from "@playwright/test";
-import type { SettingsSchema, SettingsValues } from "@/types/settings";
+import served from "@/test-fixtures/settings-schema.json";
+import type { CatalogEntry, SettingsSchema, SettingsValues } from "@/types/settings";
 
 /** The four stages a plain analyst list has always meant, as the API dumps
  *  them. A function rather than a constant so two mocked teams cannot share
@@ -72,6 +73,40 @@ const PAPER_STAGES = () => [
 const unmockedByPage = new WeakMap<Page, string[]>();
 
 const JSON_HEADERS = { "content-type": "application/json" };
+
+/** The schema the API serves a fresh deployment (`scripts/dev/write_console_schema.py`). */
+const SERVED = served as unknown as SettingsSchema;
+const SERVED_BY_KEY = new Map(
+  SERVED.groups.flatMap((group) => group.entries).map((entry) => [entry.key, entry])
+);
+
+/**
+ * A mocked schema carrying the providers' own declarations exactly as the API
+ * serves them: each provider selector's `choice_titles`, `choice_descriptions`,
+ * `choice_labels` and `choice_facts`, the server map's built-in and reserved
+ * keys, and the probe labels. The console keeps no table of its own, so a mock
+ * without these would test a console that names nothing.
+ */
+function withServedDeclarations<T extends { groups: { entries: unknown[] }[] }>(schema: T): T {
+  const groups = schema.groups.map((group) => ({
+    ...group,
+    entries: group.entries.map((raw) => {
+      const entry = raw as CatalogEntry;
+      const real = SERVED_BY_KEY.get(entry.key);
+      if (!real) return raw;
+      return {
+        ...entry,
+        choice_titles: real.choice_titles ?? null,
+        choice_descriptions: real.choice_descriptions ?? null,
+        choice_labels: real.choice_labels ?? entry.choice_labels ?? null,
+        choice_facts: real.choice_facts ?? null,
+        builtin_servers: real.builtin_servers ?? null,
+        reserved_servers: real.reserved_servers ?? null,
+      };
+    }),
+  }));
+  return { ...schema, groups, probe_labels: SERVED.probe_labels ?? {} };
+}
 
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({
@@ -315,7 +350,7 @@ export const MOCK_API_KEY = {
  * the `generic_mcp` static provider's server picker (`choices_from:
  * "mcp_servers"`).
  */
-export const MOCK_SETTINGS_SCHEMA = {
+export const MOCK_SETTINGS_SCHEMA = withServedDeclarations({
   groups: [
     {
       key: "negotiation",
@@ -717,7 +752,7 @@ export const MOCK_SETTINGS_SCHEMA = {
       ],
     },
   ],
-};
+});
 
 export const MOCK_SETTINGS_VALUES = {
   values: {
@@ -979,7 +1014,7 @@ export const MOCK_SETTINGS_VALUES = {
  * badge after the LLM guide lands on "LLM & model" (just the provider) and
  * "Providers" (the three ollama fields), never a combined count on one.
  */
-export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
+export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = withServedDeclarations({
   groups: [
     {
       key: "llm",
@@ -1397,7 +1432,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
       ],
     },
   ],
-};
+});
 
 function unset(source: "default" | "ui" = "default"): {
   is_set: null;

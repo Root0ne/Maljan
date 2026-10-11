@@ -9,8 +9,7 @@ import { getErrorMessage } from "@/lib/errors";
 import { countLabel, formatBytes, formatDateTime } from "@/lib/report-utils";
 import {
   profileLabel,
-  sandboxProviderLabel,
-  staticProviderLabel,
+  providerLabel,
 } from "@/lib/providerLabels";
 import { useProviderChoices } from "./useProviderChoices";
 
@@ -42,7 +41,8 @@ function isNamedAfterItsHash(sample: SampleRow): boolean {
 
 function SamplesPageContent() {
   const router = useRouter();
-  const { staticProviders, sandboxProviders, profiles } = useProviderChoices();
+  const { staticProviders, sandboxProviders, profiles, staticTitles, sandboxTitles } =
+    useProviderChoices();
   const [samples, setSamples] = useState<SampleRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -527,7 +527,7 @@ function SamplesPageContent() {
                 >
                   <option value="">Inherit from settings</option>
                   {staticProviders.map((p) => (
-                    <option key={p} value={p}>{staticProviderLabel(p)}</option>
+                    <option key={p} value={p}>{providerLabel(p, staticTitles)}</option>
                   ))}
                 </select>
               </div>
@@ -545,7 +545,7 @@ function SamplesPageContent() {
                 >
                   <option value="">Inherit from settings</option>
                   {sandboxProviders.map((p) => (
-                    <option key={p} value={p}>{sandboxProviderLabel(p)}</option>
+                    <option key={p} value={p}>{providerLabel(p, sandboxTitles)}</option>
                   ))}
                 </select>
                 {attachedReport && (

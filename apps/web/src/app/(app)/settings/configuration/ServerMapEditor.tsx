@@ -23,21 +23,7 @@ import { capabilityCells } from "./toolTableRows";
 const input =
   "w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent";
 
-/** Built-ins are re-seeded by the settings model, so they disable rather than delete. */
-const BUILTIN = new Set(["network", "threatintel", "virustotal"]);
 const ROLES = ["static", "dynamic", "network", "judge"] as const;
-/** Mirrors `RESERVED_SERVER_KEYS` in `src/maljan/core/config.py`. Three of
- *  these (`network`, `threatintel`, `virustotal`) are also pre-populated
- *  built-ins and never reach `add()`; `ghidra` and `cape` are reserved but not
- *  pre-populated, so without this check they would pass client validation and
- *  fail only on apply. */
-export const RESERVED_SERVER_KEYS = new Set([
-  "network",
-  "threatintel",
-  "virustotal",
-  "ghidra",
-  "cape",
-]);
 /** What a set token looks like from outside; identical to the API's mask. */
 const TOKEN_MASK = "**********";
 
@@ -304,6 +290,7 @@ export function ServerDetail({
   errors = {},
   entryKey = "core.mcp.servers",
   requiredEnv = {},
+  builtinServers = new Set<string>(),
   editable = true,
   sections = ALL_SERVER_SECTIONS,
 }: {
@@ -320,6 +307,10 @@ export function ServerDetail({
   /** Per built-in, the environment names the API always passes, as the
    *  server-map catalog entry reports them. */
   requiredEnv?: RequiredEnv;
+  /** The built-in server keys, as the server-map catalog entry reports them:
+   *  a built-in is re-seeded by the settings model, so it disables rather
+   *  than deletes. */
+  builtinServers?: ReadonlySet<string>;
   /** Whether the token may be replaced — the leaf's own `editable`. */
   editable?: boolean;
   sections?: ServerSection[];
@@ -434,7 +425,7 @@ export function ServerDetail({
               </button>
               {/* A built-in server has no Remove, and the switch two
                   controls to the left is already how it is turned off. */}
-              {!BUILTIN.has(serverKey) && (
+              {!builtinServers.has(serverKey) && (
                 <button
                   type="button"
                   className="text-xs text-text-secondary"
@@ -702,7 +693,9 @@ export default function ServerMapEditor({
 
   const add = () => {
     const key = newKey.trim();
-    const problem = mapKeyError(key, value, "server", RESERVED_SERVER_KEYS);
+    // The keys core reserves for provider-owned servers, as the catalog entry
+    // reports them, so an add is refused here rather than only on apply.
+    const problem = mapKeyError(key, value, "server", new Set(entry.reserved_servers ?? []));
     if (problem) {
       setKeyError(problem);
       return;
@@ -819,6 +812,7 @@ export default function ServerMapEditor({
           errors={errors}
           entryKey={entry.key}
           requiredEnv={entry.required_env ?? {}}
+          builtinServers={new Set(entry.builtin_servers ?? [])}
           editable={entry.editable}
         />
       )}

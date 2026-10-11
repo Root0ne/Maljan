@@ -44,7 +44,7 @@ Where the window comes from, in order:
     nobody measured is the platform stating what it does not know; the
     documented :data:`UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS` applies instead and
     every surface says the window is unknown and names
-    :data:`UNKNOWN_WINDOW_REMEDY`.
+    :func:`unknown_window_remedy`.
 
 A probe never fails a run and never blocks a settings save. Everything it can
 end with becomes a :class:`WindowFact` with the reason in words, so an operator
@@ -84,7 +84,6 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
 
 import httpx
 
@@ -114,7 +113,7 @@ __all__ = [
     "awindow_for_settings",
     "budget_for_settings",
     "NO_ROOM_BELOW_CHARS",
-    "UNKNOWN_WINDOW_REMEDY",
+    "unknown_window_remedy",
     "UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS",
     "believable",
     "declared_window",
@@ -264,12 +263,27 @@ UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS = 6000
 # the window, which loses the analyst before any tool has run.
 UNKNOWN_WINDOW_CHUNK_TOKENS = 20000
 
+
 # The one thing an operator does about it, named wherever the word ``fallback``
 # is printed.
-UNKNOWN_WINDOW_REMEDY = (
-    "set core.llm.openai.context_size to the window the server was started with, "
-    "or add the model to the vendored context-window table"
-)
+def unknown_window_remedy(providers: Iterable[str] | None = None) -> str:
+    """What to do when no window was learned, naming the providers' own window settings.
+
+    ``providers`` are the providers of the models the window was asked for;
+    ``None`` names every registered provider that declares a window setting
+    (``LLMProvider.window_setting``).
+    """
+    from maljan.llm.provider_base import facts_of, provider_names
+
+    names = provider_names() if providers is None else list(dict.fromkeys(providers))
+    settings = [s for s in (facts_of(name).window_setting for name in names) if s]
+    if not settings:
+        return "add the model to the vendored context-window table"
+    return (
+        f"set {' or '.join(settings)} to the window the server was started with, "
+        "or add the model to the vendored context-window table"
+    )
+
 
 # Where a window was learned. Four words, each of which an operator can act on.
 DECLARED = "declared"
@@ -541,8 +555,9 @@ class Ask:
     body: dict[str, Any] | None
     read: Callable[[Any, str], int]
     what: str
-    # How the request authenticates: a bearer key, or Anthropic's own headers.
-    auth: str = "bearer"
+    # How the request authenticates: ``"bearer"`` sends the key as a bearer
+    # token; a callable is the provider's own, given the key, returning headers.
+    auth: Any = "bearer"
 
 
 def _root_of(endpoint: object) -> str:
@@ -717,62 +732,27 @@ def probe_plan(provider: str, endpoint: object, model: str = "") -> tuple[Ask, .
     """Every metadata request this provider kind offers, best first.
 
     The whole surface of what this module can put on a network, so a guard
-    test can enumerate it rather than trust a reading of the code. A vendor API
-    with nothing to ask is an empty plan, and the table answers for it.
+    test can enumerate it rather than trust a reading of the code. The
+    provider's adapter names its requests (``LLMProvider.window_probes``); a
+    vendor API with nothing to ask is an empty plan, and the table answers for
+    it.
     """
-    root = _root_of(endpoint)
-    if provider == "anthropic":
-        name = str(model or "").strip()
-        if not name:
-            return ()
-        # A configured address (``llm.anthropic.base_url``) is asked in place
-        # of the vendor's; the vendor's own name is no address.
-        anthropic_root = root if "://" in root else ANTHROPIC_API_ROOT
-        return (
-            Ask(
-                "GET",
-                f"{anthropic_root}{ANTHROPIC_MODEL_PATH}{quote(name, safe='')}",
-                None,
-                window_from_anthropic_model,
-                ANTHROPIC_MODELS_API,
-                auth="anthropic",
-            ),
-        )
-    if provider == "ollama":
-        base = root or "http://localhost:11434"
-        return (
-            Ask(
-                "POST",
-                f"{base}{OLLAMA_SHOW_PATH}",
-                {"model": model},
-                window_from_ollama_show,
-                "the Ollama model description",
-            ),
-        )
-    if provider != "openai" or not root:
-        return ()
-    return (
-        Ask("GET", f"{root}{LLAMA_PROPS_PATH}", None, window_from_llama_props, "llama.cpp /props"),
-        Ask(
-            "GET",
-            f"{root}{MODEL_LIST_PATH}",
-            None,
-            window_from_model_list,
-            "the served model list",
-        ),
-        Ask("GET", f"{root}{TGI_INFO_PATH}", None, window_from_tgi_info, "the server description"),
-    )
+    from maljan.llm.provider_base import facts_of
+
+    return tuple(facts_of(provider).window_probes(endpoint, model))
 
 
-def _headers(api_key: str, auth: str = "bearer") -> dict[str, str]:
-    if auth == "anthropic":
-        return {"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION} if api_key else {}
+def _headers(api_key: str, auth: Any = "bearer") -> dict[str, str]:
+    if callable(auth):
+        return dict(auth(api_key))
     return {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
 
 def _answers_without_a_key(provider: str, api_key: str) -> bool:
-    """Whether ``provider``'s metadata path can answer this probe: the Anthropic one needs a key."""
-    return provider != "anthropic" or bool(api_key)
+    """Whether ``provider``'s metadata path can answer this probe without a key it lacks."""
+    from maljan.llm.provider_base import facts_of
+
+    return not facts_of(provider).window_probe_needs_key or bool(api_key)
 
 
 def _body_within_bounds(answer: httpx.Response, what: str) -> bytes | None:
@@ -1220,10 +1200,10 @@ _OVERFLOW_SIGNATURES = (
 _OVERFLOW_RE = re.compile("|".join(re.escape(word) for word in _OVERFLOW_SIGNATURES))
 
 
-# The provider SDKs whose errors are a server's answer. Anything else raised
-# inside a loop — a ``ValueError`` that happens to mention ``n_ctx`` — is the
-# platform's own failure and is never read as a full window.
-_PROVIDER_PACKAGES = frozenset({"openai", "anthropic", "ollama", "google"})
+# The provider SDKs whose errors are a server's answer are the ones the
+# registered adapters declare (``provider_base.provider_error_packages``).
+# Anything else raised inside a loop — a ``ValueError`` that happens to mention
+# ``n_ctx`` — is the platform's own failure and is never read as a full window.
 
 # The sentences servers say when the conversation itself has filled the
 # window: llama.cpp with context shift off (prompt and reply reached it) and
@@ -1267,7 +1247,9 @@ def window_full_error(exc: BaseException) -> bool:
         # SDK's errors (a 500 from ``ChatOpenAI`` is ``langchain_openai``'s
         # ``OpenAIAPIError``), whose own module names no provider.
         packages = {(klass.__module__ or "").split(".", 1)[0] for klass in type(exc).__mro__}
-        if not packages & _PROVIDER_PACKAGES:
+        from maljan.llm.provider_base import provider_error_packages
+
+        if not packages & provider_error_packages():
             return False
         text = str(exc).lower()
         if not any(signature in text for signature in _WINDOW_FULL_SIGNATURES):
@@ -1318,22 +1300,18 @@ def note_provider_error(message: object) -> bool:
 def declared_window(settings: Any, provider: str) -> tuple[int, bool]:
     """``(tokens, is_default)`` for the window this deployment's settings name.
 
-    Ollama's ``num_ctx`` is sent with every call, so it is one half of the
-    served window whether or not anybody chose it — which is why the second
-    element exists: the field ships with a value, and reporting an untouched
-    default as an operator's statement was a claim nobody had made. The
-    OpenAI-compatible ``context_size`` ships at zero, so a positive value there
-    is always somebody's decision.
+    The provider's adapter reads its own setting (``LLMProvider.declared_window``).
+    The second element says whether the figure is the setting's shipped
+    default rather than an operator's statement: a field that ships with a
+    value and is sent with every call is half of the served window whether or
+    not anybody chose it, and reporting an untouched default as an operator's
+    statement was a claim nobody had made.
     """
     try:
-        if provider == "ollama":
-            from maljan.core.config import OllamaConfig
+        from maljan.llm.provider_base import facts_of
 
-            value = int(settings.llm.ollama.num_ctx)
-            shipped = int(OllamaConfig.model_fields["num_ctx"].default)
-            return value, value == shipped
-        if provider == "openai":
-            return int(getattr(settings.llm.openai, "context_size", 0) or 0), False
+        tokens, is_default = facts_of(provider).declared_window(settings)
+        return int(tokens or 0), bool(is_default)
     except Exception as exc:  # noqa: BLE001 — an unreadable setting is not a window
         logger.debug("context window: the declared window could not be read (%s)", exc)
     return 0, False
@@ -1342,9 +1320,9 @@ def declared_window(settings: Any, provider: str) -> tuple[int, bool]:
 def _provider_key(settings: Any, provider: str) -> str:
     """The credential ``provider`` authenticates with, as a plain string."""
     try:
-        secret = getattr(getattr(settings.llm, provider, None), "api_key", None)
-        reveal = getattr(secret, "get_secret_value", None)
-        return str(reveal() if callable(reveal) else (secret or ""))
+        from maljan.llm.provider_base import facts_of
+
+        return facts_of(provider).api_key(settings)
     except Exception:  # noqa: BLE001 — a probe without a key is still a probe
         return ""
 
@@ -1514,17 +1492,9 @@ def call_output_bound(cap: int, window_tokens: int, prompt_chars: int) -> int | 
     return max(1, left)
 
 
-# The field a per-call output cap is passed under, by chat model type. Each
-# client reads its own name: ``ChatOpenAI`` and ``ChatAnthropic`` take
-# ``max_tokens`` (the OpenAI client renames it on the wire, and the provider
-# carries it into DeepSeek's and llama.cpp's own fields), and
-# ``ChatGoogleGenerativeAI`` takes ``max_output_tokens`` — its request config
-# refuses any other name. ``None``: the client takes no per-call cap at all —
-# Ollama's reads its cap only inside ``options`` and refuses an unknown keyword.
-_PER_CALL_CAP_FIELD: dict[str, str | None] = {
-    "ChatOllama": None,
-    "ChatGoogleGenerativeAI": "max_output_tokens",
-}
+# The field a per-call output cap is passed under is the building provider's
+# own (``LLMProvider.per_call_cap_field``); a model no adapter claims takes it
+# under this name.
 _DEFAULT_PER_CALL_CAP_FIELD = "max_tokens"
 
 
@@ -1538,10 +1508,10 @@ def _per_call_cap_field(llm: Any) -> str | None:
     if isinstance(models, list) and models:
         fields = {_per_call_cap_field(model) for model in models}
         return fields.pop() if len(fields) == 1 else None
-    for cls in type(llm).__mro__:
-        if cls.__name__ in _PER_CALL_CAP_FIELD:
-            return _PER_CALL_CAP_FIELD[cls.__name__]
-    return _DEFAULT_PER_CALL_CAP_FIELD
+    from maljan.llm.provider_base import provider_of_model
+
+    built_by = provider_of_model(llm)
+    return _DEFAULT_PER_CALL_CAP_FIELD if built_by is None else built_by.per_call_cap_field
 
 
 def accepts_output_bound(llm: Any) -> bool:
@@ -2197,7 +2167,7 @@ class ContextBudget:
             "cap_smallest": smallest,
             "cap_largest": largest,
             "derives": self.derives,
-            "remedy": "" if self.derives else UNKNOWN_WINDOW_REMEDY,
+            "remedy": "" if self.derives else unknown_window_remedy(),
         }
 
 
@@ -2242,7 +2212,7 @@ def upstream_block_chars(configured: int, budget: Any) -> tuple[int, str]:
             )
     return UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS, (
         f"{UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS} characters — the documented fallback: no "
-        f"window was learned ({UNKNOWN_WINDOW_REMEDY})"
+        f"window was learned ({unknown_window_remedy()})"
     )
 
 

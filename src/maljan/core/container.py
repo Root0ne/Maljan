@@ -142,19 +142,18 @@ def _drop_llm_caches_on_retirement(loop: object) -> None:
 def _reporter_reasons(config: Settings, provider: str) -> bool:
     """Whether the reporter's ``provider`` was left free to reason inside its cap.
 
-    Ollama's ``num_predict`` and llama.cpp's ``n_predict`` count the reasoning
-    channel with the answer, and a reasoning model left thinking spends its
-    budget there: a 900-token section cap came back as an empty section. The
-    platform cannot tell a reasoning model from its tag; what it knows is
-    whether it asked the provider to keep reasoning out
-    (``llm.ollama.disable_thinking`` / ``llm.openai.disable_thinking``). Not
-    asked, an operator's section budget is given the reporter's own cap on top
-    for the reasoning, rather than the model being asked not to reason: a
-    ``think: false`` a model does not understand is an error on Ollama, and the
-    setting that sends it is the operator's.
+    Some providers count the reasoning channel with the answer, and a
+    reasoning model left thinking spends its budget there: a 900-token section
+    cap came back as an empty section. The provider's adapter answers
+    (``LLMProvider.reasoning_counts_against_cap``), from whether it was asked
+    to keep reasoning out. Not asked, an operator's section budget is given the
+    reporter's own cap on top for the reasoning, rather than the model being
+    asked not to reason: a switch a model does not understand is an error on
+    some runtimes, and the setting that sends it is the operator's.
     """
-    block = getattr(config.llm, provider, None)
-    return provider in ("ollama", "openai") and not bool(getattr(block, "disable_thinking", False))
+    from maljan.llm.provider_base import facts_of
+
+    return bool(facts_of(provider).reasoning_counts_against_cap(config))
 
 
 def _known_window(window: Any) -> int:

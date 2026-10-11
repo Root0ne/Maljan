@@ -7,7 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import type { CatalogEntry, PatchResult, ProbeResult } from "@/types/settings";
 import FieldRow from "../configuration/FieldRow";
 import { buildFieldRowProps } from "../configuration/fieldRowProps";
-import { probeLabel } from "../configuration/GroupHeader";
+import { probeLabelFrom } from "@/lib/providerFacts";
 import {
   buildReviewItems,
   ReviewErrorSummary,
@@ -62,7 +62,7 @@ function ProviderChoice({
       <legend className="sr-only">{entry.title}</legend>
       <div className="grid gap-2 sm:grid-cols-2">
         {choices.map((choice) => {
-          const copy = providerChoiceCopy(selectorKey, choice);
+          const copy = providerChoiceCopy(ctx.schema, selectorKey, choice);
           return (
             <label
               key={choice}
@@ -358,7 +358,7 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
             disabled={result === "running"}
             onClick={() => void onProbe(probeId)}
           >
-            {probeLabel(probeId)}
+            {probeLabelFrom(ctx.schema, probeId)}
           </button>
           {result === "running" && <span className="text-[11px] text-text-muted">testing…</span>}
           {result && result !== "running" && (

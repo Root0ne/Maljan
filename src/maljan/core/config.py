@@ -142,18 +142,13 @@ class OpenAIConfig(BaseModel):
     context_size: Annotated[int, Field(ge=0)] = 0
 
 
-# The levels Anthropic's ``output_config.effort`` takes, in order. The global
-# ``llm.anthropic.effort`` spells them as its ``Literal``; a per-agent
-# ``effort`` on an ``anthropic`` entry is checked against this tuple, and a
-# test holds the two together.
+# The levels Anthropic's ``output_config.effort`` takes, in order: part of the
+# Anthropic settings block. The global ``llm.anthropic.effort`` spells them as
+# its ``Literal``; the Anthropic adapter checks a per-agent ``effort`` against
+# this tuple, and a test holds the two together. Which providers send an
+# effort, and the global setting each inherits, the adapters declare
+# (``LLMProvider.effort_setting``).
 ANTHROPIC_EFFORT_LEVELS: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max")
-# The providers that send a reasoning effort, each with the global setting a
-# per-agent ``effort`` left unset inherits. A provider absent here has no
-# effort to send, and an entry that sets one against it is refused.
-EFFORT_SETTING_OF_PROVIDER: dict[str, str] = {
-    "anthropic": "llm.anthropic.effort",
-    "openai": "llm.openai.reasoning_effort",
-}
 
 
 # The names Docker gives the host a container runs on.
@@ -327,23 +322,21 @@ class ModelChoice(BaseModel):
     when neither sets one.
 
     Attributes:
-        provider:    LLM provider name ("openai", "anthropic", "ollama", "gemini").
+        provider:    A registered LLM provider's name (``maljan.llm.registry``).
         model:       Model identifier (e.g. "gpt-4o", "claude-3-5-sonnet",
                      "llama3.1:8b").
         temperature: Optional temperature override.
         base_url:    Optional per-agent endpoint, so two agents can sit on two
-                     different OpenAI-compatible servers (llama.cpp /
-                     ik_llama.cpp) or two different Ollama servers instead of
-                     sharing the single global one. Only meaningful for the
-                     "openai" and "ollama" providers; the credential stays
-                     global, so an "openai" entry pointing at its own endpoint
-                     still authenticates with llm.openai.api_key.
+                     different servers instead of sharing the single global
+                     one. Only for a provider whose adapter declares
+                     ``supports_agent_base_url``; the credential stays global,
+                     so an entry pointing at its own endpoint still
+                     authenticates with its provider's key.
         effort:      Optional reasoning effort for this model alone, sent where
-                     the provider's global one is sent (Anthropic
-                     ``output_config.effort``, OpenAI-compatible
-                     ``reasoning_effort``). ``None`` inherits the global
-                     ``llm.anthropic.effort`` / ``llm.openai.reasoning_effort``.
-                     Only the "anthropic" and "openai" providers send one.
+                     the provider's global one is sent. ``None`` inherits the
+                     global setting the provider's adapter names
+                     (``effort_setting``); a provider that names none sends no
+                     effort.
     """
 
     provider: str
@@ -356,43 +349,54 @@ class ModelChoice(BaseModel):
     def _base_url_belongs_to_an_endpoint_provider(self) -> "ModelChoice":
         """Reject a per-agent endpoint the provider has nowhere to send.
 
-        Anthropic and Gemini are vendor APIs here, with no per-agent endpoint
-        to override, so a base_url set against them would be silently dropped
-        at build time. Saying so is the only useful answer.
+        A provider whose adapter does not declare ``supports_agent_base_url``
+        has no per-agent endpoint to override, so a base_url set against it
+        would be silently dropped at build time. Saying so is the only useful
+        answer.
         """
         if self.base_url is not None and not self.base_url.strip():
             self.base_url = None
-        if self.base_url and self.provider not in ("openai", "ollama"):
-            raise ValueError(
-                f"base_url is only supported for the 'openai' and 'ollama' providers, "
-                f"not '{self.provider}'; those providers have no per-agent endpoint."
-            )
+        if self.base_url:
+            from maljan.llm.provider_base import facts_of, provider_names
+
+            if not facts_of(self.provider).supports_agent_base_url:
+                supported = " and ".join(
+                    f"'{name}'"
+                    for name in provider_names()
+                    if facts_of(name).supports_agent_base_url
+                )
+                raise ValueError(
+                    f"base_url is only supported for the {supported} providers, "
+                    f"not '{self.provider}'; that provider has no per-agent endpoint."
+                )
         return self
 
     @model_validator(mode="after")
     def _effort_belongs_to_a_provider_that_sends_one(self) -> "ModelChoice":
         """Reject an effort the provider has nowhere to send.
 
-        Ollama and Gemini take no reasoning effort here, so one set against
-        them would be silently dropped at build time. An Anthropic level is
-        one of the levels the API names; an OpenAI-compatible value is kept as
-        written, because each endpoint names its own levels.
+        A provider whose adapter names no ``effort_setting`` takes no reasoning
+        effort, so one set against it would be silently dropped at build time.
+        A provider with levels of its own refuses a level outside them
+        (``effort_refusal``); one whose endpoint names its own levels keeps the
+        value as written.
         """
         if self.effort is not None:
             self.effort = self.effort.strip() or None
         if self.effort is None:
             return self
-        if self.provider not in EFFORT_SETTING_OF_PROVIDER:
-            supported = " and ".join(f"'{p}'" for p in EFFORT_SETTING_OF_PROVIDER)
+        from maljan.llm.provider_base import effort_providers, facts_of
+
+        facts = facts_of(self.provider)
+        if not facts.effort_setting:
+            supported = " and ".join(f"'{p}'" for p in effort_providers())
             raise ValueError(
                 f"effort is only supported for the {supported} providers, "
                 f"not '{self.provider}'; that provider sends no reasoning effort."
             )
-        if self.provider == "anthropic" and self.effort not in ANTHROPIC_EFFORT_LEVELS:
-            raise ValueError(
-                f"effort {self.effort!r} is not one of the Anthropic levels "
-                f"({', '.join(ANTHROPIC_EFFORT_LEVELS)})."
-            )
+        refusal = facts.effort_refusal(self.effort)
+        if refusal:
+            raise ValueError(refusal)
         # A probe of this model is filed under the model and its effort
         # together; a spelling wider than the column that holds it could never
         # be filed, and the gate would call the model unprobed with no reason.
@@ -628,7 +632,12 @@ class LLMConfig(BaseModel):
     Empty dict means all agents share the global expert LLM (default behavior).
     """
 
-    provider: Literal["openai", "anthropic", "ollama", "gemini"] = "openai"
+    # A registered LLM provider's name (``maljan.llm.registry``). The
+    # catalogue offers the registered names and a name nothing registered is
+    # refused where it is saved, as a memory backend's is: a stored name whose
+    # provider is registered only in another process still loads, and the
+    # registry says so when a model is built for it.
+    provider: str = "openai"
     openai: OpenAIConfig = Field(default_factory=OpenAIConfig)
     anthropic: AnthropicConfig = Field(default_factory=AnthropicConfig)
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
@@ -637,6 +646,11 @@ class LLMConfig(BaseModel):
     frontier: FrontierConfig = Field(default_factory=FrontierConfig)
     # Per-agent overrides: {"static": AgentLLMConfig(...), "dynamic": ...}
     agents: dict[str, AgentLLMConfig] = Field(default_factory=dict)
+    # A provider registered beyond the four declared here keeps its own block
+    # under its name (``llm.<id>``), validated against the settings model its
+    # adapter declares (``LLMProvider.settings_model``). A block for an id this
+    # process has not registered is kept as it was stored, so it still loads.
+    model_config = ConfigDict(extra="allow")
     # How much of an agent's loop budget one model on its fallback list may
     # spend on a turn before it is treated as stalled and the next model is
     # asked (``maljan.llm.fallback``). A share of the loop rather than a fixed
@@ -762,29 +776,57 @@ class LLMConfig(BaseModel):
     # split and the tools-free text path. Ignored when decomposition is off.
     view_decomposition_mode: Literal["facet", "tier"] = "facet"
 
+    @model_validator(mode="after")
+    def _provider_blocks_read_by_their_models(self) -> "LLMConfig":
+        """Each registered provider's block read with its adapter's settings model.
+
+        A block for an id no adapter in this process registered stays as it was
+        stored; anything that is not a block is not a setting and is dropped,
+        as an unknown key always was.
+        """
+        extra = self.__pydantic_extra__
+        selected = str(self.provider)
+        if not extra and selected in type(self).model_fields:
+            return self
+        from maljan.llm.provider_base import undeclared_settings_models
+
+        models = undeclared_settings_models()
+        if extra is None:
+            extra = {}
+            object.__setattr__(self, "__pydantic_extra__", extra)
+        for key, value in list(extra.items()):
+            model = models.get(key)
+            if model is not None and isinstance(value, dict):
+                extra[key] = model.model_validate(value)
+            elif not isinstance(value, dict | BaseModel):
+                del extra[key]
+        # The selected provider's block with its declared defaults when none is
+        # stored, as a memory backend's settings are.
+        if selected in models and selected not in extra:
+            extra[selected] = models[selected]()
+        return self
+
+    def _provider_block(self) -> Any:
+        """The selected provider's own settings block (``llm.<provider>``), or ``None``.
+
+        Never another provider's: a provider with no block of its own names no
+        role model (an empty one), and saving such a selection is refused
+        (``provider_base.role_block_problem``).
+        """
+        block = getattr(self, str(self.provider), None)
+        return block if hasattr(block, "expert_model") else None
+
     @property
     def expert_model(self) -> str:
         """Returns the expert model name for the currently selected provider."""
-        provider_cfg: dict[str, BaseModel] = {
-            "openai": self.openai,
-            "anthropic": self.anthropic,
-            "ollama": self.ollama,
-            "gemini": self.gemini,
-        }
-        cfg = provider_cfg.get(self.provider, self.openai)
-        return cfg.expert_model  # type: ignore[attr-defined, no-any-return]
+        block = self._provider_block()
+        return "" if block is None else str(block.expert_model)
 
     @property
     def judge_model(self) -> str:
         """Returns the judge model name for the currently selected provider."""
-        provider_cfg: dict[str, BaseModel] = {
-            "openai": self.openai,
-            "anthropic": self.anthropic,
-            "ollama": self.ollama,
-            "gemini": self.gemini,
-        }
-        cfg = provider_cfg.get(self.provider, self.openai)
-        return cfg.judge_model  # type: ignore[attr-defined, no-any-return]
+        block = self._provider_block()
+        return "" if block is None else str(block.judge_model)
 
 
 # ---------------------------------------------------------------------------
@@ -3496,7 +3538,11 @@ class StaticConfig(BaseModel):
     the default.
     """
 
-    provider: Literal["ghidra", "r2", "capa_yara", "generic_mcp", "none"] = "ghidra"
+    # A registered static provider's id (``maljan.providers.registry``): the
+    # catalogue offers the registered ids and a name nothing registered is
+    # refused where it is saved, as ``llm.provider`` and ``memory.backend``
+    # are; a stored id whose provider is registered only elsewhere still loads.
+    provider: str = "ghidra"
     ghidra: MCPServerConfig = Field(default_factory=lambda: ghidra_block())
     r2: StaticR2Config = Field(default_factory=lambda: r2_block())
 
@@ -3700,7 +3746,9 @@ class SandboxConfig(BaseModel):
         "rest"   — any HTTP sandbox, described by sandbox.rest.*
     """
 
-    provider: Literal["mock", "cape2", "upload", "triage", "rest"] = "mock"
+    # A registered sandbox provider's id, refused where it is saved and read
+    # as stored, as ``static.provider`` is.
+    provider: str = "mock"
     cape2: SandboxCape2Config = Field(default_factory=SandboxCape2Config)
     triage: SandboxTriageConfig = Field(default_factory=SandboxTriageConfig)
     upload: SandboxUploadConfig = Field(default_factory=SandboxUploadConfig)

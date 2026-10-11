@@ -84,6 +84,14 @@ def _validate_task_id_template(label: str, template: str) -> None:
 class RestSandboxProvider(SandboxProvider):
     """Submit, poll, fetch and (optionally) capture, all from configuration."""
 
+    # What the console calls this provider and says about it, and its test's label.
+    choice_label = "Any HTTP sandbox"
+    choice_order = 4
+    title = "Generic REST API"
+    description = "Any sandbox with an HTTP API, described by the paths the next steps fill in."
+    probe_label = "Test sandbox API"
+    settings_intro = "Where the sandbox API lives and how a request authenticates."
+
     def __init__(
         self,
         cfg: SandboxRestConfig,

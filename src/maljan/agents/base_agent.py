@@ -18,7 +18,7 @@ import sys
 import threading
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import CancelledError as _FuturesCancelled
 from concurrent.futures import Future as _ConcurrentFuture
 from concurrent.futures import TimeoutError as _FuturesTimeout
@@ -235,12 +235,14 @@ _CHARS_PER_TOKEN = 4
 def _model_context_tokens(cfg: Any, agent_name: str) -> int:
     """The context window of the model this agent runs on, or ``0``.
 
-    The per-agent entry decides which *provider* is asked, so an agent on
-    Ollama reads the Ollama window even when the run is otherwise OpenAI. It
-    does not carry a window of its own: an agent pointed at its own
-    OpenAI-compatible endpoint therefore reads ``llm.openai.context_size``,
-    which describes the global one. That is a known limit of this lookup and
-    not a claim about that agent's server; the floor below is what protects it.
+    The per-agent entry decides which *provider* is asked, and that provider's
+    adapter reads the window its own settings declare
+    (``LLMProvider.declared_window``), so an agent on one provider never reads
+    another provider's setting. An entry does not carry a window of its own:
+    an agent pointed at its own endpoint reads its provider's global setting,
+    which describes the global endpoint. That is a known limit of this lookup
+    and not a claim about that agent's server; the floor below is what
+    protects it.
 
     An agent that may fall back to another model reads the smallest window
     any of its models declares: the salvage is re-sent to whichever model is
@@ -250,15 +252,14 @@ def _model_context_tokens(cfg: Any, agent_name: str) -> int:
     Zero means nothing declared it, and the caller falls back to the floor.
     """
     try:
+        from maljan.llm.provider_base import facts_of
+
         entry = (getattr(cfg.llm, "agents", None) or {}).get(agent_name)
         chain: list[Any] = entry.chain() if entry is not None else [None]
         windows: list[int] = []
         for choice in chain:
             provider = str(getattr(choice, "provider", "") or cfg.llm.provider)
-            if provider == "ollama":
-                windows.append(int(cfg.llm.ollama.num_ctx))
-            else:
-                windows.append(int(getattr(cfg.llm.openai, "context_size", 0) or 0))
+            windows.append(int(facts_of(provider).declared_window(cfg)[0] or 0))
         declared = [window for window in windows if window > 0]
         return min(declared) if declared else 0
     except Exception as exc:  # noqa: BLE001 — a budget is never worth a lost salvage
@@ -338,7 +339,7 @@ def ledger_ids_in(msgs: Sequence[Any]) -> list[str]:
     return seen
 
 
-def _message_chars(m: object) -> int:
+def _message_chars(m: object, passback: frozenset[str] | None = None) -> int:
     """Size of a message **as the server will see it**, not just its text.
 
     An assistant turn that requests tools carries ``content == ""`` and puts the
@@ -352,11 +353,26 @@ def _message_chars(m: object) -> int:
     if calls:
         total += len(str(calls))
     # A thinking model's reasoning that a provider has sent back with the turn
-    # (``openai_provider.with_reasoning_passback``) is read with it too.
-    reasoning = (getattr(m, "additional_kwargs", None) or {}).get("reasoning_content")
-    if isinstance(reasoning, str):
-        total += len(reasoning)
+    # (each adapter's ``reasoning_passback_keys``) is read with it too.
+    kwargs = getattr(m, "additional_kwargs", None) or {}
+    for key in _passback_keys() if passback is None else passback:
+        reasoning = kwargs.get(key)
+        if isinstance(reasoning, str):
+            total += len(reasoning)
     return total
+
+
+def _chars_of(messages: Iterable[object], passback: frozenset[str] | None = None) -> int:
+    """Every message's weight in characters, the passback keys read once for all of them."""
+    keys = _passback_keys() if passback is None else passback
+    return sum(_message_chars(m, keys) for m in messages)
+
+
+def _passback_keys() -> frozenset[str]:
+    """The ``additional_kwargs`` keys any registered provider asks to have sent back."""
+    from maljan.llm.provider_base import reasoning_passback_keys
+
+    return reasoning_passback_keys()
 
 
 def _reported_request(messages: list, per_token: int) -> tuple[int, int]:
@@ -380,7 +396,7 @@ def _reported_request(messages: list, per_token: int) -> tuple[int, int]:
         except (AttributeError, TypeError, ValueError):
             prompt = 0
         if prompt > 0:
-            after = sum(_message_chars(m) for m in messages[index:])
+            after = _chars_of(messages[index:])
             return prompt * max(1, per_token) + after, index
     return 0, -1
 
@@ -405,7 +421,7 @@ def request_chars(
     server last counted (``tool_answer_clearing``): that count still holds it,
     so it comes off the reported figure; the measure already sees the clear.
     """
-    measured = sum(_message_chars(m) for m in messages) + max(0, int(definition_chars))
+    measured = _chars_of(messages) + max(0, int(definition_chars))
     reported = _reported_request_chars(messages, per_token) - max(0, int(cleared_chars))
     return max(measured, reported)
 
@@ -472,7 +488,8 @@ def _trim_for_synthesis(msgs: list, budget: int) -> list:
     Returns ``msgs`` unchanged when it already fits, so the common case is
     untouched and only a conversation that would not finish is altered.
     """
-    if sum(_message_chars(m) for m in msgs) <= budget:
+    passback = _passback_keys()
+    if _chars_of(msgs, passback) <= budget:
         return msgs
 
     head: list = []
@@ -483,9 +500,7 @@ def _trim_for_synthesis(msgs: list, budget: int) -> list:
         head.append(rest.pop(0))
 
     units = _conversation_units(rest)
-    used = sum(_message_chars(m) for m in head) + sum(
-        _message_chars(m) for unit in units for m in unit
-    )
+    used = _chars_of(head, passback) + _chars_of((m for unit in units for m in unit), passback)
 
     # Prose first, oldest first: an assistant turn that called no tool is the
     # model's own commentary, and the evidence is what the salvage is for.
@@ -494,7 +509,7 @@ def _trim_for_synthesis(msgs: list, budget: int) -> list:
             break
         if _is_a_tool_pair(unit):
             continue
-        used -= sum(_message_chars(m) for m in unit)
+        used -= _chars_of(unit, passback)
         units[index] = []
 
     for index, unit in enumerate(units):
@@ -502,7 +517,7 @@ def _trim_for_synthesis(msgs: list, budget: int) -> list:
             break
         if not unit:
             continue
-        used -= sum(_message_chars(m) for m in unit)
+        used -= _chars_of(unit, passback)
         units[index] = []
 
     return [*head, *[m for unit in units for m in unit]]
@@ -1290,12 +1305,13 @@ def nudge_turns(msgs: list) -> tuple[list, bool]:
             if not content.strip() and not kept_calls:
                 continue
             # The reasoning a provider asks to have sent back stays with the
-            # turn it belongs to (``openai_provider.with_reasoning_passback``);
+            # turn it belongs to (each adapter's ``reasoning_passback_keys``);
             # nothing else of the dropped call's raw form is carried.
+            passback = _passback_keys()
             kept_kwargs = {
                 key: value
                 for key, value in (message.additional_kwargs or {}).items()
-                if key == "reasoning_content"
+                if key in passback
             }
             out.append(
                 AIMessage(
@@ -3326,7 +3342,7 @@ class BudgetMeter:
                 max_steps=ledger.max_steps,
                 elapsed_s=time.monotonic() - ledger.started,
                 timeout_s=ledger.timeout,
-                prompt_chars=sum(_message_chars(m) for m in messages),
+                prompt_chars=_chars_of(messages),
                 ledger_entries=ledger_entries,
                 final=final,
                 tool_definition_chars=self._definitions_sent(),
@@ -5543,7 +5559,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             meter.admit(
                 kind=kind,
                 model=self._model_label() or _model_label(self.llm),
-                prompt_chars=sum(_message_chars(m) for m in messages)
+                prompt_chars=_chars_of(messages)
                 + self._definitions_sent()
                 + self._replayed_run_state_chars(),
                 cap_tokens=self.output_cap_tokens(),
@@ -5572,8 +5588,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 meter.preview(
                     kind=kind,
                     model=self._model_label() or _model_label(self.llm),
-                    prompt_chars=sum(_message_chars(m) for m in messages)
-                    + self._definitions_sent(),
+                    prompt_chars=_chars_of(messages) + self._definitions_sent(),
                     cap_tokens=self.output_cap_tokens(),
                 )
                 == 0
@@ -6150,8 +6165,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         # arguments never parsed is not sent back to the server.
         keeps_turns = keeps_turns_as_received(getattr(self, "llm", None))
         sendable, _dropped = (msgs, False) if keeps_turns else nudge_turns(msgs)
-        conversation = sum(_message_chars(m) for m in sendable)
-        framing = sum(_message_chars(m) for m in _framing_of(sendable))
+        conversation = _chars_of(sendable)
+        framing = _chars_of(_framing_of(sendable))
         rates = self._rates_sentence(generation_rate, prompt_rate)
         if paced is not None and paced < framing + len(_SYNTHESIS_DIRECTIVE):
             # Not even the task and the pack can be read and answered in the
@@ -6173,7 +6188,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             return ""
 
         trimmed = _trim_for_synthesis(sendable, budget)
-        sent = sum(_message_chars(m) for m in trimmed)
+        sent = _chars_of(trimmed)
         if len(trimmed) < len(msgs):
             self.logger.warning(
                 "%s forced synthesis: trimmed %d of %d messages to fit %d chars%s.",

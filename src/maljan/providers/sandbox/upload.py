@@ -43,6 +43,17 @@ class UploadSandboxProvider(SandboxProvider):
     no recorded format is sniffed.
     """
 
+    # What the console calls this provider and says about it, and its test's label.
+    choice_label = "A report you attach"
+    guide_leaves = (
+        "allowed_formats",
+        "max_report_bytes",
+    )
+    choice_order = 2
+    title = "Uploaded report"
+    description = "No detonation here: an operator attaches a report from another sandbox."
+    settings_intro = "Which report formats an operator may attach, and how large they may be."
+
     def __init__(self, cfg: SandboxUploadConfig, formats: Iterable[ReportFormat] = ()) -> None:
         self._cfg = cfg
         self._blob: bytes | None = None

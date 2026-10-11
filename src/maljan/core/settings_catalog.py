@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import types
 import typing
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any, Literal, get_args, get_origin
 
@@ -29,6 +30,7 @@ ChoicesFrom = Literal[
     "agent_roles",
     "profiles",
     "memory_backends",
+    "llm_providers",
 ]
 Editor = Literal["server_map", "rest_sandbox", "agent_definitions", "stages"]
 
@@ -92,6 +94,18 @@ class CatalogEntry:
     # The short phrase each choice declares for the console to show beside it
     # (a registry's own labels), keyed by choice; ``None`` when none declares one.
     choice_labels: dict[str, str] | None = None
+    # For a provider selector, filled by the API from each registered
+    # provider's own declaration: the title the console shows for a choice,
+    # its one-line description, and the facts the console reads about it
+    # (credential keys, hosted or run locally, its connection test, whether an
+    # agent may give it an endpoint of its own, its effort setting).
+    choice_titles: dict[str, str] | None = None
+    choice_descriptions: dict[str, str] | None = None
+    choice_facts: dict[str, dict[str, Any]] | None = None
+    # For the tool-server map: the keys of the built-in servers and the keys no
+    # operator's server may take, served so the console never keeps a copy.
+    builtin_servers: list[str] | None = None
+    reserved_servers: list[str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -141,7 +155,16 @@ def core_leaves() -> list[Leaf]:
         model = backend.settings_model
         if model is not None:
             leaves.extend(_walk(model, f"memory.{backend_id}.", model()))
+    for provider_id, model in _undeclared_llm_providers().items():
+        leaves.extend(_walk(model, f"llm.{provider_id}.", model()))
     return leaves
+
+
+def _undeclared_llm_providers() -> dict[str, Any]:
+    """Registered LLM providers whose settings are not a declared field of ``llm``."""
+    from maljan.llm.provider_base import undeclared_settings_models
+
+    return undeclared_settings_models()
 
 
 def _undeclared_memory_backends() -> dict[str, Any]:
@@ -156,10 +179,21 @@ def _undeclared_memory_backends() -> dict[str, Any]:
     }
 
 
-def _annotation(path: str) -> Any:
-    """``path``'s annotation: the shared table's, else the one its memory backend registered."""
+def _annotation(path: str, undeclared: Mapping[str, Any] | None = None) -> Any:
+    """``path``'s annotation: the shared table's, else the one its memory backend or LLM
+    provider declares for the leaves of its own settings."""
     found = ANNOTATIONS.get(path)
-    if found is not None or not path.startswith("memory."):
+    if found is not None:
+        return found
+    if path.startswith("llm."):
+        provider_id, _, leaf = path[len("llm.") :].partition(".")
+        providers = _undeclared_llm_providers() if undeclared is None else undeclared
+        if leaf and provider_id in providers:
+            from maljan.llm.provider_base import facts_of
+
+            return facts_of(provider_id).settings_annotations.get(leaf)
+        return None
+    if not path.startswith("memory."):
         return found
     backend_id, _, leaf = path[len("memory.") :].partition(".")
     backend = _undeclared_memory_backends().get(backend_id)
@@ -172,6 +206,23 @@ def _registry_choices(source: str | None) -> list[str] | None:
         from maljan.memory.store_factory import memory_backends
 
         return list(memory_backends())
+    if source == "llm_providers":
+        from maljan.llm.provider_base import provider_names
+
+        return provider_names()
+    if source in ("static_providers", "sandbox_providers"):
+        from maljan.providers.registry import (
+            sandbox_provider_class,
+            sandbox_provider_ids,
+            static_provider_class,
+            static_provider_ids,
+        )
+
+        static = source == "static_providers"
+        ids = static_provider_ids() if static else sandbox_provider_ids()
+        cls_of = static_provider_class if static else sandbox_provider_class
+        # In the order each provider declares, then by id.
+        return sorted(ids, key=lambda i: (getattr(cls_of(i), "choice_order", 100), i))
     return None
 
 
@@ -245,8 +296,9 @@ def core_catalog() -> list[CatalogEntry]:
     from the annotation, so an unannotated credential field is still redacted.
     """
     entries: list[CatalogEntry] = []
+    undeclared = _undeclared_llm_providers()
     for leaf in core_leaves():
-        ann = _annotation(leaf.path)
+        ann = _annotation(leaf.path, undeclared)
         ftype, choices, nullable = _field_type(leaf)
         # A str leaf whose choices a core registry holds is an enum of them.
         registry = _registry_choices(ann.get("choices_from") if ann else None)

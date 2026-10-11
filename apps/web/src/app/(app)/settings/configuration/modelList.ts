@@ -12,26 +12,32 @@ export interface ModelChoice {
   model: string;
   temperature?: number | null;
   base_url?: string | null;
-  /** This model's own reasoning effort; absent inherits the provider's
-   *  global one (`llm.anthropic.effort` / `llm.openai.reasoning_effort`). */
+  /** This model's own reasoning effort; absent inherits the global effort
+   *  setting its provider declares. */
   effort?: string | null;
 }
 
-/** Whether a provider takes a per-agent endpoint. */
-export function hasEndpoint(provider: string): boolean {
-  return provider === "openai" || provider === "ollama";
+/** Whether a provider takes a per-agent endpoint: the providers that declare
+ *  one, as the settings schema serves them (`agentEndpointProviders`). */
+export function hasEndpoint(provider: string, endpointProviders: ReadonlySet<string>): boolean {
+  return endpointProviders.has(provider);
 }
 
 /** A fallback as it is stored: blank fields dropped, an endpoint only where
  *  the provider takes one. `null` for a row with no model yet, which is
  *  kept on screen and not staged. */
-export function storedChoice(choice: ModelChoice): ModelChoice | null {
+export function storedChoice(
+  choice: ModelChoice,
+  endpointProviders: ReadonlySet<string>
+): ModelChoice | null {
   if (!choice.provider || !choice.model) return null;
   const out: ModelChoice = { provider: choice.provider, model: choice.model };
   if (choice.temperature !== null && choice.temperature !== undefined) {
     out.temperature = choice.temperature;
   }
-  if (choice.base_url && hasEndpoint(choice.provider)) out.base_url = choice.base_url;
+  if (choice.base_url && hasEndpoint(choice.provider, endpointProviders)) {
+    out.base_url = choice.base_url;
+  }
   if (choice.effort && choice.effort.trim()) out.effort = choice.effort.trim();
   return out;
 }

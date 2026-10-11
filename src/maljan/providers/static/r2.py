@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from maljan.core import builtin_declarations
 from maljan.core.logger import logger
 from maljan.core.tool_declarations import ErrorPattern
-from maljan.providers.base import MirrorSpec
+from maljan.providers.base import MirrorSpec, ProviderProbe
 from maljan.providers.declared_errors import PROTOCOL_ERROR, declared_error
 from maljan.providers.errors import ProviderError
 from maljan.providers.registry import register_static_provider
@@ -385,6 +385,14 @@ class R2StaticProvider(GenericMCPStaticProvider):
     rather than a failed job.
     """
 
+    # What the console calls this provider and says about it, and its test's label.
+    choice_label = "radare2"
+    choice_order = 1
+    title = "radare2 MCP"
+    description = "A local radare2 binary answers disassembly questions over its MCP server."
+    probe_label = "Test radare2 MCP"
+    settings_intro = "Where the radare2 binary lives; the MCP server is launched from it."
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         # This adapter reads its block's declared error patterns itself, by the
@@ -456,6 +464,43 @@ class R2StaticProvider(GenericMCPStaticProvider):
                 self._cfg = self._handle.config
         super().open(job)
         self.tools = self.get_tools()
+
+    async def probe(self) -> ProviderProbe:
+        """Find r2mcp as a job finds it, then hold an MCP handshake with it.
+
+        A stdio handshake is the only honest test of a subprocess-backed
+        server: a binary that exists but cannot serve MCP is exactly the
+        failure an operator needs named before a job fails on it.
+        """
+        import time
+
+        from maljan.core.config import MCPServerConfig
+        from maljan.providers.server_probe import PROBE_BUDGET_SECONDS, handshake
+
+        t0 = time.perf_counter()
+
+        def _ms() -> int:
+            return int((time.perf_counter() - t0) * 1000)
+
+        configured = str(self._handle.config.command or "r2mcp")
+        binary = resolve_r2_binary(configured)
+        if binary.path is None:
+            return ProviderProbe(
+                False, f"{configured!r} was not found; looked in: {binary.described()}", _ms()
+            )
+        command = binary.path
+        config = MCPServerConfig(enabled=True, transport="stdio", command=command)
+        try:
+            names, _capabilities = await handshake(config, "r2")
+        except TimeoutError:
+            return ProviderProbe(
+                False, f"no MCP handshake within {PROBE_BUDGET_SECONDS:.0f} s", _ms()
+            )
+        except FileNotFoundError:
+            return ProviderProbe(False, f"{command!r} not found on PATH", _ms())
+        except Exception as exc:  # noqa: BLE001 — reported to the operator, never raised
+            return ProviderProbe(False, f"{type(exc).__name__}: {exc}", _ms())
+        return ProviderProbe(True, f"{len(names)} tools offered by {command!r}", _ms(), names)
 
     def get_tools(self) -> list[BaseTool]:
         tools = super().get_tools()

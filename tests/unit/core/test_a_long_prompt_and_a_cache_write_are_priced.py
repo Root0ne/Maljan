@@ -129,9 +129,31 @@ class TestBeforeACall:
     def test_an_hour_s_write_is_admitted_only_where_one_is_asked_for(self) -> None:
         from maljan.core.config import Settings
 
-        asked = Settings(_env_file=None, llm={"anthropic": {"prompt_cache_ttl": "1h"}})
-        assert SpendMeter.from_settings(asked).hour_writes is True
+        hour = {"prompt_cache_ttl": "1h", "expert_model": HAIKU, "judge_model": HAIKU}
+        asked = Settings(_env_file=None, llm={"provider": "anthropic", "anthropic": hour})
+        meter = SpendMeter.from_settings(asked)
+        assert meter.hour_writes is True
+        assert meter.writes_hour_caches(HAIKU) is True
         assert SpendMeter.from_settings(Settings(_env_file=None)).hour_writes is False
+
+    def test_an_hour_s_write_is_priced_only_on_the_provider_that_asks_for_it(self) -> None:
+        """The Anthropic setting does not price another provider's models."""
+        from maljan.core.config import Settings
+
+        hour = {"prompt_cache_ttl": "1h"}
+        elsewhere = Settings(_env_file=None, llm={"provider": "openai", "anthropic": hour})
+        assert SpendMeter.from_settings(elsewhere).hour_writes is False
+        mixed = Settings(
+            _env_file=None,
+            llm={
+                "provider": "openai",
+                "anthropic": hour,
+                "agents": {"judge": {"provider": "anthropic", "model": HAIKU}},
+            },
+        )
+        meter = SpendMeter.from_settings(mixed)
+        assert meter.writes_hour_caches(HAIKU) is True
+        assert meter.writes_hour_caches("deepseek-v4-pro") is False
 
     def test_the_worst_case_of_a_long_prompt(self) -> None:
         meter = _meter()

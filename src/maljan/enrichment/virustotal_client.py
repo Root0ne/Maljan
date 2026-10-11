@@ -30,6 +30,20 @@ _VT_TIMEOUT_SECONDS = 30.0
 class VirusTotalClient:
     """Thin async client for the VirusTotal v3 domain/IP endpoints."""
 
+    # The id the settings probe tests this source under, its key's setting,
+    # and what the console calls it and its test.
+    source_id = "virustotal"
+    credential_setting = "api.virustotal_api_key"
+    title = "VirusTotal"
+    probe_label = "Test VirusTotal"
+
+    @classmethod
+    async def probe(cls, api_key: str) -> Any:
+        """Look up a public address: any valid key may (``/users/current`` needs a user one)."""
+        from maljan.enrichment.sources import http_probe
+
+        return await http_probe(f"{_VT_BASE_URL}/ip_addresses/8.8.8.8", {"x-apikey": api_key})
+
     def __init__(
         self,
         api_key: str,
@@ -166,3 +180,12 @@ def _redact_url(url: str) -> str:
     except ValueError:
         return "<invalid>"
     return f"{parsed.scheme}://{parsed.hostname}{parsed.path.rsplit('/', 1)[0]}/<redacted>"
+
+
+def _register() -> None:
+    from maljan.enrichment.sources import register_reputation_source
+
+    register_reputation_source(VirusTotalClient)
+
+
+_register()

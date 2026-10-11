@@ -59,9 +59,9 @@ from app.services.mapping_preview import PREVIEW_MAX_BYTES, preview_mapping
 from app.services.server_map import SERVER_MAP_KEY, TOKEN_MASK
 from app.services.settings_catalog_api import catalog_index, full_catalog, resolved_catalog
 from app.services.settings_probes import (
-    PROBES,
     candidate_settings,
     context_window_facts,
+    known_probe,
     run_agent_probe,
     run_mcp_probe,
     run_probe,
@@ -113,16 +113,39 @@ async def get_schema(
     _: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
 ) -> SchemaResponse:
     profiles, agents = await _effective_agents(db)
+    return served_schema(await _effective_servers(db), profiles=profiles, agents=agents)
+
+
+def served_schema(servers: list[str], *, profiles: list[str], agents: list[str]) -> SchemaResponse:
+    """The settings schema as ``GET /settings/schema`` serves it for these choices.
+
+    A pure function of the code and the choices, so the console's tests can
+    be fed exactly what the API serves (``scripts/dev/write_console_schema.py``).
+    """
     by_group: dict[str, list[CatalogEntryDTO]] = {}
-    for e in resolved_catalog(await _effective_servers(db), profiles=profiles, agents=agents):
-        d = e.to_dict()
-        by_group.setdefault(e.group, []).append(CatalogEntryDTO(**d))
+    for e in resolved_catalog(servers, profiles=profiles, agents=agents):
+        by_group.setdefault(e.group, []).append(CatalogEntryDTO(**e.to_dict()))
     groups = [
         GroupDTO(key=g, title=t, description=GROUP_DESCRIPTIONS.get(g, ""), entries=by_group[g])
         for g, t in GROUP_ORDER
         if g in by_group
     ]
-    return SchemaResponse(groups=groups)
+    from app.services.provider_facts import probe_labels
+
+    return SchemaResponse(groups=groups, probe_labels=probe_labels())
+
+
+def default_served_schema() -> SchemaResponse:
+    """The schema a deployment with nothing stored is served."""
+    from maljan.core.settings_overrides import build_settings
+
+    from app.services.agent_map import effective_definitions, effective_profiles
+
+    return served_schema(
+        list(build_settings({}).mcp.servers),
+        profiles=sorted(effective_profiles({})),
+        agents=sorted(effective_definitions({})),
+    )
 
 
 @router.get("", response_model=ValuesResponse)
@@ -726,7 +749,7 @@ async def test_probe(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> ProbeResponse:
-    if probe not in PROBES:
+    if not known_probe(probe):
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown probe: {probe}")
     stored = await SettingsService(db).load_overrides()
     # An LLM probe is allowed five minutes at a third-party endpoint; the read

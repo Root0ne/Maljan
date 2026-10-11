@@ -10,6 +10,7 @@ import { resolveGroup, VIRTUAL_GROUPS } from "./sections";
 import { useSettingsContext, type SettingsContextValue } from "./SettingsContext";
 import { guideById, type GuideId } from "../setup/guides";
 import { probeFingerprint } from "../setup/probeStale";
+import { choiceFacts, choiceTitle } from "@/lib/providerFacts";
 
 /** The setup guide that covers a backend group's keys, if one does. A guide
  *  that is not defined yet simply has no link: `guideById` decides, so this
@@ -33,27 +34,6 @@ function guideHrefForGroup(group: string): string | undefined {
 /** Groups whose first row picks a provider and whose remaining rows belong to
  *  whichever provider that is. */
 const PROVIDER_GROUPS = new Set(["static", "sandbox"]);
-
-/** Titles the plain capitalisation of a choice id would get wrong. */
-const PROVIDER_TITLE: Record<string, string> = {
-  capa_yara: "capa + YARA",
-  generic_mcp: "Generic MCP server",
-  cape2: "CAPE",
-  r2: "radare2",
-  ghidra: "Ghidra",
-  rest: "REST sandbox",
-};
-
-/** What a provider choice that reveals no fields of its own actually means,
- *  so the page says something rather than ending at the selector. */
-const EMPTY_PROVIDER_NOTE: Record<string, string> = {
-  none: "No static provider: the static analyst works from the pre-extracted data only.",
-  mock: "Mock sandbox: built-in fixture reports stand in for a detonation.",
-};
-
-function providerTitle(choice: string): string {
-  return PROVIDER_TITLE[choice] ?? choice.charAt(0).toUpperCase() + choice.slice(1);
-}
 
 function slug(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -216,6 +196,9 @@ export default function GroupPage({ section, group }: { section: string; group: 
   const selector = isProviderGroup ? rows.find(isSelectorEntry) : undefined;
   const dependents = selector ? rows.filter((e) => e.key !== selector.key) : rows;
   const selectedProvider = selector ? String(ctx.effectiveValue(selector.key) ?? "") : "";
+  // What a provider that reveals no fields of its own says it is, so the page
+  // says something rather than ending at the selector.
+  const emptyNote = selector ? choiceFacts(ctx.schema, selector.key, selectedProvider).intro : "";
 
   // A virtual split (the "Profiles" page and the "Agents" page it was carved
   // out of) shows only its own slice of a backend group, so
@@ -247,6 +230,7 @@ export default function GroupPage({ section, group }: { section: string; group: 
       onResetGroup={onResetGroup}
       guideHref={guideHrefForGroup(resolved.backendGroup)}
       probeInputs={probeInputs}
+      probeLabels={ctx.schema?.probe_labels}
     />
   );
 
@@ -275,17 +259,12 @@ export default function GroupPage({ section, group }: { section: string; group: 
       {selector && <Row ctx={ctx} entry={selector} />}
       {selector && (dependents.length > 0 || rest.length > 0) && (
         <h3 className="text-sm font-medium text-text-primary mt-4 mb-1">
-          {providerTitle(selectedProvider)} settings
+          {choiceTitle(ctx.schema, selector.key, selectedProvider)} settings
         </h3>
       )}
-      {selector &&
-        dependents.length === 0 &&
-        rest.length === 0 &&
-        EMPTY_PROVIDER_NOTE[selectedProvider] && (
-          <p className="text-sm text-text-secondary mt-3">
-            {EMPTY_PROVIDER_NOTE[selectedProvider]}
-          </p>
-        )}
+      {selector && dependents.length === 0 && rest.length === 0 && emptyNote && (
+        <p className="text-sm text-text-secondary mt-3">{emptyNote}</p>
+      )}
       {body}
       {rest.length > 0 && (
         <RestSandboxEditor

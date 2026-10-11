@@ -7,6 +7,7 @@ import {
   type StagedDefinitionMap,
 } from "./agentStaging";
 import type { SettingsContextValue } from "./SettingsContext";
+import { agentEndpointProviders } from "@/lib/providerFacts";
 
 /**
  * Builds the props `FieldRow` needs for one catalog entry, from the shared
@@ -23,6 +24,7 @@ export function buildFieldRowProps(ctx: SettingsContextValue, entry: CatalogEntr
       ? String(ctx.effectiveValue("core.llm.provider") ?? "") || null
       : null,
     modelValue: modelEntry ? String(ctx.effectiveValue("core.llm.model") ?? "") || null : null,
+    endpointProviders: agentEndpointProviders(ctx.schema),
   };
 
   return {

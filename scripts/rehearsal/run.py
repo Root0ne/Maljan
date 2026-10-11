@@ -76,7 +76,8 @@ from scripts.rehearsal.roles import SCENARIOS, STAGE_ROLES, Brain  # noqa: E402
 from scripts.rehearsal.sample import sample_bytes  # noqa: E402
 from scripts.rehearsal.stub_model import Pace, StubServer, StubState  # noqa: E402
 
-from maljan.core.config import EFFORT_SETTING_OF_PROVIDER, _is_loopback  # noqa: E402
+from maljan.core.config import _is_loopback  # noqa: E402
+from maljan.llm.provider_base import facts_of  # noqa: E402
 
 TERMINAL = {"completed", "failed", "cancelled", "canceled"}
 ACTIVE = ("pending", "queued", "running")
@@ -541,8 +542,8 @@ def gate_expected(values: dict[str, dict[str, Any]], changes: dict[str, Any]) ->
     # (``ServiceContainer.get_reporter_llm``): the provider's judge model, at
     # the provider's effort. A judge entry does not move it.
     judge_role = _value(values, f"core.llm.{provider}.judge_model") or expert
-    effort_key = "effort" if provider == "anthropic" else "reasoning_effort"
-    effort = str(_value(values, f"core.llm.{provider}.{effort_key}", "") or "")
+    global_setting = facts_of(provider).effort_setting
+    effort = str(_value(values, f"core.{global_setting}", "") or "") if global_setting else ""
     expected: dict[str, Any] = {}
 
     def own(agent: str, fallback: Any = expert) -> tuple[Any, Any]:
@@ -550,7 +551,7 @@ def gate_expected(values: dict[str, dict[str, Any]], changes: dict[str, Any]) ->
         if isinstance(entry, dict) and entry.get("model"):
             # An entry with no effort of its own inherits its own provider's
             # global effort, not the global provider's.
-            setting = EFFORT_SETTING_OF_PROVIDER.get(str(entry.get("provider") or provider))
+            setting = facts_of(str(entry.get("provider") or provider)).effort_setting
             inherited = str(_value(values, f"core.{setting}", "") or "") if setting else ""
             return entry.get("model"), entry.get("effort") or inherited
         return fallback, effort

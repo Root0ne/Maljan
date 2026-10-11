@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any, get_args
 
 import pytest
 from pydantic import ValidationError
@@ -11,40 +10,39 @@ from pydantic import ValidationError
 from app.schemas.job import JobCreateRequest, _KnownJobConfig  # noqa: E402
 
 
-def _literal_choices(annotation: Any) -> tuple[Any, ...]:
-    """Flatten a bare ``Literal[...]`` or an ``Optional[Literal[...]]`` alike.
-
-    ``get_args`` on ``Literal[...] | None`` returns ``(Literal[...], NoneType)``
-    rather than the string members, so the caller has to unwrap one more level
-    when a field is optional.
-    """
-    args = get_args(annotation)
-    for arg in args:
-        inner = get_args(arg)
-        if inner:
-            return inner
-    return args
+def _accepted(field: str, value: str) -> bool:
+    try:
+        _KnownJobConfig.model_validate({field: value})
+    except ValidationError:
+        return False
+    return True
 
 
-def test_the_job_choices_equal_the_registry_ids():
+def test_the_job_accepts_exactly_the_registry_ids():
+    """The job schema reads the registries; there is no copied list to fall behind."""
+    from maljan.llm.provider_base import provider_names
     from maljan.providers.registry import sandbox_provider_ids, static_provider_ids
 
-    static = _literal_choices(_KnownJobConfig.model_fields["static_provider"].annotation)
-    sandbox = _literal_choices(_KnownJobConfig.model_fields["sandbox_provider"].annotation)
-    assert set(static_provider_ids()) <= set(static)
-    assert set(sandbox_provider_ids()) <= set(sandbox)
+    for field, ids in (
+        ("static_provider", static_provider_ids()),
+        ("sandbox_provider", sandbox_provider_ids()),
+        ("llm_provider", provider_names()),
+    ):
+        assert ids and all(_accepted(field, provider) for provider in ids), field
+        assert not _accepted(field, "not-a-registered-provider"), field
 
 
-def test_the_job_choices_equal_the_settings_literals():
-    """Registry parity for Settings itself is Task 5's job (tests/unit/providers/test_registry.py);
-    this only adds the job-schema leg so all three stay in step.
-    """
-    from maljan.core.config import SandboxConfig, StaticConfig
+def test_a_provider_registered_at_runtime_is_accepted_at_submit():
+    from maljan.providers import registry
 
-    static = _literal_choices(_KnownJobConfig.model_fields["static_provider"].annotation)
-    sandbox = _literal_choices(_KnownJobConfig.model_fields["sandbox_provider"].annotation)
-    assert set(static) == set(get_args(StaticConfig.model_fields["provider"].annotation))
-    assert set(sandbox) == set(get_args(SandboxConfig.model_fields["provider"].annotation))
+    @registry.register_sandbox_provider("acme-sandbox")
+    class _Acme:  # noqa: B903 — a registration only needs the class
+        pass
+
+    try:
+        assert _accepted("sandbox_provider", "acme-sandbox")
+    finally:
+        registry._SANDBOX_REGISTRY.pop("acme-sandbox", None)
 
 
 def test_valid_providers_pass():
@@ -96,33 +94,91 @@ def test_the_overridden_providers_show_up_in_the_snapshot():
     assert snap["sandbox.provider"] == "upload"
 
 
-def test_the_ids_agree_exactly_in_all_three_places():
-    """A provider id exists in the registry, the settings model and this schema.
+_SETTING_OF = {
+    "llm_provider": "llm.provider",
+    "static_provider": "static.provider",
+    "sandbox_provider": "sandbox.provider",
+}
 
-    Two of the three agreeing is how the UI ends up offering a choice that
-    422s at submit time, so the assertion is equality rather than containment.
-    """
-    from typing import get_args
 
-    from maljan.core.config import SandboxConfig, StaticConfig
+def _registered(field: str) -> list[str]:
+    from maljan.llm.provider_base import provider_names
     from maljan.providers.registry import sandbox_provider_ids, static_provider_ids
 
-    static_settings = set(get_args(StaticConfig.model_fields["provider"].annotation))
-    sandbox_settings = set(get_args(SandboxConfig.model_fields["provider"].annotation))
-    static_job = set(_literal_choices(_KnownJobConfig.model_fields["static_provider"].annotation))
-    sandbox_job = set(_literal_choices(_KnownJobConfig.model_fields["sandbox_provider"].annotation))
+    return {
+        "llm_provider": provider_names,
+        "static_provider": static_provider_ids,
+        "sandbox_provider": sandbox_provider_ids,
+    }[field]()
 
-    assert set(static_provider_ids()) == static_settings == static_job
-    assert set(sandbox_provider_ids()) == sandbox_settings == sandbox_job
+
+def _built(field: str, value: str) -> str:
+    from app.worker.analysis_worker import build_job_settings
+
+    settings = build_job_settings({}, {field: value})
+    node = settings
+    for part in _SETTING_OF[field].split("."):
+        node = getattr(node, part)
+    return str(node)
+
+
+@pytest.mark.parametrize("field", sorted(_SETTING_OF))
+def test_every_id_the_job_schema_accepts_builds_the_job_s_settings(field):
+    """The submit check and the worker agree: what is accepted is what runs."""
+    for provider in _registered(field):
+        JobCreateRequest(sample_id=uuid.uuid4(), config={field: provider})
+        assert _built(field, provider) == provider
+
+
+@pytest.fixture
+def client():
+    from unittest.mock import MagicMock
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api.v1.jobs import router
+    from app.database import get_db
+    from app.deps import get_current_user
+
+    app = FastAPI()
+    app.include_router(router, prefix="/api/v1")
+    app.dependency_overrides[get_current_user] = lambda: MagicMock(id=uuid.uuid4())
+    app.dependency_overrides[get_db] = lambda: MagicMock()
+    return TestClient(app)
+
+
+@pytest.mark.parametrize("field", sorted(_SETTING_OF))
+def test_every_id_the_job_schema_refuses_is_a_422_at_submit(client, field):
+    from app.worker.analysis_worker import build_job_settings
+
+    response = client.post(
+        "/api/v1/jobs",
+        json={"sample_id": str(uuid.uuid4()), "config": {field: "not-a-registered-provider"}},
+    )
+    assert response.status_code == 422
+    assert field in response.text
+    with pytest.raises(ValidationError):
+        build_job_settings({}, {field: "not-a-registered-provider"})
+
+
+def test_a_sandbox_registered_at_runtime_is_accepted_and_builds():
+    from maljan.providers import registry
+
+    @registry.register_sandbox_provider("acme-sandbox")
+    class _Acme:  # noqa: B903 — a registration only needs the class
+        pass
+
+    try:
+        JobCreateRequest(sample_id=uuid.uuid4(), config={"sandbox_provider": "acme-sandbox"})
+        assert _built("sandbox_provider", "acme-sandbox") == "acme-sandbox"
+    finally:
+        registry._SANDBOX_REGISTRY.pop("acme-sandbox", None)
 
 
 def test_the_rest_sandbox_is_an_accepted_per_job_override():
-    from typing import get_args
-
-    from maljan.core.config import SandboxConfig
-
-    assert "rest" in get_args(SandboxConfig.model_fields["provider"].annotation)
-    assert "rest" in _literal_choices(_KnownJobConfig.model_fields["sandbox_provider"].annotation)
+    assert "rest" in _registered("sandbox_provider")
+    assert _accepted("sandbox_provider", "rest")
     JobCreateRequest(sample_id=uuid.uuid4(), config={"sandbox_provider": "rest"})
 
 

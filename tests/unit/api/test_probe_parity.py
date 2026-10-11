@@ -1,76 +1,55 @@
-"""Every probe the catalog can name is wired up, and nothing extra is silent.
+"""Every probe the catalog can name is wired up, and every provider answers for its own.
 
-Two things could drift apart without a test noticing: a catalog leaf naming a
-``probe`` id ``PROBES`` does not have (a broken "Test" button), and
-``_INPUTS["rest"]`` falling behind the ``core.sandbox.rest.*`` leaves Task 13
-actually added (a probe that quietly ignores a staged field). ``mcp`` is the
-two probe ids with no catalog leaf of their own -- the key each addresses
-comes from a query parameter (``?server=``, ``?name=``), not from a settings
-leaf -- so they, and ``mcp``'s two back-compat aliases, are named explicitly
-rather than discovered.
+A catalog leaf naming a ``probe`` id the route does not answer is a broken
+"Test" button. The route answers its own four probes (the model probe, a tool
+server, an agent definition, the queue) and every registered provider's id,
+static, sandbox, memory backend or reputation source, through that provider's
+own test; there is no table of probes to fall behind.
 """
 
 from __future__ import annotations
 
 from app.services.settings_catalog_api import full_catalog
-from app.services.settings_probes import _INPUTS, PROBES
-
-# ``capa``/``cape`` are one release's back-compat aliases for
-# ``capa_yara``/``cape2`` (see ``PROBES``'s own comments); a stored annotation
-# may still name the older id. ``mcp`` addresses one key of ``core.mcp.servers``
-# and ``agent`` one key of ``core.agents.definitions``, neither a catalog leaf,
-# so no leaf's ``probe`` field ever names them.
-_ALIASES = {"capa": "capa_yara", "cape": "cape2"}
-_NO_CATALOG_LEAF = {"mcp", "agent"}
+from app.services.settings_probes import OWN_PROBES, known_probe, probe_names
+from maljan.llm.provider_base import facts_of, provider_names
 
 
-def test_probes_cover_every_id_the_catalog_names_and_nothing_unnamed_but_the_known_extras():
+def test_every_probe_the_catalog_names_is_answered():
     catalog_probe_ids = {e.probe for e in full_catalog() if e.probe}
-    assert set(PROBES) == catalog_probe_ids | set(_ALIASES) | _NO_CATALOG_LEAF
+    missing = sorted(probe for probe in catalog_probe_ids if not known_probe(probe))
+    assert missing == [], missing
 
 
-def test_rest_inputs_cover_the_rest_leaves_the_probe_actually_reads():
-    """Every ``core.sandbox.rest.*`` leaf the mapping/status/report path uses.
+def test_every_registered_provider_has_a_probe_and_nothing_else_does():
+    from maljan.enrichment.sources import reputation_sources
+    from maljan.memory.store_factory import memory_backends
+    from maljan.providers.registry import sandbox_provider_ids, static_provider_ids
 
-    ``submit.*`` (only touched when a job actually submits, not on a
-    connection test), ``status.done_values``/``status.failed_values`` and
-    ``report.pcap_path`` are real Task 13 leaves that a live run needs but a
-    "Test" click does not -- the REST probe checks reachability and the
-    mapping, not a submission it never makes. The signature scale
-    (``report.signature_scale_*``) is how a run reads its signatures, which no
-    connection test touches.
-    """
-    rest_leaves = {e.key for e in full_catalog() if e.key.startswith("core.sandbox.rest.")}
-    not_probed = {
-        "core.sandbox.rest.submit.method",
-        "core.sandbox.rest.submit.path",
-        "core.sandbox.rest.submit.file_field",
-        "core.sandbox.rest.submit.task_id_path",
-        "core.sandbox.rest.submit.extra_fields",
-        "core.sandbox.rest.submit.submit_fields",
-        "core.sandbox.rest.status.done_values",
-        "core.sandbox.rest.status.failed_values",
-        "core.sandbox.rest.report.pcap_path",
-        "core.sandbox.rest.report.signature_scale_rungs",
-        "core.sandbox.rest.report.signature_scale_name",
+    registered = {
+        *static_provider_ids(),
+        *sandbox_provider_ids(),
+        *memory_backends(),
+        *reputation_sources(),
     }
-    assert set(_INPUTS["rest"]) == rest_leaves - not_probed
+    assert set(probe_names()) == set(OWN_PROBES) | registered
+    assert not known_probe("not-a-provider")
 
 
-def test_mcp_inputs_are_empty_by_design():
-    """The server key comes from the route's query parameter, not a leaf."""
-    assert _INPUTS["mcp"] == {}
-
-
-def test_every_llm_input_is_annotated_with_the_llm_probe():
+def test_every_llm_setting_the_probe_reads_is_annotated_with_the_llm_probe():
     """The staged value only travels if its own leaf declares the probe.
 
     The web collects the probe's key set from the catalog entries whose
-    ``probe`` is ``llm``; a key ``_INPUTS["llm"]`` reads but no annotation
-    names is one the backend silently falls back to a stored value for --
-    exactly how a staged Ollama base URL and model went missing while the
-    probe reported "missing model".
+    ``probe`` is ``llm``: a leaf an adapter reads for its test but no
+    annotation names is one the backend silently falls back to a stored value
+    for.
     """
     by_key = {e.key: e for e in full_catalog()}
-    unannotated = sorted(k for k in _INPUTS["llm"] if by_key[k].probe != "llm")
+    unannotated: list[str] = []
+    for name in provider_names():
+        facts = facts_of(name)
+        leaves = {"expert_model", "judge_model", facts.credential_leaf, facts.base_url_leaf or ""}
+        for leaf in sorted(leaf for leaf in leaves if leaf):
+            key = f"core.llm.{name}.{leaf}"
+            if key in by_key and by_key[key].probe != "llm":
+                unannotated.append(key)
     assert unannotated == [], unannotated

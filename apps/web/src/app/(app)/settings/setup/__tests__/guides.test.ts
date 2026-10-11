@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import served from "@/test-fixtures/settings-schema.json";
 import type { CatalogEntry, SettingsSchema } from "@/types/settings";
 import { GUIDES, guideById, providerChoiceCopy, type GuideContext } from "../guides";
 
@@ -8,74 +9,31 @@ import { GUIDES, guideById, providerChoiceCopy, type GuideContext } from "../gui
  * step order and the reasons Continue is blocked.
  */
 
-const entry = (key: string): CatalogEntry => ({
-  key,
-  namespace: key.startsWith("api.") ? "api" : "core",
-  path: key.slice(key.indexOf(".") + 1),
-  type: "str",
-  default: "",
-  nullable: false,
-  choices: null,
-  minimum: null,
-  maximum: null,
-  secret: false,
-  group: key.split(".")[1] ?? "",
-  title: key,
-  description: "",
-  applies: "next_job",
-  editable: true,
-  reason: null,
+/** The schema the API serves a fresh deployment, as
+ *  `scripts/dev/write_console_schema.py` writes it (and a test on the API side
+ *  keeps it current): the guides are walked against the real catalogue. */
+const SERVED = served as unknown as SettingsSchema;
+
+/** A memory backend a package might register, with keys but no probe: the one
+ *  thing the served catalogue cannot show. */
+const INVENTED_BACKEND: CatalogEntry = {
+  ...(SERVED.groups.flatMap((g) => g.entries).find((e) => e.key === "core.memory.qdrant.url") as CatalogEntry),
+  key: "core.memory.vectorhub.endpoint",
+  path: "memory.vectorhub.endpoint",
   probe: null,
   applies_when: null,
-  order: 0,
-  choices_from: null,
-  editor: null,
-  subgroup: null,
-  advanced: false,
-  required_env: null,
-});
-
-/** Enough of the catalog for the guides that name key families by prefix. */
-const KEYS = [
-  "core.static.provider",
-  "core.static.r2.binary_path",
-  "core.static.r2.mirror_dir",
-  "core.static.capa.rules_dir",
-  "core.static.yara.rules_dir",
-  "core.static.generic.server",
-  "core.sandbox.provider",
-  "core.sandbox.cape2.base_url",
-  "core.sandbox.cape2.api_token",
-  "core.sandbox.cape2.mcp.enabled",
-  "core.sandbox.cape2.mcp.url",
-  "core.sandbox.rest.base_url",
-  "core.sandbox.rest.submit.method",
-  "core.sandbox.rest.submit.path",
-  "core.sandbox.rest.status.path",
-  "core.sandbox.rest.report.path",
-  "core.sandbox.rest.report.format",
-  "core.memory.backend",
-  "core.memory.qdrant.url",
-  "core.memory.qdrant.api_key",
-  "core.memory.vectorhub.endpoint",
-  "core.memory.top_k",
-];
-
-/** The probe each catalog entry declares, as the catalogue annotations do. */
-const PROBES: Record<string, string> = {
-  "core.memory.qdrant.url": "qdrant",
 };
 
 const schema: SettingsSchema = {
+  ...SERVED,
   groups: [
-    {
-      key: "all",
-      title: "All",
-      description: "",
-      entries: KEYS.map((key) => ({ ...entry(key), probe: PROBES[key] ?? null })),
-    },
+    ...SERVED.groups,
+    { key: "invented", title: "Invented", description: "", entries: [INVENTED_BACKEND] },
   ],
 };
+
+const allKeys = schema.groups.flatMap((g) => g.entries).map((e) => e.key);
+const keysUnder = (prefix: string) => allKeys.filter((key) => key.startsWith(prefix));
 
 function context(
   values: Record<string, unknown> = {},
@@ -130,13 +88,13 @@ describe("the guide list", () => {
       ["core.sandbox.provider", ["mock", "cape2", "upload", "triage", "rest"]],
     ] as const) {
       for (const choice of choices) {
-        const copy = providerChoiceCopy(key, choice);
+        const copy = providerChoiceCopy(schema, key, choice);
         expect(copy.title).not.toBe(choice);
         expect(copy.blurb.length).toBeGreaterThan(10);
       }
     }
     // An unknown choice still gets a card, under its own id.
-    expect(providerChoiceCopy("core.static.provider", "future")).toEqual({
+    expect(providerChoiceCopy(schema, "core.static.provider", "future")).toEqual({
       title: "future",
       blurb: "",
     });
@@ -241,14 +199,18 @@ describe("the sandbox guide", () => {
     ]);
   });
 
-  it("folds the CAPE MCP sidecar away and blocks on the CAPE probe", () => {
+  it("shows CAPE's token, URL, poll and timeout up front and folds its MCP sidecar away", () => {
     const values = { "core.sandbox.provider": "cape2" };
     const fields = guideById("sandbox")!.steps(context(values))[1];
-    expect(fields.keys).toContain("core.sandbox.cape2.api_token");
-    expect(fields.advancedKeys).toEqual([
-      "core.sandbox.cape2.mcp.enabled",
-      "core.sandbox.cape2.mcp.url",
+    const folded = fields.advancedKeys ?? [];
+    expect(fields.keys!.filter((key) => !folded.includes(key))).toEqual([
+      "core.sandbox.cape2.api_token",
+      "core.sandbox.cape2.base_url",
+      "core.sandbox.cape2.poll_interval_seconds",
+      "core.sandbox.cape2.timeout_seconds",
     ]);
+    expect(folded).toEqual(keysUnder("core.sandbox.cape2.mcp."));
+    expect(folded.length).toBeGreaterThan(0);
     expect(blockedReason("sandbox", "test", context(values))).toBe("run the test first");
     expect(blockedReason("sandbox", "test", context(values, { probes: ["cape2"] }))).toBeNull();
   });
@@ -336,11 +298,8 @@ describe("the memory guide", () => {
     const connection = guideById("memory")!
       .steps(qdrant)
       .find((s) => s.id === "connection");
-    expect(connection?.keys).toEqual([
-      "core.memory.qdrant.url",
-      "core.memory.qdrant.api_key",
-      "core.memory.top_k",
-    ]);
+    expect(connection?.keys).toEqual([...keysUnder("core.memory.qdrant."), "core.memory.top_k"]);
+    expect(connection?.keys).toContain("core.memory.qdrant.url");
     expect(guideById("memory")!.steps(qdrant).find((s) => s.id === "test")?.probe).toBe("qdrant");
   });
 

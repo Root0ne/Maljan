@@ -383,13 +383,28 @@ the result as one write, so a half-configured provider is never left behind.
 
 ### Connection probes
 
-Thirteen probes back the "Test" buttons
-(`apps/api/app/services/settings_probes.py`): `llm`, `ghidra`, `r2`, `capa`,
-`mcp`, `agent`, `cape2`, `triage`, `rest`, `qdrant`, `redis`, `virustotal`,
-`abuseipdb`. They are reached at `POST /api/v1/settings/test/{probe}`, with
-`/test/mcp` and `/test/agent` taking a body naming the server or agent. A probe
-that fails answers 200 with the failure as data — a connection test that fails
-is an answer, not an error.
+The "Test" buttons are each provider's own connection test
+(`apps/api/app/services/settings_probes.py` holds no table of them). The API
+answers four probes of its own — `llm`, `mcp`, `agent` and `redis` — and every
+registered provider's id: a static or sandbox provider is built from the
+candidate settings and its own `probe()` is asked, a memory backend's
+`readiness()`, a reputation source's `probe()`. The `llm` probe lists models,
+builds its one short turn and reads the answer through the selected LLM
+provider's adapter (`maljan.llm.provider_base`). A provider registered at
+runtime has a "Test" button the day it is registered, and the test and the job
+read one object built one way. They are reached at
+`POST /api/v1/settings/test/{probe}`, with `/test/mcp` and `/test/agent` taking
+a body naming the server or agent; an id no provider registered answers 404. A
+probe that fails answers 200 with the failure as data — a connection test that
+fails is an answer, not an error.
+
+What the console shows about a provider — its title, its one-line description,
+its credential keys, whether it is hosted or run locally, its test and the label
+of its button, whether an agent may give it an endpoint of its own, its effort
+setting — is the provider's own declaration, served by `GET /settings/schema`
+on its selector's entry (`choice_titles`, `choice_descriptions`,
+`choice_facts`) and in `probe_labels`. The built-in and reserved tool-server
+keys come on the server map's entry. The console keeps no table of providers.
 
 A probe runs against the staged values on top of the stored ones, so an input
 the caller did not stage comes from the store — including the credential. That

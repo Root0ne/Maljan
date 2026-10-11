@@ -36,7 +36,7 @@ def analyze(
         None, "--sample", "-s", help="Path to the malware sample file for sandbox submission."
     ),
     provider: str = typer.Option(
-        "openai", "--provider", "-p", help="LLM provider: openai, anthropic, ollama, gemini."
+        "openai", "--provider", "-p", help="A registered LLM provider's name."
     ),
     max_iterations: int = typer.Option(
         2, "--max-iterations", "-i", min=1, help="Maximum negotiation rounds."

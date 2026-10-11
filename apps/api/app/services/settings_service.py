@@ -298,8 +298,11 @@ class SettingsService:
                 and entry.choices is not None
                 and changes[key] is not None
                 and changes[key] != stored.get(key)
-                and str(changes[key]).strip().lower() not in entry.choices
+                and changes[key] not in entry.choices
             ):
+                # Exactly as the registry spells it: a value that differs in
+                # case or spacing names no provider when a job is built, so it
+                # is refused here rather than stored for every job to fail on.
                 # A choice a registry holds (a memory backend, say) is checked
                 # here, where it is saved, rather than wherever the settings
                 # are read: a stored id whose package later breaks still loads.
@@ -307,13 +310,49 @@ class SettingsService:
         if errors:
             raise SettingsValidationError(errors)
 
+    def _with_value_errors(
+        self,
+        refused: SettingsValidationError,
+        changes: dict[str, Any],
+        current: dict[str, Any],
+    ) -> SettingsValidationError:
+        """``refused``, with what ``validate`` says about the keys it did not refuse."""
+        errors = dict(refused.errors)
+        index = catalog_index()
+        merged = dict(current)
+        for key, value in changes.items():
+            if key in errors or key not in index:
+                continue
+            if value is None:
+                merged.pop(key, None)
+            else:
+                merged[key] = value
+        core = {split_key(k)[1]: v for k, v in merged.items() if k.startswith("core.")}
+        api = {split_key(k)[1]: v for k, v in merged.items() if k.startswith("api.")}
+        try:
+            self.validate(core, api)
+        except SettingsValidationError as more:
+            for key, message in more.errors.items():
+                errors.setdefault(key, message)
+        except Exception:  # noqa: BLE001 — the refusal stands on its own
+            pass
+        return SettingsValidationError(errors)
+
     def validate(self, merged_core: dict[str, Any], merged_api: dict[str, Any]) -> None:
         errors: dict[str, str] = {}
         try:
-            build_settings(merged_core)
+            built = build_settings(merged_core)
         except ValidationError as exc:
             for err in exc.errors():
                 errors[_loc_to_key("core", err["loc"])] = err["msg"]
+        else:
+            # The selected provider's role models are read from its own block,
+            # never borrowed from another provider's.
+            from maljan.llm.provider_base import role_block_problem
+
+            problem = role_block_problem(built)
+            if problem:
+                errors["core.llm.provider"] = problem
         # No ``APISettings(**nest(merged_api))`` here: ``extra="ignore"`` drops
         # everything a catalog ``api.*`` key could supply (every one of them
         # moved off the model), so the call could only ever have failed
@@ -337,7 +376,12 @@ class SettingsService:
         self, changes: dict[str, Any], *, user_id: uuid.UUID | None, ip: str | None
     ) -> SaveResult:
         current = await self.load_overrides()
-        self.check_keys(changes, current)
+        try:
+            self.check_keys(changes, current)
+        except SettingsValidationError as refused:
+            # Every refused key is named in one answer: what the model would
+            # refuse among the keys that passed is said beside it.
+            raise self._with_value_errors(refused, changes, current) from None
         index = catalog_index()
         # An import document carries the mask wherever a secret was omitted.
         # For a secret leaf the mask means "unchanged", exactly as it does in

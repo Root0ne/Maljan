@@ -45,6 +45,7 @@ from maljan.core.logger import logger
 from maljan.core.paths import resolve_data
 from maljan.providers.base import (
     EvidenceAnswer,
+    ProviderProbe,
     StaticCapabilities,
     StaticEvidenceBundle,
     StaticProvider,
@@ -308,6 +309,14 @@ def run_capa_document(
 class CapaYaraStaticProvider(StaticProvider):
     """capa and YARA: evidence for the analyst, not tools for the model."""
 
+    # What the console calls this provider and says about it, and its test's label.
+    choice_label = "capa + YARA"
+    choice_order = 2
+    title = "capa + YARA"
+    description = "Rule sets on disk name the capabilities and match the file; no server to run."
+    probe_label = "Test capa + YARA rules"
+    settings_intro = "The rule directories to load. Both are read at the start of every analysis."
+
     def __init__(self, capa: StaticCapaConfig, yara: StaticYaraConfig) -> None:
         self._capa = capa
         self._yara = yara
@@ -316,6 +325,44 @@ class CapaYaraStaticProvider(StaticProvider):
     @classmethod
     def from_settings(cls, cfg: Settings) -> CapaYaraStaticProvider:
         return cls(cfg.static.capa, cfg.static.yara)
+
+    async def probe(self) -> ProviderProbe:
+        """Count capa and YARA rule files without touching a sample.
+
+        No live handshake exists for either (both are local libraries reading
+        local rule directories), so the connection test is the check the
+        provider makes before a run: is the library importable, and does each
+        configured directory hold rule files. Naming which is missing stops an
+        operator from discovering an evidence-free run only after it finishes.
+        """
+        import importlib.util
+
+        t0 = time.perf_counter()
+        parts: list[str] = []
+        capa_ok = False
+        if importlib.util.find_spec("capa") is None:
+            parts.append("capa library is not installed (uv sync --extra capa)")
+        else:
+            capa_dir = Path(resolve_data(str(self._capa.rules_dir or "")))
+            capa_rules = list(capa_dir.rglob("*.yml")) if capa_dir.is_dir() else []
+            if not capa_dir.is_dir():
+                parts.append(f"capa rules directory {capa_dir} does not exist")
+            elif not capa_rules:
+                parts.append(f"capa rules directory {capa_dir} has no *.yml rules")
+            else:
+                capa_ok = True
+                parts.append(f"{len(capa_rules)} rules under {capa_dir}")
+        yara_dir = Path(resolve_data(str(self._yara.rules_dir or "")))
+        yara_files = (
+            [*yara_dir.glob("*.yml"), *yara_dir.glob("*.yaml")] if yara_dir.is_dir() else []
+        )
+        if not yara_dir.is_dir():
+            parts.append(f"YARA rules directory {yara_dir} does not exist")
+        elif not yara_files:
+            parts.append(f"YARA rules directory {yara_dir} has no rule file")
+        else:
+            parts.append(f"{len(yara_files)} YARA rule file(s) under {yara_dir}")
+        return ProviderProbe(capa_ok, "; ".join(parts), int((time.perf_counter() - t0) * 1000))
 
     @property
     def capabilities(self) -> StaticCapabilities:

@@ -24,6 +24,23 @@ _ABUSE_TIMEOUT_SECONDS = 20.0
 class AbuseIPDBClient:
     """Thin async client for ``GET /api/v2/check``."""
 
+    # The id the settings probe tests this source under, its key's setting,
+    # and what the console calls it and its test.
+    source_id = "abuseipdb"
+    credential_setting = "api.abuseipdb_api_key"
+    title = "AbuseIPDB"
+    probe_label = "Test AbuseIPDB"
+
+    @classmethod
+    async def probe(cls, api_key: str) -> Any:
+        """Check a public address over the last day: the cheapest call the key may make."""
+        from maljan.enrichment.sources import http_probe
+
+        return await http_probe(
+            f"{_ABUSE_URL}?ipAddress=8.8.8.8&maxAgeInDays=1",
+            {"Key": api_key, "Accept": "application/json"},
+        )
+
     def __init__(self, api_key: str, http: httpx.AsyncClient) -> None:
         if not api_key:
             raise ValueError("AbuseIPDBClient: api_key is required")
@@ -87,3 +104,12 @@ def _safe_ip(value: str) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _register() -> None:
+    from maljan.enrichment.sources import register_reputation_source
+
+    register_reputation_source(AbuseIPDBClient)
+
+
+_register()

@@ -407,6 +407,14 @@ class GhidraStaticProvider(StaticProvider):
     and network degrade.
     """
 
+    # What the console calls this provider and says about it, and its test's label.
+    choice_label = "Ghidra"
+    choice_order = 0
+    title = "Ghidra MCP"
+    description = "A running Ghidra MCP server decompiles and names functions on request."
+    probe_label = "Test Ghidra MCP"
+    settings_intro = "Where the Ghidra MCP server listens, and how it authenticates."
+
     def __init__(
         self,
         cfg: MCPServerConfig,
@@ -784,11 +792,20 @@ class GhidraStaticProvider(StaticProvider):
                 detail=redact_url(f"{type(exc).__name__}: {exc}"),
                 latency_ms=int((time.perf_counter() - t0) * 1000),
             )
-        return ProviderProbe(
-            ok=response.status_code < 400,
-            detail=f"HTTP {response.status_code}",
-            latency_ms=int((time.perf_counter() - t0) * 1000),
-        )
+        latency = int((time.perf_counter() - t0) * 1000)
+        if response.status_code >= 400:
+            return ProviderProbe(False, f"HTTP {response.status_code}", latency)
+        # The tool names the model will call, read the way the client reads
+        # the schema, for the editor's tick boxes.
+        from maljan.agents.ghidra_http_client import schema_tool_names
+
+        try:
+            names = schema_tool_names(response.json())
+        except ValueError:
+            return ProviderProbe(
+                False, f"HTTP {response.status_code}; the schema was not JSON", latency
+            )
+        return ProviderProbe(True, f"{len(names)} tools", latency, names)
 
     async def readiness(self) -> ProviderProbe:
         """Whether a job on Ghidra can start: its schema answering, and no analysis.

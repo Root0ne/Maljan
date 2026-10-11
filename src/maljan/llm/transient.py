@@ -86,8 +86,9 @@ STREAM_ERROR_KIND = "error event in the stream"
 # reads it and moves on rather than waiting on the same model once more.
 RETRIED_ATTRIBUTE = "maljan_retries_spent"
 
-# The provider SDKs whose exceptions carry a status or a body this module reads.
-_PROVIDER_PACKAGES = frozenset({"openai", "anthropic", "ollama"})
+# The provider SDKs whose exceptions carry a status or a body this module reads
+# are the ones the registered adapters declare, less those whose own client
+# retries (``provider_base.transient_error_packages``).
 
 # Set while a call runs inside the policy, so a model call nested in it is made
 # once and the policy around it decides.
@@ -103,7 +104,17 @@ def _from_a_provider(exc: BaseException) -> bool:
     ``ChatOpenAI`` is ``langchain_openai``'s ``OpenAIAPIError``), so the whole
     class line is read, not the class's own module.
     """
-    return any(package in _PROVIDER_PACKAGES for package, _name in _class_names(exc))
+    from maljan.llm.provider_base import transient_error_packages
+
+    packages = transient_error_packages()
+    return any(package in packages for package, _name in _class_names(exc))
+
+
+def _named(names: set[tuple[str, str]], class_name: str) -> bool:
+    """Whether a provider SDK's class called ``class_name`` is in ``names``."""
+    from maljan.llm.provider_base import transient_error_packages
+
+    return any((package, class_name) in names for package in transient_error_packages())
 
 
 def _class_names(exc: BaseException) -> set[tuple[str, str]]:
@@ -161,7 +172,7 @@ def _a_stall(exc: BaseException) -> bool:
     if isinstance(exc, TimeoutError):
         return True
     names = _class_names(exc)
-    if any((package, "APITimeoutError") in names for package in ("openai", "anthropic")):
+    if _named(names, "APITimeoutError"):
         return True
     from maljan.llm.generation_rate import _transport_read_timeout
 
@@ -185,7 +196,7 @@ def transient_failure(exc: BaseException) -> str | None:
         if window_full_error(exc):
             return None
         names = _class_names(exc)
-        if any((package, "APIConnectionError") in names for package in ("openai", "anthropic")):
+        if _named(names, "APIConnectionError"):
             return "connection error"
         status = _status(exc)
         # The provider's own word on this answer, as the Anthropic SDK read it.

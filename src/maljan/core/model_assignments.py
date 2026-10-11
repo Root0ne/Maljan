@@ -14,8 +14,9 @@ The provider is carried alongside for the sentence a refusal prints, but it is
 not part of the key — two providers cannot serve one model at one endpoint.
 
 An endpoint is a URL where a provider has one, and the vendor's own name where
-it does not: Anthropic and Gemini are vendor APIs with nothing per-agent to
-override, so "the Anthropic API" is the whole of what an address means there.
+it does not: a vendor API with nothing per-agent to override is reached at one
+place, so its name is the whole of what an address means there. Each
+provider's adapter says which it is (``LLMProvider.endpoint``).
 
 There is one function that answers where a call goes, and the settings probe
 calls it too. A probe that worked the address out for itself and a gate that
@@ -29,16 +30,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from urllib.parse import urlsplit, urlunsplit
 
-# Where a provider with no configurable endpoint sends its calls. Not a URL,
-# because nothing here would do anything with one: it is the name of the only
-# place that provider can be reached.
-_VENDOR_ENDPOINTS = {
-    "anthropic": "the Anthropic API",
-    "gemini": "the Gemini API",
-}
-# What an entry with no base_url of its own talks to.
-_OPENAI_DEFAULT = "https://api.openai.com/v1"
-_OLLAMA_DEFAULT = "http://localhost:11434"
 # The port each scheme means without one, so two spellings of one server do
 # not become two keys.
 _DEFAULT_PORTS = {"http": 80, "https": 443}
@@ -165,42 +156,28 @@ def endpoint_label(endpoint: object) -> str:
     return address or "(unparseable endpoint)"
 
 
-def endpoint_where(
-    provider: str,
-    base_url: object = None,
-    *,
-    openai_base_url: object = None,
-    ollama_base_url: object = None,
-    anthropic_base_url: object = None,
-) -> str:
+def endpoint_where(provider: str, base_url: object = None, *, configured: object = None) -> str:
     """Where ``provider`` sends its calls, an entry's own ``base_url`` first.
 
-    The plain-value form of ``endpoint_for``, for the settings probe, which
-    holds staged values rather than a settings object. One function under both
-    so that the address a probe files its answer under and the address the gate
-    looks that answer up under cannot be two.
+    ``configured`` is the provider's own configured address. The plain-value
+    form of ``endpoint_for``, for the settings probe, which holds staged values
+    rather than a settings object. One function under both so that the address
+    a probe files its answer under and the address the gate looks that answer
+    up under cannot be two. The provider's adapter decides
+    (``LLMProvider.endpoint``): whether an entry may name its own address,
+    whether the provider has a configured one, and the default.
     """
-    named = normalised_endpoint(base_url)
-    if provider == "openai":
-        return named or normalised_endpoint(openai_base_url) or _OPENAI_DEFAULT
-    if provider == "ollama":
-        return named or normalised_endpoint(ollama_base_url) or _OLLAMA_DEFAULT
-    if provider == "anthropic":
-        # The vendor's name unless an address is configured: a proxy, or a
-        # loopback stub, is an address a probe reached and is filed as one.
-        return normalised_endpoint(anthropic_base_url) or _VENDOR_ENDPOINTS[provider]
-    return _VENDOR_ENDPOINTS.get(provider, provider)
+    from maljan.llm.provider_base import facts_of
+
+    return facts_of(provider).endpoint(base_url, configured) or str(provider)
 
 
 def endpoint_for(settings: object, provider: str, base_url: str | None = None) -> str:
     """Where ``provider`` sends its calls under ``settings``, agent override first."""
-    llm = settings.llm  # type: ignore[attr-defined]
+    from maljan.llm.provider_base import facts_of
+
     return endpoint_where(
-        provider,
-        base_url,
-        openai_base_url=llm.openai.base_url,
-        ollama_base_url=llm.ollama.base_url,
-        anthropic_base_url=getattr(llm.anthropic, "base_url", None),
+        provider, base_url, configured=facts_of(provider).configured_base_url(settings)
     )
 
 
@@ -325,16 +302,20 @@ def model_label_for(settings: object, agent: str, *, role: str = "expert") -> st
 def configured_endpoint_labels(settings: object) -> set[str]:
     """The model endpoints the settings configure, each as a run records it (its label).
 
-    The global provider's endpoint for each role, the OpenAI-compatible and
-    Ollama base URLs, and every endpoint an agent's own entry or its
-    fallbacks name. A vendor API's own name is no address and is left out.
+    The global provider's endpoint for each role, the endpoint of every
+    provider an agent may point at an address of its own, and every endpoint
+    an agent's own entry or its fallbacks name. A vendor API's own name is no
+    address and is left out.
     """
+    from maljan.llm.provider_base import facts_of, provider_names
+
     llm = settings.llm  # type: ignore[attr-defined]
-    where: list[str] = [
-        endpoint_for(settings, str(llm.provider)),
-        endpoint_for(settings, "openai"),
-        endpoint_for(settings, "ollama"),
-    ]
+    where: list[str] = [endpoint_for(settings, str(llm.provider))]
+    where.extend(
+        endpoint_for(settings, name)
+        for name in provider_names()
+        if facts_of(name).supports_agent_base_url
+    )
     for agent in list(getattr(llm, "agents", {}) or {}):
         where.extend(a.endpoint for a in assignment_chain_for(settings, agent))
     return {endpoint_label(w) for w in where if "://" in str(w or "")}

@@ -28,6 +28,13 @@ class MockSandboxProvider(SandboxProvider):
     the first ``submit``/``fetch`` and have it take effect.
     """
 
+    # What the console calls this provider and says about it, and its test's label.
+    choice_label = "Mock sandbox"
+    choice_order = 0
+    title = "Mock sandbox"
+    description = "Built-in fixture reports stand in for a detonation; nothing is executed."
+    settings_intro = "Mock sandbox: built-in fixture reports stand in for a detonation."
+
     def __init__(self, fixtures_dir: str) -> None:
         self.fixtures_dir = fixtures_dir
         self._client: Any = None

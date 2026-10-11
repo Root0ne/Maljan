@@ -173,17 +173,19 @@ def _serves_concurrently(settings: Any, assignment: Any, *, probe: bool) -> tupl
     """Whether one model's endpoint serves concurrent requests, and the fact that decided."""
     from maljan.core.model_assignments import endpoint_label
     from maljan.llm.context_window import reported_slots, window_for_assignment
+    from maljan.llm.provider_base import facts_of
 
     provider = str(assignment.provider)
     endpoint = str(assignment.endpoint or "")
     where = endpoint_label(endpoint) or provider
     named = f"{provider}/{assignment.model}"
-    if provider == "ollama":
+    facts = facts_of(provider)
+    if facts.concurrency == "serial":
         return False, (
-            f"{named} is served by Ollama at {where}, a runtime taken to serve one request "
-            "at a time"
+            f"{named} is served by {facts.label or provider} at {where}, a runtime taken to "
+            "serve one request at a time"
         )
-    if provider != "openai":
+    if facts.concurrency == "hosted":
         return True, f"{named} is served by the hosted {provider} API"
     kind, fact = locality(endpoint)
     if probe and kind != "unknown":
@@ -285,13 +287,16 @@ def resolve_reporter_mode(settings: Any, *, probe: bool = True) -> ReporterMode:
     if not seen:
         return ReporterMode(1, setting, f"{SETTING} is {setting} and the reporter names no model")
     from maljan.llm.context_window import reported_slots
+    from maljan.llm.provider_base import facts_of
 
     limits: list[int] = []
     said: list[str] = []
     for assignment in seen.values():
         concurrent, why = _serves_concurrently(settings, assignment, probe=probe)
         slots = (
-            reported_slots(str(assignment.endpoint or "")) if assignment.provider == "openai" else 0
+            reported_slots(str(assignment.endpoint or ""))
+            if facts_of(assignment.provider).concurrency == "endpoint"
+            else 0
         )
         if slots > 0:
             limits.append(slots)

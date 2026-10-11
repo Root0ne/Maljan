@@ -42,11 +42,20 @@ def test_the_cap_is_four_mebibytes():
 
 
 def test_the_rest_probe_is_registered_and_reads_the_rest_settings():
-    from app.services.settings_probes import _INPUTS, PROBES
+    """The probe is the provider's own, built from the candidate ``sandbox.rest`` block."""
+    from app.services.settings_probes import candidate_settings, known_probe
+    from maljan.providers.sandbox.rest import RestSandboxProvider
 
-    assert "rest" in PROBES
-    assert "core.sandbox.rest.base_url" in _INPUTS["rest"]
-    assert "core.sandbox.rest.auth.token" in _INPUTS["rest"]
+    assert known_probe("rest")
+    settings = candidate_settings(
+        {
+            "core.sandbox.rest.base_url": "https://xyz.example/api",
+            "core.sandbox.rest.auth.token": "t",
+        },
+        {},
+    )
+    provider = RestSandboxProvider.from_settings(settings)
+    assert provider._cfg.base_url == "https://xyz.example/api"
 
 
 def test_a_good_mapping_over_the_xyz_fixture_matches_task_10s_golden():

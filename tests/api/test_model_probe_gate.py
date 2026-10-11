@@ -683,7 +683,11 @@ class TestOneAddressUnderBothHalves:
             },
             {
                 "provider": "ollama",
-                "ollama": {"base_url": "http://ollama:11434/", "expert_model": "qwen3:8b"},
+                "ollama": {
+                    "base_url": "http://ollama:11434/",
+                    "expert_model": "qwen3:8b",
+                    "judge_model": "qwen3:8b",
+                },
             },
         ),
         "anthropic": (
@@ -739,7 +743,7 @@ class TestOneAddressUnderBothHalves:
                 transport=httpx.MockTransport(self._server(provider)), timeout=10
             ),
         )
-        result = await probes.probe_llm(dict(self.CASES[provider][0]))
+        result = await probes.probe_llm(_settings(**self.CASES[provider][1]))
         assert result.ok, result.detail
         return list((result.details or {})["completions"])
 
@@ -905,17 +909,19 @@ class TestAnEntrysOwnEffort:
             lambda *_a, **_k: httpx.AsyncClient(transport=httpx.MockTransport(handler), timeout=10),
         )
         result = await probes.probe_llm(
-            {
-                "provider": "openai",
-                "base_url": "http://box:8080/v1",
-                "api_key": "k",
-                "expert_model": "qwen",
-                "reasoning_effort": "max",
-                "agents": {
+            _settings(
+                provider="openai",
+                openai={
+                    "base_url": "http://box:8080/v1",
+                    "api_key": "k",
+                    "expert_model": "qwen",
+                    "reasoning_effort": "max",
+                },
+                agents={
                     "static": {"provider": "openai", "model": "ds", "effort": "high"},
                     "network": {"provider": "openai", "model": "ds"},
                 },
-            }
+            )
         )
 
         assert result.ok, result.detail

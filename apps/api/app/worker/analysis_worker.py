@@ -143,13 +143,23 @@ def build_job_settings(
     """UI overrides layered over the model defaults, then the job's own config on top.
 
     The job's values are folded into the override dict rather than assigned
-    afterwards, so the model's Literal choices and bounds apply to them too
-    (``Settings`` does not validate on assignment). Which provider ids are
-    legal here stays in step with the registry and ``Settings`` themselves via
-    ``test_job_provider_overrides.py::test_the_ids_agree_exactly_in_all_three_places``.
+    afterwards, so the model's choices and bounds apply to them too
+    (``Settings`` does not validate on assignment). The provider names a job
+    gives are checked against their registries, as the submit route checks
+    them (``_KnownJobConfig``), so a job naming a provider nothing registered
+    fails here rather than when its first model is built.
     """
     merged = dict(overrides)
     if job_config:
+        from app.schemas.job import _KnownJobConfig
+
+        _KnownJobConfig.model_validate(
+            {
+                key: job_config[key]
+                for key in ("llm_provider", "static_provider", "sandbox_provider")
+                if job_config.get(key) is not None
+            }
+        )
         if job_config.get("max_iterations") is not None:
             merged["negotiation.max_iterations"] = job_config["max_iterations"]
         if job_config.get("llm_provider") is not None:
@@ -164,7 +174,15 @@ def build_job_settings(
             merged["sandbox.provider"] = "upload"
         if job_config.get("profile") is not None:
             merged["agents.profile"] = job_config["profile"]
-    return build_settings(merged)
+    settings = build_settings(merged)
+    # The selected provider's role models come from its own block; a job never
+    # runs with an empty model name borrowed from nowhere.
+    from maljan.llm.provider_base import role_block_problem
+
+    problem = role_block_problem(settings)
+    if problem:
+        raise ValueError(f"llm.provider: {problem}")
+    return settings
 
 
 def retired_environment_lines(environ: Mapping[str, str]) -> list[str]:

@@ -35,6 +35,7 @@ class Annotation(TypedDict):
             "agent_roles",
             "profiles",
             "memory_backends",
+            "llm_providers",
         ]
     ]
     editor: NotRequired[Literal["server_map", "rest_sandbox", "agent_definitions", "stages"]]
@@ -813,12 +814,12 @@ ANNOTATIONS: dict[str, Annotation] = {
     "llm.provider": {
         "title": "Provider",
         "description": (
-            "Selects which LLM backend serves both the expert and judge roles: openai, "
-            "anthropic, ollama, or gemini. Switching providers routes every LLM call in "
-            "the pipeline to that provider's endpoint and picks up its model settings "
-            "below."
+            "Selects which registered LLM provider serves both the expert and judge "
+            "roles. Switching providers routes every LLM call in the pipeline to that "
+            "provider's endpoint and picks up its model settings below."
         ),
         "probe": "llm",
+        "choices_from": "llm_providers",
     },
     "llm.view_decomposition_mode": {
         "title": "View-decomposition mode",
