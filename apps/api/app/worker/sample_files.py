@@ -23,6 +23,8 @@ import time
 from collections.abc import Iterable
 from pathlib import Path
 
+from maljan.providers.base import DEFAULT_WORK_DIR
+
 from app.config import settings
 from app.logging_config import get_logger
 
@@ -57,10 +59,11 @@ def temp_dir() -> Path:
     return _private_dir(Path(settings.upload_temp_dir).resolve())
 
 
-def work_dir(subdir: str) -> Path:
+def work_dir(subdir: str = DEFAULT_WORK_DIR) -> Path:
     """The private mirror directory ``subdir`` names, created 0o700.
 
-    ``subdir`` is a provider's ``MirrorSpec.work_subdir``, which for r2 comes
+    ``subdir`` is a provider's ``MirrorSpec.work_subdir`` (the shared default when
+    none is named), which for r2 comes
     from an operator-set path. Taking the last segment is not on its own enough
     to keep this inside ``samples_dir``: ``Path("data/samples/..").name`` is
     ``".."``, which resolves to the *parent* of ``samples_dir`` — a directory
