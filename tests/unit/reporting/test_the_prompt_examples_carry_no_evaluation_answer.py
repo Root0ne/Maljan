@@ -69,6 +69,7 @@ from maljan.agents.judge_agent import QUESTION_ROOTS_LABEL as _ROOTS_LABEL
 from maljan.agents.network_analyst import (
     NO_PACKET_TOOL_LINE,
     OTHER_TOOLS_THEN_ANALYZE,
+    UNDECLARED_TOOLS_LINE,
     _flows_label,
     primary_evidence_line,
 )
@@ -79,6 +80,7 @@ from maljan.agents.prompt_fragments import (
     TOOL_FREE_TURN_STATEMENT,
     no_tool_call_question,
     tools_statement,
+    undeclared_server_text,
 )
 from maljan.agents.prompts import (
     ANDROID_STATIC_PROMPT,
@@ -2026,7 +2028,12 @@ PROMPTS: dict[str, str] = {
             ),
         ]
     ),
-    "network packet-tool lines": f"{NO_PACKET_TOOL_LINE} {OTHER_TOOLS_THEN_ANALYZE}",
+    "network packet-tool lines": (
+        f"{NO_PACKET_TOOL_LINE} {OTHER_TOOLS_THEN_ANALYZE} {UNDECLARED_TOOLS_LINE}"
+    ),
+    "a server that declares no workflow, in its own quoted words": undeclared_server_text(
+        "custom", "Served words.", [_StampedTool("decompile_function", "custom")]
+    ),
     "the network flows named by the job's sandbox, or by neither": " ".join(
         [_flows_label(None), _flows_label(CAPE2SandboxProvider), _flows_label(MockSandboxProvider)]
     ),

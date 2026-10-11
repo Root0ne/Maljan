@@ -98,8 +98,8 @@ OTHER_TOOLS_THEN_ANALYZE = "Use the tools in your tool list where they help, the
 # any of them may read the capture, and the model, not this line, decides.
 UNDECLARED_TOOLS_LINE = (
     "Your tool list holds tools that declare no kind; you MAY use any of them that reads the "
-    "capture to confirm packet-level beaconing or tunnelling, but base your findings primarily "
-    "on the structured flows above and do NOT block on the PCAP."
+    "capture to check the flows above at packet level, but base your findings primarily on "
+    "the structured flows above and do NOT block on the PCAP."
 )
 
 

@@ -1532,7 +1532,8 @@ DECLARATION_LEAVES: tuple[tuple[str, str, str], ...] = (
         "prompt_fragment",
         "workflow text",
         "The workflow text shown to an agent only while this server's tools are attached. "
-        "Empty shows none.",
+        "Empty: a server that offers tools it declares nothing for is introduced by its own "
+        "served instructions and tool descriptions, quoted as its data; otherwise none.",
     ),
     (
         "required_env_allow",
@@ -1570,7 +1571,9 @@ DECLARATION_LEAVES: tuple[tuple[str, str, str], ...] = (
     (
         "reads_staged_sample",
         "reads the staged sample",
-        "Whether the server's path-taking tools read the sample the platform staged for it.",
+        "Whether the server's path-taking tools read the sample the platform staged for it: "
+        "their sample argument is hidden from the model and filled, and their capture "
+        "argument filled when the job has one capture.",
     ),
     (
         "tool_facts",

@@ -211,7 +211,8 @@ class MCPLangChainToolkit:
                 )
             self.session = await self._exit_stack.enter_async_context(ClientSession(read, write))
             initialized = await self.session.initialize()
-            self.server_instructions = str(getattr(initialized, "instructions", "") or "")
+            served = getattr(initialized, "instructions", None)
+            self.server_instructions = served if isinstance(served, str) else ""
 
             # Fetch available tools
             response = await self.session.list_tools()

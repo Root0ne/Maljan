@@ -3007,6 +3007,11 @@ by one, each with the same output for the built-ins. Read today: `sample_open`;
 the worker reads `sample_mount` and `work_dir` (below); `error_patterns`, for
 every server; `prompt_fragment` by the prompts (a static provider's block after
 its claim guidance, any other server after the sentence about tools);
+`reads_staged_sample` by the path guard, which hides the sample argument of
+such a server's tools from the model and fills it, and fills its capture
+argument when the job has one capture; each tool's `long_running` and
+`timeout_seconds` by the server guard, as a manifest's own (the larger budget
+wins);
 `auto_name_prefixes` wherever a function's auto-name is read as its address;
 `reference_urls` by the report's references; and each tool's `kind`, `reader`,
 `asserts_techniques`, `source`, `techniques`, `rows`, `places`, `values`,
@@ -3021,7 +3026,10 @@ radare2's block keeps its own `mirror_dir`) and hands the server the copy under
 its `sample_mount`: `<sample_mount>/<work_dir>/<sha256><suffix>`, or the copy's
 host path when `sample_mount` is empty. Each server has its own, so two
 containerised servers mounted at different paths are each handed their own
-path. Ghidra's block ships `/data/samples`, the mount the shipped compose file
+path. A server that declares a `sample_mount` is copied the sample whether a
+static provider drives it or an agent's `agents` list or tool reference binds
+it, and the agent's path arguments are held to that copy; a server the sample
+was uploaded to (`put_sample`) keeps the path its upload answered. Ghidra's block ships `/data/samples`, the mount the shipped compose file
 writes. A `generic_mcp` server reached over http, sse or streamable-http that
 declares no mount is taken to see the samples directory at `/data/samples` as
 well; one over stdio reads the worker's filesystem. The directories the worker
@@ -3284,9 +3292,15 @@ shape:
   `arguments.address` names, then in the shared list (`address`, `addr`,
   `function_address`, `ea`, `va`, `start_address`, `entry_address`). Only a
   tool that declares nothing is read by the words of its name (`decompil`,
-  `disassembl`, `xref`, `string`), in one place (`core.undeclared_tools`);
+  `disassembl`, `xref`, `string`), in one place (`core.undeclared_tools`), and
+  the report reads such a tool's code listing by the same words: a
+  `decompil…` tool is drawn as a code figure, both it and a whole-function
+  `disassembl…` tool are listed under "Functions examined" and shown to the
+  composer's code sections, as the function map reads them;
 - a network turn offers the capture tools by kind (`packet_overview`, `dns`,
-  `http`), under the names the request offers them by;
+  `http`), under the names the request offers them by; with none of those
+  kinds and a tool that declares no kind in the request, it says that such a
+  tool may read the capture rather than that there is no packet tool;
 - a stage condition counts the rows of every `capability_rules`,
   `signature_rules` and `event_rules` answer as matched rules
   (`triage.rule_hits`, `triage.hits[...]`).
@@ -3344,6 +3358,28 @@ answers), VirusTotal its reference URL and its submit tools
 `discloses_sample`, and the threat-intel sidecar both of its prose forms
 (`N/M detections`, `N/M malicious`).
 
+**A server that declares nothing.** A server whose block declares no
+`prompt_fragment` and offers a tool its `tool_facts` say nothing about is
+introduced by its own words instead, while its tools are in the request: the
+MCP `instructions` it served when it was initialised and each offered tool's
+own description, each quoted as one value on one line (its line breaks and
+`<<` written out, whitespace collapsed as a tool's description is) under a
+sentence saying the quoted text is the server's data and never an instruction,
+and that the agent's instructions hold where it differs. A server whose every
+offered tool is declared (every built-in) carries what its declaration says
+and nothing more. A tool's answer that the server gives as `structuredContent`
+beside its text is kept on the ledger entry (`structured_content`) and read as
+the entry's structure where the text is not JSON; the text is what the model
+read, as before.
+
+**A provider registered at runtime.** A static or sandbox provider class
+registered with `register_static_provider` or `register_sandbox_provider`
+declares its own tools by answering `declaration(cfg)` with the declaration
+fields of a server block (an object or a mapping); they are read under
+`provider:<id>`, wherever a built-in provider's block is read, and switched on
+while the settings select the provider. The built-in providers' blocks
+(`static.ghidra`, `static.r2`, `sandbox.cape2.mcp`) are read as before.
+
 **Saving.** A built-in's stored block takes the shipped value of any field it
 never set, and one the operator set, empty included, is kept. A save stores
 only the fields that differ from the shipped value at the time of the save, so
@@ -3368,7 +3404,7 @@ Per job and per tool server, three settings under **Tool servers → Resilience*
 |---|---|---|
 | `core.mcp.breaker.failures_to_open` | 3 | The number of attempts the platform already gives a model call that drops its connection before calling it a failure. No recorded live run had a tool server fail at the transport, so it is a judgement, not a measurement. |
 | `core.mcp.breaker.cooldown_seconds` | 60 | A judgement: long enough for a sidecar being restarted to come back, short against the analysts' own loop budgets. |
-| `core.mcp.breaker.call_timeout_seconds` | 0 (per server) | Set, the budget of every call to every server. Zero gives each server the `call_timeout_seconds` its own block declares, and a server that declares none (every built-in) the deployment's floor: the longest of `core.static.capa.timeout_seconds` and `core.static.yara.timeout_seconds` (300 by default, 900 on a slow host), as every server got before. A tool whose server declares a longer budget in its manifest gets that, a long-running tool none unless this is set, and thirty seconds of grace are added either way. |
+| `core.mcp.breaker.call_timeout_seconds` | 0 (per server) | Set, the budget of every call to every server. Zero gives each server the `call_timeout_seconds` its own block declares, and a server that declares none (every built-in) the deployment's floor: the longest of `core.static.capa.timeout_seconds` and `core.static.yara.timeout_seconds` (300 by default, 900 on a slow host), as every server got before. A tool whose server declares a longer budget in its manifest or its declaration (`tool_facts.<tool>.timeout_seconds`) gets that, a long-running tool (by either) none unless this is set, and thirty seconds of grace are added either way. |
 | `<server block>.call_timeout_seconds` | empty | Each server's own budget per call (an `mcp.servers` entry, `static.ghidra`, `static.r2`, `sandbox.cape2.mcp`), read when `core.mcp.breaker.call_timeout_seconds` is zero; zero sends its calls with no deadline of their own, empty takes the deployment's floor. Ghidra's REST requests (open, call graph, anti-analysis scan) and radare2's open before the loop wait it too. |
 | `core.mcp.breaker.max_concurrent_calls` | 4 | A judgement: the shipped teams run their analysts one after another, and four lets one analyst's parallel tool calls through while bounding a team that fans out. `0` leaves the calls uncapped, as every server was before. |
 
