@@ -96,7 +96,7 @@ class TestTheNormalisedFlowSaysWhichProcessMadeIt:
 
         rows = report.network.tcp
         assert [row.get("sample_process_tree") for row in rows] == [None, None, False]
-        assert [row.get("lineage_disputed") for row in rows] == ["orig", "file", None]
+        assert [row.get("lineage_disputed") for row in rows] == ["marked", "file", None]
 
     def test_a_mark_and_a_file_name_that_agree_are_the_sample(self) -> None:
         processes = [

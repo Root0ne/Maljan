@@ -23,6 +23,8 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, ValidatorFunctionWrapHandler, field_validator
 
+from maljan.core.report_formats import reader_display_name
+
 
 def _int(value: Any) -> int:
     """Best-effort int coercion; malformed sandbox data becomes ``0``, never a crash."""
@@ -591,11 +593,18 @@ def _is_the_sample(proc: dict[str, Any], sample: dict[str, Any]) -> bool:
 
 
 # Which of the two facts alone names a flow's process as the sample's, on a
-# row whose attribution is therefore not stated: ``"orig"`` when Triage marks
-# it and it runs none of the submitted file's names and descends from none of
-# its processes, ``"file"`` when it runs the submitted file (or descends from a
-# process that does) and Triage marks it not.
+# row whose attribution is therefore not stated: ``"marked"`` when the sandbox
+# marks it as the sample's and it runs none of the submitted file's names and
+# descends from none of its processes, ``"file"`` when it runs the submitted
+# file (or descends from a process that does) and the sandbox marks it not. A
+# row stored before the value was normalised says ``"orig"`` for ``"marked"``.
 LINEAGE_DISPUTED_KEY = "lineage_disputed"
+LINEAGE_MARKED = "marked"
+LINEAGE_FILE = "file"
+# Beside a disputed row: the name published text gives the sandbox whose mark
+# it is, the display name its report format declares
+# (``core.report_formats.reader_display_name``).
+LINEAGE_MARKED_BY_KEY = "lineage_marked_by"
 
 
 def _reach(parent: dict[Any, Any], roots: set[Any]) -> set[Any]:
@@ -658,10 +667,14 @@ def _sample_process_tree(task: dict[str, Any], sample: dict[str, Any]) -> _Linea
     named = {p.get("procid") for p in processes if p.get("procid") and _is_the_sample(p, sample)}
     by_mark, by_file = _reach(parent, marked), _reach(parent, named)
     if marked and named:
-        disputed = {procid: "orig" for procid in by_mark - by_file}
-        disputed.update({procid: "file" for procid in by_file - by_mark})
+        disputed = {procid: LINEAGE_MARKED for procid in by_mark - by_file}
+        disputed.update({procid: LINEAGE_FILE for procid in by_file - by_mark})
         return _Lineage(by_mark & by_file, disputed, images, True)
     return _Lineage(by_mark or by_file, {}, images, bool(marked or named))
+
+
+# The sandbox whose ``orig`` mark this reader reads, by the name its format declares.
+_MARKED_BY = reader_display_name("triage")
 
 
 def _flow_attribution(flow: dict[str, Any], lineage: _Lineage) -> dict[str, Any]:
@@ -682,6 +695,7 @@ def _flow_attribution(flow: dict[str, Any], lineage: _Lineage) -> dict[str, Any]
             out[SAMPLE_TREE_KEY] = True
         elif procid in lineage.disputed:
             out[LINEAGE_DISPUTED_KEY] = lineage.disputed[procid]
+            out[LINEAGE_MARKED_BY_KEY] = _MARKED_BY
             if lineage.images.get(procid):
                 out[FLOW_PROCESS_KEY] = lineage.images[procid]
         elif lineage.stated and procid in lineage.images:

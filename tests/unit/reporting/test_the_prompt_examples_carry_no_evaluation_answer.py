@@ -238,11 +238,13 @@ from maljan.reporting.renderers.stix_renderer import (
     BENIGN_NAME_IN_A_URL,
     BENIGN_NAME_RESOLVED,
     CAPTURE_TLS_NAME,
+    DECODED_FROM_THE_BYTES_TEMPLATE,
     FLOW_OUTSIDE_THE_TREE,
     JUDGE_KEPT_WHEN_TOLD,
     JUDGE_KEPT_WHEN_TOLD_OF_ITS_HOST,
     JUDGE_NOT_ASKED_IN_TIME,
     JUDGE_QUESTION_NOT_RECORDED,
+    RECOVERED_BY_EMULATION,
     SEARCHED_THE_REPORT,
     UNATTRIBUTED_FLOW,
     disputed_flow_reason,
@@ -1939,6 +1941,9 @@ PROMPTS: dict[str, str] = {
                 "a claim by the dynamic analyst",
             ),
             disputed_flow_reason(["SearchHost.exe (procid 104)"], ["cmd.exe (procid 7)"]),
+            disputed_flow_reason(["SearchHost.exe (procid 104)"], ["cmd.exe (procid 7)"], "CAPE"),
+            DECODED_FROM_THE_BYTES_TEMPLATE.format(tool="Unblob"),
+            RECOVERED_BY_EMULATION,
             not_kept_reason("x", "", "an artifact of the network analyst"),
             public_resolver_reason(
                 UNATTRIBUTED_FLOW, "an artifact of the network analyst", "a claim by the x analyst"

@@ -162,15 +162,11 @@ def _tables() -> dict[str, Callable[[str], bool]]:
     from maljan.agents import network_analyst, static_analyst
     from maljan.core import legacy_tool_tables as legacy
     from maljan.pipeline import triage_pack
-    from maljan.reporting import evidence_bundles, ledger_report
-    from maljan.reporting.renderers import markdown, stix_renderer
+    from maljan.reporting import legacy_tool_names
 
     def names(values: object) -> Callable[[str], bool]:
         held = _strip_tool(values)
         return lambda name: name in held
-
-    def prefixes(values: tuple[str, ...]) -> Callable[[str], bool]:
-        return lambda name: name.startswith(values)
 
     return {
         "evidence_roots._WHOLE_FILE_TOOLS": names(legacy.WHOLE_FILE_TOOLS),
@@ -180,47 +176,35 @@ def _tables() -> dict[str, Callable[[str], bool]]:
         "evidence_roots._EXPORT_LISTINGS": names(legacy.EXPORT_LISTINGS),
         "evidence_roots._PROGRAM_TOOLS": names(legacy.PROGRAM_TOOLS),
         "evidence_roots._OPEN_TOOLS": names(legacy.OPEN_TOOLS),
-        "evidence_bundles._STRING_TOOLS": names(evidence_bundles._STRING_TOOLS),
-        "evidence_bundles._NETWORK_SANDBOX_TOOLS": names(evidence_bundles._NETWORK_SANDBOX_TOOLS),
-        "evidence_bundles.SANDBOX_TOOL_PREFIXES": prefixes(evidence_bundles.SANDBOX_TOOL_PREFIXES),
-        "ledger_report._FUNCTION_TOOLS": names(ledger_report._FUNCTION_TOOLS),
-        "ledger_report._FUNCTION_LIST_TOOLS": names(ledger_report._FUNCTION_LIST_TOOLS),
         "validation._REFERENCE_SECTION_SOURCES": names(legacy.REFERENCE_SECTION_SOURCES),
         "validation._SAMPLE_VALUE_SECTION_SOURCES": names(legacy.SAMPLE_VALUE_SECTION_SOURCES),
         "validation._RULE_MATCH_SECTION_SOURCES": names(legacy.RULE_MATCH_SECTION_SOURCES),
-        "markdown._ANALYSIS_TOOLS": names(markdown._ANALYSIS_TOOLS),
-        "markdown._REPUTATION_TOOLS": names(markdown._REPUTATION_TOOLS),
-        "markdown._SANDBOX_TOOLS": prefixes(markdown._SANDBOX_TOOLS),
         "triage_pack._REPUTATION_TOOLS": names(triage_pack._REPUTATION_TOOLS),
         "triage_pack.RULE_TOOLS": names(legacy.RULE_TOOLS),
         "run_state.reputation": names(_read_inline_tables()["run_state.reputation"]),
         "network_analyst._PCAP_TOOLS": names(t for t, _ in network_analyst._PCAP_TOOLS),
         "function_map": names(legacy.FUNCTION_MAP_TOOLS),
-        "stix_renderer.recovering": names(_read_inline_tables()["stix_renderer.recovering"]),
-        "stix_renderer.DECODER_TOOL": names((stix_renderer.DECODER_TOOL,)),
-        "stix_renderer._STRING_SWEEP_TOOLS": names(stix_renderer._STRING_SWEEP_TOOLS),
-        "figures.code_listing": names(_read_inline_tables()["figures.code_listing"]),
-        "ledger_projection.technique_hits": names(
-            _read_inline_tables()["ledger_projection.technique_hits"]
-        ),
         "static_analyst._LOAD_TOOL": names((static_analyst._LOAD_TOOL,)),
         "evidence_summary.yara_rule_strings": names(legacy.SIGNATURE_RULE_TOOLS),
         "evidence_summary.catalogue_associations": names(legacy.API_CATALOGUE_TOOLS),
+        # The reporting consumers read an entry with no recorded source by
+        # the tables they always read, kept in one marked module.
+        **legacy_tool_names.TABLES,
     }
 
 
 def _read_inline_tables() -> dict[str, tuple[str, ...]]:
-    """The four tables the code writes inline, read from the code's own source.
+    """The tables the code writes inline, read from the code's own source.
 
     Not copied: a change to any of these lines changes what this reads, and
-    the consumer test then holds the declaration to the new table.
+    the consumer test then holds the declaration to the new table. The
+    reporting ones are read from the legacy module that keeps them.
     """
     import ast
     import inspect
 
     from maljan.pipeline import run_state
-    from maljan.reporting import figures, ledger_projection
-    from maljan.reporting.renderers import stix_renderer
+    from maljan.reporting import legacy_tool_names
 
     def literal(pattern: str, text: str) -> tuple[str, ...]:
         found = re.findall(pattern, text)
@@ -229,22 +213,17 @@ def _read_inline_tables() -> dict[str, tuple[str, ...]]:
         return tuple(value) if isinstance(value, tuple) else (value,)
 
     state = inspect.getsource(run_state)
-    shown = inspect.getsource(figures)
-    projection = inspect.getsource(ledger_projection)
-    hits = projection.index("static.api_technique_hits.append(")
-    before_hits = projection[:hits]
-    payloads = re.findall(r"_payloads\(ledger, ([^)]*)\)", before_hits)[-1]
-    recovering = inspect.getsource(stix_renderer.emulation_from_ledger)
-    branches = re.findall(r"tool == (\"[a-z_]+\"|DECODER_TOOL)", recovering)
     return {
         "run_state.reputation": literal(
             r"reputation = \[e for e in pack if e\.tool in (\([^)]*\))\]", state
         ),
-        "figures.code_listing": literal(r'o\.get\("tool_name"\) != ("[a-z_]+")', shown),
-        "ledger_projection.technique_hits": tuple(ast.literal_eval(f"({payloads},)")),
-        "stix_renderer.recovering": tuple(
-            stix_renderer.DECODER_TOOL if b == "DECODER_TOOL" else ast.literal_eval(b)
-            for b in branches
+        "figures.code_listing": (legacy_tool_names.CODE_LISTING_TOOL,),
+        "ledger_projection.technique_hits": legacy_tool_names.TECHNIQUE_HIT_TOOLS,
+        "stix_renderer.recovering": (
+            legacy_tool_names.EMULATING_TOOL,
+            legacy_tool_names.DECODER_TOOL,
+            *legacy_tool_names.PLAIN_STRING_TOOLS,
+            *legacy_tool_names.FILE_IOC_TOOLS,
         ),
     }
 
@@ -311,12 +290,11 @@ def test_the_stored_run_tools_land_where_the_tables_put_them(declared: ToolDecla
 
 
 def test_the_section_builders_are_drawn_by_kind(declared: ToolDeclarations) -> None:
-    from maljan.reporting import ledger_report
+    from maljan.reporting import legacy_tool_names
 
     differ = []
     for source, name, facts in _built_in_tools(declared):
-        builder = ledger_report._BUILDERS.get(name)
-        expected = builder.__name__ if builder is not None else None
+        expected = legacy_tool_names.BUILDERS.get(name)
         by_kind = BUILDER_OF_KIND.get(facts.kind)  # type: ignore[attr-defined]
         if expected != by_kind:
             differ.append((source, name, expected, by_kind))
@@ -462,7 +440,7 @@ def test_the_analysis_servers_long_running_tools_and_budgets_are_its_manifests()
 
 
 def test_the_report_sections_are_the_section_hints_by_name(declared: ToolDeclarations) -> None:
-    from maljan.reporting.evidence_bundles import _SECTION_TOOL_HINTS
+    from maljan.reporting.legacy_tool_names import SECTION_TOOL_HINTS as _SECTION_TOOL_HINTS
 
     for source, name, facts in _built_in_tools(declared):
         hinted = [s for s, hs in _SECTION_TOOL_HINTS.items() if any(h in name for h in hs)]

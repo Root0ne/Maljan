@@ -7,7 +7,7 @@ knowledge and VirusTotal tools it also holds, and
 which r2mcp offers when started with ``-r``), and edited as data since.
 ``category`` is the tag the MCP client shows a description with
 (``agents.mcp_client._tag_description``); ``report_sections`` the sections
-``reporting.evidence_bundles._SECTION_TOOL_HINTS`` routes the tool's answers to.
+``reporting.evidence_bundles`` shows the tool's answers to, beside the ones its kind reaches.
 """
 
 from __future__ import annotations

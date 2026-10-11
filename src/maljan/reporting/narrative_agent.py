@@ -64,6 +64,7 @@ from maljan.pipeline.validation import (
     technique_name_violations,
     wrong_entry_citations,
 )
+from maljan.reporting import tool_kinds
 from maljan.reporting.models import (
     DefensiveRecommendation,
     KeyFinding,
@@ -419,7 +420,9 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
         else:
             lines.append("  (none stated)")
         rule_hits = [
-            h for h in report.static.api_technique_hits if h.get("source") == "api_capability"
+            h
+            for h in report.static.api_technique_hits
+            if str(h.get("source") or "") in tool_kinds.sources_of_kind("api_catalogue")
         ]
         from maljan.tools.knowledge import RESOLVED_AT_RUNTIME
 
