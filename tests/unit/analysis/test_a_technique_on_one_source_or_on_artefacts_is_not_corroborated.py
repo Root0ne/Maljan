@@ -290,7 +290,7 @@ class TestTheMatrixAndTheReport:
 
         words = _corroborated_words(mapping, [])
 
-        assert words.startswith(f" {CAPABILITY_STATUS} (2 sources, each an artefact of the file")
+        assert words.startswith(f" {CAPABILITY_STATUS} (2 sources, all artefacts of the file")
         assert "named by 2 analyst layers" in words
         assert words.endswith("; one evidence root (0x5010 in .data))")
         assert "corroborated" not in words
@@ -309,7 +309,22 @@ class TestTheMatrixAndTheReport:
         )
 
     def test_one_source_is_counted_in_the_singular(self) -> None:
-        assert capability_words(1, 0).startswith(f"{CAPABILITY_STATUS} (1 source, each")
+        assert capability_words(1, 0).startswith(f"{CAPABILITY_STATUS} (1 source, all")
+
+    def test_a_row_one_source_stands_behind_says_so(self) -> None:
+        mapping = TTPMapping(
+            technique_id="T1027.005",
+            technique_name="Indicator Removal from Tools",
+            contributing_layers=["a", "b"],
+            independent_layers=["a", "b"],
+            sources=["ev_0005"],
+            is_corroborated=False,
+        )
+
+        assert _corroborated_words(mapping, []) == (
+            ", not corroborated (2 analyst layers name it; 2 of them in a statement of its own; "
+            "they cite 1 source, each counted once)"
+        )
 
 
 class TestTheModelsAreTold:

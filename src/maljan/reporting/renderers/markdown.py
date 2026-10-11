@@ -4081,9 +4081,9 @@ def capability_words(sources: int, named: int, listed: str = "") -> str:
     sandbox observation, code listing or rule match among them.
     """
     parts = [
-        f"{sources} source{'' if sources == 1 else 's'}, each an artefact of the file "
-        "(names, strings, tables or index rows); no sandbox observation, code listing or "
-        "rule match stands behind it"
+        f"{sources} source{'' if sources == 1 else 's'}, all artefacts of the file such as "
+        "names, strings, tables or index rows; no sandbox observation, code listing or rule "
+        "match stands behind it"
     ]
     if named:
         parts.append(
@@ -4132,10 +4132,18 @@ def _layer_words(mapping: Any, rules: list[dict[str, Any]]) -> str:
     if not mapping.is_corroborated:
         if named < 2 or not (independent or identical):
             return ""
+        # Where the sources were read, a row they leave short of two says so.
+        sources = len(getattr(mapping, "sources", None) or [])
+        traced = (
+            f"; they cite {sources} source{'' if sources == 1 else 's'}, each counted once"
+            if 0 < sources < 2
+            else ""
+        )
         return (
             f", not corroborated ({named} analyst layers name it; {independent} of them in a "
             "statement of its own"
             + (f"; {repeated}" if repeated else "")
+            + traced
             + ("; their statements are listed below the table" if listed else "")
             + ")"
         )
