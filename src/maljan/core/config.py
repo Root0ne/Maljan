@@ -47,6 +47,12 @@ from maljan.agents.prompts import (
     TRIAGE_PROMPT,
 )
 from maljan.core import virustotal
+from maljan.core.report_formats import (
+    ReportFormat,
+    SeverityRung,
+    SignatureScale,
+    check_declared_formats,
+)
 from maljan.core.tool_declarations import (
     ErrorPattern,
     ToolFacts,
@@ -3622,6 +3628,21 @@ class RestReportConfig(BaseModel):
     path: str = "/samples/{task_id}/report"
     format: Literal["cape2", "cuckoo", "triage", "generic"] = "generic"
     pcap_path: str = ""
+    # The signature severity scale of a report read through the mapping
+    # (``format`` generic), where the sandbox documents one: the rung each
+    # score from 1 up means, and the scale's name ("1–N" when unnamed). No
+    # rungs: no scale, and the console draws the numbers unrated. A cape2,
+    # cuckoo or triage report takes its format's declared scale.
+    signature_scale_name: str = ""
+    signature_scale_rungs: list[SeverityRung] = Field(default_factory=list)
+
+    def signature_scale(self) -> SignatureScale | None:
+        """The declared scale, or ``None`` where no rungs are declared."""
+        if not self.signature_scale_rungs:
+            return None
+        rungs = self.signature_scale_rungs
+        name = self.signature_scale_name.strip() or f"1–{len(rungs)}"
+        return SignatureScale(name=name, rungs=rungs)
 
 
 class RestMappingConfig(BaseModel):
@@ -3684,6 +3705,18 @@ class SandboxConfig(BaseModel):
     triage: SandboxTriageConfig = Field(default_factory=SandboxTriageConfig)
     upload: SandboxUploadConfig = Field(default_factory=SandboxUploadConfig)
     rest: SandboxRestConfig = Field(default_factory=SandboxRestConfig)
+    # The operator's own report formats (``maljan.core.report_formats``): how
+    # each is recognised, where its task id and target hash sit, which reader
+    # reads it and its signature scale. Read by every provider and by the
+    # upload route. A new name is tried before the built-ins and is accepted
+    # for upload once it is also in ``upload.allowed_formats``; a built-in's
+    # name is merged over that built-in field by field.
+    report_formats: list[ReportFormat] = Field(default_factory=list)
+
+    @field_validator("report_formats")
+    @classmethod
+    def _report_formats_unique(cls, value: list[ReportFormat]) -> list[ReportFormat]:
+        return check_declared_formats(value)
 
 
 # ---------------------------------------------------------------------------

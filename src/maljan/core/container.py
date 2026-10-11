@@ -468,6 +468,11 @@ class ServiceContainer:
         # it (``schemas.sandbox_report.reader_of``), set by ``app.arun`` beside
         # it; read by the sandbox sections.
         self.sandbox_normalised: tuple[str, str, str] | None = None
+        # The signature severity scale the job's sandbox provider declares for
+        # that report (``SignatureScale.record()``), ``None`` where it declares
+        # none; set by ``app.arun`` beside it and recorded on the run summary
+        # (``report_formats.recorded_signature_scale``).
+        self.sandbox_signature_scale: dict[str, Any] | None = None
 
         # The job's sample, for the one step that needs the bytes rather than
         # a report: staging the sample to a tool server that does not share

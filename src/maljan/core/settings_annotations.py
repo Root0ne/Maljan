@@ -2016,9 +2016,23 @@ ANNOTATIONS.update(
             "title": "Accepted report formats",
             "description": (
                 "Formats the sniffer may accept for an uploaded report: cape2, "
-                "cuckoo, triage. A file that sniffs as anything else is refused."
+                "cuckoo, triage, and the name of any format declared in "
+                "sandbox.report_formats. A file "
+                "that sniffs as anything else is refused."
             ),
             "applies_when": _SANDBOX_UPLOAD,
+        },
+        "sandbox.report_formats": {
+            "title": "Declared report formats",
+            "description": (
+                "Your own sandbox report formats, as JSON, read by every sandbox "
+                "provider and by report upload: each one's name (at most 32 "
+                "characters), how it is recognised (detect: groups of field tests), "
+                "where its task id and target sha256 sit (field paths), which reader "
+                "reads it (cape2, cuckoo, triage, or empty), and its signature "
+                "severity scale. A new name is tried before the built-ins; a "
+                "built-in's name is merged over that built-in, field by field."
+            ),
         },
     }
 )
@@ -2291,6 +2305,18 @@ ANNOTATIONS.update(
         ),
         "sandbox.rest.report.pcap_path": _rest(
             "PCAP path", "Optional capture path; empty means this sandbox publishes no PCAP."
+        ),
+        "sandbox.rest.report.signature_scale_rungs": _rest(
+            "Signature scale",
+            "For a generic report: the severity rung each signature score from 1 up "
+            "means, one per line (Informational, Low, Medium, High, Critical). Empty "
+            "draws the scores unrated.",
+            generic_only=True,
+        ),
+        "sandbox.rest.report.signature_scale_name": _rest(
+            "Signature scale name",
+            "The scale's name as the console shows it; empty names it 1–N.",
+            generic_only=True,
         ),
         "sandbox.rest.mapping.target_sha256": _rest(
             "Mapping: sample hash", "JSONPath to the detonated sample's SHA-256.", generic_only=True

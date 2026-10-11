@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -178,6 +178,38 @@ class SandboxReportListResponse(BaseModel):
     """Every sandbox report attached to one sample."""
 
     items: list[SandboxReportResponse]
+    total: int
+
+
+class SignatureScaleResponse(BaseModel):
+    """A signature severity scale: the rung each score from 1 to ``max`` means."""
+
+    name: str
+    max: int
+    rungs: list[str]
+
+
+class SandboxReportFormatResponse(BaseModel):
+    """One declared sandbox report format, as the upload route and the run read it."""
+
+    name: str
+    builtin: bool
+    # Whether ``sandbox.upload.allowed_formats`` accepts it for upload.
+    allowed: bool
+    reader: str
+    detect: list[list[dict[str, Any]]]
+    task_id_paths: list[str]
+    target_sha256_paths: list[str]
+    signature_scale: SignatureScaleResponse | None = None
+    # The operator's declaration as written (only the fields it sets), or null
+    # for a built-in served as shipped. The fields above are what is in effect.
+    declared: dict[str, Any] | None = None
+
+
+class SandboxReportFormatListResponse(BaseModel):
+    """Every declared sandbox report format, in the order a payload is tried against them."""
+
+    items: list[SandboxReportFormatResponse]
     total: int
 
 

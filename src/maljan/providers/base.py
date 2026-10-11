@@ -11,7 +11,7 @@ supports, and the pipeline reads ``capabilities`` rather than checking
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
@@ -21,6 +21,7 @@ from maljan.providers.errors import ProviderError
 
 if TYPE_CHECKING:
     from maljan.core.config import Settings
+    from maljan.core.report_formats import ReportFormat, SignatureScale
     from maljan.schemas.sandbox_report import SandboxRun
 
 
@@ -295,6 +296,34 @@ class SandboxProvider(ABC):
 
     def attach_report(self, blob: bytes, *, filename: str) -> SandboxRun:
         raise ProviderError("this sandbox does not accept uploaded reports")
+
+    def set_pending_blob(
+        self, blob: bytes, *, filename: str = "report.json", report_format: str | None = None
+    ) -> None:
+        """Hand over an attached report's bytes and the format its upload row recorded.
+
+        A provider that declares ``accepts_uploaded_report`` reads the blob as
+        ``report_format`` when one is given, and refuses in words a format it
+        cannot read; the worker calls this before the run starts.
+        """
+        raise ProviderError("this sandbox does not accept uploaded reports")
+
+    def signature_scale(
+        self, run: SandboxRun, formats: Iterable[ReportFormat] | None = None
+    ) -> SignatureScale | None:
+        """What a signature's severity number means in ``run``'s report, or ``None``.
+
+        The scale the report format of the report's ``source_format`` declares
+        among ``formats``, the effective declarations
+        (``report_formats.effective_formats`` over ``sandbox.report_formats``;
+        ``None`` reads the built-ins alone). A provider whose scale is declared
+        elsewhere (a REST mapping, an uploaded report's own format) answers
+        from that declaration instead.
+        """
+        from maljan.core.report_formats import format_named
+
+        found = format_named(run.report.source_format, formats)
+        return found.signature_scale if found is not None else None
 
     def dynamic_tools(self) -> list[BaseTool]:
         return []

@@ -29,10 +29,12 @@ from arq import cron
 from maljan.agents.base_agent import CANCEL_DELIVERY_GRACE
 from maljan.core.cancellation import Cancellation, JobCancelled
 from maljan.core.config import Settings as _CoreSettings
+from maljan.core.report_formats import declarations_in_effect, recorded_signature_scale
 from maljan.core.settings_catalog import core_catalog
 from maljan.core.settings_overrides import build_settings, public_snapshot, trim_declarations
 from maljan.pipeline.events import MODEL_USAGE as MODEL_USAGE_EVENT
 from maljan.pipeline.outcome import absent_analysis_message
+from maljan.providers.errors import ProviderError
 from pydantic import ValidationError
 from sqlalchemy import Select, delete, func, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -361,6 +363,9 @@ def settings_snapshot(
     # read from ``overridden_keys`` when it is the overrides mapping itself.
     stored = overridden_keys if isinstance(overridden_keys, Mapping) else {}
     snap = trim_declarations(snap, core_settings, stored)
+    # A report format declared under a built-in's name ran merged over the
+    # built-in; the snapshot records that, not the bare fields it set.
+    snap["sandbox.report_formats"] = declarations_in_effect(core_settings.sandbox.report_formats)
     snap["overridden_keys"] = sorted(overridden_keys or [])
     return snap
 
@@ -1601,6 +1606,7 @@ async def keep_the_built_report(
     core_settings: Any,
     override_keys: Any,
     hash_mismatch_reason: str | None,
+    scale_record: Mapping[str, Any] | None = None,
 ) -> bool:
     """Store a report a failed run built, marked incomplete. Never raises.
 
@@ -1628,6 +1634,7 @@ async def keep_the_built_report(
             core_settings=core_settings,
             override_keys=override_keys,
             hash_mismatch_reason=hash_mismatch_reason,
+            scale_record=scale_record,
         )
         run_summary["degraded_mode"] = True
         run_summary["degradation_reasons"] = [
@@ -1762,6 +1769,7 @@ async def keep_the_stopped_run(
             core_settings=core_settings,
             override_keys=override_keys,
             hash_mismatch_reason=hash_mismatch_reason,
+            scale_record=recorded_signature_scale(container),
         )
         async with db_session() as db:
             report = await _store_the_report(
@@ -2147,6 +2155,10 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 _attached_storage_path = str(attached_report.storage_path)
                 _attached_row_id = attached_report.id
                 _attached_hash_matches = attached_report.sample_sha256_match
+                # The format the upload route recorded when it accepted the
+                # report: the run reads the blob as that format, never sniffs
+                # it again, so the row and the run cannot disagree.
+                _attached_format = str(attached_report.format)
 
             # The reads above opened a transaction of their own after the
             # commit. Ending it here is what makes the session's whole life
@@ -2324,9 +2336,9 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # A mock-mode job still resolves sandbox.provider="upload" through
             # build_job_settings, but ServiceContainer.get_sandbox_provider()'s
             # own mock override runs after that and wins, so the object here
-            # can be a MockSandboxProvider with no set_pending_blob at all.
+            # can be a MockSandboxProvider, whose set_pending_blob only refuses.
             # Checked by capability, not by provider id, the same way every
-            # other branch in this layer is: an attribute error escaping to
+            # other branch in this layer is: a raw error escaping to
             # job.error_message would show the user a raw internal exception
             # instead of saying what actually happened. ``StatedFailure``
             # rather than ``ValueError`` for the same reason: this sentence is
@@ -2337,10 +2349,18 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     f"sandbox provider ({sandbox_provider.id!r}) cannot accept an "
                     "uploaded report."
                 )
-            sandbox_provider.set_pending_blob(
-                await asyncio.to_thread(get_object, _attached_storage_path),
-                filename=f"{_attached_row_id}.json",
-            )
+            _attached_blob = await asyncio.to_thread(get_object, _attached_storage_path)
+            try:
+                sandbox_provider.set_pending_blob(
+                    _attached_blob,
+                    filename=f"{_attached_row_id}.json",
+                    report_format=_attached_format,
+                )
+            except ProviderError as exc:
+                # A recorded format no longer declared, or declared without a
+                # reader: the attached evidence cannot be read, and the run
+                # says so rather than going on without it.
+                raise StatedFailure(str(exc)) from exc
 
         # Announce which analysts are about to run so the frontend can show
         # them. The active profile, not the class registry: a job that runs
@@ -2746,6 +2766,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             core_settings=core_settings,
             override_keys=overrides,
             hash_mismatch_reason=_report_hash_mismatch_reason,
+            scale_record=recorded_signature_scale(getattr(app, "container", None)),
         )
 
         # A pipeline that produced no report is a failed run, not a
@@ -2937,6 +2958,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     core_settings=core_settings,
                     override_keys=overrides,
                     hash_mismatch_reason=_report_hash_mismatch_reason,
+                    scale_record=recorded_signature_scale(getattr(app, "container", None)),
                 )
             await mark_job_failed(db_session, job_uuid, reason=reason, error_id=error_id)
         else:
@@ -3707,6 +3729,7 @@ def _report_inputs(
     core_settings: Any,
     override_keys: Any,
     hash_mismatch_reason: str | None,
+    scale_record: Mapping[str, Any] | None = None,
 ) -> tuple[dict | None, dict[str, Any]]:
     """The STIX bundle and the run summary a stored report carries.
 
@@ -3743,6 +3766,10 @@ def _report_inputs(
     _run_summary = pipeline_result.get("run_summary")
     _run_summary = dict(_run_summary) if isinstance(_run_summary, dict) else {}
     _run_summary["settings_snapshot"] = settings_snapshot(core_settings, override_keys)
+    # The signature scale the sandbox provider declared for the job's report
+    # (``report_formats.recorded_signature_scale``): the console reads a
+    # signature's number on it, and a summary without it on its legacy table.
+    _run_summary.update(scale_record or {})
     if hash_mismatch_reason:
         # Threaded in here rather than through the pipeline state:
         # the mismatch is known before the graph runs (it is on the

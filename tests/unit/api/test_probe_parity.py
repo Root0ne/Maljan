@@ -36,7 +36,9 @@ def test_rest_inputs_cover_the_rest_leaves_the_probe_actually_reads():
     connection test), ``status.done_values``/``status.failed_values`` and
     ``report.pcap_path`` are real Task 13 leaves that a live run needs but a
     "Test" click does not -- the REST probe checks reachability and the
-    mapping, not a submission it never makes.
+    mapping, not a submission it never makes. The signature scale
+    (``report.signature_scale_*``) is how a run reads its signatures, which no
+    connection test touches.
     """
     rest_leaves = {e.key for e in full_catalog() if e.key.startswith("core.sandbox.rest.")}
     not_probed = {
@@ -49,6 +51,8 @@ def test_rest_inputs_cover_the_rest_leaves_the_probe_actually_reads():
         "core.sandbox.rest.status.done_values",
         "core.sandbox.rest.status.failed_values",
         "core.sandbox.rest.report.pcap_path",
+        "core.sandbox.rest.report.signature_scale_rungs",
+        "core.sandbox.rest.report.signature_scale_name",
     }
     assert set(_INPUTS["rest"]) == rest_leaves - not_probed
 

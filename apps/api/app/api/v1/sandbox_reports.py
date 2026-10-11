@@ -4,7 +4,10 @@ The sandbox provider ``upload`` reads these instead of detonating: a shop that
 already runs its own sandbox brings the report it has. Validation is layered so
 nothing is stored before it is known to be a sandbox report: stream to a size
 cap, inflate a gzip under the same cap, parse the JSON, sniff the format, and
-only then put the object. A ``target.sha256`` that disagrees with the sample is
+only then put the object. The format, its task id and its target hash are read
+from the declared report formats (``maljan.core.report_formats``, built-ins
+plus ``sandbox.report_formats``), never from a format's name in this route. A
+claimed target hash that disagrees with the sample is
 a warning carried into the run summary, not a refusal — re-hashing a sample the
 sandbox unpacked is a legitimate reason for the two to differ. The comparison
 result is stored on the row at upload time rather than recomputed later, so the
@@ -22,10 +25,15 @@ import json
 import uuid
 import zlib
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
-from maljan.providers.sandbox.formats import sniff_format
+from maljan.core.report_formats import (
+    BUILTIN_REPORT_FORMATS,
+    ReportFormat,
+    effective_formats,
+    sniff,
+)
 from pydantic import SecretStr
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,13 +45,24 @@ from app.logging_config import get_logger
 from app.models.sample import Sample
 from app.models.sandbox_report import SandboxReportRow
 from app.models.user import User
-from app.schemas.job import SandboxReportListResponse, SandboxReportResponse
+from app.schemas.job import (
+    SandboxReportFormatListResponse,
+    SandboxReportFormatResponse,
+    SandboxReportListResponse,
+    SandboxReportResponse,
+    SignatureScaleResponse,
+)
 from app.services import audit
 from app.services.settings_service import effective_core_settings
+
+if TYPE_CHECKING:
+    from maljan.core.config import SandboxConfig
 
 logger = get_logger("api.sandbox_reports")
 
 router = APIRouter(prefix="/samples", tags=["Sandbox reports"])
+# The declared report formats, served for the console and any client.
+formats_router = APIRouter(prefix="/sandbox-report-formats", tags=["Sandbox reports"])
 
 _CHUNK = 64 * 1024
 # Matches SandboxReportRow.task_id's column width (String(128)). Truncated, not
@@ -53,14 +72,13 @@ _CHUNK = 64 * 1024
 _TASK_ID_MAX_LENGTH = 128
 
 
+async def _sandbox_settings(db: AsyncSession) -> SandboxConfig:
+    core = await effective_core_settings(db)
+    return core.sandbox
+
+
 async def _max_report_bytes(db: AsyncSession) -> int:
-    core = await effective_core_settings(db)
-    return int(core.sandbox.upload.max_report_bytes)
-
-
-async def _allowed_formats(db: AsyncSession) -> set[str]:
-    core = await effective_core_settings(db)
-    return set(core.sandbox.upload.allowed_formats)
+    return int((await _sandbox_settings(db)).upload.max_report_bytes)
 
 
 async def _maybe_await(value: Any) -> Any:
@@ -181,38 +199,20 @@ async def _read_payload(file: UploadFile, db: AsyncSession) -> tuple[bytes, dict
     return body, payload
 
 
-def _task_id_of(payload: dict[str, Any], fmt: str) -> str | None:
-    if fmt == "triage":
-        sample = payload.get("sample")
-        raw = str(sample.get("id")) if isinstance(sample, dict) and sample.get("id") else None
-    else:
-        info = payload.get("info")
-        raw = str(info.get("id")) if isinstance(info, dict) and info.get("id") is not None else None
+def _read_declared(
+    payload: dict[str, Any], formats: tuple[ReportFormat, ...]
+) -> tuple[ReportFormat | None, str | None, str]:
+    """The format that recognises ``payload``, its task id and its claimed target hash."""
+    fmt = sniff(payload, formats)
+    if fmt is None:
+        return None, None, ""
+    return fmt, _task_id_of(payload, fmt), fmt.target_sha256(payload)
+
+
+def _task_id_of(payload: dict[str, Any], fmt: ReportFormat) -> str | None:
+    """The source sandbox's task id, where the format declares it, cut to the column width."""
+    raw = fmt.task_id(payload)
     return raw[:_TASK_ID_MAX_LENGTH] if raw is not None else None
-
-
-def _target_sha(payload: dict[str, Any], fmt: str) -> str:
-    """The target's own claimed sha256, read from whichever shape carries it.
-
-    Triage's ``sample.sha256`` is always flat. A real CAPE report nests
-    sample identity under ``target.file.sha256`` — ``target`` itself carries
-    only ``category`` and ``file`` (the same shape ``CAPEv2Client.fetch_report``
-    reads in ``loaders/cape2_client.py``, empirically confirmed against every
-    report under ``data/cape_reports/``) — so the nested form is read first,
-    with the flat ``target.sha256`` kept as a fallback for a report that
-    genuinely carries it flat (e.g. the simplified fixtures under
-    ``data/samples/dynamic/``).
-    """
-    if fmt == "triage":
-        block = payload.get("sample")
-        return str(block.get("sha256") or "") if isinstance(block, dict) else ""
-    target = payload.get("target")
-    if not isinstance(target, dict):
-        return ""
-    file_block = target.get("file")
-    if isinstance(file_block, dict) and file_block.get("sha256"):
-        return str(file_block["sha256"])
-    return str(target.get("sha256") or "")
 
 
 def _match_warning(*, matches: bool, sample_sha256: str) -> str | None:
@@ -264,16 +264,30 @@ async def upload_sandbox_report(
 ) -> SandboxReportResponse:
     sample = await _maybe_await(_load_sample(db, sample_id, user))
     body, payload = await _read_payload(file, db)
-    fmt = sniff_format(payload)
-    allowed = await _allowed_formats(db)
-    if fmt not in allowed:
+    sandbox = await _sandbox_settings(db)
+    # The format is named, and its task id and target hash read, from the
+    # declared formats alone: a format added as data needs no code here. The
+    # walk is linear in the report, and a large report is still a walk, so it
+    # runs in a worker thread rather than on the event loop.
+    fmt, task_id, target_sha = await asyncio.to_thread(
+        _read_declared, payload, effective_formats(sandbox.report_formats)
+    )
+    allowed = set(sandbox.upload.allowed_formats)
+    if fmt is None or fmt.name not in allowed:
         raise HTTPException(
             status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             f"Unrecognised sandbox report format. Accepted: {', '.join(sorted(allowed))}",
         )
+    if not fmt.reader:
+        # Stored, it would be evidence no run can read: the job would go on
+        # without it. Refused here, where the operator is told why.
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"The report is format {fmt.name!r}, which is declared without a reader; "
+            "no analysis can read it yet.",
+        )
     report_id = uuid.uuid4()
     storage_path = f"sandbox-reports/{sample.sha256[:2]}/{sample.sha256}/{report_id}.json"
-    target_sha = _target_sha(payload, fmt)
     matches = bool(target_sha) and target_sha.lower() == sample.sha256.lower()
     now = datetime.now(UTC)
     # Insert before the storage write, not after: a row that fails to persist
@@ -289,8 +303,8 @@ async def upload_sandbox_report(
                 id=report_id,
                 sample_id=sample.id,
                 storage_path=storage_path,
-                format=fmt,
-                task_id=_task_id_of(payload, fmt),
+                format=fmt.name,
+                task_id=task_id,
                 size_bytes=len(body),
                 sha256_of_blob=hashlib.sha256(body).hexdigest(),
                 sample_sha256_match=matches,
@@ -398,3 +412,39 @@ async def delete_sandbox_report(
         details={"sample_id": str(sample.id), "format": row.format},
         request=request,
     )
+
+
+def _format_response(
+    fmt: ReportFormat, allowed: set[str], declared: ReportFormat | None
+) -> SandboxReportFormatResponse:
+    scale = fmt.signature_scale
+    return SandboxReportFormatResponse(
+        name=fmt.name,
+        # A declaration merged over a built-in is the operator's, not the shipped one.
+        builtin=any(fmt is builtin for builtin in BUILTIN_REPORT_FORMATS),
+        allowed=fmt.name in allowed,
+        reader=fmt.reader,
+        detect=[[test.model_dump(mode="json") for test in group] for group in fmt.detect],
+        task_id_paths=list(fmt.task_id_paths),
+        target_sha256_paths=list(fmt.target_sha256_paths),
+        signature_scale=SignatureScaleResponse(**scale.record()) if scale is not None else None,
+        # Only the fields the operator wrote: the value to copy back into
+        # sandbox.report_formats without pinning the built-in's other fields.
+        declared=declared.model_dump(mode="json", exclude_unset=True) if declared else None,
+    )
+
+
+@formats_router.get("", response_model=SandboxReportFormatListResponse)
+async def list_sandbox_report_formats(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SandboxReportFormatListResponse:
+    """Every report format a payload is tried against, in that order, with its declaration."""
+    sandbox = await _sandbox_settings(db)
+    allowed = set(sandbox.upload.allowed_formats)
+    declared = {fmt.name: fmt for fmt in sandbox.report_formats}
+    items = [
+        _format_response(fmt, allowed, declared.get(fmt.name))
+        for fmt in effective_formats(sandbox.report_formats)
+    ]
+    return SandboxReportFormatListResponse(items=items, total=len(items))
