@@ -176,8 +176,9 @@ def retired_environment_lines(environ: Mapping[str, str]) -> list[str]:
     from maljan.core.settings_annotations import RETIRED_ENVIRONMENT
 
     return [
-        f"{variable} is set and no longer read; the setting {key} holds its value "
-        "(the migration that retired it read it in once where the store held none)."
+        f"{variable} is set and no longer read; the setting {key} holds the value now "
+        "(the migration that retired it copied the variable there once only if it was a "
+        "mount other than the shipped one and the store held none)."
         for variable, key in RETIRED_ENVIRONMENT.items()
         if str(environ.get(variable, "")).strip()
     ]
@@ -221,12 +222,13 @@ def mirror_lines(core: Any) -> list[str]:
 
 
 async def state_the_mirrors(session_factory: Any) -> None:
-    """Say where each static provider's copy goes under the stored settings, and export those roots.
+    """State each static provider's copy under the stored settings; sweep and export its dir.
 
-    The sweep above runs before there is a session, on the shipped settings;
-    this reads the store, so the lines name the mounts an operator saved and a
-    mirror directory the store names is a sample root from the start. A store
-    that cannot be read leaves the shipped settings' lines, and the start goes on.
+    The sweep at start runs before there is a session, on the shipped
+    settings; this reads the store, so the lines name the mounts an operator
+    saved, a stale copy in a mirror directory the store names is swept, and
+    that directory is a sample root from the start. A store that cannot be
+    read leaves the shipped settings', and the start goes on.
     """
     from maljan.providers.registry import mirror_work_dirs
 
@@ -247,10 +249,12 @@ async def state_the_mirrors(session_factory: Any) -> None:
     for line in mirror_lines(core):
         logger.info(line, extra={"component": "worker.lifecycle"})
     try:
-        sample_files.export_sample_roots(mirror_work_dirs(core))
+        subdirs = mirror_work_dirs(core)
+        sample_files.sweep(subdirs=subdirs)
+        sample_files.export_sample_roots(subdirs)
     except OSError as exc:
         logger.warning(
-            "The stored mirror directories were not exported as sample roots (%s).",
+            "The stored mirror directories were not swept and exported as sample roots (%s).",
             type(exc).__name__,
             extra={"component": "worker.lifecycle"},
         )

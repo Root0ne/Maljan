@@ -61,8 +61,9 @@ def test_a_retired_variable_still_set_is_named_with_the_setting_that_holds_it() 
     )
     assert lines == [
         "GHIDRA_CONTAINER_SAMPLES_PATH is set and no longer read; the setting "
-        "core.static.ghidra.sample_mount holds its value (the migration that retired it "
-        "read it in once where the store held none)."
+        "core.static.ghidra.sample_mount holds the value now (the migration that retired it "
+        "copied the variable there once only if it was a mount other than the shipped one "
+        "and the store held none)."
     ]
     assert "/srv/maljan" not in lines[0]
 
@@ -94,7 +95,9 @@ def test_startup_warns_once_for_a_retired_variable(monkeypatch: pytest.MonkeyPat
 def test_the_statement_reads_the_stored_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     log = MagicMock()
     monkeypatch.setattr(analysis_worker, "logger", log)
-    stored = build_settings({"static.ghidra.sample_mount": "/srv/stored"})
+    stored = build_settings(
+        {"static.ghidra.sample_mount": "/srv/stored", "static.ghidra.enabled": True}
+    )
 
     async def effective(_db: Any) -> Any:
         return stored
@@ -103,6 +106,10 @@ def test_the_statement_reads_the_stored_settings(monkeypatch: pytest.MonkeyPatch
     exported: list[Any] = []
     monkeypatch.setattr(
         "app.worker.sample_files.export_sample_roots", lambda subdirs=None: exported.append(subdirs)
+    )
+    swept: list[Any] = []
+    monkeypatch.setattr(
+        "app.worker.sample_files.sweep", lambda **kw: swept.append(kw.get("subdirs")) or 0
     )
 
     @asynccontextmanager
@@ -114,6 +121,7 @@ def test_the_statement_reads_the_stored_settings(monkeypatch: pytest.MonkeyPatch
     said = [call.args[0] for call in log.info.call_args_list]
     assert any(text.endswith("handed it as /srv/stored/.work/<sha256>.") for text in said)
     assert exported and ".work" in exported[0]
+    assert swept == exported, "the stored directories are swept as well as exported"
 
 
 def test_an_unreadable_store_falls_back_to_the_shipped_settings(
@@ -122,6 +130,7 @@ def test_an_unreadable_store_falls_back_to_the_shipped_settings(
     log = MagicMock()
     monkeypatch.setattr(analysis_worker, "logger", log)
     monkeypatch.setattr("app.worker.sample_files.export_sample_roots", lambda subdirs=None: [])
+    monkeypatch.setattr("app.worker.sample_files.sweep", lambda **_kw: 0)
 
     @asynccontextmanager
     async def session() -> Any:

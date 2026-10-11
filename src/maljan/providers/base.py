@@ -90,7 +90,10 @@ def path_in_server(spec: MirrorSpec, host_path: str | Path) -> str:
     if not spec.container_prefix:
         return str(host_path)
     prefix = spec.container_prefix.rstrip("/")
-    return f"{prefix}/{spec.work_subdir}/{Path(host_path).name}"
+    host = Path(host_path)
+    # The copy's own directory and name, so the path handed over and the copy
+    # written can never name two different directories.
+    return f"{prefix}/{host.parent.name}/{host.name}"
 
 
 @dataclass(frozen=True)

@@ -6,19 +6,28 @@ subdirectories are the boundary between the worker's scratch and the operator's
 own corpus in ``samples_dir``: nothing here lists or deletes outside them.
 
 Which subdirectories there are is not written here. Each static provider says
-where it mirrors (``mirror_spec()``) and each server declares its own
-``work_dir``; ``maljan.providers.registry.mirror_work_dirs`` is their union for
-a settings object, and every path that sweeps, removes or exports a root takes
-that union from its caller. There is more than one because a tool may refuse a
+where it mirrors (``mirror_spec()``, from its server's declared ``work_dir``);
+``maljan.providers.registry.mirror_work_dirs`` is the union for the providers
+a settings object selects and switches on, and every path that sweeps,
+removes or exports a root takes that union from its caller, beside the
+shipped mirror directories. A name is used only when it is a plain child of
+``samples_dir`` (never a link) that the worker created and marked
+(``MIRROR_MARKER``) or a shipped mirror directory, so a server naming the
+operator's own folder changes nothing in it; and only files named as the
+worker names a copy (a SHA-256 and a plain suffix) are ever removed.
+
+There is more than one because a tool may refuse a
 directory another accepts: radare2 rejects a path carrying a ``/.`` segment, so
 its copies cannot go in the hidden shared one (BUG 10, live on 2026-09-07).
 """
 
 from __future__ import annotations
 
+import functools
 import os
 import re
 import shutil
+import stat
 import time
 from collections.abc import Iterable
 from pathlib import Path
@@ -59,60 +68,144 @@ def temp_dir() -> Path:
     return _private_dir(Path(settings.upload_temp_dir).resolve())
 
 
-def work_dir(subdir: str = DEFAULT_WORK_DIR) -> Path:
-    """The private mirror directory ``subdir`` names, created 0o700.
+# The file the worker writes into each mirror directory it creates. A
+# directory under the samples directory that holds none, and is not one of the
+# shipped mirror directories, is the operator's and is never written to,
+# chmodded, swept, cleared or exported.
+MIRROR_MARKER = ".maljan-mirror"
 
-    ``subdir`` is a provider's ``MirrorSpec.work_subdir`` (the shared default when
-    none is named), which for r2 comes
-    from an operator-set path. Taking the last segment is not on its own enough
-    to keep this inside ``samples_dir``: ``Path("data/samples/..").name`` is
-    ``".."``, which resolves to the *parent* of ``samples_dir`` — a directory
-    this would then chmod 0o700 and ``sweep`` would delete stale files in.
-    ``""`` and ``"."`` were quieter and no better: they fell back to the hidden
-    shared directory, silently putting r2's sample back where radare2 refuses
-    to open it (BUG 10).
-
-    So the three names that do not denote a child are refused outright rather
-    than corrected into something plausible. ``StaticR2Config`` rejects them at
-    settings validation too; this is the fence for every other caller.
-    """
-    name = Path(subdir).name
-    if name in ("", ".", ".."):
-        raise ValueError(
-            f"invalid sample mirror directory {subdir!r}: its last segment is {name!r}, "
-            f"which names a directory itself or its parent rather than a private "
-            f"subdirectory of the samples directory"
-        )
-    return _private_dir((Path(settings.samples_dir) / name).resolve())
+# The SHA-256 every copy the worker writes is named by.
+_SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
-def configured_subdirs() -> tuple[str, ...]:
-    """The mirror subdirectories the shipped settings name, for a caller with none of its own.
+class NotAMirrorDirectory(ValueError):
+    """A named directory the worker may not use as a mirror directory."""
 
-    Built from the model defaults only (``build_settings({})``): a caller that
-    has the effective settings (the store, for a request handler; the job's
-    own, inside a job) passes their ``mirror_work_dirs`` instead.
+
+@functools.cache
+def shipped_mirror_dirs() -> tuple[str, ...]:
+    """The mirror directories the shipped settings' providers copy into.
+
+    These are the worker's own by allow-list, so a directory a release before
+    the marker created is adopted (and marked) rather than left unswept.
     """
     from maljan.core.settings_overrides import build_settings
     from maljan.providers.registry import mirror_work_dirs
 
-    return mirror_work_dirs(build_settings({}))
+    return mirror_work_dirs(build_settings({}), selected_only=False)
+
+
+def _child_name(subdir: str) -> str:
+    name = Path(str(subdir)).name
+    if name in ("", ".", ".."):
+        raise NotAMirrorDirectory(
+            f"invalid sample mirror directory {subdir!r}: its last segment is {name!r}, "
+            f"which names a directory itself or its parent rather than a private "
+            f"subdirectory of the samples directory"
+        )
+    return name
+
+
+def work_dir(subdir: str = DEFAULT_WORK_DIR) -> Path:
+    """The private mirror directory ``subdir`` names, created 0o700 and marked.
+
+    ``subdir`` is a provider's ``MirrorSpec.work_subdir`` (the shared default
+    when none is named); only its last segment is used. ``..``, ``.`` and the
+    empty name are refused: ``Path("data/samples/..").name`` is ``..``, the
+    parent of ``samples_dir``, and an empty name once fell back to the hidden
+    shared directory, putting r2's sample where radare2 refuses to open it
+    (BUG 10).
+
+    The directory must be a direct child of ``samples_dir`` that is not a
+    symbolic link (read with ``lstat``, never followed). One that does not
+    exist is created and gets ``MIRROR_MARKER``. One that exists is the
+    worker's only when it holds the marker, or is a shipped mirror directory
+    (which is then marked); any other is the operator's, such as a corpus
+    folder a server's declaration happens to name, and is refused with
+    ``NotAMirrorDirectory`` before anything is changed in it.
+    """
+    name = _child_name(subdir)
+    base = Path(settings.samples_dir).resolve()
+    path = base / name
+    created = False
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        base.mkdir(parents=True, exist_ok=True)
+        try:
+            path.mkdir(mode=0o700)
+            created = True
+        except FileExistsError:
+            pass
+        st = os.lstat(path)
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+        raise NotAMirrorDirectory(
+            f"sample mirror directory {name!r} is not a plain directory under the samples "
+            "directory (a link or a file); the worker leaves it as it is"
+        )
+    if path.resolve().parent != base:
+        raise NotAMirrorDirectory(
+            f"sample mirror directory {name!r} does not resolve to a child of the samples directory"
+        )
+    marker = path / MIRROR_MARKER
+    if not os.path.lexists(marker):
+        if not created and name not in shipped_mirror_dirs():
+            raise NotAMirrorDirectory(
+                f"{name!r} under the samples directory was not created by the worker (it holds "
+                f"no {MIRROR_MARKER}); it is left untouched and not used as a mirror directory"
+            )
+        _write_marker(marker)
+    elif not stat.S_ISREG(os.lstat(marker).st_mode):
+        raise NotAMirrorDirectory(f"the marker in {name!r} is not a plain file")
+    # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions — 0o700 is intentional: owner-only access to a private working directory that holds uploaded sample bytes  # noqa: E501
+    os.chmod(path, 0o700)
+    return path
+
+
+def _write_marker(marker: Path) -> None:
+    try:
+        fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    except FileExistsError:
+        return
+    with os.fdopen(fd, "w") as out:
+        out.write("A sample mirror directory of the Maljan worker.\n")
 
 
 def work_dirs(subdirs: Iterable[str] | None = None) -> list[Path]:
-    """Every mirror directory, for the paths that sweep or clean up.
+    """Every mirror directory of the worker's own, for the paths that sweep or clean up.
 
-    ``subdirs`` is ``mirror_work_dirs`` of the caller's effective settings;
-    ``None`` reads the shipped settings' (``configured_subdirs``). A name that
-    does not denote a child of the samples directory is skipped here, so one
-    bad declaration never stops the sweep of the others.
+    The shipped mirror directories (``shipped_mirror_dirs``) and ``subdirs``,
+    ``mirror_work_dirs`` of the caller's effective settings when it has them.
+    A name the worker may not use (no child, a link, the operator's own
+    directory) is skipped and logged, so one bad name never stops the others.
     """
     seen: dict[str, None] = {}
-    for name in configured_subdirs() if subdirs is None else subdirs:
+    for name in (*shipped_mirror_dirs(), *(subdirs or ())):
         last = Path(str(name)).name
         if last and last not in (".", ".."):
             seen.setdefault(last, None)
-    return [work_dir(name) for name in seen]
+    dirs: list[Path] = []
+    for name in seen:
+        try:
+            dirs.append(work_dir(name))
+        except NotAMirrorDirectory as exc:
+            logger.warning("Skipped a sample mirror directory: %s", exc)
+    return dirs
+
+
+def _is_sample_copy(name: str, sha256: str | None = None) -> bool:
+    """Whether ``name`` is a copy the worker writes: a SHA-256 and a plain suffix."""
+    digest, rest = name[:64], name[64:]
+    if not _SHA256.fullmatch(digest) or (sha256 is not None and digest != sha256):
+        return False
+    return rest == "" or bool(_SAFE_SUFFIX.fullmatch(rest))
+
+
+def _regular_file(path: Path) -> bool:
+    try:
+        return stat.S_ISREG(os.lstat(path).st_mode)
+    except OSError:
+        return False
 
 
 def export_sample_roots(subdirs: Iterable[str] | None = None) -> list[Path]:
@@ -156,10 +249,17 @@ def remove_quietly(path: Path | str | None, *, job_id: str | None = None) -> Non
 
 
 def remove_for_sha(sha256: str, *, subdirs: Iterable[str] | None = None) -> list[Path]:
+    """Remove the copies the worker wrote of ``sha256``: its download and its mirrors.
+
+    Only in the worker's own directories, and only files named as the worker
+    names a copy (the SHA-256 and a plain suffix), never a link.
+    """
     removed: list[Path] = []
+    if not _SHA256.fullmatch(str(sha256)):
+        return removed
     for base in [temp_dir(), *work_dirs(subdirs)]:
-        for candidate in base.glob(f"{sha256}*"):
-            if candidate.is_file():
+        for candidate in base.iterdir():
+            if _is_sample_copy(candidate.name, sha256) and _regular_file(candidate):
                 remove_quietly(candidate)
                 removed.append(candidate)
     return removed
@@ -194,8 +294,11 @@ def sweep(
     bases = [temp_dir(), *work_dirs(subdirs)]
     for base in bases:
         for candidate in base.iterdir():
+            if not _is_sample_copy(candidate.name):
+                continue
             try:
-                if candidate.is_file() and candidate.stat().st_mtime < cutoff:
+                st = os.lstat(candidate)
+                if stat.S_ISREG(st.st_mode) and st.st_mtime < cutoff:
                     remove_quietly(candidate)
                     count += 1
             except OSError:

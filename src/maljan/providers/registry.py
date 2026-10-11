@@ -100,23 +100,48 @@ def static_provider_class(name: str) -> type[StaticProvider]:
     return cls  # type: ignore[return-value]
 
 
-def mirror_work_dirs(cfg: Settings) -> tuple[str, ...]:
-    """Every directory the worker may copy a sample into under these settings.
+def _block_enabled(cfg: Settings, source: str) -> bool:
+    """Whether the server block a provider's declaration names is switched on."""
+    from maljan.core.tool_declarations import PROVIDER_BLOCKS, block_at
 
-    The union of each registered static provider's ``mirror_spec()`` (built
-    from ``cfg``, which does no I/O) and every declared server's ``work_dir``,
-    so the sweep, a sample's delete and the sidecars' sample roots reach the
-    copies of any provider or server, selected now or before. A provider whose
-    construction fails contributes nothing and is logged; the rest still count.
+    kind, _, key = source.partition(":")
+    if kind == "mcp":
+        block: Any = cfg.mcp.servers.get(key)
+    elif source in PROVIDER_BLOCKS:
+        block = block_at(cfg, PROVIDER_BLOCKS[source])
+    else:
+        return True
+    return block is None or bool(getattr(block, "enabled", True))
+
+
+def mirror_work_dirs(cfg: Settings, *, selected_only: bool = True) -> tuple[str, ...]:
+    """The directories the worker copies a sample into under these settings.
+
+    Each static provider's ``mirror_spec().work_subdir`` (built from ``cfg``,
+    which does no I/O) where the provider needs a mirror; with
+    ``selected_only``, only the providers the settings select (the global one
+    and any agent's own) and whose block is switched on. A server's declared
+    ``work_dir`` counts only through the provider that copies into it, so a
+    name no provider writes to is never swept, cleared or exported. A provider
+    whose construction fails contributes nothing and is logged.
     """
-    from maljan.core.tool_declarations import ToolDeclarations
+    from maljan.core.tool_declarations import selected_static_providers
 
     discover_providers()
+    selected = selected_static_providers(cfg)
     names: dict[str, None] = {}
     for provider_id, cls in sorted(_STATIC_REGISTRY.items()):
+        if selected_only and provider_id not in selected:
+            continue
         try:
             provider = cls.from_settings(cfg)  # type: ignore[attr-defined]
-            spec = provider.mirror_spec() if provider.capabilities.needs_sample_mirror else None
+            if not provider.capabilities.needs_sample_mirror:
+                continue
+            if selected_only and (
+                provider.switched_off() or not _block_enabled(cfg, str(provider.declaration_source))
+            ):
+                continue
+            spec = provider.mirror_spec()
         except Exception as exc:  # noqa: BLE001 - one provider never hides the others
             logger.warning(
                 "Static provider '%s' did not say where it mirrors a sample (%s).",
@@ -126,9 +151,6 @@ def mirror_work_dirs(cfg: Settings) -> tuple[str, ...]:
             continue
         if spec is not None and spec.work_subdir:
             names.setdefault(spec.work_subdir, None)
-    for declared in ToolDeclarations.from_settings(cfg).sources():
-        if declared.work_dir:
-            names.setdefault(declared.work_dir, None)
     return tuple(names)
 
 
