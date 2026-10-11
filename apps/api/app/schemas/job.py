@@ -2,11 +2,18 @@
 
 import uuid
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ── Job Schemas ──────────────────────────────────────────────────
+
+
+def _registered(value: str | None, known: list[str], field: str) -> str | None:
+    """``value`` when its registry holds it; refused with the registered names otherwise."""
+    if value is None or value in known:
+        return value
+    raise ValueError(f"{field} must be one of: {', '.join(known)}")
 
 
 class _KnownJobConfig(BaseModel):
@@ -20,12 +27,13 @@ class _KnownJobConfig(BaseModel):
     model_config = {"extra": "allow"}
 
     max_iterations: Annotated[int, Field(ge=1)] | None = None
-    llm_provider: Literal["openai", "anthropic", "ollama", "gemini"] | None = None
+    # The providers for this job, each a name its registry holds: a provider
+    # registered at runtime is accepted the day it is registered, and the
+    # registries are the one list of what a valid provider is.
+    llm_provider: str | None = None
     mock_mode: bool | None = None
-    # Static-analysis provider for this job; repeats StaticConfig.provider's choices.
-    static_provider: Literal["ghidra", "r2", "capa_yara", "generic_mcp", "none"] | None = None
-    # Sandbox provider for this job; repeats SandboxConfig.provider's choices.
-    sandbox_provider: Literal["mock", "cape2", "upload", "triage", "rest"] | None = None
+    static_provider: str | None = None
+    sandbox_provider: str | None = None
     # An uploaded report to attach; build_job_settings forces sandbox.provider="upload".
     sandbox_report_id: uuid.UUID | None = None
     # The agent profile for this job. A free string rather than a Literal
@@ -33,6 +41,27 @@ class _KnownJobConfig(BaseModel):
     # the code owns; the route checks it against the effective profile map at
     # submit time, which is where "known" can actually be answered.
     profile: str | None = None
+
+    @field_validator("llm_provider")
+    @classmethod
+    def _a_registered_llm_provider(cls, value: str | None) -> str | None:
+        from maljan.llm.provider_base import provider_names
+
+        return _registered(value, provider_names(), "llm_provider")
+
+    @field_validator("static_provider")
+    @classmethod
+    def _a_registered_static_provider(cls, value: str | None) -> str | None:
+        from maljan.providers.registry import static_provider_ids
+
+        return _registered(value, static_provider_ids(), "static_provider")
+
+    @field_validator("sandbox_provider")
+    @classmethod
+    def _a_registered_sandbox_provider(cls, value: str | None) -> str | None:
+        from maljan.providers.registry import sandbox_provider_ids
+
+        return _registered(value, sandbox_provider_ids(), "sandbox_provider")
 
     @model_validator(mode="after")
     def _mock_mode_cannot_consume_an_uploaded_report(self) -> "_KnownJobConfig":

@@ -385,6 +385,12 @@ class R2StaticProvider(GenericMCPStaticProvider):
     rather than a failed job.
     """
 
+    # What the console calls this provider and says about it, and its test's label.
+    title = "radare2 MCP"
+    description = "A local radare2 binary answers disassembly questions over its MCP server."
+    probe_label = "Test radare2 MCP"
+    settings_intro = "Where the radare2 binary lives; the MCP server is launched from it."
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         # This adapter reads its block's declared error patterns itself, by the

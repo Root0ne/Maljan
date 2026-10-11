@@ -64,6 +64,8 @@ class MemoryBackend:
     catalogue, keyed by the leaf's path under ``memory.<id>.`` (``"url"``),
     each a ``settings_annotations.Annotation``. ``label`` is the short phrase
     the console shows beside the id (``"in-process"``); empty shows the id alone.
+    ``probe_label`` names its connection test in the console; empty shows a
+    generic one.
     """
 
     id: str
@@ -71,6 +73,7 @@ class MemoryBackend:
     settings_model: type[BaseModel] | None = None
     annotations: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     label: str = ""
+    probe_label: str = ""
 
 
 _BACKENDS: dict[str, MemoryBackend] = {}
@@ -92,6 +95,7 @@ def register_memory_backend(
     settings_model: type[BaseModel] | None = None,
     annotations: Mapping[str, Mapping[str, Any]] | None = None,
     label: str = "",
+    probe_label: str = "",
 ) -> None:
     """Make ``backend_id`` a value ``memory.backend`` can select.
 
@@ -106,7 +110,12 @@ def register_memory_backend(
     if not key:
         raise ValueError("a memory backend needs a non-empty id")
     _BACKENDS[key] = MemoryBackend(
-        key, builder, settings_model, dict(annotations or {}), str(label or "").strip()
+        key,
+        builder,
+        settings_model,
+        dict(annotations or {}),
+        str(label or "").strip(),
+        str(probe_label or "").strip(),
     )
     forget_built_stores()
 
@@ -378,4 +387,6 @@ def _build_qdrant(memory: Any) -> MemoryStore:
 
 
 register_memory_backend("memory", _build_in_process, label="in-process")
-register_memory_backend("qdrant", _build_qdrant, settings_model=QdrantMemoryConfig)
+register_memory_backend(
+    "qdrant", _build_qdrant, settings_model=QdrantMemoryConfig, probe_label="Test Qdrant"
+)

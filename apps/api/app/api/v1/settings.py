@@ -122,7 +122,9 @@ async def get_schema(
         for g, t in GROUP_ORDER
         if g in by_group
     ]
-    return SchemaResponse(groups=groups)
+    from app.services.provider_facts import probe_labels
+
+    return SchemaResponse(groups=groups, probe_labels=probe_labels())
 
 
 @router.get("", response_model=ValuesResponse)

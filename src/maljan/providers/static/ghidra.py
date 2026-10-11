@@ -407,6 +407,12 @@ class GhidraStaticProvider(StaticProvider):
     and network degrade.
     """
 
+    # What the console calls this provider and says about it, and its test's label.
+    title = "Ghidra MCP"
+    description = "A running Ghidra MCP server decompiles and names functions on request."
+    probe_label = "Test Ghidra MCP"
+    settings_intro = "Where the Ghidra MCP server listens, and how it authenticates."
+
     def __init__(
         self,
         cfg: MCPServerConfig,

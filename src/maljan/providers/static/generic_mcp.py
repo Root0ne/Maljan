@@ -65,6 +65,11 @@ class GenericMCPStaticProvider(StaticProvider):
     owns.
     """
 
+    # What the console calls this provider and says about it, and its test's label.
+    title = "Generic MCP server"
+    description = "A server from the tool-server registry supplies the static tools."
+    settings_intro = "Which configured tool server drives the static analyst."
+
     def __init__(
         self,
         cfg: MCPServerConfig | ServerHandle,

@@ -309,6 +309,12 @@ def run_capa_document(
 class CapaYaraStaticProvider(StaticProvider):
     """capa and YARA: evidence for the analyst, not tools for the model."""
 
+    # What the console calls this provider and says about it, and its test's label.
+    title = "capa + YARA"
+    description = "Rule sets on disk name the capabilities and match the file; no server to run."
+    probe_label = "Test capa + YARA rules"
+    settings_intro = "The rule directories to load. Both are read at the start of every analysis."
+
     def __init__(self, capa: StaticCapaConfig, yara: StaticYaraConfig) -> None:
         self._capa = capa
         self._yara = yara

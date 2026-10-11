@@ -39,6 +39,11 @@ class CatalogEntryDTO(BaseModel):
     advanced: bool = False
     required_env: dict[str, list[str]] | None = None
     choice_labels: dict[str, str] | None = None
+    choice_titles: dict[str, str] | None = None
+    choice_descriptions: dict[str, str] | None = None
+    choice_facts: dict[str, dict[str, Any]] | None = None
+    builtin_servers: list[str] | None = None
+    reserved_servers: list[str] | None = None
 
 
 class GroupDTO(BaseModel):
@@ -50,6 +55,9 @@ class GroupDTO(BaseModel):
 
 class SchemaResponse(BaseModel):
     groups: list[GroupDTO]
+    # The label of every connection test the API answers, by probe id: the
+    # providers' own declarations and the API's own probes.
+    probe_labels: dict[str, str] = Field(default_factory=dict)
 
 
 class ValueDTO(BaseModel):

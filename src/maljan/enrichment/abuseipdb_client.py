@@ -24,9 +24,12 @@ _ABUSE_TIMEOUT_SECONDS = 20.0
 class AbuseIPDBClient:
     """Thin async client for ``GET /api/v2/check``."""
 
-    # The id the settings probe tests this source under, and its key's setting.
+    # The id the settings probe tests this source under, its key's setting,
+    # and what the console calls it and its test.
     source_id = "abuseipdb"
     credential_setting = "api.abuseipdb_api_key"
+    title = "AbuseIPDB"
+    probe_label = "Test AbuseIPDB"
 
     @classmethod
     async def probe(cls, api_key: str) -> Any:

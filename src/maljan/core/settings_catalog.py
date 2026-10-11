@@ -29,6 +29,7 @@ ChoicesFrom = Literal[
     "agent_roles",
     "profiles",
     "memory_backends",
+    "llm_providers",
 ]
 Editor = Literal["server_map", "rest_sandbox", "agent_definitions", "stages"]
 
@@ -92,6 +93,18 @@ class CatalogEntry:
     # The short phrase each choice declares for the console to show beside it
     # (a registry's own labels), keyed by choice; ``None`` when none declares one.
     choice_labels: dict[str, str] | None = None
+    # For a provider selector, filled by the API from each registered
+    # provider's own declaration: the title the console shows for a choice,
+    # its one-line description, and the facts the console reads about it
+    # (credential keys, hosted or run locally, its connection test, whether an
+    # agent may give it an endpoint of its own, its effort setting).
+    choice_titles: dict[str, str] | None = None
+    choice_descriptions: dict[str, str] | None = None
+    choice_facts: dict[str, dict[str, Any]] | None = None
+    # For the tool-server map: the keys of the built-in servers and the keys no
+    # operator's server may take, served so the console never keeps a copy.
+    builtin_servers: list[str] | None = None
+    reserved_servers: list[str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -172,6 +185,10 @@ def _registry_choices(source: str | None) -> list[str] | None:
         from maljan.memory.store_factory import memory_backends
 
         return list(memory_backends())
+    if source == "llm_providers":
+        from maljan.llm.provider_base import provider_names
+
+        return provider_names()
     return None
 
 

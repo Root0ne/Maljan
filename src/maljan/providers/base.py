@@ -272,6 +272,13 @@ class StaticProvider(ABC):
     """
 
     id: ClassVar[str] = ""
+    # What the console calls this provider, the sentence it says about it, the
+    # label of its connection test (empty: it has none of its own), and the
+    # sentence above its settings.
+    title: ClassVar[str] = ""
+    description: ClassVar[str] = ""
+    probe_label: ClassVar[str] = ""
+    settings_intro: ClassVar[str] = ""
 
     @classmethod
     @abstractmethod
@@ -395,6 +402,13 @@ class SandboxProvider(ABC):
     """
 
     id: ClassVar[str] = ""
+    # What the console calls this provider, the sentence it says about it, the
+    # label of its connection test (empty: it has none of its own), and the
+    # sentence above its settings.
+    title: ClassVar[str] = ""
+    description: ClassVar[str] = ""
+    probe_label: ClassVar[str] = ""
+    settings_intro: ClassVar[str] = ""
 
     @classmethod
     @abstractmethod

@@ -37,6 +37,13 @@ class NullStaticProvider(StaticProvider):
     the tool list the request carries.
     """
 
+    # What the console calls this provider and says about it, and its test's label.
+    title = "No static analyser"
+    description = "The static analyst works from the pre-extracted data only."
+    settings_intro = (
+        "No static provider: the static analyst works from the pre-extracted data only."
+    )
+
     # What the provider is, and nothing about the agent's tools: the static
     # analyst is bound to tool servers of its own under every provider, and the
     # sentence about those is built from the list the request carries

@@ -165,6 +165,12 @@ class TriageSandboxProvider(SandboxProvider):
     sample.
     """
 
+    # What the console calls this provider and says about it, and its test's label.
+    title = "Hatching Triage"
+    description = "Triage runs the sample in its cloud and returns the report it produced."
+    probe_label = "Test Triage connection"
+    settings_intro = "The API token is stored on the server and never shown again."
+
     UNAVAILABLE: ClassVar[tuple[str, ...]] = (
         "apistats",
         "calls",

@@ -47,7 +47,7 @@ def test_every_llm_setting_the_probe_reads_is_annotated_with_the_llm_probe():
     unannotated: list[str] = []
     for name in provider_names():
         facts = facts_of(name)
-        leaves = {*facts.setup_leaves, facts.credential_leaf, facts.base_url_leaf or ""}
+        leaves = {"expert_model", "judge_model", facts.credential_leaf, facts.base_url_leaf or ""}
         for leaf in sorted(leaf for leaf in leaves if leaf):
             key = f"core.llm.{name}.{leaf}"
             if key in by_key and by_key[key].probe != "llm":

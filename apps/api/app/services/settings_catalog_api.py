@@ -557,6 +557,7 @@ def _choice_sources(
     servers, profiles or agents exist right now; the web must not decide
     either, or "what is a valid profile" has two answers.
     """
+    from maljan.llm.provider_base import provider_names
     from maljan.memory.store_factory import memory_backends
     from maljan.providers.registry import sandbox_provider_ids, static_provider_ids
 
@@ -575,6 +576,7 @@ def _choice_sources(
         "agent_roles": list(agents),
         "profiles": list(profiles),
         "memory_backends": list(memory_backends()),
+        "llm_providers": provider_names(),
     }
 
 
@@ -597,15 +599,31 @@ def resolved_catalog(
     and a second copy of the rule in the console is a copy that drifts from
     the one the save enforces.
     """
+    from app.services.provider_facts import selector_choices, server_keys
+
     sources = _choice_sources(servers, profiles, agents)
+    selectors = selector_choices()
+    builtin, reserved = server_keys()
     out: list[CatalogEntry] = []
     for entry in full_catalog():
         if entry.choices_from and entry.choices_from in sources:
             entry = replace(entry, choices=sources[entry.choices_from])
+        if entry.key in selectors:
+            # What each provider declares about itself, so the console names,
+            # describes and tests a choice without a table of its own.
+            titles, descriptions, facts = selectors[entry.key]
+            entry = replace(
+                entry,
+                choice_titles=titles,
+                choice_descriptions=descriptions,
+                choice_facts=facts,
+            )
         if entry.editor == "server_map":
             entry = replace(
                 entry,
                 required_env={key: list(names) for key, names in REQUIRED_ENV_ALLOW.items()},
+                builtin_servers=builtin,
+                reserved_servers=reserved,
             )
         out.append(entry)
     return out

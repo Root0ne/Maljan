@@ -36,6 +36,12 @@ class CAPE2SandboxProvider(SandboxProvider):
     re-implemented here.
     """
 
+    # What the console calls this provider and says about it, and its test's label.
+    title = "CAPEv2"
+    description = "A CAPEv2 instance detonates the sample and returns its report."
+    probe_label = "Test CAPE connection"
+    settings_intro = "The API token is stored on the server and never shown again."
+
     # The tool-facing body of the dynamic system prompt: verbatim lines 25-36 of
     # the old ``_ISR_SYSTEM`` in ``dynamic_analyst.py``, moved rather than
     # retyped so a golden test can pin the assembled prompt byte for byte.

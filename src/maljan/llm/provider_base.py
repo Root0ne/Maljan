@@ -80,8 +80,15 @@ class LLMProvider:
     hosted: ClassVar[bool] = True
     # The settings leaf (under ``llm.<name>``) holding the credential, or empty.
     credential_leaf: ClassVar[str] = "api_key"
-    # The leaves the console's setup step asks for first, under ``llm.<name>``.
-    setup_leaves: ClassVar[tuple[str, ...]] = ()
+    # Flat settings keys holding the same credential (``openai_api_key``), which
+    # count as the provider being configured just as the leaf does.
+    legacy_credential_keys: ClassVar[tuple[str, ...]] = ()
+    # The leaves (under ``llm.<name>``) the console's credentials step shows,
+    # and which of them it folds under "Advanced".
+    guide_leaves: ClassVar[tuple[str, ...]] = ()
+    guide_advanced_leaves: ClassVar[tuple[str, ...]] = ()
+    # A sentence the console adds to the connection test's introduction.
+    probe_note: ClassVar[str] = ""
     # The top-level packages whose exceptions are this provider's server answering.
     sdk_packages: ClassVar[frozenset[str]] = frozenset()
     # Whether the provider's own client retries a failed request, so the

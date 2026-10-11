@@ -30,9 +30,11 @@ class GeminiProvider(LLMProvider):
     name = "gemini"
     choice_order = 3
     label = "Google Gemini"
-    description = "Gemini models over Google's Generative Language API."
+    description = "Gemini models via Google AI"
     hosted = True
-    setup_leaves = ("api_key", "expert_model", "judge_model")
+    legacy_credential_keys = ("google_api_key",)
+    guide_leaves = ("api_key",)
+    guide_advanced_leaves = ()
     sdk_packages = frozenset({"google"})
     # The client asks again on a rate limit itself (``max_retries`` below).
     retries_inside_client = True

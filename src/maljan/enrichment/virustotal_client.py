@@ -30,9 +30,12 @@ _VT_TIMEOUT_SECONDS = 30.0
 class VirusTotalClient:
     """Thin async client for the VirusTotal v3 domain/IP endpoints."""
 
-    # The id the settings probe tests this source under, and its key's setting.
+    # The id the settings probe tests this source under, its key's setting,
+    # and what the console calls it and its test.
     source_id = "virustotal"
     credential_setting = "api.virustotal_api_key"
+    title = "VirusTotal"
+    probe_label = "Test VirusTotal"
 
     @classmethod
     async def probe(cls, api_key: str) -> Any:

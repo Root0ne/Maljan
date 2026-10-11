@@ -384,9 +384,22 @@ class AnthropicProvider(LLMProvider):
     name = "anthropic"
     choice_order = 1
     label = "Anthropic"
-    description = "Claude models over the Anthropic API, or an address that serves it."
+    description = "Claude models via the Anthropic API"
     hosted = True
-    setup_leaves = ("api_key", "expert_model", "judge_model")
+    legacy_credential_keys = ("anthropic_api_key",)
+    guide_leaves = (
+        "api_key",
+        "base_url",
+        "allow_plain_http_to_docker_host",
+        "effort",
+        "prompt_cache_ttl",
+    )
+    guide_advanced_leaves = (
+        "base_url",
+        "allow_plain_http_to_docker_host",
+        "effort",
+        "prompt_cache_ttl",
+    )
     sdk_packages = frozenset({"anthropic"})
     llm_types = ("anthropic-chat",)
     timeout_kwarg = "timeout"

@@ -245,10 +245,12 @@ class OllamaProvider(LLMProvider):
     name = "ollama"
     choice_order = 2
     label = "Ollama"
-    description = "Models served by an Ollama runtime you run, on this machine or another."
+    description = "Models running locally through Ollama"
     hosted = False
     credential_leaf = ""
-    setup_leaves = ("base_url", "expert_model", "judge_model")
+    legacy_credential_keys = ()
+    guide_leaves = ("base_url", "num_ctx", "keep_alive", "disable_thinking")
+    guide_advanced_leaves = ("num_ctx", "keep_alive", "disable_thinking")
     sdk_packages = frozenset({"ollama"})
     llm_types = ("chat-ollama",)
     # ``ChatOllama`` reads its cap only inside ``options`` and refuses an
@@ -260,6 +262,11 @@ class OllamaProvider(LLMProvider):
     default_endpoint = "http://localhost:11434"
     # A runtime somebody runs, taken to serve one request at a time.
     concurrency = "serial"
+    probe_note = (
+        "A reasoning model answers in its thinking channel and leaves the answer empty, "
+        "so the test reports that it answered nothing: turn on "
+        "core.llm.ollama.disable_thinking above and test again."
+    )
 
     @classmethod
     def window_probes(cls, endpoint: object, model: str) -> tuple[Any, ...]:

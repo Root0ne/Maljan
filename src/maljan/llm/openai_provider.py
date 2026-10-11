@@ -1067,13 +1067,18 @@ class OpenAIProvider(LLMProvider):
 
     name = "openai"
     choice_order = 0
-    label = "OpenAI-compatible"
-    description = (
-        "OpenAI's API or any server that speaks its chat completions: llama.cpp, "
-        "vLLM, DeepSeek and other hosted APIs."
+    label = "OpenAI"
+    description = "Hosted OpenAI models or any OpenAI-compatible server"
+    hosted = True
+    legacy_credential_keys = ("openai_api_key",)
+    guide_leaves = (
+        "api_key",
+        "base_url",
+        "disable_thinking",
+        "reasoning_effort",
+        "repetition_penalty",
     )
-    hosted = False
-    setup_leaves = ("base_url", "api_key", "expert_model", "judge_model")
+    guide_advanced_leaves = ("disable_thinking", "reasoning_effort", "repetition_penalty")
     sdk_packages = frozenset({"openai"})
     llm_types = ("openai-chat",)
     timeout_kwarg = "request_timeout"
