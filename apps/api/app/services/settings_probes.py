@@ -1740,9 +1740,9 @@ _INPUTS: dict[str, dict[str, str]] = {
         "core.sandbox.triage.api_token": "api_token",
     },
     "qdrant": {
-        "core.memory.qdrant_url": "url",
-        "core.memory.qdrant_collection": "collection",
-        "core.memory.qdrant_api_key": "api_key",
+        "core.memory.qdrant.url": "url",
+        "core.memory.qdrant.collection": "collection",
+        "core.memory.qdrant.api_key": "api_key",
     },
     "redis": {},
     "virustotal": {"api.virustotal_api_key": "api_key"},

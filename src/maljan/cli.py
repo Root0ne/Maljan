@@ -15,6 +15,7 @@ from maljan.analysis.run_summary import NOT_APPLICABLE_SENTENCE
 from maljan.app import MaljanApp
 from maljan.core.config import LLMConfig, Settings
 from maljan.core.logger import logger
+from maljan.memory.long_term_memory import MemoryStore
 
 app = typer.Typer(
     name="maljan",
@@ -330,27 +331,14 @@ memory_app = typer.Typer(
 app.add_typer(memory_app, name="memory")
 
 
-def _build_memory_store_cli() -> object:
-    """Build a MemoryStore matching the operator's configuration.
+def _build_memory_store_cli() -> MemoryStore:
+    """The configured MemoryStore, from the factory the API and the workers use.
 
-    Mirrors the API admin route; lives here so the CLI works without
-    requiring the API service to be running.
+    Lives here so the CLI works without requiring the API service to be running.
     """
-    from maljan.memory.in_memory_store import InMemoryStore
+    from maljan.memory.store_factory import build_memory_store
 
-    cfg = Settings()
-    backend = cfg.memory.backend.lower()
-    if backend == "qdrant":
-        from maljan.memory.qdrant_store import QdrantStore
-
-        return QdrantStore(
-            url=cfg.memory.qdrant_url,
-            collection=cfg.memory.qdrant_collection,
-            api_key=(
-                cfg.memory.qdrant_api_key.get_secret_value() if cfg.memory.qdrant_api_key else None
-            ),
-        )
-    return InMemoryStore()
+    return build_memory_store(Settings())
 
 
 @memory_app.command("stats")
@@ -358,7 +346,7 @@ def memory_stats() -> None:
     """Show the configured backend and current case count."""
     store = _build_memory_store_cli()
     typer.echo(f"Backend: {type(store).__name__}")
-    typer.echo(f"Cases:   {store.count()}")  # type: ignore[attr-defined]
+    typer.echo(f"Cases:   {store.count()}")
 
 
 @memory_app.command("purge-low-quality")
@@ -387,44 +375,21 @@ def memory_purge_low_quality(
 ) -> None:
     """Retroactively purge low-quality LTM entries per the write-time gate.
 
-    Older Qdrant points stored before the quality gate landed are still in
-    the collection and would otherwise keep biasing new analyses via the
-    few-shot retrieval prior.
+    Older cases stored before the quality gate landed are still in the
+    store and would otherwise keep biasing new analyses via the few-shot
+    retrieval prior.
     """
     store = _build_memory_store_cli()
     backend = type(store).__name__
-    if dry_run:
-        # Approximate by snapshotting count, running the purge against a
-        # detached InMemoryStore copy for cheap and accurate counting.
-        from maljan.memory.in_memory_store import InMemoryStore
-
-        if isinstance(store, InMemoryStore):
-            before = store.count()
-            removed = InMemoryStore()
-            removed._cases = list(store._cases)  # noqa: SLF001
-            n = removed.purge_low_quality(
-                max_total_techniques=max_total_techniques,
-                require_uncorroborated=require_uncorroborated,
-                include_analyst_errors=include_analyst_errors,
-            )
-            typer.echo(f"[dry-run] backend={backend} would remove {n} of {before} cases.")
-            return
-        # Qdrant: walk the same scroll loop the purge would use, but skip
-        # the delete step. Keeping the logic inside the store avoids
-        # leaking internals here — for now fall back to a count-only
-        # estimate via the in-memory simulator after retrieving all cases.
-        typer.echo(
-            "[dry-run] Qdrant dry-run requires the API admin endpoint "
-            "(POST /api/v1/system/ltm/purge with dry_run=true). The CLI "
-            "would have to scroll the whole collection — call the API."
-        )
-        return
-
-    n = store.purge_low_quality(  # type: ignore[attr-defined]
+    n = store.purge_low_quality(
         max_total_techniques=max_total_techniques,
         require_uncorroborated=require_uncorroborated,
         include_analyst_errors=include_analyst_errors,
+        dry_run=dry_run,
     )
+    if dry_run:
+        typer.echo(f"[dry-run] backend={backend} would remove {n} of {store.count()} cases.")
+        return
     typer.echo(f"backend={backend} removed={n}")
 
 

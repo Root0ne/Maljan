@@ -93,7 +93,7 @@ def test_the_api_catalog_holds_no_second_copy_of_the_qdrant_settings():
     paths = {e.path for e in api_catalog()}
 
     assert not {path for path in paths if path.startswith("qdrant")}
-    assert Settings(_env_file=None).memory.qdrant_api_key is None
+    assert Settings(_env_file=None).memory.qdrant.api_key is None
 
 
 def test_api_entries_carry_the_two_new_fields_with_neutral_defaults():

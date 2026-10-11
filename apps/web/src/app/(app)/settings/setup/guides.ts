@@ -624,41 +624,53 @@ const AGENT_GUIDE: GuideDef = {
 
 /* ----------------------------------------------------------------- memory */
 
+/** The connection test a family of keys declares: the first `probe` any of
+ *  their catalog entries names, or none. */
+function probeOf(ctx: GuideContext, keys: string[]): string | undefined {
+  const wanted = new Set(keys);
+  return (
+    (ctx.schema?.groups ?? [])
+      .flatMap((group) => group.entries)
+      .find((entry) => wanted.has(entry.key) && entry.probe)?.probe ?? undefined
+  );
+}
+
 const MEMORY_GUIDE: GuideDef = {
   id: "memory",
   title: "Set up long-term memory",
-  blurb: "Keep findings in process, or point Maljan at a Qdrant instance that survives a restart.",
+  blurb: "Keep findings in process, or point Maljan at a store that survives a restart.",
   groupHref: "/settings/configuration/tools/memory",
   steps: (ctx) => {
     const steps: GuideStep[] = [
       {
         id: "backend",
         title: "Backend",
-        intro: "In-process memory is emptied by a restart; Qdrant keeps what earlier analyses learned.",
+        intro:
+          "In-process memory is emptied by a restart; a persistent backend keeps what earlier analyses learned.",
         keys: ["core.memory.backend"],
       },
     ];
-    if (text(ctx, "core.memory.backend") === "qdrant") {
-      steps.push(
-        {
-          id: "qdrant",
-          title: "Qdrant connection",
-          intro: "Where the instance lives, which collections to use, and how many neighbours a lookup returns.",
-          keys: [
-            "core.memory.qdrant_url",
-            "core.memory.qdrant_api_key",
-            "core.memory.qdrant_collection",
-            "core.memory.qdrant_function_hash_collection",
-            "core.memory.top_k",
-          ],
-        },
-        {
+    // Each backend's own settings are the catalog keys under its id; a
+    // backend with none (the in-process one) has no connection to set up.
+    const backend = text(ctx, "core.memory.backend");
+    const own = backend ? keysUnder(ctx, `core.memory.${backend}.`) : [];
+    if (own.length > 0) {
+      const probe = probeOf(ctx, own);
+      steps.push({
+        id: "connection",
+        title: "Connection",
+        intro:
+          "Where the store lives, what it keeps its cases in, and how many neighbours a lookup returns.",
+        keys: [...own, "core.memory.top_k"],
+      });
+      if (probe) {
+        steps.push({
           id: "test",
           title: "Test the connection",
-          probe: "qdrant",
-          canContinue: (c) => (c.probeOk("qdrant") ? null : "run the test first"),
-        }
-      );
+          probe,
+          canContinue: (c) => (c.probeOk(probe) ? null : "run the test first"),
+        });
+      }
     }
     steps.push(REVIEW_STEP);
     return steps;

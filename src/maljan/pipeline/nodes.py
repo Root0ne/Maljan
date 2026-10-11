@@ -1260,18 +1260,93 @@ def with_verdict_fallback(validation: Any, failure: str) -> dict[str, Any]:
     return block
 
 
+def _function_hash_attribution(
+    container: ServiceContainer, state: AnalysisState, bundle: Any
+) -> list[dict[str, Any]]:
+    """The judge's function-hash read, and the write it holds for a completed job.
+
+    Read side: which known families this sample shares code with (threaded
+    into the report). Write side: this sample's function hashes, held on the
+    container under its assessed family until the job has completed
+    (``remember_the_run``). Runs only where attribution is on, the static
+    provider hashes functions, there is a mirror to read, and the configured
+    memory backend keeps a function-hash store. Fail-safe; never affects the
+    verdict.
+    """
+    try:
+        from maljan.core.config import get_settings
+
+        cfg = get_settings()
+        provider = container.get_static_provider()
+        static_path = state.get("static_sample_path")
+        if not (
+            cfg.preprocessing.use_function_hash_attribution
+            and provider.capabilities.provides_function_hashes
+            and static_path
+        ):
+            return []
+        from maljan.memory.store_factory import (
+            acquire_function_hash_store,
+            release_function_hash_store,
+        )
+
+        store = acquire_function_hash_store(cfg)
+        if store is None:
+            return []  # the configured memory backend keeps no function hashes
+        handed_on = False
+        try:
+            from maljan.analysis.function_hash_attribution import (
+                aggregate_matches,
+                to_report_dicts,
+            )
+            from maljan.providers.base import StaticJobContext
+
+            sample_id = state.get("file_hash", "") or ""
+            functions = provider.function_hashes(
+                StaticJobContext(mirror_sample_path=str(static_path))
+            )
+            if not functions:
+                return []
+            report = to_report_dicts(
+                aggregate_matches(
+                    store.match([h for _n, h in functions], exclude_sample_id=sample_id or None),
+                    max_families=cfg.preprocessing.function_hash_max_matches,
+                )
+            )
+            # Only under a grounded family, so an UNKNOWN verdict cannot pollute
+            # the attribution corpus; held, not written, so a job that fails after
+            # its judge files nothing under a family nobody kept. The container
+            # takes over the hold and lets go once it has written, or at teardown.
+            family = _assessed_family(bundle)
+            if family:
+                container.hold_function_hashes(store, sample_id, family, functions)
+                handed_on = True
+            return report
+        finally:
+            if not handed_on:
+                release_function_hash_store(store)
+    except Exception as exc:
+        logger.warning("Function-hash attribution skipped (%s). Verdict unaffected.", exc)
+        return []
+
+
 def _function_matches_step(container: ServiceContainer, state: AnalysisState) -> Any:
     """The pack's exact-match attribution step, or ``None`` when it cannot run.
 
-    Three things have to be there: a Qdrant memory backend, a static provider
-    that can hash functions, and a mirror path for it to read. Without any
-    one of them there is no entry, because there is nothing that could have
-    been asked; with all three the step is the judge's function-hash read,
-    made before the analysts instead of after them.
+    Three things have to be there: a memory backend that keeps function
+    hashes, a static provider that can hash functions, and a mirror path for
+    it to read. Without any one of them there is no entry, because there is
+    nothing that could have been asked; with all three the step is the
+    judge's function-hash read, made before the analysts instead of after
+    them. A backend whose store could not be built still gets its entry,
+    saying why it found nothing.
     """
+    from maljan.core.settings_overrides import redact_url
+    from maljan.memory.store_factory import build_function_hash_store, configured_backend
+
     cfg = container.config
     static_path = state.get("static_sample_path")
-    if str(getattr(cfg.memory, "backend", "")) != "qdrant" or not static_path:
+    if not static_path:
         return None
     try:
         provider = container.get_static_provider()
@@ -1279,6 +1354,16 @@ def _function_matches_step(container: ServiceContainer, state: AnalysisState) ->
         logger.debug("triage pack: no static provider for function hashes (%s)", exc)
         return None
     if not provider.capabilities.provides_function_hashes:
+        return None
+    unavailable = ""
+    try:
+        store = build_function_hash_store(cfg)
+    except Exception as exc:  # noqa: BLE001 — said in the entry, never raised
+        store = None
+        # The entry reaches the models and the report; a URL in a builder's
+        # error may carry a password.
+        unavailable = redact_url(f"the function-hash store is unavailable: {exc}")
+    if store is None and not unavailable:
         return None
     sha256 = str(state.get("file_hash") or "")
 
@@ -1290,20 +1375,17 @@ def _function_matches_step(container: ServiceContainer, state: AnalysisState) ->
         hashes = [h for _name, h in provider.function_hashes(job)]
         args = {
             "func_hashes": hashes,
-            "qdrant_url": cfg.memory.qdrant_url,
-            "collection": cfg.memory.qdrant_function_hash_collection,
+            "backend": configured_backend(cfg),
             "exclude_sample_id": sha256,
         }
-        api_key = (
-            cfg.memory.qdrant_api_key.get_secret_value() if cfg.memory.qdrant_api_key else None
-        )
-        return args, knowledge.function_matches(
-            hashes,
-            cfg.memory.qdrant_url,
-            collection=cfg.memory.qdrant_function_hash_collection,
-            api_key=api_key,
-            exclude_sample_id=sha256,
-        )
+        if unavailable and hashes:
+            return args, {"matches": [], "reason": unavailable}
+        from maljan.memory.store_factory import leased_function_hash_store
+
+        # Held for the read: a settings change meanwhile closes this store only
+        # once the read has let go of it.
+        with leased_function_hash_store(cfg) as held:
+            return args, knowledge.function_matches(hashes, held, exclude_sample_id=sha256)
 
     return step
 
@@ -5203,67 +5285,8 @@ def make_judge_node(
             # (threaded into the report). Write side: upsert this sample's
             # function hashes under its inferred family so the corpus grows.
             # Fully gated + fail-safe; never affects the verdict.
-            _func_hash_report: list[dict[str, Any]] = []
+            _func_hash_report = _function_hash_attribution(container, state, bundle)
             _family_rag_report: list[dict[str, Any]] = []
-            try:
-                from maljan.core.config import get_settings
-
-                _cfg = get_settings()
-                _provider = container.get_static_provider()
-                _static_path = state.get("static_sample_path")
-                if (
-                    _cfg.preprocessing.use_function_hash_attribution
-                    and _provider.capabilities.provides_function_hashes
-                    and _cfg.memory.backend == "qdrant"
-                    and _static_path
-                ):
-                    from maljan.analysis.function_hash_attribution import (
-                        aggregate_matches,
-                        to_report_dicts,
-                    )
-                    from maljan.memory.function_hash_store import FunctionHashStore
-                    from maljan.providers.base import StaticJobContext
-
-                    _sample_id = state.get("file_hash", "") or ""
-                    _funcs = _provider.function_hashes(
-                        StaticJobContext(mirror_sample_path=str(_static_path))
-                    )
-                    if _funcs:
-                        _fh_store = FunctionHashStore(
-                            url=_cfg.memory.qdrant_url,
-                            collection=_cfg.memory.qdrant_function_hash_collection,
-                            api_key=(
-                                _cfg.memory.qdrant_api_key.get_secret_value()
-                                if _cfg.memory.qdrant_api_key
-                                else None
-                            ),
-                        )
-                        # Read side: surface prior family overlap in the report.
-                        _func_hash_report = to_report_dicts(
-                            aggregate_matches(
-                                _fh_store.match(
-                                    [h for _n, h in _funcs],
-                                    exclude_sample_id=_sample_id or None,
-                                ),
-                                max_families=_cfg.preprocessing.function_hash_max_matches,
-                            )
-                        )
-                        # Write side: only persist under a grounded family so an
-                        # UNKNOWN verdict cannot pollute the attribution corpus.
-                        # Held, not written: the corpus learns this sample once
-                        # the job has completed (``remember_the_run``), so a job
-                        # that fails after its judge files nothing under a
-                        # family nobody kept.
-                        _family = _assessed_family(bundle)
-                        if _family:
-                            container.pending_function_hashes = (
-                                _fh_store,
-                                _sample_id,
-                                _family,
-                                list(_funcs),
-                            )
-            except Exception as _e:
-                logger.warning("Function-hash attribution skipped (%s). Verdict unaffected.", _e)
 
             # Family-feature RAG (read side): record the families retrieved by
             # static-feature similarity as report evidence. Reads the HOST binary

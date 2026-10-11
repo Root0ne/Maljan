@@ -211,7 +211,7 @@ class TestDeepHealthProbe:
         monkeypatch.setattr(main_mod, "_probe_database", _boom)
         monkeypatch.setattr(main_mod, "_probe_redis", _ok)
         monkeypatch.setattr(main_mod, "_probe_minio", _ok)
-        monkeypatch.setattr(main_mod, "_probe_qdrant", _ok)
+        monkeypatch.setattr(main_mod, "_probe_memory", _ok)
 
         components = await main_mod._probe_components()
 

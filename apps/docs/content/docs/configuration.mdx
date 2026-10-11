@@ -96,7 +96,7 @@ The backend exposes seventeen groups, in this order:
 | Static analysis provider | The static analyst's provider and its connection details. |
 | Sandbox provider | Where samples are detonated, or which uploaded report stands in. |
 | Tool servers (MCP) | The servers agents may call and the tools each may expose. |
-| Memory / LTM (Qdrant) | Backend, collections and how many neighbours are recalled. The enrichment worker and the API's health probe read these same keys; there is no second, API-side copy of them. |
+| Memory / LTM | The backend, its own settings under `memory.<backend>`, and how many neighbours are recalled. The enrichment worker, the purge and the API's health probe build the store `memory.backend` selects from these same keys; there is no second, API-side copy of them. |
 | Analysis layers | Deterministic pre-analysis layers, reference data and thresholds. |
 | Negotiation | Rounds and the consensus condition. |
 | Chunking | How large inputs are split before they reach a model. |

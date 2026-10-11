@@ -1316,6 +1316,9 @@ PROMPTS: dict[str, str] = {
             str(knowledge.api_capability.__doc__ or ""),
         ]
     ),
+    "the function-match answer of a backend without function hashes": (
+        knowledge.NO_FUNCTION_HASH_STORE
+    ),
     "the claims headings of a composer section and the narrative round": (
         f"{ANALYST_CLAIMS_HEADING} {CLAIMS_IN_FORCE_HEADING}"
     ),

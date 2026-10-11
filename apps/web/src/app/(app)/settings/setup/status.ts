@@ -93,11 +93,19 @@ function agentStatus(effective: EffectiveValue): string {
   return `${head} · active profile ${profile}`;
 }
 
-function memoryStatus(effective: EffectiveValue): string {
+/** The display phrase a catalog key's choice declares (`choice_labels`), or none. */
+export type ChoiceLabel = (key: string, choice: string) => string | undefined;
+
+function memoryStatus(effective: EffectiveValue, choiceLabel?: ChoiceLabel): string {
   const backend = text(effective("core.memory.backend")) || "memory";
-  if (backend !== "qdrant") return "memory (in-process)";
-  const url = text(effective("core.memory.qdrant_url"));
-  return `qdrant · ${url || "no URL set"}`;
+  // The phrase the backend declares beside its id ("in-process"), if any.
+  const label = choiceLabel?.("core.memory.backend", backend);
+  const name = label ? `${backend} (${label})` : backend;
+  // A backend with an endpoint declares it as `core.memory.<id>.url`; one
+  // without (the in-process store) has no such key.
+  const url = effective(`core.memory.${backend}.url`);
+  if (url === undefined) return name;
+  return `${name} · ${text(url) || "no URL set"}`;
 }
 
 function enrichmentStatus(effective: EffectiveValue, isSet: IsSet): string {
@@ -109,7 +117,12 @@ function enrichmentStatus(effective: EffectiveValue, isSet: IsSet): string {
 }
 
 /** The hub's one-line summary of what a guide's settings currently say. */
-export function guideStatus(id: GuideId, effective: EffectiveValue, isSet: IsSet): string {
+export function guideStatus(
+  id: GuideId,
+  effective: EffectiveValue,
+  isSet: IsSet,
+  choiceLabel?: ChoiceLabel
+): string {
   switch (id) {
     case "llm":
       return llmStatus(effective, isSet);
@@ -126,7 +139,7 @@ export function guideStatus(id: GuideId, effective: EffectiveValue, isSet: IsSet
     case "agent":
       return agentStatus(effective);
     case "memory":
-      return memoryStatus(effective);
+      return memoryStatus(effective, choiceLabel);
     case "enrichment":
       return enrichmentStatus(effective, isSet);
   }

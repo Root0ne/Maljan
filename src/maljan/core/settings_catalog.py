@@ -23,7 +23,12 @@ from maljan.core.settings_annotations import ANNOTATIONS, GROUP_ORDER, group_for
 FieldType = Literal["bool", "int", "float", "str", "secret", "enum", "list", "dict", "json"]
 Applies = Literal["next_job", "live", "restart"]
 ChoicesFrom = Literal[
-    "static_providers", "sandbox_providers", "mcp_servers", "agent_roles", "profiles"
+    "static_providers",
+    "sandbox_providers",
+    "mcp_servers",
+    "agent_roles",
+    "profiles",
+    "memory_backends",
 ]
 Editor = Literal["server_map", "rest_sandbox", "agent_definitions", "stages"]
 
@@ -84,6 +89,9 @@ class CatalogEntry:
     # reason ``choices`` is: the rule lives in ``REQUIRED_ENV_ALLOW`` and a
     # second copy of it in the console is a copy that drifts.
     required_env: dict[str, list[str]] | None = None
+    # The short phrase each choice declares for the console to show beside it
+    # (a registry's own labels), keyed by choice; ``None`` when none declares one.
+    choice_labels: dict[str, str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -116,14 +124,65 @@ def _walk(model: type[BaseModel], prefix: str, defaults: Any) -> list[Leaf]:
 
 
 def core_leaves() -> list[Leaf]:
-    """Leaves of ``Settings`` with the *code* defaults (env ignored)."""
+    """Leaves of ``Settings`` with the *code* defaults (env ignored).
+
+    Beside the declared fields: the settings of each memory backend an
+    installed package registered with a settings model, under ``memory.<id>.``,
+    so the catalogue lists and the store saves them like any other key.
+    """
     defaults = Settings.model_construct()  # no env, no validation: declared defaults only
     # model_construct leaves nested models unbuilt; build them from their own defaults
     for name, field in Settings.model_fields.items():
         tp, _ = _unwrap_optional(field.annotation)
         if _is_model(tp) and not isinstance(getattr(defaults, name, None), BaseModel):
             object.__setattr__(defaults, name, tp())
-    return _walk(Settings, "", defaults)
+    leaves = _walk(Settings, "", defaults)
+    for backend_id, backend in _undeclared_memory_backends().items():
+        model = backend.settings_model
+        if model is not None:
+            leaves.extend(_walk(model, f"memory.{backend_id}.", model()))
+    return leaves
+
+
+def _undeclared_memory_backends() -> dict[str, Any]:
+    """Registered memory backends whose settings are not a declared field of ``memory``."""
+    from maljan.core.config import MemoryConfig
+    from maljan.memory.store_factory import registered_backends
+
+    return {
+        backend_id: backend
+        for backend_id, backend in registered_backends().items()
+        if backend_id not in MemoryConfig.model_fields
+    }
+
+
+def _annotation(path: str) -> Any:
+    """``path``'s annotation: the shared table's, else the one its memory backend registered."""
+    found = ANNOTATIONS.get(path)
+    if found is not None or not path.startswith("memory."):
+        return found
+    backend_id, _, leaf = path[len("memory.") :].partition(".")
+    backend = _undeclared_memory_backends().get(backend_id)
+    return backend.annotations.get(leaf) if backend is not None and leaf else None
+
+
+def _registry_choices(source: str | None) -> list[str] | None:
+    """The choices a core registry holds for ``source``, or ``None`` when it is not one."""
+    if source == "memory_backends":
+        from maljan.memory.store_factory import memory_backends
+
+        return list(memory_backends())
+    return None
+
+
+def _registry_labels(source: str | None) -> dict[str, str] | None:
+    """The labels a core registry's choices declare for ``source``, or ``None``."""
+    if source == "memory_backends":
+        from maljan.memory.store_factory import registered_backends
+
+        labels = {key: b.label for key, b in registered_backends().items() if b.label}
+        return labels or None
+    return None
 
 
 def _field_type(leaf: Leaf) -> tuple[FieldType, list[str] | None, bool]:
@@ -184,8 +243,12 @@ def core_catalog() -> list[CatalogEntry]:
     """
     entries: list[CatalogEntry] = []
     for leaf in core_leaves():
-        ann = ANNOTATIONS.get(leaf.path)
+        ann = _annotation(leaf.path)
         ftype, choices, nullable = _field_type(leaf)
+        # A str leaf whose choices a core registry holds is an enum of them.
+        registry = _registry_choices(ann.get("choices_from") if ann else None)
+        if registry is not None and ftype == "str":
+            ftype, choices = "enum", registry
         lo, hi = _bounds(leaf.field)
         entries.append(
             CatalogEntry(
@@ -209,6 +272,7 @@ def core_catalog() -> list[CatalogEntry]:
                 applies_when=(ann.get("applies_when") if ann else None),
                 order=(ann.get("order", 0) if ann else 0),
                 choices_from=(ann.get("choices_from") if ann else None),
+                choice_labels=_registry_labels(ann.get("choices_from") if ann else None),
                 editor=(ann.get("editor") if ann else None),
                 subgroup=(ann.get("subgroup") if ann else None),
                 advanced=bool(ann.get("advanced", False)) if ann else False,

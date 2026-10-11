@@ -28,11 +28,29 @@ class Annotation(TypedDict):
     applies_when: NotRequired[dict[str, list[str]]]  # key -> values that reveal this entry
     order: NotRequired[int]  # within the group; default 0
     choices_from: NotRequired[
-        Literal["static_providers", "sandbox_providers", "mcp_servers", "agent_roles", "profiles"]
+        Literal[
+            "static_providers",
+            "sandbox_providers",
+            "mcp_servers",
+            "agent_roles",
+            "profiles",
+            "memory_backends",
+        ]
     ]
     editor: NotRequired[Literal["server_map", "rest_sandbox", "agent_definitions", "stages"]]
     subgroup: NotRequired[str]  # heading inside the group; absent = top of the group
     advanced: NotRequired[bool]  # folded into the group's closed "Advanced" disclosure
+
+
+# Settings that moved to another key, each with the key that now holds it. An
+# export written before the move still carries the old key; the import reads
+# it as the new one (the new one wins when a file carries both).
+RENAMED_SETTINGS: dict[str, str] = {
+    "core.memory.qdrant_url": "core.memory.qdrant.url",
+    "core.memory.qdrant_collection": "core.memory.qdrant.collection",
+    "core.memory.qdrant_function_hash_collection": "core.memory.qdrant.function_hash_collection",
+    "core.memory.qdrant_api_key": "core.memory.qdrant.api_key",
+}
 
 
 # Settings that were retired with no effect, each with what replaces it. An
@@ -59,7 +77,7 @@ GROUP_ORDER: list[tuple[str, str]] = [
     ("static", "Static analysis provider"),
     ("sandbox", "Sandbox provider"),
     ("mcp", "Tool servers (MCP)"),
-    ("memory", "Memory / LTM (Qdrant)"),
+    ("memory", "Memory / LTM"),
     ("analysis", "Analysis layers"),
     ("negotiation", "Negotiation"),
     ("chunking", "Chunking"),
@@ -829,12 +847,15 @@ ANNOTATIONS: dict[str, Annotation] = {
     "memory.backend": {
         "title": "Memory backend",
         "description": (
-            "Long-term-memory store used for past-case retrieval. qdrant persists cases "
-            "in a real Qdrant instance; memory keeps them in an in-process, ephemeral "
-            "store with no external dependency."
+            "Long-term-memory store used for past-case retrieval: one of the registered "
+            "memory backends. qdrant persists cases in a real Qdrant instance; memory "
+            "keeps them in an in-process, ephemeral store with no external dependency. "
+            "Each backend's own settings are the keys under memory.<backend>."
         ),
+        "order": -1,
+        "choices_from": "memory_backends",
     },
-    "memory.qdrant_collection": {
+    "memory.qdrant.collection": {
         "title": "Qdrant case collection",
         "description": (
             "Qdrant collection name storing semantic case embeddings for few-shot "
@@ -843,28 +864,30 @@ ANNOTATIONS: dict[str, Annotation] = {
             "incompatible old collection."
         ),
         "probe": "qdrant",
+        "applies_when": {"core.memory.backend": ["qdrant"]},
     },
-    "memory.qdrant_function_hash_collection": {
+    "memory.qdrant.function_hash_collection": {
         "title": "Qdrant function-hash collection",
         "description": (
             "Separate Qdrant collection storing per-function normalized-opcode hashes "
             "for the exact-match function-hash attribution tier, independent of the "
             "fuzzy semantic case collection above."
         ),
+        "applies_when": {"core.memory.backend": ["qdrant"]},
     },
-    "memory.qdrant_url": {
+    "memory.qdrant.url": {
         "title": "Qdrant URL",
-        "description": (
-            "URL of the Qdrant server backing long-term memory when memory.backend is qdrant."
-        ),
+        "description": ("URL of the Qdrant server backing long-term memory."),
         "probe": "qdrant",
+        "applies_when": {"core.memory.backend": ["qdrant"]},
     },
-    "memory.qdrant_api_key": {
+    "memory.qdrant.api_key": {
         "title": "Qdrant API key",
         "description": (
             "API key sent with every Qdrant request when the server enforces one (compose "
             "does); empty means no authentication, which is fine for a loopback-only server."
         ),
+        "applies_when": {"core.memory.backend": ["qdrant"]},
     },
     "memory.top_k": {
         "title": "Memory top-K",

@@ -228,50 +228,41 @@ async def enqueue_enrichment(pool: Any, report_id: Any) -> str | None:
     return str(job.job_id) if job is not None else None
 
 
-# Process-wide singleton cache for the Qdrant LTM store. Two flags so we
+# Process-wide singleton cache for the configured LTM store. Two flags so we
 # can distinguish "never attempted" (build it now) from "built but unavailable"
 # (skip silently). Cannot use a ``None`` sentinel for the cache itself
-# because ``None`` is a legitimate cached value (Qdrant probe failed).
+# because ``None`` is a legitimate cached value (the store could not be built).
 _memory_store_built: bool = False
 _memory_store: MemoryStore | None = None
 
 
 async def _get_memory_store() -> MemoryStore | None:
-    """Lazily build the Qdrant LTM store. Cached process-wide, never raises.
+    """Lazily build the configured LTM store. Cached process-wide, never raises.
 
-    Returns ``None`` when Qdrant is not installed / not reachable so the
-    enrichment task degrades to reputation-only behaviour without aborting.
-
-    The settings are ``core.memory.qdrant_*`` — the same ones the analysis path
-    reads. There used to be a second set under ``api.qdrant_*``, and an
-    operator who filled in one of the two got a 401 out of every enrich run
-    because the worker was reading the other.
+    Built by ``maljan.memory.store_factory.build_memory_store`` from
+    ``core.memory`` — the backend and the settings the analysis path reads, so
+    enrichment reads the store the runs wrote. Returns ``None`` when the store
+    cannot be built, so the enrichment task degrades to reputation-only
+    behaviour without aborting.
     """
     global _memory_store_built, _memory_store
     if _memory_store_built:
         return _memory_store
 
     try:
-        from maljan.memory.qdrant_store import QdrantStore
+        from maljan.memory.store_factory import build_memory_store, configured_backend
 
-        memory = (await runtime_config.core()).memory
-        qdrant_url = memory.qdrant_url
-        qdrant_collection = memory.qdrant_collection
-        secret = memory.qdrant_api_key
-        _memory_store = QdrantStore(
-            url=qdrant_url,
-            collection=qdrant_collection,
-            api_key=(secret.get_secret_value() if secret else "") or None,
-        )
+        core = await runtime_config.core()
+        _memory_store = build_memory_store(core)
         logger.info(
-            "enrich: Qdrant LTM available (url=%s, collection=%s).",
-            redact_url(qdrant_url),
-            qdrant_collection,
+            "enrich: LTM available (backend=%s, %s).",
+            configured_backend(core),
+            type(_memory_store).__name__,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning(
-            "enrich: Qdrant LTM unavailable (%s) — similar_samples will be empty.",
-            exc,
+            "enrich: LTM unavailable (%s) — similar_samples will be empty.",
+            redact_url(str(exc)),
         )
         _memory_store = None
     _memory_store_built = True

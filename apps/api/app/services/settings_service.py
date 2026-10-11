@@ -277,8 +277,15 @@ class SettingsService:
         return out
 
     # ---- validation ----------------------------------------------------
-    def check_keys(self, changes: dict[str, Any]) -> None:
+    def check_keys(self, changes: dict[str, Any], stored: dict[str, Any] | None = None) -> None:
+        """Refuse unknown, read-only and out-of-choice keys.
+
+        ``stored`` is what is saved now: a value equal to it is not checked
+        against the choices again, so a form re-sending a stored id whose
+        backend package later broke can still save its other keys.
+        """
         index = catalog_index()
+        stored = stored or {}
         errors = {}
         for key in changes:
             entry = index.get(key)
@@ -286,6 +293,17 @@ class SettingsService:
                 errors[key] = "unknown setting"
             elif not entry.editable:
                 errors[key] = entry.reason or "read-only"
+            elif (
+                entry.choices_from
+                and entry.choices is not None
+                and changes[key] is not None
+                and changes[key] != stored.get(key)
+                and str(changes[key]).strip().lower() not in entry.choices
+            ):
+                # A choice a registry holds (a memory backend, say) is checked
+                # here, where it is saved, rather than wherever the settings
+                # are read: a stored id whose package later breaks still loads.
+                errors[key] = f"not one of: {', '.join(entry.choices)}"
         if errors:
             raise SettingsValidationError(errors)
 
@@ -318,9 +336,9 @@ class SettingsService:
     async def save(
         self, changes: dict[str, Any], *, user_id: uuid.UUID | None, ip: str | None
     ) -> SaveResult:
-        self.check_keys(changes)
-        index = catalog_index()
         current = await self.load_overrides()
+        self.check_keys(changes, current)
+        index = catalog_index()
         # An import document carries the mask wherever a secret was omitted.
         # For a secret leaf the mask means "unchanged", exactly as it does in
         # a composite editor -- never a credential whose literal characters

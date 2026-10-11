@@ -119,11 +119,15 @@ a bare and a Kubernetes-style liveness probe work without extra configuration.
   and version, and a `config` block reporting `bootstrap` and `encryption`,
   both of which the process already satisfied before it could serve anything.
   A liveness probe must not restart the API because Postgres blinked.
-- `GET /health?deep=true` probes Postgres, Redis, MinIO and Qdrant
-  concurrently, each with a three-second budget, and reports every result as
-  data. `status` becomes `degraded` when Postgres or Redis is unreachable and
-  `degraded_optional` when only MinIO or Qdrant is, so use the deep form for
-  readiness and the bare form for liveness.
+- `GET /health?deep=true` probes Postgres, Redis, MinIO and the configured
+  long-term-memory backend (`components.memory`, which names the backend it
+  probed) concurrently, each with a three-second budget, and reports every
+  result as data. An in-process backend answers without I/O; a backend id no
+  registered builder knows is reported with `ok: null` and `detail: "not
+  configured"`, never as a failure, and one whose package failed to load with
+  `ok: false`, `detail: "unavailable"` and the reason in `error`. `status` becomes `degraded` when Postgres
+  or Redis is unreachable and `degraded_optional` when only MinIO or the memory
+  store is, so use the deep form for readiness and the bare form for liveness.
 
 Operational detail — throttle state and dropped audit rows — lives on
 `GET /api/v1/system/status`, where those fields are returned to admin callers

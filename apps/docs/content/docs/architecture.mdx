@@ -245,8 +245,8 @@ third party leaves a backend `idle in transaction` for the length of that
 wait. The routes that do wait end the read first, through
 `database.end_read_transaction`: the three probes (`/settings/test/{probe}`,
 `/test/mcp`, `/test/agent`, up to five minutes at a model endpoint), the
-VirusTotal registration, and the long-term-memory purge, which scrolls a whole
-Qdrant collection. The session stays usable; the next statement opens a
+VirusTotal registration, and the long-term-memory purge, which walks the
+whole configured store. The session stays usable; the next statement opens a
 transaction of its own.
 
 The WebSocket route holds no session across the stream at all. The handshake
@@ -405,8 +405,8 @@ files, channels) and `pcap_summary` when a capture was fetched; one reputation
 lookup on the sha256 (`get_file_report` on `virustotal` when it is enabled,
 else `check_hash` on `threatintel`), made through the tool server exactly as
 an agent's call is and recorded under that server; `function_matches` when
-a Qdrant function-hash store and a provider that hashes functions are both
-present; and, last, for a PE, `floss`: FLOSS's decoded, stack and tight
+the configured memory backend keeps a function-hash store and a provider that
+hashes functions is present; and, last, for a PE, `floss`: FLOSS's decoded, stack and tight
 strings, recovered by emulation (the sample is never executed) through the
 same `tools.emulated_strings` function the sidecar's `floss` tool serves — its
 pinned build, 600 s wall clock and 4 GiB address-space limit — with the
@@ -3236,6 +3236,52 @@ the neighbour count and the Qdrant endpoint are settings. The ATT&CK corpus and
 its embeddings are cached on disk; on the compose stack that cache is a named
 volume, because rebuilding it costs the judge node about a gigabyte of resident
 memory and a minute and a half on the first analysis.
+
+One factory builds the store `memory.backend` selects
+(`maljan.memory.store_factory.build_memory_store`), and every caller uses it:
+the analysis container (the store a run writes its case to), the enrichment
+worker, the API's purge and its dry run, `/health?deep=true`,
+the function-hash attribution steps and the command line. No caller names a
+backend. Each backend implements the one `MemoryStore` interface — store,
+retrieve, count, clear, `purge_low_quality` (with `dry_run=True` counting what
+the same gate would remove), `readiness()`, `function_hash_store()` and
+`close()` — and says what it cannot do through it: the in-process backend's
+`function_hash_store()` answers `None`, and function-hash attribution is then
+left out the way it is for any backend that keeps no function hashes. A
+backend that derives from `MemoryStoreDefaults` gets those answers for what it
+does not implement; the factory refuses a store without the interface, naming
+what it lacks. The function-hash store is built once per backend and settings
+and handed out as a hold: a settings change builds a new one, and the one it
+replaces is closed only when the last holder lets go — the judge's hold ends
+with the job's corpus write, or at teardown for a job that never wrote — so a
+running job keeps reading and writing the store it started with.
+
+`memory.backend` is the id of a registered backend: saving any other id is
+refused (a settings PATCH or import), while a stored id whose package was
+removed or failed to load still loads with the rest of the settings — the
+factory then reports that backend not configured or unavailable, with the
+reason, to every caller, `/health` says so, and a run goes on without
+long-term memory as it does when any store cannot be built. Each backend's own settings live under `memory.<id>.*`
+(`memory.qdrant.url`, `memory.qdrant.collection`,
+`memory.qdrant.function_hash_collection`, `memory.qdrant.api_key`); the
+console's memory guide asks for the keys under the selected backend's id and
+tests them with the probe those keys declare. A backend from an installed
+package registers through the `maljan.memory_backends` entry-point group — a
+callable that calls `register_memory_backend(id, builder, settings_model=...,
+annotations=...)` — which every process loads on first use, so the API, the
+analysis worker and the enrichment worker all know it; its settings model's
+leaves join the catalogue under `memory.<id>.` with the annotations it
+registered. A backend may declare a short `label` the console shows beside
+its id (the in-process backend's is "in-process"); the catalogue serves the
+labels as `choice_labels` on `memory.backend`. An entry point is best named
+after the id it registers: a package
+that fails to load is then reported against that id; otherwise a selected id
+nothing registered is reported unavailable, with every failed package's
+reason, whenever any package failed. The flat keys stored before the move (`memory.qdrant_url` and its
+siblings) are still read, through the one map of moved keys
+(`settings_annotations.RENAMED_SETTINGS`): revision `20261010000000` renames
+the stored rows, an older export or a settings PATCH naming an old key writes
+the new one, and an environment's flat values land under the backend.
 
 The case a run adds to long-term memory, and the function hashes it files
 under the judge's family in the attribution corpus, are decided by the judge

@@ -25,10 +25,10 @@ When to upgrade to QdrantStore:
 from __future__ import annotations
 
 from maljan.memory.embeddings import cosine, encode
-from maljan.memory.long_term_memory import StoredCase
+from maljan.memory.long_term_memory import MemoryStoreDefaults, StoredCase
 
 
-class InMemoryStore:
+class InMemoryStore(MemoryStoreDefaults):
     """Pure-Python MemoryStore implementation backed by semantic embeddings.
 
     Thread safety: NOT thread-safe. For single-threaded pipelines this is
@@ -101,12 +101,13 @@ class InMemoryStore:
         max_total_techniques: int = 1,
         require_uncorroborated: bool = True,
         include_analyst_errors: bool = True,
+        dry_run: bool = False,
     ) -> int:
         """Drop low-quality cases per the write-time quality gate.
 
         See ``MemoryStore.purge_low_quality`` for the contract. The
         in-memory implementation walks the case list and rebuilds it,
-        keeping only entries that pass the gate.
+        keeping only entries that pass the gate; ``dry_run`` only counts.
         """
 
         def _low_quality(case: StoredCase) -> bool:
@@ -120,6 +121,8 @@ class InMemoryStore:
                 return False
             return True
 
+        if dry_run:
+            return sum(1 for c, _v in self._cases if _low_quality(c))
         before = len(self._cases)
         self._cases = [(c, v) for c, v in self._cases if not _low_quality(c)]
         return before - len(self._cases)

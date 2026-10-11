@@ -358,7 +358,8 @@ class StaticAnalyst(BaseAnalyst):
         """Pre-pass: surface known-family code reuse via exact opcode-hash match.
 
         Computes per-function normalized-opcode hashes for the binary, asks the
-        FunctionHashStore which known samples share them, and renders an
+        configured memory backend's function-hash store which known samples
+        share them, and renders an
         "attribution prior" hint. Deterministic and fail-safe: any error (or an
         empty corpus / no overlap) returns an empty string and the analyst
         proceeds normally. ``get_bulk_function_hashes`` is deliberately NOT in
@@ -372,35 +373,30 @@ class StaticAnalyst(BaseAnalyst):
             return ""
         if not self._provider().capabilities.provides_function_hashes:
             return ""  # this static provider cannot produce function hashes
-        if cfg.memory.backend != "qdrant":
-            return ""  # the function-hash store needs the Qdrant backend
 
         try:
             from maljan.analysis.function_hash_attribution import (
                 aggregate_matches,
                 build_attribution_hint,
             )
-            from maljan.memory.function_hash_store import FunctionHashStore
+            from maljan.memory.store_factory import leased_function_hash_store
 
-            functions = self._provider().function_hashes(
-                StaticJobContext(mirror_sample_path=file_path)
-            )
-            if not functions:
-                return ""
+            # Held for the read: a settings change meanwhile closes this store
+            # only once the read has let go of it.
+            with leased_function_hash_store(cfg) as store:
+                if store is None:
+                    return ""  # the configured memory backend keeps no function hashes
 
-            store = FunctionHashStore(
-                url=cfg.memory.qdrant_url,
-                collection=cfg.memory.qdrant_function_hash_collection,
-                api_key=(
-                    cfg.memory.qdrant_api_key.get_secret_value()
-                    if cfg.memory.qdrant_api_key
-                    else None
-                ),
-            )
-            matches = store.match(
-                [fh for _name, fh in functions],
-                exclude_sample_id=sample_hash or None,
-            )
+                functions = self._provider().function_hashes(
+                    StaticJobContext(mirror_sample_path=file_path)
+                )
+                if not functions:
+                    return ""
+
+                matches = store.match(
+                    [fh for _name, fh in functions],
+                    exclude_sample_id=sample_hash or None,
+                )
             results = aggregate_matches(
                 matches, max_families=cfg.preprocessing.function_hash_max_matches
             )

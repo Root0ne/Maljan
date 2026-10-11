@@ -428,6 +428,9 @@ class ServiceContainer:
         # The function-hash corpus write the judge decided on, as
         # ``(store, sample_id, family, functions)``, held for the same reason.
         self.pending_function_hashes: Any = None
+        # Set by ``aclose``: a hold handed over after teardown (a judge thread a
+        # timeout abandoned) is let go of at once.
+        self._closed = False
         self._sandbox_provider_cache: SandboxProvider | None = None
         self._static_provider_cache: dict[str, StaticProvider] = {}
         self._server_registry_cache: ServerRegistry | None = None
@@ -780,31 +783,17 @@ class ServiceContainer:
     # ------------------------------------------------------------------
 
     def get_memory_store(self) -> MemoryStore:
+        """The store ``memory.backend`` selects, built once by the factory every caller uses."""
         with self._lock:
             if self._memory_store_cache is None:
-                backend = self.config.memory.backend
-                if backend == "qdrant":
-                    from maljan.memory.qdrant_store import QdrantStore
+                from maljan.memory.store_factory import build_memory_store, configured_backend
 
-                    self._memory_store_cache = QdrantStore(
-                        url=self.config.memory.qdrant_url,
-                        collection=self.config.memory.qdrant_collection,
-                        api_key=(
-                            self.config.memory.qdrant_api_key.get_secret_value()
-                            if self.config.memory.qdrant_api_key
-                            else None
-                        ),
-                    )
-                    logger.info(
-                        "LTM backend: QdrantStore (url=%s, collection=%s)",
-                        self.config.memory.qdrant_url,
-                        self.config.memory.qdrant_collection,
-                    )
-                else:
-                    from maljan.memory.in_memory_store import InMemoryStore
-
-                    self._memory_store_cache = InMemoryStore()
-                    logger.info("LTM backend: InMemoryStore (in-process, non-persistent).")
+                self._memory_store_cache = build_memory_store(self.config)
+                logger.info(
+                    "LTM backend: %s (%s).",
+                    configured_backend(self.config),
+                    type(self._memory_store_cache).__name__,
+                )
             return self._memory_store_cache
 
     def remember_the_run(self) -> bool:
@@ -838,11 +827,33 @@ class ServiceContainer:
         )
         return True
 
+    def hold_function_hashes(
+        self, store: Any, sample_id: str, family: str, functions: list
+    ) -> None:
+        """Take over the judge's hold on ``store`` with the corpus write it decided on.
+
+        The hold ends with the write (``remember_the_run``) or at teardown. A
+        write it replaces lets go of its own store; one handed over after
+        teardown is let go of at once, never written.
+        """
+        from maljan.memory.store_factory import release_function_hash_store
+
+        with self._lock:
+            if self._closed:
+                replaced, self.pending_function_hashes = (store,), None
+            else:
+                replaced = self.pending_function_hashes
+                self.pending_function_hashes = (store, sample_id, family, list(functions))
+        if replaced is not None:
+            release_function_hash_store(replaced[0])
+
     def _remember_the_function_hashes(self) -> bool:
         held, self.pending_function_hashes = self.pending_function_hashes, None
         if held is None:
             return False
         store, sample_id, family, functions = held
+        from maljan.memory.store_factory import release_function_hash_store
+
         try:
             written = int(store.upsert_sample(sample_id, family, functions) or 0)
         except Exception as exc:  # noqa: BLE001 — the corpus never costs a completed job
@@ -850,6 +861,10 @@ class ServiceContainer:
                 "Function-hash corpus write failed (%s). The completed job is unaffected.", exc
             )
             return False
+        finally:
+            # The judge's hold ends with the write: a store a settings change
+            # replaced meanwhile is closed now, not under this job.
+            release_function_hash_store(store)
         logger.info(
             "Function-hash corpus: filed %d function(s) of '%s' under %s.",
             written,
@@ -1340,6 +1355,15 @@ class ServiceContainer:
         plain ``await`` on the graph's loop. Each stack has to unwind where it
         was wound.
         """
+        # A job that ended before its corpus write (failed, cancelled, or never
+        # told to remember) lets go of the function-hash store its judge held.
+        with self._lock:
+            self._closed = True
+            unwritten, self.pending_function_hashes = self.pending_function_hashes, None
+        if unwritten is not None:
+            from maljan.memory.store_factory import release_function_hash_store
+
+            release_function_hash_store(unwritten[0])
         with self._lock:
             analysts = list(self._agent_cache.values())
             judges = list(self._judge_agent_cache.values())

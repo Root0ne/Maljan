@@ -12,7 +12,12 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 from maljan.core.model_assignments import endpoint_label
-from maljan.core.settings_annotations import GROUP_DESCRIPTIONS, GROUP_ORDER, RETIRED_SETTINGS
+from maljan.core.settings_annotations import (
+    GROUP_DESCRIPTIONS,
+    GROUP_ORDER,
+    RENAMED_SETTINGS,
+    RETIRED_SETTINGS,
+)
 from maljan.core.settings_overrides import redact_url
 from maljan.core.virustotal import SERVER_KEY as VIRUSTOTAL_SERVER_KEY
 from maljan.pipeline.conditions import validate_condition
@@ -232,7 +237,8 @@ async def patch_values(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> PatchResponse | JSONResponse:
-    unprobed = await _unprobed_models_in(db, body.changes)
+    changes = _current_keys(body.changes)
+    unprobed = await _unprobed_models_in(db, changes)
     if unprobed:
         from app.services.model_probes import AGENT_MODELS_KEY, refusal_sentence
 
@@ -244,7 +250,7 @@ async def patch_values(
             content={"errors": {AGENT_MODELS_KEY: refusal_sentence(unprobed)}},
         )
     try:
-        res = await SettingsService(db).save(body.changes, user_id=user.id, ip=_client_ip(request))
+        res = await SettingsService(db).save(changes, user_id=user.id, ip=_client_ip(request))
     except SettingsValidationError as exc:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": exc.errors}
@@ -417,6 +423,20 @@ async def export_values(
     )
 
 
+def _current_keys(values: dict[str, Any]) -> dict[str, Any]:
+    """``values`` with each moved key read as the key that now holds it.
+
+    An export written before a setting moved carries the old key; it is
+    imported as the new one, and a file carrying both keeps the new one's
+    value.
+    """
+    out = {key: value for key, value in values.items() if key not in RENAMED_SETTINGS}
+    for old, new in RENAMED_SETTINGS.items():
+        if old in values and new not in out:
+            out[new] = values[old]
+    return out
+
+
 @router.post("/import", response_model=PatchResponse)
 async def import_values(
     body: ImportRequest,
@@ -430,8 +450,9 @@ async def import_values(
             content={"errors": {"format": "unsupported format"}},
         )
     index = catalog_index()
+    values = _current_keys(body.values)
     errors: dict[str, str] = {}
-    for key in body.values:
+    for key in values:
         entry = index.get(key)
         if entry is None and key in RETIRED_SETTINGS:
             errors[key] = (
@@ -447,7 +468,7 @@ async def import_values(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": errors}
         )
     try:
-        res = await SettingsService(db).save(body.values, user_id=user.id, ip=_client_ip(request))
+        res = await SettingsService(db).save(values, user_id=user.id, ip=_client_ip(request))
     except SettingsValidationError as exc:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": exc.errors}

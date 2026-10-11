@@ -56,6 +56,20 @@ def test_the_schema_carries_registry_ids_and_the_current_server_keys(client):
     assert entries["core.mcp.servers"]["editor"] == "server_map"
 
 
+def test_the_memory_backend_choice_carries_each_backend_s_declared_label(client):
+    """The console's memory status names the in-process backend from this answer."""
+    from maljan.memory import store_factory
+
+    with patch("app.api.v1.settings.SettingsService.load_overrides", AsyncMock(return_value={})):
+        response = client.get("/api/v1/settings/schema")
+    entries = {e["key"]: e for g in response.json()["groups"] for e in g["entries"]}
+    backend = entries["core.memory.backend"]
+    assert backend["choices_from"] == "memory_backends"
+    assert backend["choices"] == list(store_factory.memory_backends())
+    assert backend["choice_labels"] == {"memory": "in-process"}
+    assert entries["core.memory.top_k"]["choice_labels"] is None
+
+
 def test_the_server_map_leaf_carries_the_names_a_built_in_is_always_started_with(client):
     """The console draws the rule the save enforces, not a copy of it.
 

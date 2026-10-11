@@ -21,8 +21,8 @@ def test_types_and_choices():
     by_path = {e.path: e for e in cat.core_catalog()}
     assert by_path["llm.openai.api_key"].type == "secret" and by_path["llm.openai.api_key"].secret
     assert (
-        by_path["memory.qdrant_api_key"].type == "secret"
-        and by_path["memory.qdrant_api_key"].secret
+        by_path["memory.qdrant.api_key"].type == "secret"
+        and by_path["memory.qdrant.api_key"].secret
     )
     assert by_path["reporting.default_tlp"].type == "enum"
     expected_tlp_choices = ["CLEAR", "GREEN", "AMBER", "AMBER_STRICT", "RED"]

@@ -171,6 +171,9 @@ def test_the_memory_purge_runs_with_no_transaction_open(session: FakeSession) ->
             open_during_the_purge.append(session.in_transaction)
             return 3
 
+        def close(self) -> None:
+            return None
+
     async def _build(db: Any) -> Any:
         # Reading the settings is what puts the request in a transaction.
         await db.execute("select the configured collection")
