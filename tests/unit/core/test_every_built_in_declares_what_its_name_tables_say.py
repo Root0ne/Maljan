@@ -466,17 +466,27 @@ def test_the_rule_match_display_names_are_the_assertion_words(declared: ToolDecl
     assert names == set(alternation.group(1).split("|"))
 
 
-def test_ghidra_and_radare2_carry_their_prompts_and_radare2_its_errors(
+def test_ghidra_and_radare2_carry_their_workflows_and_radare2_its_errors(
     declared: ToolDeclarations,
 ) -> None:
+    from maljan.core.builtin_declarations import CAPE_WORKFLOW, R2_WORKFLOW
+    from maljan.providers.base import CLAIM_GUIDANCE
     from maljan.providers.static import ghidra, r2
 
     held = declared.source("provider:ghidra")
-    assert held is not None and held.prompt_fragment == ghidra.GHIDRA_PROMPT_FRAGMENT
+    assert held is not None and held.prompt_fragment == ghidra.GHIDRA_WORKFLOW
+    assert ghidra.GHIDRA_PROMPT_FRAGMENT == (
+        ghidra.GHIDRA_LEAD + CLAIM_GUIDANCE + "\n\n" + held.prompt_fragment
+    )
     held_r2 = declared.source("provider:r2")
     assert held_r2 is not None
-    assert held_r2.prompt_fragment == r2.R2StaticProvider.R2_PROMPT_FRAGMENT
+    assert held_r2.prompt_fragment == R2_WORKFLOW
+    assert r2.R2StaticProvider.R2_PROMPT_FRAGMENT == (
+        r2.R2StaticProvider.R2_LEAD + CLAIM_GUIDANCE + "\n\n" + R2_WORKFLOW
+    )
     assert held_r2.error_patterns == r2._R2_PATTERNS
+    held_cape = declared.source("provider:cape2")
+    assert held_cape is not None and held_cape.prompt_fragment == CAPE_WORKFLOW
 
 
 # ---------------------------------------------------------------------------

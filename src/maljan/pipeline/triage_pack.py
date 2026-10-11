@@ -117,7 +117,7 @@ from maljan.core.logger import logger
 from maljan.core.reputation import ReputationRecord, is_lookup_entry, reputation_of
 from maljan.core.tool_declarations import PACK
 from maljan.extractors.sample_identity import ARCHIVE_FILE_TYPES, DOCUMENT_FILE_TYPES
-from maljan.pipeline.conditions import TriageFacts
+from maljan.pipeline.conditions import TriageFacts, rule_match_hits
 from maljan.pipeline.sandbox_status import (
     OBSERVED,
     STATUS_TOOL,
@@ -697,11 +697,14 @@ class _Pack:
         # the reputation call's included, so it is the one list to publish.
         self.result.entries = list(self.recorder.entries)
         self.result.duration_ms = int((time.monotonic() - started) * 1000)
+        hits, rule_hits = rule_match_hits(self.result.entries)
         self.result.facts = TriageFacts(
             has_signature=self.has_signature,
             reputation_malicious=self.reputation_malicious,
             yara_hits=self.yara_hits,
             capa_hits=self.capa_hits,
+            rule_hits=rule_hits,
+            hits=hits,
         )
         return self.result
 

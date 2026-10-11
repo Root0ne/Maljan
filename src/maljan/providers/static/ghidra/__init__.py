@@ -14,6 +14,7 @@ registry imports and the golden capture script reads.
 from maljan.providers.static.ghidra.provider import (
     GHIDRA_DID_NOT_MAKE_IT_CURRENT,
     GHIDRA_GUIDANCE,
+    GHIDRA_LEAD,
     GHIDRA_NOT_ANSWERING,
     GHIDRA_PROMPT_FRAGMENT,
     GHIDRA_WORKFLOW,
@@ -32,6 +33,7 @@ from maljan.providers.static.ghidra.provider import (
 __all__ = [
     "GHIDRA_DID_NOT_MAKE_IT_CURRENT",
     "GHIDRA_GUIDANCE",
+    "GHIDRA_LEAD",
     "GHIDRA_NOT_ANSWERING",
     "GHIDRA_PROMPT_FRAGMENT",
     "GHIDRA_WORKFLOW",

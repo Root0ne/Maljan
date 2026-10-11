@@ -1138,6 +1138,11 @@ class ServerHandle:
             self._forget_attachment()
 
 
+def _declared_fragment(handle: Any) -> str:
+    """The workflow text a handle's server declares (``prompt_fragment``); "" for none."""
+    return str(getattr(getattr(handle, "config", None), "prompt_fragment", "") or "")
+
+
 class ServerRegistry:
     """The tool servers one job may attach, built from ``cfg.mcp.servers``."""
 
@@ -1179,7 +1184,11 @@ class ServerRegistry:
 
         for name, handle in self._handles.items():
             handle.guard = guard_from_settings(
-                name, cfg, on_open=_on_open, sample_open=getattr(handle.config, "sample_open", None)
+                name,
+                cfg,
+                on_open=_on_open,
+                sample_open=getattr(handle.config, "sample_open", None),
+                block=handle.config,
             )
         # The job's own bound-hit ledger and the job's own tool-output limit,
         # put on every toolkit this registry opens. Both used to be left to the
@@ -1370,6 +1379,8 @@ class ServerRegistry:
         incoming: list[BaseTool],
         tools: list[BaseTool],
         seen: dict[str, str],
+        *,
+        fragment: str = "",
     ) -> int:
         """Append ``incoming`` to ``tools`` under the collision rule.
 
@@ -1387,6 +1398,11 @@ class ServerRegistry:
         the bytes at a path of its own, and a wrapper that pinned one path for
         every tool would send the local one to the remote server.
 
+        ``fragment`` is the workflow text the server declares (its
+        ``prompt_fragment``); it rides with each tool
+        (``metadata["maljan_server_fragment"]``), so the prompt built from the
+        list shows it only while the server's tools are there.
+
         Returns how many tools were renamed, so the caller can log it once
         per server instead of per tool.
         """
@@ -1396,9 +1412,10 @@ class ServerRegistry:
             owner = seen.get(name)
             if owner == server:
                 continue
-            update: dict[str, Any] = {
-                "metadata": {**(getattr(tool, "metadata", None) or {}), "maljan_server": server}
-            }
+            metadata = {**(getattr(tool, "metadata", None) or {}), "maljan_server": server}
+            if fragment.strip():
+                metadata["maljan_server_fragment"] = fragment
+            update: dict[str, Any] = {"metadata": metadata}
             if owner is not None:
                 name = f"{server}__{name}"
                 if seen.get(name) == server:
@@ -1416,7 +1433,9 @@ class ServerRegistry:
         # It is reported here instead, where it is withheld, and reaches the
         # degraded block exactly as it did before.
         self._record(handle.withheld_reasons())
-        return self.merge_tools(handle.name, handle.tools(), tools, seen)
+        return self.merge_tools(
+            handle.name, handle.tools(), tools, seen, fragment=_declared_fragment(handle)
+        )
 
     def tools_for(
         self,
@@ -1569,7 +1588,13 @@ class ServerRegistry:
         picked, reasons = self._ref_tools(handle, ref)
         self._record(reasons)
         tools: list[BaseTool] = []
-        renamed = self.merge_tools(handle.name, picked, tools, {} if seen is None else seen)
+        renamed = self.merge_tools(
+            handle.name,
+            picked,
+            tools,
+            {} if seen is None else seen,
+            fragment=_declared_fragment(handle),
+        )
         if renamed:
             logger.info(
                 "mcp server '%s': %d referenced tool name(s) already taken, prefixed with '%s__'.",
@@ -1603,7 +1628,13 @@ class ServerRegistry:
         picked, reasons = self._ref_tools(handle, ref)
         self._record(reasons)
         tools: list[BaseTool] = []
-        renamed = self.merge_tools(handle.name, picked, tools, {} if seen is None else seen)
+        renamed = self.merge_tools(
+            handle.name,
+            picked,
+            tools,
+            {} if seen is None else seen,
+            fragment=_declared_fragment(handle),
+        )
         if renamed:
             logger.info(
                 "mcp server '%s': %d referenced tool name(s) already taken, prefixed with '%s__'.",

@@ -347,12 +347,35 @@ def tools_statement(
         return NO_TOOLS_STATEMENT
     named = [_family_label(family, provider_label) for family in families]
     joined = named[0] if len(named) == 1 else ", ".join(named[:-1]) + " and " + named[-1]
-    return (
+    statement = (
         f"The tools attached to this request come from {joined}; their names and "
         "arguments are listed with the request. Call them where the evidence in front "
         "of you leaves a question open or a claim needs checking, and cite each result "
         f"by the evidence id it carries. {FENCE_STATEMENT}"
     )
+    return "\n\n".join([statement, *server_fragments(tools)])
+
+
+def server_fragments(tools: Sequence[object]) -> list[str]:
+    """The workflow text each tool server in ``tools`` declares, in the order the list names them.
+
+    A registry server's tools carry the ``prompt_fragment`` their server
+    declares (``ServerRegistry.merge_tools``), so the text is shown exactly
+    where that server's tools are: a server none of whose tools the request
+    carries says nothing. A provider's own workflow is its provider's
+    fragment, and is not repeated here.
+    """
+    from maljan.agents.tool_pinning import SERVER_FRAGMENT_METADATA_KEY, server_of
+
+    found: dict[str, str] = {}
+    for tool in offered(tools):
+        server = server_of(tool)
+        if not server or server in found:
+            continue
+        text = str((getattr(tool, "metadata", None) or {}).get(SERVER_FRAGMENT_METADATA_KEY) or "")
+        if text.strip():
+            found[server] = text.strip()
+    return list(dict.fromkeys(found.values()))
 
 
 def has_decompiler(tools: Sequence[object]) -> bool:

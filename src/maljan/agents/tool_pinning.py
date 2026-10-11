@@ -41,6 +41,10 @@ if TYPE_CHECKING:
 # The metadata key ``ServerRegistry`` stamps a tool with. Read here, written
 # there, and named once so the two cannot drift.
 SERVER_METADATA_KEY = "maljan_server"
+# And the workflow text the server declares (its ``prompt_fragment``), carried
+# with each of its tools so a prompt built from the tool list shows it exactly
+# where the server's tools are (``prompt_fragments.tools_statement``).
+SERVER_FRAGMENT_METADATA_KEY = "maljan_server_fragment"
 
 # An argument whose *name* looks like it takes a file. Substring matches cover
 # ``file``, ``file_path``, ``filepath``, ``filename``, ``path``, ``target_file``;

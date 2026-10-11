@@ -1578,14 +1578,15 @@ def mcp_server_annotations(
     order: int = 0,
     provider_owned: bool = False,
 ) -> dict[str, Annotation]:
-    """The thirty-three leaves of an ``MCPServerConfig`` block, described for ``label``.
+    """The thirty-four leaves of an ``MCPServerConfig`` block, described for ``label``.
 
     Every MCP server in the settings has the same nine transport/tool-selection
-    knobs, plus five tool-server fields (``cwd``, ``env_allow``, ``tools``,
-    ``agents``, ``label``), the seven of ``sample_open`` and the twelve other
-    declaration fields (``DECLARATION_LEAVES``); writing them out six times
-    invites drift between blocks that must behave identically. The
-    per-field wording is fixed, the server's name is the only variable.
+    knobs, plus six tool-server fields (``cwd``, ``env_allow``, ``tools``,
+    ``agents``, ``label``, ``call_timeout_seconds``), the seven of
+    ``sample_open`` and the twelve other declaration fields
+    (``DECLARATION_LEAVES``); writing them out six times invites drift between
+    blocks that must behave identically. The per-field wording is fixed, the
+    server's name is the only variable.
 
     ``provider_owned`` marks a block whose ``tools``/``agents``/``label`` a
     static or sandbox provider (Ghidra, radare2, the CAPE MCP sidecar)
@@ -1674,6 +1675,16 @@ def mcp_server_annotations(
             f"{label} working directory",
             "Working directory for the stdio subprocess; empty means the repository root.",
             subgroup="Connection",
+        ),
+        f"{prefix}.call_timeout_seconds": ann(
+            f"{label} call budget (seconds)",
+            "How long one call of this server's tools may go unanswered before it counts "
+            "as a server that did not answer, before thirty seconds of grace. A tool the "
+            "server's capabilities manifest gives a longer budget gets that one. Zero sends "
+            "its calls with no deadline of their own. Every built-in server declares 300; "
+            "mcp.breaker.call_timeout_seconds, where set, applies to every server instead.",
+            subgroup="Connection",
+            advanced=True,
         ),
         f"{prefix}.env_allow": ann(
             f"{label} inherited environment names",
@@ -2121,9 +2132,9 @@ ANNOTATIONS.update(
                 "did not answer — a transport failure the breaker counts. A tool whose server "
                 "declares a longer budget in its capabilities manifest gets that one, and "
                 "thirty seconds of grace are added either way, so a tool that gives up at its "
-                "own budget answers with its own timeout error first. Zero, the default, "
-                "derives it from the longest tool budget this deployment configures: "
-                "core.static.capa.timeout_seconds (300, and 900 on a slow host, still fits). "
+                "own budget answers with its own timeout error first. Set, it applies to "
+                "every server. Zero, the default, gives each server the budget its own "
+                "block declares (its call_timeout_seconds; 300 for every built-in). "
                 "A call cut short by its caller's own budget while it waited on the server "
                 "counts as unanswered too."
             ),

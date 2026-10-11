@@ -36,6 +36,7 @@ from maljan.providers.base import (
     StaticCapabilities,
     StaticJobContext,
     StaticProvider,
+    with_claim_guidance,
 )
 from maljan.providers.registry import register_static_provider
 from maljan.providers.servers import ServerHandle
@@ -54,8 +55,11 @@ class GenericMCPStaticProvider(StaticProvider):
     """Any MCP tool server, attached through a ``ServerHandle``.
 
     ``label`` names the server in logs and in the generated prompt fragment.
-    ``prompt_fragment_text`` lets a caller supply real tool-specific guidance
-    instead of the generated, tool-name-listing paragraph.
+    The fragment is the opening sentence (``prompt_lead_text``, else one naming
+    the label), the claim guidance every static analyst is given, then the
+    workflow the server declares (its ``prompt_fragment``), or, where it
+    declares none, a generated paragraph listing its tools.
+    ``prompt_fragment_text`` lets a caller supply the whole fragment instead.
 
     The constructor accepts either a ready ``ServerHandle`` (the normal path,
     built by ``from_settings`` from an ``mcp.servers`` entry) or a bare
@@ -78,6 +82,7 @@ class GenericMCPStaticProvider(StaticProvider):
         *,
         label: str = "MCP",
         prompt_fragment_text: str = "",
+        prompt_lead_text: str = "",
     ) -> None:
         if isinstance(cfg, ServerHandle):
             self._handle = cfg
@@ -87,6 +92,7 @@ class GenericMCPStaticProvider(StaticProvider):
             self._handle = self._build_handle(label or "generic", cfg)
         self._label = label
         self._prompt_fragment_text = prompt_fragment_text
+        self._prompt_lead_text = prompt_lead_text
         self._job = StaticJobContext()
         self.tools: list[Any] = []
         # A declared error's remediation may name the path the server can open
@@ -163,15 +169,21 @@ class GenericMCPStaticProvider(StaticProvider):
     def prompt_fragment(self) -> str:
         if self._prompt_fragment_text:
             return self._prompt_fragment_text
+        return with_claim_guidance(self.prompt_lead(), self.workflow_fragment())
+
+    def prompt_lead(self) -> str:
+        named = f"Analyze the binary using the {self._label} tools available to you. "
+        return self._prompt_lead_text or named
+
+    def workflow_fragment(self) -> str:
+        """The server's declared workflow text, else a paragraph listing its tools."""
+        declared = str(getattr(self._cfg, "prompt_fragment", "") or "")
+        if declared.strip():
+            return declared
         names = [t.name for t in self.get_tools()]
         # Every tool name: the list is the model's map of what it can call.
         listed = ", ".join(f"`{n}`" for n in names) if names else "the tools you are given"
         return (
-            f"Analyze the binary using the {self._label} tools available to you. "
-            "For EVERY claim you make, you MUST cite a concrete artifact: a function name, "
-            "string offset (.data+0xNN), API import, or hex pattern. "
-            "Focus on MITRE ATT&CK: T1027 (Obfuscation), T1106 (Native API), "
-            "T1055 (Process Injection), T1140 (Deobfuscation).\n\n"
             "=== TOOL USAGE WORKFLOW ===\n"
             f"Available tools: {listed}.\n"
             "Load or open the sample first, enumerate what the binary imports and "

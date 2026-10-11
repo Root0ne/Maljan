@@ -431,18 +431,41 @@ class TestAHungServerIsCounted:
 
 
 class TestTheCallDeadline:
-    def test_it_is_derived_from_the_longest_tool_budget_and_capa_still_fits(self) -> None:
+    @pytest.mark.parametrize(
+        "server", ["analysis", "knowledge", "network", "threatintel", "virustotal"]
+    )
+    def test_every_built_in_server_keeps_the_budget_it_had(self, server: str) -> None:
+        settings = Settings()
+        assert settings.mcp.servers[server].call_timeout_seconds == 300.0
+        assert guard_from_settings(server, settings).call_timeout("any") == 330.0
+
+    def test_the_built_in_provider_blocks_keep_it_too(self) -> None:
+        from maljan.providers.server_guard import server_call_budget
+
+        settings = Settings()
+        for block in (settings.static.ghidra, settings.static.r2, settings.sandbox.cape2.mcp):
+            assert server_call_budget(settings, block) == 300.0
+
+    def test_a_rule_tools_settings_no_longer_move_another_servers_deadline(self) -> None:
         settings = Settings()
         settings.static.capa.timeout_seconds = 900
-        guard = guard_from_settings("analysis", settings)
-        assert guard.call_timeout("capa") == 930.0
+        settings.static.yara.timeout_seconds = 1200
+        assert guard_from_settings("network", settings).call_timeout("extract_dns") == 330.0
+
+    def test_each_server_gets_the_budget_its_own_block_declares(self) -> None:
+        settings = Settings()
+        settings.mcp.servers["network"].call_timeout_seconds = 45
+        settings.mcp.servers["knowledge"].call_timeout_seconds = 0
+        assert guard_from_settings("network", settings).call_timeout("t") == 75.0
+        assert guard_from_settings("knowledge", settings).call_timeout("t") is None
+        assert guard_from_settings("analysis", settings).call_timeout("t") == 330.0
 
     def test_a_longer_budget_the_server_declares_wins(self) -> None:
         settings = Settings()
         guard = guard_from_settings("analysis", settings)
         guard.declare({"slow": {"timeout_s": 2000}, "quick": {"timeout_s": 15}})
         assert guard.call_timeout("slow") == 2030.0
-        assert guard.call_timeout("quick") == settings.static.capa.timeout_seconds + 30.0
+        assert guard.call_timeout("quick") == 330.0
 
     def test_an_explicit_setting_is_used_as_written(self) -> None:
         settings = Settings()

@@ -242,20 +242,82 @@ class ProviderProbe:
     tools: list[str] | None = None
 
 
-# The provider-neutral instructions every static provider fragment opens with:
-# what a claim must cite and which techniques to look for. A provider with no
-# tools of its own, and one whose tools did not attach, say only this and what
-# the provider is.
-STATIC_EVIDENCE_INSTRUCTIONS = (
-    "Analyze the deterministic static evidence you are given. "
+# What a static claim must cite, and which techniques to look for.
+CLAIM_CITATION = (
     "For EVERY claim you make, you MUST cite a concrete artifact: a function name, "
     "string offset (.data+0xNN), API import, or hex pattern. "
     "Focus on MITRE ATT&CK: T1027 (Obfuscation), T1106 (Native API), "
     "T1055 (Process Injection), T1140 (Deobfuscation)."
 )
 
+# The opening sentence of a provider that brings no tools of its own (and of a
+# provider whose tools did not attach): it says where the evidence comes from.
+STATIC_EVIDENCE_LEAD = "Analyze the deterministic static evidence you are given. "
 
-def absent_provider_fragment(label: str, guidance: str = STATIC_EVIDENCE_INSTRUCTIONS) -> str:
+# The provider-neutral instructions a static fragment opened with before the
+# confidence discipline below was shared: the lead and what a claim cites.
+STATIC_EVIDENCE_INSTRUCTIONS = STATIC_EVIDENCE_LEAD + CLAIM_CITATION
+
+# How confident a static claim may be, whatever the provider: the cap without a
+# falsification, the two loci a High claim needs, and the idiom that is not
+# obfuscation. It is about claims, not about any tool: its one sentence about a
+# check says "no tool that runs one is attached", so it holds on any provider,
+# with tools or none. Every static analyst carries it (``guidance_fragment``,
+# ``static_provider_parts``).
+VERIFICATION_DISCIPLINE = (
+    "=== VERIFICATION DISCIPLINE (suppresses confidently-wrong attribution) ===\n"
+    "- A SPECIFIC claim (a named algorithm like RC4/djb2/ROR13, a constant or XOR\n"
+    "  key, or a hash-resolved API) may reach CONFIDENCE >= 0.8 only if you\n"
+    "  FALSIFIED it first: an emulation with a known input against the expected\n"
+    "  output, OR a backward data-flow trace confirming its origin. If no such\n"
+    "  check ran — the code is non-leaf or has syscall/heap side effects, or no\n"
+    "  tool that runs one is attached to this request — cap CONFIDENCE at 0.7.\n"
+    "- A hash-resolution result: read the FULL list of matches. If more than one\n"
+    "  API name collides, do NOT blindly take the best match — disambiguate via\n"
+    "  the likely source DLL, or emit CONFIDENCE <= 0.5.\n"
+    "- A claim is High (>= 0.8) only with >= 2 independent evidence loci (e.g. an\n"
+    "  import AND its call-site). A single locus caps at 0.7. Reconcile any\n"
+    "  contradictory signals before emitting.\n"
+    "- Dynamic API resolution (LoadLibrary + GetProcAddress) is by itself the\n"
+    "  ORDINARY Windows idiom for optional/delay-loaded DLLs — it is NOT evidence\n"
+    "  of packing or obfuscation (T1027) on its own. Only claim T1027 when you\n"
+    "  observe a REAL obfuscation mechanism: a hashing/decrypt loop over API\n"
+    "  names, a high-entropy/packed section, an unpacking stub, or a sparse\n"
+    "  import table that hides the real APIs. A rich, fully-named import table\n"
+    "  (dozens of imports across several DLLs) argues AGAINST packing. Do not\n"
+    "  inflate a plain LoadLibrary/GetProcAddress pair into an obfuscation claim."
+)
+
+# What every static provider's fragment says about claims: what a claim cites,
+# then the confidence discipline.
+CLAIM_GUIDANCE = CLAIM_CITATION + "\n\n" + VERIFICATION_DISCIPLINE
+
+
+def with_claim_guidance(lead: str, workflow: str = "") -> str:
+    """A static provider's fragment: its ``lead`` sentence, the claim guidance, its ``workflow``.
+
+    ``workflow`` is the attached server's own text (its declared
+    ``prompt_fragment``), shown after the guidance; empty, the fragment ends
+    with the guidance.
+    """
+    text = lead + CLAIM_GUIDANCE
+    return text + "\n\n" + workflow if workflow.strip() else text
+
+
+def holding_the_discipline(body: str) -> str:
+    """``body`` with the verification discipline after it, unless it already holds it.
+
+    A provider that writes its whole fragment itself still reaches the model
+    with the discipline every static analyst is held to.
+    """
+    if VERIFICATION_DISCIPLINE in body:
+        return body
+    return body.rstrip() + "\n\n" + VERIFICATION_DISCIPLINE if body.strip() else body
+
+
+def absent_provider_fragment(
+    label: str, guidance: str = STATIC_EVIDENCE_LEAD + CLAIM_GUIDANCE
+) -> str:
     """The static fragment for a provider none of whose tools reached the request.
 
     The provider's tool-independent ``guidance`` — what a claim cites, the
@@ -428,10 +490,25 @@ class StaticProvider(ABC):
         shape ``analysis.anti_analysis.AntiAnalysisScan`` names: one that says
         why it cannot scan (``unavailable``), or scans ``job.mirror_sample_path``.
         ``notes`` is the job's note of opened samples (``providers.sample_open``)
-        and ``call_budget`` what one tool call of this deployment may take
-        (zero: as long as the tool takes).
+        and ``call_budget`` what one call to the provider's server may take
+        (:meth:`call_budget`; zero: as long as the tool takes).
         """
         return None
+
+    def server_block(self) -> Any:
+        """The settings block of the server this provider drives, or ``None`` for none."""
+        return getattr(self, "_cfg", None)
+
+    def call_budget(self, cfg: Any) -> float:
+        """What one call to this provider's server may take (zero: as long as it takes).
+
+        The operator's ``mcp.breaker.call_timeout_seconds`` when set, else the
+        ``call_timeout_seconds`` the server's own block declares
+        (``server_guard.server_call_budget``).
+        """
+        from maljan.providers.server_guard import server_call_budget
+
+        return server_call_budget(cfg, self.server_block())
 
     def switched_off(self) -> bool:
         """Whether the operator turned this provider off, so it attaches nothing.
@@ -449,7 +526,19 @@ class StaticProvider(ABC):
         return []
 
     def prompt_fragment(self) -> str:
-        """The tool-facing body of the static system prompt, with this provider attached."""
+        """The tool-facing body of the static system prompt, with this provider attached.
+
+        The provider's lead sentence, the claim guidance every static provider
+        gives, then the workflow its server declares (``workflow_fragment``).
+        """
+        return with_claim_guidance(self.prompt_lead(), self.workflow_fragment())
+
+    def prompt_lead(self) -> str:
+        """The sentence the fragment opens with: what the analyst works with."""
+        return STATIC_EVIDENCE_LEAD
+
+    def workflow_fragment(self) -> str:
+        """The attached server's own workflow text (its declared ``prompt_fragment``), or ""."""
         return ""
 
     @property
@@ -474,7 +563,7 @@ class StaticProvider(ABC):
         The part of ``prompt_fragment`` that is not a tool workflow: every
         call on a run with this provider carries it, the tools-free ones too.
         """
-        return STATIC_EVIDENCE_INSTRUCTIONS
+        return STATIC_EVIDENCE_LEAD + CLAIM_GUIDANCE
 
     def collect_evidence(self, sample_path: str) -> StaticEvidenceBundle | None:
         return None

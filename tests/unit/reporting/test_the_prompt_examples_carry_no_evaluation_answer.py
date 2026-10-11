@@ -195,7 +195,11 @@ from maljan.pipeline.validation import (
     validate_verdict_bundle,
     whole_answer_after_retry_question,
 )
-from maljan.providers.base import STATIC_EVIDENCE_INSTRUCTIONS, absent_provider_fragment
+from maljan.providers.base import (
+    CLAIM_GUIDANCE,
+    STATIC_EVIDENCE_LEAD,
+    absent_provider_fragment,
+)
 from maljan.providers.static import r2 as _r2
 from maljan.providers.static.ghidra import (
     GHIDRA_GUIDANCE,
@@ -1979,8 +1983,11 @@ PROMPTS: dict[str, str] = {
         provider_label="the Ghidra static provider",
     ),
     "analyst tool statement for a request with none": NO_TOOLS_STATEMENT,
+    # The shared claim guidance before it is the text Ghidra's prompt has
+    # always carried (its reworded part is scanned below); what follows it is
+    # the sentence of its own.
     "static provider sentence when none is attached": NullStaticProvider.NO_PROVIDER_FRAGMENT[
-        len(STATIC_EVIDENCE_INSTRUCTIONS) :
+        len(STATIC_EVIDENCE_LEAD + CLAIM_GUIDANCE) :
     ],
     "a Ghidra that could not open the job's sample, as an ask's caller reads it": str(
         sample_not_opened("File not found: /data/samples/.work/a.bin")
@@ -1992,7 +1999,7 @@ PROMPTS: dict[str, str] = {
         "No program loaded.", "get_function_count"
     ),
     "static provider sentence when its tools did not attach": absent_provider_fragment("Ghidra")[
-        len(STATIC_EVIDENCE_INSTRUCTIONS) :
+        len(STATIC_EVIDENCE_LEAD + CLAIM_GUIDANCE) :
     ],
     "static human-turn tool lines": " ".join(
         [

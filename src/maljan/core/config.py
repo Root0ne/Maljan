@@ -1259,6 +1259,14 @@ GHIDRA_SAMPLE_OPEN = SampleOpenConfig(
 )
 
 
+# How long one call to a tool server may go unanswered, before the grace,
+# unless the server's block declares otherwise or an operator sets
+# ``mcp.breaker.call_timeout_seconds`` (``providers.server_guard``). Every
+# built-in server and provider block declares this value: the per-call budget
+# every server got before each server declared its own (capa's shipped 300 s).
+DEFAULT_CALL_TIMEOUT_SECONDS = 300.0
+
+
 class MCPServerConfig(BaseModel):
     """Configuration for a single MCP server connection.
 
@@ -1292,6 +1300,12 @@ class MCPServerConfig(BaseModel):
     agents: list[str] = Field(default_factory=list)
     # Display name; empty means "use the key".
     label: str = ""
+    # How long one call of this server's tools may go unanswered before it is
+    # a transport failure, before the grace (``providers.server_guard``); a tool
+    # the server's manifest gives a longer budget gets that one. Zero sends its
+    # calls with no deadline of their own. ``mcp.breaker.call_timeout_seconds``,
+    # where an operator set it, applies to every server instead.
+    call_timeout_seconds: Annotated[float, Field(ge=0.0)] = DEFAULT_CALL_TIMEOUT_SECONDS
     # Which tool opens a sample, and which select and analyse one; empty
     # declares nothing. See ``SampleOpenConfig``.
     sample_open: SampleOpenConfig = Field(default_factory=SampleOpenConfig)
@@ -1586,8 +1600,9 @@ class MCPBreakerConfig(BaseModel):
     max_concurrent_calls: Annotated[int, Field(ge=0)] = 4
     # The budget every tool call gets at least before it counts as a server
     # that did not answer (a tool whose server declares a longer budget gets
-    # that, and thirty seconds of grace are added either way). Zero derives
-    # it from the longest tool budget the deployment configures — capa's.
+    # that, and thirty seconds of grace are added either way). Set, it applies
+    # to every server; zero gives each server its own block's
+    # ``call_timeout_seconds``.
     call_timeout_seconds: Annotated[float, Field(ge=0.0)] = 0.0
 
 

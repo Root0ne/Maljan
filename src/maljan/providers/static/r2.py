@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from maljan.core import builtin_declarations
 from maljan.core.logger import logger
 from maljan.core.tool_declarations import ErrorPattern
-from maljan.providers.base import MirrorSpec, ProviderProbe
+from maljan.providers.base import MirrorSpec, ProviderProbe, with_claim_guidance
 from maljan.providers.declared_errors import PROTOCOL_ERROR, declared_error
 from maljan.providers.errors import ProviderError
 from maljan.providers.registry import register_static_provider
@@ -412,8 +412,15 @@ class R2StaticProvider(GenericMCPStaticProvider):
         """radare2's own block, not a registry server: ``provider:r2``."""
         return f"provider:{self.id}"
 
-    # The workflow prompt is the radare2 declaration's text (``core.builtin_declarations``).
-    R2_PROMPT_FRAGMENT: ClassVar[str] = builtin_declarations.R2_PROMPT_FRAGMENT
+    # radare2's opening sentence; its workflow is the text its block declares
+    # (``static.r2.prompt_fragment``, shipped as ``core.builtin_declarations.R2_WORKFLOW``).
+    # ``R2_PROMPT_FRAGMENT`` is the whole fragment with the shipped workflow.
+    R2_LEAD: ClassVar[str] = (
+        "Analyze binary files (e.g. PE, ELF) utilizing radare2 through your available tools. "
+    )
+    R2_PROMPT_FRAGMENT: ClassVar[str] = with_claim_guidance(
+        R2_LEAD, builtin_declarations.R2_WORKFLOW
+    )
 
     # ``StaticR2Config.mirror_dir``'s own default, kept here too: a provider
     # built any way other than ``from_settings`` (there is none today, but the
@@ -432,11 +439,7 @@ class R2StaticProvider(GenericMCPStaticProvider):
             "r2",
             MCPServerConfig.model_validate({**r2.model_dump(), "command": r2.binary_path}),
         )
-        provider = cls(
-            handle,
-            label="radare2 MCP",
-            prompt_fragment_text=cls.R2_PROMPT_FRAGMENT,
-        )
+        provider = cls(handle, label="radare2 MCP", prompt_lead_text=cls.R2_LEAD)
         provider._mirror_dir = r2.mirror_dir
         return provider
 
@@ -545,9 +548,8 @@ class R2StaticProvider(GenericMCPStaticProvider):
             return False
         from maljan.agents.base_agent import run_coro_blocking
         from maljan.core.config import get_settings
-        from maljan.providers.server_guard import deployment_call_budget
 
-        budget = deployment_call_budget(get_settings())
+        budget = self.call_budget(get_settings())
         try:
             reply = run_coro_blocking(
                 coroutine(file_path=target),
