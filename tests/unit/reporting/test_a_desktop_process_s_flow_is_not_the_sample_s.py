@@ -110,7 +110,8 @@ def test_a_marked_desktop_process_the_file_does_not_name_states_no_attribution(
 ) -> None:
     flow = _desktop_flow(marked)
     assert "sample_process_tree" not in flow
-    assert flow["lineage_disputed"] == "orig"
+    assert flow["lineage_disputed"] == "marked"
+    assert flow["lineage_marked_by"] == "Triage"
     assert flow["process"] == "StartMenuExperienceHost.exe"
 
 

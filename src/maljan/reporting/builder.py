@@ -277,6 +277,8 @@ class MalwareReportBuilder:
                 duration_ms=entry.duration_ms,
                 truncated=entry.truncated,
                 repeated_of=entry.repeated_of or None,
+                source=entry.source,
+                facts=entry.facts,
             )
             for entry in self.evidence_ledger
         ]
@@ -853,6 +855,7 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
                     ip.outside_processes,
                     ip.marked_only_processes,
                     ip.file_only_processes,
+                    ip.marked_by,
                 )
                 if ip.source == "sandbox"
                 else "",
@@ -1073,6 +1076,7 @@ def _process_tree_words(
     outside: list[str] | None = None,
     marked_only: list[str] | None = None,
     file_only: list[str] | None = None,
+    marked_by: str | None = None,
 ) -> str:
     """What the sandbox report says about which process reached an address."""
     if attributed is True:
@@ -1083,7 +1087,7 @@ def _process_tree_words(
     if marked_only or file_only:
         from maljan.reporting.renderers.stix_renderer import disputed_flow_reason
 
-        return disputed_flow_reason(list(marked_only or []), list(file_only or []))
+        return disputed_flow_reason(list(marked_only or []), list(file_only or []), marked_by)
     return "the sandbox report does not say which process reached it"
 
 

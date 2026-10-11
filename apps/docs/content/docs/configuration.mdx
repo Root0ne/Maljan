@@ -2987,9 +2987,9 @@ it:
 | `reputation` | for a reputation lookup: `service` (the name it is attributed to), the paths `stats`, `malicious`, `total`, `labels`, `detections`, `engines`, and `text_patterns` (below) |
 | `arguments` | per role (`path`, `hash`, `address`, `program`, `command_lines` …), the argument a call gives it in |
 | `reader` | the answer shape the paths cannot express (below); empty reads the paths |
-| `report_sections` | the report sections whose writer is shown this tool's answers |
+| `report_sections` | the report sections whose writer is shown this tool's answers, beside the sections its `kind` reaches (below) |
 | `words` | words a statement may use to name this tool's entry |
-| `display_name` | the name published text gives the tool |
+| `display_name` | the name published text gives the tool: a rule table's title, the tool a recovered value names, the decoder a decoded value names; empty uses the tool's name |
 | `category` | the tag its description is shown with (`analyze`, `list`, `modify` …) |
 
 **Paths** are JSON-pointer-like: `/strings/*/offset` is the `offset` of every
@@ -3126,6 +3126,46 @@ shape:
   `function_index` answers by kind, and the report step does not run an
   evidence-only static provider when the pack already recorded an answer of a
   kind that provider declares.
+
+**How the report reads a tool.** The report reads an entry by its tool's
+declared kind, from whichever server declares it, and never by the tool's
+name:
+
+* the section a tool's answer is drawn as: `identity`, `signing`,
+  `format_info`, `strings`, `file_iocs`/`text_iocs`, the three rule kinds
+  (`signature_rules`, `event_rules`, `capability_rules`, each read at its
+  declared `rows`, `values.rule`, `values.namespace` and `techniques`, and
+  titled by its `display_name`), the `sandbox_<section>` kinds, `pcap` and the
+  reputation kinds each get a purpose-built section; any other kind, and a
+  tool of yours whose answer the purpose-built section cannot read, gets the
+  generic block;
+* "Functions examined" lists every call of a `decompile`,
+  `function_disassembly`, `function_list` or `method_list` tool, and the code
+  figures draw every `decompile` answer;
+* each technical section of the composed report is shown the captured
+  outputs of the kinds it is about (a function's `decompile` or
+  `function_disassembly`, `listing_strings`, `segments`, `crypto_constants`,
+  `emulation`, `dataflow`, `call_chains`, `iocs_with_context`,
+  `import_listing`, `anti_analysis_scan`, `behaviour_scan`,
+  `function_analysis`, `documentation_completeness`), and of any tool whose
+  `report_sections` names it;
+* a `capability_rules` tool's rows become technique hits under its `source`;
+* the published record of a value only a recovering tool read states each
+  `emulated_strings` and `decoded_strings` tool under its `display_name`, with
+  the scheme, routine and call site its declaration places.
+
+The report reads these from the facts each entry stored when it was written,
+copied onto the report's evidence index and captured outputs, never from the
+settings of the process that renders it, so the console shows what the worker
+built. So a reverser you add with tools of these kinds feeds every section as
+Ghidra's tools do. An entry written before sources were recorded is read by
+the tool names the report always read it by.
+
+A server added under a built-in server's key (`analysis`, `knowledge`,
+`network`, `threatintel`, `virustotal`) is read as that built-in: a tool of
+yours there whose answer a purpose-built section cannot read is not given the
+generic block, and its answer is left out of the report's sections. Give a
+server of your own a key of its own.
 
 **What ships.** The built-in servers (`analysis`, `knowledge`, `network`,
 `threatintel`, `virustotal`), every tool Ghidra and radare2 advertise, the CAPE

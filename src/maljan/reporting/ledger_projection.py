@@ -34,6 +34,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from maljan.analysis.technique_ids import api_capability_hits, sigma_technique_ids
 from maljan.core.logger import logger
+from maljan.core.tool_declarations import first, select
+from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import distinct_signatures, process_identity
 from maljan.reporting.models import (
     DynamicBehavior,
@@ -58,6 +60,10 @@ from maljan.schemas.evidence import build_entry, format_entry_id
 from maljan.schemas.sandbox_report import (
     FLOW_PROCESS_KEY,
     LINEAGE_DISPUTED_KEY,
+    LINEAGE_FILE,
+    LINEAGE_MARKED,
+    LINEAGE_MARKED_BY_KEY,
+    LINEAGE_MARKED_STORED,
     SAMPLE_TREE_KEY,
 )
 
@@ -67,11 +73,15 @@ if TYPE_CHECKING:
     from maljan.schemas.evidence import LedgerEntry
     from maljan.schemas.isr_models import AgentISR
 
-# The identity tools, in the order their answers should win: a hash the sample
-# was actually hashed for beats one a format tool reported in passing.
-_IDENTITY_TOOLS = ("identify_file", "hashes", "signing_info")
+# The identity kinds: what the file is and its hashes, and its signature. A
+# hash the sample was actually hashed for beats one a format tool reported in
+# passing.
+_IDENTITY_KINDS = ("identity", "signing")
 
 _TECHNIQUE_RE = re.compile(r"\bT\d{4}(?:\.\d{3})?\b")
+
+# Beside an address's disputed lineage facts: the sandboxes whose mark they are.
+_MARKED_BY = "marked_by"
 
 _STRING_KINDS = {
     "url",
@@ -88,11 +98,24 @@ _STRING_KINDS = {
 }
 
 
-def _payloads(ledger: list[LedgerEntry], *tools: str) -> list[tuple[LedgerEntry, dict[str, Any]]]:
-    """Every successful call of ``tools`` whose answer was a JSON object."""
+def _payloads(
+    ledger: list[LedgerEntry], *kinds: str, reader: str | None = None
+) -> list[tuple[LedgerEntry, dict[str, Any]]]:
+    """Every successful call of a tool of ``kinds`` whose answer was a JSON object.
+
+    A tool's kind is its declaration's, by the source the entry recorded, from
+    any server that declares it (``reporting.tool_kinds``); ``reader`` narrows
+    to the tools whose answer is that named shape. An entry with no recorded
+    source is read as the built-in tool of its name.
+    """
     out: list[tuple[LedgerEntry, dict[str, Any]]] = []
     for entry in ledger or []:
-        if entry.tool not in tools or not entry.ok:
+        if not entry.ok:
+            continue
+        facts = tool_kinds.facts_of(entry)
+        if facts is None or facts.kind not in kinds:
+            continue
+        if reader is not None and facts.reader != reader:
             continue
         data = entry.structured
         if isinstance(data, dict) and not data.get("error"):
@@ -128,7 +151,7 @@ def identity_from_ledger(
     file itself.
     """
     facts: dict[str, Any] = {}
-    for _entry, data in _payloads(ledger, *_IDENTITY_TOOLS):
+    for _entry, data in _payloads(ledger, *_IDENTITY_KINDS):
         for key, value in data.items():
             if value not in (None, "", [], {}):
                 facts.setdefault(key, value)
@@ -183,7 +206,7 @@ def _header_facts(ledger: list[LedgerEntry]) -> dict[str, Any]:
     name, and the header's timestamp. Nothing is inferred from the file name.
     """
     out: dict[str, Any] = {}
-    for _entry, data in _payloads(ledger, "pe_info"):
+    for _entry, data in _payloads(ledger, "format_info", reader="pe_header"):
         machine = data.get("machine")
         if isinstance(machine, int) and machine and not isinstance(machine, bool):
             out.setdefault("architecture", pe_architecture(machine))
@@ -199,7 +222,7 @@ def _header_facts(ledger: list[LedgerEntry]) -> dict[str, Any]:
         stamp = data.get("timestamp")
         if isinstance(stamp, int) and stamp > 0 and not isinstance(stamp, bool):
             out.setdefault("compile_timestamp", datetime.fromtimestamp(stamp, tz=UTC))
-    for _entry, data in _payloads(ledger, "elf_info"):
+    for _entry, data in _payloads(ledger, "format_info"):
         bits, endian = data.get("bitness"), data.get("endianness")
         if bits and endian:
             out.setdefault("architecture", f"{bits}-bit, {endian}-endian")
@@ -216,7 +239,7 @@ def _signing_from_ledger(ledger: list[LedgerEntry]) -> SignatureInfo:
     does not verify chains today, so it stays ``None`` rather than reading
     "present" as "valid". The entry id travels with the facts.
     """
-    for entry, data in _payloads(ledger, "signing_info"):
+    for entry, data in _payloads(ledger, "signing"):
         auth = _dict_of(data.get("authenticode"))
         apk = _dict_of(data.get("apk"))
         macho = _dict_of(data.get("macho"))
@@ -283,7 +306,7 @@ def static_from_ledger(ledger: list[LedgerEntry]) -> StaticAnalysis | None:
     static = StaticAnalysis()
     seen = False
 
-    for _entry, data in _payloads(ledger, "pe_info", "elf_info", "macho_info", "apk_info"):
+    for _entry, data in _payloads(ledger, "format_info"):
         seen = True
         for row in data.get("sections") or []:
             if not isinstance(row, dict):
@@ -347,7 +370,7 @@ def static_from_ledger(ledger: list[LedgerEntry]) -> StaticAnalysis | None:
                 for name, row in zip(packers, rows, strict=True)
             ]
 
-    for _entry, data in _payloads(ledger, "iocs_from_file", "iocs_from_text"):
+    for _entry, data in _payloads(ledger, "file_iocs", "text_iocs"):
         seen = True
         for row in data.get("iocs") or []:
             if not isinstance(row, dict):
@@ -360,30 +383,34 @@ def static_from_ledger(ledger: list[LedgerEntry]) -> StaticAnalysis | None:
                 )
             )
 
-    # capa reaches the report as a tool call like everything else
+    # A capability-rule tool (capa, or any tool declaring ``capability_rules``)
+    # reaches the report as a tool call like everything else
     # (``providers.static.capa_yara.ledger_entries``); this is what keeps its
     # technique hits in front of the layers that read ``static``, rather than
-    # folding the bundle into the builder by hand.
-    for _entry, data in _payloads(ledger, "capa"):
-        for row in data.get("capabilities") or []:
+    # folding the bundle into the builder by hand. Its rows, rule, namespace
+    # and technique ids sit where its declaration says, and each hit carries
+    # the corroboration name the tool declares (``ToolFacts.source``).
+    for entry, data in _payloads(ledger, *_TECHNIQUE_HIT_KINDS):
+        facts = tool_kinds.facts_of(entry)
+        if facts is None:
+            continue
+        hit_source = facts.source or tool_kinds.declared_name(entry)
+        for row in select(data, facts.rows):
             if not isinstance(row, dict):
                 continue
             seen = True
-            namespace = str(row.get("namespace") or "")
-            for technique in row.get("attck") or []:
-                tid = _technique_id(technique)
-                if not tid:
-                    continue
-                static.api_technique_hits.append(
-                    {
-                        "technique_id": tid,
-                        "name": str(row.get("rule") or ""),
-                        # No confidence: capa says a rule matched, which is
-                        # a presence and not a probability.
-                        "matched_apis": [namespace] if namespace else [],
-                        "source": "capa",
-                    }
-                )
+            namespace = _row_text(row, facts.values.get("namespace", ""))
+            rule = _row_text(row, facts.values.get("rule", ""))
+            for tid in tool_kinds.row_technique_ids(row, facts):
+                hit: dict[str, Any] = {
+                    "technique_id": tid,
+                    "name": rule,
+                    # No confidence: a rule matched, which is a
+                    # presence and not a probability.
+                    "matched_apis": [namespace] if namespace else [],
+                    "source": hit_source,
+                }
+                static.api_technique_hits.append(_with_kind(hit, entry, facts))
 
     # An analyst's table of imports or IOCs is not read here. The import table
     # and the string table are what the tools returned, printed as measured,
@@ -402,7 +429,7 @@ def static_from_ledger(ledger: list[LedgerEntry]) -> StaticAnalysis | None:
     # (``_names_resolved_at_runtime``) and every rule row says which it matched.
     resolved_keys = {_canonical(name) for name in _names_resolved_at_runtime(ledger, static)}
     imported_keys = {_canonical(row.function) for row in static.imports if row.function}
-    for entry, data in _payloads(ledger, "api_capability"):
+    for entry, data in _payloads(ledger, "api_catalogue"):
         rows = [row for row in data.get("capabilities") or [] if isinstance(row, dict)]
         # The names the caller said it resolved, and the ones the ledger's own
         # resolutions name; an import-table name is an import either way.
@@ -432,12 +459,12 @@ def static_from_ledger(ledger: list[LedgerEntry]) -> StaticAnalysis | None:
         for hit in api_capability_hits(data):
             matched = [str(a) for a in hit.get("matched_apis") or []]
             matched_at_runtime = [a for a in matched if _canonical(a) in runtime]
-            row_hit = {**hit, "source": "api_capability", "evidence_id": entry.id}
+            row_hit = {**hit, "source": tool_kinds.declared_name(entry), "evidence_id": entry.id}
             if matched_at_runtime:
                 row_hit["resolved_apis"] = matched_at_runtime
             else:
                 row_hit.pop("resolved_apis", None)
-            static.api_technique_hits.append(row_hit)
+            static.api_technique_hits.append(_with_kind(row_hit, entry, tool_kinds.facts_of(entry)))
         if rows:
             seen = True
             if imported_rows:
@@ -486,7 +513,7 @@ def _names_resolved_at_runtime(ledger: list[LedgerEntry], static: StaticAnalysis
     """
     imported = {_canonical(row.function) for row in static.imports if row.function}
     found: set[str] = set()
-    for _entry, data in _payloads(ledger, "resolve_api_hashes"):
+    for _entry, data in _payloads(ledger, "api_hash_resolution"):
         for hit in data.get("hits") or []:
             if not isinstance(hit, dict):
                 continue
@@ -540,6 +567,28 @@ def _technique_id(value: Any) -> str:
     return match.group(0) if match else ""
 
 
+# The kinds whose answers are rules that matched the sample and name the
+# technique each one implements (``CONSUMER_KINDS``).
+_TECHNIQUE_HIT_KINDS = tuple(tool_kinds.consumer_kinds_in_order("ledger_projection.technique_hits"))
+
+
+def _with_kind(hit: dict[str, Any], entry: Any, facts: Any) -> dict[str, Any]:
+    """A technique hit with the kind of the tool that recorded it (``kind``).
+
+    What the report reads a hit's tool by; a hit from an entry read by its
+    name is written as it always was, without one.
+    """
+    if facts is not None and not tool_kinds.read_by_name(entry):
+        hit["kind"] = facts.kind
+    return hit
+
+
+def _row_text(row: dict[str, Any], path: str) -> str:
+    """The first value a declared in-row path names, as text; ``""`` where none is declared."""
+    found = first(row, path) if path else None
+    return str(found or "")
+
+
 # ---------------------------------------------------------------------------
 # Dynamic
 # ---------------------------------------------------------------------------
@@ -584,7 +633,7 @@ def dynamic_from_ledger(ledger: list[LedgerEntry]) -> DynamicBehavior | None:
 
     dynamic.sandbox_signatures = distinct_signatures(dynamic.sandbox_signatures)
 
-    for _entry, data in _payloads(ledger, "sandbox_registry_ops"):
+    for _entry, data in _payloads(ledger, "sandbox_registry"):
         for row in data.get("registry") or []:
             if not isinstance(row, dict):
                 continue
@@ -901,11 +950,19 @@ def network_from_ledger(
                         if named not in outside.setdefault(address, []):
                             outside[address].append(named)
                     which = str(row.get(LINEAGE_DISPUTED_KEY) or "")
-                    if which in ("orig", "file") and image:
+                    if which == LINEAGE_MARKED_STORED:
+                        which = LINEAGE_MARKED
+                    if which in (LINEAGE_MARKED, LINEAGE_FILE) and image:
                         named = f"{image} (procid {row.get('procid')})"
-                        facts = disputed.setdefault(address, {}).setdefault(which, [])
+                        held = disputed.setdefault(address, {})
+                        facts = held.setdefault(which, [])
                         if named not in facts:
                             facts.append(named)
+                        marker = str(row.get(LINEAGE_MARKED_BY_KEY) or "").strip()
+                        if which == LINEAGE_MARKED and marker:
+                            markers = held.setdefault(_MARKED_BY, [])
+                            if marker not in markers:
+                                markers.append(marker)
         for row in data.get("http") or []:
             host = _first_str(row, "host", "hostname")
             _add("domain", host, "sandbox")
@@ -922,7 +979,7 @@ def network_from_ledger(
             if method and known_url is not None and not known_url.method:
                 known_url.method = method
 
-    for _entry, data in _payloads(ledger, "pcap_summary"):
+    for _entry, data in _payloads(ledger, "pcap"):
         for row in data.get("conversations") or []:
             _add("ip", address_key(_first_str(row, "dst", "ip", "address")), "sandbox")
         sni = data.get("sni")
@@ -930,7 +987,7 @@ def network_from_ledger(
             _add("domain", str(name), "sandbox")
             tls_names.add(value_key("domain", str(name)))
 
-    for _entry, data in _payloads(ledger, "iocs_from_file", "iocs_from_text"):
+    for _entry, data in _payloads(ledger, "file_iocs", "text_iocs"):
         for row in data.get("iocs") or []:
             if isinstance(row, dict):
                 _add(str(row.get("kind") or ""), str(row.get("value") or ""), "strings")
@@ -1479,8 +1536,11 @@ def _state_sandbox_facts(
             ip.outside_processes = list((outside or {}).get(ip.address) or [])
         if ip.sample_process_tree is not True:
             facts = (disputed or {}).get(ip.address) or {}
-            ip.marked_only_processes = list(facts.get("orig") or [])
-            ip.file_only_processes = list(facts.get("file") or [])
+            ip.marked_only_processes = list(facts.get(LINEAGE_MARKED) or [])
+            ip.file_only_processes = list(facts.get(LINEAGE_FILE) or [])
+            markers = facts.get(_MARKED_BY) or []
+            if ip.marked_only_processes and markers:
+                ip.marked_by = ", ".join(markers)
         ip.public_resolver = is_public_resolver(ip.address)
         facts = host_facts.get(ip.address, {})
         if facts.get("asn") and not ip.asn:
@@ -1707,10 +1767,10 @@ def persistence_from_ledger(ledger: list[LedgerEntry]) -> list[PersistenceMechan
             )
         )
 
-    # An autostart key an agent read through ``sandbox_registry_ops`` is
+    # An autostart key an agent read through a sandbox registry tool is
     # persistence where the sample created or wrote it: a read, a delete, or a
     # write the call reports as failed (bare access) arranges nothing to run.
-    for entry, data in _payloads(ledger, "sandbox_registry_ops"):
+    for entry, data in _payloads(ledger, "sandbox_registry"):
         for row in data.get("registry") or []:
             if not isinstance(row, dict):
                 continue
@@ -1720,7 +1780,7 @@ def persistence_from_ledger(ledger: list[LedgerEntry]) -> list[PersistenceMechan
                 continue
             _add(autostart, key, str(row.get("value") or ""), None, entry.id)
 
-    for entry, data in _payloads(ledger, "sandbox_services_and_tasks"):
+    for entry, data in _payloads(ledger, "sandbox_services"):
         for name in data.get("services") or []:
             _add("service", str(name), "", "T1543.003", entry.id)
         for command in data.get("tasks") or []:
@@ -1731,7 +1791,7 @@ def persistence_from_ledger(ledger: list[LedgerEntry]) -> list[PersistenceMechan
     # it matched names the key: the rule's title is what the rule is called,
     # never a registry target, and one live report filed "LOLBIN Execution From
     # Abnormal Drive" — a rule with no technique at all — as a Run key.
-    for entry, data in _payloads(ledger, "sigma_match", "sigma_match_sandbox"):
+    for entry, data in _payloads(ledger, "event_rules"):
         for row in data.get("matches") or []:
             if not isinstance(row, dict):
                 continue

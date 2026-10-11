@@ -50,6 +50,7 @@ from maljan.analysis.run_summary import (
     tokens_sentence,
 )
 from maljan.core.logger import logger
+from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import distinct_processes, distinct_signatures
 from maljan.reporting.defang import ProseDefanger, defang
 from maljan.reporting.judge_reasons import (
@@ -170,8 +171,48 @@ _TACTIC_ORDER: tuple[str, ...] = (
     "TA0040",
 )
 
-# The tools an absence line names first, as the ones that looked for behaviour.
-_ANALYSIS_TOOLS = ("capa", "yara_scan", "lolbin_lookup", "api_capability", "strings")
+# The tools an absence line names first, as the ones that looked for behaviour:
+# the kinds of ``CONSUMER_KINDS``, in this order.
+_ANALYSIS_TOOLS = "markdown._ANALYSIS_TOOLS"
+
+
+def _analysis_rank(row: Any) -> int:
+    """Where an absence line names an entry's tool: the analysis kinds first, in order."""
+    return tool_kinds.rank_in(row, _ANALYSIS_TOOLS)
+
+
+def _looked_at_the_file(row: Any) -> bool:
+    """Whether an entry's tool looked at the file itself: not a sandbox's, not a lookup.
+
+    A declared tool is a sandbox's by its kind, and reads the sandbox report
+    rather than the file when its declaration takes a ``report`` argument; a
+    reputation lookup asks about the sample elsewhere. An entry with no
+    source is read by its tool's name, as before.
+    """
+    by_name = tool_kinds.looked_at_the_file_by_name(row)
+    if by_name is not None:
+        return by_name
+    facts = tool_kinds.facts_of(row)
+    return (
+        not tool_kinds.is_of(row, _SANDBOX_TOOLS)
+        and not tool_kinds.is_of(row, _REPUTATION_TOOLS)
+        and not (facts is not None and "report" in facts.arguments)
+    )
+
+
+def _capability_rule_hit(hit: dict[str, Any]) -> bool:
+    """Whether a technique hit came from a capability-rule tool (``capability_rules``).
+
+    A hit carries the corroboration name of the tool that recorded it
+    (``ToolFacts.source``); every tool declaring that kind names its own.
+    """
+    return tool_kinds.hit_of_kind(hit, "capability_rules")
+
+
+def _is_sandbox_status(row: Any) -> bool:
+    """Whether an entry is the pack's sentence about the sandbox rather than a call to one."""
+    return tool_kinds.is_kind(row, "sandbox_status")
+
 
 # What a sandbox signature or a rule has to name to be printed beside the
 # anti-analysis prose and the API-resolution prose respectively.
@@ -183,14 +224,15 @@ _CELL_LIMIT = 240
 
 _EV_RE = re.compile(r"\bev_\d+\b")
 
-# The tools whose ledger entries are a sandbox's.
-_SANDBOX_TOOLS = ("sandbox_", "pcap_summary")
+# The tools whose ledger entries are a sandbox's, by their declared kinds.
+_SANDBOX_TOOLS = "markdown._SANDBOX_TOOLS"
 
 # Network indicator kinds, which the IOC section prints in its second table.
 _NETWORK_KINDS = frozenset({"domain", "ip", "url", "user_agent", "ja3", "ja3s", "email", "sni"})
 
-# The reputation tools a triage pack may call about the sample itself.
-_REPUTATION_TOOLS = ("get_file_report", "check_hash", "file_report", "hash_lookup")
+# The reputation tools a triage pack may call about the sample itself, by
+# their declared kinds.
+_REPUTATION_TOOLS = "markdown._REPUTATION_TOOLS"
 _REPUTATION_KEYS = (
     "malicious",
     "suspicious",
@@ -693,7 +735,7 @@ class MarkdownRenderer:
         resolving = [
             hit
             for hit in (static.api_technique_hits if static else [])
-            if hit.get("source") != "capa"
+            if not _capability_rule_hit(hit)
             and _names_any(str(hit.get("name") or ""), _RESOLUTION_WORDS)
         ]
         if resolving:
@@ -2247,7 +2289,7 @@ class _Context:
         # The pack's status entry is a sentence about the sandbox, not a call
         # to one, and is read as the statement it is.
         called = any(
-            str(row.tool or "").startswith(_SANDBOX_TOOLS) and row.tool != _SANDBOX_STATUS_TOOL
+            tool_kinds.is_of(row, _SANDBOX_TOOLS) and not _is_sandbox_status(row)
             for row in report.evidence_index
         )
         self.sandbox_statement = _sandbox_statement(report)
@@ -2274,20 +2316,12 @@ class _Context:
         self._tools = {row.id: row for row in report.evidence_index}
         # The tools that looked at the file itself, in the order they ran: not
         # a sandbox's, and not a lookup about the sample elsewhere.
-        self.file_tools = sorted(
-            dict.fromkeys(
-                str(row.tool)
-                for row in report.evidence_index
-                if row.tool
-                and "sandbox" not in str(row.tool)
-                and not str(row.tool).startswith(_SANDBOX_TOOLS)
-                and str(row.tool) not in _REPUTATION_TOOLS
-            ),
-            # The analysis tools first, the identity and parsing tools after.
-            key=lambda tool: (
-                _ANALYSIS_TOOLS.index(tool) if tool in _ANALYSIS_TOOLS else len(_ANALYSIS_TOOLS)
-            ),
-        )
+        ranked: dict[str, int] = {}
+        for row in report.evidence_index:
+            if row.tool and str(row.tool) not in ranked and _looked_at_the_file(row):
+                ranked[str(row.tool)] = _analysis_rank(row)
+        # The analysis tools first, the identity and parsing tools after.
+        self.file_tools = sorted(ranked, key=lambda tool: ranked[tool])
         read = _indicator_rows(report)
         self._table_read = read is not None
         self.iocs = read or []
@@ -2566,11 +2600,6 @@ _SANDBOX_STATES = {
     "not_called": "not called",
     "unknown": "not recorded",
 }
-
-
-# The pack entry that states what the run's sandbox report is
-# (``pipeline.sandbox_status.STATUS_TOOL``), spelled here as the report reads it.
-_SANDBOX_STATUS_TOOL = "sandbox_status"
 
 
 def _sandbox_statement(report: MalwareReport) -> str:
@@ -3711,7 +3740,7 @@ def _verdict_line(report: MalwareReport) -> str:
 
 def _reputation_line(report: MalwareReport) -> str:
     """The sample's own reputation lookup, as the tool answered it, or that there was none."""
-    entries = [row for row in report.evidence_index if row.tool in _REPUTATION_TOOLS]
+    entries = [row for row in report.evidence_index if tool_kinds.is_of(row, _REPUTATION_TOOLS)]
     if not entries:
         return "no reputation lookup in this run"
     ids = {row.id for row in entries}
@@ -4015,10 +4044,10 @@ def _rule_words(hit: dict[str, Any]) -> str:
         or "-"
     )
     rule = str(hit.get("rule") or hit.get("name") or "").strip()
-    # capa names the namespace a rule lives in; the knowledge table names the
+    # A capability-rule tool names the namespace a rule lives in; the knowledge table names the
     # imports its rule matched, and the names it matched that the run resolved
     # at runtime from stored values apart from them: those are not imports.
-    where = f"namespace {matched}" if hit.get("source") == "capa" else _matched_names(hit)
+    where = f"namespace {matched}" if _capability_rule_hit(hit) else _matched_names(hit)
     said = (f"rule {rule} ({hit.get('source') or 'rule'}), " if rule else "") + where
     return said + f"; base rate {hit.get('benign_rate') or 'not measured'}"
 
@@ -4236,7 +4265,7 @@ def _rule_ids(rules: list[dict[str, Any]], capa_ids: list[str]) -> list[str]:
     for hit in rules:
         if hit.get("evidence_id"):
             out.append(str(hit["evidence_id"]))
-        elif hit.get("source") == "capa":
+        elif _capability_rule_hit(hit):
             out.extend(capa_ids)
     return list(dict.fromkeys(out))
 

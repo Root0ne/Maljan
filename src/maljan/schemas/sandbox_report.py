@@ -23,6 +23,8 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, ValidatorFunctionWrapHandler, field_validator
 
+from maljan.core.report_formats import reader_display_name
+
 
 def _int(value: Any) -> int:
     """Best-effort int coercion; malformed sandbox data becomes ``0``, never a crash."""
@@ -591,11 +593,22 @@ def _is_the_sample(proc: dict[str, Any], sample: dict[str, Any]) -> bool:
 
 
 # Which of the two facts alone names a flow's process as the sample's, on a
-# row whose attribution is therefore not stated: ``"orig"`` when Triage marks
-# it and it runs none of the submitted file's names and descends from none of
-# its processes, ``"file"`` when it runs the submitted file (or descends from a
-# process that does) and Triage marks it not.
+# row whose attribution is therefore not stated: ``"marked"`` when the sandbox
+# marks it as the sample's and it runs none of the submitted file's names and
+# descends from none of its processes, ``"file"`` when it runs the submitted
+# file (or descends from a process that does) and the sandbox marks it not. A
+# row stored before the value was normalised says ``"orig"`` for ``"marked"``.
 LINEAGE_DISPUTED_KEY = "lineage_disputed"
+LINEAGE_MARKED = "marked"
+LINEAGE_FILE = "file"
+# Beside a disputed row: the name published text gives the sandbox whose mark
+# it is, the display name its report format declares
+# (``core.report_formats.reader_display_name``).
+LINEAGE_MARKED_BY_KEY = "lineage_marked_by"
+# The value a row stored before the normalisation gives a marked process, and
+# the sandbox such a row, which names no marker, was marked by: the one
+# reader that wrote one (the triage format's declared name).
+LINEAGE_MARKED_STORED = "orig"
 
 
 def _reach(parent: dict[Any, Any], roots: set[Any]) -> set[Any]:
@@ -658,13 +671,20 @@ def _sample_process_tree(task: dict[str, Any], sample: dict[str, Any]) -> _Linea
     named = {p.get("procid") for p in processes if p.get("procid") and _is_the_sample(p, sample)}
     by_mark, by_file = _reach(parent, marked), _reach(parent, named)
     if marked and named:
-        disputed = {procid: "orig" for procid in by_mark - by_file}
-        disputed.update({procid: "file" for procid in by_file - by_mark})
+        disputed = {procid: LINEAGE_MARKED for procid in by_mark - by_file}
+        disputed.update({procid: LINEAGE_FILE for procid in by_file - by_mark})
         return _Lineage(by_mark & by_file, disputed, images, True)
     return _Lineage(by_mark or by_file, {}, images, bool(marked or named))
 
 
-def _flow_attribution(flow: dict[str, Any], lineage: _Lineage) -> dict[str, Any]:
+# The sandbox whose ``orig`` mark this reader reads, by the name the built-in
+# triage format declares, unless the caller names the format it matched.
+LINEAGE_STORED_MARKED_BY = reader_display_name("triage")
+
+
+def _flow_attribution(
+    flow: dict[str, Any], lineage: _Lineage, marked_by: str = LINEAGE_STORED_MARKED_BY
+) -> dict[str, Any]:
     """What one Triage flow says about the process that made it, and its network facts.
 
     ``procid`` and ``pid`` as the flow gives them; ``sample_process_tree`` only
@@ -682,6 +702,8 @@ def _flow_attribution(flow: dict[str, Any], lineage: _Lineage) -> dict[str, Any]
             out[SAMPLE_TREE_KEY] = True
         elif procid in lineage.disputed:
             out[LINEAGE_DISPUTED_KEY] = lineage.disputed[procid]
+            if lineage.disputed[procid] == LINEAGE_MARKED:
+                out[LINEAGE_MARKED_BY_KEY] = marked_by
             if lineage.images.get(procid):
                 out[FLOW_PROCESS_KEY] = lineage.images[procid]
         elif lineage.stated and procid in lineage.images:
@@ -727,8 +749,13 @@ def triage_overview_to_sandbox_report(
     provider: str = "triage",
     task_reports: dict[str, dict[str, Any]] | None = None,
     task_id: str = "",
+    marked_by: str = "",
 ) -> SandboxReport:
     """Map a Triage overview (plus its behavioural task reports) onto the model.
+
+    ``marked_by`` is the name the format the report was matched as declares
+    (its ``display_name``, else its name), which a disputed row names its
+    marking sandbox by; empty is the built-in triage format's.
 
     Triage reports what it observed, not every API call: there is no per-call
     log, no apistats, no registry timeline, no generic-event stream and (for a
@@ -799,7 +826,7 @@ def triage_overview_to_sandbox_report(
             if not dst_host:
                 continue
             row: dict[str, Any] = {"dst": dst_host, "dport": dst_port}
-            row.update(_flow_attribution(flow, lineage))
+            row.update(_flow_attribution(flow, lineage, marked_by or LINEAGE_STORED_MARKED_BY))
             if proto == "tcp":
                 network.tcp.append(row)
             elif proto == "udp":

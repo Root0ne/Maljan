@@ -4380,7 +4380,11 @@ is assembled from what the run gathered rather than recomputed beside it:
   process in both trees is the sample's (`true`), a listed process in neither
   is not (`false`), and one in exactly one tree is disputed: the facts
   disagree, so its attribution is absent and the row says which fact alone
-  named it (`lineage_disputed`: `orig` or `file`). Where only one fact names
+  named it (`lineage_disputed`: `marked` or `file`, with `lineage_marked_by`
+  naming the sandbox whose mark it is, the display name its report format
+  declares; a row stored before says `orig` for `marked` and is read as
+  such, and its sentence names Triage, the one sandbox that marked one).
+  Where only one fact names
   any process, its tree is the answer. A flow outside the tree or disputed
   carries the image of the process that made it (`process`); the address's
   row states those processes (`outside_processes`, `marked_only_processes`,

@@ -411,11 +411,16 @@ class NetworkIP(BaseModel):
     # refuses the row. Empty when the report names none.
     outside_processes: list[str] = Field(default_factory=list)
     # The processes the two lineage facts disagree about that made flows to
-    # it, as ``<image> (procid N)``: the ones only Triage's ``orig`` mark names
+    # it, as ``<image> (procid N)``: the ones only the sandbox's own mark names
     # as the sample's, and the ones only the submitted file's own process tree
     # does. Their flows state no attribution, and the publish rule says why.
     marked_only_processes: list[str] = Field(default_factory=list)
     file_only_processes: list[str] = Field(default_factory=list)
+    # The name the sandbox whose mark ``marked_only_processes`` are declares
+    # (its report format's display name). ``None`` on a row stored before it
+    # was recorded, and then left out of the dump; the publish rule then
+    # names the one sandbox whose mark such a row could be.
+    marked_by: str | None = Field(default=None, exclude_if=lambda value: value is None)
     # Whether the address is a public DNS resolver's, which a sandbox guest
     # reaches whatever the sample does.
     public_resolver: bool = False
@@ -1002,6 +1007,14 @@ class RecoveredValue(BaseModel):
     # argument 2, is then argument 2 of the call at …; it is not followed past
     # that call"); empty where it joined none, or on a record stored before it.
     passed_to: list[str] = Field(default_factory=list)
+    # The tool's declared kind (``emulated_strings`` for emulation,
+    # ``decoded_strings`` for a static decoder), which decides the words the
+    # recovery is stated in, and the name published text gives the tool (its
+    # declared display name). Empty on a record stored before they were
+    # recorded, and then left out of the dump: such a record is read by its
+    # tool's name (``legacy_tool_names``).
+    kind: str = Field(default="", exclude_if=lambda value: not value)
+    named: str = Field(default="", exclude_if=lambda value: not value)
 
 
 class EmulatedStrings(BaseModel):
@@ -1214,6 +1227,17 @@ class EvidenceIndexRow(BaseModel):
     # repeats; the row's own id for a call a guard answered with no tool run
     # and no earlier entry; ``None`` for a call that ran.
     repeated_of: str | None = None
+    # The source the entry recorded its tool under (``LedgerEntry.source``),
+    # which the report reads the tool's declaration by
+    # (``reporting.tool_kinds``). ``None`` on a row of an entry written before
+    # sources were recorded, and then left out of the dump, so a stored report
+    # reads and dumps as it did.
+    source: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    # The facts the entry stored when it was written (``LedgerEntry.facts``),
+    # which the report reads the tool's kind, display name and paths by, so a
+    # re-render reads what the worker read (``core.declared_reading``). ``None``
+    # on a row of an entry that stored none, and then left out of the dump.
+    facts: dict[str, Any] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 # ---------------------------------------------------------------------------

@@ -52,6 +52,24 @@ class CapturedToolOutput(BaseModel):
     )
     output: str = Field("", description="Tool result text (already guardrail-capped, re-trimmed).")
     seq: int = Field(0, description="Call order within the agent's loop (0-based).")
+    source: str | None = Field(
+        None,
+        # Left out of the dump when unset, so a capture written before the
+        # field existed dumps as it did.
+        exclude_if=lambda value: value is None,
+        description=(
+            "The source the tool's declaration lives under (LedgerEntry.source), which the "
+            "report reads the output's kind by; None where none was recorded."
+        ),
+    )
+    facts: dict | None = Field(
+        None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "The facts the entry stored when it was written (LedgerEntry.facts), which the "
+            "report reads the output's kind and report sections by; None where none was stored."
+        ),
+    )
 
 
 def _symbol_from_args(args: dict) -> str | None:

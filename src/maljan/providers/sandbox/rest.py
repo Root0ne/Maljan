@@ -84,9 +84,19 @@ def _validate_task_id_template(label: str, template: str) -> None:
 class RestSandboxProvider(SandboxProvider):
     """Submit, poll, fetch and (optionally) capture, all from configuration."""
 
-    def __init__(self, cfg: SandboxRestConfig, mapping: CompiledMapping) -> None:
+    def __init__(
+        self,
+        cfg: SandboxRestConfig,
+        mapping: CompiledMapping,
+        formats: Iterable[ReportFormat] = (),
+    ) -> None:
+        from maljan.core.report_formats import effective_formats
+
         self._cfg = cfg
         self._mapping = mapping
+        # The effective format declarations (``sandbox.report_formats`` over the
+        # built-ins), which name the sandbox a report's lineage sentence states.
+        self._formats = effective_formats(formats)
         self._http: httpx.Client | None = None
         # Instance attributes, not module functions, so a test can drive the
         # clock and the sleeps without patching the stdlib.
@@ -107,7 +117,7 @@ class RestSandboxProvider(SandboxProvider):
         _validate_task_id_template("report.path", rest.report.path)
         if rest.report.pcap_path:
             _validate_task_id_template("report.pcap_path", rest.report.pcap_path)
-        return cls(rest, compile_mapping(rest.mapping))
+        return cls(rest, compile_mapping(rest.mapping), cfg.sandbox.report_formats)
 
     @property
     def capabilities(self) -> SandboxCapabilities:
@@ -291,8 +301,14 @@ class RestSandboxProvider(SandboxProvider):
 
         fmt = self._cfg.report.format
         if fmt == "triage":
+            from maljan.core.report_formats import format_named
+
+            declared = format_named(fmt, self._formats)
             report = triage_overview_to_sandbox_report(
-                payload, provider="rest", task_id=str(task_id)
+                payload,
+                provider="rest",
+                task_id=str(task_id),
+                marked_by=(declared.display_name or declared.name) if declared else "",
             )
         elif fmt in ("cape2", "cuckoo"):
             # The same readers the report-upload provider uses, so a CAPE-shaped

@@ -18,7 +18,10 @@ through code written against its name. A declaration says:
   empty for a format no reader reads yet;
 * ``signature_scale``: what a signature's severity number means, as the rung
   of the five-word severity ladder each score from 1 up names; absent where the
-  format documents no scale.
+  format documents no scale;
+* ``display_name``: the name published text gives the sandbox whose report
+  this is (a sentence that says what the report marks), empty for the
+  format's ``name``.
 
 The built-in formats (:data:`BUILTIN_REPORT_FORMATS`) reproduce what the
 platform recognised and read before formats were declared. An operator
@@ -167,6 +170,7 @@ class ReportFormat(BaseModel):
     target_sha256_paths: list[str] = Field(default_factory=list)
     reader: ReaderId | Literal[""] = ""
     signature_scale: SignatureScale | None = None
+    display_name: str = Field(default="", max_length=64)
 
     @field_validator("name")
     @classmethod
@@ -237,6 +241,7 @@ BUILTIN_REPORT_FORMATS: tuple[ReportFormat, ...] = (
         task_id_paths=["/sample/id"],
         target_sha256_paths=["/sample/sha256"],
         reader="triage",
+        display_name="Triage",
         # A Triage signature's score is its sample-score scale: 1 no malicious
         # behaviour, 2-5 likely benign, 6-7 suspicious, 8-9 likely malicious,
         # 10 known bad.
@@ -266,6 +271,7 @@ BUILTIN_REPORT_FORMATS: tuple[ReportFormat, ...] = (
         task_id_paths=_CAPE_TASK_ID,
         target_sha256_paths=_CAPE_TARGET,
         reader="cape2",
+        display_name="CAPE",
         signature_scale=SignatureScale(name="CAPE 1–3", rungs=_LOW_TO_HIGH),
     ),
     # Cuckoo: the generic ``info`` + ``behavior`` shape CAPE inherited, reached
@@ -276,6 +282,7 @@ BUILTIN_REPORT_FORMATS: tuple[ReportFormat, ...] = (
         task_id_paths=_CAPE_TASK_ID,
         target_sha256_paths=_CAPE_TARGET,
         reader="cuckoo",
+        display_name="Cuckoo",
         signature_scale=SignatureScale(name="Cuckoo 1–3", rungs=_LOW_TO_HIGH),
     ),
 )
@@ -329,6 +336,23 @@ def sniff(payload: Any, formats: Iterable[ReportFormat] | None = None) -> Report
         if fmt.matches(payload):
             return fmt
     return None
+
+
+def reader_display_name(reader: str, formats: Iterable[ReportFormat] | None = None) -> str:
+    """The name published text gives the sandbox whose reports ``reader`` reads.
+
+    The display name of the first format read by ``reader`` that declares one,
+    else that format's name; empty when no format names the reader.
+    """
+    named = [
+        fmt
+        for fmt in (BUILTIN_REPORT_FORMATS if formats is None else formats)
+        if fmt.reader == reader
+    ]
+    for fmt in named:
+        if fmt.display_name:
+            return fmt.display_name
+    return named[0].name if named else ""
 
 
 def format_named(name: str, formats: Iterable[ReportFormat] | None = None) -> ReportFormat | None:

@@ -100,6 +100,7 @@ route read the declaration, never a format's name:
 | `target_sha256_paths` | Where the report's claimed target sha256 sits; the first non-empty string or number wins. It is compared with the sample's hash, and a mismatch is a warning, not a refusal. |
 | `reader` | Which report reader reads the format into the internal sandbox report: `cape2`, `cuckoo`, `triage`, or empty for a format no reader reads yet. An upload of a format with no reader is refused (422) with a message saying so. |
 | `signature_scale` | What a signature's severity number means: `{name, rungs}`, the rung of the severity ladder (Informational, Low, Medium, High, Critical) each score from 1 up names. Absent where the format documents no scale. |
+| `display_name` | The name published text gives the sandbox whose report this is, such as the sentence that says a process the sandbox marks as the sample's is disputed (`Triage`, `CAPE`, `Cuckoo` for the built-ins); empty uses the format's `name`. |
 
 Field paths are the tool declarations' JSON-pointer-like paths (`/` keys and
 `*` for every item), read in time linear in the report. `**` (any depth) is

@@ -4,7 +4,7 @@ The corpus reports are figure-heavy. The local model cannot produce decompiler
 screenshots, so we generate **real charts/diagrams deterministically** from the
 report's own data (no fabrication, no screenshots): a process tree, an ATT&CK
 tactic matrix, a section-entropy chart, a network graph, an infection-chain
-flow, and Ghidra code listings as ``<pre>`` text figures.
+flow, and decompiled code listings as ``<pre>`` text figures.
 
 Each ``build_*`` returns a ``Figure`` or ``None`` (omit when the data is
 absent). SVG uses only primitives (rect/line/text) so it renders identically in
@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from html import escape
 
+from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import distinct_processes
 from maljan.reporting.defang import defang
 from maljan.reporting.models import Figure, MalwareReport, ProcessNode
@@ -300,7 +301,7 @@ def build_infection_chain(report: MalwareReport) -> Figure | None:
 
 
 # ---------------------------------------------------------------------------
-# Ghidra code listings (text figures)
+# Decompiled code listings (text figures), from any decompiler
 # ---------------------------------------------------------------------------
 
 
@@ -314,7 +315,7 @@ def build_code_listings(report: MalwareReport) -> list[Figure]:
     listed: list[tuple[str, str]] = []
     for outputs in (report.technical_evidence or {}).values():
         for o in outputs or []:
-            if o.get("tool_name") != "decompile_function":
+            if not tool_kinds.is_of(o, "figures.code_listing"):
                 continue
             body = str(o.get("output") or "").strip()
             if body:

@@ -20,7 +20,8 @@ import ipaddress
 from collections.abc import Callable
 from typing import Any
 
-from maljan.analysis.sandbox_sections import ITEMS_TOOL, SECTIONS_TOOL, ItemIndex
+from maljan.analysis.sandbox_sections import ItemIndex
+from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import distinct_processes
 from maljan.reporting.models import MalwareReport
 from maljan.schemas.sandbox_report import SAMPLE_TREE_KEY
@@ -47,61 +48,57 @@ SECTIONS = (
     "mitigations",
 )
 
-# The ledger tools a sandbox answers through. An execution step the report
-# model marks ``observed`` has to cite one of their entries.
-SANDBOX_TOOL_PREFIXES = ("sandbox_", "pcap_summary")
+# The ledger tools a sandbox answers through, by their declared kinds
+# (``CONSUMER_KINDS``). An execution step the report model marks ``observed``
+# has to cite one of their entries.
+_SANDBOX_TOOLS = "evidence_bundles.SANDBOX_TOOL_PREFIXES"
 
 # The sandbox answers about the network: a flow table and a capture. Either
 # holds the guest's traffic as well as the sample's, so it shows a step was
 # observed only when the sandbox attributed a flow to the sample's own tree.
-_NETWORK_SANDBOX_TOOLS = frozenset({"sandbox_network", "pcap_summary"})
+_NETWORK_SANDBOX_TOOLS = "evidence_bundles._NETWORK_SANDBOX_TOOLS"
 
-# Tool names whose captured output is relevant to each technical section. Used
-# to filter ``technical_evidence`` so e.g. the encryption bundle never sees
-# network tool output.
-_SECTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
-    "packing_obfuscation": ("list_segments", "find_anti_analysis", "detect_malware_behaviors"),
-    "cli_flags": ("decompile_function", "analyze_function_complete", "list_strings"),
-    "encryption_scheme": (
-        "detect_crypto_constants",
-        "emulate_function",
-        "emulate_hash_batch",
-        "analyze_dataflow",
-    ),
-    "discovery": ("list_imports", "analyze_api_call_chains", "decompile_function"),
-    "persistence_detail": ("list_strings", "decompile_function", "analyze_api_call_chains"),
-    "evasion_antiforensics": (
-        "find_anti_analysis_techniques",
-        "detect_malware_behaviors",
-        "decompile_function",
-    ),
-    "ransom_note": ("list_strings", "extract_iocs_with_context"),
-    "communications": ("list_strings", "extract_iocs_with_context", "analyze_api_call_chains"),
-    "command_and_control": (
-        "list_strings",
-        "extract_iocs_with_context",
-        "analyze_api_call_chains",
-        "decompile_function",
-    ),
-    "string_resolution": (
-        "emulate_hash_batch",
-        "emulate_function",
-        "analyze_api_call_chains",
-        "decompile_function",
-        "list_strings",
-    ),
-    "configuration": (
-        "emulate_function",
-        "emulate_hash_batch",
-        "analyze_dataflow",
-        "detect_crypto_constants",
-        "extract_iocs_with_context",
-        "decompile_function",
-    ),
-    "commands": ("decompile_function", "analyze_function_complete", "analyze_api_call_chains"),
-    "payloads": ("list_segments", "decompile_function", "extract_iocs_with_context"),
-    "host_identifiers": ("list_strings", "extract_iocs_with_context"),
+# The kinds of captured output each technical section is shown, so e.g. the
+# encryption bundle never sees network tool output. A tool of one of these
+# kinds reaches the section from any server; a tool may also name the sections
+# it is shown to in its own declaration (``report_sections``). A function's
+# code is shown as decompiled source or as its disassembly, whichever the
+# reverser gives. A captured output with no recorded source is routed by its
+# tool's name, as it always was (``legacy_tool_names.SECTION_TOOL_HINTS``).
+_CODE = ("decompile", "function_disassembly")
+_SECTION_KINDS: dict[str, tuple[str, ...]] = {
+    "packing_obfuscation": ("segments", "anti_analysis_scan", "behaviour_scan"),
+    "cli_flags": (*_CODE, "function_analysis", "documentation_completeness", "listing_strings"),
+    "encryption_scheme": ("crypto_constants", "emulation", "dataflow"),
+    "discovery": ("import_listing", "call_chains", *_CODE),
+    "persistence_detail": ("listing_strings", *_CODE, "call_chains"),
+    "evasion_antiforensics": ("anti_analysis_scan", "behaviour_scan", *_CODE),
+    "ransom_note": ("listing_strings", "iocs_with_context"),
+    "communications": ("listing_strings", "iocs_with_context", "call_chains"),
+    "command_and_control": ("listing_strings", "iocs_with_context", "call_chains", *_CODE),
+    "string_resolution": ("emulation", "call_chains", *_CODE, "listing_strings"),
+    "configuration": ("emulation", "dataflow", "crypto_constants", "iocs_with_context", *_CODE),
+    "commands": (*_CODE, "function_analysis", "documentation_completeness", "call_chains"),
+    "payloads": ("segments", *_CODE, "iocs_with_context"),
+    "host_identifiers": ("listing_strings", "iocs_with_context"),
 }
+
+
+def shown_to_section(section: str, output: dict[str, Any]) -> bool:
+    """Whether one captured tool output belongs in a technical section's bundle.
+
+    By the output's recorded source: its tool's declared kind is one the
+    section reads, or its declaration names the section. With no source, by
+    the tool's name, as before.
+    """
+    by_name = tool_kinds.shown_by_name(section, output)
+    if by_name is not None:
+        return by_name
+    facts = tool_kinds.facts_of(output)
+    if facts is None:
+        return False
+    return facts.kind in _SECTION_KINDS.get(section, ()) or section in facts.report_sections
+
 
 # Keyword hints to pull the relevant ISR claims into a technical section.
 _SECTION_CLAIM_KEYWORDS: dict[str, tuple[str, ...]] = {
@@ -212,15 +209,15 @@ def _filter_claims(claims: list[dict[str, str]], keywords: tuple[str, ...]) -> l
 
 
 def _filter_tool_outputs(
-    technical_evidence: dict[str, list[dict[str, Any]]] | None, hints: tuple[str, ...]
+    technical_evidence: dict[str, list[dict[str, Any]]] | None, section: str
 ) -> list[dict[str, str]]:
-    if not technical_evidence or not hints:
+    if not technical_evidence:
         return []
     picked: list[dict[str, str]] = []
     for outputs in technical_evidence.values():
         for o in outputs or []:
             name = str(o.get("tool_name", ""))
-            if any(h in name for h in hints):
+            if shown_to_section(section, o):
                 picked.append(
                     {
                         "tool": name,
@@ -304,9 +301,11 @@ def bundle_for(
 ) -> dict[str, Any]:
     """Return the isolated evidence slice for ``section``.
 
-    Keys: ``claims`` (relevant ISR claims), ``tool_outputs`` (relevant captured
-    Ghidra output), ``facts`` (deterministic report data for the section), and
-    ``binary`` (what the file demonstrably is — see :func:`binary_facts`).
+    Keys: ``claims`` (relevant ISR claims), ``tool_outputs`` (the captured tool
+    outputs of the kinds the section reads, from any server:
+    :func:`shown_to_section`), ``facts`` (deterministic report data for the
+    section), and ``binary`` (what the file demonstrably is — see
+    :func:`binary_facts`).
 
     ``binary`` is separate from ``facts`` on purpose. :func:`is_empty` keys off
     ``facts``, and it is what makes the Composer skip a section instead of
@@ -393,7 +392,7 @@ def bundle_for(
         net = report.network
         return {
             "claims": _filter_claims(all_claims, _SECTION_CLAIM_KEYWORDS[section]),
-            "tool_outputs": _filter_tool_outputs(tech_ev, _SECTION_TOOL_HINTS[section]),
+            "tool_outputs": _filter_tool_outputs(tech_ev, section),
             "binary": base,
             "facts": {
                 "domains": [d.fqdn for d in (net.domains if net else [])],
@@ -411,7 +410,7 @@ def bundle_for(
     # conclusion's.
     return {
         "claims": _filter_claims(all_claims, _SECTION_CLAIM_KEYWORDS.get(section, ())),
-        "tool_outputs": _filter_tool_outputs(tech_ev, _SECTION_TOOL_HINTS.get(section, ())),
+        "tool_outputs": _filter_tool_outputs(tech_ev, section),
         "binary": base,
         "facts": _technical_facts(section, report),
     }
@@ -474,25 +473,29 @@ def sandbox_entry_ids(report: MalwareReport) -> list[str]:
     # The pack's sandbox-status entry states what the sandbox report is, and
     # its section index how many items each section holds; neither records
     # behaviour, and neither is an observation to cite.
-    tools = {
-        row.id: str(row.tool or "")
+    rows = {
+        row.id: row
         for row in report.evidence_index
-        if str(row.tool or "").startswith(SANDBOX_TOOL_PREFIXES)
-        and row.tool not in _NOT_OBSERVATIONS
+        if tool_kinds.is_of(row, _SANDBOX_TOOLS) and not _states_the_report(row)
     }
     holding: set[str] = set()
     for section in report.sections:
-        cited = set(tools).intersection(section.evidence_ids)
+        cited = set(rows).intersection(section.evidence_ids)
         if not cited or not section_holds_something(section):
             continue
         if not sample_flow:
-            cited = {eid for eid in cited if not _answers_about_the_network(tools[eid], section)}
+            cited = {eid for eid in cited if not _answers_about_the_network(rows[eid], section)}
         holding.update(cited)
     return [row.id for row in report.evidence_index if row.id in holding]
 
 
-# The sandbox entries that state what the report is or holds, not what it saw.
-_NOT_OBSERVATIONS = frozenset({"sandbox_status", SECTIONS_TOOL})
+# The kinds of the sandbox entries that state what the report is or holds, not what it saw.
+_REPORT_STATE_KINDS = frozenset({"sandbox_status", "sandbox_sections"})
+
+
+def _states_the_report(row: Any) -> bool:
+    """Whether a sandbox entry states what the report is or holds (by its kind)."""
+    return tool_kinds.kind_of(row) in _REPORT_STATE_KINDS
 
 
 def sandbox_item_observation(
@@ -534,14 +537,14 @@ _NETWORK_REPORT_SECTIONS = frozenset(
 )
 
 
-def _answers_about_the_network(tool: str, section: Any) -> bool:
+def _answers_about_the_network(row: Any, section: Any) -> bool:
     """Whether a sandbox answer records traffic: the flow table, the capture, a network section."""
-    if tool in _NETWORK_SANDBOX_TOOLS:
+    if tool_kinds.is_of(row, _NETWORK_SANDBOX_TOOLS):
         return True
     name = str(getattr(section, "key", "") or "").removeprefix("sandbox_").lower()
-    if tool == ITEMS_TOOL:
+    if tool_kinds.is_kind(row, "sandbox_items"):
         return name == "items_network"
-    return tool == "sandbox_report_section" and name in _NETWORK_REPORT_SECTIONS
+    return tool_kinds.is_kind(row, "sandbox_report_section") and name in _NETWORK_REPORT_SECTIONS
 
 
 def sample_flow_fact(report: MalwareReport) -> Any:
@@ -637,8 +640,9 @@ def _process_lines(node: Any, depth: int) -> list[str]:
     return out
 
 
-# The tools whose answers are the sample's own strings, read or decoded.
-_STRING_TOOLS = frozenset({"strings", "floss", "iocs_from_file", "list_strings"})
+# The tools whose answers are the sample's own strings, read or decoded, by
+# their declared kinds (``CONSUMER_KINDS``).
+_STRING_TOOLS = "evidence_bundles._STRING_TOOLS"
 
 # The string-sweep kinds a responder searches a host for.
 _HOST_STRING_KINDS = frozenset({"path", "registry", "mutex", "command"})
@@ -649,7 +653,7 @@ def _string_entries(report: MalwareReport) -> list[str]:
     return [
         f"{row.id} ({row.tool})"
         for row in report.evidence_index
-        if str(row.tool or "") in _STRING_TOOLS and row.ok
+        if row.ok and tool_kinds.is_of(row, _STRING_TOOLS)
     ]
 
 
