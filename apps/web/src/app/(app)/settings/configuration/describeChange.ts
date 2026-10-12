@@ -16,6 +16,7 @@ import type {
 } from "@/types/settings";
 import type { AgentLLMOverride } from "./AgentDefinitionsEditor";
 import { deepEqual } from "./deepEqual";
+import { shippedToolFactsOf } from "@/lib/providerFacts";
 import { toolFactsDiff, type ToolFactsDiff } from "./toolFactsChanges";
 
 export interface ChangeLine {
@@ -29,11 +30,13 @@ export interface ChangeLine {
 const MAX_SCALAR_LENGTH = 60;
 
 /** Renders a scalar for a `before → after` line: `unset` for null/undefined,
- *  plain (unquoted) text for strings, `String()` for everything else. Long
- *  strings are cut to 60 chars with an ellipsis. Exported so tests (and any
- *  other scalar-rendering call site) share one rule. */
+ *  `""` for the empty string (so an empty side still shows), plain (unquoted)
+ *  text for other strings, `String()` for everything else. Long strings are
+ *  cut to 60 chars with an ellipsis. Exported so tests (and any other
+ *  scalar-rendering call site) share one rule. */
 export function formatScalar(v: unknown): string {
   if (v === null || v === undefined) return "unset";
+  if (v === "") return '""';
   if (typeof v === "string") return truncate(v);
   return String(v);
 }
@@ -148,6 +151,7 @@ const SERVER_FIELDS = [
   "env_allow",
   "label",
   "agents",
+  "call_timeout_seconds",
   // The server's declaration (`maljan.core.tool_declarations`).
   "sample_open",
   "sample_mount",
@@ -179,7 +183,16 @@ function describeTokenChange(before: unknown, after: unknown): string | null {
   return "token replaced";
 }
 
-function describeServerMap(before: unknown, after: unknown): {
+/** The server map, one server at a time. A server's `tool_facts` are compared
+ *  per tool as they are in force (`toolFactsDiff` over what the server ships,
+ *  read off the map's catalog entry), so a value written in another form that
+ *  puts the same tools in force is no change. */
+function describeServerMap(
+  entry: CatalogEntry,
+  before: unknown,
+  after: unknown,
+  fields: ToolDeclarationFields | null
+): {
   summary: string;
   detail?: string[];
 } {
@@ -206,30 +219,37 @@ function describeServerMap(before: unknown, after: unknown): {
     const bs = asRecord(b[key]);
     const as = asRecord(a[key]);
     const enabledChanged = bs.enabled !== as.enabled;
-    const fields: string[] = [];
+    const changed: string[] = [];
     for (const field of SERVER_FIELDS) {
-      if (!deepEqual(bs[field], as[field])) fields.push(field);
+      if (deepEqual(bs[field], as[field])) continue;
+      if (
+        field === "tool_facts" &&
+        toolFactsDiff(shippedToolFactsOf(entry, key), bs[field], as[field], fields).length === 0
+      ) {
+        continue;
+      }
+      changed.push(field);
     }
     if (!deepEqual(bs.tools, as.tools)) {
       const beforeCount =
         bs.tools === null || bs.tools === undefined ? "all" : (bs.tools as unknown[]).length;
       const afterCount =
         as.tools === null || as.tools === undefined ? "all" : (as.tools as unknown[]).length;
-      fields.push(`tools (${beforeCount} → ${afterCount})`);
+      changed.push(`tools (${beforeCount} → ${afterCount})`);
     }
     const tokenChange = describeTokenChange(bs.auth_token, as.auth_token);
-    if (tokenChange) fields.push(tokenChange);
+    if (tokenChange) changed.push(tokenChange);
 
     // A flip that happens alongside other edits joins the `changed:` list
     // rather than being dropped for them: "disabled" is usually the most
     // consequential half of such a change.
-    if (enabledChanged) fields.unshift(as.enabled ? "enabled" : "disabled");
+    if (enabledChanged) changed.unshift(as.enabled ? "enabled" : "disabled");
 
-    if (fields.length === 1 && enabledChanged) {
+    if (changed.length === 1 && enabledChanged) {
       detail.push(`${key}: ${as.enabled ? "enabled" : "disabled"}`);
       changedCount++;
-    } else if (fields.length > 0) {
-      detail.push(`${key}: changed: ${fields.join(", ")}`);
+    } else if (changed.length > 0) {
+      detail.push(`${key}: changed: ${changed.join(", ")}`);
       changedCount++;
     }
   }
@@ -569,7 +589,7 @@ export function describeChange(
   }
 
   if (entry.key === "core.mcp.servers") {
-    return { ...base, ...describeServerMap(before, after) };
+    return { ...base, ...describeServerMap(entry, before, after, fields) };
   }
   if (entry.key === AGENT_DEFINITIONS_KEY) {
     return { ...base, ...describeDefinitionsMap(before, after) };

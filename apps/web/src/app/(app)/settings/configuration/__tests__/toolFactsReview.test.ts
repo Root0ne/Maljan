@@ -179,3 +179,99 @@ describe("a conflicting change of a tool the block does not ship", () => {
     expect(resetTool(changes, "gone")).toEqual({ ...MARK });
   });
 });
+
+/* The server map, whose entries hold a built-in server's tool declarations
+ * stored as their changes over what it ships. */
+const SERVER_MAP = {
+  ...LEAF,
+  key: "core.mcp.servers",
+  path: "mcp.servers",
+  title: "Tool servers",
+  editor: "server_map",
+  builtin_servers: ["srv"],
+  default: { srv: { transport: "http", url: "http://127.0.0.1:9/mcp", tool_facts: SHIPPED } },
+} as unknown as CatalogEntry;
+
+describe("the import preview of a server's tool declarations", () => {
+  const entries = { [SERVER_MAP.key]: SERVER_MAP };
+  const server = (tool_facts: unknown) => ({
+    srv: { transport: "http", url: "http://127.0.0.1:9/mcp", tool_facts },
+  });
+
+  it("leaves out a /1 file whose whole map puts in force what is in force now", () => {
+    const stored = { ...MARK, [FIRST]: { timeout_seconds: 5 } };
+    const whole = mergeToolFacts(SHIPPED, stored);
+    const preview = buildImportPreview(
+      { format: "maljan-settings/1", values: { [SERVER_MAP.key]: server(whole) } },
+      entries,
+      { [SERVER_MAP.key]: server(stored) },
+      FIELDS
+    );
+    expect(preview.lines).toEqual([]);
+  });
+
+  it("still names a server whose tool declarations change in force", () => {
+    const whole = { ...SHIPPED };
+    delete whole[SECOND];
+    const preview = buildImportPreview(
+      { format: "maljan-settings/1", values: { [SERVER_MAP.key]: server(whole) } },
+      entries,
+      { [SERVER_MAP.key]: server({ ...MARK }) },
+      FIELDS
+    );
+    expect(preview.lines).toHaveLength(1);
+    expect(preview.lines[0].detail).toEqual(["srv: changed: tool_facts"]);
+  });
+
+  it("still names a server whose other field changes beside equal declarations", () => {
+    const stored = server({ ...MARK });
+    const sent = { srv: { ...stored.srv, call_timeout_seconds: 9, tool_facts: SHIPPED } };
+    const preview = buildImportPreview(
+      { format: "maljan-settings/1", values: { [SERVER_MAP.key]: sent } },
+      entries,
+      { [SERVER_MAP.key]: stored },
+      FIELDS
+    );
+    expect(preview.lines[0].detail).toEqual(["srv: changed: call_timeout_seconds"]);
+  });
+});
+
+describe("an empty value and an empty name", () => {
+  it("shows an empty value before the arrow", () => {
+    const line = describeChange(LEAF, SHIPPED, edited(FIRST, { display_name: "Z" }), FIELDS);
+    expect(line.detail).toEqual([`${FIRST}: changed: display_name "" → Z`]);
+  });
+
+  it("says the stored map as a whole is not in force when the API lists the mark's key", () => {
+    const html = renderToStaticMarkup(
+      createElement(ToolFactsBox, {
+        id: "b",
+        ariaLabel: "s tool_facts",
+        serverKey: "s",
+        shipped: { [FIRST]: SHIPPED[FIRST] },
+        changes: { ...MARK },
+        fields: FIELDS,
+        conflicts: [""],
+        onChanges: () => {},
+      })
+    );
+    expect(html).toContain('data-tool-conflicts-unlisted="s"');
+    expect(html).toContain("form no release writes");
+  });
+
+  it("shows a conflicting name no row carries, an empty one visibly", () => {
+    const html = renderToStaticMarkup(
+      createElement(ToolFactsBox, {
+        id: "b",
+        ariaLabel: "s tool_facts",
+        serverKey: "s",
+        shipped: {},
+        changes: { ...MARK },
+        fields: FIELDS,
+        conflicts: ["mine__scan"],
+        onChanges: () => {},
+      })
+    );
+    expect(html).toContain("Stored changes not in force: mine__scan");
+  });
+});

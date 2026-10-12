@@ -191,3 +191,36 @@ describe("the tool declarations box", () => {
     expect(unsaved).toContain("Every tool is as shipped.");
   });
 });
+
+describe("a tool named like a prototype key", () => {
+  // JSON.parse keeps `__proto__` an own key, as the API serves it.
+  const proto = JSON.parse('{"__proto__": {"kind": "strings", "display_name": "P"}}');
+
+  it("is kept as an own tool by every map helper", () => {
+    const changes = withMark(proto);
+    expect(Object.keys(changes)).toEqual(["", "__proto__"]);
+    expect(Object.keys(withoutMark(changes))).toEqual(["__proto__"]);
+    const inForce = mergeToolFacts(SHIPPED, changes);
+    expect(Object.prototype.hasOwnProperty.call(inForce, "__proto__")).toBe(true);
+    const staged = toolFactsChanges(inForce, SHIPPED, FIELDS);
+    expect(Object.keys(staged)).toEqual(["", "__proto__"]);
+    expect(changedTools(SHIPPED, staged)).toEqual([{ tool: "__proto__", state: "added" }]);
+    expect(Object.keys(resetTool(staged, "__proto__"))).toEqual([""]);
+  });
+
+  it("is named by the per-tool comparison", () => {
+    const keys = ["constructor", "toString", "hasOwnProperty"];
+    for (const tool of keys) {
+      const sent = JSON.parse(`{"${tool}": {"kind": "strings", "display_name": "P"}}`);
+      const staged = toolFactsChanges(mergeToolFacts(SHIPPED, withMark(sent)), SHIPPED, FIELDS);
+      expect(changedTools(SHIPPED, staged)).toEqual([{ tool, state: "added" }]);
+    }
+  });
+});
+
+describe("the mark always wins", () => {
+  it("over an entry under its key", () => {
+    expect(withMark({ "": "Changes", scan: null } as never)).toEqual({ ...MARK, scan: null });
+    expect(Object.keys(withMark({ scan: null, "": "Changes" } as never))).toEqual(["", "scan"]);
+  });
+});

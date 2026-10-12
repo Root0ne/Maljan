@@ -34,11 +34,20 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === "object" && !Array.isArray(v);
 }
 
+/** An empty map keyed by tool name. It has no prototype, so a tool named like
+ *  one of `Object.prototype`'s own keys (`__proto__`, which the API accepts)
+ *  is an own key like any other, never the object's prototype. */
+function toolMap<T>(): Record<string, T> {
+  return Object.create(null) as Record<string, T>;
+}
+
+const owns = (map: object, key: string) => Object.prototype.hasOwnProperty.call(map, key);
+
 /** The tools `changes` names and what it says of each, without the mark. */
 export function withoutMark(
   changes: ToolFactsChanges | undefined | null
 ): Record<string, ToolFactsChange> {
-  const out: Record<string, ToolFactsChange> = {};
+  const out = toolMap<ToolFactsChange>();
   for (const [tool, change] of Object.entries(changes ?? {})) {
     if (tool === CHANGES_MARK && change === CHANGES_FORM) continue;
     out[tool] = change as ToolFactsChange;
@@ -46,9 +55,16 @@ export function withoutMark(
   return out;
 }
 
-/** `changes` marked as a block's changes over what it ships, as the API stores them. */
+/** `changes` marked as a block's changes over what it ships, as the API stores them.
+ *  The mark always wins: whatever `changes` holds under the mark's key is no
+ *  tool and is left out, as the API's `with_mark` leaves it out. */
 export function withMark(changes: ToolFactsChanges | undefined | null): ToolFactsChanges {
-  return { [CHANGES_MARK]: CHANGES_FORM, ...withoutMark(changes) };
+  const out = toolMap<ToolFactsChange | typeof CHANGES_FORM>();
+  out[CHANGES_MARK] = CHANGES_FORM;
+  for (const [tool, change] of Object.entries(withoutMark(changes))) {
+    if (tool !== CHANGES_MARK) out[tool] = change;
+  }
+  return out;
 }
 
 /** Whether `changes` names any tool (the mark alone names none). */
@@ -62,9 +78,9 @@ export function mergeToolFacts(
   changes: ToolFactsChanges | undefined
 ): Record<string, ToolFactsEntry> {
   const held = withoutMark(changes);
-  const out: Record<string, ToolFactsEntry> = {};
+  const out = toolMap<ToolFactsEntry>();
   for (const [tool, facts] of Object.entries(shipped)) {
-    if (!Object.prototype.hasOwnProperty.call(held, tool)) {
+    if (!owns(held, tool)) {
       out[tool] = facts as ToolFactsEntry;
       continue;
     }
@@ -73,7 +89,7 @@ export function mergeToolFacts(
     out[tool] = (isObject(change) ? { ...facts, ...change } : change) as ToolFactsEntry;
   }
   for (const [tool, change] of Object.entries(held)) {
-    if (!Object.prototype.hasOwnProperty.call(shipped, tool) && change !== null) {
+    if (!owns(shipped, tool) && change !== null) {
       out[tool] = change as ToolFactsEntry;
     }
   }
@@ -101,9 +117,10 @@ export function toolFactsChanges(
   shipped: Declarations,
   fields: ToolDeclarationFields | null = null
 ): ToolFactsChanges {
-  const out: ToolFactsChanges = { [CHANGES_MARK]: CHANGES_FORM };
+  const out = toolMap<ToolFactsChange | typeof CHANGES_FORM>();
+  out[CHANGES_MARK] = CHANGES_FORM;
   for (const [tool, facts] of Object.entries(shipped)) {
-    if (!Object.prototype.hasOwnProperty.call(inForce, tool)) {
+    if (!owns(inForce, tool)) {
       out[tool] = null;
       continue;
     }
@@ -126,7 +143,7 @@ export function toolFactsChanges(
     if (Object.keys(changed).length > 0) out[tool] = changed;
   }
   for (const [tool, held] of Object.entries(inForce)) {
-    if (!Object.prototype.hasOwnProperty.call(shipped, tool)) out[tool] = held as ToolFactsChange;
+    if (!owns(shipped, tool)) out[tool] = held as ToolFactsChange;
   }
   return out;
 }
@@ -141,7 +158,7 @@ export interface ToolChange {
 export function changedTools(shipped: Declarations, changes: ToolFactsChanges | undefined): ToolChange[] {
   const out: ToolChange[] = [];
   for (const [tool, change] of Object.entries(withoutMark(changes))) {
-    const ships = Object.prototype.hasOwnProperty.call(shipped, tool);
+    const ships = owns(shipped, tool);
     if (!ships) {
       if (change !== null) out.push({ tool, state: "added" });
       continue;
@@ -218,7 +235,7 @@ export function toolFactsDiff(
 ): ToolFactsDiff[] {
   const was = inForceOf(shipped, before, fields);
   const now = inForceOf(shipped, after, fields);
-  const has = (map: object, key: string) => Object.prototype.hasOwnProperty.call(map, key);
+  const has = owns;
   const tools = [...Object.keys(was), ...Object.keys(now).filter((tool) => !has(was, tool))];
   const out: ToolFactsDiff[] = [];
   for (const tool of tools) {

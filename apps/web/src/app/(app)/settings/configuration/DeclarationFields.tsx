@@ -26,6 +26,7 @@ import {
 } from "./declarationFields";
 import {
   asChanges,
+  CHANGES_MARK,
   changedTools,
   mergeToolFacts,
   namesAnyTool,
@@ -165,6 +166,11 @@ function ReadField<T>({
   );
 }
 
+/** A tool's name as the console shows it: an empty one as `""`, so it is seen. */
+function shownToolName(tool: string): string {
+  return tool === "" ? '""' : tool;
+}
+
 /** The word on a tool's reset button. A tool the block does not ship is the
  *  operator's own and is removed; one whose stored change conflicts with this
  *  release is reset (its stored change removed), shipped or not. */
@@ -228,6 +234,10 @@ export function ToolFactsBox({
       : mergeToolFacts(shipped, read);
   const ships = Object.keys(shipped).length > 0;
   const changed = ships ? changedTools(shipped, read) : [];
+  // A conflicting name no row below carries (the mark's key stands for the
+  // stored map as a whole) is said on its own line, never dropped.
+  const listed = new Set(changed.map(({ tool }) => tool));
+  const unlisted = conflicts.filter((tool) => !listed.has(tool));
   return (
     <>
       <ReadField
@@ -249,6 +259,14 @@ export function ToolFactsBox({
           onChanges(staged);
         }}
       />
+      {unlisted.length > 0 && (
+        <p className="mt-1 text-[11px] text-status-orange" data-tool-conflicts-unlisted={serverKey}>
+          {unlisted.includes(CHANGES_MARK)
+            ? "The stored tool declarations of this block have a form no release writes, so " +
+              "they are not in force and what ships is; saving the block writes them anew."
+            : `Stored changes not in force: ${unlisted.map(shownToolName).join(", ")}`}
+        </p>
+      )}
       {ships && (
         <div className="mt-1 text-[11px] text-text-secondary" data-tool-changes={serverKey}>
           {changed.length === 0 ? (

@@ -80,9 +80,11 @@ export function buildImportPreview(
     const current = currentValues[key];
     if (deepEqual(current, importedValue)) continue;
     const line = describeChange(entry, current, importedValue, fields);
-    // A block's tool declarations are compared as they are in force: a file
-    // that writes them in another form but changes no tool is no change.
-    if (entry.editor === "tool_facts" && line.detail === undefined) continue;
+    // A block's tool declarations are compared as they are in force, also
+    // inside the server map: a file that writes them in another form but
+    // changes no tool (and, for the map, no other field of any server) is no
+    // change.
+    if ((entry.editor === "tool_facts" || entry.editor === "server_map") && !line.detail) continue;
     lines.push(line);
   }
 

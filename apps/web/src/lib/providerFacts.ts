@@ -96,7 +96,15 @@ export function shippedServerToolFacts(
   schema: SettingsSchema | null | undefined,
   serverKey: string
 ): Record<string, Record<string, unknown>> {
-  const entry = serverMapEntry(schema);
+  return shippedToolFactsOf(serverMapEntry(schema), serverKey);
+}
+
+/** The tool declarations a built-in server ships, read off the server map's
+ *  own catalog entry (`shippedServerToolFacts` finds that entry in a schema). */
+export function shippedToolFactsOf(
+  entry: CatalogEntry | null | undefined,
+  serverKey: string
+): Record<string, Record<string, unknown>> {
   if (!entry || !(entry.builtin_servers ?? []).includes(serverKey)) return {};
   const servers = entry.default as Record<string, { tool_facts?: unknown }> | null | undefined;
   const shipped = servers?.[serverKey]?.tool_facts;
