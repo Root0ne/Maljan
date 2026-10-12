@@ -98,7 +98,7 @@ def lenient_imported_declarations(
     is returned as a warning keyed by its dotted path. A declaration left
     with nothing it says is left out whole. The file is never refused for it.
     """
-    from maljan.core.tool_declarations import lenient_declarations
+    from maljan.core.tool_declarations import lenient_declarations, loggable_names, reads_no_kind
 
     from app.services.server_map import SERVER_MAP_KEY
 
@@ -110,9 +110,11 @@ def lenient_imported_declarations(
         kept, notes = lenient_declarations(declared, where=f"{prefix} ")
         for tool, names in notes.items():
             warnings[f"{prefix}.{tool}"] = (
-                "left out " + ", ".join(names) + ": this version does not read them"
+                "left out " + loggable_names(names) + ": this version does not read them"
             )
         for tool, held in list(kept.items()):
+            if isinstance(held, dict) and reads_no_kind(held):
+                held = {**held, "kind": ""}
             if isinstance(held, dict) and not any(
                 name for name, value in held.items() if value not in ("", None, [], {}, False)
             ):

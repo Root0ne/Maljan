@@ -547,20 +547,37 @@ def _same(left: Any, right: Any) -> bool:
 def lenient_declaration(raw: Mapping[str, Any]) -> tuple[dict[str, Any], list[str]]:
     """``raw`` without what this version cannot read, and the names left out.
 
-    Unknown keys are left out; with no kind (absent, empty or the word that
-    names none) the fields read only through a kind are left out too, so the
-    tool is read as one that declares no kind. Everything else is kept as
-    written, and validated as ever.
+    Unknown keys are left out; with no kind at all (absent or empty) the
+    fields read only through a kind are left out too, so the tool is read as
+    one that declares no kind. ``unclassified`` with a kind-dependent field is
+    the ordinary kind word it always was (:func:`reads_no_kind`), and keeps
+    them. Everything else is kept as written, and validated as ever.
     """
     fields = ToolFacts.model_fields
     left_out = [str(key) for key in raw if key not in fields]
     kept = {key: value for key, value in raw.items() if key in fields}
-    if kept.get("kind") in (None, "", NO_KIND):
+    if kept.get("kind") in (None, ""):
         for name in KIND_DEPENDENT_FIELDS:
             if name in kept and not _same(kept[name], _field_default(name)):
                 left_out.append(name)
                 kept.pop(name)
     return kept, left_out
+
+
+def reads_no_kind(raw: Mapping[str, Any]) -> bool:
+    """Whether ``unclassified`` in ``raw`` names no kind: only when no kind-dependent field is set.
+
+    The one rule for the word, everywhere a declaration is read or saved. A
+    declaration of ``unclassified`` that sets rows, places, techniques or any
+    other field read only through a kind keeps it as an ordinary kind word,
+    read exactly as it always was; alone, or with kind-free fields only, it
+    names no kind.
+    """
+    if raw.get("kind") != NO_KIND:
+        return False
+    return not any(
+        name in raw and not _same(raw[name], _field_default(name)) for name in KIND_DEPENDENT_FIELDS
+    )
 
 
 def lenient_declarations(
@@ -805,8 +822,16 @@ class ToolFacts(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _read_what_this_version_reads(cls, data: Any) -> Any:
-        """Outside an operator's edit, leave out what this version cannot read, with a warning."""
-        if STRICT_DECLARATIONS.get() or not isinstance(data, Mapping):
+        """Outside an operator's edit, leave out what this version cannot read, with a warning.
+
+        In every read, ``unclassified`` names no kind only when the
+        declaration sets no kind-dependent field (:func:`reads_no_kind`).
+        """
+        if not isinstance(data, Mapping):
+            return data
+        if reads_no_kind(data):
+            data = {**data, "kind": ""}
+        if STRICT_DECLARATIONS.get():
             return data
         kept, left_out = lenient_declaration(data)
         if left_out:
@@ -816,10 +841,11 @@ class ToolFacts(BaseModel):
     @field_validator("kind")
     @classmethod
     def _kind_is_a_word(cls, value: str) -> str:
-        # No kind (empty, or the word ``unclassified`` a proposal once offered
-        # for it) declares the tool's other facts and leaves it read as a tool
+        # No kind declares the tool's other facts and leaves it read as a tool
         # of no kind: every reading of an undeclared tool still applies to it.
-        if value in ("", NO_KIND):
+        # ``unclassified`` alone was made empty above (``reads_no_kind``); with
+        # a kind-dependent field it is an ordinary kind word, as it always was.
+        if value == "":
             return ""
         return _word(value, "tool kind")
 

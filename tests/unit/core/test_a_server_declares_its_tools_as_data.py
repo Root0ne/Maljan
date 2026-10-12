@@ -87,8 +87,9 @@ def test_an_edit_a_kind_would_be_needed_to_read_is_refused(
     [
         ({"kind": "decompile", "note": "a later field"}, {"kind": "decompile"}, ["note"]),
         ({"knd": "decompile"}, {}, ["knd"]),
+        # No kind at all: what only a kind reads is left out.
         (
-            {"kind": "unclassified", "rows": "/m/*", "places": {"offset": "/o"}},
+            {"kind": "", "rows": "/m/*", "places": {"offset": "/o"}},
             {"kind": ""},
             ["rows", "places"],
         ),
@@ -761,3 +762,80 @@ def test_the_module_functions_read_the_settings_given() -> None:
     assert declaration_for(entry, settings=settings).kind == "strings"
     assert tools_of_kind("pcap", settings=settings)
     assert SourceRef("mcp", "virustotal") in servers_with_role("reputation", settings=settings)
+
+
+# ---------------------------------------------------------------------------
+# "unclassified": no kind only when nothing a kind reads is set
+# ---------------------------------------------------------------------------
+
+DEV_UNCLASSIFIED = {
+    "kind": "unclassified",
+    "rows": "/matches/*",
+    "places": {"offset": "/offset"},
+    "asserts_techniques": True,
+    "techniques": [{"path": "/matches/*/tags", "format": "sigma_tag"}],
+}
+DEV_ANSWER = {"matches": [{"offset": "0x400", "tags": ["attack.t1055"]}]}
+
+
+def _dev_entry(facts: dict[str, Any]) -> Any:
+    from maljan.schemas.evidence import LedgerEntry
+
+    return LedgerEntry(
+        id="ev_0001",
+        seq=1,
+        agent="static",
+        tool="scan_rules",
+        source="mcp:invented",
+        output="{}",
+        structured=DEV_ANSWER,
+        facts=facts,
+    )
+
+
+def test_a_dev_record_of_kind_unclassified_with_rows_reads_as_on_dev() -> None:
+    from maljan.analysis.evidence_roots import reading_branch
+    from maljan.core import declared_reading
+    from maljan.pipeline.evidence_summary import asserted_techniques
+
+    entry = _dev_entry({"v": 1, **DEV_UNCLASSIFIED})
+    facts = declared_reading.facts_of(entry)
+    assert facts is not None
+    assert (facts.kind, facts.rows, facts.asserts_techniques) == (
+        "unclassified",
+        "/matches/*",
+        True,
+    )
+    assert reading_branch(entry) == "declared_rows"
+    assert asserted_techniques(entry) == {"T1055"}
+
+
+def test_a_stored_declaration_of_kind_unclassified_with_rows_is_kept_whole() -> None:
+    from maljan.core.settings_overrides import build_settings
+    from maljan.core.tool_declarations import ToolFacts, strict_declarations
+
+    built = build_settings({"static.ghidra.tool_facts": {"scan_rules": DEV_UNCLASSIFIED}})
+    facts = built.static.ghidra.tool_facts["scan_rules"]
+    assert facts == ToolFacts.model_validate(DEV_UNCLASSIFIED)
+    assert (facts.kind, facts.rows, facts.asserts_techniques) == (
+        "unclassified",
+        "/matches/*",
+        True,
+    )
+    assert facts.techniques[0].path == "/matches/*/tags"
+    # The same rule holds for an edit being saved: it is an ordinary kind.
+    with strict_declarations():
+        assert ToolFacts.model_validate(DEV_UNCLASSIFIED).kind == "unclassified"
+
+
+def test_a_bare_unclassified_still_reads_as_undeclared() -> None:
+    from maljan.core import declared_reading
+    from maljan.core.tool_declarations import ToolFacts, strict_declarations
+
+    entry = _dev_entry({"v": 1, "kind": "unclassified"})
+    assert declared_reading.facts_of(entry) is None
+    assert ToolFacts.model_validate({"kind": "unclassified"}).kind == ""
+    named = ToolFacts.model_validate({"kind": "unclassified", "display_name": "S"})
+    assert (named.kind, named.display_name) == ("", "S")
+    with strict_declarations(), pytest.raises(ValidationError, match="names its kind"):
+        ToolFacts.model_validate({"kind": "unclassified"})
