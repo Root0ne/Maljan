@@ -633,23 +633,36 @@ async def test_mcp_server(
     body: ProbeRequest,
     request: Request,
     server: str = Query(..., description="key in mcp.servers"),
+    call_tools: bool = Query(
+        False,
+        description=(
+            "Also call each undeclared tool once with a harmless argument (a path that "
+            "does not exist, the digest of empty input), so its answer can propose its "
+            "declaration. Never a sample."
+        ),
+    ),
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> ProbeResponse:
-    """Launch one configured MCP server and report the tools it offers.
+    """Launch one configured MCP server, report the tools it offers and propose declarations.
 
     Takes staged values so an operator can test a server they have not saved
     yet — the same contract as every other probe, addressed to one key of one
     setting rather than to a set of settings. Registered ahead of
-    ``/test/{probe}`` so the fixed path wins the match.
+    ``/test/{probe}`` so the fixed path wins the match. The proposals in
+    ``details`` are data for the admin to accept; nothing is saved here.
     """
     stored = await SettingsService(db).load_overrides()
     # The staged values are read; what follows launches a server and waits on
     # it. Nothing below needs the transaction that read them, and a probe is
     # the longest await this API makes.
     await end_read_transaction(db)
-    response = await _probe_response(run_mcp_probe(server, body.values, stored))
-    await _record_the_probe(request, user, "mcp", body, response, server=server)
+    response = await _probe_response(
+        run_mcp_probe(server, body.values, stored, call_tools=call_tools)
+    )
+    await _record_the_probe(
+        request, user, "mcp", body, response, server=server, call_tools=call_tools
+    )
     return response
 
 

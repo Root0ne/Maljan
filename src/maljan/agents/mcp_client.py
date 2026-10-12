@@ -200,6 +200,12 @@ class MCPLangChainToolkit:
         # nothing. Tool-supplied text: shown to a model only as the server's
         # quoted words (``agents.prompt_fragments.undeclared_server_text``).
         self.server_instructions = ""
+        # Each tool's definition exactly as the server listed it (MCP
+        # ``Tool``: its input and output schemas, annotations, title and
+        # description). Read by the settings probe alone, which proposes a
+        # declaration from it (``core.declaration_proposals``); no run reads
+        # it and no model is shown it.
+        self.tool_definitions: list[Any] = []
 
     async def initialize(self) -> None:
         """Initialize the connection to the MCP server and fetch available tools."""
@@ -245,6 +251,7 @@ class MCPLangChainToolkit:
             for tool in response.tools:
                 lc_tool = self._create_langchain_tool(tool)
                 self._tools.append(lc_tool)
+                self.tool_definitions.append(tool)
 
             logger.info(f"Successfully loaded {len(self._tools)} tools from MCP server.")
         except BaseException as e:

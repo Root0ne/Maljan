@@ -934,6 +934,21 @@ class ServerHandle:
         """Every tool the server advertises, allow-list ignored."""
         return [str(getattr(t, "name", "")) for t in self._all_tools]
 
+    def tool_definitions(self) -> list[Any]:
+        """Each tool's definition as the server listed it (MCP ``Tool``), allow-list ignored.
+
+        For the settings probe's declaration proposals; empty before an
+        attach and for a toolkit that keeps none.
+        """
+        return list(getattr(self._toolkit, "tool_definitions", None) or [])
+
+    def advertised_tool(self, name: str) -> Any | None:
+        """The tool the server advertises under ``name``, allow-list ignored, or ``None``."""
+        for tool in self._all_tools:
+            if str(getattr(tool, "name", "")) == name:
+                return tool
+        return None
+
     def _capabilities_tool(self) -> Any | None:
         for tool in self._all_tools:
             if str(getattr(tool, "name", "")) == CAPABILITIES_TOOL:

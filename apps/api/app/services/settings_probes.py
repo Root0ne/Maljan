@@ -603,8 +603,60 @@ def _probe_config(entry: dict[str, Any], name: str) -> MCPServerConfig:
     return config.model_copy(update=update)
 
 
+def _declared_tools(config: MCPServerConfig, name: str) -> frozenset[str]:
+    """The tools ``name`` already declares: in the entry probed, or as the built-in it is."""
+    from maljan.core.builtin_declarations import builtin_server_names, server_declaration
+
+    declared = set(config.tool_facts)
+    if name in builtin_server_names():
+        declared.update(server_declaration(name).get("tool_facts") or {})
+    return frozenset(declared)
+
+
+async def _inspect(
+    config: MCPServerConfig, name: str, plan: Callable[[list[Any]], list[Any]] | None
+) -> server_probe.Inspection:
+    """Attach ``config`` to read what it says of its tools (``server_probe.inspect``)."""
+    return await server_probe.inspect(
+        config, name, budget=PROBE_BUDGET_SECONDS, handle_factory=ServerHandle, plan=plan
+    )
+
+
+def _proposals(found: server_probe.Inspection, declared: frozenset[str]) -> dict[str, Any] | None:
+    """The declaration proposals for the tools ``found`` lists and nothing declares.
+
+    Data for an admin to accept field by field (``core.declaration_proposals``);
+    nothing here is saved and no run reads it. ``None`` when there is no tool
+    to propose for. A proposal that cannot be built is reported as none rather
+    than failing the connection test.
+    """
+    from maljan.core.declaration_proposals import propose
+    from maljan.tools.capabilities import CAPABILITIES_TOOL
+
+    if not found.definitions:
+        return None
+    try:
+        proposals = propose(
+            found.definitions,
+            capabilities=found.capabilities,
+            answers=found.answers,
+            skip=declared | {CAPABILITIES_TOOL},
+        )
+    except Exception as exc:  # noqa: BLE001 — a proposal is never worth the probe
+        logger.warning("declaration proposals could not be built (%s).", type(exc).__name__)
+        return None
+    if found.probed:
+        proposals["probed"] = dict(found.probed)
+    return proposals if proposals["tools"] or proposals["server"] else None
+
+
 async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
-    """Launch one configured MCP server and list the tools it offers."""
+    """Launch one configured MCP server, list the tools it offers and propose their declarations.
+
+    With ``call_tools`` true (the operator's own request), each undeclared tool
+    that can be called with a harmless argument is called once, so its answer
+    can propose what its schema does not say (``core.declaration_proposals``).
+    """
     t0 = time.perf_counter()
     name = str(v.get("name") or "server")
     try:
@@ -620,8 +672,18 @@ async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
     # trace. A server that declares no bootstrap may legitimately be open.
     if config.credential_bootstrap is not None and not config.auth_token.get_secret_value():
         return ProbeResult(False, _ms(t0), NO_CREDENTIAL_DETAIL)
+    declared = _declared_tools(config, name)
+    plan: Callable[[list[Any]], list[Any]] | None = None
+    if v.get("call_tools") is True:
+        from maljan.core.declaration_proposals import plan_calls
+        from maljan.tools.capabilities import CAPABILITIES_TOOL
+
+        def plan(definitions: list[Any]) -> list[Any]:
+            return plan_calls(definitions, skip=declared | {CAPABILITIES_TOOL})
+
     try:
-        names, capabilities = await handshake(config, name)
+        found = await _inspect(config, name, plan)
+        names, capabilities = found.names, found.capabilities
     except TimeoutError:
         return ProbeResult(False, _ms(t0), f"no MCP handshake within {PROBE_BUDGET_SECONDS:.0f} s")
     except FileNotFoundError as exc:
@@ -638,6 +700,10 @@ async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
         if unavailable:
             detail += f"; {len(unavailable)} unavailable on this host"
         details = {"capabilities": capabilities}
+    proposals = _proposals(found, declared)
+    if proposals is not None:
+        details = {**(details or {}), "proposals": proposals}
+        detail += f"; declarations proposed for {len(proposals['tools'])} undeclared tools"
     return ProbeResult(True, _ms(t0), detail, None, names, details)
 
 
@@ -672,7 +738,9 @@ def _merge_server_entry(
     return merged
 
 
-async def run_mcp_probe(server: str, values: dict[str, Any], stored: dict[str, Any]) -> ProbeResult:
+async def run_mcp_probe(
+    server: str, values: dict[str, Any], stored: dict[str, Any], *, call_tools: bool = False
+) -> ProbeResult:
     """Probe one entry of the server map, staged fields winning over stored ones.
 
     Separate from ``run_probe`` because this probe is addressed to a *key*
@@ -696,7 +764,9 @@ async def run_mcp_probe(server: str, values: dict[str, Any], stored: dict[str, A
         entry = effective[server].model_dump(mode="json")
     else:
         entry = _merge_server_entry(stored_map.get(server) or {}, staged_map.get(server) or {})
-    return await in_probe_loop(lambda: probe_mcp({"name": server, "entry": entry}))
+    return await in_probe_loop(
+        lambda: probe_mcp({"name": server, "entry": entry, "call_tools": call_tools})
+    )
 
 
 async def _ask_each_model(
