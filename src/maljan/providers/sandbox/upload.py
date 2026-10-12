@@ -166,8 +166,11 @@ class UploadSandboxProvider(SandboxProvider):
         (``app.api.v1.sandbox_reports._read_payload``): a report that was
         accepted with a leading BOM at upload time must still parse here.
         """
+        from maljan.core.safe_json import loads
+
         try:
-            payload = json.loads(blob.decode("utf-8-sig"))
+            # Read at any nesting depth (``core.safe_json``).
+            payload = loads(blob.decode("utf-8-sig"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ProviderError("The attached sandbox report is not valid JSON.") from exc
         if not isinstance(payload, dict):

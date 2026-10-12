@@ -1008,7 +1008,8 @@ def _sized(func: Any, sizer: Any, narrowing: tuple[str, ...] = _PAGING) -> Any:
     so every row stays reachable.
     """
     import functools
-    import json
+
+    from maljan.core.safe_json import dumps
 
     if sizer is None:
         return func
@@ -1016,7 +1017,7 @@ def _sized(func: Any, sizer: Any, narrowing: tuple[str, ...] = _PAGING) -> Any:
     @functools.wraps(func)
     def _answer(*args: Any, **kwargs: Any) -> Any:
         value = func(*args, **kwargs)
-        text = json.dumps(value, default=str)
+        text = dumps(value, default=str)
         return sizer._apply_output_guardrail(text, narrowing)
 
     return _answer

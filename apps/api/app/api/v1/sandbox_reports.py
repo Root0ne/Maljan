@@ -35,6 +35,7 @@ from maljan.core.report_formats import (
     ReportFormat,
     sniff,
 )
+from maljan.core.safe_json import loads
 from maljan.providers.sandbox.readers import report_reader, sandbox_formats
 from pydantic import SecretStr
 from sqlalchemy import delete, select
@@ -193,7 +194,9 @@ async def _read_payload(file: UploadFile, db: AsyncSession) -> tuple[bytes, dict
                 status.HTTP_400_BAD_REQUEST, "File looks gzipped but could not be decompressed"
             ) from exc
     try:
-        payload = json.loads(body.decode("utf-8-sig"))
+        # Read at any nesting depth: a report nested past ``json.loads``'s
+        # recursion is read again iteratively (``core.safe_json``).
+        payload = loads(body.decode("utf-8-sig"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "File is not valid JSON") from exc
     if not isinstance(payload, dict):

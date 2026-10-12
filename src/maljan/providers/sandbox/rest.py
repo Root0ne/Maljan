@@ -17,7 +17,6 @@ to what remains of the budget, and the interval backs off 1.5x to 60 s.
 
 from __future__ import annotations
 
-import json
 import time
 from contextlib import suppress
 from pathlib import Path
@@ -303,8 +302,11 @@ class RestSandboxProvider(SandboxProvider):
                 response.read()
                 self._raise_for_status(response, "report fetch")
             body = read_capped(response, what="The sandbox report")
+        from maljan.core.safe_json import loads
+
         try:
-            payload = json.loads(body)
+            # Read at any nesting depth (``core.safe_json``).
+            payload = loads(body)
         except ValueError as exc:
             raise ProviderError("Sandbox report is not valid JSON.") from exc
         if not isinstance(payload, dict):
