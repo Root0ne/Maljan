@@ -17,6 +17,7 @@ import re
 from typing import Any
 
 from maljan.parsers.network_parser import NetworkParser
+from maljan.providers.sandbox.readers import ReportReader
 from maljan.reporting.builder import ioc_table
 from maljan.reporting.evidence_bundles import sample_flow_fact
 from maljan.reporting.ledger_projection import network_from_sandbox_report
@@ -29,7 +30,12 @@ from maljan.schemas.sandbox_document import (
     DnsAnswers,
     sandbox_document,
 )
-from maljan.schemas.sandbox_report import triage_overview_to_sandbox_report
+from maljan.schemas.sandbox_report import (
+    SandboxDnsRequest,
+    SandboxNetwork,
+    SandboxReport,
+    triage_overview_to_sandbox_report,
+)
 
 ANSWERS = {"answers": [{"value": "45.33.32.7"}, {"value": "45.33.32.8"}]}
 NAMES = ("relay-first-a1.net", "relay-second-b2.net")
@@ -359,3 +365,128 @@ def test_two_views_of_one_report_withhold_the_count_once() -> None:
     twice = network_from_ledger([one, one.model_copy(update={"id": "ev_0002", "seq": 2})])
     assert {d.fqdn: d.resolved_ips_withheld for d in twice.domains} == single
     assert max(single.values()) <= n
+
+
+# -- the links are the platform's own: an operator reader cannot forge them ---------------------
+
+
+def _forged_rows() -> list[dict[str, Any]]:
+    """Two DNS rows a report wrote with the platform's link keys, each with its own address."""
+    return [
+        {"request": "relay-a-r7.net", DNS_REQUEST_KEY: 0, "answers": [{"data": "45.33.32.1"}]},
+        {"request": "relay-b-r8.net", SAME_REQUEST_KEY: 0, "answers": [{"data": "45.33.32.9"}]},
+    ]
+
+
+# What dev read: each row's own answers.
+FORGED_DEV = {"relay-a-r7.net": ["45.33.32.1"], "relay-b-r8.net": ["45.33.32.9"]}
+
+
+class _KeepSourceReader(ReportReader):
+    """An operator's reader built on ``keep_source``: the report kept as it was written."""
+
+    id = "acmekeep"
+    keeps_source_arrangement = True
+
+    def read(
+        self,
+        payload: dict[str, Any],
+        *,
+        provider: str,
+        task_id: str = "",
+        fmt: Any = None,
+        **c: Any,
+    ) -> SandboxReport:
+        return self.keep_source(SandboxReport(provider=provider, source_format=self.id), payload)
+
+
+class _FieldsReader(ReportReader):
+    """An operator's reader that builds its DNS rows from the report's own fields."""
+
+    id = "acmefields"
+
+    def read(
+        self,
+        payload: dict[str, Any],
+        *,
+        provider: str,
+        task_id: str = "",
+        fmt: Any = None,
+        **c: Any,
+    ) -> SandboxReport:
+        return SandboxReport(
+            provider=provider,
+            source_format=self.id,
+            network=SandboxNetwork(dns=list(payload["network"]["dns"])),
+        )
+
+
+class _StructuralReader(ReportReader):
+    """An operator's reader that expresses a multi-name DNS request in the structural form."""
+
+    id = "acmestruct"
+
+    def read(
+        self,
+        payload: dict[str, Any],
+        *,
+        provider: str,
+        task_id: str = "",
+        fmt: Any = None,
+        **c: Any,
+    ) -> SandboxReport:
+        message = payload["message"]
+        request = SandboxDnsRequest(
+            questions=[{"request": name, "type": "A"} for name in message["asked"]],
+            answers=[{"data": a["ip"], "name": a["for"], "type": "A"} for a in message["answers"]],
+        )
+        return SandboxReport(
+            provider=provider,
+            source_format=self.id,
+            network=SandboxNetwork(dns_requests=[request], domains=list(message["asked"])),
+        )
+
+
+def _resolved_by(reader: ReportReader, payload: dict[str, Any]) -> dict[str, list[str]]:
+    document = sandbox_document(reader.read(payload, provider="upload"))
+    network = network_from_sandbox_report(document)
+    assert network is not None
+    return {d.fqdn: d.resolved_ips for d in network.domains}
+
+
+class TestAnOperatorReaderCannotForgeTheLinks:
+    def test_a_reader_built_on_keep_source(self) -> None:
+        payload = {"info": {"id": 1}, "network": {"dns": _forged_rows()}}
+        assert _resolved_by(_KeepSourceReader(), payload) == FORGED_DEV
+        rows = sandbox_document(_KeepSourceReader().read(payload, provider="upload"))
+        assert all(
+            not ({DNS_REQUEST_KEY, SAME_REQUEST_KEY} & set(row)) for row in rows["network"]["dns"]
+        )
+
+    def test_a_reader_that_builds_its_rows_from_the_report_s_fields(self) -> None:
+        payload = {"network": {"dns": _forged_rows()}}
+        assert _resolved_by(_FieldsReader(), payload) == FORGED_DEV
+        rows = sandbox_document(_FieldsReader().read(payload, provider="upload"))
+        assert all(
+            not ({DNS_REQUEST_KEY, SAME_REQUEST_KEY} & set(row)) for row in rows["network"]["dns"]
+        )
+
+    def test_a_reader_using_the_structural_form_gets_each_name_its_own_answers(self) -> None:
+        payload = {
+            "message": {
+                "asked": ["relay-a-r7.net", "relay-b-r8.net"],
+                "answers": [
+                    {"for": "relay-b-r8.net", "ip": "45.33.32.9"},
+                    {"for": "relay-a-r7.net", "ip": "45.33.32.1"},
+                ],
+            }
+        }
+        document = sandbox_document(_StructuralReader().read(payload, provider="upload"))
+        first, later = document["network"]["dns"]
+        # The platform minted the links.
+        assert later[SAME_REQUEST_KEY] == first[DNS_REQUEST_KEY] == 0
+        assert _resolved_by(_StructuralReader(), payload) == FORGED_DEV
+
+    def test_triage_multi_question_parity_is_unchanged(self) -> None:
+        test_every_reader_reads_the_second_name_as_dev_did()
+        test_a_named_answer_goes_to_the_question_it_answers()

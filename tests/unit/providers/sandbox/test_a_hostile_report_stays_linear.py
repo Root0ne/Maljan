@@ -244,7 +244,7 @@ class TestEachRequestSFieldsAreHeldOnce:
         held, report = _held(
             lambda: triage_overview_to_sandbox_report({}, task_reports={"t": task})
         )
-        assert len(report.network.dns) == 1_500
+        assert len(sandbox_document(report)["network"]["dns"]) == 1_500
         assert held <= 2 * parsed_bytes, (held, parsed_bytes)
 
 
@@ -307,7 +307,7 @@ class TestTheDocumentWritesOutLinearly:
         document = sandbox_document(report)
         assert len(json.dumps(document)) <= 3 * len(body)
         # The first question's row carries the answers; each later one names it.
-        first, second = report.network.dns[0], report.network.dns[1]
+        first, second = document["network"]["dns"][:2]
         assert len(first["answers"]) == n
         assert "answers" not in second
         assert second[SAME_REQUEST_KEY] == first[DNS_REQUEST_KEY]

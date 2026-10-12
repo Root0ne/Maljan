@@ -36,12 +36,8 @@ from pydantic import (
 
 from maljan.core.report_formats import SignatureScale, reader_display_name
 from maljan.schemas.sandbox_document import (
-    DNS_REQUEST_KEY,
     GROUP_ROWS_KEY,
-    SAME_REQUEST_KEY,
-    decompose,
-    renamed,
-    without_dns_links,
+    kept_source,
 )
 from maljan.schemas.sandbox_document import (
     SUMMARY_KEYS as _DOCUMENT_SUMMARY_KEYS,
@@ -160,6 +156,33 @@ class SandboxSignatureRow(BaseModel):
         return _without_empty(self, handler, ("extra",))
 
 
+class SandboxDnsRequest(BaseModel):
+    """One DNS request a sandbox recorded asking one or more names: the structural form.
+
+    A reader that saw one DNS message ask several names fills one of these (in
+    ``SandboxNetwork.dns_requests``) rather than writing a row per name and
+    linking them itself: the document's one chokepoint
+    (``schemas.sandbox_document.dns_rows``) writes the request's rows, the
+    request's answers and other fields once on its first name's row, and mints
+    the links between them. Each name then reads the answers for its own name
+    and alias chain, and every answer that names no name
+    (``schemas.sandbox_document.DnsAnswers``), so a request grouped wrongly can
+    never credit a named answer to another name.
+
+    ``questions`` holds each asked name as its row's own fields (``request``,
+    the name, and ``type``, the record type asked for); ``answers`` the
+    request's answers as the reader writes them (each ``data``, and the
+    ``name`` it answers and its ``type`` where the sandbox says); ``extra`` the
+    request's other fields.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    questions: list[dict[str, Any]] = Field(default_factory=list)
+    answers: list[Any] = Field(default_factory=list)
+    extra: dict[str, Any] = Field(default_factory=dict)
+
+
 class SandboxNetwork(BaseModel):
     """Network IOC rows, carried through close to their sandbox shape.
 
@@ -182,6 +205,13 @@ class SandboxNetwork(BaseModel):
     # with no network activity at all.
     icmp: list[dict[str, Any]] = Field(default_factory=list)
     pcap_local_path: str | None = None
+    # The DNS requests a reader expresses structurally (:class:`SandboxDnsRequest`),
+    # written into the document's DNS rows after ``dns`` by its chokepoint.
+    dns_requests: list[SandboxDnsRequest] = Field(default_factory=list)
+
+    @model_serializer(mode="wrap")
+    def _dump(self, handler: SerializerFunctionWrapHandler) -> Any:
+        return _without_empty(self, handler, ("dns_requests",))
 
 
 class SandboxReport(BaseModel):
@@ -476,6 +506,7 @@ def report_fills(report: SandboxReport) -> frozenset[str]:
             f"network.{kind}": getattr(network, kind)
             for kind in ("dns", "http", "tcp", "udp", "hosts", "domains", "tls", "icmp")
         },
+        "network.dns": network.dns or network.dns_requests,
         **{f"summary.{key}": report.summary.get(key) for key in _SUMMARY_KEYS},
         "process_tree": report.process_tree,
         "resolved_apis": report.resolved_apis,
@@ -675,9 +706,7 @@ def cape_report_to_sandbox_report(
     arrangement: dict[str, list[str]] | None = None
     if keep_arrangement:
         words = CAPE_RENAMES if renames is None else renames
-        published, extras, arrangement = decompose(renamed(raw, words))
-        if "network.dns" in published:
-            published["network.dns"] = without_dns_links(published["network.dns"])
+        published, extras, arrangement = kept_source(raw, words)
     return SandboxReport(
         provider=provider,
         source_format=source_format,
@@ -705,8 +734,7 @@ def cape_report_to_sandbox_report(
         generic_events=[g for g in (behavior.get("generic") or []) if isinstance(g, dict)],
         signatures=signatures,
         network=SandboxNetwork(
-            # A source's own DNS rows never carry the platform's request links.
-            dns=_rows(without_dns_links(net.get("dns"))),
+            dns=_rows(net.get("dns")),
             http=_rows(net.get("http")),
             tcp=_rows(net.get("tcp")),
             udp=_rows(net.get("udp")),
@@ -1053,8 +1081,6 @@ def triage_overview_to_sandbox_report(
     tasks_read = 0
     extracted = _rows(overview.get("extracted"))
     channels: dict[str, Any] = {}
-    # The id the next DNS request with several questions is written under.
-    dns_requests = 0
     for task_name, task in (task_reports or {}).items():
         if not isinstance(task, dict):
             continue
@@ -1144,18 +1170,13 @@ def triage_overview_to_sandbox_report(
                     for a in _rows((domain_resp or {}).get("answers"))
                     if a.get("value")
                 ]
-                # The request's answers and its other fields belong to the
-                # request, so they are written once, on its first question's
-                # row. With more than one question, that row carries the
-                # request's id and each later question's row names it
-                # (``schemas.sandbox_document.dns_answers`` reads them back),
-                # so any writing-out of the report stays linear in its size.
+                # The request in the structural form
+                # (``SandboxDnsRequest``): the document's chokepoint writes its
+                # rows, its answers and other fields once, and links its names.
                 questions = [
                     q for q in _rows(domain_req.get("questions")) if str(q.get("name") or "")
                 ]
-                request_id = dns_requests if len(questions) > 1 else None
-                if request_id is not None:
-                    dns_requests += 1
+                if len(questions) > 1:
                     # Several questions: each answer keeps the name it answers
                     # and its type, so each question is given the answers for
                     # its own name and its alias chain (``DnsAnswers``).
@@ -1168,22 +1189,21 @@ def triage_overview_to_sandbox_report(
                         for a in _rows((domain_resp or {}).get("answers"))
                         if a.get("value")
                     ]
-                for position, question in enumerate(questions):
-                    name = str(question.get("name") or "")
-                    dns_row: dict[str, Any] = {
-                        "request": name,
-                        "type": str(question.get("type") or ""),
-                    }
-                    if position == 0:
-                        dns_row["answers"] = answers
-                        if req_extra:
-                            dns_row["extra"] = req_extra
-                        if request_id is not None:
-                            dns_row[DNS_REQUEST_KEY] = request_id
-                    else:
-                        dns_row[SAME_REQUEST_KEY] = request_id
-                    network.dns.append(dns_row)
-                    network.domains.append(name)
+                if questions:
+                    network.dns_requests.append(
+                        SandboxDnsRequest(
+                            questions=[
+                                {
+                                    "request": str(q.get("name") or ""),
+                                    "type": str(q.get("type") or ""),
+                                }
+                                for q in questions
+                            ],
+                            answers=answers,
+                            extra=req_extra,
+                        )
+                    )
+                network.domains.extend(str(q.get("name") or "") for q in questions)
 
             if web_req is not None:
                 parsed_url = urlsplit(str(web_req.get("url") or ""))

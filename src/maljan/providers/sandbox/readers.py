@@ -133,11 +133,11 @@ class ReportReader(ABC):
         document laid out from ``report`` is then ``payload`` itself
         (``schemas.sandbox_document.decompose``).
         """
-        from maljan.schemas.sandbox_document import decompose, renamed
+        from maljan.schemas.sandbox_document import kept_source
 
-        report.published, report.extras, report.arrangement = decompose(
-            renamed(payload, self.renames)
-        )
+        # Any platform link key in the source's DNS rows is removed here, and
+        # again where the document is built.
+        report.published, report.extras, report.arrangement = kept_source(payload, self.renames)
         return report
 
     def _scaled(self, report: SandboxReport, fmt: Any) -> SandboxReport:

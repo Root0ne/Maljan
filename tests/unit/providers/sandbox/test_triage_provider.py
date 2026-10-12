@@ -281,7 +281,10 @@ def test_fetch_maps_overview_and_task_report_into_a_sandbox_report():
     # The consumer shape, not Triage's own field names: a flow's combined
     # "host:port" is split, and a DNS/HTTP request is read from its
     # domain_req/domain_resp or web_req/web_resp sub-object.
-    assert _bare(report.network.dns) == [
+    from maljan.schemas.sandbox_document import sandbox_document
+
+    # The request is held structurally; the document writes its rows.
+    assert _bare(sandbox_document(report)["network"]["dns"]) == [
         {"request": "update-relay-c9f2.net", "type": "A", "answers": [{"data": "45.33.32.23"}]}
     ]
     assert report.network.domains == ["update-relay-c9f2.net"]
@@ -361,7 +364,7 @@ def test_every_consumer_channel_is_populated_or_named_unavailable():
         ("screenshots", report.screenshots),
         ("processes", report.processes),
         ("signatures", report.signatures),
-        ("network.dns", report.network.dns),
+        ("network.dns", report.network.dns or report.network.dns_requests),
         ("network.http", report.network.http),
         ("network.tcp", report.network.tcp),
         ("network.udp", report.network.udp),

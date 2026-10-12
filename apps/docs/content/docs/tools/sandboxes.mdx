@@ -65,10 +65,11 @@ own row naming its task, built when it is read, so `offset` and `limit` page
 it and a claim cites one item by its id. A DNS request's answers and other
 fields sit on its first question's row; where the request asks several names,
 that row carries the request's id (`@dns_request`) and each later question's row
-names it (`@same_request_as`). These two keys are the platform's own: every reader
-that hands a source's DNS rows through removes them from those rows, and a link
-is honoured only in the exact form a reader writes it, so a report can never make
-one name read another's answers; each answer keeps the name it answers and its
+names it (`@same_request_as`). These two keys are the platform's own and no reader
+writes them: where the document is built, they are removed from every DNS row
+any reader filled and written only for the requests a reader expresses in the
+structural form (below), and a link is honoured only in that exact form, so a
+report can never make one name read another's answers; each answer keeps the name it answers and its
 type. Every reader of the DNS rows (the network analyst's input, the IOC
 block's resolved addresses, the attribution sentence, the published IOCs and
 the export) gives each question the answers for its own name and the names its
@@ -264,7 +265,18 @@ A reader whose source already uses the document's arrangement sets
 `keeps_source_arrangement`, names the source's words for blocks the document
 calls otherwise in `renames`, and keeps the source with `keep_source(report,
 payload)`: the report's document is then the source itself, the renamed blocks
-under the document's words in place.
+under the document's words in place, and any platform link key removed from its
+DNS rows.
+
+A reader that saw one DNS message ask several names expresses it structurally:
+one `SandboxDnsRequest` in `SandboxNetwork.dns_requests`, holding the asked names
+(`questions`, each `{"request": name, "type": record type}`), the request's
+answers (each `data`, with the `name` it answers and its `type` where the
+sandbox says) and the request's other fields (`extra`). The platform writes the
+request's rows, its answers once on the first name's row, and links them; each
+name then reads the answers for its own name and alias chain, so a request
+grouped wrongly can never credit a named answer to another name. A request with
+one name needs no link and is written as one row.
 
 The formats a payload is tried against are the registry's: the declared
 formats above, then each registered reader no declaration names, recognised by
