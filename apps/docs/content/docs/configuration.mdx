@@ -3412,8 +3412,10 @@ unknown key (`{"knd": …}`), an empty one, or one of no kind that sets a field
 read only through a kind is refused on save, by the API and the console's box
 alike: the box reads the field split, each field's default and the no-kind word
 from the served settings schema (`tool_declaration_fields`), and a field counts
-as set only when it differs from its default, as the API counts it, so a
-declaration stored with every default spelled out reads as it was saved. A
+as set only when it differs from its default, as the API counts it (a yes-or-no
+field as the model reads it, so `0`, `"false"`, `"no"` and `"off"` are its
+default, `false`), so a declaration stored with every default spelled out reads
+as it was saved. A
 declaration of no kind keeps every reading an undeclared tool gets —
 the composer's citation routing below, the code-listing reading of its name,
 its server's own words, the network line — until a kind is accepted for it;
@@ -3474,8 +3476,8 @@ that the declaration does not hold yet and never a kind it did not ask for,
 into the server's `tool_facts` (or adds the patterns and prefixes beside the
 server's own), and Apply saves it like a typed declaration. Nothing is applied
 without an accept, and no run reads a proposal. Accepting on a built-in server
-stores its tool declarations whole, so later corrections to its shipped ones
-stop applying to it; the panel says so.
+stores only the tools you accept (see **Saving** below); every other tool keeps
+following what the server ships.
 
 **Where an undeclared tool's answers go.** The composer shows a technical
 section the captured output of a tool its source declares no kind for when a
@@ -3562,6 +3564,38 @@ releases. A server you add starts with no declaration. A run's settings
 snapshot records only the declaration fields an operator set and names the
 rest by a digest per source (`declaration_digest.<source>`) and one of the
 shipped data (`declaration_digest.shipped`).
+
+**Tool declarations are saved one tool at a time.** On a built-in block (a
+built-in entry of `mcp.servers`, and the `static.ghidra`, `static.r2` and
+`sandbox.cape2.mcp` blocks' `tool_facts`), what is stored is each tool's change
+over the shipped declaration of that tool:
+
+| Stored for a tool | Means |
+|---|---|
+| nothing | the tool is declared as shipped, and follows later releases |
+| `{"timeout_seconds": 900}` | only these fields differ from the shipped declaration; the rest follow later releases |
+| `null` | a shipped tool you removed; it stays removed |
+| a whole declaration | a tool the block does not ship (yours) |
+
+On load the shipped declarations are merged with what is stored field by
+field, so a correction a later release ships for any tool you did not change
+reaches the run, and a tool shipped later appears. The declaration box shows
+the declarations in force (shipped, with your changes over them), lists each
+tool that carries a change (changed, removed, or yours) and has a **Reset to
+shipped** per tool; a provider block's tool declarations are edited the same
+way under its **Declaration** heading. A stored map sent back through the API
+is read the same way: a tool it leaves out is not removed (write `null` to
+remove one). A server you add has nothing shipped, so its stored map is its
+whole map.
+
+Settings saved by an earlier release stored a built-in's tool declarations
+whole. The database migration (revision `20261012000000`) rewrites each such
+map once: against the declarations of the release that wrote it (inferred from
+a frozen record of what every earlier release shipped), a tool stored as that
+release shipped it is dropped and follows today's declaration, an edited tool
+keeps the fields you changed, and a missing shipped tool stays removed. Where
+the writing release cannot be told apart, the stored map is kept whole as
+yours. It logs one line when it rewrites anything.
 
 **A declaration for a server you add.** `docs/examples/profiles/qu1cksc0pe.declaration.json`
 holds the declaration fields of a Qu1cksc0pe server, its six tools' kinds,
@@ -3682,7 +3716,7 @@ sets `Content-Disposition: attachment; filename=maljan-settings.json`:
 
 ```json
 {
-  "format": "maljan-settings/1",
+  "format": "maljan-settings/2",
   "exported_at": "2026-09-12T00:00:00Z",
   "values": { "core.llm.provider": "openai" },
   "secrets_omitted": ["core.llm.openai.api_key"]
@@ -3699,8 +3733,14 @@ sets `Content-Disposition: attachment; filename=maljan-settings.json`:
   operator can see what has to be re-entered on the other side. Those paths are
   informational, not catalog keys.
 
-`POST /api/v1/settings/import` (admin) accepts the same document. A `format`
-other than `maljan-settings/1` is rejected with 422; unknown or read-only keys
+`POST /api/v1/settings/import` (admin) accepts the same document. In
+`maljan-settings/2` a built-in block's tool declarations are stored as their
+changes over the shipped ones, one tool at a time (see **Tool declarations are
+saved one tool at a time**), so an export and import round trip keeps exactly
+those changes. A document in `maljan-settings/1`, written before, is still
+accepted: a built-in block's tool declarations there are its whole map, so a
+shipped tool it does not name stays removed and a tool it names reads as
+written. A `format` other than these two is rejected with 422; unknown or read-only keys
 are rejected with 422 and a per-key error, and nothing is applied when any key
 fails. A key of a setting retired with no effect — `core.preprocessing.summarizer_provider`,
 `core.preprocessing.summarizer_model`, `core.reporting.narrative_max_tokens` —
