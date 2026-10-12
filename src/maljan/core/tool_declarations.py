@@ -23,8 +23,16 @@ block never set takes the built-in's value; a field the operator set, even to
 an empty value, is kept as set (:func:`fill_declaration`). A save stores a
 built-in's field only where it differs from the shipped value at the time of
 the save (:func:`strip_declaration_defaults`), so a value written equal to the
-shipped one is not recorded and follows later releases. A server that is not a
-built-in starts from nothing and inherits nothing.
+shipped one is not recorded and follows later releases. A built-in's tool
+declarations (``tool_facts``) follow the same rule one tool at a time: what is
+stored is each tool's change over the shipped declaration of that tool (only
+the fields that differ; ``null`` for a shipped tool an operator removed; the
+whole declaration of a tool the block does not ship), and what is in force is
+the shipped map with those changes over it (:func:`merge_tool_facts`,
+:func:`tool_facts_changes`). A tool an operator never changed keeps following
+later releases, and a tool shipped after the save appears. A server that is
+not a built-in starts from nothing and inherits nothing: its stored map is its
+whole map.
 
 The read API (:class:`ToolDeclarations`, :func:`declaration_for`,
 :func:`tools_of_kind`, :func:`servers_with_role`) resolves a ledger entry by the
@@ -1169,6 +1177,71 @@ def fill_declaration(stored: MCPServerConfig, default: MCPServerConfig) -> MCPSe
     return stored
 
 
+def merge_tool_facts(shipped: Mapping[str, Any], stored: Mapping[str, Any]) -> dict[str, Any]:
+    """The tool declarations in force: ``shipped`` with the ``stored`` changes over it, per tool.
+
+    ``stored`` is a block's tool declarations as a save writes them
+    (:func:`tool_facts_changes`): per tool, the fields that differ from the
+    shipped declaration of that tool, which replace those fields; ``None``
+    for a shipped tool the operator removed, which is left out; the whole
+    declaration of a tool ``shipped`` does not declare. A shipped tool the
+    stored map does not name is in force as shipped, so a correction a later
+    release ships reaches it, and so does a tool shipped after the save. With
+    nothing shipped (a server that is not a built-in) the stored map is the
+    whole map. A change that is not a mapping is kept for the model to read
+    or refuse as ever. Time linear in the two maps.
+    """
+    out: dict[str, Any] = {}
+    for tool, facts in shipped.items():
+        if tool not in stored:
+            out[tool] = _copy(facts)
+            continue
+        change = stored[tool]
+        if change is None:
+            continue
+        if isinstance(change, Mapping) and isinstance(facts, Mapping):
+            out[tool] = {**_copy(dict(facts)), **_copy(dict(change))}
+        else:
+            out[tool] = _copy(change)
+    for tool, change in stored.items():
+        if tool not in shipped and change is not None:
+            out[tool] = _copy(change)
+    return out
+
+
+def tool_facts_changes(in_force: Mapping[str, Any], shipped: Mapping[str, Any]) -> dict[str, Any]:
+    """What ``in_force`` changes of ``shipped``, per tool: how a block's declarations are stored.
+
+    The inverse of :func:`merge_tool_facts`: a tool declared as shipped is
+    not named; a shipped tool ``in_force`` declares otherwise names only the
+    fields that differ (keys in any order, as :func:`_same` compares them); a
+    shipped tool ``in_force`` lacks is ``None``; a tool ``shipped`` does not
+    declare is named whole. A field ``in_force`` leaves out of a shipped
+    tool's declaration follows the shipped value, as on load. Time linear in
+    the two maps.
+    """
+    out: dict[str, Any] = {}
+    for tool, facts in shipped.items():
+        if tool not in in_force:
+            out[tool] = None
+            continue
+        held = in_force[tool]
+        if isinstance(held, Mapping) and isinstance(facts, Mapping):
+            changed = {
+                str(name): _copy(value)
+                for name, value in held.items()
+                if name not in facts or not _same(value, facts[name])
+            }
+            if changed:
+                out[tool] = changed
+        elif not _same(held, facts):
+            out[tool] = _copy(held)
+    for tool, held in in_force.items():
+        if tool not in shipped:
+            out[tool] = _copy(held)
+    return out
+
+
 def strip_declaration_defaults(dumped: dict[str, Any], default: MCPServerConfig) -> dict[str, Any]:
     """A built-in's stored row without the declaration fields equal to its default.
 
@@ -1177,14 +1250,20 @@ def strip_declaration_defaults(dumped: dict[str, Any], default: MCPServerConfig)
     save and a later release could never correct it. A value that differs
     from the default, an empty one included, is the operator's and is stored;
     a value equal to the shipped one at the time of the save is not recorded,
-    and follows later releases.
+    and follows later releases. The tool declarations are stored one tool at
+    a time, as their changes over the shipped ones (:func:`tool_facts_changes`),
+    and not at all when no tool differs.
     """
     reference = default.model_dump(mode="json")
-    return {
-        key: value
-        for key, value in dumped.items()
-        if key not in DECLARATION_FIELDS or value != reference.get(key)
-    }
+    out: dict[str, Any] = {}
+    for key, value in dumped.items():
+        if key == "tool_facts" and isinstance(value, Mapping):
+            changes = tool_facts_changes(value, reference.get(key) or {})
+            if changes:
+                out[key] = changes
+        elif key not in DECLARATION_FIELDS or value != reference.get(key):
+            out[key] = value
+    return out
 
 
 def declaration_digest(cfg: Any) -> str:

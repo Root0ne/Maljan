@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Mapping
+from functools import cache
 from typing import Any, Literal
 
 from pydantic import BaseModel
 
 from maljan.core.config import STORE_ONLY, Settings
+from maljan.core.tool_declarations import merge_tool_facts
 
 CORE_NS = "core"
 API_NS = "api"
@@ -85,9 +87,73 @@ def build_settings(core_overrides: Mapping[str, Any]) -> Settings:
     """
     token = STORE_ONLY.set(True)
     try:
-        return Settings(**nest(core_overrides))
+        return Settings(**nest(declarations_in_force(core_overrides)))
     finally:
         STORE_ONLY.reset(token)
+
+
+# The stored tool-server map, and the field holding a block's tool declarations.
+SERVER_MAP_PATH = "mcp.servers"
+TOOL_FACTS_FIELD = "tool_facts"
+_TOOL_FACTS_SUFFIX = f".{TOOL_FACTS_FIELD}"
+
+
+@cache
+def _shipped_dump() -> dict[str, Any]:
+    """Every block as it ships, as JSON: the settings built from no override at all."""
+    return build_settings({}).model_dump(mode="json")
+
+
+def shipped_tool_facts(block: str) -> dict[str, Any]:
+    """The tool declarations the block at dotted path ``block`` ships, as JSON; ``{}`` for none.
+
+    ``mcp.servers.<key>`` for a server of the tool-server map, a provider
+    block's own path (``static.ghidra``) otherwise. A block that is not in the
+    shipped settings (a server an operator added) ships nothing.
+    """
+    node: Any = _shipped_dump()
+    for part in block.split("."):
+        if not isinstance(node, Mapping) or part not in node:
+            return {}
+        node = node[part]
+    held = node.get(TOOL_FACTS_FIELD) if isinstance(node, Mapping) else None
+    return dict(held) if isinstance(held, Mapping) else {}
+
+
+def server_entry_in_force(name: str, entry: Any) -> Any:
+    """One stored server entry with its tool declarations as they are in force.
+
+    A stored entry's ``tool_facts`` holds its changes over what the server
+    ships (``tool_declarations.tool_facts_changes``); in force they are the
+    shipped ones with those changes over them. An entry that sets no tool
+    declarations is returned as it is, and takes the shipped ones on load.
+    """
+    if not isinstance(entry, Mapping) or not isinstance(entry.get(TOOL_FACTS_FIELD), Mapping):
+        return entry
+    shipped = shipped_tool_facts(f"{SERVER_MAP_PATH}.{name}")
+    return {**entry, TOOL_FACTS_FIELD: merge_tool_facts(shipped, entry[TOOL_FACTS_FIELD])}
+
+
+def declarations_in_force(core_overrides: Mapping[str, Any]) -> dict[str, Any]:
+    """``core_overrides`` with every stored block's tool declarations read as they are in force.
+
+    What a store holds for a block's tool declarations (a server's entry in
+    the tool-server map, a provider block's ``tool_facts`` leaf) is its
+    changes over the shipped ones, one tool at a time; the settings model
+    holds the declarations in force. This is the one place the first is read
+    as the second, for every construction from stored overrides
+    (:func:`build_settings`). Every other key is passed through unchanged.
+    """
+    out = dict(core_overrides)
+    for key, value in core_overrides.items():
+        if not isinstance(value, Mapping):
+            continue
+        if key == SERVER_MAP_PATH:
+            out[key] = {name: server_entry_in_force(name, entry) for name, entry in value.items()}
+        elif key.endswith(_TOOL_FACTS_SUFFIX):
+            shipped = shipped_tool_facts(key.removesuffix(_TOOL_FACTS_SUFFIX))
+            out[key] = merge_tool_facts(shipped, value)
+    return out
 
 
 def effective_source(*, overridden: bool) -> Source:

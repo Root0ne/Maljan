@@ -31,6 +31,11 @@ from maljan.core.config import (
     _builtin_servers,
     builtin_env_allow,
 )
+from maljan.core.settings_overrides import (
+    SERVER_MAP_PATH,
+    server_entry_in_force,
+    shipped_tool_facts,
+)
 from maljan.core.tool_declarations import (
     changed_declaration_errors,
     check_own_prefix,
@@ -115,19 +120,23 @@ def validate_server_map(
                 errors[f"{key}.agents"] = (
                     f"{role!r} is not a known agent; expected one of {', '.join(sorted(roles))}"
                 )
-        # The tool declarations this save adds or changes are an operator's
-        # edit and are held to the strict rules; one it leaves as stored or
-        # shipped is read as it always was (leniently, below), so a stored
-        # entry never blocks an unrelated save.
+        # The entry's tool declarations are its changes over what the server
+        # ships, one tool at a time (``tool_declarations.tool_facts_changes``):
+        # they are checked and validated as they are in force. The ones this
+        # save adds or changes are an operator's edit and are held to the
+        # strict rules; one it leaves as stored or shipped is read as it always
+        # was (leniently, below), so a stored entry never blocks an unrelated
+        # save.
         facts_in = entry.get("tool_facts")
         if isinstance(facts_in, dict):
-            stored_entry = (stored or {}).get(key)
+            shipped = shipped_tool_facts(f"{SERVER_MAP_PATH}.{key}")
+            entry = server_entry_in_force(key, entry)
+            stored_entry = server_entry_in_force(key, (stored or {}).get(key))
             before: list[Any] = [
-                stored_entry.get("tool_facts") if isinstance(stored_entry, dict) else None
+                stored_entry.get("tool_facts") if isinstance(stored_entry, dict) else None,
+                shipped,
             ]
-            if key in builtins:
-                before.append(builtins[key].model_dump(mode="json").get("tool_facts"))
-            refused = changed_declaration_errors(facts_in, before)
+            refused = changed_declaration_errors(entry["tool_facts"], before)
             if refused:
                 for path, message in refused.items():
                     errors[f"{key}.tool_facts.{path}"] = message

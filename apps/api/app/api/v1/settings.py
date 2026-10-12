@@ -75,7 +75,13 @@ from app.services.settings_service import (
     lenient_imported_declarations,
 )
 
-EXPORT_FORMAT = "maljan-settings/1"
+# The settings document an export writes and an import reads. In ``/2`` a
+# block's tool declarations are its changes over what the block ships, one
+# tool at a time, as they are stored; an import also reads ``/1``, written
+# before that, where a block's tool declarations are its whole map.
+EXPORT_FORMAT = "maljan-settings/2"
+WHOLE_MAP_FORMAT = "maljan-settings/1"
+IMPORT_FORMATS = (EXPORT_FORMAT, WHOLE_MAP_FORMAT)
 
 logger = get_logger("api.settings")
 
@@ -505,7 +511,7 @@ async def import_values(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> PatchResponse | JSONResponse:
-    if body.format != EXPORT_FORMAT:
+    if body.format not in IMPORT_FORMATS:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"errors": {"format": "unsupported format"}},
@@ -530,7 +536,9 @@ async def import_values(
         )
     # A declaration another version wrote may hold what this one does not
     # read: it is left out with a warning, never a refusal of the file.
-    values, left_out = lenient_imported_declarations(values)
+    values, left_out = lenient_imported_declarations(
+        values, whole_maps=body.format == WHOLE_MAP_FORMAT
+    )
     try:
         res = await SettingsService(db).save(values, user_id=user.id, ip=_client_ip(request))
     except SettingsValidationError as exc:

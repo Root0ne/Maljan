@@ -149,7 +149,7 @@ def test_the_server_map_refuses_only_the_entries_a_save_adds_or_changes() -> Non
     assert set(refused.value.errors) == {"invented.tool_facts.u.nott"}
 
 
-def test_an_import_leaves_the_unknown_key_out_and_says_so() -> None:
+def _imported(document_format: str) -> tuple[dict[str, Any], dict[str, str]]:
     from app.api.v1.settings import router
     from app.database import get_db
     from app.deps import require_admin
@@ -178,16 +178,37 @@ def test_an_import_leaves_the_unknown_key_out_and_says_so() -> None:
     ):
         response = TestClient(app).post(
             "/api/v1/settings/import",
-            json={"format": "maljan-settings/1", "values": exported},
+            json={"format": document_format, "values": exported},
         )
     assert response.status_code == 200
-    saved = save.call_args.args[0]
-    assert saved[LEAF] == {"decompile_function": {"kind": "decompile"}}
+    return save.call_args.args[0], response.json()["warnings"]
+
+
+def test_an_import_leaves_the_unknown_key_out_and_says_so() -> None:
+    saved, warnings = _imported("maljan-settings/2")
+    # What is left of the provider's declaration is what it ships: no change.
+    assert saved[LEAF] == {}
     assert saved["core.mcp.servers"]["invented"]["tool_facts"] == {"t": {"kind": "strings"}}
-    warnings = response.json()["warnings"]
     assert "note" in warnings[f"{LEAF}.decompile_function"]
     assert "note" in warnings["core.mcp.servers.invented.tool_facts.t"]
     assert "declares nothing" in warnings["core.mcp.servers.invented.tool_facts.e"]
+
+
+def test_an_import_written_whole_keeps_reading_whole() -> None:
+    from maljan.core.settings_overrides import shipped_tool_facts
+
+    saved, warnings = _imported("maljan-settings/1")
+    shipped = shipped_tool_facts("static.ghidra")
+    # The map was the provider's whole map: every shipped tool it lacks was
+    # removed, and the one it holds reads as written, its other fields at
+    # their default rather than the shipped value.
+    removed = {tool for tool, change in saved[LEAF].items() if change is None}
+    assert removed == set(shipped) - {"decompile_function"}
+    held = saved[LEAF]["decompile_function"]
+    assert held and "kind" not in held
+    assert all(value in ({}, [], "", None, False) for value in held.values())
+    assert saved["core.mcp.servers"]["invented"]["tool_facts"] == {"t": {"kind": "strings"}}
+    assert "note" in warnings[f"{LEAF}.decompile_function"]
 
 
 @pytest.mark.asyncio

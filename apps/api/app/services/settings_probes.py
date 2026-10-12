@@ -594,9 +594,12 @@ def _probe_config(entry: dict[str, Any], name: str) -> MCPServerConfig:
     built-in, and a built-in is started with the environment names a job
     starts it with (``builtin_env_allow``) rather than with whatever a stored
     row holds — the probe exists so that the console tests the same server the
-    run gets.
+    run gets. Its tool declarations are read as they are in force: an entry's
+    are its changes over what the server ships.
     """
-    config = MCPServerConfig.model_validate(entry)
+    from maljan.core.settings_overrides import server_entry_in_force
+
+    config = MCPServerConfig.model_validate(server_entry_in_force(name, entry))
     update: dict[str, Any] = {"enabled": True, "tools": None}
     if name in BUILTIN_SERVER_KEYS:
         update["env_allow"] = builtin_env_allow(name, config.env_allow)
@@ -604,13 +607,17 @@ def _probe_config(entry: dict[str, Any], name: str) -> MCPServerConfig:
 
 
 def _declared_tools(config: MCPServerConfig, name: str) -> frozenset[str]:
-    """The tools ``name`` already declares: in the entry probed, or as the built-in it is."""
-    from maljan.core.builtin_declarations import builtin_server_names, server_declaration
+    """The tools ``name`` declares as the entry probed has them in force.
 
-    declared = set(config.tool_facts)
-    if name in builtin_server_names():
-        declared.update(server_declaration(name).get("tool_facts") or {})
-    return frozenset(declared)
+    An entry that sets its tool declarations has them in force already (the
+    shipped ones with its changes over them, so a shipped tool it removed is
+    undeclared); one that sets none has what the server ships.
+    """
+    from maljan.core.settings_overrides import SERVER_MAP_PATH, shipped_tool_facts
+
+    if "tool_facts" in config.model_fields_set:
+        return frozenset(config.tool_facts)
+    return frozenset(shipped_tool_facts(f"{SERVER_MAP_PATH}.{name}"))
 
 
 async def _inspect(
