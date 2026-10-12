@@ -239,6 +239,28 @@ def _overlapping(n: int) -> tuple[Image, dict[str, Any]]:
     return _image([8] * n, body, texts, table=table), {}
 
 
+def _by_kind(n: int) -> tuple[Image, dict[str, Any]]:
+    """No table: every function start comes from a listing answer, each holding a rule and a
+    recovered string placed by their answers' addresses, the inputs read by kind."""
+    texts = [b"a text every function loads"]
+
+    def body(i: int, start: int, at: Callable[[int], int], data: int) -> bytes:
+        return _lea(start, data) + b"\x90" * 4 + b"\xc3"
+
+    image = _image([16] * n, body, texts, table=[])
+    starts = [hex(TEXT_RVA + 16 * i) for i in range(n)]
+    sites = [
+        {"kind": "decoded", "string": f"text {i:06d}", "called_at_rva": hex(TEXT_RVA + 16 * i + 8)}
+        for i in range(n)
+    ]
+    rules = [(f"rule {i % 64}", [starts[i]]) for i in range(n)]
+    return image, {
+        "function_starts": [("Lister", "ev_0003", starts)],
+        "rule_hits": [("match", "ev_0008", rules)],
+        "site_strings": [("recover", "ev_0017", sites)],
+    }
+
+
 def _dense(n: int, degree: int = 8) -> tuple[Image, dict[str, Any]]:
     """Function i loads a text and calls the ``degree`` functions after it, wrapping around."""
     texts = [b"a text every function loads"]
@@ -483,3 +505,14 @@ class TestTheCostGrowsWithTheFunctionsAndTheCalls:
         low, high = _ratio(_many_sections, 2_000)
         print("as many sections as calls:", round(low, 3), round(high, 3))
         assert high < low * 20
+
+    def test_starts_rules_and_recovered_strings_read_by_kind(self) -> None:
+        low, high = _ratio(_by_kind, 2_000)
+        print("starts, rules and strings by kind:", round(low, 3), round(high, 3))
+        assert high < low * 20
+        _, answer = _timed(_by_kind, 2_000)
+        assert answer["function_sources"] == {"Lister function starts": 2_000}
+        assert answer["total"] == 2_000
+        assert all(
+            len(row["capa"]) == 1 and len(row["decoded_strings"]) == 1 for row in answer["rows"]
+        )
