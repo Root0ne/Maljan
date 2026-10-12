@@ -280,3 +280,33 @@ class TestABlockIsHeldOnceByReference:
                 triage_overview_to_sandbox_report({}, task_reports={"t": task})
             ),
         )
+
+
+class TestTheDocumentWritesOutLinearly:
+    """Writing the document out is linear in the body: a request's fields are written once."""
+
+    def test_many_questions_times_many_keys(self) -> None:
+        import json
+
+        task = _questions_and_keys(3_000)
+        body = json.dumps(task)
+        document = sandbox_document(triage_overview_to_sandbox_report({}, task_reports={"t": task}))
+        assert len(json.dumps(document)) <= 3 * len(body)
+
+    def test_many_answers_times_many_questions(self) -> None:
+        import json
+
+        n = 3_000
+        request = {
+            "domain_req": {"questions": [{"name": f"q{i}.example", "type": "A"} for i in range(n)]},
+            "domain_resp": {"answers": [{"value": f"192.0.2.{i % 250}"} for i in range(n)]},
+        }
+        task = {"network": {"requests": [request]}}
+        body = json.dumps(task)
+        report = triage_overview_to_sandbox_report({}, task_reports={"t": task})
+        document = sandbox_document(report)
+        assert len(json.dumps(document)) <= 3 * len(body)
+        # The first question's row carries the answers; each later one names it.
+        first, second = report.network.dns[0], report.network.dns[1]
+        assert len(first["answers"]) == n
+        assert "answers" not in second and second["same_request_as"] == "q0.example"

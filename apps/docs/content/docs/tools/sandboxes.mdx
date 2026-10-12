@@ -58,13 +58,19 @@ the overview's analysis, task and target blocks, each flow's and request's
 other fields under `extra` (source, times, bytes, the name and TLS facts, every
 header), and each task report's blocks with no part of their own (its
 signatures with their per-process indicators, the task, its other network
-logs) as `task.<block>` channels, one row per task holding the block whole
-(`task_report`, `rows`). A report read through the JSONPath mapping keeps every
-top-level block no path starts in as a `report.<block>` channel, whole: a list's
-items are its rows as they are, any other block is one row. The analyst reads it
-through `sandbox_channels` and the pack's channels section, and nothing is
-concluded from it for the analyst. A kept block is held once, by reference to
-the parsed report, never copied or wrapped row by row.
+logs) as `task.<block>` channels. The document holds each such block once per
+task, by reference (`{"task_report": ..., "block_rows": <block>}`), and every
+reader reads it as the block's items: each signature, flow or other item is its
+own row naming its task, built when it is read, so `offset` and `limit` page
+it and a claim cites one item by its id. A DNS request's answers and other
+fields sit on its first question's row; a later question's row names that first
+question (`same_request_as`). A report read through the JSONPath mapping keeps
+every top-level block no path starts in as a `report.<block>` channel, whole: a
+list's items are its rows as they are, any other block is one row. The analyst
+reads these through `sandbox_channels` and the pack's channels section, and
+nothing is concluded from them for the analyst. A kept block is held once, by
+reference to the parsed report, never copied or wrapped row by row, and the
+document writes each value out once.
 
 | Provider | Detonates | Reached at |
 | :-- | :-- | :-- |

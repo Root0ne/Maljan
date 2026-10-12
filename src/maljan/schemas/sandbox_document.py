@@ -32,7 +32,8 @@ document's word, in the place the source listed it.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import bisect
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -132,6 +133,76 @@ def _at(document: Any, path: Path) -> tuple[bool, Any]:
             return False, None
         node = node[key]
     return True, node
+
+
+# A channel row that holds a whole block a reader kept by reference
+# (``{<labels>..., GROUP_ROWS_KEY: <block>}``): read as the block's items, each
+# with the row's labels, built one item at a time when it is read
+# (:func:`channel_rows`).
+GROUP_ROWS_KEY = "block_rows"
+
+
+def _is_group(row: Any) -> bool:
+    return isinstance(row, Mapping) and GROUP_ROWS_KEY in row
+
+
+class GroupedRows(Sequence[Any]):
+    """A channel's rows with each kept block read as its items, built when read.
+
+    Holds the channel's rows by reference and, per row, where its items start:
+    one pass over the channel's rows, never over a block's items. An item of a
+    kept block is its labels with the item's own fields (or its value), built
+    only for the index or slice asked; a plain row is itself.
+    """
+
+    def __init__(self, rows: list[Any]) -> None:
+        self._rows = rows
+        self._starts: list[int] = []
+        total = 0
+        for row in rows:
+            self._starts.append(total)
+            total += len(self._block(row)) if _is_group(row) else 1
+        self._total = total
+
+    @staticmethod
+    def _block(row: Mapping[str, Any]) -> list[Any]:
+        block = row[GROUP_ROWS_KEY]
+        return block if isinstance(block, list) else [block]
+
+    def __len__(self) -> int:
+        return self._total
+
+    def _one(self, index: int) -> Any:
+        if index < 0:
+            index += self._total
+        if not 0 <= index < self._total:
+            raise IndexError(index)
+        at = bisect.bisect_right(self._starts, index) - 1
+        row = self._rows[at]
+        if not _is_group(row):
+            return row
+        item = self._block(row)[index - self._starts[at]]
+        labels = {k: v for k, v in row.items() if k != GROUP_ROWS_KEY}
+        return {**labels, **item} if isinstance(item, Mapping) else {**labels, "value": item}
+
+    def __getitem__(self, index: Any) -> Any:
+        if isinstance(index, slice):
+            return [self._one(i) for i in range(*index.indices(self._total))]
+        return self._one(int(index))
+
+
+def channel_rows(held: Any) -> Sequence[Any] | None:
+    """A channel's rows as read: a list as it is, a kept block as its items, one block whole.
+
+    ``None`` for nothing held. A list with no kept block is returned as it is.
+    """
+    if held is None:
+        return None
+    if not isinstance(held, list):
+        return [held]
+    if any(_is_group(row) for row in held):
+        return GroupedRows(held)
+    return held
 
 
 def place(document: Any, name: str, default: Any = None) -> Any:

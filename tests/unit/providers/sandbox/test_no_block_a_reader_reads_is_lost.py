@@ -48,16 +48,23 @@ def _triage_document() -> dict[str, Any]:
 class TestATriageTaskReportKeepsItsBlocks:
     def test_the_task_s_own_blocks_are_channels_naming_the_task(self) -> None:
         document = _triage_document()
-        (signatures,) = sandbox_channels(document, "task.signatures")["rows"]
-        assert signatures[TASK_KEY] == "behavioral1"
-        # The task's block as the task report holds it, kept whole.
-        assert signatures[TASK_ROWS_KEY][0]["name"] == "task_only_signature"
-        assert signatures[TASK_ROWS_KEY][0]["indicators"][0]["procid"] == 1000
+        # Held once, by reference: one row per task holding the block.
+        (kept,) = document["channels"]["task.signatures"]
+        assert kept[TASK_KEY] == "behavioral1" and isinstance(kept[TASK_ROWS_KEY], list)
+        # Read as the block's items, each naming its task.
+        assert sandbox_channels(document, "task.signatures")["rows"] == [
+            {
+                TASK_KEY: "behavioral1",
+                "name": "task_only_signature",
+                "score": 7,
+                "indicators": [{"ioc": "C:\\Users\\user\\x.dll", "procid": 1000}],
+            }
+        ]
         assert sandbox_channels(document, "task.network.listening")["rows"] == [
-            {TASK_KEY: "behavioral1", TASK_ROWS_KEY: [{"port": 8080}]}
+            {TASK_KEY: "behavioral1", "port": 8080}
         ]
         (task,) = sandbox_channels(document, "task.task")["rows"]
-        assert task[TASK_ROWS_KEY]["kind"] == "behavioral"
+        assert task[TASK_KEY] == "behavioral1" and task["kind"] == "behavioral"
 
     def test_what_the_task_extracted_joins_the_extracted_section(self) -> None:
         document = _triage_document()
@@ -171,3 +178,46 @@ def test_a_reader_declares_the_renames_it_keeps_its_source_with() -> None:
     document = sandbox_document(_RenamingReader().read(source, provider="x"))
     assert list(document) == ["info", "extracted", "behavior"]
     assert document["extracted"] is source["payloads_found"]
+
+
+class TestAKeptTaskBlockIsPagedPerItem:
+    """Each item of a kept block is its own row, reached by page and cited by id."""
+
+    @staticmethod
+    def _document(count: int) -> dict[str, Any]:
+        task = {"signatures": [{"name": f"sig{i}", "score": i % 10} for i in range(count)]}
+        report = required_reader("triage").read(
+            {}, provider="triage", task_reports={"behavioral1": task}
+        )
+        return sandbox_document(report)
+
+    def test_three_hundred_signatures_page_and_one_is_cited(self) -> None:
+        document = self._document(300)
+        first = sandbox_channels(document, "task.signatures", offset=0, limit=10)
+        assert first["total"] == 300 and first["next_offset"] == 10
+        assert [row["name"] for row in first["rows"]] == [f"sig{i}" for i in range(10)]
+        page = sandbox_channels(document, "task.signatures", offset=290, limit=50)
+        assert [row["name"] for row in page["rows"]] == [f"sig{i}" for i in range(290, 300)]
+        assert all(row[TASK_KEY] == "behavioral1" for row in page["rows"])
+
+        index = ss.section_index(document, ("triage", "triage", "tasks"))["sections"]
+        channel_items = index["channels"]["items"]
+        assert channel_items >= 300
+        sections = ss.Sections(document, ("triage", "triage", "tasks"))
+        named = [item for item in sections.items("channels") if item["kind"] == "task.signatures"]
+        assert len(named) == 300
+        cited = sections.item(named[249]["id"])
+        assert cited is not None
+        assert cited["fields"] == {TASK_KEY: "behavioral1", "name": "sig249", "score": 9}
+
+    def test_a_page_builds_only_its_own_rows(self) -> None:
+        from maljan.schemas.sandbox_document import GroupedRows
+
+        document = self._document(100_000)
+        held = document["channels"]["task.signatures"]
+        # The document holds one row per task, the block by reference.
+        assert len(held) == 1
+        view = GroupedRows(held)
+        assert len(view) == 100_000
+        assert view[99_999]["name"] == "sig99999"
+        assert len(view[50:53]) == 3

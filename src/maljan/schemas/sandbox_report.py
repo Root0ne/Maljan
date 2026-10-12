@@ -36,11 +36,12 @@ from pydantic import (
 
 from maljan.core.report_formats import SignatureScale, reader_display_name
 from maljan.schemas.sandbox_document import (
-    SUMMARY_KEYS as _DOCUMENT_SUMMARY_KEYS,
-)
-from maljan.schemas.sandbox_document import (
+    GROUP_ROWS_KEY,
     decompose,
     renamed,
+)
+from maljan.schemas.sandbox_document import (
+    SUMMARY_KEYS as _DOCUMENT_SUMMARY_KEYS,
 )
 
 
@@ -955,9 +956,13 @@ _TRIAGE_FLOW_READ: frozenset[str] = frozenset(
 _TRIAGE_REQUEST_READ: frozenset[str] = frozenset(
     {"domain_req", "domain_resp", "web_req", "web_resp"}
 )
-# The keys of a kept task block's row: the task it came from, and the block.
+# The key a kept task block's row names its task by; the block itself is held
+# under the document's grouped-rows key (``schemas.sandbox_document``).
 TASK_KEY = "task_report"
-TASK_ROWS_KEY = "rows"
+TASK_ROWS_KEY = GROUP_ROWS_KEY
+# On a DNS row of a request's later question: the first question of the same
+# request, whose row carries the request's answers and other fields.
+SAME_REQUEST_KEY = "same_request_as"
 
 
 def _keep_task_block(channels: dict[str, Any], name: str, task: str, value: Any) -> None:
@@ -1134,6 +1139,12 @@ def triage_overview_to_sandbox_report(
                     for a in _rows((domain_resp or {}).get("answers"))
                     if a.get("value")
                 ]
+                # The request's answers and its other fields belong to the
+                # request, so they are written once, on its first question's
+                # row; each later question's row names that first question
+                # (``SAME_REQUEST_KEY``) rather than repeating them, so any
+                # writing-out of the report stays linear in its size.
+                first = ""
                 for question in _rows(domain_req.get("questions")):
                     name = str(question.get("name") or "")
                     if not name:
@@ -1141,11 +1152,14 @@ def triage_overview_to_sandbox_report(
                     dns_row: dict[str, Any] = {
                         "request": name,
                         "type": str(question.get("type") or ""),
-                        "answers": answers,
                     }
-                    if req_extra:
-                        # One dict per request, shared by its questions' rows.
-                        dns_row["extra"] = req_extra
+                    if not first:
+                        first = name
+                        dns_row["answers"] = answers
+                        if req_extra:
+                            dns_row["extra"] = req_extra
+                    else:
+                        dns_row[SAME_REQUEST_KEY] = first
                     network.dns.append(dns_row)
                     network.domains.append(name)
 

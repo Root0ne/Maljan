@@ -55,7 +55,7 @@ from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from maljan.schemas.sandbox_document import place, place_path
+from maljan.schemas.sandbox_document import channel_rows, place, place_path
 from maljan.schemas.sandbox_report import SECTION_IDS, section_id, stored_place
 
 # The tool name of the pack's index entry, and of the query tool beside it.
@@ -527,9 +527,8 @@ class Sections:
             section.no = NO_LIST.format(path="channels")
             return
         for name in sorted(str(key) for key in channels):
-            held = channels.get(name)
-            # A block a reader kept whole is one item, read as it is.
-            rows = held if isinstance(held, list) else None if held is None else [held]
+            # A kept block's items are each an item, built when read.
+            rows = channel_rows(channels.get(name))
             if rows is not None:
                 section.parts.append(_Part(name, f"channels[{len(section.parts)}]", rows))
 

@@ -30,7 +30,7 @@ return nothing.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
@@ -52,12 +52,12 @@ if TYPE_CHECKING:
 # report.
 
 
-def _page(rows: list[Any], offset: Any = 0, limit: Any = 0) -> tuple[list[Any], dict[str, Any]]:
+def _page(rows: Sequence[Any], offset: Any = 0, limit: Any = 0) -> tuple[list[Any], dict[str, Any]]:
     """One page of ``rows`` and what it says about itself when it is not all of them."""
     start = max(0, _count(offset))
     wanted = _count(limit)
     stop = start + wanted if wanted > 0 else len(rows)
-    shown = rows[start:stop]
+    shown = list(rows[start:stop])
     if start == 0 and len(shown) == len(rows):
         return shown, {}
     meta: dict[str, Any] = {"shown": f"{len(shown)} of {len(rows)} rows, from offset {start}"}
@@ -716,9 +716,10 @@ def sandbox_channels(
         return {"channels": available, "rows": []}
     if key not in channels:
         return {"error": f"no channel {key!r}", "channels": available}
-    held = channels[key]
-    # A block a reader kept whole is one row, answered as it is.
-    rows = held if isinstance(held, list) else [held]
+    from maljan.schemas.sandbox_document import channel_rows
+
+    # A kept block's items are each a row, built only for the page asked.
+    rows = channel_rows(channels[key]) or []
     page, meta = _page(rows, offset, limit)
     return {"channel": key, "rows": page, "total": len(rows), **meta}
 
