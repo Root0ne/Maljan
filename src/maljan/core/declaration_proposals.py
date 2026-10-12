@@ -71,10 +71,9 @@ def _rank(confidence: str) -> int:
     return _RANK[confidence]
 
 
-# The kind a tool is proposed under when nothing it says names one. A
-# declaration needs a kind; this one is read by no consumer, so accepting it
-# changes nothing but what the other accepted fields say.
-UNCLASSIFIED_KIND = "unclassified"
+# A tool nothing it says names a kind for is proposed no kind: a declaration
+# may state its other facts without one (``ToolFacts.kind``), and a tool of
+# no kind keeps every reading an undeclared tool gets.
 
 # A name this module will put into a path or an argument: the argument-name
 # rule of ``ToolFacts.arguments``, without the dot and dash a path segment
@@ -536,12 +535,26 @@ _REPUTATION_COUNTS: dict[str, str] = {
     "suspicious": "suspicious",
     "total": "total",
 }
-_REPUTATION_LISTS: dict[str, tuple[str, ...]] = {
-    "labels": ("labels", "threat_label", "threat_labels", "family", "families"),
-    "first_seen": ("first_seen", "first_submission_date", "first_seen_date"),
-    "last_seen": ("last_seen", "last_analysis_date", "last_seen_date"),
-    "link": ("link", "permalink", "report_url", "report_link"),
-}
+# The words a date of a reputation answer is named by beside "first" or
+# "last", and the words a label list and a link are named by: generic words,
+# read in a field's name tokens, never one service's field names.
+_WHEN_WORDS = frozenset({"seen", "submission", "submitted", "analysis", "scan", "date", "time"})
+_LABEL_WORDS = frozenset({"label", "labels", "family", "families"})
+_LINK_WORDS = frozenset({"link", "url"})
+
+
+def _reputation_list(name: str) -> str:
+    """The list field of ``ReputationFacts`` a field named ``name`` is read as, or ``""``."""
+    tokens = set(_tokens(name))
+    if tokens & _LABEL_WORDS:
+        return "labels"
+    if "first" in tokens and tokens & _WHEN_WORDS:
+        return "first_seen"
+    if "last" in tokens and tokens & _WHEN_WORDS:
+        return "last_seen"
+    if tokens & _LINK_WORDS or name.lower().endswith("link"):
+        return "link"
+    return ""
 
 
 @dataclass
@@ -561,18 +574,19 @@ class _AnswerReading:
 def _read_answer(root: _Shape, origin: str, confidence: str) -> _AnswerReading:
     reading = _AnswerReading(confidence=confidence)
     nodes = _nodes(root)
+    by_path = dict(nodes)
     row_at: tuple[str, ...] | None = None
+    row: _Shape | None = None
     for segments, shape in nodes:
         if shape.kind == "array" and shape.items is not None and shape.items.props:
-            row_at = (*segments, "*")
+            row_at, row = (*segments, "*"), shape.items
             reading.rows = Proposed(
                 value=_path(row_at),
                 evidence=[f"{_where(origin, segments)} (a list of objects)"],
                 confidence=confidence,
             )
             break
-    if row_at is not None:
-        row = next(shape for segments, shape in nodes if segments == row_at)
+    if row_at is not None and row is not None:
         for segments, shape in _nodes(row):
             if not segments or shape.kind != "scalar" and segments[-1] != "addresses":
                 continue
@@ -619,14 +633,14 @@ def _read_answer(root: _Shape, origin: str, confidence: str) -> _AnswerReading:
             reading.reputation_evidence.append(_where(origin, segments))
             if len(segments) > 1 and "stats" not in reading.reputation:
                 parent = segments[:-1]
-                parent_shape = next(s for g, s in nodes if g == parent)
-                if len(parent_shape.props) >= 2:
+                parent_shape = by_path.get(parent)
+                if parent_shape is not None and len(parent_shape.props) >= 2:
                     reading.reputation["stats"] = _path(parent)
             continue
-        for key, names in _REPUTATION_LISTS.items():
-            if name in names and key not in reading.reputation:
-                reading.reputation[key] = [_path(segments)]
-                reading.reputation_evidence.append(_where(origin, segments))
+        key = _reputation_list(segments[-1])
+        if key and key not in reading.reputation:
+            reading.reputation[key] = [_path(segments)]
+            reading.reputation_evidence.append(_where(origin, segments))
     if "malicious" not in reading.reputation:
         reading.reputation = {}
         reading.reputation_evidence = []
@@ -685,6 +699,7 @@ class ToolProposal:
     required: tuple[str, ...] = ()
     read_only: bool | None = None
     destructive: bool | None = None
+    open_world: bool | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -743,8 +758,10 @@ def propose_tool(
     cell = manifest_cell if isinstance(manifest_cell, Mapping) else {}
     read_only = annotations.get("readOnlyHint")
     destructive = annotations.get("destructiveHint")
+    open_world = annotations.get("openWorldHint")
     proposal.read_only = read_only if isinstance(read_only, bool) else None
     proposal.destructive = destructive if isinstance(destructive, bool) else None
+    proposal.open_world = open_world if isinstance(open_world, bool) else None
 
     words = _words_in(_get(definition, "description")) | _words_in(cell.get("facts"))
     word_origin = "description" + (" and capabilities manifest facts" if cell.get("facts") else "")
@@ -784,22 +801,24 @@ def propose_tool(
             list(reading.techniques), list(reading.techniques_evidence), reading.confidence
         )
 
-    # The kind.
-    kind, kind_confidence, kind_evidence = _kind_of(name, words, word_origin, proposal, reading)
-    if kind in _RULE_KINDS and reading.techniques:
-        proposal.fields["asserts_techniques"] = Proposed(
-            True,
-            [*kind_evidence, *reading.techniques_evidence],
-            LOW,
-        )
-    if reading.reputation and kind in ("reputation", "indicator_reputation"):
-        proposal.fields["reputation"] = Proposed(
-            dict(reading.reputation), list(reading.reputation_evidence), reading.confidence
-        )
-    proposal.fields = {
-        "kind": Proposed(kind, kind_evidence, kind_confidence),
-        **proposal.fields,
-    }
+    # The kind, when something the server said names one.
+    found_kind = _kind_of(name, words, word_origin, proposal, reading)
+    if found_kind is not None:
+        kind, kind_confidence, kind_evidence = found_kind
+        if kind in _RULE_KINDS and reading.techniques:
+            proposal.fields["asserts_techniques"] = Proposed(
+                True,
+                [*kind_evidence, *reading.techniques_evidence],
+                LOW,
+            )
+        if reading.reputation and kind in ("reputation", "indicator_reputation"):
+            proposal.fields["reputation"] = Proposed(
+                dict(reading.reputation), list(reading.reputation_evidence), reading.confidence
+            )
+        proposal.fields = {
+            "kind": Proposed(kind, kind_evidence, kind_confidence),
+            **proposal.fields,
+        }
 
     # What the server says about running it.
     long_evidence: list[str] = []
@@ -831,8 +850,7 @@ def propose_tool(
         proposal.fields["display_name"] = Proposed(title, ["title"], HIGH)
 
     for held_name, held in proposal.fields.items():
-        if held_name != "kind":
-            held.requires = ("kind", *_REQUIRES.get(held_name, ()))
+        held.requires = _REQUIRES.get(held_name, ())
     _settle(proposal)
     return proposal
 
@@ -843,8 +861,8 @@ def _kind_of(
     word_origin: str,
     proposal: ToolProposal,
     reading: _AnswerReading,
-) -> tuple[str, str, list[str]]:
-    """The proposed kind, how sure, and what said it."""
+) -> tuple[str, str, list[str]] | None:
+    """The proposed kind, how sure, and what said it; ``None`` when nothing names one."""
     roles = proposal.roles
     counts = f"a malicious count in the answer ({reading.reputation.get('malicious', '')})"
     if reading.reputation and "hash" in roles:
@@ -878,7 +896,7 @@ def _kind_of(
         return "function_disassembly", LOW, [f"{word_origin} (disassembly)"]
     if "strings" in words and "text" in reading.values:
         return "strings", LOW, [f"{word_origin} (strings)", "rows with a text value"]
-    return UNCLASSIFIED_KIND, LOW, ["nothing the server said names a kind"]
+    return None
 
 
 def _settle(proposal: ToolProposal) -> None:
@@ -895,8 +913,9 @@ def _settle(proposal: ToolProposal) -> None:
             continue
         proposal.facts = facts
         return
-    proposal.facts = {"kind": UNCLASSIFIED_KIND}
-    proposal.fields = {"kind": Proposed(UNCLASSIFIED_KIND, ["nothing validated"], LOW)}
+    proposal.facts = {}
+    proposal.fields = {}
+    proposal.notes.append("nothing proposed: no field validated")
 
 
 # ---------------------------------------------------------------------------
@@ -906,23 +925,33 @@ def _settle(proposal: ToolProposal) -> None:
 
 @dataclass(frozen=True)
 class ProbeCall:
-    """One harmless call the probe may make, and what it fills."""
+    """One harmless call the probe may make, and what it fills.
+
+    ``remote`` says the tool may reach a service of its own (its server does
+    not mark it ``openWorldHint: false``, MCP's default being open).
+    """
 
     tool: str
     arguments: dict[str, Any]
     bogus_path: str = ""
+    remote: bool = True
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"tool": self.tool, "arguments": dict(self.arguments), "remote": self.remote}
 
 
 def harmless_call(proposal: ToolProposal) -> ProbeCall | None:
     """The harmless call for ``proposal``'s tool, or ``None`` when there is none.
 
-    A tool the server marks destructive, or explicitly not read-only, is
-    never called. Every required argument must be one this module can fill
-    with a value that names no sample: a path under a directory that does
-    not exist, the digest of empty input, a documentation address. A tool the
-    server marks read-only that takes no argument is called with none.
+    Only a tool its own server marks ``readOnlyHint: true`` and does not mark
+    destructive is ever called: an unannotated tool may write, submit or
+    rescan, and nothing about it says otherwise. Every required argument must
+    be one this module can fill with a value that names no sample: a path
+    under a directory that does not exist, the digest of empty input, a
+    documentation address. A read-only tool that takes no argument is called
+    with none.
     """
-    if proposal.destructive is True or proposal.read_only is False:
+    if proposal.read_only is not True or proposal.destructive is True:
         return None
     by_name = {name: role for role, name in proposal.roles.items()}
     arguments: dict[str, Any] = {}
@@ -942,9 +971,12 @@ def harmless_call(proposal: ToolProposal) -> ProbeCall | None:
             arguments[name] = f"{_PROBE_URL_SCHEME}://{_PROBE_DOMAIN}/"
         else:
             return None
-    if not arguments and proposal.read_only is not True:
-        return None
-    return ProbeCall(tool=proposal.tool, arguments=arguments, bogus_path=bogus)
+    return ProbeCall(
+        tool=proposal.tool,
+        arguments=arguments,
+        bogus_path=bogus,
+        remote=proposal.open_world is not False,
+    )
 
 
 # RE2's metacharacters, escaped when a probe answer becomes a pattern.
@@ -970,25 +1002,31 @@ def error_pattern_from(call: ProbeCall, text: str) -> Proposed | None:
     if not stripped or "\n" in stripped or "\r" in stripped:
         return None
     from maljan.schemas.evidence import parse_structured
+    from maljan.schemas.tool_evidence import MAX_OUTPUT_CHARS
     from maljan.tools.errors import error_parts
 
+    # Longer than a captured output is kept: not a line a pattern should copy.
+    if len(stripped) > MAX_OUTPUT_CHARS:
+        return None
     if parse_structured(stripped) is not None or error_parts(stripped) is not None:
         return None
     parts = stripped.split(call.bogus_path)
+    evidence = [f"probe answer of {call.tool} to a path that does not exist"]
     if len(parts) == 1:
+        # The same line may be the tool's answer to a file it opened and
+        # found nothing in: only an admin who knows the tool can tell.
         match = _escaped(stripped)
+        evidence.append("the answer does not name the path it could not open")
+        confidence = LOW
     else:
         match = ".+".join(_escaped(part) for part in parts)
+        confidence = MEDIUM
     pattern = {"match": match, "tools": [call.tool]}
     try:
         ErrorPattern.model_validate(pattern)
     except (ValidationError, ValueError):
         return None
-    return Proposed(
-        pattern,
-        [f"probe answer of {call.tool} to a path that does not exist"],
-        MEDIUM,
-    )
+    return Proposed(pattern, evidence, confidence)
 
 
 _AUTO_NAME_RE = re.compile(
@@ -1034,43 +1072,61 @@ def propose(
     """The proposals for every tool ``definitions`` lists, as JSON the console reads.
 
     ``{"v": 1, "tools": {tool: {"facts", "fields", "notes"?}}, "server":
-    {field: proposed}}``. ``answers``
-    are the harmless calls made and what each returned (the text, or the
-    parsed object); ``skip`` names tools proposed for nothing (the manifest
-    tool itself).
+    {field: proposed}, "planned"?: [{tool, arguments, remote}], "failed"?:
+    {tool: reason}}``. ``planned`` lists the harmless calls the operator may
+    confirm; ``failed`` the tools whose schema could not be read, each losing
+    only its own proposal. ``answers`` are the harmless calls made and what
+    each returned (the text, or the parsed object); ``skip`` names tools
+    proposed for nothing (the manifest tool itself).
     """
     cells = _manifest_cells(capabilities)
     skipped = set(skip)
     answered = dict(answers or {})
     tools: dict[str, Any] = {}
+    failed: dict[str, str] = {}
+    planned: list[dict[str, Any]] = []
     texts: list[str] = []
     errors: list[dict[str, Any]] = []
     error_evidence: list[str] = []
+    error_confidence = MEDIUM
     for definition in definitions:
         name = _get(definition, "name")
         if not isinstance(name, str) or name in skipped:
             continue
-        held = answered.get(name)
-        answer = _parsed(held[1]) if held is not None else None
-        proposal = propose_tool(definition, manifest_cell=cells.get(name), answer=answer)
-        if proposal is None:
+        try:
+            held = answered.get(name)
+            answer = _parsed(held[1]) if held is not None else None
+            proposal = propose_tool(definition, manifest_cell=cells.get(name), answer=answer)
+            if proposal is None:
+                continue
+            call = harmless_call(proposal)
+            if held is not None:
+                made, raw = held
+                text = raw if isinstance(raw, str) else ""
+                texts.append(text)
+                found = error_pattern_from(made, text)
+                if found is not None:
+                    errors.append(found.value)
+                    error_evidence.extend(found.evidence)
+                    error_confidence = min(error_confidence, found.confidence, key=_rank)
+        except Exception as exc:  # noqa: BLE001 — one tool's schema costs only its proposal
+            failed[name] = f"no proposal: reading its schema raised {type(exc).__name__}"
             continue
-        if held is not None:
-            call, raw = held
-            text = raw if isinstance(raw, str) else ""
-            texts.append(text)
-            found = error_pattern_from(call, text)
-            if found is not None:
-                errors.append(found.value)
-                error_evidence.extend(found.evidence)
         tools[name] = proposal.as_dict()
+        if call is not None:
+            planned.append(call.as_dict())
     server: dict[str, Any] = {}
     if errors:
-        server["error_patterns"] = Proposed(errors, error_evidence, MEDIUM).as_dict()
+        server["error_patterns"] = Proposed(errors, error_evidence, error_confidence).as_dict()
     prefixes = auto_name_prefixes_in(texts)
     if prefixes is not None:
         server["auto_name_prefixes"] = prefixes.as_dict()
-    return {"v": PROPOSALS_VERSION, "tools": tools, "server": server}
+    out: dict[str, Any] = {"v": PROPOSALS_VERSION, "tools": tools, "server": server}
+    if planned:
+        out["planned"] = planned
+    if failed:
+        out["failed"] = failed
+    return out
 
 
 def _manifest_cells(capabilities: Mapping[str, Any] | None) -> dict[str, Mapping[str, Any]]:
@@ -1103,10 +1159,11 @@ def plan_calls(definitions: Iterable[Any], *, skip: Iterable[str] = ()) -> list[
         name = _get(definition, "name")
         if not isinstance(name, str) or name in skipped:
             continue
-        proposal = propose_tool(definition)
-        if proposal is None:
+        try:
+            proposal = propose_tool(definition)
+            call = harmless_call(proposal) if proposal is not None else None
+        except Exception:  # noqa: BLE001 — a schema that cannot be read plans no call
             continue
-        call = harmless_call(proposal)
         if call is not None:
             calls.append(call)
     return calls
@@ -1117,7 +1174,6 @@ __all__ = [
     "LOW",
     "MEDIUM",
     "PROPOSALS_VERSION",
-    "UNCLASSIFIED_KIND",
     "ProbeCall",
     "Proposed",
     "ToolProposal",

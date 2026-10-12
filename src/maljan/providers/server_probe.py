@@ -153,7 +153,10 @@ async def inspect(
             task.result()
             if plan is not None:
                 reader = getattr(handle, "tool_definitions", None)
-                planned = list(plan(list(reader()) if callable(reader) else []))
+                try:
+                    planned = list(plan(list(reader()) if callable(reader) else []))
+                except Exception:  # noqa: BLE001 — a plan never costs the connection test
+                    planned = []
             # Each planned call keeps its own budget inside ``_read``.
             return await asyncio.wait_for(_read(), budget * (len(planned) + 1))
         finally:

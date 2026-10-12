@@ -622,7 +622,9 @@ async def _inspect(
     )
 
 
-def _proposals(found: server_probe.Inspection, declared: frozenset[str]) -> dict[str, Any] | None:
+def _proposals(
+    found: server_probe.Inspection, declared: frozenset[str], *, needs_credential: bool
+) -> dict[str, Any] | None:
     """The declaration proposals for the tools ``found`` lists and nothing declares.
 
     Data for an admin to accept field by field (``core.declaration_proposals``);
@@ -647,15 +649,51 @@ def _proposals(found: server_probe.Inspection, declared: frozenset[str]) -> dict
         return None
     if found.probed:
         proposals["probed"] = dict(found.probed)
-    return proposals if proposals["tools"] or proposals["server"] else None
+    # Whether a confirmed call would carry this server's credential: only
+    # where its declaration says it needs one (see ``_without_credentials``).
+    for call in proposals.get("planned") or []:
+        call["credential"] = needs_credential
+    return (
+        proposals if proposals["tools"] or proposals["server"] or proposals.get("failed") else None
+    )
+
+
+def _needs_credential(config: MCPServerConfig) -> bool:
+    """Whether the server's declaration says it needs a credential to answer at all."""
+    return config.credential_bootstrap is not None or bool(config.required_env_allow)
+
+
+def _without_credentials(config: MCPServerConfig) -> MCPServerConfig:
+    """``config`` without what could be a credential, for the confirmed harmless calls.
+
+    The auth token is dropped, and the environment keeps only the names the
+    server declares non-secret (``variable_names``). A server whose
+    declaration says it needs a credential keeps its own (the planned list
+    says so before anything is called).
+    """
+    if _needs_credential(config):
+        return config
+    from pydantic import SecretStr
+
+    plain = set(config.variable_names)
+    return config.model_copy(
+        update={
+            "auth_token": SecretStr(""),
+            "env": {k: v for k, v in config.env.items() if k in plain},
+            "env_allow": [n for n in config.env_allow if n in plain],
+        }
+    )
 
 
 async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
     """Launch one configured MCP server, list the tools it offers and propose their declarations.
 
-    With ``call_tools`` true (the operator's own request), each undeclared tool
-    that can be called with a harmless argument is called once, so its answer
-    can propose what its schema does not say (``core.declaration_proposals``).
+    Nothing is called unless the operator confirmed it: the proposals list
+    the harmless calls a tool its server marks read-only allows
+    (``proposals.planned``), and only the tools named in ``confirmed_calls``
+    that are still planned are called, once each, without this server's
+    credentials unless its declaration says it needs one, so their answers can
+    propose what the schemas do not say (``core.declaration_proposals``).
     """
     t0 = time.perf_counter()
     name = str(v.get("name") or "server")
@@ -674,15 +712,25 @@ async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
         return ProbeResult(False, _ms(t0), NO_CREDENTIAL_DETAIL)
     declared = _declared_tools(config, name)
     plan: Callable[[list[Any]], list[Any]] | None = None
-    if v.get("call_tools") is True:
+    raw_confirmed = v.get("confirmed_calls")
+    confirmed = (
+        {str(t) for t in raw_confirmed if isinstance(t, str)}
+        if isinstance(raw_confirmed, list | tuple | set)
+        else set()
+    )
+    attached = config
+    if confirmed:
         from maljan.core.declaration_proposals import plan_calls
         from maljan.tools.capabilities import CAPABILITIES_TOOL
 
         def plan(definitions: list[Any]) -> list[Any]:
-            return plan_calls(definitions, skip=declared | {CAPABILITIES_TOOL})
+            planned = plan_calls(definitions, skip=declared | {CAPABILITIES_TOOL})
+            return [call for call in planned if call.tool in confirmed]
+
+        attached = _without_credentials(config)
 
     try:
-        found = await _inspect(config, name, plan)
+        found = await _inspect(attached, name, plan)
         names, capabilities = found.names, found.capabilities
     except TimeoutError:
         return ProbeResult(False, _ms(t0), f"no MCP handshake within {PROBE_BUDGET_SECONDS:.0f} s")
@@ -700,7 +748,7 @@ async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
         if unavailable:
             detail += f"; {len(unavailable)} unavailable on this host"
         details = {"capabilities": capabilities}
-    proposals = _proposals(found, declared)
+    proposals = _proposals(found, declared, needs_credential=_needs_credential(config))
     if proposals is not None:
         details = {**(details or {}), "proposals": proposals}
         detail += f"; declarations proposed for {len(proposals['tools'])} undeclared tools"
@@ -739,7 +787,11 @@ def _merge_server_entry(
 
 
 async def run_mcp_probe(
-    server: str, values: dict[str, Any], stored: dict[str, Any], *, call_tools: bool = False
+    server: str,
+    values: dict[str, Any],
+    stored: dict[str, Any],
+    *,
+    confirmed_calls: list[str] | None = None,
 ) -> ProbeResult:
     """Probe one entry of the server map, staged fields winning over stored ones.
 
@@ -765,7 +817,9 @@ async def run_mcp_probe(
     else:
         entry = _merge_server_entry(stored_map.get(server) or {}, staged_map.get(server) or {})
     return await in_probe_loop(
-        lambda: probe_mcp({"name": server, "entry": entry, "call_tools": call_tools})
+        lambda: probe_mcp(
+            {"name": server, "entry": entry, "confirmed_calls": list(confirmed_calls or [])}
+        )
     )
 
 

@@ -633,14 +633,6 @@ async def test_mcp_server(
     body: ProbeRequest,
     request: Request,
     server: str = Query(..., description="key in mcp.servers"),
-    call_tools: bool = Query(
-        False,
-        description=(
-            "Also call each undeclared tool once with a harmless argument (a path that "
-            "does not exist, the digest of empty input), so its answer can propose its "
-            "declaration. Never a sample."
-        ),
-    ),
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> ProbeResponse:
@@ -650,7 +642,9 @@ async def test_mcp_server(
     yet — the same contract as every other probe, addressed to one key of one
     setting rather than to a set of settings. Registered ahead of
     ``/test/{probe}`` so the fixed path wins the match. The proposals in
-    ``details`` are data for the admin to accept; nothing is saved here.
+    ``details`` are data for the admin to accept; nothing is saved here. A
+    tool is called only when the body's ``confirmed_calls`` names it after the
+    admin was shown the planned calls (``details.proposals.planned``).
     """
     stored = await SettingsService(db).load_overrides()
     # The staged values are read; what follows launches a server and waits on
@@ -658,10 +652,16 @@ async def test_mcp_server(
     # the longest await this API makes.
     await end_read_transaction(db)
     response = await _probe_response(
-        run_mcp_probe(server, body.values, stored, call_tools=call_tools)
+        run_mcp_probe(server, body.values, stored, confirmed_calls=body.confirmed_calls)
     )
     await _record_the_probe(
-        request, user, "mcp", body, response, server=server, call_tools=call_tools
+        request,
+        user,
+        "mcp",
+        body,
+        response,
+        server=server,
+        confirmed_calls=sorted(body.confirmed_calls),
     )
     return response
 

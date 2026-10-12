@@ -123,6 +123,10 @@ class ImportRequest(BaseModel):
 
 class ProbeRequest(BaseModel):
     values: dict[str, Any] = Field(default_factory=dict)
+    # The MCP probe's harmless calls the admin confirmed, by tool name, after
+    # the previous probe listed them (``details.proposals.planned``). Empty:
+    # nothing is called. Read by ``/test/mcp`` alone.
+    confirmed_calls: list[str] = Field(default_factory=list)
 
 
 class ProbeResponse(BaseModel):
