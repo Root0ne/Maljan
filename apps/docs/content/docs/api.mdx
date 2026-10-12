@@ -284,7 +284,9 @@ path, a mutex name and a malware or tool name are compared as written.
 ### Settings
 
 `GET /settings/schema` returns the catalog: every entry with its type, bounds,
-choices, group, title, description and when it takes effect. `GET /settings`
+choices, group, title, description and when it takes effect, and
+`tool_declaration_fields`: the word naming no kind and each kind-free and
+kind-dependent tool-declaration field with its default. `GET /settings`
 returns the current values with their source. `PATCH /settings` applies a set
 of changes in one write; `DELETE /settings/{key}` and `DELETE /settings` remove
 one override or a group's. `GET /settings/export` and `POST /settings/import`

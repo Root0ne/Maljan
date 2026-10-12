@@ -196,3 +196,15 @@ async def test_the_cleaned_import_then_saves() -> None:
     db = _db([])
     result = await svc.SettingsService(db).save(values, user_id=uuid.uuid4(), ip=None)
     assert result.applied == [LEAF]
+
+
+def test_every_import_warning_about_one_tool_is_kept() -> None:
+    values, warnings = svc.lenient_imported_declarations(
+        {LEAF: {"a": {"kind": "unclassified", "nott": 1}, "b": {"kind": "", "zz\x1b[31m": 1}}}
+    )
+    assert values[LEAF] == {}
+    said = warnings[f"{LEAF}.a"]
+    assert "left out nott" in said and "declares nothing" in said
+    assert said.index("nott") < said.index("declares nothing")
+    # The names stay sanitised.
+    assert "\x1b" not in warnings[f"{LEAF}.b"] and "\\x1b" in warnings[f"{LEAF}.b"]

@@ -167,6 +167,7 @@ export default function DeclarationFields({
   server: McpServerEntry;
   put: (next: Partial<McpServerEntry>) => void;
 }) {
+  const fields = useOptionalSettingsContext()?.schema?.tool_declaration_fields ?? null;
   const open = server.sample_open ?? EMPTY_OPEN;
   const box = (field: string) => `${serverKey}.${field}`;
   return (
@@ -317,7 +318,7 @@ export default function DeclarationFields({
             show={showJson}
             rows={6}
             mono
-            read={(text) => readToolFacts(text, serverKey)}
+            read={(text) => readToolFacts(text, serverKey, fields)}
             onValue={(tool_facts) => put({ tool_facts })}
           />
         </div>

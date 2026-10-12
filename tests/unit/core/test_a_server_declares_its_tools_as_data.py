@@ -10,7 +10,6 @@ written: never a bare tool name, an agent's name or today's settings.
 
 from __future__ import annotations
 
-import re
 import time
 from typing import Any
 
@@ -177,24 +176,12 @@ def test_a_runtime_provider_block_with_an_unknown_key_keeps_the_rest_of_its_decl
 
 
 def test_the_fields_split_once_into_kind_free_and_kind_dependent() -> None:
-    from pathlib import Path
-
     from maljan.core.tool_declarations import KIND_DEPENDENT_FIELDS, KIND_FREE_FIELDS
 
     assert not set(KIND_FREE_FIELDS) & set(KIND_DEPENDENT_FIELDS)
     assert {*KIND_FREE_FIELDS, *KIND_DEPENDENT_FIELDS, "kind"} == set(ToolFacts.model_fields)
-    # The console's declaration box reads the same split.
-    console = (
-        Path(__file__).resolve().parents[3]
-        / "apps/web/src/app/(app)/settings/configuration/declarationFields.ts"
-    ).read_text(encoding="utf-8")
-
-    def _listed(name: str) -> tuple[str, ...]:
-        body = console.split(f"export const {name} = [", 1)[1].split("]", 1)[0]
-        return tuple(re.findall(r'"([a-z_]+)"', body))
-
-    assert _listed("KIND_FREE_FIELDS") == KIND_FREE_FIELDS
-    assert _listed("KIND_DEPENDENT_FIELDS") == KIND_DEPENDENT_FIELDS
+    # The console's declaration box reads the same split from the served
+    # schema (tests/unit/api/test_the_console_reads_tool_declarations_as_the_api_does.py).
 
 
 def test_every_shipped_declaration_and_stored_record_loads_as_before() -> None:
@@ -839,3 +826,125 @@ def test_a_bare_unclassified_still_reads_as_undeclared() -> None:
     assert (named.kind, named.display_name) == ("", "S")
     with strict_declarations(), pytest.raises(ValidationError, match="names its kind"):
         ToolFacts.model_validate({"kind": "unclassified"})
+
+
+# ---------------------------------------------------------------------------
+# A stored record's kind-free fields are read whatever its kind
+# ---------------------------------------------------------------------------
+
+# A value for each stored field read without a kind; a field added to both
+# lists needs one here, and is then held to be read for a record of no kind.
+KIND_FREE_SAMPLES: dict[str, Any] = {
+    "display_name": "Section scanner",
+    "words": ["sectioner"],
+    "arguments": {"report": "task_report", "address": "offset_va"},
+}
+
+
+def _stored_kind_free_fields() -> tuple[str, ...]:
+    from maljan.core.declared_reading import STORED_FACT_FIELDS
+    from maljan.core.tool_declarations import KIND_FREE_FIELDS
+
+    return tuple(name for name in STORED_FACT_FIELDS if name in KIND_FREE_FIELDS)
+
+
+@pytest.mark.parametrize("kind", ["", "unclassified", None])
+def test_every_stored_kind_free_field_is_read_for_a_record_of_no_kind(kind: str | None) -> None:
+    from maljan.core import declared_reading
+    from maljan.reporting import tool_kinds
+
+    assert set(_stored_kind_free_fields()) == set(KIND_FREE_SAMPLES)
+    for name in _stored_kind_free_fields():
+        record = {"v": 1, name: KIND_FREE_SAMPLES[name]}
+        if kind is not None:
+            record["kind"] = kind
+        entry = _dev_entry(record)
+        assert declared_reading.facts_of(entry) is None
+        read = declared_reading.kind_free_facts(entry).model_dump(mode="json")
+        assert read[name] == KIND_FREE_SAMPLES[name], name
+        assert tool_kinds.kind_free_facts(entry).model_dump(mode="json")[name] == read[name]
+
+
+def test_a_kind_free_field_the_validators_refuse_costs_no_other() -> None:
+    from maljan.core import declared_reading
+    from maljan.core.tool_declarations import strict_declarations
+
+    entry = _dev_entry({"v": 1, "kind": "", "display_name": "S", "arguments": {"Not A Role": "x"}})
+    with strict_declarations():
+        facts = declared_reading.kind_free_facts(entry)
+    assert (facts.display_name, dict(facts.arguments)) == ("S", {})
+    assert declared_reading.kind_free_facts(_dev_entry({"kind": "", "display_name": "S"})) == (
+        ToolFacts.model_construct()
+    )
+
+
+@pytest.mark.parametrize("kind", ["", "unclassified"])
+def test_a_report_argument_declared_without_a_kind_keeps_the_tool_off_the_file(
+    kind: str,
+) -> None:
+    from maljan.reporting.renderers.markdown import _looked_at_the_file
+
+    row = {
+        "tool": "my_tool",
+        "source": "mcp:operator",
+        "facts": {"v": 1, "kind": kind, "arguments": {"report": "task_report"}},
+    }
+    # As on dev, where the bare word was a kind: the tool read a report.
+    assert _looked_at_the_file(row) is False
+    assert _looked_at_the_file({**row, "facts": {"v": 1, "kind": kind}}) is True
+
+
+def test_an_address_argument_declared_without_a_kind_is_read_first() -> None:
+    from maljan.core import declared_reading
+    from maljan.core.undeclared_tools import ADDRESS_ARGUMENTS, address_arguments
+
+    entry = _dev_entry({"v": 1, "kind": "unclassified", "arguments": {"address": "offset_va"}})
+    assert address_arguments(declared_reading.kind_free_facts(entry))[0] == "offset_va"
+    plain = _dev_entry({"v": 1})
+    assert address_arguments(declared_reading.kind_free_facts(plain)) == ADDRESS_ARGUMENTS
+
+
+def test_no_kind_free_field_is_read_only_through_a_kind() -> None:
+    """A stored kind-free field is never read off what a kind-gated reader returned."""
+    import ast
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[3]
+    gated = {"facts_of", "entry_facts", "declared_facts", "stored_facts_by_name"}
+    fields = set(_stored_kind_free_fields())
+    readers_of_fields = {"address_arguments"}
+
+    def _callee(node: ast.Call) -> str:
+        func = node.func
+        if isinstance(func, ast.Name):
+            return func.id
+        return func.attr if isinstance(func, ast.Attribute) else ""
+
+    found: list[str] = []
+    for root in ("src/maljan", "apps/api/app"):
+        for path in sorted((repo / root).rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for fn in ast.walk(tree):
+                if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
+                    continue
+                bound = {
+                    target.id
+                    for node in ast.walk(fn)
+                    if isinstance(node, ast.Assign)
+                    and isinstance(node.value, ast.Call)
+                    and _callee(node.value) in gated
+                    for target in node.targets
+                    if isinstance(target, ast.Name)
+                }
+                for node in ast.walk(fn):
+                    where = f"{path.relative_to(repo)}:{getattr(node, 'lineno', 0)} {fn.name}"
+                    if isinstance(node, ast.Attribute) and node.attr in fields:
+                        held = node.value
+                        if (isinstance(held, ast.Name) and held.id in bound) or (
+                            isinstance(held, ast.Call) and _callee(held) in gated
+                        ):
+                            found.append(where)
+                    if isinstance(node, ast.Call) and _callee(node) in readers_of_fields:
+                        if any(isinstance(a, ast.Name) and a.id in bound for a in node.args):
+                            found.append(where)
+    assert not found, found

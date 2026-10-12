@@ -156,6 +156,8 @@ def served_schema(
         for g, t in GROUP_ORDER
         if g in by_group
     ]
+    from maljan.core.tool_declarations import declaration_fields
+
     from app.services.provider_facts import probe_labels
 
     if server_configs is None:
@@ -167,6 +169,7 @@ def served_schema(
         probe_labels=probe_labels(enrichment_sources),
         enrichment_sources=source_facts(enrichment_sources, server_configs),
         credential_servers=bootstrap_facts(server_configs),
+        tool_declaration_fields=declaration_fields(),
     )
 
 

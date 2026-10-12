@@ -86,6 +86,19 @@ def facts_of(entry: Any, tool: str | None = None) -> ToolFacts | None:
     return None
 
 
+def kind_free_facts(entry: Any, tool: str | None = None) -> ToolFacts:
+    """The facts an entry's tool declared that are read without a kind, whatever its kind.
+
+    :func:`facts_of` for a tool of a kind; for a stored record of no kind,
+    the fields it stores that are read without one
+    (``declared_reading.kind_free_facts``); an empty declaration for none.
+    """
+    if stored(entry):
+        return declared_reading.kind_free_facts(entry)
+    facts = facts_of(entry, tool)
+    return facts if facts is not None else ToolFacts.model_construct()
+
+
 def declared_facts(entry: Any) -> ToolFacts | None:
     """The stored facts of an entry; ``None`` for one read by the legacy tables.
 
@@ -368,15 +381,10 @@ def display_name(entry: Any, tool: str | None = None) -> str:
     """The name published text gives an entry's tool: its declared display name, else its name.
 
     A declaration that names no kind still names the tool
-    (``declared_reading.named_facts``), though it declares nothing else.
+    (:func:`kind_free_facts`), though it declares nothing else.
     """
     name = tool if tool is not None else tool_of(entry)
-    facts = facts_of(entry, name)
-    if facts is not None:
-        return facts.display_name or name
-    if stored(entry):
-        return declared_reading.named_facts(entry)[0] or name
-    return name
+    return kind_free_facts(entry, name).display_name or name
 
 
 def section_title(entry: Any) -> str:

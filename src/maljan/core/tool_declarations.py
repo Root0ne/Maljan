@@ -429,7 +429,8 @@ NO_KIND = "unclassified"
 # the paths inside them, its techniques and reputation, a reader of its shape,
 # the report sections it is shown to): a declaration that names no kind may
 # not set one, since it would be read by nothing. The one place the split is
-# written; the console's tool-declaration box mirrors it, held equal by a test.
+# written; the console's tool-declaration box reads it, with each field's
+# default, from the served settings schema (:func:`declaration_fields`).
 KIND_FREE_FIELDS: tuple[str, ...] = (
     "display_name",
     "category",
@@ -578,6 +579,22 @@ def reads_no_kind(raw: Mapping[str, Any]) -> bool:
     return not any(
         name in raw and not _same(raw[name], _field_default(name)) for name in KIND_DEPENDENT_FIELDS
     )
+
+
+def declaration_fields() -> dict[str, Any]:
+    """The split of a tool declaration's fields as the settings schema serves it.
+
+    The word that names no kind, and each kind-free and kind-dependent field
+    with its default as JSON: what the console's tool-declaration box needs
+    to apply :func:`reads_no_kind` and the edit rules exactly as the API
+    does, a field counting as set only when it differs from its default.
+    """
+    defaults = ToolFacts.model_construct().model_dump(mode="json")
+    return {
+        "no_kind": NO_KIND,
+        "kind_free": {name: defaults[name] for name in KIND_FREE_FIELDS},
+        "kind_dependent": {name: defaults[name] for name in KIND_DEPENDENT_FIELDS},
+    }
 
 
 def lenient_declarations(

@@ -3410,7 +3410,11 @@ only the fields read without one (`display_name`, `category`, `words`,
 `arguments`; `core.tool_declarations.KIND_FREE_FIELDS`): a declaration with an
 unknown key (`{"knd": …}`), an empty one, or one of no kind that sets a field
 read only through a kind is refused on save, by the API and the console's box
-alike. A declaration of no kind keeps every reading an undeclared tool gets —
+alike: the box reads the field split, each field's default and the no-kind word
+from the served settings schema (`tool_declaration_fields`), and a field counts
+as set only when it differs from its default, as the API counts it, so a
+declaration stored with every default spelled out reads as it was saved. A
+declaration of no kind keeps every reading an undeclared tool gets —
 the composer's citation routing below, the code-listing reading of its name,
 its server's own words, the network line — until a kind is accepted for it;
 `unclassified` is read as no kind only when the declaration sets no field a
@@ -3419,14 +3423,16 @@ only a declaration with no kind at all loses such fields); a declaration's
 `display_name` and `words` still name
 the tool (a section built from an operator's tool is titled by its declared
 name, with a kind or without, and a statement may name the entry by its
-words). These rules hold for what an operator types now: a save checks only the
+words; a stored record's `display_name`, `words` and `arguments` are read
+whatever its kind, so a `report` argument declared without a kind still keeps
+the tool off the "looked at the file" lines). These rules hold for what an operator types now: a save checks only the
 declarations it adds or changes, against what is stored and what ships, so a
 declaration left as it was never blocks a save. Everything already accepted —
 stored settings, shipped blocks, a runtime provider's declaration, an import —
 is read leniently: a key this version does not read, and on a declaration of no
 kind a field only a kind makes readable, is left out with one warning naming it
 (sanitised, once per process), and the rest is kept; an import says what it
-left out in its `warnings`, and an import of an export from another version is
+left out in its `warnings` (every warning about one tool, in order), and an import of an export from another version is
 never refused for it.
 Schemas are walked once, without recursion, to 16 levels below the answer's
 root, and a name that is not a plain identifier is never made a path or an

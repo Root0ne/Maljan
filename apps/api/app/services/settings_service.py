@@ -104,13 +104,19 @@ def lenient_imported_declarations(
 
     warnings: dict[str, str] = {}
 
+    def _warn(key: str, text: str) -> None:
+        # Every warning about one tool is kept, in the order it was found.
+        held = warnings.get(key)
+        warnings[key] = f"{held}; then {text}" if held else text
+
     def _clean(declared: Any, prefix: str) -> Any:
         if not isinstance(declared, dict):
             return declared
         kept, notes = lenient_declarations(declared, where=f"{prefix} ")
         for tool, names in notes.items():
-            warnings[f"{prefix}.{tool}"] = (
-                "left out " + loggable_names(names) + ": this version does not read them"
+            _warn(
+                f"{prefix}.{tool}",
+                "left out " + loggable_names(names) + ": this version does not read them",
             )
         for tool, held in list(kept.items()):
             if isinstance(held, dict) and reads_no_kind(held):
@@ -119,7 +125,7 @@ def lenient_imported_declarations(
                 name for name, value in held.items() if value not in ("", None, [], {}, False)
             ):
                 kept.pop(tool)
-                warnings[f"{prefix}.{tool}"] = "left out: it declares nothing this version reads"
+                _warn(f"{prefix}.{tool}", "left out whole: it declares nothing this version reads")
         return kept
 
     out = dict(values)

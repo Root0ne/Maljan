@@ -8,9 +8,17 @@ import {
   readRoles,
   readToolFacts,
   readWorkDir,
+  readsNoKind,
   showJson,
   splitWords,
 } from "../declarationFields";
+import served from "@/test-fixtures/settings-schema.json";
+import shared from "@/test-fixtures/tool-declaration-cases.json";
+import type { SettingsSchema, ToolDeclarationFields } from "@/types/settings";
+
+/* The split the API serves with the settings schema, as the box reads it. */
+const FIELDS = (served as unknown as SettingsSchema).tool_declaration_fields as ToolDeclarationFields;
+const read = (text: string, serverKey = "") => readToolFacts(text, serverKey, FIELDS);
 
 describe("the server editor's declaration readers", () => {
   it("reads roles as lowercase words, comma- or line-separated, any word accepted", () => {
@@ -44,22 +52,57 @@ describe("the server editor's declaration readers", () => {
   });
 
   it("reads tool declarations as an object of tools each with a kind word", () => {
-    expect(readToolFacts("").value).toEqual({});
-    const ok = readToolFacts('{"scan": {"kind": "rule_match", "rows": "/hits/*"}}');
+    expect(read("").value).toEqual({});
+    const ok = read('{"scan": {"kind": "rule_match", "rows": "/hits/*"}}');
     expect(ok.value).toEqual({ scan: { kind: "rule_match", rows: "/hits/*" } });
-    expect(readToolFacts("[]").error).toMatch(/keyed by tool name/);
+    expect(read("[]").error).toMatch(/keyed by tool name/);
     // An empty declaration, a misspelt key and a kind-dependent field with
     // no kind are refused, as the API refuses them.
-    expect(readToolFacts('{"scan": {}}').error).toMatch(/scan: name its kind/);
-    expect(readToolFacts('{"scan": {"knd": "decompile"}}').error).toMatch(/scan: unknown field knd/);
-    expect(
-      readToolFacts('{"scan": {"rows": "/m/*", "places": {"offset": "/o"}}}').error,
-    ).toMatch(/scan: rows, places are read only through a kind/);
+    expect(read('{"scan": {}}').error).toMatch(/scan: name its kind/);
+    expect(read('{"scan": {"knd": "decompile"}}').error).toMatch(/scan: unknown field knd/);
+    expect(read('{"scan": {"rows": "/m/*", "places": {"offset": "/o"}}}').error).toMatch(
+      /scan: (rows, places|places, rows) are read only through a kind/
+    );
     // A declaration of no kind states only kind-free fields.
-    expect(readToolFacts('{"scan": {"display_name": "Scanner"}}').error).toBeNull();
-    expect(readToolFacts('{"scan": {"kind": 3}}').error).toMatch(/scan: kind is a lowercase word/);
-    expect(readToolFacts('{"scan": {"kind": "Rule Match"}}').error).toMatch(/scan: kind/);
+    expect(read('{"scan": {"display_name": "Scanner"}}').error).toBeNull();
+    expect(read('{"scan": {"kind": 3}}').error).toMatch(/scan: kind is a lowercase word/);
+    expect(read('{"scan": {"kind": "Rule Match"}}').error).toMatch(/scan: kind/);
   });
+
+  it("reads the no-kind word as the API does: an ordinary kind beside a kind-dependent field", () => {
+    // A dev-era server declaration stays editable, and another tool can be added beside it.
+    const devEra = read('{"t": {"kind": "unclassified", "rows": "/m/*"}, "u": {"kind": "strings"}}');
+    expect(devEra.error).toBeNull();
+    expect(devEra.value?.t).toEqual({ kind: "unclassified", rows: "/m/*" });
+    // Alone, or with only defaults, it still names no kind and declares nothing.
+    expect(read('{"t": {"kind": "unclassified"}}').error).toMatch(/t: name its kind/);
+    expect(read('{"t": {"kind": "unclassified", "rows": ""}}').error).toMatch(/t: name its kind/);
+    expect(read('{"t": {"kind": "unclassified", "display_name": "X"}}').error).toBeNull();
+  });
+
+  it("counts a field as set only when it differs from its default, as the API counts it", () => {
+    // An accepted kindless proposal, stored as the full declaration with every default.
+    const stored = shared.cases.find((c) => c.name.startsWith("an accepted kindless proposal"));
+    expect(stored).toBeDefined();
+    const box = JSON.stringify({ proposed: stored?.declaration, other: { kind: "strings" } });
+    expect(read(box).error).toBeNull();
+    expect(read('{"t": {"display_name": "X", "rows": ""}}').error).toBeNull();
+  });
+
+  it("without the served split, checks the shape and leaves the field rules to the API", () => {
+    expect(readToolFacts('{"t": {"kind": "unclassified", "rows": "/m/*"}}').error).toBeNull();
+    expect(readToolFacts('{"t": {"kind": "Rule Match"}}').error).toMatch(/t: kind/);
+    expect(readToolFacts("[]").error).toMatch(/keyed by tool name/);
+  });
+
+  it.each(shared.cases.map((c) => [c.name, c] as const))(
+    "reads the shared case %s exactly as the API does",
+    (_name, c) => {
+      const facts = c.declaration as Record<string, unknown>;
+      expect(read(JSON.stringify({ t: facts })).error === null).toBe(c.accepted);
+      expect(readsNoKind(facts, FIELDS)).toBe(c.reads_no_kind);
+    }
+  );
 
   it("shows nothing declared as an empty box and a value as pretty JSON", () => {
     expect(showJson(undefined)).toBe("");
@@ -69,7 +112,7 @@ describe("the server editor's declaration readers", () => {
   });
 
   it("refuses a tool name that is empty, padded or this server's renamed spelling", () => {
-    expect(readToolFacts('{"": {"kind": "strings"}}').error).toMatch(/own name/);
+    expect(read('{"": {"kind": "strings"}}').error).toMatch(/own name/);
     expect(readToolFacts('{" x": {"kind": "strings"}}').error).toMatch(/own name/);
     expect(readToolFacts('{"mine__capa": {"kind": "strings"}}', "mine").error).toMatch(
       /renamed tool/
