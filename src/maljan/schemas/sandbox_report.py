@@ -41,6 +41,7 @@ from maljan.schemas.sandbox_document import (
     SAME_REQUEST_KEY,
     decompose,
     renamed,
+    without_dns_links,
 )
 from maljan.schemas.sandbox_document import (
     SUMMARY_KEYS as _DOCUMENT_SUMMARY_KEYS,
@@ -675,6 +676,8 @@ def cape_report_to_sandbox_report(
     if keep_arrangement:
         words = CAPE_RENAMES if renames is None else renames
         published, extras, arrangement = decompose(renamed(raw, words))
+        if "network.dns" in published:
+            published["network.dns"] = without_dns_links(published["network.dns"])
     return SandboxReport(
         provider=provider,
         source_format=source_format,
@@ -702,7 +705,8 @@ def cape_report_to_sandbox_report(
         generic_events=[g for g in (behavior.get("generic") or []) if isinstance(g, dict)],
         signatures=signatures,
         network=SandboxNetwork(
-            dns=_rows(net.get("dns")),
+            # A source's own DNS rows never carry the platform's request links.
+            dns=_rows(without_dns_links(net.get("dns"))),
             http=_rows(net.get("http")),
             tcp=_rows(net.get("tcp")),
             udp=_rows(net.get("udp")),

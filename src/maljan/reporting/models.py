@@ -22,7 +22,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+)
 
 from maljan.core.reputation import ReputationRecord
 from maljan.schemas.stix_models import get_utcnow
@@ -382,6 +389,22 @@ class NetworkDomain(BaseModel):
     # HTTP view naming it: a TLS name says nothing about which process made
     # the connection, so the row waits for the judge.
     capture_only: bool = False
+    # Whether the platform stopped reading the answers of this name's DNS
+    # request before it had read them all: the request's questions shared more
+    # answers than the request's own size bounds (``schemas.sandbox_document.
+    # DnsAnswers``), so ``resolved_ips`` holds fewer addresses, never a wrong
+    # one, and how many of the request's answers were not read for it. Left out
+    # of a dump where nothing was withheld, so a stored report reads as before.
+    resolved_ips_partial: bool = False
+    resolved_ips_withheld: int = 0
+
+    @model_serializer(mode="wrap")
+    def _dump(self, handler: SerializerFunctionWrapHandler) -> Any:
+        dumped = handler(self)
+        if isinstance(dumped, dict) and not dumped.get("resolved_ips_partial"):
+            dumped.pop("resolved_ips_partial", None)
+            dumped.pop("resolved_ips_withheld", None)
+        return dumped
 
 
 class NetworkIP(BaseModel):

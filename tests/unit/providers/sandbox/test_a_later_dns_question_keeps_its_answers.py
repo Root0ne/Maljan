@@ -153,8 +153,8 @@ def test_a_named_answer_goes_to_the_question_it_answers() -> None:
     rows = _document([_named_request(answers, NAMES)])["network"]["dns"]
     answers_of = DnsAnswers(rows)
     assert [answers_of.of(row) for row in rows] == [
-        [{"data": "45.33.32.7"}],
-        [{"data": "45.33.32.8"}],
+        [{"data": "45.33.32.7", "type": "A"}],
+        [{"data": "45.33.32.8", "type": "A"}],
     ]
 
 
@@ -169,14 +169,113 @@ def test_an_alias_chain_leads_a_name_to_its_addresses() -> None:
     rows = _document([_named_request(answers, names)])["network"]["dns"]
     answers_of = DnsAnswers(rows)
     first, alias = rows
-    assert answers_of.of(first) == [{"data": "45.33.32.7"}]
+    assert answers_of.of(first) == [{"data": "45.33.32.7", "type": "A"}]
     assert answers_of.of(alias) == [
-        {"data": "relay-middle-f6.net"},
-        {"data": "relay-target-g7.net."},
-        {"data": "45.33.32.9"},
+        {"data": "relay-middle-f6.net", "type": "CNAME"},
+        {"data": "relay-target-g7.net.", "type": "CNAME"},
+        {"data": "45.33.32.9", "type": "A"},
     ]
     network = network_from_sandbox_report(_document([_named_request(answers, names)]))
     assert network is not None
     held = {d.fqdn: d.resolved_ips for d in network.domains}
     assert held["relay-alias-e5.net"] == ["45.33.32.9"]
     assert held[NAMES[0]] == ["45.33.32.7"]
+
+
+def _cape_upload(link_key: str) -> dict[str, Any]:
+    """A CAPE report whose two DNS rows each carry ``link_key: 7``, read by the upload provider."""
+    from maljan.core.config import Settings
+    from maljan.providers.sandbox.upload import UploadSandboxProvider
+
+    rows = [
+        {
+            "request": "relay-a-k1.net",
+            "type": "A",
+            "answers": [{"type": "A", "data": "45.33.32.1"}],
+        },
+        {
+            "request": "relay-b-k2.net",
+            "type": "A",
+            "answers": [{"type": "A", "data": "45.33.32.9"}],
+        },
+    ]
+    for row in rows:
+        row[link_key] = 7
+    payload = {"info": {"version": "2.4-CAPE", "id": 3}, "network": {"dns": rows}}
+    cfg = Settings(_env_file=None)
+    cfg.sandbox.provider = "upload"
+    run = UploadSandboxProvider.from_settings(cfg).attach_report(
+        json.dumps(payload).encode(), filename="r.json"
+    )
+    return sandbox_document(run.report)
+
+
+class TestASourceReportCannotLinkItsOwnRows:
+    """A source's own DNS link key is never read as the platform's: each row keeps its answers."""
+
+    def _resolved(self, link_key: str) -> dict[str, list[str]]:
+        network = network_from_sandbox_report(_cape_upload(link_key))
+        assert network is not None
+        return {d.fqdn: d.resolved_ips for d in network.domains}
+
+    # Dev read each row's own answers.
+    DEV = {"relay-a-k1.net": ["45.33.32.1"], "relay-b-k2.net": ["45.33.32.9"]}
+
+    def test_a_plain_key_of_the_same_word(self) -> None:
+        assert self._resolved("dns_request") == self.DEV
+        assert self._resolved("same_request_as") == self.DEV
+
+    def test_the_reserved_key_itself_is_removed_by_the_reader(self) -> None:
+        assert self._resolved(DNS_REQUEST_KEY) == self.DEV
+        assert self._resolved(SAME_REQUEST_KEY) == self.DEV
+        rows = _cape_upload(DNS_REQUEST_KEY)["network"]["dns"]
+        assert all(DNS_REQUEST_KEY not in row for row in rows)
+
+    def test_a_link_not_in_the_reader_s_form_is_ignored(self) -> None:
+        rows = [
+            {"request": "a.relay-m3.net", DNS_REQUEST_KEY: 1, "answers": [{"data": "45.33.32.1"}]},
+            {"request": "b.relay-m3.net", DNS_REQUEST_KEY: 1, "answers": [{"data": "45.33.32.2"}]},
+            {"request": "c.relay-m3.net", SAME_REQUEST_KEY: 9, "answers": [{"data": "45.33.32.3"}]},
+            {
+                "request": "d.relay-m3.net",
+                SAME_REQUEST_KEY: True,
+                "answers": [{"data": "45.33.32.4"}],
+            },
+        ]
+        answers_of = DnsAnswers(rows)
+        assert [answers_of.of(row) for row in rows] == [row["answers"] for row in rows]
+
+    def test_triage_multi_question_attribution_still_works(self) -> None:
+        test_a_named_answer_goes_to_the_question_it_answers()
+
+
+def test_only_an_address_record_names_an_address() -> None:
+    answers = [
+        {"name": NAMES[0], "type": "TXT", "value": "45.33.32.99"},
+        {"name": NAMES[0], "type": "A", "value": "45.33.32.7"},
+        {"name": NAMES[1], "type": "AAAA", "value": "2001:db8::7"},
+    ]
+    network = network_from_sandbox_report(_document([_named_request(answers, NAMES)]))
+    assert network is not None
+    held = {d.fqdn: d.resolved_ips for d in network.domains}
+    assert held[NAMES[0]] == ["45.33.32.7"]
+    assert held[NAMES[1]] == ["2001:db8::7"]
+
+
+def test_a_cut_is_stated_on_the_names_it_withheld_from() -> None:
+    from maljan.reporting.builder import _domain_context
+
+    n = 300
+    questions = [{"name": f"q{i}.relay-n4.net", "type": "A"} for i in range(n)]
+    answers = [{"value": f"45.33.{i // 250}.{i % 250 + 1}"} for i in range(n)]
+    request = {"domain_req": {"questions": questions}, "domain_resp": {"answers": answers}}
+    network = network_from_sandbox_report(_document([request]))
+    assert network is not None
+    partial = [d for d in network.domains if d.resolved_ips_partial]
+    assert partial, "a request this shared must reach the size bound"
+    assert all(d.resolved_ips_withheld > 0 for d in partial)
+    assert "withheld for size" in _domain_context(partial[0])
+    whole = [d for d in network.domains if not d.resolved_ips_partial]
+    # A name nothing was withheld from dumps as it always did.
+    assert "resolved_ips_partial" not in whole[0].model_dump()
+    assert partial[0].model_dump()["resolved_ips_partial"] is True

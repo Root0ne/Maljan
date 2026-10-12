@@ -20,7 +20,7 @@ import pytest
 from maljan.core.config import RestMappingConfig
 from maljan.providers.sandbox.readers import required_reader
 from maljan.providers.sandbox.rest_mapping import node_count, unnamed_blocks
-from maljan.schemas.sandbox_document import sandbox_document
+from maljan.schemas.sandbox_document import DNS_REQUEST_KEY, SAME_REQUEST_KEY, sandbox_document
 from maljan.schemas.sandbox_report import (
     cape_report_to_sandbox_report,
     stored_place,
@@ -309,7 +309,8 @@ class TestTheDocumentWritesOutLinearly:
         # The first question's row carries the answers; each later one names it.
         first, second = report.network.dns[0], report.network.dns[1]
         assert len(first["answers"]) == n
-        assert "answers" not in second and second["same_request_as"] == first["dns_request"]
+        assert "answers" not in second
+        assert second[SAME_REQUEST_KEY] == first[DNS_REQUEST_KEY]
 
 
 class TestManyQuestionsTimesManyAnswers:

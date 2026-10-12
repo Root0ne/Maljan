@@ -1128,6 +1128,11 @@ def _domain_context(d: Any) -> str:
         notes.append(f"punycode{target}")
     if d.resolved_ips:
         notes.append("resolved to " + ", ".join(d.resolved_ips[:4]))
+    if getattr(d, "resolved_ips_partial", False):
+        notes.append(
+            f"some addresses withheld for size ({d.resolved_ips_withheld} of its DNS "
+            "request's answers not read)"
+        )
     if d.queried_pids:
         # Which process asked: when a dropped child resolves the C2 rather
         # than the parent, this is the whole story.

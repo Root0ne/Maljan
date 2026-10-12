@@ -905,7 +905,7 @@ def network_from_ledger(
     resolved: set[str] = set()
     tls_names: set[str] = set()
 
-    from maljan.schemas.sandbox_document import DnsAnswers
+    from maljan.schemas.sandbox_document import ADDRESS_TYPES, DnsAnswers
 
     # The addresses each name already holds, so a value is added once.
     held_ips: dict[str, set[str]] = {}
@@ -926,10 +926,19 @@ def network_from_ledger(
                     value_key("domain", name), set(known_name.resolved_ips)
                 )
                 for answer in answers_of.of(row):
+                    # Only an address record names an address; a TXT or MX
+                    # value that reads as one is no resolution.
+                    kind = answer.get("type") if isinstance(answer, dict) else None
+                    if kind and str(kind).strip().lower() not in ADDRESS_TYPES:
+                        continue
                     address = address_key(_first_str(answer, "data", "ip", "address"))
                     if _parses_as_an_address(address) and address not in name_ips:
                         name_ips.add(address)
                         known_name.resolved_ips.append(address)
+                withheld = answers_of.withheld(row)
+                if withheld:
+                    known_name.resolved_ips_partial = True
+                    known_name.resolved_ips_withheld += withheld
         if answers_of.cut:
             logger.warning(
                 "network block: a DNS request's questions share more answers than the "

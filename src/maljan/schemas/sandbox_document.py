@@ -211,14 +211,46 @@ def channel_rows(held: Any) -> Sequence[Any] | None:
 # later question's row names that id (``SAME_REQUEST_KEY``). Every reader reads
 # a row's answers through :class:`DnsAnswers`, in memory, so the written report
 # stays linear in its size.
-DNS_REQUEST_KEY = "dns_request"
-SAME_REQUEST_KEY = "same_request_as"
-# The record type an answer that points one name at another carries.
-_ALIAS_TYPE = "CNAME"
+#
+# The two link keys are the platform's own: only a reader that builds DNS rows
+# writes them, every reader that hands a source's rows through removes them
+# from those rows first (:func:`without_dns_links`), and the resolver honours a
+# link only in the exact form a reader writes it. A source report can never
+# make one name read another's answers.
+DNS_REQUEST_KEY = "@dns_request"
+SAME_REQUEST_KEY = "@same_request_as"
+_LINK_KEYS = (DNS_REQUEST_KEY, SAME_REQUEST_KEY)
+# The record type an answer that points one name at another carries, and the
+# types whose value is an address.
+_ALIAS_TYPE = "cname"
+ADDRESS_TYPES = frozenset({"a", "aaaa"})
 
 
 def _lower(value: Any) -> str:
     return str(value or "").strip().rstrip(".").lower()
+
+
+def without_dns_links(rows: Any) -> Any:
+    """``rows`` with any field under a platform link key removed from a source's DNS row.
+
+    The same list where no row holds one (nothing is copied); otherwise a new
+    list in which each row that held one is copied without it. One pass.
+    """
+    if not isinstance(rows, list):
+        return rows
+    if not any(isinstance(row, Mapping) and any(k in row for k in _LINK_KEYS) for row in rows):
+        return rows
+    return [
+        {k: v for k, v in row.items() if k not in _LINK_KEYS}
+        if isinstance(row, Mapping) and any(k in row for k in _LINK_KEYS)
+        else row
+        for row in rows
+    ]
+
+
+def _link(value: Any) -> int | None:
+    """A link value in the form a reader writes it: a whole number, never a boolean."""
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 class DnsAnswers:
@@ -230,36 +262,59 @@ class DnsAnswers:
     names no name (which belongs to the whole request, as dev read it), each
     value once.
 
+    A link is honoured only in the exact form a reader writes it: a whole-number
+    id held by exactly one first row (``DNS_REQUEST_KEY``), named by the later
+    rows (``SAME_REQUEST_KEY``), and never both on one row. Any other row reads
+    its own answers, as dev read every row.
+
     Linear in the rows: one pass finds each request's answers, each request's
     answers are indexed by name once, when first asked, and the work every
     question of a request may cost together, with what it yields, is bounded
     by the request's own size (``_work_left``). A request whose questions share
     more than that (many names aliasing one target, many answers naming no
-    name) stops giving answers once the bound is spent, and says so
-    (:attr:`cut`): a name is then given fewer addresses, never a wrong one.
+    name) stops giving answers once the bound is spent: a name is then given
+    fewer addresses, never a wrong one, and :meth:`withheld` says how many of
+    its request's answers it was not given.
     """
 
     def __init__(self, rows: Any) -> None:
-        self._records: dict[Any, list[Any]] = {}
-        self._questions: dict[Any, int] = {}
+        firsts: dict[int, int] = {}
         for row in rows if isinstance(rows, list) else []:
-            if not isinstance(row, Mapping):
-                continue
-            request = row.get(DNS_REQUEST_KEY, row.get(SAME_REQUEST_KEY))
-            if request is None or isinstance(request, dict | list):
+            if isinstance(row, Mapping) and SAME_REQUEST_KEY not in row:
+                request = _link(row.get(DNS_REQUEST_KEY))
+                if request is not None:
+                    firsts[request] = firsts.get(request, 0) + 1
+        self._records: dict[int, list[Any]] = {}
+        self._questions: dict[int, int] = {}
+        for row in rows if isinstance(rows, list) else []:
+            request = self._request_of(row, firsts)
+            if request is None:
                 continue
             self._questions[request] = self._questions.get(request, 0) + 1
             if DNS_REQUEST_KEY in row:
                 answers = row.get("answers")
                 self._records[request] = answers if isinstance(answers, list) else []
-        self._index: dict[Any, tuple[dict[str, list[Any]], list[Any]]] = {}
+        self._valid = set(self._records)
+        self._index: dict[int, tuple[dict[str, list[Any]], list[Any]]] = {}
         self._work_left = {
             request: 2 * (len(records) + self._questions.get(request, 0)) + 16
             for request, records in self._records.items()
         }
+        self._withheld: dict[int, int] = {}
         self.cut = False
 
-    def _indexed(self, request: Any) -> tuple[dict[str, list[Any]], list[Any]]:
+    @staticmethod
+    def _request_of(row: Any, firsts: Mapping[int, int]) -> int | None:
+        """The request id ``row`` is linked by, in the exact form a reader writes, else ``None``."""
+        if not isinstance(row, Mapping):
+            return None
+        first, later = DNS_REQUEST_KEY in row, SAME_REQUEST_KEY in row
+        if first == later:
+            return None
+        request = _link(row.get(DNS_REQUEST_KEY if first else SAME_REQUEST_KEY))
+        return request if request is not None and firsts.get(request) == 1 else None
+
+    def _indexed(self, request: int) -> tuple[dict[str, list[Any]], list[Any]]:
         held = self._index.get(request)
         if held is None:
             by_name: dict[str, list[Any]] = {}
@@ -273,21 +328,34 @@ class DnsAnswers:
             held = self._index[request] = (by_name, unnamed)
         return held
 
+    def _linked(self, row: Mapping[str, Any]) -> int | None:
+        if (DNS_REQUEST_KEY in row) == (SAME_REQUEST_KEY in row):
+            return None
+        request = _link(row.get(DNS_REQUEST_KEY if DNS_REQUEST_KEY in row else SAME_REQUEST_KEY))
+        return request if request in self._valid else None
+
     def of(self, row: Any) -> list[Any]:
-        """The answers ``row``'s name resolved to, each value once."""
+        """The answers ``row``'s name resolved to, each value once, with its type if it has one."""
         if not isinstance(row, Mapping):
             return []
-        request = row.get(DNS_REQUEST_KEY, row.get(SAME_REQUEST_KEY))
-        if request is None or isinstance(request, dict | list):
+        request = self._linked(row)
+        if request is None:
             own = row.get("answers")
             return own if isinstance(own, list) else []
-        if request not in self._records:
-            return []
         by_name, unnamed = self._indexed(request)
         found: list[Any] = []
         values: set[str] = set()
         names: set[str] = set()
+        read = 0
         stack = [_lower(row.get("request"))]
+
+        def keep(record: Any) -> None:
+            value = str(record.get("data") or "") if isinstance(record, Mapping) else ""
+            if value and value not in values:
+                values.add(value)
+                kind = record.get("type") if isinstance(record, Mapping) else None
+                found.append({"data": value, **({"type": kind} if kind else {})})
+
         while stack:
             name = stack.pop()
             if not name or name in names:
@@ -295,26 +363,31 @@ class DnsAnswers:
             names.add(name)
             for record in by_name.get(name, ()):
                 if not self._spend(request):
+                    self._withhold(row, request, read)
                     return found
-                value = str(record.get("data") or "")
-                if _lower(record.get("type")) == _ALIAS_TYPE.lower():
-                    stack.append(_lower(value))
-                if value and value not in values:
-                    values.add(value)
-                    found.append({"data": value})
+                read += 1
+                if _lower(record.get("type")) == _ALIAS_TYPE:
+                    stack.append(_lower(record.get("data")))
+                keep(record)
         for record in unnamed:
             if not self._spend(request):
+                self._withhold(row, request, read)
                 return found
-            value = str(record.get("data") or "") if isinstance(record, Mapping) else ""
-            if value and value not in values:
-                values.add(value)
-                found.append({"data": value})
+            read += 1
+            keep(record)
         return found
 
-    def _spend(self, request: Any) -> bool:
+    def _withhold(self, row: Mapping[str, Any], request: int, read: int) -> None:
+        self.cut = True
+        self._withheld[id(row)] = max(0, len(self._records.get(request, [])) - read)
+
+    def withheld(self, row: Any) -> int:
+        """How many of its request's answers ``row``'s name was not given, the size bound spent."""
+        return self._withheld.get(id(row), 0)
+
+    def _spend(self, request: int) -> bool:
         left = self._work_left.get(request, 0)
         if left <= 0:
-            self.cut = True
             return False
         self._work_left[request] = left - 1
         return True

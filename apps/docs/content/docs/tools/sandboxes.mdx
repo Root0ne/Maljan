@@ -64,16 +64,23 @@ reader reads it as the block's items: each signature, flow or other item is its
 own row naming its task, built when it is read, so `offset` and `limit` page
 it and a claim cites one item by its id. A DNS request's answers and other
 fields sit on its first question's row; where the request asks several names,
-that row carries the request's id (`dns_request`) and each later question's row
-names it (`same_request_as`); each answer keeps the name it answers and its
+that row carries the request's id (`@dns_request`) and each later question's row
+names it (`@same_request_as`). These two keys are the platform's own: every reader
+that hands a source's DNS rows through removes them from those rows, and a link
+is honoured only in the exact form a reader writes it, so a report can never make
+one name read another's answers; each answer keeps the name it answers and its
 type. Every reader of the DNS rows (the network analyst's input, the IOC
 block's resolved addresses, the attribution sentence, the published IOCs and
 the export) gives each question the answers for its own name and the names its
 alias (CNAME) chain leads to, and every answer that names no name, as dev gave
-a request's answers to each of its questions; each address once per name. What
+a request's answers to each of its questions; each address once per name, and
+only an A or AAAA answer counts as an address. What
 a request's questions are given together is bounded by the request's own size,
 so a request whose many names share many answers gives later names fewer
-addresses, never a wrong one, and the network block stays linear in the report. A report read through the JSONPath mapping keeps
+addresses, never a wrong one, and the network block stays linear in the report.
+Such a name's IOC row says so (`resolved_ips_partial`, with how many of its
+request's answers were not read in `resolved_ips_withheld`), and the IOC table
+and the console's Network page show that some addresses were withheld for size. A report read through the JSONPath mapping keeps
 every top-level block no path starts in as a `report.<block>` channel, whole: a
 list's items are its rows as they are, any other block is one row. The analyst
 reads these through `sandbox_channels` and the pack's channels section, and
