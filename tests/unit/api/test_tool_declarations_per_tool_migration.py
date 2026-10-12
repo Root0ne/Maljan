@@ -191,7 +191,7 @@ def test_a_map_whose_release_cannot_be_known_is_kept_whole_as_the_operators() ->
     assert changes == whole
 
 
-def test_a_custom_server_a_secret_row_and_a_marked_map_are_left_alone(caplog) -> None:
+def test_a_secret_row_and_marked_maps_are_left_alone(caplog) -> None:
     from app.services.server_map import validate_server_map
 
     row = validate_server_map({})
@@ -199,7 +199,7 @@ def test_a_custom_server_a_secret_row_and_a_marked_map_are_left_alone(caplog) ->
         "transport": "http",
         "url": "http://127.0.0.1:9/mcp",
         "enabled": True,
-        "tool_facts": {"scan": {"kind": "strings"}},
+        "tool_facts": _marked({"scan": {"kind": "strings"}}),
     }
     shipped = _shipped_dump()["mcp"]["servers"]["analysis"]["tool_facts"]
     first, second, *_ = list(shipped)
@@ -215,6 +215,39 @@ def test_a_custom_server_a_secret_row_and_a_marked_map_are_left_alone(caplog) ->
         _run(_module(), conn)
     assert _rows(conn) == before
     assert not [r for r in caplog.records if "rewritten" in r.getMessage()]
+
+
+def test_a_custom_server_s_whole_map_is_marked_and_an_unknown_leaf_stays_whole(caplog) -> None:
+    """A server an operator added ships nothing, so its whole map is its changes:
+    it is marked and reads the same. A provider leaf no recorded release shipped
+    declarations for is left unmarked, read whole until a save writes it."""
+    from app.services.server_map import validate_server_map
+
+    row = validate_server_map({})
+    custom = {"scan": {"kind": "strings"}, "probe": {"display_name": "Probe"}}
+    row["mine"] = {
+        "transport": "http",
+        "url": "http://127.0.0.1:9/mcp",
+        "enabled": True,
+        "tool_facts": dict(custom),
+    }
+    row["empty"] = {"transport": "http", "url": "http://127.0.0.1:9/mcp", "tool_facts": {}}
+    unknown_leaf = "core.invented.block.tool_facts"
+    conn = _connect()
+    _insert(conn, SERVERS, row)
+    _insert(conn, unknown_leaf, {"my_script": {"kind": "strings"}})
+    in_force_before = _in_force({SERVERS: row})["mcp"]["servers"]["mine"]["tool_facts"]
+    mod = _module()
+    with caplog.at_level(logging.INFO):
+        _run(mod, conn)
+    after = _rows(conn)
+    assert after[SERVERS]["mine"]["tool_facts"] == _marked(custom)
+    assert after[SERVERS]["empty"]["tool_facts"] == {}
+    assert after[unknown_leaf] == {"my_script": {"kind": "strings"}}
+    assert _in_force(after)["mcp"]["servers"]["mine"]["tool_facts"] == in_force_before
+    assert [r.getMessage() for r in caplog.records if r.name == mod.logger.name] == [mod.REWRITTEN]
+    _run(mod, conn, "downgrade")
+    assert _rows(conn)[SERVERS]["mine"]["tool_facts"] == custom
 
 
 def test_one_fixed_info_line_is_logged_and_a_downgrade_reads_the_same(caplog) -> None:
@@ -256,11 +289,14 @@ def test_a_save_before_the_migration_keeps_every_tool_after_it() -> None:
     shipped = _shipped_dump()["mcp"]["servers"]["analysis"]["tool_facts"]
     tool = sorted(shipped)[0]
     dev = _dev_row(analysis_facts=dict(shipped))
-    sent = {**dev, "analysis": {**dev["analysis"], "tool_facts": {tool: {"display_name": "Mine"}}}}
+    changes = _marked({tool: {"display_name": "Mine"}})
+    sent = {**dev, "analysis": {**dev["analysis"], "tool_facts": changes}}
     saved = validate_server_map(sent, stored=dev)
     ghidra = _shipped_dump()["static"]["ghidra"]["tool_facts"]
     leaf_tool = sorted(ghidra)[0]
-    leaf = svc.stored_declaration_leaves({GHIDRA: {leaf_tool: {"timeout_seconds": 5}}})[GHIDRA]
+    leaf = svc.stored_declaration_leaves({GHIDRA: _marked({leaf_tool: {"timeout_seconds": 5}})})[
+        GHIDRA
+    ]
     conn = _connect()
     _insert(conn, SERVERS, saved)
     _insert(conn, GHIDRA, leaf)

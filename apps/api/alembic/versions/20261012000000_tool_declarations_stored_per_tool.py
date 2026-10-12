@@ -28,9 +28,13 @@ every tool any release shipped that it lacks stays removed. Either way every
 map reads today as it read before this revision, except that a tool the
 operator never changed takes the declaration shipped now.
 
-A block nothing ever shipped tool declarations for (a server an operator
-added) keeps its map as it is: its whole map is its changes over nothing. A
-secret row is left alone. One line is logged when anything was rewritten.
+A server an operator added ships nothing, so its whole map is its changes
+over nothing: its map is marked as such, and reads exactly as before (should
+a later release ship declarations for a server of that key, the operator's
+map then no longer hides them). A provider block's leaf with no record (no
+release this revision knows shipped declarations for it) is left as it is,
+and is read whole until a save of this release writes it marked. A secret row
+is left alone. One line is logged when anything was rewritten.
 
 Downgrade writes each marked map whole again, without the mark, with the
 declarations the release before this revision shipped (the last state in the
@@ -213,12 +217,14 @@ def with_mark(changes: dict[str, Any]) -> dict[str, Any]:
 
 
 def _rewrite(convert: Any) -> bool:
-    """Every stored block map passed through ``convert(map, block)``; whether any changed.
+    """Every stored block map passed through ``convert(map, block, server)``; whether any changed.
 
     ``block`` is the block's record, ``None`` for a block nothing ever
-    shipped tool declarations for (a server an operator added). ``convert``
-    returns the map to store; an empty one leaves a server entry without
-    tool declarations, which reads as the shipped ones.
+    shipped tool declarations for (a server an operator added, or a provider
+    leaf the record does not know); ``server`` says whether the map is a
+    server entry's. ``convert`` returns the map to store; an empty one leaves
+    a server entry without tool declarations, which reads as the shipped
+    ones.
     """
     conn = op.get_bind()
     record = _record()
@@ -235,7 +241,7 @@ def _rewrite(convert: Any) -> bool:
                 facts = entry.get("tool_facts")
                 if not isinstance(facts, dict):
                     continue
-                converted = convert(facts, blocks.get(f"{SERVER_BLOCK_PREFIX}{name}"))
+                converted = convert(facts, blocks.get(f"{SERVER_BLOCK_PREFIX}{name}"), True)
                 if converted == facts:
                     continue
                 servers[name] = (
@@ -249,7 +255,9 @@ def _rewrite(convert: Any) -> bool:
             continue
         if not isinstance(value, dict):
             continue
-        converted = convert(value, blocks.get(key[len(CORE_PREFIX) : -len(TOOL_FACTS_SUFFIX)]))
+        converted = convert(
+            value, blocks.get(key[len(CORE_PREFIX) : -len(TOOL_FACTS_SUFFIX)]), False
+        )
         if converted != value:
             _store(conn, key, converted)
             changed = True
@@ -259,13 +267,18 @@ def _rewrite(convert: Any) -> bool:
 def upgrade() -> None:
     defaults = _record()["defaults"]
 
-    def convert(stored: dict[str, Any], block: dict[str, Any] | None) -> dict[str, Any]:
+    def convert(
+        stored: dict[str, Any], block: dict[str, Any] | None, server: bool
+    ) -> dict[str, Any]:
         # A map marked as changes was written by this release (a save that
         # ran before this revision did) and is left alone, so running the
-        # revision again changes nothing; so is the map of a block nothing
-        # ever shipped declarations for, whose whole map is its changes.
-        if holds_changes(stored) or block is None:
+        # revision again changes nothing. A server nothing ever shipped
+        # declarations for has its whole map as its changes, marked; a
+        # provider leaf the record does not know is left as it is.
+        if holds_changes(stored):
             return stored
+        if block is None:
+            return with_mark(stored) if server and stored else stored
         return with_mark(per_tool_changes(stored, block, defaults)[0])
 
     if _rewrite(convert):
@@ -273,7 +286,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    def convert(stored: dict[str, Any], block: dict[str, Any] | None) -> dict[str, Any]:
+    def convert(
+        stored: dict[str, Any], block: dict[str, Any] | None, server: bool
+    ) -> dict[str, Any]:
         # A map without the mark is in the form the release before this
         # revision reads already.
         if not holds_changes(stored):
