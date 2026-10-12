@@ -51,21 +51,35 @@ the same kind.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from maljan.core.tool_declarations import check_tool_name
 
 __all__ = [
     "ARGUMENT_PLACEHOLDERS",
+    "DECLARED_FACT_RENDERERS",
+    "answer_field",
+    "answer_fields",
     "default_steps",
     "PACK_RENDERERS",
     "PackStep",
     "check_steps",
     "effective_steps",
+    "read_answer_field",
     "shipped_step",
+    "shipped_tools_of",
+    "written_for",
 ]
 
 _ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
@@ -117,9 +131,22 @@ PACK_RENDERERS: dict[str, str] = {
 # The platform's own steps that take a wall clock of their own.
 _BUDGETED_BUILTINS = frozenset({"capa", "floss", "yara_scan"})
 
+# The renderers that read an answer through its tool's declared facts (its
+# rows, their values and places, its techniques) as well as in the shape of
+# the tool they were written for, so any tool of the kind is shown with the
+# same facts. Every other renderer reads only the answer of the tool its
+# shipped step calls, and is refused on any other step: on another tool's
+# answer it would state what that answer does not say.
+DECLARED_FACT_RENDERERS = frozenset({"capability_rules"})
+
 
 class PackStep(BaseModel):
-    """One step of the triage pack (see the module docstring)."""
+    """One step of the triage pack (see the module docstring).
+
+    A step dumps the fields it was given and no others: a declaration is
+    merged over the shipped step field by field, over the fields it sets, so
+    a dump that wrote every field would blank the shipped ones when read back.
+    """
 
     # A key this model does not know is refused: a misspelt ``enabled`` would
     # otherwise save as a step that runs.
@@ -183,10 +210,13 @@ class PackStep(BaseModel):
     @field_validator("arguments")
     @classmethod
     def _placeholders_are_known(cls, value: dict[str, Any]) -> dict[str, Any]:
-        for name, held in value.items():
+        for name in value:
             if not isinstance(name, str) or not name:
                 raise ValueError("an argument template names each argument")
-            for found in _PLACEHOLDER_RE.findall(held if isinstance(held, str) else ""):
+        # Every string of the template is checked, at any depth, as every one
+        # is filled (``placeholder_values``).
+        for name, text in _template_strings(value):
+            for found in _PLACEHOLDER_RE.findall(text):
                 if found not in ARGUMENT_PLACEHOLDERS:
                     raise ValueError(
                         f"argument {name!r} names {{{found}}}, which a template cannot name; "
@@ -199,6 +229,12 @@ class PackStep(BaseModel):
         if self.server and not self.tool:
             raise ValueError(f"step {self.id!r} names a server and no tool to call on it")
         return self
+
+    @model_serializer(mode="wrap")
+    def _dump_what_was_set(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        dumped = handler(self)
+        held = self.model_fields_set | {"id"}
+        return {name: value for name, value in dumped.items() if name in held}
 
     @property
     def builtin(self) -> bool:
@@ -313,9 +349,8 @@ def _shipped() -> tuple[PackStep, ...]:
         ),
         _o(
             id="find_crypto_constants",
-            # As shipped: the executable images by the names the scan was
-            # first given.
-            formats=("pe", "elf", "macho"),
+            # The executable images, by the names the router gives them.
+            formats=("pe", "elf", "mach-o"),
             renderer="crypto_constants",
             display_name="crypto constants",
         ),
@@ -350,15 +385,79 @@ def default_steps() -> tuple[PackStep, ...]:
     return _DEFAULT[0]
 
 
-_INDEXES: list[tuple[dict[str, PackStep], dict[str, PackStep]]] = []
+_INDEXES: list[tuple[dict[str, PackStep], dict[str, PackStep], dict[str, frozenset[str]]]] = []
 
 
-def _indexes() -> tuple[dict[str, PackStep], dict[str, PackStep]]:
-    """The shipped steps by id, and by the tool each records under, built once."""
+def _indexes() -> tuple[dict[str, PackStep], dict[str, PackStep], dict[str, frozenset[str]]]:
+    """The shipped steps by id, by the tool each records under, and each renderer's tools.
+
+    Built once.
+    """
     if not _INDEXES:
         steps = default_steps()
-        _INDEXES.append(({s.id: s for s in steps}, {s.called: s for s in steps}))
+        tools: dict[str, set[str]] = {}
+        for step in steps:
+            if step.renderer:
+                tools.setdefault(step.renderer, set()).add(step.called)
+        _INDEXES.append(
+            (
+                {s.id: s for s in steps},
+                {s.called: s for s in steps},
+                {renderer: frozenset(names) for renderer, names in tools.items()},
+            )
+        )
     return _INDEXES[0]
+
+
+def shipped_tools_of(renderer: str) -> frozenset[str]:
+    """The tools the shipped steps of ``renderer`` call: the answers it was written for."""
+    return _indexes()[2].get(renderer, frozenset())
+
+
+def written_for(renderer: str, tool: Any) -> bool:
+    """Whether ``tool`` is one the shipped steps of ``renderer`` call: an answer it reads as is.
+
+    The reading of an entry the pack's own step wrote, as :func:`shipped_renderer` is.
+    """
+    return str(tool or "") in shipped_tools_of(renderer)
+
+
+def _historic_word(renderer: str) -> str:
+    """The one tool the shipped steps of ``renderer`` call; ``""`` for none or several."""
+    tools = shipped_tools_of(renderer)
+    return next(iter(tools)) if len(tools) == 1 else ""
+
+
+def answer_field(template: str, renderer: str, neutral: str, *, shipped: bool) -> str:
+    """The name an answer gives what the tools behind ``renderer``'s kind contributed.
+
+    ``template`` with the shipped tool's name in it when ``shipped`` (every
+    source is the tool the shipped step of ``renderer`` calls, or there is
+    none), the name these answers have always used; else with ``neutral``, so
+    an answer never names a tool that did not run. ``"also_recovered_by_{}"``
+    with the shipped decoder, or ``neutral`` ``"decoder"``.
+    """
+    word = _historic_word(renderer) if shipped else ""
+    return template.format(word or neutral)
+
+
+def answer_fields(template: str, renderer: str, neutral: str) -> tuple[str, ...]:
+    """Both names :func:`answer_field` may give, the shipped one first, each once."""
+    return tuple(
+        dict.fromkeys(
+            answer_field(template, renderer, neutral, shipped=shipped) for shipped in (True, False)
+        )
+    )
+
+
+def read_answer_field(
+    mapping: Mapping[str, Any], template: str, renderer: str, neutral: str
+) -> Any:
+    """What ``mapping`` holds under either name :func:`answer_field` gives; ``None`` for neither."""
+    for name in answer_fields(template, renderer, neutral):
+        if name in mapping:
+            return mapping[name]
+    return None
 
 
 def shipped_step(step_id: str) -> PackStep | None:
@@ -498,8 +597,12 @@ def _effective(declared: list[PackStep]) -> list[PackStep]:
         cursor = after.get(cursor, "")
     problems: list[str] = []
     ids = {step.id for step in steps}
+    named_beside = {other for step in steps for other in step.beside}
+    set_by = {step.id: step.model_fields_set for step in declared}
     for step in steps:
         problems.extend(_builtin_problems(step))
+        problems.extend(_renderer_problems(step))
+        problems.extend(_schedule_problems(step, set_by.get(step.id, frozenset()), named_beside))
         if step.starts_after and step.starts_after not in ids:
             problems.append(
                 f"step {step.id!r} starts after {step.starts_after!r}, which no step is"
@@ -512,18 +615,134 @@ def _effective(declared: list[PackStep]) -> list[PackStep]:
     return steps
 
 
-def placeholder_values(template: Mapping[str, Any], values: Mapping[str, str]) -> dict[str, Any]:
-    """``template`` with each ``{placeholder}`` of a string value replaced by its value.
+def _starts_early(step: PackStep) -> bool:
+    """Whether ``step`` can start beside the pack: any server's tool, or a built-in shipped so."""
+    if not step.builtin:
+        return True
+    shipped = shipped_step(step.id)
+    return shipped is not None and bool(shipped.starts_after)
 
-    Values that are not strings are kept as declared.
+
+def _early_builtins() -> str:
+    return ", ".join(s.id for s in default_steps() if s.builtin and s.starts_after)
+
+
+def _schedule_problems(
+    step: PackStep, declared: frozenset[str] | set[str], named_beside: set[str]
+) -> list[str]:
+    """The scheduling fields an operator set on ``step`` that the pack could not honour.
+
+    Each would otherwise be saved and ignored at run time: a start beside the
+    pack for an in-process step that runs only in turn, steps to run beside
+    for a step that starts after none, a peak no schedule reads, a step that
+    starts after or beside itself. Only the fields the operator set are
+    checked, so a shipped value an operator leaves alone is never refused.
     """
-    out: dict[str, Any] = {}
-    for name, held in template.items():
-        if not isinstance(held, str):
-            out[name] = held
-            continue
-        out[name] = _PLACEHOLDER_RE.sub(lambda m: str(values.get(m.group(1), m.group(0))), held)
-    return out
+    problems: list[str] = []
+    if "starts_after" in declared and step.starts_after == step.id:
+        problems.append(f"step {step.id!r} starts after itself")
+    if "beside" in declared and step.id in step.beside:
+        problems.append(f"step {step.id!r} runs beside itself")
+    early = _starts_early(step)
+    asked = [
+        name for name in ("starts_after", "beside") if name in declared and getattr(step, name)
+    ]
+    if asked and not early:
+        problems.append(
+            f"step {step.id!r} runs in-process in turn and cannot start beside the pack, so "
+            f"{' and '.join(asked)} would be ignored; of the platform's own steps only "
+            f"{_early_builtins()} can, and any server's tool"
+        )
+    elif "beside" in declared and step.beside and not step.starts_after:
+        problems.append(
+            f"step {step.id!r} names steps to run beside but starts after none, so it runs "
+            "in turn and beside would be ignored; set starts_after"
+        )
+    if (
+        "peak_mb" in declared
+        and step.peak_mb is not None
+        and not (early and step.starts_after)
+        and step.id not in named_beside
+    ):
+        problems.append(
+            f"step {step.id!r} declares peak_mb, which only sizes a step started beside the "
+            "pack (starts_after) or one another step runs beside, and this step is neither"
+        )
+    return problems
+
+
+def _renderer_problems(step: PackStep) -> list[str]:
+    """A renderer that would read ``step``'s answer in another tool's shape.
+
+    A renderer of :data:`DECLARED_FACT_RENDERERS` reads any tool's answer by
+    its declared facts; any other only the answer of the tool its shipped step
+    calls, on the platform's own step.
+    """
+    if not step.renderer or step.renderer in DECLARED_FACT_RENDERERS:
+        return []
+    if step.builtin and step.called in shipped_tools_of(step.renderer):
+        return []
+    readers = ", ".join(sorted(DECLARED_FACT_RENDERERS))
+    return [
+        f"step {step.id!r}: renderer {step.renderer!r} reads only the answer of "
+        f"{', '.join(sorted(shipped_tools_of(step.renderer)))} as the platform runs it, and "
+        f"{step.called!r} is not that; leave renderer empty for the generic line, which reads "
+        f"the tool's declared rows, or use a renderer that reads declared facts ({readers})"
+    ]
+
+
+def _template_strings(template: Mapping[str, Any]) -> Iterator[tuple[str, str]]:
+    """Every string of ``template`` at any depth, with the top-level argument holding it.
+
+    Walked with a stack of its own, so a deep template costs its size and no
+    recursion limit.
+    """
+    stack: list[tuple[str, Any]] = [(str(name), held) for name, held in template.items()]
+    while stack:
+        name, held = stack.pop()
+        if isinstance(held, str):
+            yield name, held
+        elif isinstance(held, Mapping):
+            stack.extend((name, inner) for inner in held.values())
+        elif isinstance(held, list | tuple):
+            stack.extend((name, inner) for inner in held)
+
+
+def placeholder_values(template: Mapping[str, Any], values: Mapping[str, str]) -> dict[str, Any]:
+    """``template`` with each ``{placeholder}`` of a string replaced by its value, at any depth.
+
+    Values that are not strings, lists or mappings are kept as declared. A
+    filled value is never read for placeholders again.
+    """
+
+    def fill(text: str) -> str:
+        return _PLACEHOLDER_RE.sub(lambda m: str(values.get(m.group(1), m.group(0))), text)
+
+    def walk(root: Any) -> Any:
+        # Built with a stack of its own: each container is copied once and
+        # filled in place, so a deep template costs its size.
+        def copy(held: Any) -> Any:
+            if isinstance(held, str):
+                return fill(held)
+            if isinstance(held, Mapping):
+                made: Any = dict(held)
+            elif isinstance(held, list | tuple):
+                made = list(held)
+            else:
+                return held
+            pending.append(made)
+            return made
+
+        pending: list[Any] = []
+        top = copy(root)
+        while pending:
+            held = pending.pop()
+            keys = held.keys() if isinstance(held, dict) else range(len(held))
+            for key in list(keys):
+                held[key] = copy(held[key])
+        return top
+
+    return {name: walk(held) for name, held in template.items()}
 
 
 def step_schedules(facts: Mapping[str, Any] | None) -> dict[str, str]:

@@ -47,7 +47,7 @@ from maljan.agents.prompts import (
     TRIAGE_PROMPT,
 )
 from maljan.core import virustotal
-from maljan.core.pack_steps import PackStep, check_steps
+from maljan.core.pack_steps import PackStep, check_steps, effective_steps
 from maljan.core.report_formats import (
     READER_ID_PATTERN,
     ReportFormat,
@@ -4492,18 +4492,14 @@ class Settings(BaseSettings):
             for ref in definition.tools:
                 if ref.kind != "mcp":
                     continue
-                server = self.mcp.servers.get(str(ref.server))
-                if server is None:
-                    raise ValueError(f"{key!r} references unknown mcp server {ref.server!r}")
-                # ``tools=None`` is "every tool this server advertises", which
-                # is only knowable from a live handshake. A name against such a
-                # server is checked at resolution and a miss degrades there;
-                # refusing it here would make a built-in sidecar unreferenceable.
-                if ref.name is not None and server.tools is not None:
-                    if ref.name not in server.tools:
-                        raise ValueError(
-                            f"{key!r}: {ref.name!r} is not allowed on server {ref.server!r}"
-                        )
+                self._check_server_tool(repr(key), str(ref.server), ref.name)
+
+        # A triage pack step that calls a server's tool is checked as an
+        # agent's reference is, so a list that cannot run is refused here, and
+        # so is removing a server a step uses.
+        for step in effective_steps(self.triage.steps):
+            if not step.builtin:
+                self._check_server_tool(f"triage step {step.id!r}", step.server, step.called)
 
         self._rederive_converted_profiles()
 
@@ -4517,6 +4513,21 @@ class Settings(BaseSettings):
                         f"Available: {available}"
                     )
         return self
+
+    def _check_server_tool(self, owner: str, server_key: str, tool: str | None) -> None:
+        """Refuse a reference by ``owner`` to a server not in ``mcp.servers``, or to a tool
+        outside the server's ``tools`` allow-list.
+
+        ``tools=None`` is "every tool this server advertises", which is only
+        knowable from a live handshake. A name against such a server is checked
+        at resolution and a miss degrades there; refusing it here would make a
+        built-in sidecar unreferenceable.
+        """
+        server = self.mcp.servers.get(server_key)
+        if server is None:
+            raise ValueError(f"{owner} references unknown mcp server {server_key!r}")
+        if tool is not None and server.tools is not None and tool not in server.tools:
+            raise ValueError(f"{owner}: {tool!r} is not allowed on server {server_key!r}")
 
     def _rederive_converted_profiles(self) -> None:
         """Give a converted profile the global values it is supposed to inherit.
