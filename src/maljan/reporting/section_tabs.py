@@ -12,11 +12,11 @@ reading process's settings:
   declaration): a sandbox kind on DYNAMIC, a capture or flow kind on NETWORK,
   a reputation lookup on IDENTITY, a code listing, a rule match, a strings or
   an import listing on STATIC;
-* else by the role the calling agent's definition declared when its entries
-  were written (``LedgerEntry.agent_role``, built-in, cloned or custom agents
-  and the judge alike): a static, dynamic or network role on its tab, the
-  judge's on IDENTITY (its calls check what the sample is). An agent's name is
-  never read: a renamed or cloned agent places by its role.
+* else by the tab the calling agent's definition declared when its entries
+  were written (``LedgerEntry.agent_tab``, from ``AgentDefinition.tab``: the
+  built-in roles declare theirs, a clone copies its source's, a generic or
+  lead agent declares one only when an operator sets it). An agent's name is
+  never read, and settings are never read while a report renders.
 
 Only sections built from the answers of tools whose source the platform ships
 no declaration for are placed: every built-in section keeps the key map's
@@ -33,18 +33,8 @@ from typing import Any
 from maljan.reporting import tool_kinds
 
 # The tabs the console draws sections on that this module may name.
-TABS: tuple[str, ...] = ("identity", "static", "dynamic", "network")
+TABS: tuple[str, ...] = ("identity", "static", "dynamic", "network", "persistence")
 
-# The tab a section is drawn on by the role of the agent whose calls it
-# cites, keyed by the role vocabulary of agent definitions
-# (``core.config.AnalystRole``), never by an agent's name. A role with no tab
-# of its own (``generic``, ``lead``, ``report``) places nothing.
-TAB_OF_ROLE: dict[str, str] = {
-    "static": "static",
-    "dynamic": "dynamic",
-    "network": "network",
-    "judge": "identity",
-}
 
 # Consumers of declared kinds (``core.builtin_declarations.CONSUMER_KINDS``)
 # and the tab a kind they read is drawn on, the first that reads a kind
@@ -119,13 +109,14 @@ def section_tabs(report: Any) -> dict[str, str]:
 
 
 def _tab_of_rows(rows: list[Any]) -> str:
-    """The tab the cited entries agree on: their declared kind's, else their agents' role's."""
+    """The tab the cited entries agree on: their declared kind's, else their agents' tab."""
     by_kind = {_tab_of_kind(tool_kinds.facts_of(row)) for row in rows}
     if len(by_kind) == 1 and "" not in by_kind:
         return by_kind.pop()
     if by_kind - {""}:
         return ""
-    tabs = {TAB_OF_ROLE.get(str(_field(row, "agent_role") or ""), "") for row in rows}
+    tabs = {str(_field(row, "agent_tab") or "") for row in rows}
     if len(tabs) == 1:
-        return tabs.pop()
+        tab = tabs.pop()
+        return tab if tab in TABS else ""
     return ""

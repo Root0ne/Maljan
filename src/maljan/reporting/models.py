@@ -1250,6 +1250,10 @@ class EvidenceIndexRow(BaseModel):
     # an operator's tool produced is read by (``reporting.section_tabs``).
     # ``None`` on a row of an entry written without one, and then left out.
     agent_role: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    # The console tab the calling agent's definition declared
+    # (``LedgerEntry.agent_tab``), which places a section of an operator's
+    # tool when its kind places none. ``None`` where none was, and left out.
+    agent_tab: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class ReputationAnswer(ReputationRecord):

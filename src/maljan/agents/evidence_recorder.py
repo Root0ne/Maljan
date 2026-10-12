@@ -241,8 +241,10 @@ class EvidenceRecorder:
         corpus: Any = None,
         model: str = "",
         agent_role: str | None = None,
+        agent_tab: str | None = None,
     ) -> None:
         self.agent = agent
+        self.agent_tab = agent_tab or None
         # The role the agent's definition declares, written on every entry
         # (``LedgerEntry.agent_role``); ``None`` for the pack and an agent
         # running outside a container.
@@ -391,6 +393,7 @@ class EvidenceRecorder:
             source=source,
             structured_content=structured_content,
             agent_role=self.agent_role,
+            agent_tab=self.agent_tab,
         )
         self.entries.append(entry)
         self._by_id[entry.id] = entry

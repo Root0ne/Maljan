@@ -751,12 +751,21 @@ def _mcp_refs(settings: Settings, definition: AgentDefinition, key: str) -> list
     return [ref for ref in _server_refs(settings, definition) if str(ref.server) not in excluded]
 
 
+def _definition_of(settings: Any, key: str) -> Any:
+    definitions = getattr(getattr(settings, "agents", None), "definitions", None) or {}
+    return definitions.get(key) if hasattr(definitions, "get") else None
+
+
 def role_of(settings: Any, key: str) -> str | None:
     """The role agent ``key``'s definition declares, or ``None`` when it has none."""
-    definitions = getattr(getattr(settings, "agents", None), "definitions", None) or {}
-    definition = definitions.get(key) if hasattr(definitions, "get") else None
-    role = getattr(definition, "role", None)
+    role = getattr(_definition_of(settings, key), "role", None)
     return str(role) if role else None
+
+
+def tab_of(settings: Any, key: str) -> str | None:
+    """The console tab agent ``key``'s definition declares, or ``None`` when it declares none."""
+    tab = getattr(_definition_of(settings, key), "tab", None)
+    return str(tab) if tab else None
 
 
 def mcp_refs_for(settings: Settings, key: str) -> list[ToolRef]:
