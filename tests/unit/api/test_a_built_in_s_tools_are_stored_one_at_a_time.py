@@ -314,3 +314,12 @@ def test_what_the_console_stages_for_a_removed_tool_s_proposal_saves(shipped_rel
     out = validate_server_map(_accept(stored, "analysis", "shipped_later", staged), stored=stored)
     held = _in_force(out)["shipped_later"]
     assert (held.kind, held.rows, held.display_name) == ("", "", "P")
+
+
+def test_what_a_block_ships_is_a_copy_a_caller_cannot_change() -> None:
+    held = so.shipped_tool_facts("mcp.servers.analysis")
+    tool = next(iter(held))
+    held[tool]["display_name"] = "changed by a caller"
+    assert so.shipped_tool_facts("mcp.servers.analysis")[tool]["display_name"] != (
+        "changed by a caller"
+    )

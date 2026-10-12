@@ -13,6 +13,7 @@ behaviour, relied on by the legacy one-shot environment import.
 
 from __future__ import annotations
 
+import copy
 import re
 from collections.abc import Iterable, Mapping
 from functools import cache
@@ -117,7 +118,8 @@ def shipped_tool_facts(block: str) -> dict[str, Any]:
             return {}
         node = node[part]
     held = node.get(TOOL_FACTS_FIELD) if isinstance(node, Mapping) else None
-    return dict(held) if isinstance(held, Mapping) else {}
+    # A copy all the way down: the dump is cached for the process.
+    return copy.deepcopy(dict(held)) if isinstance(held, Mapping) else {}
 
 
 def _block_in_force(block: str, stored: Mapping[str, Any]) -> tuple[dict[str, Any], list[str]]:
