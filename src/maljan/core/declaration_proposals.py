@@ -192,7 +192,7 @@ class _Shape:
     kind: str = "scalar"  # "object" | "array" | "scalar"
     type: str = ""
     fmt: str = ""
-    pattern: str = ""
+    regex: str = ""
     min_length: int | None = None
     max_length: int | None = None
     words: frozenset[str] = frozenset()
@@ -240,7 +240,7 @@ def shape_of_schema(schema: Any) -> _Shape:
         if isinstance(declared, str) and declared and not shape.type:
             shape.type = declared
         shape.fmt = shape.fmt or _text(node.get("format"))
-        shape.pattern = shape.pattern or _text(node.get("pattern"))
+        shape.regex = shape.regex or _text(node.get("pattern"))
         shape.min_length = (
             shape.min_length if shape.min_length is not None else _int(node.get("minLength"))
         )
@@ -395,9 +395,9 @@ def _argument_role(name: str, shape: _Shape) -> tuple[str, str, str] | None:
     ):
         return "hash", HIGH, "name"
     if (
-        shape.pattern
-        and _HEX_PATTERN.search(shape.pattern)
-        and any(f"{{{n}}}" in shape.pattern for n in _HEX_LENGTHS)
+        shape.regex
+        and _HEX_PATTERN.search(shape.regex)
+        and any(f"{{{n}}}" in shape.regex for n in _HEX_LENGTHS)
     ):
         return "hash", HIGH, "pattern"
     if (

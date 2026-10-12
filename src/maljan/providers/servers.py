@@ -274,6 +274,10 @@ class ServerHandle:
         # from its ``capabilities`` tool when it offers one; ``None`` for a
         # server that does not, or whose answer could not be read.
         self.capabilities: ServerCapabilities | None = None
+        # Whether the next attach keeps each tool's definition as the server
+        # listed it (``tool_definitions``). Only the settings probe asks, to
+        # propose declarations; a run's handle keeps none.
+        self.keeps_tool_definitions = False
         # The job's breaker and call cap for this server, set by the registry
         # that owns the handle (``maljan.providers.server_guard``). A handle
         # built outside a registry — a probe, a test — has none and sends
@@ -454,6 +458,7 @@ class ServerHandle:
                 context_budget=context_budget,
                 guard=self.guard,
                 categories=categories_of(getattr(self.config, "tool_facts", None)),
+                keep_tool_definitions=self.keeps_tool_definitions,
             )
         # An http/sse transport has no child of ours to reap.
         self._launch_argv = ()
@@ -469,6 +474,7 @@ class ServerHandle:
             context_budget=context_budget,
             guard=self.guard,
             categories=categories_of(getattr(self.config, "tool_facts", None)),
+            keep_tool_definitions=self.keeps_tool_definitions,
         )
 
     def open(
@@ -938,7 +944,8 @@ class ServerHandle:
         """Each tool's definition as the server listed it (MCP ``Tool``), allow-list ignored.
 
         For the settings probe's declaration proposals; empty before an
-        attach and for a toolkit that keeps none.
+        attach and for a handle that did not ask to keep them
+        (``keeps_tool_definitions``).
         """
         return list(getattr(self._toolkit, "tool_definitions", None) or [])
 

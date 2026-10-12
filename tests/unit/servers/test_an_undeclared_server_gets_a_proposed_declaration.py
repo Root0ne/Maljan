@@ -413,6 +413,20 @@ def test_without_acceptance_the_tool_stays_undeclared(installed: Any) -> None:
     assert settings.mcp.servers[SERVER].tool_facts == {}
 
 
+def test_a_run_s_handle_keeps_no_tool_definitions() -> None:
+    async def _run() -> list[Any]:
+        registry = ServerRegistry(_settings(None))
+        await registry.atools_for("static", "job-1")
+        try:
+            return [handle.tool_definitions() for handle in registry.still_open()]
+        finally:
+            for handle in registry.still_open():
+                await handle.aclose()
+
+    held = asyncio.run(_run())
+    assert held and all(definitions == [] for definitions in held)
+
+
 def test_no_run_module_reads_a_proposal() -> None:
     """Proposals reach the console and nothing else: only the settings probe imports them."""
     import re

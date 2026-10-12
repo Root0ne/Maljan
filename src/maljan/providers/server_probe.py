@@ -117,6 +117,7 @@ async def inspect(
 
         handle_factory = ServerHandle
     handle = handle_factory(name, config)
+    handle.keeps_tool_definitions = True
     probe_key = f"probe-{name}-{uuid.uuid4().hex[:8]}"
     planned: list[Any] = []
 
