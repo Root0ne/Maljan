@@ -1343,6 +1343,19 @@ def rule_cells(row: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     return [cell for cell in held or [] if isinstance(cell, Mapping)]
 
 
+def rule_count_words(row: Mapping[str, Any]) -> tuple[str, str]:
+    """How a count of ``row``'s rule cells is worded, one and many.
+
+    Named by the shipped matcher only where the row holds its rules under
+    that matcher's name (every rule came from it); else a neutral word, so a
+    count never names a matcher that did not run.
+    """
+    shipped = rules_field(shipped=True)
+    if shipped != RULES_FIELD_NEUTRAL and shipped in row:
+        return f"{shipped} rule", f"{shipped} rules"
+    return "rule", "rules"
+
+
 # A function start list from an answer that lists starts: ``(the source's
 # name, the entry's id, the starts as offsets from the image base)``.
 StartSource = tuple[str, str, Sequence[Any]]
