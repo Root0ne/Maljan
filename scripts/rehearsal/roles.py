@@ -542,7 +542,11 @@ class Brain:
                         used.add(ident)
                         techniques.add(technique)
                         break
-        plain = [i for i in own if i not in used][:2] + [i for i in pack if i not in used][:1]
+        mine = [i for i in own if i not in used]
+        if self.fill_from_results:
+            # A model following its answers cites what they found before what failed.
+            mine.sort(key=lambda i: bool(_FAILED.match(own[i].split(": ", 1)[-1])))
+        plain = mine[:2] + [i for i in pack if i not in used][:1]
         for ident in plain:
             text = own.get(ident) or pack[ident]
             blocks.append(
@@ -923,6 +927,15 @@ _PLACE_VALUE = re.compile(r"\b0x[0-9A-Fa-f]{3,16}\b|\b(?:FUN_|fcn\.|sub_)[0-9A-F
 # block it may append after one; neither is the tool's own text.
 _RESULT_HEAD = re.compile(r"^\s*\[ev_\d{4,}\]\s*")
 _RESULT_TAIL = "\n\n=== "
+# The product's own envelope for a tool call that failed.
+_FAILED = re.compile(r'^\s*\{\s*"error"\s*:')
+# A tool whose description says it changes what the server holds (closes,
+# renames, sets, writes): a model reading a sample leaves it alone.
+_CHANGES_STATE = re.compile(
+    r"^\s*(?:\[[A-Z]+\]\s*)?(?:close|rename|set|add|delete|remove|write|save|modify|select|"
+    r"change|update)s?\b",
+    re.IGNORECASE,
+)
 
 
 def _answer_text(result: str) -> str:
@@ -959,7 +972,9 @@ def _value_under(value: Any, keys: tuple[str, ...]) -> str:
     return ""
 
 
-def _from_answers(name: str, prop: dict[str, Any], answers: list[str]) -> str:
+def _from_answers(
+    name: str, prop: dict[str, Any], answers: list[str], spent: frozenset[str] = frozenset()
+) -> str:
     """A value for a required string argument, read from the earlier answers, or empty.
 
     An argument whose name says it is a place in the code takes the first such
@@ -967,15 +982,16 @@ def _from_answers(name: str, prop: dict[str, Any], answers: list[str]) -> str:
     the same key in the latest answer that holds it, else under its last word;
     an argument only its description calls a place takes a place last. Read
     from the request's own tool answers, newest first, never from a tool's name.
+    A place in ``spent`` (one an earlier call failed at) is not taken again.
     """
     lowered = name.lower()
     words = tuple(dict.fromkeys((name, lowered, re.split(r"[_\W]+", lowered)[-1])))
 
     def place() -> str:
         for text in answers:
-            found = _PLACE_VALUE.search(text)
-            if found:
-                return found.group(0)
+            for found in _PLACE_VALUE.finditer(text):
+                if found.group(0) not in spent:
+                    return found.group(0)
         return ""
 
     if _PLACE_WORDS.search(lowered):
@@ -994,7 +1010,10 @@ def _from_answers(name: str, prop: dict[str, Any], answers: list[str]) -> str:
 
 
 def _fillable(
-    tool: dict[str, Any], facts: _Facts, answers: list[str] | None = None
+    tool: dict[str, Any],
+    facts: _Facts,
+    answers: list[str] | None = None,
+    spent: frozenset[str] = frozenset(),
 ) -> dict[str, Any] | None:
     """Arguments for ``tool`` this run can give it, or ``None`` when one cannot be given.
 
@@ -1030,7 +1049,9 @@ def _fillable(
         elif kind == "integer":
             value = 0
         else:
-            value = _from_answers(name, properties.get(name) or {}, answers) if answers else ""
+            value = (
+                _from_answers(name, properties.get(name) or {}, answers, spent) if answers else ""
+            )
             if not value:
                 return None
         args[name] = [value] if kind == "array" else value
@@ -1048,6 +1069,43 @@ def _varied(args: dict[str, Any], tool: dict[str, Any], step: int) -> dict[str, 
     return args
 
 
+def _lead(
+    request: wire.Request,
+    tools: dict[str, dict[str, Any]],
+    facts: _Facts,
+    answers: list[str],
+    order: list[str],
+    spent: frozenset[str] = frozenset(),
+) -> wire.ToolCall | None:
+    """The call the earlier answers lead to, as a model following them would make it.
+
+    First the tool the latest answer's remediation names, when it is offered;
+    then the first tool only the answers make callable (an argument read from
+    them), each with arguments it was not yet called with. ``None`` leaves the
+    choice to the rotation.
+    """
+    made = {(c.name, json.dumps(c.args, sort_keys=True)) for c in request.tool_calls_made}
+
+    def fresh(name: str, args: dict[str, Any] | None) -> wire.ToolCall | None:
+        if args is None or (name, json.dumps(args, sort_keys=True)) in made:
+            return None
+        return wire.ToolCall(name=name, args=args)
+
+    remedy = _value_under(_answer_json(answers[0]), ("remediation",))
+    for name in order:
+        if remedy and not _NEVER_CALL.match(name) and re.search(rf"\b{re.escape(name)}\b", remedy):
+            call = fresh(name, _fillable(tools[name], facts, answers, spent))
+            if call is not None:
+                return call
+    for name in order:
+        if _NEVER_CALL.match(name) or _fillable(tools[name], facts) is not None:
+            continue
+        call = fresh(name, _fillable(tools[name], facts, answers, spent))
+        if call is not None:
+            return call
+    return None
+
+
 def _next_call(
     request: wire.Request, facts: _Facts, step: int, fill_from_results: bool = False
 ) -> wire.ToolCall | None:
@@ -1059,11 +1117,28 @@ def _next_call(
     )
     order = [name for name in _TOOL_PREFERENCE if name in tools]
     order += sorted(name for name in tools if name not in order)
+    spent: frozenset[str] = frozenset()
+    if answers is not None:
+        # Following its answers, a model reads and leaves the server's state
+        # alone, and does not go back to a place a call already failed at.
+        order = [n for n in order if not _CHANGES_STATE.match(tools[n].get("description") or "")]
+        said = {r.id: _answer_text(r.text) for r in request.tool_results}
+        spent = frozenset(
+            str(value)
+            for call in request.tool_calls_made
+            if _FAILED.match(said.get(call.id, ""))
+            for value in call.args.values()
+            if isinstance(value, str)
+        )
+    if answers:
+        lead = _lead(request, tools, facts, answers, order, spent)
+        if lead is not None:
+            return lead
     candidates: list[wire.ToolCall] = []
     for name in order:
         if _NEVER_CALL.match(name):
             continue
-        args = _fillable(tools[name], facts, answers)
+        args = _fillable(tools[name], facts, answers, spent)
         if args is not None:
             candidates.append(wire.ToolCall(name=name, args=args))
     if not candidates:

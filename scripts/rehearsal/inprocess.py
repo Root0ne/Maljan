@@ -106,9 +106,12 @@ class Rehearsal:
     # id, as the worker passes ``static_sample_paths``; an empty value is the
     # rehearsal's own sample. ``None`` passes none.
     static_sample_paths: dict[str, str] | None = None
-    # The stub fills a required argument it has no rule for from the earlier
-    # tool answers of the same request (``roles._fillable``). Off by default,
-    # so the matrix calls exactly the tools it always called.
+    # The stub follows its earlier tool answers as a model would: it fills a
+    # required argument it has no rule for from them (``roles._fillable``),
+    # calls the tool a failed answer's remediation names, then the tools only
+    # the answers made callable (``roles._lead``), leaves tools that change
+    # the server's state alone, and cites what its answers found before what
+    # failed. Off by default, so the matrix calls exactly what it always called.
     fill_from_results: bool = False
     # Bytes appended to the sample after its last section, so a run can be
     # held to a sample of another hash; empty keeps the one sample.
