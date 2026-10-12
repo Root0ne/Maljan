@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Upload, X } from "lucide-react";
 import { api } from "@/lib/api";
 import type { SampleDTO, SandboxReportDTO } from "@/lib/api";
+import ReportFormatProposal from "./ReportFormatProposal";
+import { readProposal } from "./reportFormatProposal";
 import { getErrorMessage } from "@/lib/errors";
 import { countLabel, formatBytes, formatDateTime } from "@/lib/report-utils";
 import {
@@ -65,6 +67,8 @@ function SamplesPageContent() {
   const [attachedReport, setAttachedReport] = useState<SandboxReportDTO | null>(null);
   const [reportUploading, setReportUploading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
+  const [accepting, setAccepting] = useState(false);
+  const [acceptError, setAcceptError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const firstFieldRef = useRef<HTMLSelectElement>(null);
@@ -83,6 +87,7 @@ function SamplesPageContent() {
     setProfile("");
     setAttachedReport(null);
     setReportError(null);
+    setAcceptError(null);
     setSubmitError(null);
   }, []);
 
@@ -124,6 +129,28 @@ function SamplesPageContent() {
       setReportError(getErrorMessage(err) || "Failed to upload the report.");
     } finally {
       if (activeSubmitSampleIdRef.current === requestSampleId) setReportUploading(false);
+    }
+  }
+
+  async function acceptProposal(declaration: Record<string, unknown>) {
+    if (!submitFor || !attachedReport) return;
+    const requestSampleId = submitFor.id;
+    setAccepting(true);
+    setAcceptError(null);
+    try {
+      const read = await api.acceptSandboxReportFormat(
+        requestSampleId,
+        attachedReport.id,
+        declaration
+      );
+      if (activeSubmitSampleIdRef.current !== requestSampleId) return;
+      setAttachedReport(read);
+    } catch (err) {
+      if (activeSubmitSampleIdRef.current !== requestSampleId) return;
+      // The API's own sentence: why the declaration was not saved.
+      setAcceptError(getErrorMessage(err) || "The declaration was not accepted.");
+    } finally {
+      if (activeSubmitSampleIdRef.current === requestSampleId) setAccepting(false);
     }
   }
 
@@ -612,6 +639,18 @@ function SamplesPageContent() {
                     {attachedReport.warning}
                   </div>
                 )}
+                {attachedReport && (() => {
+                  const proposal = readProposal(attachedReport.proposal);
+                  return proposal ? (
+                    <ReportFormatProposal
+                      key={attachedReport.id}
+                      proposal={proposal}
+                      busy={accepting}
+                      error={acceptError}
+                      onAccept={acceptProposal}
+                    />
+                  ) : null;
+                })()}
               </div>
 
               <div className="flex justify-end gap-2 pt-2">
