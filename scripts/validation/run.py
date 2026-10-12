@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import copy
+import functools
 import json
 import os
 import shutil
@@ -360,39 +361,51 @@ def scenario_a(ctx: Context) -> list[RunResult]:
             ),
         ),
     }
-    r2 = reach_mod.by_server("r2")
+    r2_ok = lambda e: reach_mod.by_server("r2")(e) and bool(e.get("ok"))  # noqa: E731
 
-    def gates(record: RunRecord, rows: dict[str, Any], _dump: Path) -> Gates:
-        kinds = _entry_kinds(record, r2)
+    def gates(record: RunRecord, rows: dict[str, Any], _dump: Path, deep: bool = True) -> Gates:
+        own: Gates = {"preflight": (pre["ok"], json.dumps(pre))}
+        if not deep:
+            return own
+        kinds = _entry_kinds(record, r2_ok)
         code = [k for k in kinds if k in ("decompile", "disassembly", "function_disassembly")]
-        return {
-            "preflight": (pre["ok"], json.dumps(pre)),
-            "code_entry": (bool(code), f"r2 entry kinds: {kinds}"),
-            "code_listing_figure": (
-                rows["r2"]["E5"]["listing_from_source"],
-                f"{rows['r2']['E5']['code_listing_figures']} code listing figure(s)",
-            ),
-            "functions_examined": (rows["r2"]["E5"]["functions_examined"], ""),
-        }
-
-    results = []
-    runs = [(w, "normal") for w in ctx.wires] + [(ctx.wires[0], "long_loop")]
-    for wire, scenario in runs:
-        rehearsal = _rehearsal(
-            wire,
-            scenario,
-            extra=extra,
-            static_sample_paths={"r2": ""},
-            fill_from_results=True,
+        own.update(
+            {
+                "code_entry": (bool(code), f"r2 entry kinds filed ok: {kinds}"),
+                "code_listing_figure": (
+                    rows["r2"]["E5"]["listing_from_source"],
+                    f"{rows['r2']['E5']['code_listing_figures']} code listing figure(s)",
+                ),
+                "functions_examined": (rows["r2"]["E5"]["functions_examined"], ""),
+            }
         )
+        return own
+
+    # A normal run gives each analyst two tool calls, which the stub spends on
+    # the preferred tools: its r2 reach is recorded there and held in the long
+    # loop, whose sixteen calls follow the answers into the code.
+    results = []
+    runs = [(w, "normal", 2) for w in ctx.wires] + [(ctx.wires[0], "long_loop", 16)]
+    for wire, scenario, steps in runs:
+        rehearsal = replace(
+            _rehearsal(
+                wire,
+                scenario,
+                extra=extra,
+                static_sample_paths={"r2": ""},
+                fill_from_results=True,
+            ),
+            loop_steps=steps,
+        )
+        deep = scenario == "long_loop"
         result, _ = run_one(
             ctx,
             "a",
             f"{scenario}-{wire}",
             rehearsal,
-            servers={"r2": ALL_E},
+            servers={"r2": ALL_E if deep else ()},
             absent=("Ghidra",),
-            gates=gates,
+            gates=functools.partial(gates, deep=deep),
         )
         results.append(result)
     return results
@@ -827,7 +840,7 @@ def scenario_d(ctx: Context) -> list[RunResult]:
 # (e) a reputation server of the operator's
 # ---------------------------------------------------------------------------
 
-REP_DECLARED = {
+REP_DECLARED: dict[str, Any] = {
     "lookup_hash": {
         "kind": "reputation",
         "arguments": {"hash": "sha256"},
@@ -870,7 +883,7 @@ STUB_SERVICE = "Stub reputation"
 def scenario_e(ctx: Context) -> list[RunResult]:
     base = stdio_server(ctx, REP_STUB, agents=["judge"], label=STUB_SERVICE)
     e1 = {**base, "roles": ["reputation"], "tool_facts": REP_DECLARED}
-    first_rank = copy.deepcopy(REP_DECLARED)
+    first_rank: dict[str, Any] = copy.deepcopy(REP_DECLARED)
     first_rank["lookup_hash"]["reputation"]["rank"] = 0
     e1_first = {**e1, "tool_facts": first_rank}
     e2 = dict(base)
@@ -896,7 +909,9 @@ def scenario_e(ctx: Context) -> list[RunResult]:
             ) -> Gates:
                 rep = record.malware_report.get("reputation") or []
                 first = rep[0] if rep else {}
-                stub = next((r for r in rep if r.get("service") == STUB_SERVICE), {})
+                stub: dict[str, Any] = next(
+                    (r for r in rep if r.get("service") == STUB_SERVICE), {}
+                )
                 own: Gates = {
                     "first_service": (
                         (first.get("service") or "") == expected,
@@ -1034,16 +1049,32 @@ def scenario_f2(ctx: Context) -> list[RunResult]:
 
 
 def scenario_f3(ctx: Context) -> list[RunResult]:
-    """The agent holding the kit holds no built-in server of the same tool names."""
-    static = _defaults().agents.definitions["static"].model_dump(mode="json")
-    static["tools"] = [
+    """The agent holding the kit holds no built-in server of the same tool names.
+
+    A clone of the built-in static analyst (built-ins are cloned, never
+    changed) with the kit in place of the analysis server takes the static
+    analyst's place in the default stages.
+    """
+    clone = _defaults().agents.definitions["static"].model_dump(mode="json", exclude_none=True)
+    clone["label"] = "Static analyst (operator kit)"
+    clone.pop("tab", None)
+    clone["tools"] = [
         {"kind": "mcp", "server": "kit"},
-        *[t for t in static.get("tools") or [] if t.get("server") != "analysis"],
+        *[t for t in clone.get("tools") or [] if t.get("server") != "analysis"],
     ]
+    stages = default_stages()
+    for stage in stages:
+        stage["agents"] = [
+            "validation_static" if a == "static" else a for a in stage.get("agents") or []
+        ]
     results = []
     for label, facts in (("undeclared", {}), ("declared", KIT_DECLARED)):
         kit = stdio_server(ctx, KIT_STUB, tool_facts=facts)
-        extra = {"mcp.servers": {"kit": kit}, "agents.definitions": {"static": static}}
+        extra = {
+            "mcp.servers": {"kit": kit},
+            "agents.definitions": {"validation_static": clone},
+            **profile("validation_kit_alone", stages),
+        }
         results.append(_kit_run(ctx, f"f3-{label}", extra, facts))
     return results
 

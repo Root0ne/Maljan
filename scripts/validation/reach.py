@@ -16,7 +16,8 @@ the evidence entries of one source:
   Reputation row, dynamic sections) are read off for the scenario to gate;
 * **E6 nothing false** — no degradation names the source unavailable, no
   published text names a tool the scenario says the run did not use, and no
-  entry filed ``ok`` reads as an error.
+  entry filed ``ok`` reads as an error, and no figure draws an answer filed
+  as failed.
 
 The source is matched by the entry's ``server`` or its ``source``
 (``<server>``, ``mcp:<server>``, ``provider:<server>``), or by a predicate
@@ -25,6 +26,7 @@ the caller gives; nothing here names a tool.
 
 from __future__ import annotations
 
+import html
 import json
 import re
 from collections.abc import Callable, Iterable
@@ -291,11 +293,17 @@ def reach(
         for f in mr.get("figures") or []
         if isinstance(f, dict) and f.get("kind") == "code_listing"
     ]
+    drawn = [html.unescape(str(f.get("content") or "")) for f in listings]
     own_heads = [answers.get(i, "").strip()[:40] for i in ok_ids if answers.get(i, "").strip()]
     listing_from_source = any(
-        head and head.split("\n", 1)[0] in str(f.get("content") or "")
-        for f in listings
-        for head in own_heads
+        head and head.split("\n", 1)[0] in text for text in drawn for head in own_heads
+    )
+    # A figure drawn from an answer this source filed as failed: an error shown as code.
+    failed_ids = [i for i in ids if i not in set(ok_ids)]
+    failed_drawn = sorted(
+        i
+        for i in failed_ids
+        if (head := answers.get(i, "").strip()[:60]) and any(head in text for text in drawn)
     )
     functions_examined = any(
         isinstance(s, dict)
@@ -325,10 +333,11 @@ def reach(
     named_absent = absent_names(record, absent)
     suspect = [i for i in ok_ids if _ERROR_WORDS.match(answers.get(i, ""))]
     e6 = {
-        "ok": not naming and not named_absent and not suspect,
+        "ok": not naming and not named_absent and not suspect and not failed_drawn,
         "degradations_naming": naming,
         "absent_named": named_absent,
         "ok_but_reads_as_error": suspect,
+        "failed_answer_drawn_as_listing": failed_drawn,
     }
     return {"server": server_key, "E1": e1, "E2": e2, "E3": e3, "E4": e4, "E5": e5, "E6": e6}
 

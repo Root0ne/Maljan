@@ -143,6 +143,49 @@ def the_stub_fills_from_answers_only_when_asked() -> None:
 
 
 @check
+def the_stub_follows_a_remediation_then_the_answers_leads() -> None:
+    from scripts.rehearsal import wire
+    from scripts.rehearsal.roles import _next_call
+
+    tools = [
+        _tool("aaa_listing", {}),
+        _tool("any_decompiler", {"address": {"type": "string"}}),
+        _tool("open_it", {"file_path": {"type": "string"}}),
+    ]
+    refusal = json.dumps(
+        {"error": {"code": "tool_failed", "remediation": "call open_it with the path, then again"}}
+    )
+
+    def request(*answers: tuple[str, str, dict[str, Any]]) -> Any:
+        turns = [wire.Turn(role="user", text="go")]
+        for i, (name, text, args) in enumerate(answers):
+            turns.append(
+                wire.Turn(role="assistant", tool_calls=[wire.ToolCall(name, args, f"c{i}")])
+            )
+            turns.append(wire.Turn(role="user", tool_results=[wire.ToolResult(f"c{i}", text)]))
+        return wire.Request("openai", "m", "sys", turns, tools, None, False, {})
+
+    first = request(("aaa_listing", refusal, {}))
+    call = _next_call(first, _facts(), 1, fill_from_results=True)
+    assert call is not None and call.name == "open_it", call
+    assert call.args == {"file_path": "/s/sample_1.exe"}
+    opened = request(
+        ("aaa_listing", refusal, {}), ("open_it", LISTING, {"file_path": "/s/sample_1.exe"})
+    )
+    call = _next_call(opened, _facts(), 2, fill_from_results=True)
+    assert call is not None and call.name == "any_decompiler", call
+    again = request(
+        ("open_it", LISTING, {"file_path": "/s/sample_1.exe"}),
+        ("any_decompiler", "int f(void);", {"address": "0x00401000"}),
+    )
+    call = _next_call(again, _facts(), 2, fill_from_results=True)
+    assert call is None or call.args != {"address": "0x00401000"}, call
+    # Off, the rotation is what it always was: the answers lead nowhere.
+    rotated = {getattr(_next_call(first, _facts(), step), "name", "") for step in range(4)}
+    assert rotated == {"aaa_listing", "open_it"}, rotated
+
+
+@check
 def a_report_is_refused_by_a_provider_that_takes_none() -> None:
     from scripts.rehearsal.inprocess import attach_report
 
