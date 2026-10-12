@@ -18,6 +18,8 @@ export interface ReportFormatProposal {
   fields: Record<string, ProposedFormatField>;
   declaration?: Record<string, unknown>;
   failed?: string;
+  /** What the proposer's reading horizons left unread, in words. */
+  notes?: string[];
 }
 
 const CONFIDENCES = new Set(["high", "medium", "low"]);
@@ -50,7 +52,15 @@ export function readProposal(raw: unknown): ReportFormatProposal | null {
     fields,
     ...(isRecord(raw.declaration) ? { declaration: raw.declaration } : {}),
     ...(typeof raw.failed === "string" ? { failed: raw.failed } : {}),
+    ...(Array.isArray(raw.notes)
+      ? { notes: raw.notes.filter((n): n is string => typeof n === "string") }
+      : {}),
   };
+}
+
+/** Whether a report row was accepted unread, so its proposal can be read again. */
+export function isUnread(format: string | null | undefined): boolean {
+  return format === "unread";
 }
 
 /** The fields in the order they are shown: how it is recognised, then where its parts sit. */

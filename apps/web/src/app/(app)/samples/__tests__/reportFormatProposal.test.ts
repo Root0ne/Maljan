@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import ReportFormatProposal from "../ReportFormatProposal";
 import {
+  isUnread,
   parseDeclaration,
   readProposal,
   shownFields,
@@ -109,6 +110,7 @@ describe("ReportFormatProposal", () => {
         proposal: readProposal(hostile)!,
         busy: false,
         error: null,
+        canAccept: true,
         onAccept: () => {},
       })
     );
@@ -126,11 +128,52 @@ describe("ReportFormatProposal", () => {
         proposal: readProposal({ v: 1, fields: {}, failed: "no block is named plainly" })!,
         busy: false,
         error: null,
+        canAccept: true,
         onAccept: () => {},
       })
     );
     expect(html).toContain("no block is named plainly");
     expect(html).not.toContain("Accept this declaration");
+  });
+
+  it("offers the accept to an admin alone", () => {
+    const html = renderToStaticMarkup(
+      createElement(ReportFormatProposal, {
+        proposal: readProposal(PROPOSAL)!,
+        busy: false,
+        error: null,
+        canAccept: false,
+        onAccept: () => {},
+      })
+    );
+    expect(html).not.toContain("Accept this declaration");
+    expect(html).not.toContain("<textarea");
+    expect(html).toContain("An admin accepts or edits this declaration.");
+    expect(html).toContain("mapping.processes");
+  });
+
+  it("says, as text, what the reading horizons left unread", () => {
+    const read = readProposal({
+      ...PROPOSAL,
+      notes: ["3 containers nested more than 16 path segments <b>x</b>", 7],
+    })!;
+    expect(read.notes).toEqual(["3 containers nested more than 16 path segments <b>x</b>"]);
+    const html = renderToStaticMarkup(
+      createElement(ReportFormatProposal, {
+        proposal: read,
+        busy: false,
+        error: null,
+        canAccept: true,
+        onAccept: () => {},
+      })
+    );
+    expect(html).toContain("16 path segments &lt;b&gt;x&lt;/b&gt;");
+  });
+
+  it("knows an unread row by its format", () => {
+    expect(isUnread("unread")).toBe(true);
+    expect(isUnread("cape2")).toBe(false);
+    expect(isUnread(null)).toBe(false);
   });
 
   it("shows a value as one line", () => {

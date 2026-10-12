@@ -868,6 +868,13 @@ class ApiClient {
     );
   }
 
+  /** An unread upload with its proposed declaration, read again from the stored report. */
+  getSandboxReportProposal(sampleId: string, reportId: string) {
+    return this.request<SandboxReportDTO>(
+      `/api/v1/samples/${sampleId}/sandbox-reports/${reportId}/proposal`
+    );
+  }
+
   /** Save an admin-accepted format declaration and read the unread upload as it. */
   acceptSandboxReportFormat(
     sampleId: string,

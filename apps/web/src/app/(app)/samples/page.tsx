@@ -6,7 +6,8 @@ import { Upload, X } from "lucide-react";
 import { api } from "@/lib/api";
 import type { SampleDTO, SandboxReportDTO } from "@/lib/api";
 import ReportFormatProposal from "./ReportFormatProposal";
-import { readProposal } from "./reportFormatProposal";
+import { isUnread, readProposal } from "./reportFormatProposal";
+import { useAuth } from "@/lib/auth";
 import { getErrorMessage } from "@/lib/errors";
 import { countLabel, formatBytes, formatDateTime } from "@/lib/report-utils";
 import {
@@ -67,6 +68,7 @@ function SamplesPageContent() {
   const [attachedReport, setAttachedReport] = useState<SandboxReportDTO | null>(null);
   const [reportUploading, setReportUploading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
+  const { user: authUser } = useAuth();
   const [accepting, setAccepting] = useState(false);
   const [acceptError, setAcceptError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -131,6 +133,24 @@ function SamplesPageContent() {
       if (activeSubmitSampleIdRef.current === requestSampleId) setReportUploading(false);
     }
   }
+
+  // An unread report attached without its proposal (the upload could not read
+  // one): read it again from the stored report.
+  useEffect(() => {
+    if (!submitFor || !attachedReport || !isUnread(attachedReport.format)) return;
+    if (readProposal(attachedReport.proposal)) return;
+    const requestSampleId = submitFor.id;
+    const reportId = attachedReport.id;
+    api
+      .getSandboxReportProposal(requestSampleId, reportId)
+      .then((read) => {
+        if (activeSubmitSampleIdRef.current !== requestSampleId) return;
+        if (read.proposal) setAttachedReport(read);
+      })
+      .catch(() => {
+        // The upload's answer stands; the proposal is advisory.
+      });
+  }, [submitFor, attachedReport]);
 
   async function acceptProposal(declaration: Record<string, unknown>) {
     if (!submitFor || !attachedReport) return;
@@ -631,7 +651,19 @@ function SamplesPageContent() {
                     {attachedReport.format} · task {attachedReport.task_id ?? "unknown"}
                   </p>
                 )}
-                {attachedReport && !attachedReport.sample_sha256_match && attachedReport.warning && (
+                {attachedReport && isUnread(attachedReport.format) && attachedReport.warning && (
+                  <div
+                    role="status"
+                    data-unread-warning
+                    className="mt-2 text-status-orange bg-status-orange/10 border border-status-orange/20 rounded px-2 py-1.5"
+                  >
+                    {attachedReport.warning}
+                  </div>
+                )}
+                {attachedReport &&
+                  !isUnread(attachedReport.format) &&
+                  !attachedReport.sample_sha256_match &&
+                  attachedReport.warning && (
                   <div
                     role="alert"
                     className="mt-2 text-status-red bg-status-red/10 border border-status-red/20 rounded px-2 py-1.5"
@@ -647,6 +679,7 @@ function SamplesPageContent() {
                       proposal={proposal}
                       busy={accepting}
                       error={acceptError}
+                      canAccept={authUser?.role === "admin"}
                       onAccept={acceptProposal}
                     />
                   ) : null;

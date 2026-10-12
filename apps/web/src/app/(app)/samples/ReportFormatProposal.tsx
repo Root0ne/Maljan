@@ -15,11 +15,14 @@ export default function ReportFormatProposal({
   proposal,
   busy,
   error,
+  canAccept,
   onAccept,
 }: {
   proposal: Proposal;
   busy: boolean;
   error: string | null;
+  /** Only an admin accepts a declaration; anyone else reads the proposal. */
+  canAccept: boolean;
   onAccept: (declaration: Record<string, unknown>) => void;
 }) {
   const [text, setText] = useState(() =>
@@ -58,7 +61,15 @@ export default function ReportFormatProposal({
         ))}
       </ul>
       {proposal.failed && <p className="text-text-muted">{proposal.failed}</p>}
-      {proposal.declaration && (
+      {proposal.notes?.map((note) => (
+        <p key={note} className="text-text-muted" data-format-proposal-note>
+          {note}
+        </p>
+      ))}
+      {proposal.declaration && !canAccept && (
+        <p className="text-text-muted">An admin accepts or edits this declaration.</p>
+      )}
+      {proposal.declaration && canAccept && (
         <>
           <label htmlFor="format-declaration" className="block text-text-muted">
             Declaration (edit before accepting)
