@@ -34,7 +34,10 @@ The built-in formats (:data:`BUILTIN_REPORT_FORMATS`) reproduce what the
 platform recognised and read before formats were declared. An operator
 declares more in ``sandbox.report_formats``, read by every sandbox provider
 and by the upload route alike. A new name is tried before the built-ins,
-because the operator's format is the more specific knowledge; a declaration
+because the operator's format is the more specific knowledge, except a
+format read through a mapping (``reader: generic``, an accepted proposal
+among them), which is tried after every built-in
+(``providers.sandbox.readers.sandbox_formats``); a declaration
 under a built-in's name is merged over that built-in field by field, in its
 place, so a field it does not set keeps the shipped value
 (:func:`effective_formats`).

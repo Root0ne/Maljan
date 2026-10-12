@@ -207,13 +207,20 @@ async def _read_payload(file: UploadFile, db: AsyncSession) -> tuple[bytes, dict
             ) from exc
     try:
         # Read at any nesting depth: a report nested past ``json.loads``'s
-        # recursion is read again iteratively (``core.safe_json``).
-        payload = loads(body.decode("utf-8-sig"))
+        # recursion is read again iteratively (``core.safe_json``). Linear in
+        # the body, but a large body is still seconds of work, so it is read in
+        # a worker thread and never holds the event loop.
+        payload = await asyncio.to_thread(_parsed, body)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "File is not valid JSON") from exc
     if not isinstance(payload, dict):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "A sandbox report must be a JSON object")
     return body, payload
+
+
+def _parsed(body: bytes) -> Any:
+    """``body`` decoded and read as JSON at any depth (``core.safe_json.loads``)."""
+    return loads(body.decode("utf-8-sig"))
 
 
 def _read_declared(
@@ -275,12 +282,19 @@ def _match_warning(*, matches: bool, sample_sha256: str) -> str | None:
     )
 
 
-async def _load_sample(db: AsyncSession, sample_id: uuid.UUID, user: User) -> Sample:
-    row = (
-        await db.execute(
-            select(Sample).where(Sample.id == sample_id, Sample.uploaded_by == user.id)
-        )
-    ).scalar_one_or_none()
+async def _load_sample(
+    db: AsyncSession, sample_id: uuid.UUID, user: User, *, any_for_admin: bool = False
+) -> Sample:
+    """The sample ``user`` uploaded; any sample for an admin where ``any_for_admin``.
+
+    An unread report's proposal is accepted into the settings, an admin's
+    write: an admin reads and accepts the proposal of any stored report, not
+    only of the samples they uploaded.
+    """
+    query = select(Sample).where(Sample.id == sample_id)
+    if not (any_for_admin and getattr(user, "role", None) == "admin"):
+        query = query.where(Sample.uploaded_by == user.id)
+    row = (await db.execute(query)).scalar_one_or_none()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Sample not found")
     return row
@@ -540,8 +554,12 @@ async def sandbox_report_proposal(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> SandboxReportResponse:
-    """An unread upload with its proposed declaration, read again from the stored report."""
-    sample = await _maybe_await(_load_sample(db, sample_id, user))
+    """An unread upload with its proposed declaration, read again from the stored report.
+
+    The uploader's own reports, and any stored report for an admin, who may
+    accept its proposal.
+    """
+    sample = await _maybe_await(_load_sample(db, sample_id, user, any_for_admin=True))
     row = await _owned_row(db, sample, report_id)
     proposal = None
     if row.format == UNREAD_FORMAT:
@@ -586,6 +604,62 @@ def _accepted_formats(
     return formats, allowed
 
 
+# Accepts rewrite the whole ``sandbox.report_formats`` list: one at a time, so
+# none drops another's declaration (in this process by this lock, across
+# processes by a transaction-scoped database lock where the database has one).
+_ACCEPT_LOCK = asyncio.Lock()
+_ACCEPT_LOCK_KEY = int.from_bytes(hashlib.sha256(b"sandbox.report_formats").digest()[:4], "big")
+
+
+async def _serialise_accepts(db: AsyncSession) -> None:
+    """Hold the database's transaction lock on the report formats, where it has one."""
+    from sqlalchemy import text
+
+    bind = getattr(db, "bind", None)
+    dialect = getattr(getattr(bind, "dialect", None), "name", "")
+    if dialect == "postgresql":
+        await db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _ACCEPT_LOCK_KEY})
+
+
+def _trial_read(payload: dict[str, Any], declaration: ReportFormat, fallback: Any) -> str:
+    """Why ``declaration`` reads nothing of ``payload``, in words; empty where it reads something.
+
+    The report is read as an upload of the format would be: a format read
+    through a mapping must select something with one of its paths (a row in a
+    channel or a place, or the target hash); any other reader must read it
+    without failing.
+    """
+    from maljan.providers.sandbox.readers import format_mapping
+    from maljan.providers.sandbox.rest_mapping import (
+        CHANNELS,
+        apply_mapping,
+        compile_mapping,
+    )
+
+    reader = report_reader(declaration.reader)
+    if reader is None:
+        return f"The declaration names no registered reader ({declaration.reader!r})."
+    mapping = format_mapping(declaration, fallback)
+    if not reader.reads_mapping or mapping is None:
+        try:
+            reader.read(payload, provider="upload", fmt=declaration, mapping=mapping)
+        except Exception as exc:  # noqa: BLE001 — the reason is the answer
+            return f"Its reader cannot read this report ({type(exc).__name__})."
+        return ""
+    result = apply_mapping(compile_mapping(mapping), payload, provider="upload", task_id="")
+    selected = [
+        name
+        for name, stats in result.stats.items()
+        if stats.kept and (name in CHANNELS or name.startswith(("channels.", "places.")))
+    ]
+    if selected or result.report.target.sha256:
+        return ""
+    return (
+        "Read with this report, its mapping selects nothing: no path keeps a row and the "
+        "target hash path names no hash. Correct the paths before accepting it."
+    )
+
+
 @formats_router.post("/accept", response_model=SandboxReportResponse)
 async def accept_report_format(
     body: AcceptReportFormatRequest,
@@ -595,13 +669,17 @@ async def accept_report_format(
 ) -> SandboxReportResponse | Any:
     """Save an operator-accepted format declaration and read the unread upload as it.
 
-    The declaration must recognise the upload it is accepted for, and its
-    reader must read it, or nothing is saved: an accepted declaration that
+    The declaration must be the format that recognises the upload (a format
+    read through a mapping is tried after every built-in, so one a built-in
+    also recognises is refused, named), and a trial read of the upload with it
+    must read something, or nothing is saved: an accepted declaration that
     reads nothing would leave the report unread with the operator told
-    otherwise. On success the declaration is saved through the settings path
-    every declaration takes (validated and audited), its name is allowed for
+    otherwise. An admin accepts for any stored report. Accepts run one at a
+    time, each reading the formats as they stand, so none drops another. On
+    success the declaration is saved through the settings path every
+    declaration takes (validated and audited), its name is allowed for
     upload, and the upload's row records the format, its task id and target
-    match as an upload of that format records them.
+    match as an upload of that format records them, in the same commit.
     """
     from fastapi.responses import JSONResponse
 
@@ -620,50 +698,61 @@ async def accept_report_format(
             f"The declaration does not validate ({exc.error_count()} errors): "
             + "; ".join(str(error.get("msg", "")) for error in exc.errors()[:5]),
         ) from exc
-    sample = await _maybe_await(_load_sample(db, body.sample_id, user))
+    sample = await _maybe_await(_load_sample(db, body.sample_id, user, any_for_admin=True))
     row = await _owned_row(db, sample, body.report_id)
     if row.format != UNREAD_FORMAT:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             f"This report is read as {row.format!r} already, not unread.",
         )
-    sandbox = await _sandbox_settings(db)
-    formats, allowed = _accepted_formats(sandbox, declaration)
     payload = await _stored_payload(row)
-    candidate = sandbox_formats([*sandbox.report_formats, declaration])
-    fmt, task_id, target_sha = await asyncio.to_thread(_read_declared, payload, candidate)
-    if fmt is None or fmt.name != declaration.name:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            "The declaration does not recognise this report"
-            + (f" (it is recognised as {fmt.name!r} first)" if fmt is not None else "")
-            + "; nothing was saved.",
+    async with _ACCEPT_LOCK:
+        await _serialise_accepts(db)
+        # The formats as they stand now, not as a cache read them a moment ago.
+        core_settings_cache.invalidate()
+        sandbox = await _sandbox_settings(db)
+        formats, allowed = _accepted_formats(sandbox, declaration)
+        candidate = sandbox_formats([*sandbox.report_formats, declaration])
+        fmt, task_id, target_sha = await asyncio.to_thread(_read_declared, payload, candidate)
+        if fmt is None or fmt.name != declaration.name:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                (
+                    f"This report is recognised as {fmt.name!r}, which is tried before a "
+                    "format read through a mapping: a declaration a built-in or another "
+                    "declared format also claims would never read it. Add a detect test "
+                    "only this report passes; nothing was saved."
+                )
+                if fmt is not None
+                else "The declaration does not recognise this report; nothing was saved.",
+            )
+        refusal = mapping_refusal(declaration) or await asyncio.to_thread(
+            _trial_read, payload, declaration, sandbox.rest.mapping
         )
-    if report_reader(declaration.reader) is None or mapping_refusal(declaration):
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            mapping_refusal(declaration)
-            or f"The declaration names no registered reader ({declaration.reader!r}); "
-            "nothing was saved.",
-        )
-    try:
-        await SettingsService(db).save(
-            {"sandbox.report_formats": formats, "sandbox.upload.allowed_formats": allowed},
-            user_id=user.id,
-            ip=request.client.host if request.client else None,
-        )
-    except SettingsValidationError as exc:
-        return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"errors": exc.errors}
-        )
-    runtime_config.invalidate()
-    core_settings_cache.invalidate()
-    matches = bool(target_sha) and target_sha.lower() == sample.sha256.lower()
-    row.format = declaration.name
-    row.task_id = task_id
-    row.sample_sha256_match = matches
-    row.updated_at = datetime.now(UTC)
-    await db.flush()
+        if refusal:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT, f"{refusal} Nothing was saved."
+            )
+        matches = bool(target_sha) and target_sha.lower() == sample.sha256.lower()
+        # The row first: the settings save commits, so the two land together.
+        row.format = declaration.name
+        row.task_id = task_id
+        row.sample_sha256_match = matches
+        row.updated_at = datetime.now(UTC)
+        await db.flush()
+        try:
+            await SettingsService(db).save(
+                {"sandbox.report_formats": formats, "sandbox.upload.allowed_formats": allowed},
+                user_id=user.id,
+                ip=request.client.host if request.client else None,
+            )
+        except SettingsValidationError as exc:
+            await db.rollback()
+            return JSONResponse(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"errors": exc.errors}
+            )
+        runtime_config.invalidate()
+        core_settings_cache.invalidate()
     await audit.record(
         "sandbox_report.format_accepted",
         resource_type="sandbox_report",

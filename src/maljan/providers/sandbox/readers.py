@@ -267,23 +267,35 @@ class ReaderFormat:
 def sandbox_formats(declared: Iterable[ReportFormat] = ()) -> tuple[Any, ...]:
     """The formats a payload is tried against, in order: the registry's ids.
 
-    The operator's newly declared formats first, then each registered reader
-    that recognises payloads on its own and that no declaration names, then
-    the shipped declarations (an operator's declaration under a shipped name
-    merged over it): ``core.report_formats.effective_formats`` with the
-    registered readers in their place.
+    The operator's newly declared formats a reader of its own reads first,
+    then each registered reader that recognises payloads on its own and that
+    no declaration names, then the shipped declarations (an operator's
+    declaration under a shipped name merged over it), and last the newly
+    declared formats read through a mapping (an accepted proposal among
+    them): ``core.report_formats.effective_formats`` with the registered
+    readers in their place. A format read through a mapping is recognised by
+    the blocks it reads, which a built-in report may hold too; tried after
+    every built-in sniffer, it never takes a report a built-in reader reads.
     """
     formats = effective_formats(declared)
     builtin_names = {fmt.name for fmt in BUILTIN_REPORT_FORMATS}
     named = {fmt.name for fmt in formats}
     new = [fmt for fmt in formats if fmt.name not in builtin_names]
+    mapped = [fmt for fmt in new if _reads_mapping(fmt)]
+    own = [fmt for fmt in new if not _reads_mapping(fmt)]
     shipped = [fmt for fmt in formats if fmt.name in builtin_names]
     reader_only = [
         ReaderFormat(reader)
         for reader_id in report_reader_ids()
         if (reader := _READERS[reader_id]).sniffs and reader_id not in named
     ]
-    return (*new, *reader_only, *shipped)
+    return (*own, *reader_only, *shipped, *mapped)
+
+
+def _reads_mapping(fmt: Any) -> bool:
+    """Whether format ``fmt`` is read through a mapping: its reader is the mapping reader."""
+    reader = report_reader(getattr(fmt, "reader", ""))
+    return bool(reader is not None and reader.reads_mapping)
 
 
 def format_mapping(fmt: Any, fallback: Any = None) -> Any:

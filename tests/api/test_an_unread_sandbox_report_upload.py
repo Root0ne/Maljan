@@ -229,3 +229,183 @@ def test_the_listing_says_an_unread_row_is_unread(monkeypatch) -> None:
     body = TestClient(app).get(f"/api/v1/samples/{sample.id}/sandbox-reports").json()
     assert body["items"][0]["warning"] == module.UNREAD_WARNING
     assert json.dumps(body).count("does not match") == 0
+
+
+# A report shaped as a built-in's blocks, but missing what the built-in tests.
+_BEHAVIOR_NETWORK = {
+    "behavior": {"processes": [{"pid": 7, "ppid": 1, "name": "a.exe"}], "summary": {"x": 1}},
+    "network": {"dns": [{"request": "own-i2.example", "type": "A", "answers": []}]},
+}
+
+
+def _sniffed(formats: list[Any]) -> str:
+    from maljan.core.report_formats import ReportFormat, sniff
+    from maljan.providers.sandbox.readers import sandbox_formats
+
+    cape = json.loads(_blob("cape2_synthetic.json"))
+    found = sniff(cape, sandbox_formats([ReportFormat.model_validate(f) for f in formats]))
+    assert found is not None
+    return found.name
+
+
+@pytest.mark.parametrize("loosened", [False, True], ids=["as-proposed", "loosened"])
+def test_an_accepted_format_never_takes_a_built_in_report(monkeypatch, loosened: bool) -> None:
+    before = _sniffed([])
+    api, sample, state = _client(monkeypatch, ["cape2", "cuckoo", "unread"])
+    saved = AsyncMock()
+    monkeypatch.setattr("app.services.settings_service.SettingsService.save", saved)
+    body = _upload(api, sample, json.dumps(_BEHAVIOR_NETWORK).encode()).json()
+    assert body["format"] == "unread"
+    declaration = body["proposal"]["declaration"]
+    if loosened:
+        # An operator's edit: tested by the two blocks alone, as a built-in's report has them.
+        declaration["detect"] = [
+            [
+                {"path": "/behavior", "types": ["object"]},
+                {"path": "/network", "types": ["object"]},
+            ]
+        ]
+    r = _accept(api, sample, state["rows"][0], declaration)
+    assert r.status_code == 200, r.text
+    accepted = saved.await_args.args[0]["sandbox.report_formats"]
+    assert _sniffed(accepted) == before
+
+
+def test_a_declaration_a_built_in_also_claims_for_the_report_is_refused(monkeypatch) -> None:
+    api, sample, state = _client(monkeypatch, ["cape2", "cuckoo", "unread"])
+    saved = AsyncMock()
+    monkeypatch.setattr("app.services.settings_service.SettingsService.save", saved)
+    body = _upload(api, sample, json.dumps(_BEHAVIOR_NETWORK).encode()).json()
+    row = state["rows"][0]
+    # The stored report as a built-in now reads it (the built-in's own test passes).
+    claimed = {**_BEHAVIOR_NETWORK, "info": {"id": 3}}
+    state["stored"][row.storage_path] = json.dumps(claimed).encode()
+    r = _accept(api, sample, row, body["proposal"]["declaration"])
+    assert r.status_code == 422
+    assert "'cuckoo'" in r.json()["detail"]
+    assert "nothing was saved" in r.json()["detail"]
+    saved.assert_not_awaited()
+    assert row.format == "unread"
+
+
+def test_a_declaration_whose_mapping_reads_nothing_is_refused(monkeypatch) -> None:
+    api, sample, state = _client(monkeypatch, ["unread"])
+    saved = AsyncMock()
+    monkeypatch.setattr("app.services.settings_service.SettingsService.save", saved)
+    body = _upload(api, sample, _blob("unread_flat_report.json")).json()
+    declaration = body["proposal"]["declaration"]
+    declaration["mapping"] = {
+        "target_sha256": "$['sample_info']['no_such_hash']",
+        "processes": "$['no_such_list'][*]",
+    }
+    r = _accept(api, sample, state["rows"][0], declaration)
+    assert r.status_code == 422
+    assert "selects nothing" in r.json()["detail"]
+    saved.assert_not_awaited()
+    assert state["rows"][0].format == "unread"
+
+
+def test_an_admin_reads_and_accepts_any_stored_report_s_proposal(monkeypatch) -> None:
+    api, sample, state = _client(monkeypatch, ["unread"])
+    saved = AsyncMock()
+    monkeypatch.setattr("app.services.settings_service.SettingsService.save", saved)
+    _upload(api, sample, _blob("unread_flat_report.json"))
+    row = state["rows"][0]
+    got = api.get(f"/api/v1/samples/{sample.id}/sandbox-reports/{row.id}/proposal")
+    assert got.status_code == 200
+    assert got.json()["proposal"]["declaration"]["reader"] == "generic"
+    r = _accept(api, sample, row, got.json()["proposal"]["declaration"])
+    assert r.status_code == 200, r.text
+    calls = module._load_sample.call_args_list
+    # The proposal and the accept reach any sample for an admin; the upload only the user's own.
+    assert [c.kwargs.get("any_for_admin", False) for c in calls] == [False, True, True]
+
+
+@pytest.mark.parametrize(("role", "owner_only"), [("admin", False), ("analyst", True)])
+def test_only_an_admin_reaches_a_sample_they_did_not_upload(role: str, owner_only: bool) -> None:
+    import asyncio
+
+    seen: list[str] = []
+
+    async def _execute(query: Any) -> Any:
+        seen.append(str(query).split("WHERE", 1)[1])
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = MagicMock()
+        return result
+
+    db = MagicMock()
+    db.execute = _execute
+    user = MagicMock(id=uuid.uuid4(), role=role)
+    asyncio.run(module._load_sample(db, uuid.uuid4(), user, any_for_admin=True))
+    asyncio.run(module._load_sample(db, uuid.uuid4(), user))
+    assert ("uploaded_by" in seen[0]) is owner_only
+    assert "uploaded_by" in seen[1]
+
+
+def test_concurrent_accepts_keep_every_declaration(monkeypatch) -> None:
+    import asyncio
+
+    import httpx
+
+    api, sample, state = _client(monkeypatch, ["unread"])
+    flat = _upload(api, sample, _blob("unread_flat_report.json")).json()
+    nested = _upload(api, sample, _blob("unread_nested_report.json")).json()
+
+    async def _save(self: Any, changes: dict[str, Any], **_kw: Any) -> None:
+        # The write lands after a pause, as a database round trip does.
+        await asyncio.sleep(0.05)
+        state["sandbox"] = SandboxConfig.model_validate(
+            {
+                "report_formats": changes["sandbox.report_formats"],
+                "upload": {"allowed_formats": changes["sandbox.upload.allowed_formats"]},
+            }
+        )
+
+    monkeypatch.setattr("app.services.settings_service.SettingsService.save", _save)
+
+    async def _both() -> list[Any]:
+        transport = httpx.ASGITransport(app=api.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+            return list(
+                await asyncio.gather(
+                    *(
+                        client.post(
+                            "/api/v1/sandbox-report-formats/accept",
+                            json={
+                                "declaration": body["proposal"]["declaration"],
+                                "sample_id": str(sample.id),
+                                "report_id": str(row.id),
+                            },
+                        )
+                        for body, row in zip((flat, nested), state["rows"], strict=True)
+                    )
+                )
+            )
+
+    answers = asyncio.run(_both())
+    assert [a.status_code for a in answers] == [200, 200], [a.text for a in answers]
+    names = {fmt.name for fmt in state["sandbox"].report_formats}
+    assert names == {
+        flat["proposal"]["declaration"]["name"],
+        nested["proposal"]["declaration"]["name"],
+    }
+
+
+def test_the_upload_body_is_read_off_the_event_loop(monkeypatch) -> None:
+    import asyncio
+
+    api, sample, _state = _client(monkeypatch, ["unread"])
+    on_loop: list[bool] = []
+    real = module.loads
+
+    def _loads(text: Any) -> Any:
+        try:
+            asyncio.get_running_loop()
+            on_loop.append(True)
+        except RuntimeError:
+            on_loop.append(False)
+        return real(text)
+
+    monkeypatch.setattr(module, "loads", _loads)
+    assert _upload(api, sample, _blob("unread_flat_report.json")).status_code == 201
+    assert on_loop == [False]
