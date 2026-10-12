@@ -178,31 +178,61 @@ report instead:
 
 1. It is stored with the format `unread`, and the upload answers with a
    *proposed format declaration* read from the report's shape. The proposal
-   holds detect tests on its top-level blocks, its task id and target hash where
-   their names say so, and the JSONPath `mapping` of its processes, connections,
-   DNS questions and dropped files (lists of objects whose keys say so), with
-   the renames from the report's key names to the consumers'. Each field carries
-   its value, where in the report it was read (`evidence`, a path, never report
-   text) and how sure the reading is (`high`, `medium`, `low`), as a tool's
-   proposed declaration does. Blocks under a mapped block that no proposed path
-   reads are proposed as channels of their own, kept raw.
+   holds the JSONPath `mapping` of its processes, connections, DNS questions and
+   dropped files (lists of objects whose keys say so), with the renames from the
+   report's key names to the consumers', its task id and target hash where their
+   names say so, and detect tests, by type, on the blocks those paths start in
+   (each path's first two named blocks). Each field carries its value, where in
+   the report it was read (`evidence`, a path, never report text) and how sure
+   the reading is (`high`, `medium`, `low`), as a tool's proposed declaration
+   does. Each top-level block a proposed path starts in is also kept whole as
+   the raw `report.<block>` channel the unread read gave it, so nothing the
+   analyst read unread is lost; its evidence counts the blocks in it no path
+   reads. The proposal's size follows the declaration's own fields, never the
+   report's block count. Where no list reads as one of those parts, no
+   declaration is proposed (it would read nothing the unread read does not).
+
+   A list reads as DNS questions only with evidence of its own: a key only DNS
+   rows write (`qname`, `qtype`, `rrtype` ...), an answer, question types that
+   are DNS record types, or a name it sits under saying so (`dns`, `lookups`).
+   A name and a type alone are what function, section, rule and classification
+   lists hold. Likewise a digest, a name and a size read as dropped files only
+   under a name saying so (`dropped`, `written`), not as an archive's or a
+   resource listing's members.
 2. A run reads it *unread*: every top-level block is a raw `report.<block>`
    channel the dynamic analyst reads, every section is listed as unavailable,
    and no observed fact (process, flow, DNS name, indicator) is drawn from it.
    The run records that it read the report unread.
 3. The upload dialog shows the proposal. An admin edits the declaration if
    needed and accepts it (`POST /api/v1/sandbox-report-formats/accept`, with
-   `declaration`, `sample_id` and `report_id`). The declaration is saved only
-   if it validates, recognises that report and names a reader that reads it.
+   `declaration`, `sample_id` and `report_id`), for any stored report. The
+   declaration is saved only if it validates, is the format that recognises
+   that report, and a trial read of the report with it reads something (a row
+   in a channel or a place, or the target hash). A format read through a
+   mapping is tried after every built-in format and every registered reader,
+   so it never takes a report a built-in reads; a declaration a built-in or
+   another declared format also recognises for that report is refused, naming
+   that format. Accepts run one at a time, so none drops another's
+   declaration.
    It is saved through the settings path every declaration takes, its name is
    added to `allowed_formats`, and the upload's row records the format, task id
    and target match. From then on the report, and every report shaped like it,
    reads as a built-in format does. Until then it stays unread.
 
 `GET /api/v1/samples/{sample_id}/sandbox-reports/{report_id}/proposal` reads
-the proposal again from the stored report. The proposer walks the report once,
-with a stack and no recursion, to 16 path segments below the top; it copies no
-report text but key names, and its memory and time stay linear in the report.
+the proposal again from the stored report (the uploader's own reports, and any
+for an admin). The proposer walks the report once, with a stack and no
+recursion; it copies no report text but key names, and its memory and time
+stay linear in the report. It has two reading horizons: it looks for lists to
+16 path segments below the top, and writes into a path only keys of at most
+128 characters with no quote, slash, star or control character. They bound
+what the proposer reads, not what a run reads: an accepted declaration's paths
+are read at any depth, and you may name any key in them. Where a horizon
+leaves something unread, the proposal's `notes` say how much.
+
+A body nested deeper than 160 levels is logged once as it is read, with the
+number of containers read as the marked placeholder. The upload is read in a
+worker thread, so a large body never holds the API's event loop.
 
 ### Report formats are declarations
 
@@ -237,7 +267,10 @@ reproduce what the platform always recognised:
 Declare your own in `sandbox.report_formats` (a JSON list), and add each new
 name to `sandbox.upload.allowed_formats` to accept its uploads. A new format
 must say how it is recognised (`detect`), and it is tried before the built-ins,
-so a report shaped like Cuckoo but carrying your marker is yours. A
+so a report shaped like Cuckoo but carrying your marker is yours. A new format
+read through a mapping (`reader: generic`, an accepted proposal among them) is
+the exception: it is tried after every built-in and every registered reader,
+so it never takes a report one of them reads. A
 declaration under a built-in's name is merged over that built-in field by
 field: a field you set replaces the shipped value, a field you leave out keeps
 it. So `{"name": "cape2", "signature_scale": {...}}` changes CAPE's scale alone,
@@ -385,7 +418,7 @@ coding it:
 | `sandbox.rest.submit` | The multipart submission (`method`, `path`, `file_field`, `extra_fields`, `submit_fields`) and the JSONPath of the task id in its answer. |
 | `sandbox.rest.status` | The poll path, the JSONPath of the state, and the done and failed values. |
 | `sandbox.rest.report` | Where the report is, the registered reader or declared format that reads it (`cape2`, `cuckoo`, `triage`, `generic`, one an operator registers, or a format declared in `sandbox.report_formats`, read through its own `mapping` and on its own scale as an upload of it is), an optional capture path, and for a `generic` report its signature scale (`signature_scale_rungs`, `signature_scale_name`). |
-| `sandbox.rest.mapping` | For a `generic` report, an RFC 9535 JSONPath per channel: processes, calls, signatures, DNS, HTTP, TCP, UDP, hosts, domains, dropped files, registry; and per report place with no channel (`places`): `process_tree`, `resolved_apis`, `extracted`, `procdumps`, `memory`, `ids_alerts`, each match kept as the sandbox published it and read whole. A place holds the report at most once: its matches, each counted with everything nested in it, never hold more values than the report does, so a descendant path whose matches nest (`$..children[*]` over a nested tree) is cut there, and the cut is logged and counted as truncated. A path with more than one descendant segment (`$..a..b`) walks the report again under every node the first reached; saving one returns a warning beside it (never a refusal), so anchor it where you can. A channel is still cut at 5,000 rows, a limit kept from before. |
+| `sandbox.rest.mapping` | For a `generic` report, an RFC 9535 JSONPath per channel: processes, calls, signatures, DNS, HTTP, TCP, UDP, hosts, domains, dropped files, registry; and per report place with no channel (`places`): `process_tree`, `resolved_apis`, `extracted`, `procdumps`, `memory`, `ids_alerts`, each match kept as the sandbox published it and read whole. A place holds the report at most once: its matches, each counted with everything nested in it, never hold more values than the report does, so a descendant path whose matches nest (`$..children[*]` over a nested tree) is cut there, and the cut is logged and counted as truncated. A path with more than one descendant segment (`$..a..b`), or a filter whose absolute query descends (`$.a[*][?count($..x) > 0]`, read again for every candidate), walks the report again under every node the first reached; saving one returns a warning beside it (never a refusal), so anchor it where you can. A channel is still cut at 5,000 rows, a limit kept from before. |
 
 An empty path in `mapping` says the sandbox does not publish that channel, and
 the report lists it as unavailable rather than reading like a clean sample by
