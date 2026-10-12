@@ -66,10 +66,12 @@ it and a claim cites one item by its id. A DNS request's answers and other
 fields sit on its first question's row; where the request asks several names,
 that row carries the request's id (`@dns_request`) and each later question's row
 names it (`@same_request_as`). These two keys are the platform's own and no reader
-writes them: where the document is built, they are removed from every DNS row
-any reader filled and written only for the requests a reader expresses in the
-structural form (below), and a link is honoured only in that exact form, so a
-report can never make one name read another's answers; each answer keeps the name it answers and its
+writes them: where the document is built, they are removed from every network
+row any reader filled, of every kind, and written only on the DNS rows of the
+requests a reader expresses in the structural form (below). A link is honoured
+only in that exact form and only on a DNS row; a `domains` row, or a row of any
+other kind, reads its own answers whatever key it carries, so a report can
+never make one name read another's answers; each answer keeps the name it answers and its
 type. Every reader of the DNS rows (the network analyst's input, the IOC
 block's resolved addresses, the attribution sentence, the published IOCs and
 the export) gives each question the answers for its own name and the names its
@@ -276,7 +278,20 @@ sandbox says) and the request's other fields (`extra`). The platform writes the
 request's rows, its answers once on the first name's row, and links them; each
 name then reads the answers for its own name and alias chain, so a request
 grouped wrongly can never credit a named answer to another name. A request with
-one name needs no link and is written as one row.
+one name needs no link and is written as one row. The rows a reader fills in
+`network.dns` come first and the structural requests' rows follow, in the order
+the reader listed them; a reader that wants its sandbox's recorded order kept
+expresses every DNS message structurally, a one-name message included. A source
+kept with `keep_source` that has no `network` block gets one to hold the
+requests' rows, and a source `network.dns` that is not a list is kept as the
+first row before them (with no structural request it stays as the source wrote
+it).
+
+A reader built from the JSONPath mapping (`generic`) has no structural form: its
+DNS path names rows, and each row is one name with its own answers, as before.
+A sandbox whose report asks several names in one DNS message reads each name's
+answers only where the report writes them on that name's row; a code reader
+(above) is the way to express a multi-name request.
 
 The formats a payload is tried against are the registry's: the declared
 formats above, then each registered reader no declaration names, recognised by

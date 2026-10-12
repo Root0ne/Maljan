@@ -356,3 +356,37 @@ class TestManyQuestionsTimesManyAnswers:
 
     def test_unnamed_answers(self) -> None:
         self._check(named=False)
+
+
+class TestEveryKindLosesItsLinkKeysLinearly:
+    """Removing the link keys from every network kind's rows is one pass per kind."""
+
+    @staticmethod
+    def _rows(n: int) -> dict[str, Any]:
+        def rows(kind: str) -> list[dict[str, Any]]:
+            return [{"domain": f"{kind}{i}.relay-l1.net", SAME_REQUEST_KEY: 0} for i in range(n)]
+
+        kinds = ("dns", "http", "tcp", "udp", "hosts", "domains", "tls", "icmp")
+        return {"info": {"id": 1}, "network": {kind: rows(kind) for kind in kinds}}
+
+    def test_a_kept_source(self) -> None:
+        _linear(
+            self._rows,
+            lambda payload: sandbox_document(
+                cape_report_to_sandbox_report(payload, provider="upload")
+            ),
+            2_000,
+        )
+
+    def test_a_report_laid_out_from_fields(self) -> None:
+        from maljan.schemas.sandbox_report import SandboxNetwork, SandboxReport
+
+        def report(n: int) -> SandboxReport:
+            network = self._rows(n)["network"]
+            return SandboxReport(
+                provider="upload",
+                source_format="acme",
+                network=SandboxNetwork(**network),
+            )
+
+        _linear(report, sandbox_document, 2_000)

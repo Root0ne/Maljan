@@ -33,11 +33,14 @@ document's word, in the place the source listed it.
 from __future__ import annotations
 
 import bisect
+import logging
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from maljan.schemas.sandbox_report import SandboxReport
+
+logger = logging.getLogger(__name__)
 
 Path = tuple[str, ...]
 
@@ -213,13 +216,15 @@ def channel_rows(held: Any) -> Sequence[Any] | None:
 # stays linear in its size.
 #
 # The two link keys are the platform's own and no reader writes them: the
-# document's one chokepoint (:func:`compose`, through :func:`dns_rows`) removes
-# them from every DNS row a reader filled, whatever the reader, and mints them
-# itself for the requests a reader expresses structurally
+# document's one chokepoint (:func:`compose`, through :func:`dns_rows` and
+# :func:`_network_without_links`) removes them from every network row a reader
+# filled, of every kind and whatever the reader, and mints them itself for the
+# requests a reader expresses structurally
 # (``schemas.sandbox_report.SandboxDnsRequest``); a reader that keeps its
-# source's arrangement removes them too (:func:`kept_source`), and the resolver
-# honours a link only in the exact form the chokepoint writes it. A report can
-# never make one name read another's answers.
+# source's arrangement removes them too (:func:`kept_source`). The resolver
+# honours a link only in the exact form the chokepoint writes it, and only on
+# a row of the DNS rows it was built over, never on any other row. A report
+# can never make one name read another's answers.
 DNS_REQUEST_KEY = "@dns_request"
 SAME_REQUEST_KEY = "@same_request_as"
 _LINK_KEYS = (DNS_REQUEST_KEY, SAME_REQUEST_KEY)
@@ -251,6 +256,17 @@ def without_dns_links(rows: Any) -> Any:
     ]
 
 
+def _network_without_links(network: dict[str, Any]) -> None:
+    """``network``'s rows of every kind with no platform link key, in place.
+
+    One pass over each kind's rows (:func:`without_dns_links`); a kind whose
+    rows hold none keeps its list.
+    """
+    for kind in NETWORK_KINDS:
+        if kind in network:
+            network[kind] = without_dns_links(network[kind])
+
+
 def dns_rows(rows: Any, requests: Any) -> Any:
     """The document's DNS rows: a reader's own rows with no link key, then each request's rows.
 
@@ -261,8 +277,13 @@ def dns_rows(rows: Any, requests: Any) -> Any:
     fields, and, where the request asked several names, the request's id
     (``DNS_REQUEST_KEY``), which each later name's row names
     (``SAME_REQUEST_KEY``). Ids count the report's multi-name requests from 0.
-    Linear in the rows, the names and the answers, each held once.
+    A source's DNS value that is not a list stays as the source wrote it where
+    there is no request, and is kept as the first row, before the requests'
+    rows, where there is. Linear in the rows, the names and the answers, each
+    held once.
     """
+    if requests and rows is not None and not isinstance(rows, list):
+        rows = [rows]
     stripped = without_dns_links(rows)
     if not requests:
         return stripped
@@ -308,10 +329,12 @@ class DnsAnswers:
     names no name (which belongs to the whole request, as dev read it), each
     value once.
 
-    A link is honoured only in the exact form a reader writes it: a whole-number
-    id held by exactly one first row (``DNS_REQUEST_KEY``), named by the later
-    rows (``SAME_REQUEST_KEY``), and never both on one row. Any other row reads
-    its own answers, as dev read every row.
+    A link is honoured only in the exact form the platform writes it: a
+    whole-number id held by exactly one first row (``DNS_REQUEST_KEY``), named
+    by the later rows (``SAME_REQUEST_KEY``), and never both on one row; and
+    only on a row of ``rows`` itself, the DNS rows the object was built over.
+    Any other row, a row of another kind or list included, reads its own
+    answers, as dev read every row.
 
     Linear in the rows: one pass finds each request's answers, each request's
     answers are indexed by name once, when first asked, and the work every
@@ -332,10 +355,15 @@ class DnsAnswers:
                     firsts[request] = firsts.get(request, 0) + 1
         self._records: dict[int, list[Any]] = {}
         self._questions: dict[int, int] = {}
+        # The linked rows of ``rows``, by identity; ``rows`` is held so no
+        # identity is reused while the object lives.
+        self._rows = rows
+        self._members: set[int] = set()
         for row in rows if isinstance(rows, list) else []:
             request = self._request_of(row, firsts)
             if request is None:
                 continue
+            self._members.add(id(row))
             self._questions[request] = self._questions.get(request, 0) + 1
             if DNS_REQUEST_KEY in row:
                 answers = row.get("answers")
@@ -375,6 +403,8 @@ class DnsAnswers:
         return held
 
     def _linked(self, row: Mapping[str, Any]) -> int | None:
+        if id(row) not in self._members:
+            return None
         if (DNS_REQUEST_KEY in row) == (SAME_REQUEST_KEY in row):
             return None
         request = _link(row.get(DNS_REQUEST_KEY if DNS_REQUEST_KEY in row else SAME_REQUEST_KEY))
@@ -473,13 +503,14 @@ def kept_source(
     source: Mapping[str, Any], renames: Mapping[str, str]
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, list[str]]]:
     """A source cut as :func:`decompose` cuts it, its renamed blocks under the document's words,
-    its DNS rows with no platform link key (:func:`without_dns_links`).
+    its network rows of every kind with no platform link key (:func:`without_dns_links`).
 
     What every reader that keeps its source's arrangement uses.
     """
     published, extras, arrangement = decompose(renamed(source, renames))
-    if "network.dns" in published:
-        published["network.dns"] = without_dns_links(published["network.dns"])
+    for kind in NETWORK_KINDS:
+        if f"network.{kind}" in published:
+            published[f"network.{kind}"] = without_dns_links(published[f"network.{kind}"])
     return published, extras, arrangement
 
 
@@ -525,12 +556,23 @@ def compose(report: SandboxReport) -> dict[str, Any]:
         document = _arranged(report.published, report.extras, report.arrangement, ())
         if report.recorded_fixture:
             document[FIXTURE_KEY] = True
-        # The chokepoint: the DNS rows with no link key a reader wrote, then the
-        # requests it expressed structurally, linked here.
-        network = document.get("network")
+        # The chokepoint: the network rows with no link key a reader wrote,
+        # then the requests it expressed structurally, linked here. A source
+        # with no network block gets one to hold them.
         requests = report.network.dns_requests
-        if isinstance(network, dict) and ("dns" in network or requests):
-            network["dns"] = dns_rows(network.get("dns", []), requests)
+        if requests and "network" not in document:
+            document["network"] = {}
+        network = document.get("network")
+        if isinstance(network, dict):
+            _network_without_links(network)
+            if "dns" in network or requests:
+                network["dns"] = dns_rows(network.get("dns", []), requests)
+        elif requests:
+            logger.warning(
+                "sandbox report: the source's network block is not an object, so the "
+                "reader's %d structural DNS requests have no place in the document.",
+                len(requests),
+            )
         return document
     return _laid_out(report)
 
@@ -642,11 +684,12 @@ def _laid_out(report: SandboxReport) -> dict[str, Any]:
         "behavior": behavior,
         "signatures": [_signature_row(s) for s in report.signatures],
         "network": {
-            # The chokepoint: no reader's link key, the platform's own links.
+            # The chokepoint: no reader's link key on any row, the platform's
+            # own links on the DNS rows.
             kind: (
                 dns_rows(list(network.dns), network.dns_requests)
                 if kind == "dns"
-                else list(getattr(network, kind))
+                else without_dns_links(list(getattr(network, kind)))
             )
             for kind in NETWORK_KINDS
         },

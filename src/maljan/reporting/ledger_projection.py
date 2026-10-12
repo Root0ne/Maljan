@@ -910,8 +910,10 @@ def network_from_ledger(
     # The addresses each name already holds, so a value is added once.
     held_ips: dict[str, set[str]] = {}
     for data, whole in _sandbox_views(ledger, sandbox_report):
-        # Each question reads the answers for its own name, and a request's
-        # unnamed answers, within the request's own size.
+        # Each DNS question reads the answers for its own name, and a request's
+        # unnamed answers, within the request's own size. A ``domains`` row is
+        # no DNS question: it reads its own answers, as dev read it, whatever
+        # link it carries.
         answers_of = DnsAnswers(data.get("dns"))
         for key in ("dns", "domains"):
             for row in data.get(key) or []:
@@ -925,7 +927,12 @@ def network_from_ledger(
                 name_ips = held_ips.setdefault(
                     value_key("domain", name), set(known_name.resolved_ips)
                 )
-                for answer in answers_of.of(row):
+                if key == "dns":
+                    answers = answers_of.of(row)
+                else:
+                    own = row.get("answers") if isinstance(row, dict) else None
+                    answers = own if isinstance(own, list) else []
+                for answer in answers:
                     # Only an address record names an address; a TXT or MX
                     # value that reads as one is no resolution.
                     kind = answer.get("type") if isinstance(answer, dict) else None
@@ -935,7 +942,7 @@ def network_from_ledger(
                     if _parses_as_an_address(address) and address not in name_ips:
                         name_ips.add(address)
                         known_name.resolved_ips.append(address)
-                withheld = answers_of.withheld(row)
+                withheld = answers_of.withheld(row) if key == "dns" else 0
                 if withheld:
                     # Several views of one report cut the same request alike:
                     # the most any of them withheld, never their sum.

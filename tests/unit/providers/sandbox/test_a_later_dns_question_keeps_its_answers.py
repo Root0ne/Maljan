@@ -490,3 +490,164 @@ class TestAnOperatorReaderCannotForgeTheLinks:
     def test_triage_multi_question_parity_is_unchanged(self) -> None:
         test_every_reader_reads_the_second_name_as_dev_did()
         test_a_named_answer_goes_to_the_question_it_answers()
+
+
+# -- a link key on a row outside the DNS rows is never honoured --------------------------------
+
+
+class _KeepSourceStructuralReader(ReportReader):
+    """An operator's reader that keeps its source and expresses one DNS message structurally."""
+
+    id = "acmekeepstruct"
+    keeps_source_arrangement = True
+
+    def read(
+        self,
+        payload: dict[str, Any],
+        *,
+        provider: str,
+        task_id: str = "",
+        fmt: Any = None,
+        **c: Any,
+    ) -> SandboxReport:
+        report = SandboxReport(provider=provider, source_format=self.id)
+        message = payload["message"]
+        report.network.dns_requests.append(
+            SandboxDnsRequest(
+                questions=[{"request": name, "type": "A"} for name in message["asked"]],
+                answers=[{"data": address} for address in message["answers"]],
+            )
+        )
+        return self.keep_source(report, payload)
+
+
+class _FieldsDomainsReader(ReportReader):
+    """An operator's reader that lays its report out from fields, its domains rows as written."""
+
+    id = "acmefielddomains"
+
+    def read(
+        self,
+        payload: dict[str, Any],
+        *,
+        provider: str,
+        task_id: str = "",
+        fmt: Any = None,
+        **c: Any,
+    ) -> SandboxReport:
+        message = payload["message"]
+        request = SandboxDnsRequest(
+            questions=[{"request": name, "type": "A"} for name in message["asked"]],
+            answers=[{"data": address} for address in message["answers"]],
+        )
+        return SandboxReport(
+            provider=provider,
+            source_format=self.id,
+            network=SandboxNetwork(dns_requests=[request], domains=list(payload["domains"])),
+        )
+
+
+UNRELATED = "unrelated-z9.net"
+
+
+def _two_name_message() -> dict[str, Any]:
+    return {"asked": ["relay-a-s1.net", "relay-b-s2.net"], "answers": ["45.33.32.50"]}
+
+
+def _no_link_left(document: dict[str, Any]) -> bool:
+    return all(
+        not ({DNS_REQUEST_KEY, SAME_REQUEST_KEY} & set(row))
+        for kind in ("domains", "hosts", "http", "tcp", "udp")
+        for row in document["network"].get(kind) or []
+        if isinstance(row, dict)
+    )
+
+
+class TestALinkOutsideTheDnsRowsIsNeverHonoured:
+    def test_a_kept_source_s_domains_row_reads_its_own_answers(self) -> None:
+        payload = {
+            "info": {"id": 1},
+            "network": {"domains": [{"domain": UNRELATED, SAME_REQUEST_KEY: 0}]},
+            "message": _two_name_message(),
+        }
+        document = sandbox_document(_KeepSourceStructuralReader().read(payload, provider="upload"))
+        assert _no_link_left(document)
+        resolved = _resolved_by(_KeepSourceStructuralReader(), payload)
+        assert resolved[UNRELATED] == []
+        assert resolved["relay-b-s2.net"] == ["45.33.32.50"]
+
+    def test_a_reader_s_own_domains_rows_lose_the_link_keys(self) -> None:
+        for key in (SAME_REQUEST_KEY, DNS_REQUEST_KEY):
+            payload = {"domains": [{"domain": UNRELATED, key: 0}], "message": _two_name_message()}
+            document = sandbox_document(_FieldsDomainsReader().read(payload, provider="upload"))
+            assert _no_link_left(document)
+            assert _resolved_by(_FieldsDomainsReader(), payload)[UNRELATED] == []
+
+    def test_the_platform_s_own_ledger_view_reads_a_domains_row_s_own_answers(self) -> None:
+        from maljan.schemas.evidence import build_entry
+
+        rows = [
+            {"request": "relay-a-s1.net", DNS_REQUEST_KEY: 0, "answers": [{"data": "45.33.32.50"}]},
+            {"request": "relay-b-s2.net", SAME_REQUEST_KEY: 0},
+        ]
+        for key in (SAME_REQUEST_KEY, DNS_REQUEST_KEY):
+            output = {"dns": rows, "domains": [{"domain": UNRELATED, key: 0}]}
+            for source in ("sandbox", "pack"):
+                entry = build_entry(
+                    entry_id="ev_0001",
+                    seq=1,
+                    agent="dynamic",
+                    tool="sandbox_network",
+                    args={},
+                    server=None,
+                    output=json.dumps(output),
+                    source=source,
+                )
+                resolved = _resolved_from([entry])
+                assert resolved[UNRELATED] == []
+                assert resolved["relay-b-s2.net"] == ["45.33.32.50"]
+
+    def test_the_resolver_honours_a_link_only_on_the_rows_it_was_built_over(self) -> None:
+        rows = [
+            {"request": "relay-a-s1.net", DNS_REQUEST_KEY: 0, "answers": [{"data": "45.33.32.50"}]},
+            {"request": "relay-b-s2.net", SAME_REQUEST_KEY: 0},
+        ]
+        answers = DnsAnswers(rows)
+        assert answers.of(rows[1]) == [{"data": "45.33.32.50"}]
+        # An equal row that is not one of them, and a row of another list.
+        assert answers.of(dict(rows[1])) == []
+        stranger = {"domain": UNRELATED, SAME_REQUEST_KEY: 0, "answers": [{"data": "45.33.32.60"}]}
+        assert answers.of(stranger) == [{"data": "45.33.32.60"}]
+        assert answers.withheld(stranger) == 0
+
+
+class TestAKeptSourceKeepsItsStructuralRequests:
+    def test_a_source_with_no_network_block_gets_one(self) -> None:
+        payload = {"info": {"id": 1}, "message": _two_name_message()}
+        document = sandbox_document(_KeepSourceStructuralReader().read(payload, provider="upload"))
+        assert list(document) == ["info", "message", "network"]
+        assert [row["request"] for row in document["network"]["dns"]] == [
+            "relay-a-s1.net",
+            "relay-b-s2.net",
+        ]
+        assert _resolved_by(_KeepSourceStructuralReader(), payload)["relay-b-s2.net"] == [
+            "45.33.32.50"
+        ]
+
+    def test_a_dns_value_that_is_not_a_list_is_kept_beside_the_requests(self) -> None:
+        value = {"request": "own-c3.net", "answers": [{"data": "45.33.32.70"}], SAME_REQUEST_KEY: 0}
+        payload = {"info": {"id": 1}, "network": {"dns": value}, "message": _two_name_message()}
+        document = sandbox_document(_KeepSourceStructuralReader().read(payload, provider="upload"))
+        first, *requested = document["network"]["dns"]
+        # The source's value, kept as its first row, without the platform's link key.
+        assert first == {"request": "own-c3.net", "answers": [{"data": "45.33.32.70"}]}
+        assert [row["request"] for row in requested] == ["relay-a-s1.net", "relay-b-s2.net"]
+        resolved = _resolved_by(_KeepSourceStructuralReader(), payload)
+        assert resolved["own-c3.net"] == ["45.33.32.70"]
+        assert resolved["relay-b-s2.net"] == ["45.33.32.50"]
+
+    def test_a_dns_value_that_is_not_a_list_stays_as_written_with_no_request(self) -> None:
+        value = {"request": "own-c3.net", "answers": [{"data": "45.33.32.70"}]}
+        payload = {"info": {"id": 1}, "network": {"dns": value}}
+        document = sandbox_document(_KeepSourceReader().read(payload, provider="upload"))
+        assert document["network"]["dns"] == value
