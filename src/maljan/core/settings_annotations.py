@@ -1145,12 +1145,13 @@ ANNOTATIONS: dict[str, Annotation] = {
     "triage.enabled": {
         "title": "Run the triage pack",
         "description": (
-            "Before any analyst starts, the pipeline runs the deterministic tools "
-            "over the sample (identification, hashes, signature, format facts, "
-            "strings, IoCs, YARA, capa, Sigma, catalogue lookups, the sandbox "
-            "summary, one reputation lookup) and writes each result to the "
-            "evidence ledger as facts of the run. Off leaves the stage in every "
-            "team and makes it decline with that reason."
+            "Before any analyst starts, the pipeline runs the deterministic steps "
+            "over the sample (as shipped: identification, hashes, signature, format "
+            "facts, strings, IoCs, signature and capability rules, event rules, "
+            "catalogue lookups, the sandbox summary, one reputation lookup, decoded "
+            "strings and the readings of a PE's bytes; your own in triage.steps) and "
+            "writes each result to the evidence ledger as facts of the run. Off "
+            "leaves the stage in every team and makes it decline with that reason."
         ),
         "subgroup": "Triage pack",
     },
@@ -1178,8 +1179,9 @@ ANNOTATIONS: dict[str, Annotation] = {
     "triage.budget_seconds": {
         "title": "Triage pack budget (seconds)",
         "description": (
-            "How long the whole triage pack may take. capa and YARA carry their own "
-            "budgets; this one is checked between steps, and a step that would start "
+            "How long the whole triage pack may take. A step with a wall clock of its "
+            "own keeps it (its budget_seconds in triage.steps, else its tool's declared "
+            "timeout); this one is checked between steps, and a step that would start "
             "after it is spent is recorded as not run rather than started."
         ),
         "subgroup": "Triage pack",
@@ -1187,11 +1189,30 @@ ANNOTATIONS: dict[str, Annotation] = {
     "triage.memory_floor_mb": {
         "title": "Triage memory floor (MiB)",
         "description": (
-            "What running FLOSS beside capa must leave of the host's available "
-            "memory. The pack runs the two together only when the available memory, "
-            "less capa's measured peak and FLOSS's own bound, stays at or above this, "
-            "and the worker's memory limit, where it has one, holds both; otherwise it "
-            "runs them one after the other and records why."
+            "What running a step beside the others must leave of the host's available "
+            "memory (as shipped: the decoded-strings step beside the capability rules). "
+            "The pack runs a step that declares starts_after beside the steps its "
+            "beside names only when the available memory, less their peaks and its "
+            "own (each measured in this worker, else declared as peak_mb), stays at or "
+            "above this, and the worker's memory limit, where it has one, holds them "
+            "all; otherwise it runs it at its place and records why."
+        ),
+        "subgroup": "Triage pack",
+    },
+    "triage.steps": {
+        "title": "Triage pack steps",
+        "description": (
+            "Your own steps, as JSON, laid over the shipped list: each one's id, the "
+            "tool and server it calls (no server: one of the platform's own steps, "
+            "named by its shipped id), its argument template ({sample_path}, {sha256}, "
+            "{file_type}; none: the arguments its tool declares for the path and hash "
+            "roles), the routed formats it runs for, its budget_seconds, peak_mb, "
+            "starts_after and beside, the renderer its pack line uses (none: the "
+            "generic line), the kind of answer it records, its display_name and "
+            "enabled. A shipped id is changed in its place, and enabled false drops "
+            "it; naming another tool or server replaces it there; a new id is added "
+            "after the step its after names, else at the end. Empty runs the shipped "
+            "list."
         ),
         "subgroup": "Triage pack",
     },

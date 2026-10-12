@@ -47,6 +47,7 @@ from maljan.agents.prompts import (
     TRIAGE_PROMPT,
 )
 from maljan.core import virustotal
+from maljan.core.pack_steps import PackStep, check_steps
 from maljan.core.report_formats import (
     READER_ID_PATTERN,
     ReportFormat,
@@ -4155,6 +4156,17 @@ class TriageConfig(BaseModel):
     # holds both. 10,240 is the machine rule this project runs its models
     # under: ten gigabytes free before heavy work. 0 checks only that both fit.
     memory_floor_mb: Annotated[int, Field(ge=0)] = 10240
+    # The operator's steps, laid over the shipped list (``core.pack_steps``):
+    # one under a shipped step's id changes that step in its place
+    # (``enabled: false`` drops it), one that names another tool or server
+    # replaces it there, and a new id adds a step, after the step its
+    # ``after`` names or after every shipped step. Empty runs the shipped list.
+    steps: list[PackStep] = Field(default_factory=list)
+
+    @field_validator("steps")
+    @classmethod
+    def _steps_run(cls, value: list[PackStep]) -> list[PackStep]:
+        return check_steps(value)
 
 
 class EventsConfig(BaseModel):

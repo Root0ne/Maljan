@@ -1884,12 +1884,15 @@ class RunSummaryBuilder:
         prompts, and the ledger holds the entries themselves.
         """
         if facts and "entries" in facts:
+            from maljan.core.pack_steps import step_schedules
+
             self._triage = {
                 "entries": int(facts.get("entries") or 0),
                 "failed": int(facts.get("failed") or 0),
                 "duration_ms": int(facts.get("duration_ms") or 0),
-                # How FLOSS ran: beside capa, or in turn and why.
-                **({"floss": str(facts["floss"])} if facts.get("floss") else {}),
+                # How each step that may run beside the pack ran, by step id:
+                # beside which steps, or in turn and why.
+                **step_schedules(facts),
             }
         return self
 
