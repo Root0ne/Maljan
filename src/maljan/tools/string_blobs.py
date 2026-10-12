@@ -85,14 +85,16 @@ Each result names the blob's file offset and RVA, the section, the scheme and
 its parameters, the decoded text and the code that refers to the blob: the
 places a scan for relative and absolute references to the blob's first byte or
 its text's first byte finds (``maljan.tools.pe_image``), each with the function
-around it when the file's function table says, and FLOSS's own row when FLOSS
-decoded the same text in this process (its decoding routine and call site,
-said as ``floss``). No reference is stated that the bytes do not hold.
+around it when the file's function table says, and the row of a decoder that
+recovered the same text at a call site (its decoding routine and call site,
+said under the answer's ``floss`` field): the rows the caller hands in from
+whichever answer of that kind it holds, else this process's emulated strings
+for the file. No reference is stated that the bytes do not hold.
 
 Which decodings are results. The test above still passes on some tables of
 numbers under some key, and a file with large tables yields many of them; a
 program's encoded string, though, is reached by its address. So ``results``
-holds the decodings some code or data refers to, or FLOSS recovered too; the
+holds the decodings some code or data refers to, or a decoder recovered too; the
 others are counted under ``unreferenced`` and listed only when the caller asks
 (``include_unreferenced``), because a string a program walks to from another
 one is real and not referred to by address.
@@ -105,7 +107,7 @@ from __future__ import annotations
 import base64
 import binascii
 import re
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -643,11 +645,11 @@ def _error(message: str) -> dict[str, Any]:
     return {"error": message, "tool": TOOL}
 
 
-def _floss_rows(path: str) -> list[dict[str, Any]]:
-    """FLOSS's decoded rows for this file, when FLOSS already ran on it in this process."""
+def _remembered_rows(path: str) -> list[dict[str, Any]]:
+    """This process's emulated strings for this file, when that tool already ran on it here."""
     try:
         return emulated_strings.remembered_rows(path)
-    except Exception:  # noqa: BLE001 - FLOSS's absence is not this tool's failure
+    except Exception:  # noqa: BLE001 - the emulator's absence is not this tool's failure
         return []
 
 
@@ -748,15 +750,23 @@ def decode_string_blobs(
     limit: int | None = None,
     include_unreferenced: bool = False,
     function_starts: Sequence[Any] | None = None,
-    function_source: str = "capa",
+    function_source: str = "",
+    recovered: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Decode the text a PE keeps encoded in its data sections (see the module docstring).
 
     ``schemes`` keeps some of ``SCHEMES``; with none every one is tried.
     ``offset``/``limit`` page the results when the caller wants pages;
     ``limit`` of ``None`` is every result. A decoding no code refers to and
-    FLOSS did not recover is counted under ``unreferenced`` and listed only
+    no decoder recovered is counted under ``unreferenced`` and listed only
     with ``include_unreferenced``.
+
+    ``recovered`` are the strings another decoder recovered at a call site
+    (rows with ``string``, ``kind`` ``decoded``, ``function_rva`` and
+    ``called_at_rva``), from whichever answer of that kind the caller holds;
+    ``None`` reads this process's emulated strings for the file, when that
+    tool ran here. A decoding one of them recovered too is marked and counted
+    under the answer's fields for it.
     """
     wanted = tuple(SCHEMES) if not schemes else tuple(str(s).strip() for s in schemes)
     unknown = [scheme for scheme in wanted if scheme not in SCHEMES]
@@ -773,9 +783,16 @@ def decode_string_blobs(
     decoded = decode(image, minimum, wanted)
     items = decoded.items
 
-    floss: dict[str, dict[str, Any]] = {}
-    for recovered_row in _floss_rows(path):
-        if recovered_row.get("kind") == "decoded" and recovered_row.get("string"):
+    # Under the answer's own field names for them (``floss``,
+    # ``floss_rows_compared``, ``also_recovered_by_floss``), whichever decoder
+    # the rows come from.
+    floss: dict[str, Mapping[str, Any]] = {}
+    for recovered_row in _remembered_rows(path) if recovered is None else recovered:
+        if (
+            isinstance(recovered_row, Mapping)
+            and recovered_row.get("kind") == "decoded"
+            and recovered_row.get("string")
+        ):
             floss.setdefault(str(recovered_row["string"]), recovered_row)
 
     targets: set[int] = set()
@@ -838,14 +855,14 @@ def decode_string_blobs(
         }
         if item.layers:
             row["layers"] = item.layers
-        recovered = floss.get(text) or next(
+        same = floss.get(text) or next(
             (floss[layer["text"]] for layer in item.layers if layer["text"] in floss), None
         )
-        if recovered is not None:
+        if same is not None:
             also_floss += 1
             row["floss"] = {
-                "function_rva": recovered.get("function_rva"),
-                "called_at_rva": recovered.get("called_at_rva"),
+                "function_rva": same.get("function_rva"),
+                "called_at_rva": same.get("called_at_rva"),
             }
         if row["references"] or "floss" in row:
             results.append(row)

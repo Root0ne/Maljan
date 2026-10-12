@@ -69,14 +69,16 @@ def _sample(tmp_path: Path, import_name: str = "CreateMutexW") -> str:
 
 
 class TestTheWholeTable:
-    def test_the_table_is_the_pack_s_row_form_and_capa_is_said_absent(
+    def test_the_table_is_the_pack_s_row_form_and_the_rule_matches_are_said_absent(
         self, server: Any, tmp_path: Path
     ) -> None:
         answer = server.function_index(path=_sample(tmp_path))
         lines = answer["table"].split("\n")
         assert lines[0].startswith("2 of the ")
-        assert artefact_index.CAPA_NOT_JOINED in lines[0]
-        assert answer["absent"]["capa"] == artefact_index.CAPA_NOT_JOINED
+        # No rule matcher runs here: the kind of answer it lacks is named.
+        said = f"{artefact_index.RULES_KIND}: {artefact_index.RULES_NOT_JOINED}"
+        assert said in lines[0]
+        assert answer["absent"][artefact_index.RULES_KIND] == artefact_index.RULES_NOT_JOINED
         # FLOSS has not run on the file in this server: said, with the reason.
         assert answer["absent"]["floss"] == artefact_index.FLOSS_NOT_REMEMBERED
         assert f"floss: {artefact_index.FLOSS_NOT_REMEMBERED}" in lines[0]

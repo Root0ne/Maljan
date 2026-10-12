@@ -340,6 +340,20 @@ class LedgerEntry(BaseModel):
         ),
     )
 
+    pack_step: dict[str, Any] | None = Field(
+        default=None,
+        # Like ``facts``: an entry with none dumps as it always did.
+        exclude_if=lambda value: value is None,
+        description=(
+            "The triage pack step that wrote the entry, where an operator declared it "
+            "(core.pack_steps): {'v': 1, 'id', and where set 'label' (what the pack's line "
+            "calls it) and 'renderer' (how the pack's line shows its answer)}. None on an "
+            "entry of a step as shipped, and on every other entry, which the pack reads by "
+            "its shipped steps. Read later from here, never from the reading process's "
+            "settings."
+        ),
+    )
+
     structured_from_server: bool = Field(
         default=False,
         # Like ``facts``: an entry without one dumps as it always did.

@@ -8,6 +8,12 @@ so only when the host's available memory, less capa's measured peak and
 FLOSS's bound (``FLOSS_ADDRESS_SPACE_BYTES``), stays above
 ``triage.memory_floor_mb``, and the worker's cgroup limit, where it has one,
 holds both; otherwise the two run in turn, as before, and the summary says why.
+
+The shipped FLOSS step declares this as data (``core.pack_steps``): it starts
+after the signature step, beside the capa step, with its bound as its declared
+peak, and capa's peak is the one its in-process step measures. The sentences
+are built from those numbers and the tools' declared display names
+(``room_beside``).
 Measured on PuTTY with both real tools: 312.0 s → 183.1 s, peak resident
 memory of the pack's process tree 1,600 MB → 2,291 MB.
 """
@@ -21,7 +27,7 @@ from typing import Any
 import pytest
 
 from maljan.pipeline import triage_pack
-from maljan.pipeline.triage_pack import cgroup_headroom_bytes, floss_beside_capa
+from maljan.pipeline.triage_pack import DECLARED, MEASURED, cgroup_headroom_bytes, room_beside
 from maljan.providers.static import capa_yara
 from maljan.tools import emulated_strings, rules
 from tests.unit.pipeline.test_decoded_strings_in_the_pack import (
@@ -70,37 +76,61 @@ def _available(
     monkeypatch.setattr(capa_yara, "_CAPA_PEAK_BYTES", capa_peak)
 
 
+def _peaks(capa_peak: int | None) -> list[tuple[str, int | None, str]]:
+    return [("capa", capa_peak, MEASURED), ("FLOSS", BOUND, DECLARED)]
+
+
+def _room(
+    host_available: int | None, *, cgroup_left: int | None = None, capa_peak: int | None
+) -> str:
+    return room_beside(
+        host_available=host_available,
+        cgroup_left=cgroup_left,
+        peaks=_peaks(capa_peak),
+        floor=FLOOR,
+    )
+
+
 class TestTheRoomItNeeds:
     def test_capa_s_peak_and_floss_s_bound_above_the_floor(self) -> None:
         need = 2 * GIB + BOUND
 
-        assert (
-            floss_beside_capa(
-                host_available=FLOOR + need, cgroup_left=None, capa_peak=2 * GIB, floor=FLOOR
-            )
-            == ""
+        assert _room(FLOOR + need, capa_peak=2 * GIB) == ""
+        short = _room(FLOOR + need - 1, capa_peak=2 * GIB)
+        assert short == (
+            "16383 MiB available, less capa's measured 2048 MiB and FLOSS's 4096 MiB bound, "
+            "is under the 10240 MiB floor"
         )
-        short = floss_beside_capa(
-            host_available=FLOOR + need - 1, cgroup_left=None, capa_peak=2 * GIB, floor=FLOOR
-        )
-        assert "under the 10240 MiB floor" in short
 
     def test_a_worker_limit_that_cannot_hold_both(self) -> None:
-        why = floss_beside_capa(
-            host_available=64 * GIB, cgroup_left=4 * GIB, capa_peak=2 * GIB, floor=FLOOR
+        why = _room(64 * GIB, cgroup_left=4 * GIB, capa_peak=2 * GIB)
+        assert why == (
+            "the worker's memory limit leaves 4096 MiB, under the 6144 MiB capa and FLOSS "
+            "need together"
         )
-        assert why.startswith("the worker's memory limit leaves 4096 MiB")
 
     def test_nothing_measured_nothing_run_together(self) -> None:
         assert (
-            floss_beside_capa(
-                host_available=64 * GIB, cgroup_left=None, capa_peak=None, floor=FLOOR
-            )
+            _room(64 * GIB, capa_peak=None)
             == "capa's memory has not been measured in this worker yet"
         )
-        assert (
-            floss_beside_capa(host_available=None, cgroup_left=None, capa_peak=GIB, floor=FLOOR)
-            == "the host does not report its available memory"
+        assert _room(None, capa_peak=GIB) == "the host does not report its available memory"
+
+    def test_a_step_with_no_peak_measured_or_declared_says_so(self) -> None:
+        why = room_beside(
+            host_available=64 * GIB,
+            cgroup_left=None,
+            peaks=[("Recover", None, DECLARED)],
+            floor=FLOOR,
+        )
+        assert why == "Recover declares no memory peak"
+
+    def test_three_steps_are_named_and_summed(self) -> None:
+        peaks = [("capa", GIB, MEASURED), ("Lister", GIB, DECLARED), ("FLOSS", BOUND, DECLARED)]
+        why = room_beside(host_available=64 * GIB, cgroup_left=GIB, peaks=peaks, floor=FLOOR)
+        assert why == (
+            "the worker's memory limit leaves 1024 MiB, under the 6144 MiB capa, Lister and "
+            "FLOSS need together"
         )
 
     def test_the_host_s_own_figure_is_read(self) -> None:

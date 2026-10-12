@@ -861,7 +861,9 @@ class TestReviewRoundOne:
         pack = _Pack(recorder, inputs, reputation=None, function_matches=None)
         pack.steps_run = 1
         pack.started -= 100
-        pack._sandbox_sections()
+        from maljan.core.pack_steps import shipped_step
+
+        pack._sandbox_sections(shipped_step(ss.SECTIONS_TOOL))
         (entry,) = [e for e in pack.recorder.entries if e.tool == ss.SECTIONS_TOOL]
         assert entry.ok is True
 

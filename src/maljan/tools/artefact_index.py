@@ -2,10 +2,12 @@
 
 A reverser on a local model decompiles the functions it happens to pick. The
 facts that say which functions hold the run's artefacts are already on the
-ledger, spread over five answers: FLOSS's rows name the call site of each
-decoded string, the hash resolution and the blob decoder name the function
-around each place, capa names where each rule matched, and the file's own
-tables list the functions. This module joins them per function, and adds what
+ledger, spread over the answers of several kinds: an emulator's recovered
+strings name the call site of each decoded string, the hash resolution and the
+blob decoder name the function around each place, a rule matcher names where
+each rule matched, a tool that lists functions names their starts, and the
+file's own tables list the functions. Each comes in by its kind, never by the
+tool that answered it. This module joins them per function, and adds what
 the platform's x86 decoder (``tools.call_sites``) reads in each function: the
 calls it makes, and the data it loads the address of.
 
@@ -13,7 +15,7 @@ What it states, and nothing else:
 
 * **The functions.** The starts of the file's exception directory (x64, a
   chained fragment counted for the function it belongs to), its exports, its
-  entry point, the function starts capa listed, and every direct call target
+  entry point, the function starts a listing answer gave, and every direct call target
   the decoder reaches in an executable section. A disassembler's function
   list is not read here: the pack runs before any analyst opens one, and the
   answer says so.
@@ -38,12 +40,12 @@ What it states, and nothing else:
   their terminator, and the address is where that text starts: a plain
   string. A reference into the middle of a text reads nothing, so texts are
   disjoint and all of them are read in one pass of the section. A decoded
-  string is one the blob decoder states this function refers to, or one
-  FLOSS decoded at a call site inside it (a stack or tight string: in the
-  function FLOSS names).
+  string is one the blob decoder states this function refers to, or one an
+  emulator decoded at a call site inside it (a stack or tight string: in the
+  function the emulator names).
 * **The names its hashes resolve to** where the hash resolution states the
-  place inside it, and **the capa rules** that matched at its start or at an
-  address inside it.
+  place inside it, and **the rules** that matched at its start or at an
+  address inside it, under the name of the tool that matched them.
 * **The calls it makes through slots the hash resolution fills.** In the
   straight-line run of code holding a hashed value (up to a transfer of
   control), the slot that value's name is stored to: after a call exactly one
@@ -139,8 +141,9 @@ TEXT_MIN_CHARS = 6
 _EXCEPTION_DIRECTORY = "exception directory"
 _EXPORTS = "exports"
 _ENTRY_POINT = "entry point"
-_CAPA = "capa function starts"
 _CALL_TARGETS = "call targets the decoder reached"
+# How the answer names the functions a listed source gave: by the source's name.
+LISTED_STARTS = "{label} function starts"
 
 _HEX = re.compile(r"\s*0x([0-9a-fA-F]{1,16})\s*")
 
@@ -1266,7 +1269,7 @@ def _printable(byte: int) -> bool:
 class _Cell:
     """One artefact of one function, and the entries that state it."""
 
-    kind: str  # "import", "slot", "name", "decoded", "plain" or "capa"
+    kind: str  # "import", "slot", "name", "decoded", "plain" or "rule"
     value: str
     sources: list[str] = field(default_factory=list)
     # For a call through a slot the hash resolution fills: the slot, and the
@@ -1311,8 +1314,25 @@ _GROUP = {
     "slot": "slot",
     "plain": "text",
     "decoded": "text",
-    "capa": "capa",
+    "rule": "rule",
 }
+
+# The field of a row that holds the rules matched in a function: the name the
+# answer has always used for it, whichever rule engine's answer they come from.
+RULES_FIELD = "capa"
+
+# A function start list from an answer that lists starts: ``(the source's
+# name, the entry's id, the starts as offsets from the image base)``.
+StartSource = tuple[str, str, Sequence[Any]]
+# Rule hits from an answer of rule matches: ``(the tool that answered, the
+# entry's id, [(rule, the addresses it matched at)])``.
+RuleSource = tuple[str, str, Sequence[tuple[str, Sequence[Any]]]]
+# Strings recovered with the place that produced each: ``(the tool that
+# answered, the entry's id, rows)``, each row a mapping with ``string``,
+# ``kind`` (``decoded`` for a string placed by its call site) and the offsets
+# ``called_at_rva`` / ``function_rva`` (or the virtual addresses
+# ``called_at`` / ``function``).
+SiteSource = tuple[str, str, Sequence[Mapping[str, Any]]]
 
 
 def _source(pair: tuple[str, Mapping[str, Any]] | None) -> tuple[str, Mapping[str, Any]]:
@@ -1323,20 +1343,21 @@ def _source(pair: tuple[str, Mapping[str, Any]] | None) -> tuple[str, Mapping[st
 
 
 def _places_wanted(
-    capa: Mapping[str, Any],
-    floss: Mapping[str, Any],
+    rule_hits: Sequence[RuleSource],
+    site_strings: Sequence[SiteSource],
     hashes: Mapping[str, Any],
     blobs: Mapping[str, Any],
     base: int,
 ) -> set[int]:
     wanted: set[int] = set()
-    for row in capa.get("capabilities") or []:
-        if isinstance(row, Mapping):
-            wanted.update(a for a in map(_hex, row.get("addresses") or []) if a is not None)
-    for row in floss.get("strings") or []:
-        if isinstance(row, Mapping):
-            for place in _floss_places(row, base):
-                wanted.add(place)
+    for _tool, _entry, rules in rule_hits:
+        for _rule, addresses in rules:
+            wanted.update(a for a in map(_hex, addresses or []) if a is not None)
+    for _tool, _entry, rows in site_strings:
+        for row in rows:
+            if isinstance(row, Mapping):
+                for place in _site_places(row, base):
+                    wanted.add(place)
     for hit in hashes.get("hits") or []:
         for place in (hit.get("occurrences") or []) if isinstance(hit, Mapping) else []:
             rva = _hex(place.get("rva")) if isinstance(place, Mapping) else None
@@ -1350,8 +1371,8 @@ def _places_wanted(
     return wanted
 
 
-def _floss_places(row: Mapping[str, Any], base: int) -> list[int]:
-    """The offset a FLOSS row is placed by: a decoded string's call site, another's routine."""
+def _site_places(row: Mapping[str, Any], base: int) -> list[int]:
+    """Where a recovered string is placed: a decoded string's call site, else its routine."""
     if str(row.get("kind") or "") == "decoded":
         keys = ("called_at_rva", "called_at")
     else:
@@ -1394,8 +1415,9 @@ def index_image(
     image: Image,
     *,
     pe_info: tuple[str, Mapping[str, Any]] | None = None,
-    capa: tuple[str, Mapping[str, Any]] | None = None,
-    floss: tuple[str, Mapping[str, Any]] | None = None,
+    function_starts: Sequence[StartSource] = (),
+    rule_hits: Sequence[RuleSource] = (),
+    site_strings: Sequence[SiteSource] = (),
     hashes: tuple[str, Mapping[str, Any]] | None = None,
     blobs: tuple[str, Mapping[str, Any]] | None = None,
     absent: Mapping[str, str] | None = None,
@@ -1408,6 +1430,14 @@ def index_image(
     ``ranges_into``, when given, is filled with :func:`function_ranges`: a
     fact the caller keeps beside the answer, never in it.
 
+    The run's answers come in by what they are, never by the tool that gave
+    them: ``function_starts`` from any answer that lists function starts,
+    named by its source; ``rule_hits`` from any answer of rule matches with
+    the addresses each matched at; ``site_strings`` from any answer of
+    recovered strings with the place that produced each. A place one of them
+    states that no function holds is counted under ``unplaced`` by the tool
+    that answered it.
+
     ``absent`` is the ``no: <reason>`` of each source the caller could not
     join, by source; the answer and its head state each. ``addresses`` are
     the readings of one asked address, in the order they are tried, each
@@ -1419,8 +1449,6 @@ def index_image(
     holds none; with no reading answering, ``function`` is a ``no:`` sentence.
     """
     _, info = _source(pe_info)
-    capa_id, capa_data = _source(capa)
-    floss_id, floss_data = _source(floss)
     hash_id, hash_data = _source(hashes)
     blob_id, blob_data = _source(blobs)
     base = image.image_base
@@ -1440,11 +1468,17 @@ def index_image(
     if isinstance(entry, int) and entry > 0:
         seeds[_ENTRY_POINT] = [entry]
         entry_points = {entry}
-    starts = [s for s in map(_hex, capa_data.get("function_starts") or []) if s is not None]
-    if starts:
-        seeds[_CAPA] = starts
+    listed: list[str] = []
+    for label, _entry, given in function_starts:
+        starts = [s for s in map(_hex, given or []) if s is not None]
+        if starts:
+            key = LISTED_STARTS.format(label=label)
+            seeds.setdefault(key, []).extend(starts)
+            if key not in listed:
+                listed.append(key)
+    order = (_EXCEPTION_DIRECTORY, _EXPORTS, _ENTRY_POINT, *listed, _CALL_TARGETS)
 
-    wanted = _places_wanted(capa_data, floss_data, hash_data, blob_data, base)
+    wanted = _places_wanted(rule_hits, site_strings, hash_data, blob_data, base)
     wanted.update(offset for _, offset in addresses)
     graph = _read_code(image, seeds, wanted, _hashed_places(hash_data))
     placer = _Placer(image, graph)
@@ -1514,22 +1548,24 @@ def index_image(
             )
             place(where, "decoded", str(result["text"]), blob_id, "decode_string_blobs")
 
-    for row in floss_data.get("strings") or []:
-        if not isinstance(row, Mapping) or not row.get("string"):
-            continue
-        where = [h for rva in _floss_places(row, base) for h in placer.holders(rva)]
-        place(where, "decoded", str(row["string"]), floss_id, "floss")
-
-    for capability in capa_data.get("capabilities") or []:
-        if not isinstance(capability, Mapping) or not capability.get("rule"):
-            continue
-        for address in map(_hex, capability.get("addresses") or []):
-            if address is None:
+    for tool, entry_id, recovered in site_strings:
+        for row in recovered:
+            if not isinstance(row, Mapping) or not row.get("string"):
                 continue
-            where = placer.stated(hex(address)) or placer.holders(address)
-            place(where, "capa", str(capability["rule"]), capa_id, "capa")
+            where = [h for rva in _site_places(row, base) for h in placer.holders(rva)]
+            place(where, "decoded", str(row["string"]), entry_id, tool)
 
-    data = _answer(image, graph, rows, names, unplaced, entry_points)
+    for tool, entry_id, rules in rule_hits:
+        for rule, matched in rules:
+            if not rule:
+                continue
+            for address in map(_hex, matched or []):
+                if address is None:
+                    continue
+                where = placer.stated(hex(address)) or placer.holders(address)
+                place(where, "rule", str(rule), entry_id, tool)
+
+    data = _answer(image, graph, rows, names, unplaced, entry_points, order=order)
     # Only the slots some code calls or jumps through are stated.
     data["resolved_slots"] = {
         hex(base + slot): name for slot, (name, _w) in sorted(filled.items()) if slot in called
@@ -1565,7 +1601,7 @@ def index_image(
     data["function_lists"] = function_lists
     data["absent"] = dict(absent or {})
     if addresses:
-        data.update(_asked(image, graph, placer, rows, names, entry_points, addresses))
+        data.update(_asked(image, graph, placer, rows, names, entry_points, addresses, order))
     return data
 
 
@@ -1619,7 +1655,7 @@ def function_ranges(image: Image, starts: Iterable[int]) -> dict[str, list[list[
     offsets from the image base, end exclusive: where a place inside a
     function is that function (``analysis.evidence_roots``). ``starts`` are
     every function start the index knows (the exception directory, exports,
-    the entry point, capa, call targets); a range holding one other than its
+    the entry point, a listed source's starts, call targets); a range holding one other than its
     own function's is left out, since the table that states it does not
     agree with the code.
     """
@@ -1646,6 +1682,7 @@ def _asked(
     names: Mapping[int, list[str]],
     entry_points: Iterable[int],
     addresses: Sequence[tuple[str, int]],
+    order: Sequence[str] = (),
 ) -> dict[str, Any]:
     """The function an asked address names, by the first reading that names one."""
     base = image.image_base
@@ -1657,7 +1694,9 @@ def _asked(
             if not holders:
                 continue
             start, where = holders[0], "inside"
-        row = _answer(image, graph, rows, names, {}, entry_points, only=start)["function"]
+        row = _answer(image, graph, rows, names, {}, entry_points, only=start, order=order)[
+            "function"
+        ]
         asked = hex(base + offset) if how == _AS_VIRTUAL else hex(offset)
         said = f"{asked} read as {how}: {where} the function at {hex(base + start)}"
         return {"function": row, "address_read": said}
@@ -1668,7 +1707,7 @@ def _asked(
     return {
         "function": (
             f"no: no function the run knows starts at or holds the address (read {tried}; "
-            f"{_SOURCES_SAID})"
+            f"functions come from {', '.join(order or _SOURCE_ORDER)})"
         )
     }
 
@@ -1681,6 +1720,7 @@ def _answer(
     unplaced: Mapping[str, int],
     entry_points: Iterable[int] = (),
     only: int | None = None,
+    order: Sequence[str] = (),
 ) -> dict[str, Any]:
     base = image.image_base
     entries = set(entry_points)
@@ -1734,7 +1774,7 @@ def _answer(
             "resolved": [_cell(c, base) for c in listed if c.kind == "name"],
             "decoded_strings": [_cell(c, base) for c in listed if c.kind == "decoded"],
             "plain_strings": [_cell(c, base) for c in listed if c.kind == "plain"],
-            "capa": [_cell(c, base) for c in listed if c.kind == "capa"],
+            RULES_FIELD: [_cell(c, base) for c in listed if c.kind == "rule"],
             "callers": [va(c) for c in sorted(callers.get(start, ()))],
             "callees": [va(c) for c in sorted(held.callees if held else ())],
             "indirect": {"artefacts": reached, "through": through},
@@ -1759,7 +1799,7 @@ def _answer(
         "tool": TOOL,
         "image_base": hex(base),
         "functions_known": len(graph.functions),
-        "function_sources": {s: sources[s] for s in _SOURCE_ORDER if s in sources},
+        "function_sources": {s: sources[s] for s in (order or _SOURCE_ORDER) if s in sources},
         "function_lists": FUNCTION_LISTS_ABSENT,
         "undecoded_functions": sum(1 for f in graph.functions.values() if f.undecoded),
         # Per function, by address: which the decoder stopped in, and how many
@@ -1775,13 +1815,13 @@ def _answer(
     }
 
 
-_SOURCE_ORDER = (_EXCEPTION_DIRECTORY, _EXPORTS, _ENTRY_POINT, _CAPA, _CALL_TARGETS)
-_SOURCES_SAID = "functions come from " + ", ".join(_SOURCE_ORDER)
-_KIND_ORDER = {"import": 0, "slot": 1, "name": 2, "decoded": 3, "plain": 4, "capa": 5}
+# The sources when no answer listed function starts.
+_SOURCE_ORDER = (_EXCEPTION_DIRECTORY, _EXPORTS, _ENTRY_POINT, _CALL_TARGETS)
+_KIND_ORDER = {"import": 0, "slot": 1, "name": 2, "decoded": 3, "plain": 4, "rule": 5}
 
 
 def _cell(cell: _Cell, base: int = 0) -> dict[str, Any]:
-    key = "rule" if cell.kind == "capa" else "text" if cell.kind in ("plain", "decoded") else "name"
+    key = "rule" if cell.kind == "rule" else "text" if cell.kind in ("plain", "decoded") else "name"
     out: dict[str, Any] = {key: cell.value, "sources": list(cell.sources)}
     if cell.slot is not None and cell.named_at is not None:
         out["slot"] = hex(base + cell.slot)
@@ -1819,8 +1859,9 @@ def function_index(
     path: str | Path,
     *,
     pe_info: tuple[str, Mapping[str, Any]] | None = None,
-    capa: tuple[str, Mapping[str, Any]] | None = None,
-    floss: tuple[str, Mapping[str, Any]] | None = None,
+    function_starts: Sequence[StartSource] = (),
+    rule_hits: Sequence[RuleSource] = (),
+    site_strings: Sequence[SiteSource] = (),
     hashes: tuple[str, Mapping[str, Any]] | None = None,
     blobs: tuple[str, Mapping[str, Any]] | None = None,
     absent: Mapping[str, str] | None = None,
@@ -1839,8 +1880,9 @@ def function_index(
     return index_image(
         image,
         pe_info=pe_info,
-        capa=capa,
-        floss=floss,
+        function_starts=function_starts,
+        rule_hits=rule_hits,
+        site_strings=site_strings,
         hashes=hashes,
         blobs=blobs,
         absent=absent,
@@ -1915,12 +1957,13 @@ def _ids(cells: Any, entry_id: str) -> list[str]:
     return ids
 
 
-def row_line(row: Mapping[str, Any], entry_id: str) -> str:
-    """``- 0x…: calls "A" (ev_…); refers to 2 decoded strings (ev_…); capa: r (ev_…); …``.
+def row_line(row: Mapping[str, Any], entry_id: str, labels: Mapping[str, str] | None = None) -> str:
+    """``- 0x…: calls "A" (ev_…); refers to 2 decoded strings (ev_…); <rules>: r (ev_…); …``.
 
     Names the sample wrote (imports, resolved names, exports) are quoted with
     the pack's escaping, as every recovered string is, so they read as data;
-    the strings a function refers to are counted, never shown.
+    the strings a function refers to are counted, never shown. ``labels``
+    names the entries the rules come from (:func:`row_parts`).
     """
     said = [f"export {sample_text(n)}" for n in row.get("names") or []]
     if row.get("entry_point"):
@@ -1929,11 +1972,22 @@ def row_line(row: Mapping[str, Any], entry_id: str) -> str:
     where = stated if _ADDRESS.fullmatch(stated) else sample_text(stated)
     if said:
         where += f" ({', '.join(said)})"
-    return f"- {where}: {row_parts(row, entry_id)}"
+    return f"- {where}: {row_parts(row, entry_id, labels)}"
 
 
-def row_parts(row: Mapping[str, Any], entry_id: str) -> str:
-    """What :func:`row_line` says a function holds, after its address."""
+# What a row calls rules whose entry ``labels`` does not name.
+RULES_UNLABELLED = "rules"
+
+
+def row_parts(
+    row: Mapping[str, Any], entry_id: str, labels: Mapping[str, str] | None = None
+) -> str:
+    """What :func:`row_line` says a function holds, after its address.
+
+    The rules matched in the function are said under the name of the entry
+    they come from (``labels``: entry id to the name of the tool that
+    answered), one group per name, in the order the row lists them.
+    """
     parts: list[str] = []
 
     def named(key: str, verb: str, field: str) -> None:
@@ -1956,10 +2010,15 @@ def row_parts(row: Mapping[str, Any], entry_id: str) -> str:
             texts.append(f"{len(cells)} {noun} ({', '.join(_ids(cells, entry_id))})")
     if texts:
         parts.append("refers to " + ", ".join(texts))
-    capa = [c for c in row.get("capa") or [] if isinstance(c, Mapping)]
-    if capa:
-        rules = ", ".join(str(c.get("rule") or "") for c in capa)
-        parts.append(f"capa: {rules} ({', '.join(_ids(capa, entry_id))})")
+    named_by = dict(labels or {})
+    grouped: dict[str, list[Mapping[str, Any]]] = {}
+    for cell in (c for c in row.get(RULES_FIELD) or [] if isinstance(c, Mapping)):
+        cited = [str(source) for source in cell.get("sources") or []]
+        label = next((named_by[s] for s in cited if s in named_by), RULES_UNLABELLED)
+        grouped.setdefault(label, []).append(cell)
+    for label, cells in grouped.items():
+        rules = ", ".join(str(c.get("rule") or "") for c in cells)
+        parts.append(f"{label}: {rules} ({', '.join(_ids(cells, entry_id))})")
     callers, callees = len(row.get("callers") or []), len(row.get("callees") or [])
     parts.append(
         f"called by {callers}, calls {callees} {'function' if callees == 1 else 'functions'}"
@@ -2021,19 +2080,21 @@ def relation_parts(row: Mapping[str, Any]) -> list[str]:
 
 # -- the analysis server's tool --------------------------------------------------
 
-# What the served index says of capa, which it never runs.
-CAPA_NOT_JOINED = (
-    "no: this tool does not run capa, which takes minutes; the triage pack's function_index "
-    "entry joins capa's answer"
+# What the served index says of rule matches, which it never runs a matcher for;
+# the key it says it under is the kind of answer it lacks.
+RULES_NOT_JOINED = (
+    "no: this tool runs no rule matcher, which takes minutes; the triage pack's function_index "
+    "entry joins the rule matches the pack recorded"
 )
+RULES_KIND = "capability_rules"
 
 # What the served index says of a source it ran that raised, or answered an error.
 FAILED_HERE = "no: it failed here ({})"
 ERROR_HERE = "no: it answered an error here ({})"
-# What it says when FLOSS's remembered rows for the file could not be read.
+# What it says when this server's own emulated strings for the file could not be read.
 FLOSS_UNREADABLE = "no: FLOSS's rows for this file could not be read ({})"
 
-# What the served index says of FLOSS when this server holds no FLOSS answer for the file.
+# What the served index says when this server's emulated strings tool has not run on the file.
 FLOSS_NOT_REMEMBERED = "no: FLOSS has not run on this file in this server"
 
 # Why the served index has no disassembler's function list.
@@ -2085,9 +2146,9 @@ def served_index(path: str | Path, address: Any = None) -> dict[str, Any]:
     Joined with the server's own answers for the file: ``pe_info`` for the
     exports and the entry point, ``resolve_api_hashes`` and
     ``decode_string_blobs`` run here in-process (they read only the bytes),
-    and the rows FLOSS answered for the file in this server when it ran on
-    it. Each source not joined is stated with its reason under ``absent``;
-    capa is never run here (``CAPA_NOT_JOINED``). With no address, the whole
+    and the rows this server's emulated strings tool answered for the file
+    when it ran on it. Each source not joined is stated with its reason under
+    ``absent``; no rule matcher is run here (``RULES_NOT_JOINED``). With no address, the whole
     table in the pack's row form; with one, read as ``address_readings`` says,
     that function's row with its callers and callees and the reading that
     answered.
@@ -2130,20 +2191,25 @@ def served_index(path: str | Path, address: Any = None) -> dict[str, Any]:
             if isinstance(said, dict):
                 said = said.get("message") or said
             absent[name] = ERROR_HERE.format(said)
+    # This server's own emulated strings tool, remembered for the file: its
+    # rows are cited by the tool's name, as no ledger entry exists here.
+    emulated = emulated_strings.TOOL
+    sites: list[SiteSource] = []
     try:
-        floss_rows = emulated_strings.remembered_rows(str(path))
+        recovered = emulated_strings.remembered_rows(str(path))
     except Exception as exc:  # noqa: BLE001 - stated under ``absent``, never lost
-        floss_rows = []
-        absent["floss"] = FLOSS_UNREADABLE.format(exc)
-    if floss_rows:
-        answers["floss"] = ("floss", {"strings": floss_rows})
-    elif "floss" not in absent:
-        absent["floss"] = FLOSS_NOT_REMEMBERED
-    absent["capa"] = CAPA_NOT_JOINED
+        recovered = []
+        absent[emulated] = FLOSS_UNREADABLE.format(exc)
+    if recovered:
+        answers[emulated] = (emulated, {"strings": recovered})
+        sites.append((emulated, emulated, recovered))
+    elif emulated not in absent:
+        absent[emulated] = FLOSS_NOT_REMEMBERED
+    absent[RULES_KIND] = RULES_NOT_JOINED
     data = index_image(
         image,
         pe_info=answers.get("pe_info"),
-        floss=answers.get("floss"),
+        site_strings=sites,
         hashes=answers.get("resolve_api_hashes"),
         blobs=answers.get("decode_string_blobs"),
         absent=absent,

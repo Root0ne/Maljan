@@ -11,8 +11,9 @@ lives in ``core.legacy_tool_tables``, read only by ``core.declared_reading``,
 outside these packages.
 
 ``STILL_BY_NAME`` holds, as a multiset, the reads whose own change is another
-branch's (the triage pack's own steps, which the pack writes itself), each
-with its reason. The name-text heuristics for an undeclared tool live in
+branch's, each with its reason. The triage pack reads each entry it renders by
+the renderer and label its step declared (``core.pack_steps``), and an entry
+of a step as shipped by that shipped step. The name-text heuristics for an undeclared tool live in
 ``core.undeclared_tools``, outside these packages, read only after a tool's
 declared kind.
 Its counts may only shrink: a new read, a moved one, or one more of the same,
@@ -32,36 +33,13 @@ ROOT = Path(__file__).resolve().parents[2]
 PACKAGES = ("pipeline", "analysis", "agents")
 
 _PACK_STEP = (
-    "the triage pack reading or rendering the entry its own step just wrote, by that step's "
-    "name; the pack as a declared step list replaces it"
+    "the triage pack reading the answer its own in-process step just produced, by that "
+    "step's tool, before the entry is written"
 )
 
 # ((module, what, code), count) -> why it is still by name.
 STILL_BY_NAME: dict[tuple[str, str, str], tuple[int, str]] = {
     ("pipeline/triage_pack.py", "looks", "_ESTABLISHED.get(tool)"): (1, _PACK_STEP),
-    ("pipeline/triage_pack.py", "looks", "_GROUP_LABELS.get(entry.tool, entry.tool)"): (
-        1,
-        _PACK_STEP,
-    ),
-    ("pipeline/triage_pack.py", "looks", "_RENDERERS.get(entry.tool)"): (1, _PACK_STEP),
-    ("pipeline/triage_pack.py", "looks", "_SHORTER_RENDERERS.get(entry.tool)"): (1, _PACK_STEP),
-    ("pipeline/triage_pack.py", "compares", "entry.tool in PASS_TOOLS"): (4, _PACK_STEP),
-    ("pipeline/triage_pack.py", "compares", "entry.tool not in PASS_TOOLS"): (1, _PACK_STEP),
-    ("pipeline/triage_pack.py", "compares", "entry.tool == 'capa'"): (1, _PACK_STEP),
-    ("pipeline/triage_pack.py", "compares", "entry.tool != 'capa'"): (1, _PACK_STEP),
-    ("pipeline/triage_pack.py", "compares", "entry.tool == crypto_constants.TOOL"): (1, _PACK_STEP),
-    ("pipeline/triage_pack.py", "compares", "entry.tool == SCAN_TOOL"): (1, _PACK_STEP),
-    ("pipeline/triage_pack.py", "compares", "entry.tool == INDEX_TOOL"): (2, _PACK_STEP),
-    ("pipeline/triage_pack.py", "compares", "entry.tool != INDEX_TOOL"): (1, _PACK_STEP),
-    ("pipeline/triage_pack.py", "compares", "e.tool == INDEX_TOOL"): (1, _PACK_STEP),
-    ("pipeline/triage_pack.py", "compares", "entry.tool != sandbox_sections.SECTIONS_TOOL"): (
-        1,
-        _PACK_STEP,
-    ),
-    ("pipeline/triage_pack.py", "compares", "made[-1].tool == artefact_index.TOOL"): (
-        1,
-        _PACK_STEP,
-    ),
     ("pipeline/nodes.py", "looks", "_FORMAT_TOOLS.get(tool)"): (
         1,
         "the pack's own format step chosen for the routed format; the declared step list "

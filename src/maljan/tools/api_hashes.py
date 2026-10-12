@@ -331,7 +331,7 @@ def resolve_api_hashes(
     names_path: str = DEFAULT_EXPORT_NAMES,
     algorithms_path: str = DEFAULT_ALGORITHMS,
     function_starts: Sequence[Any] | None = None,
-    function_source: str = "capa",
+    function_source: str = "",
 ) -> dict[str, Any]:
     """Resolve 32-bit values in a PE to the function names they are hashes of.
 

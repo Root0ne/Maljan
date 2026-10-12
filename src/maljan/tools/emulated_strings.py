@@ -88,6 +88,9 @@ FLOSS_TIMEOUT_S: int | None = None
 # clock is.
 FLOSS_ADDRESS_SPACE_BYTES = 4 * 1024 * 1024 * 1024
 
+# The name the analysis server serves this tool under.
+TOOL = "floss"
+
 # The three kinds FLOSS recovers by emulation. Its fourth, the static strings,
 # is what the ``strings`` tool already answers, and asking FLOSS for them again
 # would put a second copy of the same noise in front of the model.

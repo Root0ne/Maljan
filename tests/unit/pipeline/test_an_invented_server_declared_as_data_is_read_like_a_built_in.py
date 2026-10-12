@@ -166,7 +166,7 @@ def test_the_function_map_and_index_read_inputs_by_kind(settings: Settings) -> N
     floss_lookalike = _entry("ev_0006", "floss", "mcp:lookalike", '{"strings": []}')
     assert _map_kind(recover) == "emulated_strings"
     assert _map_kind(floss_lookalike) == ""
-    assert _index_slot(recover) == "floss"
+    assert _index_slot(recover) == "call_sites"
     assert _index_slot(floss_lookalike) == ""
 
 

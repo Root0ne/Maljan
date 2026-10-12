@@ -154,7 +154,7 @@ def test_the_line_takes_only_the_room_the_other_lines_leave(tmp_path: Path) -> N
     entries = [
         e
         for e in pack_entries(_pack(path, tmp_path).entries)
-        if e.tool not in (triage_pack.INDEX_TOOL, *triage_pack.PASS_TOOLS) or e.tool == upx.TOOL
+        if not (triage_pack._is_index(e) or triage_pack._is_pass(e)) or e.tool == upx.TOOL
     ]
     others = [e for e in entries if e.tool != upx.TOOL]
     unpack = next(e for e in entries if e.tool == upx.TOOL)

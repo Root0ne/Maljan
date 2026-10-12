@@ -235,7 +235,7 @@ def test_the_function_map_and_the_pack_join_by_devs_names(held: ToolDeclarations
     from maljan.pipeline.triage_pack import _index_slot
 
     dev_map = set(legacy.FUNCTION_MAP_TOOLS)
-    dev_slot = {"pe_info": "pe_info", "capa": "capa", "floss": "floss",
+    dev_slot = {"pe_info": "pe_header", "capa": "rules", "floss": "call_sites",
                 "resolve_api_hashes": "hashes", "decode_string_blobs": "blobs"}  # fmt: skip
     for source, tool in _built_in(held):
         for entry in (

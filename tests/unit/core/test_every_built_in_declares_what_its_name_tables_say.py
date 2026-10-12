@@ -111,10 +111,11 @@ def test_every_sandbox_report_tool_is_declared(declared: ToolDeclarations) -> No
 def test_every_step_the_triage_pack_records_is_declared(declared: ToolDeclarations) -> None:
     from maljan.analysis import sandbox_sections
     from maljan.analysis.anti_analysis import SCAN_TOOL as ANTI_ANALYSIS_TOOL
-    from maljan.pipeline import sandbox_status, triage_pack
+    from maljan.core.pack_steps import default_steps
+    from maljan.pipeline import sandbox_status
     from maljan.tools import artefact_index, crypto_constants, upx
 
-    steps = {tool for tool, _call in triage_pack._FORMAT_TOOLS.values()}
+    steps = {step.called for step in default_steps()}
     steps |= {
         "identify_file",
         "hashes",

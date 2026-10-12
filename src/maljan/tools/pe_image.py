@@ -16,12 +16,13 @@ What it states and where it stops:
   is chained to another entry is a fragment of that entry's function (a cold
   part moved away from it), and its addresses are stated with the start of the
   function the chain leads to — or with none when the chain cannot be followed.
-  An x86 image has no such table: when the caller has capa's function starts
-  for the file, the nearest of them at or before the address in the same
-  section is stated under a field of its own, ``after_function_start`` with
-  its ``function_source`` — never as ``function``, because capa lists where
-  functions start and not where they end, so it says what precedes the
-  address, not what holds it; otherwise an address is stated alone. An
+  An x86 image has no such table: when the caller has another tool's list of
+  function starts for the file, the nearest of them at or before the address
+  in the same section is stated under a field of its own,
+  ``after_function_start`` with its ``function_source`` (the list's source,
+  where the caller names one) — never as ``function``, because such a list
+  says where functions start and not where they end, so it says what precedes
+  the address, not what holds it; otherwise an address is stated alone. An
   address outside every listed function has no function stated: a start is
   never guessed at.
 * **The exception directory is not program data.** The tools that read the
@@ -104,7 +105,7 @@ class Image:
     function_starts: list[int] = field(default_factory=list)
     function_ends: list[int] = field(default_factory=list)
     function_owners: list[int | None] = field(default_factory=list)
-    # Function starts handed in from elsewhere (capa), for an image with no
+    # Function starts handed in from another tool's list, for an image with no
     # table of its own; only starts, so the nearest one before an address is
     # what is stated, and said to be.
     outside_starts: list[int] = field(default_factory=list)
@@ -281,7 +282,8 @@ class Image:
             before = self.start_before(rva)
             if before is not None:
                 place["after_function_start"] = hex(before)
-                place["function_source"] = self.outside_source
+                if self.outside_source:
+                    place["function_source"] = self.outside_source
         return place
 
     def occurrences(self, value: int, width: int = 4) -> list[int]:

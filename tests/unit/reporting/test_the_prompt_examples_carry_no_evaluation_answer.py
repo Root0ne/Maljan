@@ -124,7 +124,7 @@ from maljan.extractors.capability_matrix import (
 from maljan.llm.context_window import no_room_sentence
 from maljan.llm.tool_replies import NO_REPLY_RECORDED, NOT_RUN_REPLY
 from maljan.memory.technique_cards import card_lines, load_cards
-from maljan.pipeline import triage_pack
+from maljan.pipeline import nodes, triage_pack
 from maljan.pipeline.debate_facts import (
     ANALYSTS_FIELD_MISSING_NOTE,
     BLOCK_NOT_READ_NOTE,
@@ -1703,7 +1703,54 @@ PROMPTS: dict[str, str] = {
     "the spend ceiling's reason and a call it refused": _spend_sentences(),
     "an ask refused for a mutual wait": WAITING_ON_EACH_OTHER_REFUSAL.format(callee="'helper'"),
     "the pack's decoded strings in part": triage_pack.DECODED_STRINGS_ROOM_SENTENCE.format(
-        shown=10, total=90, offset=10
+        shown=10, total=90, offset=10, tool="recover"
+    ),
+    "the pack's declared steps: a step not asked, scheduled, or read generically": " ".join(
+        [
+            triage_pack.NO_SERVER_CALLS.format(server="scanner", tool="recover"),
+            nodes.STEP_WITHHELD.format(server="scanner", tool="recover"),
+            nodes.STEP_WITHHELD_UNREAD.format(server="scanner"),
+            nodes.STEP_NO_SERVER.format(server="scanner", tool="recover"),
+            triage_pack.room_beside(
+                host_available=12 * 1024**3,
+                cgroup_left=None,
+                peaks=[("Matcher", 2 * 1024**3, "measured"), ("Recover", 4 * 1024**3, "x")],
+                floor=10 * 1024**3,
+            ),
+            triage_pack.room_beside(
+                host_available=64 * 1024**3,
+                cgroup_left=1024**3,
+                peaks=[("Recover", 4 * 1024**3, "declared")],
+                floor=0,
+            ),
+            triage_pack.room_beside(
+                host_available=None, cgroup_left=None, peaks=[("Recover", None, "x")], floor=0
+            ),
+            artefact_index.RULES_NOT_JOINED,
+            artefact_index.RULES_UNLABELLED,
+            triage_pack.render_pack(
+                [
+                    LedgerEntry(
+                        id="ev_0001",
+                        agent=triage_pack.PIPELINE,
+                        server="scanner",
+                        tool="recover",
+                        output='{"rows": [{"t": "a b", "at": "0x10"}]}',
+                        structured={"rows": [{"t": "a b", "at": "0x10"}]},
+                        facts={
+                            "v": 1,
+                            "kind": "decoded_strings",
+                            "rows": "/rows/*",
+                            "values": {"text": "/t"},
+                            "places": {"rva": "/at"},
+                        },
+                        pack_step={"v": 1, "id": "recover", "label": "Recover"},
+                    )
+                ],
+                0,
+            ),
+            triage_pack._around({"after_function_start": "0x1000"}),
+        ]
     ),
     "the pack's resolved hashes and decoded blobs in part": " ".join(
         [
