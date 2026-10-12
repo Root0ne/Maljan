@@ -97,6 +97,25 @@ class Rehearsal:
     extra: dict[str, Any] = field(default_factory=dict)
     # Where every request body the stub receives is written; ``None`` writes none.
     dump_dir: Path | None = None
+    # A sandbox report handed to the run's sandbox provider before it starts,
+    # as the worker hands an attached report over: the report's path and the
+    # format its upload recorded (``None``: the provider sniffs it). Refused
+    # unless the configured provider accepts an uploaded report.
+    attach_report: tuple[Path, str | None] | None = None
+    # One path per static provider the run's profile uses, keyed by provider
+    # id, as the worker passes ``static_sample_paths``; an empty value is the
+    # rehearsal's own sample. ``None`` passes none.
+    static_sample_paths: dict[str, str] | None = None
+    # The stub fills a required argument it has no rule for from the earlier
+    # tool answers of the same request (``roles._fillable``). Off by default,
+    # so the matrix calls exactly the tools it always called.
+    fill_from_results: bool = False
+    # Bytes appended to the sample after its last section, so a run can be
+    # held to a sample of another hash; empty keeps the one sample.
+    sample_overlay: bytes = b""
+    # Write the run's long-term-memory case once it completed, as the worker
+    # does after recording the job completed (``MaljanApp.remember_the_run``).
+    remember: bool = False
 
     @property
     def deadline_s(self) -> float | None:
@@ -308,6 +327,7 @@ async def rehearse(rehearsal: Rehearsal) -> RunRecord:
         loop_steps=rehearsal.loop_steps,
         slow_seconds=rehearsal.slow_seconds,
         deadline_in=rehearsal.deadline_in,
+        fill_from_results=rehearsal.fill_from_results,
     )
     state = StubState(
         brain=brain,
@@ -316,7 +336,7 @@ async def rehearse(rehearsal: Rehearsal) -> RunRecord:
         dump_dir=rehearsal.dump_dir,
     )
     events: list[dict[str, Any]] = []
-    sample_path, sha256 = write_sample(rehearsal.work_dir)
+    sample_path, sha256 = write_sample(rehearsal.work_dir, overlay=rehearsal.sample_overlay)
     status, error, result = "failed", "", {}
     probe_ok, probe_detail = False, ""
     started = time.monotonic()
@@ -340,9 +360,19 @@ async def rehearse(rehearsal: Rehearsal) -> RunRecord:
                 event_sink=lambda kind, payload: events.append({"type": kind, **payload}),
             )
             try:
-                run = app.arun(sha256, file_name=sample_path.name, sample_path=str(sample_path))
+                if rehearsal.attach_report is not None:
+                    attach_report(app, *rehearsal.attach_report)
+                static_paths = _static_paths(rehearsal, settings, sample_path)
+                run = app.arun(
+                    sha256,
+                    file_name=sample_path.name,
+                    sample_path=str(sample_path),
+                    **static_paths,
+                )
                 result = await asyncio.wait_for(run, timeout=rehearsal.deadline_s)
                 status = "completed" if app.failed_step is None else "failed"
+                if rehearsal.remember and status == "completed":
+                    await asyncio.to_thread(app.remember_the_run)
             except TimeoutError:
                 status = "failed"
                 error = f"the run passed its {rehearsal.deadline_s}s deadline"
@@ -414,6 +444,37 @@ async def rehearse(rehearsal: Rehearsal) -> RunRecord:
         },
         elapsed_s=elapsed,
     )
+
+
+def attach_report(app: Any, path: Path, report_format: str | None) -> None:
+    """Hand ``path``'s bytes to the run's sandbox provider, as the worker does.
+
+    The worker's own sequence (``analysis_worker`` before the pipeline
+    starts): the container's provider, refused unless it declares
+    ``accepts_uploaded_report``, then ``set_pending_blob`` with the recorded
+    format. A refusal raises, so the run is a failed record that says why.
+    """
+    provider = app.container.get_sandbox_provider()
+    if not provider.capabilities.accepts_uploaded_report:
+        raise ValueError(
+            f"the configured sandbox provider ({provider.id!r}) cannot accept an uploaded report"
+        )
+    provider.set_pending_blob(
+        Path(path).read_bytes(), filename=Path(path).name, report_format=report_format
+    )
+
+
+def _static_paths(rehearsal: Rehearsal, settings: Any, sample_path: Path) -> dict[str, Any]:
+    """The ``static_sample_path(s)`` arguments the worker would pass, or none."""
+    if rehearsal.static_sample_paths is None:
+        return {}
+    paths = {
+        str(key): str(value or sample_path) for key, value in rehearsal.static_sample_paths.items()
+    }
+    return {
+        "static_sample_path": paths.get(str(settings.static.provider)),
+        "static_sample_paths": paths,
+    }
 
 
 def _required_stages(settings: Any) -> dict[str, list[str]]:

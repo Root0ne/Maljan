@@ -53,9 +53,13 @@ def sample_bytes() -> bytes:
     return image.build()
 
 
-def write_sample(directory: Path) -> tuple[Path, str]:
-    """Write the sample into ``directory``; answer its path and sha256."""
-    data = sample_bytes()
+def write_sample(directory: Path, overlay: bytes = b"") -> tuple[Path, str]:
+    """Write the sample into ``directory``; answer its path and sha256.
+
+    ``overlay`` is appended after the image's last section, which gives a run
+    a sample of another hash with the same sections, imports and strings.
+    """
+    data = sample_bytes() + overlay
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / SAMPLE_NAME
     path.write_bytes(data)
