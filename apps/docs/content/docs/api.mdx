@@ -292,9 +292,12 @@ carry configuration between instances, and `POST /settings/test/{probe}` (plus
 `/test/mcp` and `/test/agent`, which take a body) run the connection probes.
 `/test/mcp?server=<key>` answers the server's tools, its `capabilities`
 manifest and, under `details.proposals`, a proposed declaration for each
-undeclared tool with each field's evidence and confidence; `&call_tools=true`
-also calls each such tool once with a harmless argument, never a sample (see
-the configuration guide's "A proposed declaration"). Nothing it proposes is
+undeclared tool with each field's evidence and confidence, and the harmless
+calls it would make (`planned`: only tools their server marks read-only, each
+with its arguments, whether it may reach its own service and whether it would
+carry the server's credential). A body naming some of them in
+`confirmed_calls` calls those once each, never with a sample (see the
+configuration guide's "A proposed declaration"). Nothing it proposes is
 saved.
 `POST /settings/validate-condition` checks one stage's `when` expression
 against the parser that will run it and answers `{"valid": …, "problems":
