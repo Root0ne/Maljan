@@ -611,7 +611,6 @@ export function ServerDetail({
           serverKey={serverKey}
           server={server}
           proposals={proposals}
-          builtin={builtinServers.has(serverKey)}
           busy={result === "running"}
           put={(next) => put(serverKey, next)}
           onConfirmCalls={(tools) => void probe.probe(serverKey, tools)}

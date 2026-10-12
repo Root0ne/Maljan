@@ -26,7 +26,7 @@ export type ChoicesFrom =
   | "memory_backends"
   | "sandbox_report_readers";
 
-export type Editor = "server_map" | "rest_sandbox" | "agent_definitions" | "stages";
+export type Editor = "server_map" | "rest_sandbox" | "agent_definitions" | "stages" | "tool_facts";
 
 export interface CatalogEntry {
   key: string;
@@ -160,7 +160,11 @@ export interface McpServerEntry {
   platform_owned?: boolean;
   auto_name_prefixes?: string[];
   reference_urls?: string[];
-  tool_facts?: Record<string, ToolFactsEntry>;
+  /** Per tool, as stored: for a built-in, its changes over the shipped
+   *  declaration of that tool (the changed fields, `null` for a removed
+   *  shipped tool, the whole declaration of a tool it does not ship); for a
+   *  server an operator added, its whole map. */
+  tool_facts?: Record<string, ToolFactsEntry | null>;
   /** How the server's credential is obtained by one request, or null when its
    *  token is typed in (`core.tool_declarations.CredentialBootstrap`). */
   credential_bootstrap?: CredentialBootstrapEntry | null;

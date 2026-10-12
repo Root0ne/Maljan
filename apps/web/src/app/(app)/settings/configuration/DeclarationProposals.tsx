@@ -120,7 +120,6 @@ export default function DeclarationProposals({
   proposals,
   put,
   onConfirmCalls,
-  builtin = false,
   busy = false,
 }: {
   serverKey: string;
@@ -128,7 +127,6 @@ export default function DeclarationProposals({
   proposals: Proposals;
   put: (next: Partial<McpServerEntry>) => void;
   onConfirmCalls?: (tools: string[]) => void;
-  builtin?: boolean;
   busy?: boolean;
 }) {
   const tools = Object.entries(proposals.tools);
@@ -150,9 +148,8 @@ export default function DeclarationProposals({
       <p className="text-[11px] text-text-secondary mt-1">
         Read from what the server says about its tools. Nothing is used until you accept it;
         accepting stages it in this server&apos;s declaration, and Apply saves it. A tool keeps
-        what an undeclared tool gets until you accept a kind for it.
-        {builtin &&
-          " This is a built-in server: saving its tool declarations stores them whole, and later corrections to its shipped declarations then stop applying."}
+        what an undeclared tool gets until you accept a kind for it. Only the tools you
+        accept are stored; every other tool keeps following what the server ships.
       </p>
       <div className="space-y-2 mt-2 text-xs">
         {proposing.map(([tool, proposal]) => (

@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { McpServerEntry, SampleOpenEntry } from "@/types/settings";
+import { shippedServerToolFacts } from "@/lib/providerFacts";
+import type {
+  McpServerEntry,
+  SampleOpenEntry,
+  ToolDeclarationFields,
+  ToolFactsEntry,
+} from "@/types/settings";
 import { deepEqual } from "./mapEditorHelpers";
 import { useOptionalSettingsContext } from "./SettingsContext";
 import {
@@ -15,8 +21,17 @@ import {
   readToolFacts,
   readWorkDir,
   showJson,
+  usableFields,
   type Read,
 } from "./declarationFields";
+import {
+  changedTools,
+  mergeToolFacts,
+  resetTool,
+  toolFactsChanges,
+  type ToolChange,
+  type ToolFactsChanges,
+} from "./toolFactsChanges";
 
 const input =
   "w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent";
@@ -148,6 +163,108 @@ function ReadField<T>({
   );
 }
 
+const CHANGE_LABEL: Record<ToolChange["state"], string> = {
+  changed: "changed",
+  removed: "removed",
+  added: "yours, not shipped",
+};
+
+/**
+ * A block's tool declarations, edited as they are in force.
+ *
+ * What is stored (`changes`) is the block's changes over what it ships, one
+ * tool at a time; the box shows the shipped declarations with those changes
+ * over them, and stages what the edited text changes of the shipped ones. A
+ * tool left as shipped is not staged, so it keeps following later releases.
+ * Below the box, each tool that carries a change is listed with a reset to
+ * what ships. With nothing shipped (a server an operator added) the box is
+ * the whole map and nothing is listed.
+ *
+ * While the typed text stands for the changes staged, the box keeps showing
+ * it as typed rather than re-rendering it filled from the shipped values.
+ */
+export function ToolFactsBox({
+  id,
+  ariaLabel,
+  serverKey,
+  shipped,
+  changes,
+  fields,
+  onChanges,
+}: {
+  id: string;
+  ariaLabel: string;
+  serverKey: string;
+  shipped: Record<string, Record<string, unknown>>;
+  changes: ToolFactsChanges | undefined;
+  fields: ToolDeclarationFields | null;
+  onChanges: (changes: ToolFactsChanges) => void;
+}) {
+  const [held, setHeld] = useState<{
+    changes: ToolFactsChanges;
+    inForce: Record<string, ToolFactsEntry>;
+  } | null>(null);
+  const inForce =
+    held !== null && deepEqual(held.changes, changes ?? {})
+      ? held.inForce
+      : mergeToolFacts(shipped, changes);
+  const ships = Object.keys(shipped).length > 0;
+  const changed = ships ? changedTools(shipped, changes) : [];
+  return (
+    <>
+      <ReadField
+        id={id}
+        label={
+          ships
+            ? "Tool declarations in force (JSON object keyed by tool name; a tool left as shipped keeps following later releases)"
+            : "Tool declarations (JSON object keyed by tool name, each with its facts; a kind is optional)"
+        }
+        ariaLabel={ariaLabel}
+        value={inForce}
+        show={showJson}
+        rows={6}
+        mono
+        read={(text) => readToolFacts(text, serverKey, fields)}
+        onValue={(next) => {
+          const staged = toolFactsChanges(next, shipped, fields);
+          setHeld({ changes: staged, inForce: next });
+          onChanges(staged);
+        }}
+      />
+      {ships && (
+        <div className="mt-1 text-[11px] text-text-secondary" data-tool-changes={serverKey}>
+          {changed.length === 0 ? (
+            <p>Every tool is as shipped.</p>
+          ) : (
+            <>
+              <p>Tools carrying your changes:</p>
+              <ul className="mt-1 space-y-0.5">
+                {changed.map(({ tool, state }) => (
+                  <li key={tool} className="flex items-center gap-2" data-tool-change={state}>
+                    <span className="font-mono text-text-primary">{tool}</span>
+                    <span className="text-text-muted">{CHANGE_LABEL[state]}</span>
+                    <button
+                      type="button"
+                      className="text-accent-strong"
+                      aria-label={`reset ${tool} to shipped`}
+                      onClick={() => {
+                        setHeld(null);
+                        onChanges(resetTool(changes, tool));
+                      }}
+                    >
+                      {state === "added" ? "Remove" : "Reset to shipped"}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
 const joinComma = (v: string[]) => v.join(", ");
 const joinLines = (v: string[]) => v.join("\n");
 const asIs = (v: string) => v;
@@ -167,7 +284,9 @@ export default function DeclarationFields({
   server: McpServerEntry;
   put: (next: Partial<McpServerEntry>) => void;
 }) {
-  const fields = useOptionalSettingsContext()?.schema?.tool_declaration_fields ?? null;
+  const schema = useOptionalSettingsContext()?.schema;
+  const fields = usableFields(schema?.tool_declaration_fields);
+  const shipped = shippedServerToolFacts(schema, serverKey);
   const open = server.sample_open ?? EMPTY_OPEN;
   const box = (field: string) => `${serverKey}.${field}`;
   return (
@@ -310,16 +429,19 @@ export default function DeclarationFields({
           />
         </div>
         <div className="sm:col-span-2">
-          <ReadField
+          <ToolFactsBox
             id={box("tool_facts")}
-            label="Tool declarations (JSON object keyed by tool name, each with its facts; a kind is optional)"
             ariaLabel={`${serverKey} tool_facts`}
-            value={server.tool_facts ?? {}}
-            show={showJson}
-            rows={6}
-            mono
-            read={(text) => readToolFacts(text, serverKey, fields)}
-            onValue={(tool_facts) => put({ tool_facts })}
+            serverKey={serverKey}
+            shipped={shipped}
+            changes={server.tool_facts}
+            fields={fields}
+            onChanges={(tool_facts) => {
+              // Nothing changed of what ships, where nothing was stored:
+              // leave the entry as it was rather than stage an empty map.
+              if (Object.keys(tool_facts).length === 0 && server.tool_facts === undefined) return;
+              put({ tool_facts: tool_facts as McpServerEntry["tool_facts"] });
+            }}
           />
         </div>
         <div className="sm:col-span-2">

@@ -39,7 +39,9 @@ class Annotation(TypedDict):
             "sandbox_report_readers",
         ]
     ]
-    editor: NotRequired[Literal["server_map", "rest_sandbox", "agent_definitions", "stages"]]
+    editor: NotRequired[
+        Literal["server_map", "rest_sandbox", "agent_definitions", "stages", "tool_facts"]
+    ]
     subgroup: NotRequired[str]  # heading inside the group; absent = top of the group
     advanced: NotRequired[bool]  # folded into the group's closed "Advanced" disclosure
 
@@ -1768,6 +1770,10 @@ def mcp_server_annotations(
         entries[f"{prefix}.{leaf}"] = ann(
             f"{label} {title}", description, subgroup="Declaration", advanced=True
         )
+    # The tool declarations are edited as they are in force, and stored as the
+    # changes over what the block ships, one tool at a time; the console's
+    # editor shows which tools carry a change and resets one to shipped.
+    entries[f"{prefix}.tool_facts"]["editor"] = "tool_facts"
 
     if provider_owned:
         # Only a tool server of ``mcp.servers`` has the route that performs a

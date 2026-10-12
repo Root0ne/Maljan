@@ -186,7 +186,7 @@ describe("accepting", () => {
 
   it("replaces the field accepted itself", () => {
     const server = { ...SERVER, tool_facts: { scan: { kind: "mine", rows: "/hits/*" } } };
-    expect(acceptField(server, "scan", SCAN, "rows").tool_facts!.scan.rows).toBe("/matches/*");
+    expect(acceptField(server, "scan", SCAN, "rows").tool_facts!.scan!.rows).toBe("/matches/*");
   });
 
   it("stages a whole tool as proposed, and nothing for a tool proposed nothing", () => {
@@ -296,9 +296,11 @@ describe("DeclarationProposals", () => {
     expect(render(made, { onConfirmCalls: () => {} })).not.toContain("Call these");
   });
 
-  it("says a built-in server's declarations are stored whole", () => {
+  it("says only the accepted tools are stored, with no warning of a frozen declaration", () => {
     const proposals = readProposals(result({ v: 1, tools: { t: LISTER }, server: {} }))!;
-    expect(render(proposals, { builtin: true })).toContain("stores them whole");
-    expect(render(proposals)).not.toContain("stores them whole");
+    const html = render(proposals);
+    expect(html).toContain("Only the tools you");
+    expect(html).toContain("keeps following what the server ships");
+    expect(html).not.toContain("stores them whole");
   });
 });

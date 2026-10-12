@@ -14,6 +14,7 @@ import AgentDefinitionsEditor, {
 } from "./AgentDefinitionsEditor";
 import StagesEditor from "./StagesEditor";
 import ServerMapEditor from "./ServerMapEditor";
+import ToolFactsLeafEditor from "./ToolFactsLeafEditor";
 import { APPLIES_LABEL, SOURCE_LABEL } from "./vocabulary";
 import { Widget } from "./widgets";
 
@@ -195,6 +196,13 @@ export default function FieldRow({
             llmGlobal={llmGlobal ?? { providerChoices: null, providerValue: null, modelValue: null }}
             onChangeLlmAgents={onChangeLlmAgents ?? (() => undefined)}
             errors={errors ?? {}}
+            onChange={onChange}
+          />
+        ) : entry.editor === "tool_facts" ? (
+          <ToolFactsLeafEditor
+            entry={entry}
+            current={current}
+            staged={staged}
             onChange={onChange}
           />
         ) : entry.editor === "stages" ? (
