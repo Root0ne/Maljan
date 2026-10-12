@@ -1152,6 +1152,18 @@ def triage_overview_to_sandbox_report(
                 request_id = dns_requests if len(questions) > 1 else None
                 if request_id is not None:
                     dns_requests += 1
+                    # Several questions: each answer keeps the name it answers
+                    # and its type, so each question is given the answers for
+                    # its own name and its alias chain (``DnsAnswers``).
+                    answers = [
+                        {
+                            "data": str(a["value"]),
+                            **({"name": str(a["name"])} if a.get("name") else {}),
+                            **({"type": str(a["type"])} if a.get("type") else {}),
+                        }
+                        for a in _rows((domain_resp or {}).get("answers"))
+                        if a.get("value")
+                    ]
                 for position, question in enumerate(questions):
                     name = str(question.get("name") or "")
                     dns_row: dict[str, Any] = {

@@ -905,11 +905,14 @@ def network_from_ledger(
     resolved: set[str] = set()
     tls_names: set[str] = set()
 
-    from maljan.schemas.sandbox_document import dns_answers, dns_answers_by_request
+    from maljan.schemas.sandbox_document import DnsAnswers
 
+    # The addresses each name already holds, so a value is added once.
+    held_ips: dict[str, set[str]] = {}
     for data, whole in _sandbox_views(ledger, sandbox_report):
-        # A later question of a request reads the request's answers.
-        by_request = dns_answers_by_request(data.get("dns"))
+        # Each question reads the answers for its own name, and a request's
+        # unnamed answers, within the request's own size.
+        answers_of = DnsAnswers(data.get("dns"))
         for key in ("dns", "domains"):
             for row in data.get(key) or []:
                 name = _first_str(row, "request", "hostname", "domain", "name")
@@ -917,14 +920,21 @@ def network_from_ledger(
                 resolved.add(value_key("domain", name))
                 # The addresses the answer gave for it, as the record states them.
                 known_name = domains.get(value_key("domain", name)) if name else None
-                for answer in dns_answers(row, by_request):
+                if known_name is None:
+                    continue
+                name_ips = held_ips.setdefault(
+                    value_key("domain", name), set(known_name.resolved_ips)
+                )
+                for answer in answers_of.of(row):
                     address = address_key(_first_str(answer, "data", "ip", "address"))
-                    if (
-                        known_name is not None
-                        and _parses_as_an_address(address)
-                        and address not in known_name.resolved_ips
-                    ):
+                    if _parses_as_an_address(address) and address not in name_ips:
+                        name_ips.add(address)
                         known_name.resolved_ips.append(address)
+        if answers_of.cut:
+            logger.warning(
+                "network block: a DNS request's questions share more answers than the "
+                "request holds; later names were given fewer resolved addresses."
+            )
         # An address the sample really reached, labelled as one: the default
         # source is ``strings``, so every observed address was recorded as
         # though a string sweep had produced it, which is the weakest claim

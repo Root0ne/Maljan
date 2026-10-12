@@ -310,3 +310,48 @@ class TestTheDocumentWritesOutLinearly:
         first, second = report.network.dns[0], report.network.dns[1]
         assert len(first["answers"]) == n
         assert "answers" not in second and second["same_request_as"] == first["dns_request"]
+
+
+class TestManyQuestionsTimesManyAnswers:
+    """The network block and the analyst's input stay linear for 3,000 questions x 3,000 answers."""
+
+    N = 3_000
+
+    def _task(self, named: bool) -> dict[str, Any]:
+        questions = [{"name": f"q{i}.relay-h8.net", "type": "A"} for i in range(self.N)]
+        answers = [
+            {
+                **({"name": f"q{i}.relay-h8.net", "type": "A"} if named else {}),
+                "value": f"45.{i // 250 % 250}.{i % 250}.1",
+            }
+            for i in range(self.N)
+        ]
+        request = {"domain_req": {"questions": questions}, "domain_resp": {"answers": answers}}
+        return {"network": {"requests": [request]}}
+
+    def _check(self, named: bool) -> None:
+        import json
+
+        from maljan.parsers.network_parser import NetworkParser
+        from maljan.reporting.ledger_projection import network_from_sandbox_report
+
+        task = self._task(named)
+        body = json.dumps(task)
+        parsed_bytes, parsed = _held(lambda: json.loads(body))
+        document = sandbox_document(
+            triage_overview_to_sandbox_report({}, task_reports={"t": parsed})
+        )
+        held, network = _held(lambda: network_from_sandbox_report(document))
+        assert network is not None
+        assert len(network.domains) == self.N
+        assert held <= 4 * parsed_bytes, (held, parsed_bytes)
+        # Each name's row has a fixed set of fields beside its addresses.
+        assert len(json.dumps(network.model_dump(mode="json"))) <= 6 * len(body)
+        analyst_input = NetworkParser().parse(document["network"])
+        assert len(analyst_input) <= 4 * len(body)
+
+    def test_named_answers(self) -> None:
+        self._check(named=True)
+
+    def test_unnamed_answers(self) -> None:
+        self._check(named=False)

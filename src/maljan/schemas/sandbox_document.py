@@ -206,38 +206,118 @@ def channel_rows(held: Any) -> Sequence[Any] | None:
 
 
 # A DNS request with several questions is written once: its first question's
-# row carries the request's answers and other fields and the request's id
-# (``DNS_REQUEST_KEY``), and each later question's row names that id
-# (``SAME_REQUEST_KEY``). Every reader resolves a row's answers through
-# :func:`dns_answers`, in memory, so the written report stays linear in its size.
+# row carries the request's answers (each with the name it answers and its
+# type) and other fields and the request's id (``DNS_REQUEST_KEY``), and each
+# later question's row names that id (``SAME_REQUEST_KEY``). Every reader reads
+# a row's answers through :class:`DnsAnswers`, in memory, so the written report
+# stays linear in its size.
 DNS_REQUEST_KEY = "dns_request"
 SAME_REQUEST_KEY = "same_request_as"
+# The record type an answer that points one name at another carries.
+_ALIAS_TYPE = "CNAME"
 
 
-def dns_answers_by_request(rows: Any) -> dict[Any, list[Any]]:
-    """Each multi-question request's answers, by its id: one pass over the DNS rows."""
-    found: dict[Any, list[Any]] = {}
-    for row in rows if isinstance(rows, list) else []:
-        if isinstance(row, Mapping) and DNS_REQUEST_KEY in row:
-            answers = row.get("answers")
-            found[row[DNS_REQUEST_KEY]] = answers if isinstance(answers, list) else []
-    return found
+def _lower(value: Any) -> str:
+    return str(value or "").strip().rstrip(".").lower()
 
 
-def dns_answers(row: Any, by_request: Mapping[Any, list[Any]]) -> list[Any]:
-    """The answers a DNS row's name resolved to: its own, else its request's.
+class DnsAnswers:
+    """The answers each DNS row's name resolved to, read over one list of DNS rows.
 
-    ``by_request`` is :func:`dns_answers_by_request` over the same rows.
+    A row of a request with one question has its own answers, as written. A
+    question of a request with several is given the answers that answer its
+    own name and the names its alias chain leads to, and every answer that
+    names no name (which belongs to the whole request, as dev read it), each
+    value once.
+
+    Linear in the rows: one pass finds each request's answers, each request's
+    answers are indexed by name once, when first asked, and the work every
+    question of a request may cost together, with what it yields, is bounded
+    by the request's own size (``_work_left``). A request whose questions share
+    more than that (many names aliasing one target, many answers naming no
+    name) stops giving answers once the bound is spent, and says so
+    (:attr:`cut`): a name is then given fewer addresses, never a wrong one.
     """
-    if not isinstance(row, Mapping):
-        return []
-    own = row.get("answers")
-    if isinstance(own, list):
-        return own
-    request = row.get(SAME_REQUEST_KEY)
-    if request is None or isinstance(request, dict | list):
-        return []
-    return by_request.get(request, [])
+
+    def __init__(self, rows: Any) -> None:
+        self._records: dict[Any, list[Any]] = {}
+        self._questions: dict[Any, int] = {}
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, Mapping):
+                continue
+            request = row.get(DNS_REQUEST_KEY, row.get(SAME_REQUEST_KEY))
+            if request is None or isinstance(request, dict | list):
+                continue
+            self._questions[request] = self._questions.get(request, 0) + 1
+            if DNS_REQUEST_KEY in row:
+                answers = row.get("answers")
+                self._records[request] = answers if isinstance(answers, list) else []
+        self._index: dict[Any, tuple[dict[str, list[Any]], list[Any]]] = {}
+        self._work_left = {
+            request: 2 * (len(records) + self._questions.get(request, 0)) + 16
+            for request, records in self._records.items()
+        }
+        self.cut = False
+
+    def _indexed(self, request: Any) -> tuple[dict[str, list[Any]], list[Any]]:
+        held = self._index.get(request)
+        if held is None:
+            by_name: dict[str, list[Any]] = {}
+            unnamed: list[Any] = []
+            for record in self._records.get(request, []):
+                name = _lower(record.get("name")) if isinstance(record, Mapping) else ""
+                if name:
+                    by_name.setdefault(name, []).append(record)
+                else:
+                    unnamed.append(record)
+            held = self._index[request] = (by_name, unnamed)
+        return held
+
+    def of(self, row: Any) -> list[Any]:
+        """The answers ``row``'s name resolved to, each value once."""
+        if not isinstance(row, Mapping):
+            return []
+        request = row.get(DNS_REQUEST_KEY, row.get(SAME_REQUEST_KEY))
+        if request is None or isinstance(request, dict | list):
+            own = row.get("answers")
+            return own if isinstance(own, list) else []
+        if request not in self._records:
+            return []
+        by_name, unnamed = self._indexed(request)
+        found: list[Any] = []
+        values: set[str] = set()
+        names: set[str] = set()
+        stack = [_lower(row.get("request"))]
+        while stack:
+            name = stack.pop()
+            if not name or name in names:
+                continue
+            names.add(name)
+            for record in by_name.get(name, ()):
+                if not self._spend(request):
+                    return found
+                value = str(record.get("data") or "")
+                if _lower(record.get("type")) == _ALIAS_TYPE.lower():
+                    stack.append(_lower(value))
+                if value and value not in values:
+                    values.add(value)
+                    found.append({"data": value})
+        for record in unnamed:
+            if not self._spend(request):
+                return found
+            value = str(record.get("data") or "") if isinstance(record, Mapping) else ""
+            if value and value not in values:
+                values.add(value)
+                found.append({"data": value})
+        return found
+
+    def _spend(self, request: Any) -> bool:
+        left = self._work_left.get(request, 0)
+        if left <= 0:
+            self.cut = True
+            return False
+        self._work_left[request] = left - 1
+        return True
 
 
 def place(document: Any, name: str, default: Any = None) -> Any:

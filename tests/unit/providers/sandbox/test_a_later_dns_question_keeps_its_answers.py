@@ -3,7 +3,7 @@
 The Triage reader writes a request once: its first question's row carries the
 answers and the request's id, and each later question's row names that id.
 Every reader resolves the later question back to the request's answers in
-memory (``schemas.sandbox_document.dns_answers``). So a report whose request
+memory (``schemas.sandbox_document.DnsAnswers``). So a report whose request
 asks two names reads, for the second name, exactly as the same report with one
 request per name, which is how dev read both: the network analyst's input, the
 IOC block's resolved addresses, the attribution sentence the publish rule
@@ -26,8 +26,7 @@ from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
 from maljan.schemas.sandbox_document import (
     DNS_REQUEST_KEY,
     SAME_REQUEST_KEY,
-    dns_answers,
-    dns_answers_by_request,
+    DnsAnswers,
     sandbox_document,
 )
 from maljan.schemas.sandbox_report import triage_overview_to_sandbox_report
@@ -96,10 +95,11 @@ def _readings(document: dict[str, Any]) -> dict[str, Any]:
 def test_the_request_is_written_once_and_named_by_its_id() -> None:
     rows = _one_request_two_questions()["network"]["dns"]
     first, second = rows
-    assert first["answers"] == [{"data": "45.33.32.7"}, {"data": "45.33.32.8"}]
+    assert [answer["data"] for answer in first["answers"]] == ["45.33.32.7", "45.33.32.8"]
     assert second[SAME_REQUEST_KEY] == first[DNS_REQUEST_KEY]
     assert "answers" not in second
-    assert dns_answers(second, dns_answers_by_request(rows)) == first["answers"]
+    # Answers that name no name belong to the whole request, as dev read them.
+    assert DnsAnswers(rows).of(second) == [{"data": "45.33.32.7"}, {"data": "45.33.32.8"}]
 
 
 def test_a_single_question_request_is_written_as_before() -> None:
@@ -119,9 +119,9 @@ def test_two_requests_with_the_same_first_name_keep_their_own_answers() -> None:
         }
 
     rows = _document([request("45.33.32.1"), request("45.33.32.2")])["network"]["dns"]
-    by_request = dns_answers_by_request(rows)
+    answers_of = DnsAnswers(rows)
     later = [row for row in rows if SAME_REQUEST_KEY in row]
-    assert [dns_answers(row, by_request) for row in later] == [
+    assert [answers_of.of(row) for row in later] == [
         [{"data": "45.33.32.1"}],
         [{"data": "45.33.32.2"}],
     ]
@@ -136,3 +136,47 @@ def test_every_reader_reads_the_second_name_as_dev_did() -> None:
     # The name reaches the published IOCs and the export, on both readings.
     assert NAMES[1] in json.dumps(together["iocs"])
     assert together == apart
+
+
+def _named_request(answers: list[dict[str, str]], names: tuple[str, ...]) -> dict[str, Any]:
+    return {
+        "domain_req": {"questions": [{"name": name, "type": "A"} for name in names]},
+        "domain_resp": {"answers": answers},
+    }
+
+
+def test_a_named_answer_goes_to_the_question_it_answers() -> None:
+    answers = [
+        {"name": NAMES[0], "type": "A", "value": "45.33.32.7"},
+        {"name": NAMES[1], "type": "A", "value": "45.33.32.8"},
+    ]
+    rows = _document([_named_request(answers, NAMES)])["network"]["dns"]
+    answers_of = DnsAnswers(rows)
+    assert [answers_of.of(row) for row in rows] == [
+        [{"data": "45.33.32.7"}],
+        [{"data": "45.33.32.8"}],
+    ]
+
+
+def test_an_alias_chain_leads_a_name_to_its_addresses() -> None:
+    answers = [
+        {"name": "relay-alias-e5.net", "type": "CNAME", "value": "relay-middle-f6.net"},
+        {"name": "relay-middle-f6.net", "type": "CNAME", "value": "relay-target-g7.net."},
+        {"name": "relay-target-g7.net", "type": "A", "value": "45.33.32.9"},
+        {"name": NAMES[0], "type": "A", "value": "45.33.32.7"},
+    ]
+    names = (NAMES[0], "relay-alias-e5.net")
+    rows = _document([_named_request(answers, names)])["network"]["dns"]
+    answers_of = DnsAnswers(rows)
+    first, alias = rows
+    assert answers_of.of(first) == [{"data": "45.33.32.7"}]
+    assert answers_of.of(alias) == [
+        {"data": "relay-middle-f6.net"},
+        {"data": "relay-target-g7.net."},
+        {"data": "45.33.32.9"},
+    ]
+    network = network_from_sandbox_report(_document([_named_request(answers, names)]))
+    assert network is not None
+    held = {d.fqdn: d.resolved_ips for d in network.domains}
+    assert held["relay-alias-e5.net"] == ["45.33.32.9"]
+    assert held[NAMES[0]] == ["45.33.32.7"]
