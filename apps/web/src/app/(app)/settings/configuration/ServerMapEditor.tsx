@@ -224,8 +224,8 @@ export interface ServerProbeApi {
   result: ProbeResult | "running" | undefined;
   /** The focused server's result was dropped by an edit to what it dialled. */
   stale: boolean;
-  /** `callTools`: also call each undeclared tool once with a harmless argument. */
-  probe: (key: string, callTools?: boolean) => Promise<void>;
+  /** `confirmedCalls`: the planned harmless calls the admin confirmed. */
+  probe: (key: string, confirmedCalls?: string[]) => Promise<void>;
   /** Called before an edit is staged: drops a result the edit invalidates. */
   noteEdit: (key: string, next: Partial<McpServerEntry>) => void;
 }
@@ -252,11 +252,11 @@ export function useServerProbe(
     setStaleProbe((s) => ({ ...s, [key]: true }));
   };
 
-  const probe = async (key: string, callTools = false) => {
+  const probe = async (key: string, confirmedCalls: string[] = []) => {
     setStaleProbe((s) => ({ ...s, [key]: false }));
     setProbes((p) => ({ ...p, [key]: "running" }));
     try {
-      const result = await api.testMcpServer(key, { "core.mcp.servers": value }, callTools);
+      const result = await api.testMcpServer(key, { "core.mcp.servers": value }, confirmedCalls);
       setProbes((p) => ({ ...p, [key]: result }));
     } catch (e) {
       setProbes((p) => ({
@@ -606,27 +606,16 @@ export function ServerDetail({
         </fieldset>
       )}
 
-      {has("tools") && manifest && manifest.length > 0 && (
-        <div className="space-y-1">
-          {proposals && (
-            <DeclarationProposals
-              serverKey={serverKey}
-              server={server}
-              proposals={proposals}
-              put={(next) => put(serverKey, next)}
-            />
-          )}
-          {/* The harmless calls are the operator's request: a path that does
-              not exist, the digest of empty input, never a sample. */}
-          <button
-            type="button"
-            className="text-[11px] text-accent-strong disabled:opacity-50"
-            disabled={result === "running"}
-            onClick={() => void probe.probe(serverKey, true)}
-          >
-            Propose declarations from one harmless call per undeclared tool
-          </button>
-        </div>
+      {has("tools") && manifest && manifest.length > 0 && proposals && (
+        <DeclarationProposals
+          serverKey={serverKey}
+          server={server}
+          proposals={proposals}
+          builtin={builtinServers.has(serverKey)}
+          busy={result === "running"}
+          put={(next) => put(serverKey, next)}
+          onConfirmCalls={(tools) => void probe.probe(serverKey, tools)}
+        />
       )}
 
       {has("agents") && (

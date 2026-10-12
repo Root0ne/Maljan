@@ -199,9 +199,11 @@ export interface ErrorPatternEntry {
   message_group?: string;
 }
 
-/** What one tool's answer is and where its facts sit; every key but `kind` optional. */
+/** What one tool's answer is and where its facts sit; every key optional. A
+ *  declaration with no kind states the tool's other facts and leaves it read
+ *  as a tool of no kind. */
 export interface ToolFactsEntry {
-  kind: string;
+  kind?: string;
   [field: string]: unknown;
 }
 

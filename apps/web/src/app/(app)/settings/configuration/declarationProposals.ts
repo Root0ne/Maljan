@@ -6,8 +6,10 @@
  * an admin. Nothing here saves anything: accepting a field or a whole tool
  * writes it into the staged server entry exactly as typing it into the
  * declaration box would, and Apply saves it through the settings path every
- * declaration takes. A field is staged with the fields it needs to validate
- * (`requires`: a row field needs `rows`, every field needs the tool's `kind`).
+ * declaration takes. A field is staged with only the fields it needs to
+ * validate (`requires`: a row field needs `rows`); a kind is never staged
+ * unless it is the field accepted, so a tool keeps every reading an
+ * undeclared tool gets until a kind is accepted for it.
  */
 
 import type { ErrorPatternEntry, McpServerEntry, ProbeResult, ToolFactsEntry } from "@/types/settings";
@@ -27,11 +29,23 @@ export interface ToolProposal {
   notes?: string[];
 }
 
+/** One harmless call the probe would make once the admin confirms it. */
+export interface PlannedCall {
+  tool: string;
+  arguments: Record<string, unknown>;
+  /** The tool may reach a service of its own (its server does not say otherwise). */
+  remote: boolean;
+  /** The call would carry this server's credential (its declaration needs one). */
+  credential: boolean;
+}
+
 export interface Proposals {
   v: number;
   tools: Record<string, ToolProposal>;
   server: Record<string, ProposedField>;
   probed?: Record<string, string>;
+  planned?: PlannedCall[];
+  failed?: Record<string, string>;
 }
 
 const CONFIDENCES = new Set(["high", "medium", "low"]);
@@ -40,18 +54,30 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function strings(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((e): e is string => typeof e === "string") : [];
+}
+
 function readField(value: unknown): ProposedField | null {
   if (!isRecord(value)) return null;
-  const evidence = Array.isArray(value.evidence)
-    ? value.evidence.filter((e): e is string => typeof e === "string")
-    : [];
   const confidence = typeof value.confidence === "string" && CONFIDENCES.has(value.confidence)
     ? (value.confidence as Confidence)
     : "low";
-  const requires = Array.isArray(value.requires)
-    ? value.requires.filter((r): r is string => typeof r === "string")
-    : undefined;
-  return { value: value.value, evidence, confidence, ...(requires ? { requires } : {}) };
+  const requires = Array.isArray(value.requires) ? strings(value.requires) : undefined;
+  return {
+    value: value.value,
+    evidence: strings(value.evidence),
+    confidence,
+    ...(requires && requires.length ? { requires } : {}),
+  };
+}
+
+function readStringMap(value: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, said] of Object.entries(isRecord(value) ? value : {})) {
+    if (typeof said === "string") out[key] = said;
+  }
+  return out;
 }
 
 /** The proposals a probe result carries, or `null`; a part of an odd shape is left out. */
@@ -61,15 +87,14 @@ export function readProposals(result: ProbeResult | null | undefined): Proposals
   if (!isRecord(raw) || !isRecord(raw.tools)) return null;
   const tools: Record<string, ToolProposal> = {};
   for (const [name, held] of Object.entries(raw.tools)) {
-    if (!isRecord(held) || !isRecord(held.facts) || typeof held.facts.kind !== "string") continue;
+    if (!isRecord(held) || !isRecord(held.facts)) continue;
+    if (held.facts.kind !== undefined && typeof held.facts.kind !== "string") continue;
     const fields: Record<string, ProposedField> = {};
     for (const [field, value] of Object.entries(isRecord(held.fields) ? held.fields : {})) {
       const read = readField(value);
       if (read) fields[field] = read;
     }
-    const notes = Array.isArray(held.notes)
-      ? held.notes.filter((n): n is string => typeof n === "string")
-      : undefined;
+    const notes = Array.isArray(held.notes) ? strings(held.notes) : undefined;
     tools[name] = { facts: held.facts as ToolFactsEntry, fields, ...(notes ? { notes } : {}) };
   }
   const server: Record<string, ProposedField> = {};
@@ -77,15 +102,25 @@ export function readProposals(result: ProbeResult | null | undefined): Proposals
     const read = readField(value);
     if (read) server[field] = read;
   }
-  const probed: Record<string, string> = {};
-  for (const [tool, said] of Object.entries(isRecord(raw.probed) ? raw.probed : {})) {
-    if (typeof said === "string") probed[tool] = said;
+  const planned: PlannedCall[] = [];
+  for (const call of Array.isArray(raw.planned) ? raw.planned : []) {
+    if (!isRecord(call) || typeof call.tool !== "string" || !isRecord(call.arguments)) continue;
+    planned.push({
+      tool: call.tool,
+      arguments: call.arguments,
+      remote: call.remote !== false,
+      credential: call.credential === true,
+    });
   }
+  const probed = readStringMap(raw.probed);
+  const failed = readStringMap(raw.failed);
   return {
     v: typeof raw.v === "number" ? raw.v : 1,
     tools,
     server,
     ...(Object.keys(probed).length ? { probed } : {}),
+    ...(planned.length ? { planned } : {}),
+    ...(Object.keys(failed).length ? { failed } : {}),
   };
 }
 
@@ -107,12 +142,24 @@ export function withRequired(proposal: ToolProposal, field: string): string[] {
   return out;
 }
 
+/** The fields accepting `field` would add beside it, where the declaration lacks them. */
+export function alsoStaged(
+  server: McpServerEntry,
+  tool: string,
+  proposal: ToolProposal,
+  field: string,
+): string[] {
+  const held = (server.tool_facts?.[tool] ?? {}) as Record<string, unknown>;
+  return withRequired(proposal, field).filter((name) => name !== field && !(name in held));
+}
+
 /**
  * The server entry with one proposed field of `tool` accepted.
  *
  * A field the tool's declaration already holds is replaced; the fields it
  * requires are added only where the declaration does not hold them yet, so
- * accepting `places` never overwrites a `rows` the operator wrote.
+ * accepting `places` never overwrites a `rows` the operator wrote. No kind
+ * is added unless `kind` is the field accepted.
  */
 export function acceptField(
   server: McpServerEntry,
@@ -125,8 +172,12 @@ export function acceptField(
   for (const name of withRequired(proposal, field)) {
     if (name === field || !(name in next)) next[name] = proposal.fields[name].value;
   }
-  if (typeof next.kind !== "string") next.kind = proposal.facts.kind;
   return { tool_facts: { ...(server.tool_facts ?? {}), [tool]: next as ToolFactsEntry } };
+}
+
+/** Whether accepting the whole tool would stage anything. */
+export function hasProposal(proposal: ToolProposal): boolean {
+  return Object.keys(proposal.facts).length > 0;
 }
 
 /** The server entry with `tool`'s whole proposed declaration accepted, replacing its own. */
@@ -135,6 +186,7 @@ export function acceptTool(
   tool: string,
   proposal: ToolProposal,
 ): Partial<McpServerEntry> {
+  if (!hasProposal(proposal)) return {};
   return { tool_facts: { ...(server.tool_facts ?? {}), [tool]: { ...proposal.facts } } };
 }
 
@@ -176,3 +228,6 @@ export function isAccepted(
   if (!held || !(field in held) || !(field in proposal.fields)) return false;
   return JSON.stringify(held[field]) === JSON.stringify(proposal.fields[field].value);
 }
+
+/** How many tools the panel lists open before it starts closed. */
+export const OPEN_UP_TO = 5;

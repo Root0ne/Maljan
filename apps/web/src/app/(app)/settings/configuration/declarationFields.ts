@@ -152,8 +152,11 @@ export function readToolFacts(
     if (serverKey && tool.startsWith(`${serverKey}__`)) {
       return bad(`${tool}: spelled as this server's renamed tool; use the tool's own name`);
     }
-    if (!isObject(facts)) return bad(`${tool}: expected an object with a kind`);
-    if (typeof facts.kind !== "string" || !WORD.test(facts.kind)) {
+    if (!isObject(facts)) return bad(`${tool}: expected an object of the tool's facts`);
+    // No kind (absent or empty) states the other facts and keeps the tool
+    // read as one of no kind.
+    if (facts.kind !== undefined && facts.kind !== "" &&
+        (typeof facts.kind !== "string" || !WORD.test(facts.kind))) {
       return bad(`${tool}: kind is a lowercase word such as strings, rule_match or decompile`);
     }
   }

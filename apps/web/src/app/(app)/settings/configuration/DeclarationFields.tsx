@@ -311,7 +311,7 @@ export default function DeclarationFields({
         <div className="sm:col-span-2">
           <ReadField
             id={box("tool_facts")}
-            label="Tool declarations (JSON object keyed by tool name, each with a kind)"
+            label="Tool declarations (JSON object keyed by tool name, each with its facts; a kind is optional)"
             ariaLabel={`${serverKey} tool_facts`}
             value={server.tool_facts ?? {}}
             show={showJson}

@@ -1,9 +1,10 @@
 /**
  * The declarations a probe proposes, and what accepting one stages.
  *
- * Accepting stages the field in the server's declaration, with the fields it
- * needs to validate; nothing is staged before an accept. The proposal is the
- * server's data and is shown as text.
+ * Accepting stages the field in the server's declaration, with only the
+ * fields it needs to validate and never a kind it did not ask for; nothing is
+ * staged before an accept and nothing is called before a confirm. The
+ * proposal is the server's data and is shown as text.
  */
 
 import { createElement } from "react";
@@ -16,9 +17,11 @@ import {
   acceptField,
   acceptServerField,
   acceptTool,
+  alsoStaged,
   isAccepted,
   readProposals,
   withRequired,
+  type Proposals,
   type ToolProposal,
 } from "../declarationProposals";
 
@@ -45,38 +48,54 @@ const SCAN: ToolProposal = {
     places: { offset: "/strings/*/offset" },
     techniques: [{ path: "/**2/tags", format: "sigma_tag" }],
     asserts_techniques: true,
+    display_name: "Rule scanner",
   },
   fields: {
     kind: { value: "signature_rules", evidence: ["description (rule match)"], confidence: "low" },
-    rows: {
-      value: "/matches/*",
-      evidence: ["outputSchema.matches (a list of objects)"],
-      confidence: "medium",
-      requires: ["kind"],
-    },
+    rows: { value: "/matches/*", evidence: ["outputSchema.matches (a list of objects)"], confidence: "medium" },
     places: {
       value: { offset: "/strings/*/offset" },
       evidence: ["outputSchema.matches[].strings[].offset"],
       confidence: "medium",
-      requires: ["kind", "rows"],
+      requires: ["rows"],
     },
     techniques: {
       value: [{ path: "/**2/tags", format: "sigma_tag" }],
       evidence: ["outputSchema.matches[].tags"],
       confidence: "medium",
-      requires: ["kind"],
     },
     asserts_techniques: {
       value: true,
       evidence: ["rows with techniques"],
       confidence: "low",
-      requires: ["kind", "techniques"],
+      requires: ["techniques"],
     },
+    display_name: { value: "Rule scanner", evidence: ["title"], confidence: "high" },
+  },
+};
+
+const LISTER: ToolProposal = {
+  facts: { display_name: "Sections", arguments: { path: "path" } },
+  fields: {
+    display_name: { value: "Sections", evidence: ["title"], confidence: "high" },
+    arguments: { value: { path: "path" }, evidence: ["inputSchema.properties.path (name)"], confidence: "high" },
   },
 };
 
 function result(proposals: unknown): ProbeResult {
   return { ok: true, latency_ms: 1, detail: "", models: null, tools: ["scan"], details: { proposals } };
+}
+
+function render(proposals: Proposals, over: Record<string, unknown> = {}): string {
+  return renderToStaticMarkup(
+    createElement(DeclarationProposals, {
+      serverKey: "s",
+      server: SERVER,
+      proposals,
+      put: () => {},
+      ...over,
+    }),
+  );
 }
 
 describe("readProposals", () => {
@@ -86,19 +105,29 @@ describe("readProposals", () => {
         v: 1,
         tools: {
           scan: SCAN,
+          lister: LISTER,
           bad: { facts: { kind: 3 } },
           odd: "x",
-          half: { facts: { kind: "unclassified" }, fields: { kind: 5, rows: { value: "/r", confidence: "sure" } } },
+          half: { facts: {}, fields: { kind: 5, rows: { value: "/r", confidence: "sure" } } },
         },
         server: { error_patterns: { value: [{ match: "x" }], evidence: ["e"], confidence: "medium" } },
         probed: { scan: "called", other: 4 },
+        planned: [
+          { tool: "lister", arguments: { path: "/nonexistent-maljan-probe/x" }, remote: false, credential: false },
+          { tool: 5, arguments: {} },
+        ],
+        failed: { deep: "no proposal: reading its schema raised RecursionError", odd: 1 },
       }),
     );
     expect(read).not.toBeNull();
-    expect(Object.keys(read!.tools)).toEqual(["scan", "half"]);
+    expect(Object.keys(read!.tools)).toEqual(["scan", "lister", "half"]);
     expect(read!.tools.half.fields).toEqual({ rows: { value: "/r", evidence: [], confidence: "low" } });
     expect(read!.server.error_patterns.confidence).toBe("medium");
     expect(read!.probed).toEqual({ scan: "called" });
+    expect(read!.planned).toEqual([
+      { tool: "lister", arguments: { path: "/nonexistent-maljan-probe/x" }, remote: false, credential: false },
+    ]);
+    expect(read!.failed).toEqual({ deep: "no proposal: reading its schema raised RecursionError" });
   });
 
   it("is null for a result without proposals", () => {
@@ -109,23 +138,32 @@ describe("readProposals", () => {
 });
 
 describe("accepting", () => {
-  it("stages a field with the fields it needs, and nothing before", () => {
-    expect(SERVER.tool_facts).toBeUndefined();
-    expect(withRequired(SCAN, "places")).toEqual(["kind", "rows", "places"]);
-    const staged = acceptField(SERVER, "scan", SCAN, "places");
-    expect(staged.tool_facts).toEqual({
-      scan: { kind: "signature_rules", rows: "/matches/*", places: { offset: "/strings/*/offset" } },
+  it("stages a field with only the fields it needs, never a kind", () => {
+    expect(withRequired(SCAN, "places")).toEqual(["rows", "places"]);
+    expect(acceptField(SERVER, "scan", SCAN, "places").tool_facts).toEqual({
+      scan: { rows: "/matches/*", places: { offset: "/strings/*/offset" } },
+    });
+    expect(acceptField(SERVER, "scan", SCAN, "display_name").tool_facts).toEqual({
+      scan: { display_name: "Rule scanner" },
+    });
+    expect(alsoStaged(SERVER, "scan", SCAN, "places")).toEqual(["rows"]);
+    expect(alsoStaged(SERVER, "scan", SCAN, "display_name")).toEqual([]);
+  });
+
+  it("stages a kind only when the kind is accepted", () => {
+    expect(acceptField(SERVER, "scan", SCAN, "kind").tool_facts).toEqual({
+      scan: { kind: "signature_rules" },
     });
   });
 
   it("never overwrites a required field the operator wrote", () => {
     const server = { ...SERVER, tool_facts: { scan: { kind: "mine", rows: "/hits/*" } } };
-    const staged = acceptField(server, "scan", SCAN, "places");
-    expect(staged.tool_facts!.scan).toEqual({
+    expect(acceptField(server, "scan", SCAN, "places").tool_facts!.scan).toEqual({
       kind: "mine",
       rows: "/hits/*",
       places: { offset: "/strings/*/offset" },
     });
+    expect(alsoStaged(server, "scan", SCAN, "places")).toEqual([]);
   });
 
   it("replaces the field accepted itself", () => {
@@ -133,12 +171,14 @@ describe("accepting", () => {
     expect(acceptField(server, "scan", SCAN, "rows").tool_facts!.scan.rows).toBe("/matches/*");
   });
 
-  it("stages a whole tool as proposed, leaving the other tools alone", () => {
+  it("stages a whole tool as proposed, and nothing for a tool proposed nothing", () => {
     const server = { ...SERVER, tool_facts: { other: { kind: "strings" } } };
     const staged = acceptTool(server, "scan", SCAN);
     expect(staged.tool_facts).toEqual({ other: { kind: "strings" }, scan: SCAN.facts });
     expect(isAccepted({ ...server, ...staged }, "scan", "places", SCAN)).toBe(true);
     expect(isAccepted(server, "scan", "places", SCAN)).toBe(false);
+    expect(acceptTool(server, "lister", LISTER).tool_facts!.lister).toEqual(LISTER.facts);
+    expect(acceptTool(server, "empty", { facts: {}, fields: {} })).toEqual({});
   });
 
   it("adds a server's error patterns and prefixes beside its own, once", () => {
@@ -152,11 +192,7 @@ describe("accepting", () => {
       }),
     ).toEqual({ error_patterns: [pattern, { match: "no program" }] });
     expect(
-      acceptServerField(server, "auto_name_prefixes", {
-        value: ["proc_", "blk_"],
-        evidence: [],
-        confidence: "low",
-      }),
+      acceptServerField(server, "auto_name_prefixes", { value: ["proc_", "blk_"], evidence: [], confidence: "low" }),
     ).toEqual({ auto_name_prefixes: ["proc_", "blk_"] });
     expect(acceptServerField(server, "other", { value: 1, evidence: [], confidence: "low" })).toEqual({});
   });
@@ -170,36 +206,72 @@ describe("DeclarationProposals", () => {
         v: 1,
         tools: {
           [hostile]: {
-            facts: { kind: "unclassified", display_name: hostile },
-            fields: {
-              display_name: { value: hostile, evidence: [hostile], confidence: "high", requires: ["kind"] },
-            },
+            facts: { display_name: hostile },
+            fields: { display_name: { value: hostile, evidence: [hostile], confidence: "high" } },
             notes: [hostile],
           },
         },
         server: {},
         probed: { [hostile]: hostile },
+        failed: { [`${hostile}2`]: hostile },
       }),
     )!;
-    const html = renderToStaticMarkup(
-      createElement(DeclarationProposals, { serverKey: "s", server: SERVER, proposals, put: () => {} }),
-    );
+    const html = render(proposals);
     expect(html).not.toContain("<img");
     expect(html).toContain("&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
   });
 
-  it("draws an accept per field and per tool, and nothing when there is nothing to propose", () => {
+  it("draws an accept per field and per tool, the fields a field brings, and nothing when empty", () => {
     const proposals = readProposals(result({ v: 1, tools: { scan: SCAN }, server: {} }))!;
-    const html = renderToStaticMarkup(
-      createElement(DeclarationProposals, { serverKey: "s", server: SERVER, proposals, put: () => {} }),
-    );
+    const html = render(proposals);
     expect(html).toContain('aria-label="accept every field of scan"');
     for (const field of Object.keys(SCAN.fields)) expect(html).toContain(`aria-label="accept ${field}"`);
-    const empty = readProposals(result({ v: 1, tools: {}, server: {} }))!;
-    expect(
-      renderToStaticMarkup(
-        createElement(DeclarationProposals, { serverKey: "s", server: SERVER, proposals: empty, put: () => {} }),
-      ),
-    ).toBe("");
+    expect(html).toContain("also stages rows");
+    expect(render(readProposals(result({ v: 1, tools: {}, server: {} }))!)).toBe("");
+  });
+
+  it("lists a tool proposed nothing on one line, with no accept", () => {
+    const proposals = readProposals(
+      result({ v: 1, tools: { quiet_one: { facts: {}, fields: {} }, quiet_two: { facts: {}, fields: {} } }, server: {} }),
+    )!;
+    const html = render(proposals);
+    expect(html).toContain("Nothing proposed for: <span");
+    expect(html).toContain("quiet_one, quiet_two");
+    expect(html).not.toContain("accept every field");
+  });
+
+  it("starts closed past a handful of proposing tools", () => {
+    const many = Object.fromEntries(Array.from({ length: 6 }, (_, i) => [`t${i}`, LISTER]));
+    expect(render(readProposals(result({ v: 1, tools: many, server: {} }))!)).not.toContain(" open=");
+    expect(render(readProposals(result({ v: 1, tools: { t: LISTER }, server: {} }))!)).toContain(" open=");
+  });
+
+  it("lists every planned call before any is made, and calls only on a confirm", () => {
+    const planned = [
+      { tool: "lookup", arguments: { hash: "e3" }, remote: true, credential: true },
+      { tool: "lister", arguments: { path: "/nonexistent-maljan-probe/x" }, remote: false, credential: false },
+    ];
+    const proposals = readProposals(result({ v: 1, tools: { lister: LISTER }, server: {}, planned }))!;
+    const confirmed: string[][] = [];
+    const html = render(proposals, { onConfirmCalls: (tools: string[]) => confirmed.push(tools) });
+    expect(html).toContain('data-planned-call="lookup"');
+    expect(html).toContain("may reach its own service");
+    expect(html).toContain("with this server&#x27;s credential");
+    expect(html).toContain("without this server&#x27;s credentials");
+    expect(html).toContain("Call these 2 tools once each");
+    // Rendering calls nothing.
+    expect(confirmed).toEqual([]);
+    // No confirm control without a handler, and none once the calls were made.
+    expect(render(proposals)).not.toContain("Call these");
+    const made = readProposals(
+      result({ v: 1, tools: { lister: LISTER }, server: {}, planned, probed: { lister: "called" } }),
+    )!;
+    expect(render(made, { onConfirmCalls: () => {} })).not.toContain("Call these");
+  });
+
+  it("says a built-in server's declarations are stored whole", () => {
+    const proposals = readProposals(result({ v: 1, tools: { t: LISTER }, server: {} }))!;
+    expect(render(proposals, { builtin: true })).toContain("stores them whole");
+    expect(render(proposals)).not.toContain("stores them whole");
   });
 });

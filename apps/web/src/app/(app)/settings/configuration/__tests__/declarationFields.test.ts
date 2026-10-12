@@ -48,7 +48,9 @@ describe("the server editor's declaration readers", () => {
     const ok = readToolFacts('{"scan": {"kind": "rule_match", "rows": "/hits/*"}}');
     expect(ok.value).toEqual({ scan: { kind: "rule_match", rows: "/hits/*" } });
     expect(readToolFacts("[]").error).toMatch(/keyed by tool name/);
-    expect(readToolFacts('{"scan": {}}').error).toMatch(/scan: kind is a lowercase word/);
+    // A declaration may name no kind.
+    expect(readToolFacts('{"scan": {}}').error).toBeNull();
+    expect(readToolFacts('{"scan": {"kind": 3}}').error).toMatch(/scan: kind is a lowercase word/);
     expect(readToolFacts('{"scan": {"kind": "Rule Match"}}').error).toMatch(/scan: kind/);
   });
 

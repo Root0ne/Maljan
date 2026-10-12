@@ -680,13 +680,17 @@ class ApiClient {
   }
 
   /** Probe one entry of the tool-server map, staged values included.
-   *  `callTools` also calls each undeclared tool once with a harmless
-   *  argument, so its answer can propose its declaration. */
-  testMcpServer(server: string, values: Record<string, unknown>, callTools = false) {
-    const call = callTools ? "&call_tools=true" : "";
+   *  `confirmedCalls` names the planned harmless calls the admin confirmed
+   *  after the previous probe listed them; none: nothing is called. */
+  testMcpServer(server: string, values: Record<string, unknown>, confirmedCalls: string[] = []) {
     return this.request<ProbeResult>(
-      `/api/v1/settings/test/mcp?server=${encodeURIComponent(server)}${call}`,
-      { method: "POST", body: JSON.stringify({ values }) }
+      `/api/v1/settings/test/mcp?server=${encodeURIComponent(server)}`,
+      {
+        method: "POST",
+        body: JSON.stringify(
+          confirmedCalls.length ? { values, confirmed_calls: confirmedCalls } : { values }
+        ),
+      }
     );
   }
 
