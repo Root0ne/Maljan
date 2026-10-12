@@ -93,9 +93,9 @@ COSTLY_PATH = (
 
 
 COSTLY_FILTER_PATH = (
-    "this path's filter reads the whole report again ('$' with a '..' segment) for every "
-    "candidate it tests, so reading it costs the report's size times the candidates; test "
-    "the candidate itself ('@') in the filter to read in time linear in the report"
+    "this path's filter runs a query from the report's root ('$') for every candidate it "
+    "tests, so reading it can cost the report's size times the candidates; test the "
+    "candidate itself ('@') in the filter to read in time linear in the report"
 )
 
 
@@ -105,19 +105,21 @@ def descendant_segments(expression: str) -> int:
 
 
 def _segments(expression: str) -> tuple[int, bool]:
-    """``(descendant segments, whether a filter reads `$` with a descendant segment)``.
+    """``(descendant segments, whether a filter holds an absolute query)``.
 
-    Outside quoted names. A filter (``[?...]``) runs its query once per
-    candidate: an absolute query in it (``$``) that descends reads the whole
-    report each time.
+    Outside quoted names. A filter (``[?...]``) runs its queries once per
+    candidate: an absolute query in it (``$``) is evaluated from the report's
+    root each time, and with a wildcard, a descendant segment or a filter of
+    its own it reads a part of the report as large as the report per
+    candidate. Any absolute query in a filter is named, whatever it holds.
     """
     count = 0
     quote = ""
     index = 0
-    # The bracket depth each open filter began at, and whether it has read ``$``.
-    filters: list[list[Any]] = []
+    # The bracket depth each open filter began at.
+    filters: list[int] = []
     depth = 0
-    absolute_descent = False
+    absolute = False
     while index < len(expression):
         char = expression[index]
         if quote:
@@ -130,29 +132,27 @@ def _segments(expression: str) -> tuple[int, bool]:
             quote = char
         elif expression.startswith("..", index):
             count += 1
-            if filters and filters[-1][1]:
-                absolute_descent = True
             index += 2
             continue
         elif char == "[":
             depth += 1
             if expression.startswith("?", index + 1):
-                filters.append([depth, False])
+                filters.append(depth)
         elif char == "]":
-            if filters and filters[-1][0] == depth:
+            if filters and filters[-1] == depth:
                 filters.pop()
             depth -= 1
         elif char == "$" and filters:
-            filters[-1][1] = True
+            absolute = True
         index += 1
-    return count, absolute_descent
+    return count, absolute
 
 
 def costly_paths(mapping: Any) -> dict[str, str]:
     """``{field: warning}`` for each path of ``mapping`` whose reading is not linear in the report.
 
     A path is costly where it holds more than one descendant segment, or a
-    filter whose absolute query descends (``[?count($..x) > 0]``). The
+    filter holding an absolute query (``[?count($.b[*]) > 0]``). The
     field is the mapping's own: ``places.extracted``, ``channels.<name>``,
     ``processes``. Linear in the paths' text.
     """
@@ -161,10 +161,10 @@ def costly_paths(mapping: Any) -> dict[str, str]:
     named += [(f"channels.{k}", v) for k, v in (getattr(mapping, "channels", None) or {}).items()]
     named += [(f"places.{k}", v) for k, v in (getattr(mapping, "places", None) or {}).items()]
     for name, expression in named:
-        count, absolute_descent = _segments(str(expression or ""))
+        count, absolute = _segments(str(expression or ""))
         if count > 1:
             out[name] = COSTLY_PATH.format(count=count)
-        elif absolute_descent:
+        elif absolute:
             out[name] = COSTLY_FILTER_PATH
     return out
 

@@ -131,16 +131,34 @@ class TestACostlyPathIsNamed:
             ("$.a[*][?@..x]", False),
             ("$.a[?@.b == '$..x']", False),
             ("$..a[?@.b]", False),
-            ("$.a[?$.b == 1]", False),
+            ("$.a[?$.b == 1]", True),
+            ("$.a[?count($.b[*]) > 0]", True),
+            ("$.a[?@.v == $.b[0]]", True),
+            ("$.a[?@.v == 1][?@.w == '$']", False),
         ],
     )
-    def test_a_filter_reading_the_whole_report_again_for_each_candidate_is_costly(
-        self, path: str, costly: bool
-    ) -> None:
+    def test_a_filter_holding_an_absolute_query_is_costly(self, path: str, costly: bool) -> None:
         warned = costly_paths(RestMappingConfig(processes=path))
         assert ("processes" in warned) is costly
         if costly:
             assert "every candidate" in warned["processes"]
+
+    def test_an_absolute_wildcard_query_in_a_filter_is_quadratic_and_named(self) -> None:
+        """The query from the root runs once per candidate: twice the rows, four times the work."""
+        path = "$.a[?count($.b[*]) > 0]"
+        assert "processes" in costly_paths(RestMappingConfig(processes=path))
+
+        def run(n: int) -> Callable[[], Any]:
+            payload = {
+                "a": [{"v": i, "pid": i, "ppid": 0, "name": "x"} for i in range(n)],
+                "b": list(range(n)),
+            }
+            compiled = compile_mapping(RestMappingConfig(target_sha256="", processes=path))
+            return lambda: apply_mapping(compiled, payload, provider="rest", task_id="t")
+
+        once, fourfold = _seconds(run(300)), _seconds(run(1_200))
+        # Four times the rows: sixteen times the work where it is quadratic.
+        assert fourfold > 6 * once, (once, fourfold)
 
 
 def test_the_settings_save_warns_beside_a_costly_path_and_saves_it(monkeypatch: Any) -> None:
