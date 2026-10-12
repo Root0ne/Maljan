@@ -48,6 +48,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from maljan.core.tool_declarations import (
+    KIND_DEPENDENT_FIELDS,
     ErrorPattern,
     ToolFacts,
     check_auto_name_prefixes,
@@ -849,8 +850,20 @@ def propose_tool(
     if title:
         proposal.fields["display_name"] = Proposed(title, ["title"], HIGH)
 
+    # A field read only through a kind is offered only with that kind: it
+    # requires it, and with no kind proposed it is not offered at all.
+    if "kind" not in proposal.fields:
+        dropped = [name for name in KIND_DEPENDENT_FIELDS if name in proposal.fields]
+        for name in dropped:
+            proposal.fields.pop(name)
+        if dropped:
+            proposal.notes.append(
+                f"{', '.join(dropped)} not offered: read only through a kind, and nothing "
+                "the server said names one"
+            )
     for held_name, held in proposal.fields.items():
-        held.requires = _REQUIRES.get(held_name, ())
+        needs_kind = ("kind",) if held_name in KIND_DEPENDENT_FIELDS else ()
+        held.requires = (*needs_kind, *_REQUIRES.get(held_name, ()))
     _settle(proposal)
     return proposal
 
@@ -902,6 +915,9 @@ def _kind_of(
 def _settle(proposal: ToolProposal) -> None:
     """Make ``facts`` a declaration that validates, dropping what will not."""
     facts = {name: held.value for name, held in proposal.fields.items()}
+    if not facts:
+        proposal.facts = {}
+        return
     for drop in (None, *_DROP_ORDER):
         if drop is not None and drop in facts:
             facts.pop(drop)

@@ -103,7 +103,27 @@ def test_a_cyclic_ref_and_a_self_referencing_object_are_read_once() -> None:
         "type": "object",
         "properties": {"head": {"$ref": "#/$defs/node"}, "rows": ROWS},
     }
-    assert propose_tool({"name": "ref", "outputSchema": by_ref}).facts["rows"] == "/rows/*"
+    by_ref_tool = {
+        "name": "ref",
+        "description": "Matches the rules; each match names its techniques.",
+        "outputSchema": {
+            **by_ref,
+            "properties": {
+                **by_ref["properties"],
+                "rows": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "rule": {"type": "string"},
+                            "technique_id": {"type": "string"},
+                        },
+                    },
+                },
+            },
+        },
+    }
+    assert propose_tool(by_ref_tool).facts["rows"] == "/rows/*"
     node: dict[str, Any] = {"type": "object", "properties": {}}
     node["properties"]["self"] = node
     node["anyOf"] = [node]
@@ -293,6 +313,17 @@ def test_a_tool_nothing_names_a_kind_for_is_proposed_no_kind() -> None:
     assert proposal.facts == {"arguments": {"path": "path"}, "display_name": "Things"}
     # A field needs only what makes it validate, never a kind.
     assert all("kind" not in held.requires for held in proposal.fields.values())
+
+
+def test_a_field_read_only_through_a_kind_is_not_offered_without_one() -> None:
+    proposal = propose_tool(
+        {"name": "listing", "outputSchema": {"type": "object", "properties": {"rows": ROWS}}}
+    )
+    assert proposal is not None
+    assert proposal.facts == {} and proposal.fields == {}
+    assert proposal.notes == [
+        "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
 
 
 def test_a_tool_that_says_nothing_is_proposed_nothing() -> None:

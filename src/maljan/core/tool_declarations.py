@@ -412,6 +412,38 @@ class ErrorPattern(BaseModel):
 # The word that names no kind, read as an empty kind (``ToolFacts.kind``).
 NO_KIND = "unclassified"
 
+# The fields of a tool declaration, split by whether they are read without a
+# kind. A kind-free field is read from the live declaration whatever the kind
+# (the guard's budget, a call's argument roles, the tag a description is shown
+# with, the words and name a tool is given, whether it discloses the sample).
+# A kind-dependent field is read only through the kind (an answer's rows and
+# the paths inside them, its techniques and reputation, a reader of its shape,
+# the report sections it is shown to): a declaration that names no kind may
+# not set one, since it would be read by nothing. The one place the split is
+# written; the console's tool-declaration box mirrors it, held equal by a test.
+KIND_FREE_FIELDS: tuple[str, ...] = (
+    "display_name",
+    "category",
+    "words",
+    "timeout_seconds",
+    "long_running",
+    "memory_peak_mb",
+    "discloses_sample",
+    "arguments",
+)
+KIND_DEPENDENT_FIELDS: tuple[str, ...] = (
+    "asserts_techniques",
+    "source",
+    "holds_strings",
+    "rows",
+    "places",
+    "values",
+    "techniques",
+    "reputation",
+    "reader",
+    "report_sections",
+)
+
 
 class TechniqueField(BaseModel):
     """Where an answer names ATT&CK technique ids, and how they are written.
@@ -556,7 +588,10 @@ class ToolFacts(BaseModel):
     description is shown with.
     """
 
-    model_config = ConfigDict(frozen=True)
+    # A key this model does not know is refused: a misspelt ``kind`` would
+    # otherwise save as a declaration of nothing. Stored records are read for
+    # the fields this version knows (``declared_reading``), never refused.
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     kind: str = ""
     asserts_techniques: bool = False
@@ -630,6 +665,19 @@ class ToolFacts(BaseModel):
             raise ValueError("source names a corroborating tool; set asserts_techniques")
         if (self.places or self.values) and not self.rows:
             raise ValueError("places and values are read inside rows; declare rows")
+        if not self.kind:
+            held = self.model_dump(exclude_defaults=True)
+            held.pop("kind", None)
+            if not held:
+                raise ValueError(
+                    "a tool declaration names its kind or at least one of: "
+                    + ", ".join(KIND_FREE_FIELDS)
+                )
+            needing = [name for name in KIND_DEPENDENT_FIELDS if name in held]
+            if needing:
+                raise ValueError(
+                    f"{', '.join(needing)} are read only through a kind; declare the kind"
+                )
         return self
 
     def row_values(self, answer: Any) -> list[dict[str, list[Any]]]:

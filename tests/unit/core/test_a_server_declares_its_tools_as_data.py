@@ -10,7 +10,9 @@ written: never a bare tool name, an agent's name or today's settings.
 
 from __future__ import annotations
 
+import re
 import time
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -48,10 +50,87 @@ def test_a_kind_that_is_not_a_lowercase_word_is_refused(kind: str) -> None:
 
 
 @pytest.mark.parametrize("kind", ["", "unclassified"])
-def test_a_declaration_may_name_no_kind(kind: str) -> None:
+def test_a_declaration_may_name_no_kind_and_state_kind_free_fields(kind: str) -> None:
     facts = ToolFacts(kind=kind, display_name="Sections")
     assert facts.kind == ""
     assert ToolFacts(display_name="Sections").kind == ""
+    assert ToolFacts(timeout_seconds=30, arguments={"path": "path"}).kind == ""
+
+
+@pytest.mark.parametrize(
+    ("declared", "message"),
+    [
+        # The three a kindless save let through: refused again, as dev refused them.
+        ({"knd": "decompile"}, "knd"),
+        ({}, "names its kind or at least one of"),
+        ({"rows": "/m/*", "places": {"offset": "/o"}}, "rows, places are read only through a kind"),
+        ({"kind": "unclassified"}, "names its kind or at least one of"),
+        ({"display_name": "Scanner", "rows": "/m/*"}, "rows are read only through a kind"),
+        ({"display_name": "Scanner", "report_sections": ["commands"]}, "report_sections"),
+    ],
+)
+def test_a_declaration_a_kind_would_be_needed_to_read_is_refused(
+    declared: dict[str, Any], message: str
+) -> None:
+    with pytest.raises(ValidationError, match=message):
+        ToolFacts.model_validate(declared)
+    with pytest.raises(ValidationError, match=message):
+        MCPServerConfig.model_validate({"command": "x", "tool_facts": {"scan": declared}})
+
+
+def test_the_fields_split_once_into_kind_free_and_kind_dependent() -> None:
+    from pathlib import Path
+
+    from maljan.core.tool_declarations import KIND_DEPENDENT_FIELDS, KIND_FREE_FIELDS
+
+    assert not set(KIND_FREE_FIELDS) & set(KIND_DEPENDENT_FIELDS)
+    assert {*KIND_FREE_FIELDS, *KIND_DEPENDENT_FIELDS, "kind"} == set(ToolFacts.model_fields)
+    # The console's declaration box reads the same split.
+    console = (
+        Path(__file__).resolve().parents[3]
+        / "apps/web/src/app/(app)/settings/configuration/declarationFields.ts"
+    ).read_text(encoding="utf-8")
+
+    def _listed(name: str) -> tuple[str, ...]:
+        body = console.split(f"export const {name} = [", 1)[1].split("]", 1)[0]
+        return tuple(re.findall(r'"([a-z_]+)"', body))
+
+    assert _listed("KIND_FREE_FIELDS") == KIND_FREE_FIELDS
+    assert _listed("KIND_DEPENDENT_FIELDS") == KIND_DEPENDENT_FIELDS
+
+
+def test_every_shipped_declaration_and_stored_record_loads_as_before() -> None:
+    import json
+
+    from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before import _benchmark
+
+    from maljan.core import declared_reading
+    from maljan.core.builtin_declarations import builtin_server_names, server_declaration
+
+    for key in builtin_server_names():
+        block = server_declaration(key)
+        MCPServerConfig.model_validate({"command": "x", **block})
+    # A record dev stored always names its kind and reads as it did; a key a
+    # later version adds is read past, never refused.
+    record = {"v": 1, "kind": "strings", "rows": "/strings/*", "a_later_field": 1}
+    facts = declared_reading.facts_of({"tool": "t", "source": "mcp:x", "facts": record})
+    assert facts is not None and facts.kind == "strings" and facts.rows == "/strings/*"
+    root = _benchmark()
+    if root is None:
+        pytest.skip("the stored benchmark runs are not on this machine")
+    from maljan.schemas.evidence import LedgerEntry
+
+    read = 0
+    for run in ("run7", "run5", "run4", "local8"):
+        path = root / run / "evidence.json"
+        if not path.is_file():
+            continue
+        for item in json.loads(path.read_text()).get("items") or []:
+            entry = LedgerEntry.model_validate({**item, "id": item.get("entry_id") or item["id"]})
+            # Stored before sources and records: read by name, as it always was.
+            assert entry.facts is None or entry.facts.get("kind")
+            read += 1
+    assert read > 0
 
 
 @pytest.mark.parametrize(
