@@ -937,8 +937,12 @@ def network_from_ledger(
                         known_name.resolved_ips.append(address)
                 withheld = answers_of.withheld(row)
                 if withheld:
+                    # Several views of one report cut the same request alike:
+                    # the most any of them withheld, never their sum.
                     known_name.resolved_ips_partial = True
-                    known_name.resolved_ips_withheld += withheld
+                    known_name.resolved_ips_withheld = max(
+                        known_name.resolved_ips_withheld, withheld
+                    )
         if answers_of.cut:
             logger.warning(
                 "network block: a DNS request's questions share more answers than the "
@@ -1645,7 +1649,17 @@ def _sandbox_views(
 
     The job's report read whole when it holds an observation; otherwise every
     ``sandbox_network`` answer in the ledger, a paged one marked as a page.
+    Only an answer the platform's own sandbox tools or triage pack wrote (its
+    recorded declaration source) may carry the platform's DNS request links;
+    any other answer, a server's whatever its name, has them removed
+    (``schemas.sandbox_document.without_dns_links``), so its rows read their
+    own answers.
     """
+    from maljan.agents.prompt_fragments import SANDBOX_FAMILY
+    from maljan.pipeline.triage_pack import PACK_SOURCE
+    from maljan.schemas.sandbox_document import without_dns_links
+
+    platform_sources = {SANDBOX_FAMILY, PACK_SOURCE}
     if isinstance(sandbox_report, dict) and sandbox_report:
         from maljan.providers.sandbox_tools import sandbox_network
 
@@ -1659,6 +1673,10 @@ def _sandbox_views(
             str(k).endswith("_total") or k in ("next_offset", "shortened", "truncated")
             for k in data
         )
+        if getattr(entry, "source", None) not in platform_sources and isinstance(
+            data.get("dns"), list
+        ):
+            data = {**data, "dns": without_dns_links(data["dns"])}
         # A shortened or truncated answer is a part of the view, like a page.
         views.append((data, not paged and not getattr(entry, "truncated", False)))
     return views

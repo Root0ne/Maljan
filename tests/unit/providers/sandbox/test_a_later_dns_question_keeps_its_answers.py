@@ -279,3 +279,83 @@ def test_a_cut_is_stated_on_the_names_it_withheld_from() -> None:
     # A name nothing was withheld from dumps as it always did.
     assert "resolved_ips_partial" not in whole[0].model_dump()
     assert partial[0].model_dump()["resolved_ips_partial"] is True
+
+
+def _ledger_view(rows: list[dict[str, Any]], *, server: str | None, source: str | None) -> Any:
+    """A ``sandbox_network`` ledger answer holding ``rows``, as one tool or another wrote it."""
+    from maljan.schemas.evidence import build_entry
+
+    return build_entry(
+        entry_id="ev_0001",
+        seq=1,
+        agent="dynamic",
+        tool="sandbox_network",
+        args={},
+        server=server,
+        output=json.dumps({"dns": rows}),
+        source=source,
+    )
+
+
+def _linked_rows() -> list[dict[str, Any]]:
+    """Two DNS rows in the resolver's exact link form, each with its own address."""
+    return [
+        {"request": "relay-a-p5.net", DNS_REQUEST_KEY: 0, "answers": [{"data": "45.33.32.1"}]},
+        {"request": "relay-b-p6.net", SAME_REQUEST_KEY: 0, "answers": [{"data": "45.33.32.9"}]},
+    ]
+
+
+def _resolved_from(entries: list[Any]) -> dict[str, list[str]]:
+    from maljan.reporting.ledger_projection import network_from_ledger
+
+    network = network_from_ledger(entries)
+    assert network is not None
+    return {d.fqdn: d.resolved_ips for d in network.domains}
+
+
+class TestALedgerAnswerFromAServerCannotLinkItsRows:
+    """With no report in hand, only the platform's own answers carry request links."""
+
+    DEV = {"relay-a-p5.net": ["45.33.32.1"], "relay-b-p6.net": ["45.33.32.9"]}
+
+    def test_a_server_s_answer_reads_each_row_s_own_answers(self) -> None:
+        # As the reviewer recorded it: a server's tool of the view's name, no source.
+        entry = _ledger_view(_linked_rows(), server="acme", source=None)
+        assert _resolved_from([entry]) == self.DEV
+
+    def test_a_server_named_like_a_platform_source_is_treated_alike(self) -> None:
+        for name in ("sandbox", "pack"):
+            entry = _ledger_view(_linked_rows(), server=name, source=None)
+            assert _resolved_from([entry]) == self.DEV
+
+    def test_an_answer_with_no_recorded_source_reads_its_own_answers(self) -> None:
+        entry = _ledger_view(_linked_rows(), server=None, source=None)
+        assert _resolved_from([entry]) == self.DEV
+
+    def test_the_platform_s_own_answer_keeps_its_links(self) -> None:
+        rows = [
+            {
+                "request": "relay-a-p5.net",
+                DNS_REQUEST_KEY: 0,
+                "answers": [{"data": "45.33.32.1"}, {"data": "45.33.32.2"}],
+            },
+            {"request": "relay-b-p6.net", SAME_REQUEST_KEY: 0},
+        ]
+        for source in ("sandbox", "pack"):
+            entry = _ledger_view(rows, server=None, source=source)
+            assert _resolved_from([entry])["relay-b-p6.net"] == ["45.33.32.1", "45.33.32.2"]
+
+
+def test_two_views_of_one_report_withhold_the_count_once() -> None:
+    n = 300
+    questions = [{"name": f"q{i}.relay-n4.net", "type": "A"} for i in range(n)]
+    answers = [{"value": f"45.33.{i // 250}.{i % 250 + 1}"} for i in range(n)]
+    request = {"domain_req": {"questions": questions}, "domain_resp": {"answers": answers}}
+    rows = _document([request])["network"]["dns"]
+    one = _ledger_view(rows, server=None, source="sandbox")
+    from maljan.reporting.ledger_projection import network_from_ledger
+
+    single = {d.fqdn: d.resolved_ips_withheld for d in network_from_ledger([one]).domains}
+    twice = network_from_ledger([one, one.model_copy(update={"id": "ev_0002", "seq": 2})])
+    assert {d.fqdn: d.resolved_ips_withheld for d in twice.domains} == single
+    assert max(single.values()) <= n
