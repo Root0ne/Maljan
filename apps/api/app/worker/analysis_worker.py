@@ -1836,6 +1836,7 @@ async def keep_the_built_report(
                 run_summary=run_summary,
                 transcript=transcript,
                 incomplete_reason=note,
+                core_settings=core_settings,
             )
             await db.commit()
             report_id = report.id
@@ -1966,6 +1967,7 @@ async def keep_the_stopped_run(
                 run_summary=run_summary,
                 transcript=transcript,
                 incomplete_reason=note,
+                core_settings=core_settings,
             )
             await db.commit()
             report_id = report.id
@@ -3013,6 +3015,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 stix_bundle=stix_bundle_for_persist,
                 run_summary=_run_summary,
                 transcript=transcript,
+                core_settings=core_settings,
             )
 
             # ── 5. Mark job complete ─────────────────────────────
@@ -3995,16 +3998,19 @@ def _report_inputs(
     return stix_bundle_for_persist, _run_summary
 
 
-def evidence_budget_of(run_summary: Mapping[str, Any] | None) -> int:
-    """The per-agent evidence budget the run ran with: its settings snapshot, else the settings."""
+def evidence_budget_of(run_summary: Mapping[str, Any] | None, core_settings: Any = None) -> int:
+    """The per-agent evidence budget the run ran with.
+
+    Its settings snapshot in the run summary, else the job's own settings
+    (``core_settings``, the ones the run was built with); with neither, no
+    budget, and the last pass leaves the ledger as it is.
+    """
     snapshot = (run_summary or {}).get("settings_snapshot")
     value = (
         snapshot.get("reporting.evidence_budget_bytes") if isinstance(snapshot, Mapping) else None
     )
-    if value is None:
-        from maljan.core.config import get_settings
-
-        value = getattr(get_settings().reporting, "evidence_budget_bytes", 0)
+    if value is None and core_settings is not None:
+        value = getattr(getattr(core_settings, "reporting", None), "evidence_budget_bytes", 0)
     try:
         return int(value or 0)
     except (TypeError, ValueError):
@@ -4021,6 +4027,7 @@ async def _store_the_report(
     run_summary: dict[str, Any],
     transcript: list[dict[str, Any]],
     incomplete_reason: str | None = None,
+    core_settings: Any = None,
 ) -> Any:
     """Add the report and everything that cites it to ``db``, uncommitted.
 
@@ -4211,7 +4218,7 @@ async def _store_the_report(
     # with no structure kept beside a prose text, every built-in's).
     fit_structures_to_budget(
         [_entry for _entry in _ledger if isinstance(_entry, dict)],
-        evidence_budget_of(run_summary),
+        evidence_budget_of(run_summary, core_settings),
     )
     for _entry in _ledger:
         if not isinstance(_entry, dict):
