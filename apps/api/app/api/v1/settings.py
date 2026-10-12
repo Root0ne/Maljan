@@ -698,7 +698,7 @@ async def obtain_server_credential(
     except credential_bootstrap.BootstrapError as exc:
         # The service's own sentence goes to the admin who pressed the button,
         # not into the log.
-        logger.warning("credential bootstrap failed for tool server %s", log_safe(key))
+        logger.warning("the bootstrap request failed for tool server %s", log_safe(key))
         return JSONResponse(
             status_code=status.HTTP_502_BAD_GATEWAY, content={"errors": {key: str(exc)}}
         )
@@ -726,7 +726,7 @@ async def obtain_server_credential(
     )
     runtime_config.invalidate()
     core_settings_cache.invalidate()
-    logger.info("credential obtained for tool server %s", log_safe(key))
+    logger.info("the bootstrap request answered for tool server %s", log_safe(key))
     entry = updated[key]
     return CredentialBootstrapResponse(
         **credential_bootstrap.masked_state(key, entry if isinstance(entry, dict) else {}, facts)
