@@ -1,0 +1,3249 @@
+{
+ "_about": "The tool declarations each built-in block shipped in every release that could have stored a block's tool declarations whole, one entry per tool and version with the fields at their default left out, and per block the distinct shipped states in release order (each a tool -> version index, with the releases that shipped it). Frozen: read only by the revision beside it.",
+ "blocks": {
+  "mcp.servers.analysis": {
+   "releases": [
+    [
+     "7c988f65",
+     "a8d98e4c",
+     "f96cb89f",
+     "5e1f1792",
+     "bc6fd6be",
+     "1f415b17",
+     "a0ee72ba",
+     "2c2522b2",
+     "3770a52c",
+     "871ebf23",
+     "e2c0bfc2",
+     "767bd97a",
+     "174bd387",
+     "ba27771a",
+     "5520f868",
+     "5596cb4e",
+     "83469e98"
+    ]
+   ],
+   "states": [
+    {
+     "apk_info": 0,
+     "archive_list": 0,
+     "capa": 0,
+     "capabilities": 0,
+     "carve_payloads": 0,
+     "decode_string_blobs": 0,
+     "document_info": 0,
+     "elf_info": 0,
+     "find_crypto_constants": 0,
+     "floss": 0,
+     "function_index": 0,
+     "hashes": 0,
+     "identify_file": 0,
+     "iocs_from_file": 0,
+     "iocs_from_text": 0,
+     "macho_info": 0,
+     "pe_info": 0,
+     "put_sample": 0,
+     "put_sample_begin": 0,
+     "put_sample_chunk": 0,
+     "put_sample_finish": 0,
+     "resolve_api_hashes": 0,
+     "sigma_match": 0,
+     "sigma_match_sandbox": 0,
+     "signing_info": 0,
+     "strings": 0,
+     "transform_bytes": 0,
+     "unpack_upx": 0,
+     "yara_scan": 0
+    }
+   ],
+   "versions": {
+    "apk_info": [
+     {
+      "arguments": {
+       "carved": "carved_path",
+       "path": "path"
+      },
+      "kind": "format_info"
+     }
+    ],
+    "archive_list": [
+     {
+      "arguments": {
+       "carved": "carved_path",
+       "path": "path"
+      },
+      "kind": "archive_listing"
+     }
+    ],
+    "capa": [
+     {
+      "arguments": {
+       "path": "path"
+      },
+      "asserts_techniques": true,
+      "display_name": "capa",
+      "kind": "capability_rules",
+      "long_running": true,
+      "places": {
+       "addresses": "/addresses"
+      },
+      "rows": "/capabilities/*",
+      "source": "capa",
+      "techniques": [
+       {
+        "format": "attck",
+        "path": "/**6/technique_id"
+       },
+       {
+        "format": "attck",
+        "path": "/**6/attck"
+       },
+       {
+        "format": "attck",
+        "path": "/**6/technique_ids"
+       },
+       {
+        "format": "sigma_tag",
+        "path": "/**6/tags"
+       }
+      ],
+      "values": {
+       "namespace": "/namespace",
+       "rule": "/rule"
+      }
+     }
+    ],
+    "capabilities": [
+     {
+      "kind": "capabilities"
+     }
+    ],
+    "carve_payloads": [
+     {
+      "arguments": {
+       "carved": "carved_path",
+       "path": "path"
+      },
+      "kind": "carve"
+     }
+    ],
+    "decode_string_blobs": [
+     {
+      "arguments": {
+       "carved": "carved_path",
+       "path": "path"
+      },
+      "kind": "decoded_strings",
+      "places": {
+       "rva": "/rva"
+      },
+      "rows": "/results/*",
+      "values": {
+       "text": "/text"
+      }
+     }
+    ],
+    "document_info": [
+     {
+      "arguments": {
+       "carved": "carved_path",
+       "path": "path"
+      },
+      "kind": "document_info"
+     }
+    ],
+    "elf_info": [
+     {
+      "arguments": {
+       "carved": "carved_path",
+       "path": "path"
+      },
+      "kind": "format_info"
+     }
+    ],
+    "find_crypto_constants": [
+     {
+      "arguments": {
+       "carved": "carved_path",
+       "path": "path"
+      },
+      "kind": "crypto_constants"
+     }
+    ],
+    "floss": [
+     {
+      "arguments": {
+       "carved": "carved_path",
+       "path": "path"
+      },
+      "display_name": "FLOSS",
+      "kind": "emulated_strings",
+      "long_running": true,
+      "places": {
+       "call_site": "/called_at_rva",
+       "function": "/function_rva"
+      },
+      "reader": "emulated_strings_with_call_sites",
+      "rows": "/strings/*",
+      "values": {
+       "scheme": "/kind",
+       "text": "/string"
+      },
+      "words": [
+       "decoded",
+       "emulation",
+       "floss"
+      ]
+     }
+    ],
+    "function_index": [
+     {
+      "arguments": {
+       "carved": "carved_path",
+       "path": "path"
+      },
+      "kind": "function_index",
+      "reader": "function_table"
+     }
+    ],
+    "hashes": [
+     {
+      "arguments": {
+       "carved": "carved_path",
+       "path": "path"
+      },
+      "kind": "identity"
+     }
+    ],
+    "identify_file": [
+     {
+      "arguments": {
+       "carved": "carved_path",
+       "path": "path"
+      },
+      "kind": "identity"
+     }
+    ],
+    "iocs_from_file": [
+     {
+      "arguments": {
+       "carved": "carved_path",
+       "path": "path"
+      },
+      "kind": "file_iocs"
+     }
+    ],
+    "iocs_from_text": [
+     {
+      "arguments": {
+       "text": "text"
+      },
+      "kind": "text_iocs"
+     }
+    ],
+    "macho_info": [
+     {
+      "arguments": {
+       "carved": "carved_path",
+       "path": "path"
+      },
+      "kind": "format_info"
+     }
+    ],
+    "pe_info": [
+     {
+      "arguments": {
+       "carved": "carved_path",
+       "path": "path"
+      },
+      "kind": "format_info",
+      "reader": "pe_header"
+     }
+    ],
+    "put_sample": [
+     {
+      "kind": "sample_delivery"
+     }
+    ],
+    "put_sample_begin": [
+     {
+      "kind": "sample_delivery"
+     }
+    ],
+    "put_sample_chunk": [
+     {
+      "kind": "sample_delivery"
+     }
+    ],
+    "put_sample_finish": [
+     {
+      "kind": "sample_delivery"
+     }
+    ],
+    "resolve_api_hashes": [
+     {
+      "arguments": {
+       "carved": "carved_path",
+       "path": "path"
+      },
+      "kind": "api_hash_resolution",
+      "places": {
+       "rva": "/occurrences/*/rva"
+      },
+      "rows": "/hits/*",
+      "values": {
+       "name": "/readings/*/name"
+      }
+     }
+    ],
+    "sigma_match": [
+     {
+      "arguments": {
+       "events": "events"
+      },
+      "asserts_techniques": true,
+      "display_name": "Sigma",
+      "kind": "event_rules",
+      "places": {
+       "command_line": "/matched_fields/CommandLine"
+      },
+      "rows": "/matches/*",
+      "source": "sigma",
+      "techniques": [
+       {
+        "format": "attck",
+        "path": "/**6/technique_id"
+       },
+       {
+        "format": "attck",
+        "path": "/**6/attck"
+       },
+       {
+        "format": "attck",
+        "path": "/**6/technique_ids"
+       },
+       {
+        "format": "sigma_tag",
+        "path": "/**6/tags"
+       }
+      ],
+      "values": {
+       "rule": "/rule",
+       "title": "/title"
+      },
+      "words": [
+       "sigma",
+       "rule",
+       "rules"
+      ]
+     }
+    ],
+    "sigma_match_sandbox": [
+     {
+      "arguments": {
+       "report": "report"
+      },
+      "asserts_techniques": true,
+      "display_name": "Sigma",
+      "kind": "event_rules",
+      "places": {
+       "command_line": "/matched_fields/CommandLine"
+      },
+      "rows": "/matches/*",
+      "source": "sigma",
+      "techniques": [
+       {
+        "format": "attck",
+        "path": "/**6/technique_id"
+       },
+       {
+        "format": "attck",
+        "path": "/**6/attck"
+       },
+       {
+        "format": "attck",
+        "path": "/**6/technique_ids"
+       },
+       {
+        "format": "sigma_tag",
+        "path": "/**6/tags"
+       }
+      ],
+      "values": {
+       "rule": "/rule",
+       "title": "/title"
+      },
+      "words": [
+       "sigma",
+       "rule",
+       "rules"
+      ]
+     }
+    ],
+    "signing_info": [
+     {
+      "arguments": {
+       "carved": "carved_path",
+       "path": "path"
+      },
+      "kind": "signing"
+     }
+    ],
+    "strings": [
+     {
+      "arguments": {
+       "carved": "carved_path",
+       "path": "path"
+      },
+      "kind": "strings",
+      "places": {
+       "offset": "/offset"
+      },
+      "rows": "/strings/*",
+      "values": {
+       "text": "/text"
+      }
+     }
+    ],
+    "transform_bytes": [
+     {
+      "arguments": {
+       "carved": "carved_path",
+       "path": "path"
+      },
+      "kind": "transform",
+      "reader": "byte_transform"
+     }
+    ],
+    "unpack_upx": [
+     {
+      "arguments": {
+       "carved": "carved_path",
+       "path": "path"
+      },
+      "kind": "unpack",
+      "reader": "unpacked_image"
+     }
+    ],
+    "yara_scan": [
+     {
+      "arguments": {
+       "carved": "carved_path",
+       "path": "path"
+      },
+      "asserts_techniques": true,
+      "display_name": "YARA",
+      "kind": "signature_rules",
+      "places": {
+       "instance_offset": "/strings/*/instances/*/offset",
+       "offset": "/strings/*/offset"
+      },
+      "rows": "/matches/*",
+      "source": "yara",
+      "techniques": [
+       {
+        "format": "attck",
+        "path": "/**6/technique_id"
+       },
+       {
+        "format": "attck",
+        "path": "/**6/attck"
+       },
+       {
+        "format": "attck",
+        "path": "/**6/technique_ids"
+       },
+       {
+        "format": "sigma_tag",
+        "path": "/**6/tags"
+       }
+      ],
+      "timeout_seconds": 60.0,
+      "values": {
+       "rule": "/rule"
+      },
+      "words": [
+       "yara",
+       "rule",
+       "rules"
+      ]
+     }
+    ]
+   }
+  },
+  "mcp.servers.knowledge": {
+   "releases": [
+    [
+     "7c988f65",
+     "a8d98e4c",
+     "f96cb89f",
+     "5e1f1792",
+     "bc6fd6be",
+     "1f415b17",
+     "a0ee72ba",
+     "2c2522b2",
+     "3770a52c",
+     "871ebf23",
+     "e2c0bfc2",
+     "767bd97a",
+     "174bd387",
+     "ba27771a",
+     "5520f868",
+     "5596cb4e",
+     "83469e98"
+    ]
+   ],
+   "states": [
+    {
+     "api_capability": 0,
+     "attck_lookup": 0,
+     "attck_validate": 0,
+     "capabilities": 0,
+     "family_lookup": 0,
+     "lolbin_lookup": 0,
+     "resolve_technique": 0,
+     "similar_cases": 0
+    }
+   ],
+   "versions": {
+    "api_capability": [
+     {
+      "kind": "api_catalogue"
+     }
+    ],
+    "attck_lookup": [
+     {
+      "kind": "reference"
+     }
+    ],
+    "attck_validate": [
+     {
+      "kind": "reference"
+     }
+    ],
+    "capabilities": [
+     {
+      "kind": "capabilities"
+     }
+    ],
+    "family_lookup": [
+     {
+      "kind": "reference"
+     }
+    ],
+    "lolbin_lookup": [
+     {
+      "arguments": {
+       "command_lines": "command_lines"
+      },
+      "asserts_techniques": true,
+      "kind": "command_match",
+      "source": "lolbin",
+      "techniques": [
+       {
+        "format": "attck",
+        "path": "/**6/technique_id"
+       },
+       {
+        "format": "attck",
+        "path": "/**6/attck"
+       },
+       {
+        "format": "attck",
+        "path": "/**6/technique_ids"
+       },
+       {
+        "format": "sigma_tag",
+        "path": "/**6/tags"
+       }
+      ]
+     }
+    ],
+    "resolve_technique": [
+     {
+      "kind": "reference"
+     }
+    ],
+    "similar_cases": [
+     {
+      "kind": "reference"
+     }
+    ]
+   }
+  },
+  "mcp.servers.network": {
+   "releases": [
+    [
+     "7c988f65",
+     "a8d98e4c",
+     "f96cb89f",
+     "5e1f1792",
+     "bc6fd6be",
+     "1f415b17"
+    ],
+    [
+     "a0ee72ba",
+     "2c2522b2",
+     "3770a52c",
+     "871ebf23",
+     "e2c0bfc2",
+     "767bd97a",
+     "174bd387",
+     "ba27771a",
+     "5520f868",
+     "5596cb4e",
+     "83469e98"
+    ]
+   ],
+   "states": [
+    {
+     "capabilities": 0,
+     "extract_dns": 0,
+     "extract_http": 0,
+     "pcap_summary": 0,
+     "read_pcap_summary": 0
+    },
+    {
+     "capabilities": 0,
+     "extract_dns": 0,
+     "extract_http": 0,
+     "pcap_summary": 0,
+     "read_pcap_summary": 1
+    }
+   ],
+   "versions": {
+    "capabilities": [
+     {
+      "kind": "capabilities"
+     }
+    ],
+    "extract_dns": [
+     {
+      "arguments": {
+       "path": "pcap_path"
+      },
+      "kind": "dns",
+      "reader": "dns_query_lines"
+     }
+    ],
+    "extract_http": [
+     {
+      "arguments": {
+       "path": "pcap_path"
+      },
+      "kind": "http"
+     }
+    ],
+    "pcap_summary": [
+     {
+      "arguments": {
+       "path": "pcap_path"
+      },
+      "kind": "pcap",
+      "reader": "flow_table",
+      "words": [
+       "capture",
+       "packet",
+       "packets",
+       "pcap"
+      ]
+     }
+    ],
+    "read_pcap_summary": [
+     {
+      "arguments": {
+       "path": "pcap_path"
+      },
+      "kind": "packet_overview",
+      "reader": "flow_table",
+      "words": [
+       "capture",
+       "packet",
+       "packets",
+       "pcap"
+      ]
+     },
+     {
+      "arguments": {
+       "path": "pcap_path"
+      },
+      "kind": "packet_overview",
+      "reader": "packet_lines",
+      "words": [
+       "capture",
+       "packet",
+       "packets",
+       "pcap"
+      ]
+     }
+    ]
+   }
+  },
+  "mcp.servers.threatintel": {
+   "releases": [
+    [
+     "7c988f65",
+     "a8d98e4c",
+     "f96cb89f",
+     "5e1f1792",
+     "bc6fd6be",
+     "1f415b17",
+     "a0ee72ba",
+     "2c2522b2",
+     "3770a52c"
+    ],
+    [
+     "871ebf23",
+     "e2c0bfc2",
+     "767bd97a",
+     "174bd387",
+     "ba27771a",
+     "5520f868",
+     "5596cb4e",
+     "83469e98"
+    ]
+   ],
+   "states": [
+    {
+     "capabilities": 0,
+     "check_domain_reputation": 0,
+     "check_hash": 0,
+     "check_ip_reputation": 0,
+     "get_threatintel_status": 0
+    },
+    {
+     "capabilities": 0,
+     "check_domain_reputation": 0,
+     "check_hash": 1,
+     "check_ip_reputation": 0,
+     "get_threatintel_status": 0
+    }
+   ],
+   "versions": {
+    "capabilities": [
+     {
+      "kind": "capabilities"
+     }
+    ],
+    "check_domain_reputation": [
+     {
+      "arguments": {
+       "domain": "domain"
+      },
+      "kind": "indicator_reputation"
+     }
+    ],
+    "check_hash": [
+     {
+      "arguments": {
+       "hash": "file_hash"
+      },
+      "display_name": "Threat intelligence",
+      "kind": "hash_reputation",
+      "reputation": {
+       "detections": "",
+       "engines": "",
+       "labels": [],
+       "malicious": "",
+       "service": "",
+       "stats": "",
+       "text_patterns": [
+        "(?i)\\b(?P<malicious>\\d+)\\s*/\\s*(?P<total>\\d+)\\s+detections?\\b",
+        "(?i)\\b(?P<malicious>\\d+)\\s*/\\s*(?P<total>\\d+)\\s+malicious\\b"
+       ],
+       "total": ""
+      }
+     },
+     {
+      "arguments": {
+       "hash": "file_hash"
+      },
+      "display_name": "Threat intelligence",
+      "kind": "reputation",
+      "reputation": {
+       "detections": "",
+       "engines": "",
+       "first_seen": [],
+       "labels": [],
+       "last_seen": [],
+       "link": [],
+       "malicious": "",
+       "rank": 20,
+       "service": "",
+       "stats": "",
+       "summary": "",
+       "suspicious": "",
+       "text_patterns": [
+        "(?i)\\b(?P<malicious>\\d+)\\s*/\\s*(?P<total>\\d+)\\s+detections?\\b",
+        "(?i)\\b(?P<malicious>\\d+)\\s*/\\s*(?P<total>\\d+)\\s+malicious\\b(?:,\\s*(?P<suspicious>\\d+)\\s*/\\s*\\d+\\s+suspicious\\b)?"
+       ],
+       "total": ""
+      }
+     }
+    ],
+    "check_ip_reputation": [
+     {
+      "arguments": {
+       "ip": "ip_address"
+      },
+      "kind": "indicator_reputation"
+     }
+    ],
+    "get_threatintel_status": [
+     {
+      "kind": "status"
+     }
+    ]
+   }
+  },
+  "mcp.servers.virustotal": {
+   "releases": [
+    [
+     "7c988f65",
+     "a8d98e4c",
+     "f96cb89f",
+     "5e1f1792",
+     "bc6fd6be",
+     "1f415b17",
+     "a0ee72ba",
+     "2c2522b2",
+     "3770a52c"
+    ],
+    [
+     "871ebf23",
+     "e2c0bfc2",
+     "767bd97a",
+     "174bd387",
+     "ba27771a",
+     "5520f868",
+     "5596cb4e",
+     "83469e98"
+    ]
+   ],
+   "states": [
+    {
+     "get_analysis": 0,
+     "get_domain_report": 0,
+     "get_file_report": 0,
+     "get_ip_report": 0,
+     "get_submission": 0,
+     "get_url_report": 0,
+     "submit_file": 0,
+     "submit_local_file": 0
+    },
+    {
+     "get_analysis": 0,
+     "get_domain_report": 0,
+     "get_file_report": 1,
+     "get_ip_report": 0,
+     "get_submission": 0,
+     "get_url_report": 0,
+     "submit_file": 0,
+     "submit_local_file": 0
+    }
+   ],
+   "versions": {
+    "get_analysis": [
+     {
+      "kind": "submission_status"
+     }
+    ],
+    "get_domain_report": [
+     {
+      "kind": "indicator_report"
+     }
+    ],
+    "get_file_report": [
+     {
+      "arguments": {
+       "hash": "hash"
+      },
+      "display_name": "VirusTotal",
+      "kind": "file_reputation",
+      "reputation": {
+       "detections": "/**7/detections",
+       "engines": "/**7/coverage/engines",
+       "labels": [
+        "/**7/popular_threat_classification/suggested_threat_label",
+        "/**7/popular_threat_classification/popular_threat_name/*/value",
+        "/**7/popular_threat_classification/popular_threat_category/*/value"
+       ],
+       "malicious": "/**7/last_analysis_stats/malicious",
+       "service": "VirusTotal",
+       "stats": "/**7/last_analysis_stats",
+       "text_patterns": [],
+       "total": ""
+      }
+     },
+     {
+      "arguments": {
+       "hash": "hash"
+      },
+      "display_name": "VirusTotal",
+      "kind": "reputation",
+      "reputation": {
+       "detections": "/**7/detections",
+       "engines": "/**7/coverage/engines",
+       "first_seen": [
+        "/**7/first_submission_date",
+        "/**7/first_seen_itw_date"
+       ],
+       "labels": [
+        "/**7/popular_threat_classification/suggested_threat_label",
+        "/**7/popular_threat_classification/popular_threat_name/*/value",
+        "/**7/popular_threat_classification/popular_threat_category/*/value"
+       ],
+       "last_seen": [
+        "/**7/last_analysis_date",
+        "/**7/analysis_date",
+        "/**7/last_submission_date"
+       ],
+       "link": [
+        "/**7/report_url",
+        "/**7/gui_url",
+        "/**7/permalink",
+        "/**7/html_url"
+       ],
+       "malicious": "/**7/last_analysis_stats/malicious",
+       "rank": 10,
+       "service": "VirusTotal",
+       "stats": "/**7/last_analysis_stats",
+       "summary": "",
+       "suspicious": "/**7/last_analysis_stats/suspicious",
+       "text_patterns": [],
+       "total": ""
+      }
+     }
+    ],
+    "get_ip_report": [
+     {
+      "kind": "indicator_report"
+     }
+    ],
+    "get_submission": [
+     {
+      "kind": "submission_status"
+     }
+    ],
+    "get_url_report": [
+     {
+      "kind": "indicator_report"
+     }
+    ],
+    "submit_file": [
+     {
+      "discloses_sample": true,
+      "kind": "submission"
+     }
+    ],
+    "submit_local_file": [
+     {
+      "discloses_sample": true,
+      "kind": "submission"
+     }
+    ]
+   }
+  },
+  "static.ghidra": {
+   "releases": [
+    [
+     "7c988f65",
+     "a8d98e4c",
+     "f96cb89f",
+     "5e1f1792",
+     "bc6fd6be",
+     "1f415b17",
+     "a0ee72ba",
+     "2c2522b2",
+     "3770a52c",
+     "871ebf23",
+     "e2c0bfc2",
+     "767bd97a"
+    ],
+    [
+     "174bd387",
+     "ba27771a",
+     "5520f868",
+     "5596cb4e",
+     "83469e98"
+    ]
+   ],
+   "states": [
+    {
+     "add_struct_field": 0,
+     "analysis_status": 0,
+     "analyze_api_call_chains": 0,
+     "analyze_call_graph": 0,
+     "analyze_control_flow": 0,
+     "analyze_data_region": 0,
+     "analyze_dataflow": 0,
+     "analyze_for_documentation": 0,
+     "analyze_function_complete": 0,
+     "analyze_function_completeness": 0,
+     "analyze_struct_field_usage": 0,
+     "apply_data_classification": 0,
+     "apply_data_type": 0,
+     "apply_function_documentation": 0,
+     "batch_analyze_completeness": 0,
+     "batch_create_labels": 0,
+     "batch_decompile": 0,
+     "batch_delete_labels": 0,
+     "batch_rename_function_components": 0,
+     "batch_set_comments": 0,
+     "batch_string_anchor_report": 0,
+     "bulk_fuzzy_match": 0,
+     "can_rename_at_address": 0,
+     "clear_function_comments": 0,
+     "clear_instruction_flow_override": 0,
+     "clone_data_type": 0,
+     "close_program": 0,
+     "close_project": 0,
+     "compare_programs_documentation": 0,
+     "convert_number": 0,
+     "create_array_type": 0,
+     "create_data_type_category": 0,
+     "create_enum": 0,
+     "create_folder": 0,
+     "create_function": 0,
+     "create_function_signature": 0,
+     "create_label": 0,
+     "create_memory_block": 0,
+     "create_pointer_type": 0,
+     "create_project": 0,
+     "create_struct": 0,
+     "create_typedef": 0,
+     "create_union": 0,
+     "decompile_function": 0,
+     "delete_bookmark": 0,
+     "delete_data_type": 0,
+     "delete_file": 0,
+     "delete_function": 0,
+     "delete_label": 0,
+     "detect_array_bounds": 0,
+     "detect_crypto_constants": 0,
+     "detect_malware_behaviors": 0,
+     "diff_functions": 0,
+     "disassemble_bytes": 0,
+     "disassemble_function": 0,
+     "emulate_function": 0,
+     "emulate_hash_batch": 0,
+     "extract_iocs_with_context": 0,
+     "find_anti_analysis_techniques": 0,
+     "find_code_gaps": 0,
+     "find_dead_code": 0,
+     "find_next_undefined_function": 0,
+     "find_similar_functions": 0,
+     "find_similar_functions_fuzzy": 0,
+     "find_undocumented_by_string": 0,
+     "force_decompile": 0,
+     "get_address_spaces": 0,
+     "get_assembly_context": 0,
+     "get_bulk_function_hashes": 0,
+     "get_bulk_xrefs": 0,
+     "get_current_program_info": 0,
+     "get_entry_points": 0,
+     "get_enum_values": 0,
+     "get_external_location": 0,
+     "get_field_access_context": 0,
+     "get_full_call_graph": 0,
+     "get_function_by_address": 0,
+     "get_function_call_graph": 0,
+     "get_function_callees": 0,
+     "get_function_callers": 0,
+     "get_function_count": 0,
+     "get_function_documentation": 0,
+     "get_function_hash": 0,
+     "get_function_jump_targets": 0,
+     "get_function_labels": 0,
+     "get_function_signature": 0,
+     "get_function_variables": 0,
+     "get_function_xrefs": 0,
+     "get_metadata": 0,
+     "get_plate_comment": 0,
+     "get_project_info": 0,
+     "get_struct_layout": 0,
+     "get_type_size": 0,
+     "get_valid_data_types": 0,
+     "get_xrefs_from": 0,
+     "get_xrefs_to": 0,
+     "import_data_types": 0,
+     "import_file": 0,
+     "inspect_memory_content": 0,
+     "list_analyzers": 0,
+     "list_bookmarks": 0,
+     "list_calling_conventions": 0,
+     "list_classes": 0,
+     "list_data_items": 0,
+     "list_data_items_by_xrefs": 0,
+     "list_data_type_categories": 0,
+     "list_data_types": 0,
+     "list_exports": 0,
+     "list_external_locations": 0,
+     "list_functions": 0,
+     "list_functions_enhanced": 0,
+     "list_globals": 0,
+     "list_imports": 0,
+     "list_methods": 0,
+     "list_namespaces": 0,
+     "list_open_programs": 0,
+     "list_project_files": 0,
+     "list_scripts": 0,
+     "list_segments": 0,
+     "list_strings": 0,
+     "load_program": 0,
+     "load_program_from_project": 0,
+     "modify_struct_field": 0,
+     "move_data_type_to_category": 0,
+     "open_program": 0,
+     "open_project": 0,
+     "read_memory": 0,
+     "reanalyze": 0,
+     "remove_struct_field": 0,
+     "rename_data": 0,
+     "rename_external_location": 0,
+     "rename_function": 0,
+     "rename_function_by_address": 0,
+     "rename_global_variable": 0,
+     "rename_label": 0,
+     "rename_or_label": 0,
+     "rename_variable": 0,
+     "rename_variables": 0,
+     "run_analysis": 0,
+     "run_ghidra_script": 0,
+     "run_script_inline": 0,
+     "save_all_programs": 0,
+     "save_program": 0,
+     "search_byte_patterns": 0,
+     "search_data_types": 0,
+     "search_functions": 0,
+     "search_functions_enhanced": 0,
+     "search_strings": 0,
+     "server_status": 0,
+     "set_bookmark": 0,
+     "set_decompiler_comment": 0,
+     "set_disassembly_comment": 0,
+     "set_function_no_return": 0,
+     "set_function_prototype": 0,
+     "set_image_base": 0,
+     "set_local_variable_type": 0,
+     "set_parameter_type": 0,
+     "set_plate_comment": 0,
+     "set_variable_storage": 0,
+     "set_variables": 0,
+     "suggest_field_names": 0,
+     "switch_program": 0,
+     "validate_data_type": 0,
+     "validate_data_type_exists": 0,
+     "validate_function_prototype": 0
+    },
+    {
+     "add_struct_field": 0,
+     "analysis_status": 0,
+     "analyze_api_call_chains": 0,
+     "analyze_call_graph": 0,
+     "analyze_control_flow": 0,
+     "analyze_data_region": 0,
+     "analyze_dataflow": 0,
+     "analyze_for_documentation": 0,
+     "analyze_function_complete": 0,
+     "analyze_function_completeness": 0,
+     "analyze_struct_field_usage": 0,
+     "apply_data_classification": 0,
+     "apply_data_type": 0,
+     "apply_function_documentation": 0,
+     "batch_analyze_completeness": 0,
+     "batch_create_labels": 0,
+     "batch_decompile": 0,
+     "batch_delete_labels": 0,
+     "batch_rename_function_components": 0,
+     "batch_set_comments": 0,
+     "batch_string_anchor_report": 1,
+     "bulk_fuzzy_match": 0,
+     "can_rename_at_address": 0,
+     "clear_function_comments": 0,
+     "clear_instruction_flow_override": 0,
+     "clone_data_type": 0,
+     "close_program": 0,
+     "close_project": 0,
+     "compare_programs_documentation": 0,
+     "convert_number": 0,
+     "create_array_type": 0,
+     "create_data_type_category": 0,
+     "create_enum": 0,
+     "create_folder": 0,
+     "create_function": 0,
+     "create_function_signature": 0,
+     "create_label": 0,
+     "create_memory_block": 0,
+     "create_pointer_type": 0,
+     "create_project": 0,
+     "create_struct": 0,
+     "create_typedef": 0,
+     "create_union": 0,
+     "decompile_function": 0,
+     "delete_bookmark": 0,
+     "delete_data_type": 0,
+     "delete_file": 0,
+     "delete_function": 0,
+     "delete_label": 0,
+     "detect_array_bounds": 0,
+     "detect_crypto_constants": 0,
+     "detect_malware_behaviors": 0,
+     "diff_functions": 0,
+     "disassemble_bytes": 0,
+     "disassemble_function": 0,
+     "emulate_function": 0,
+     "emulate_hash_batch": 0,
+     "extract_iocs_with_context": 0,
+     "find_anti_analysis_techniques": 0,
+     "find_code_gaps": 0,
+     "find_dead_code": 0,
+     "find_next_undefined_function": 0,
+     "find_similar_functions": 0,
+     "find_similar_functions_fuzzy": 0,
+     "find_undocumented_by_string": 1,
+     "force_decompile": 0,
+     "get_address_spaces": 0,
+     "get_assembly_context": 0,
+     "get_bulk_function_hashes": 0,
+     "get_bulk_xrefs": 0,
+     "get_current_program_info": 0,
+     "get_entry_points": 0,
+     "get_enum_values": 0,
+     "get_external_location": 0,
+     "get_field_access_context": 0,
+     "get_full_call_graph": 0,
+     "get_function_by_address": 0,
+     "get_function_call_graph": 0,
+     "get_function_callees": 0,
+     "get_function_callers": 0,
+     "get_function_count": 0,
+     "get_function_documentation": 0,
+     "get_function_hash": 0,
+     "get_function_jump_targets": 0,
+     "get_function_labels": 0,
+     "get_function_signature": 0,
+     "get_function_variables": 0,
+     "get_function_xrefs": 0,
+     "get_metadata": 0,
+     "get_plate_comment": 0,
+     "get_project_info": 0,
+     "get_struct_layout": 0,
+     "get_type_size": 0,
+     "get_valid_data_types": 0,
+     "get_xrefs_from": 0,
+     "get_xrefs_to": 0,
+     "import_data_types": 0,
+     "import_file": 0,
+     "inspect_memory_content": 0,
+     "list_analyzers": 0,
+     "list_bookmarks": 0,
+     "list_calling_conventions": 0,
+     "list_classes": 0,
+     "list_data_items": 0,
+     "list_data_items_by_xrefs": 0,
+     "list_data_type_categories": 0,
+     "list_data_types": 0,
+     "list_exports": 0,
+     "list_external_locations": 0,
+     "list_functions": 0,
+     "list_functions_enhanced": 0,
+     "list_globals": 0,
+     "list_imports": 0,
+     "list_methods": 0,
+     "list_namespaces": 0,
+     "list_open_programs": 0,
+     "list_project_files": 0,
+     "list_scripts": 0,
+     "list_segments": 0,
+     "list_strings": 0,
+     "load_program": 0,
+     "load_program_from_project": 0,
+     "modify_struct_field": 0,
+     "move_data_type_to_category": 0,
+     "open_program": 0,
+     "open_project": 0,
+     "read_memory": 0,
+     "reanalyze": 0,
+     "remove_struct_field": 0,
+     "rename_data": 0,
+     "rename_external_location": 0,
+     "rename_function": 0,
+     "rename_function_by_address": 0,
+     "rename_global_variable": 0,
+     "rename_label": 0,
+     "rename_or_label": 0,
+     "rename_variable": 0,
+     "rename_variables": 0,
+     "run_analysis": 0,
+     "run_ghidra_script": 0,
+     "run_script_inline": 0,
+     "save_all_programs": 0,
+     "save_program": 0,
+     "search_byte_patterns": 0,
+     "search_data_types": 0,
+     "search_functions": 0,
+     "search_functions_enhanced": 0,
+     "search_strings": 0,
+     "server_status": 0,
+     "set_bookmark": 0,
+     "set_decompiler_comment": 0,
+     "set_disassembly_comment": 0,
+     "set_function_no_return": 0,
+     "set_function_prototype": 0,
+     "set_image_base": 0,
+     "set_local_variable_type": 0,
+     "set_parameter_type": 0,
+     "set_plate_comment": 0,
+     "set_variable_storage": 0,
+     "set_variables": 0,
+     "suggest_field_names": 0,
+     "switch_program": 0,
+     "validate_data_type": 0,
+     "validate_data_type_exists": 0,
+     "validate_function_prototype": 0
+    }
+   ],
+   "versions": {
+    "add_struct_field": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "tool",
+      "kind": "utility"
+     }
+    ],
+    "analysis_status": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "tool",
+      "kind": "analysis_status"
+     }
+    ],
+    "analyze_api_call_chains": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "analyze",
+      "kind": "call_chains",
+      "report_sections": [
+       "discovery",
+       "persistence_detail",
+       "communications",
+       "command_and_control",
+       "string_resolution",
+       "commands"
+      ]
+     }
+    ],
+    "analyze_call_graph": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "analyze",
+      "kind": "call_graph"
+     }
+    ],
+    "analyze_control_flow": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "analyze",
+      "kind": "analysis"
+     }
+    ],
+    "analyze_data_region": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "analyze",
+      "kind": "analysis"
+     }
+    ],
+    "analyze_dataflow": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "analyze",
+      "kind": "dataflow",
+      "report_sections": [
+       "encryption_scheme",
+       "configuration"
+      ]
+     }
+    ],
+    "analyze_for_documentation": [
+     {
+      "arguments": {
+       "address": "function_address",
+       "program": "program"
+      },
+      "category": "analyze",
+      "kind": "analysis"
+     }
+    ],
+    "analyze_function_complete": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "analyze",
+      "kind": "function_analysis",
+      "report_sections": [
+       "cli_flags",
+       "commands"
+      ]
+     }
+    ],
+    "analyze_function_completeness": [
+     {
+      "arguments": {
+       "address": "function_address",
+       "program": "program"
+      },
+      "category": "analyze",
+      "kind": "documentation_completeness",
+      "report_sections": [
+       "cli_flags",
+       "commands"
+      ]
+     }
+    ],
+    "analyze_struct_field_usage": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "analyze",
+      "kind": "analysis"
+     }
+    ],
+    "apply_data_classification": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "apply_data_type": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "apply_function_documentation": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "batch_analyze_completeness": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "batch",
+      "kind": "batch_analysis"
+     }
+    ],
+    "batch_create_labels": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "batch",
+      "kind": "batch_analysis"
+     }
+    ],
+    "batch_decompile": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "batch",
+      "kind": "decompile_batch"
+     }
+    ],
+    "batch_delete_labels": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "batch",
+      "kind": "batch_analysis"
+     }
+    ],
+    "batch_rename_function_components": [
+     {
+      "arguments": {
+       "address": "function_address",
+       "program": "program"
+      },
+      "category": "batch",
+      "kind": "batch_analysis"
+     }
+    ],
+    "batch_set_comments": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "batch",
+      "kind": "batch_analysis"
+     }
+    ],
+    "batch_string_anchor_report": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "batch",
+      "kind": "batch_analysis"
+     },
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "batch",
+      "holds_strings": true,
+      "kind": "batch_analysis"
+     }
+    ],
+    "bulk_fuzzy_match": [
+     {
+      "category": "batch",
+      "kind": "batch_analysis"
+     }
+    ],
+    "can_rename_at_address": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "check",
+      "kind": "check"
+     }
+    ],
+    "clear_function_comments": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "clear_instruction_flow_override": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "clone_data_type": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "close_program": [
+     {
+      "category": "nav",
+      "kind": "project_navigation"
+     }
+    ],
+    "close_project": [
+     {
+      "category": "nav",
+      "kind": "project_navigation"
+     }
+    ],
+    "compare_programs_documentation": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "analyze",
+      "kind": "analysis"
+     }
+    ],
+    "convert_number": [
+     {
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "create_array_type": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "create_data_type_category": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "create_enum": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "create_folder": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "create_function": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "create_function_signature": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "create_label": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "create_memory_block": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "create_pointer_type": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "create_project": [
+     {
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "create_struct": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "create_typedef": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "create_union": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "decompile_function": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "analyze",
+      "kind": "decompile",
+      "report_sections": [
+       "cli_flags",
+       "discovery",
+       "persistence_detail",
+       "evasion_antiforensics",
+       "command_and_control",
+       "string_resolution",
+       "configuration",
+       "commands",
+       "payloads"
+      ]
+     }
+    ],
+    "delete_bookmark": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "delete_data_type": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "delete_file": [
+     {
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "delete_function": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "delete_label": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "detect_array_bounds": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "analyze",
+      "kind": "analysis"
+     }
+    ],
+    "detect_crypto_constants": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "analyze",
+      "kind": "crypto_constants",
+      "report_sections": [
+       "encryption_scheme",
+       "configuration"
+      ]
+     }
+    ],
+    "detect_malware_behaviors": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "analyze",
+      "kind": "behaviour_scan",
+      "report_sections": [
+       "packing_obfuscation",
+       "evasion_antiforensics"
+      ]
+     }
+    ],
+    "diff_functions": [
+     {
+      "category": "analyze",
+      "kind": "analysis"
+     }
+    ],
+    "disassemble_bytes": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "analyze",
+      "kind": "byte_disassembly"
+     }
+    ],
+    "disassemble_function": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "analyze",
+      "kind": "function_disassembly"
+     }
+    ],
+    "emulate_function": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "analyze",
+      "kind": "emulation",
+      "report_sections": [
+       "encryption_scheme",
+       "string_resolution",
+       "configuration"
+      ]
+     }
+    ],
+    "emulate_hash_batch": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "analyze",
+      "kind": "emulation",
+      "report_sections": [
+       "encryption_scheme",
+       "string_resolution",
+       "configuration"
+      ]
+     }
+    ],
+    "extract_iocs_with_context": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "analyze",
+      "kind": "iocs_with_context",
+      "places": {
+       "address": "/address"
+      },
+      "report_sections": [
+       "ransom_note",
+       "communications",
+       "command_and_control",
+       "configuration",
+       "payloads",
+       "host_identifiers"
+      ],
+      "rows": "/iocs/*",
+      "values": {
+       "value": "/value"
+      }
+     }
+    ],
+    "find_anti_analysis_techniques": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "analyze",
+      "kind": "anti_analysis_scan",
+      "report_sections": [
+       "packing_obfuscation",
+       "evasion_antiforensics"
+      ]
+     }
+    ],
+    "find_code_gaps": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "analyze",
+      "kind": "code_gaps"
+     }
+    ],
+    "find_dead_code": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "analyze",
+      "kind": "analysis"
+     }
+    ],
+    "find_next_undefined_function": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "analyze",
+      "kind": "analysis"
+     }
+    ],
+    "find_similar_functions": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "analyze",
+      "kind": "analysis"
+     }
+    ],
+    "find_similar_functions_fuzzy": [
+     {
+      "arguments": {
+       "address": "address"
+      },
+      "category": "analyze",
+      "kind": "analysis"
+     }
+    ],
+    "find_undocumented_by_string": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "analyze",
+      "kind": "analysis"
+     },
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "analyze",
+      "holds_strings": true,
+      "kind": "analysis"
+     }
+    ],
+    "force_decompile": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "decompile_refresh"
+     }
+    ],
+    "get_address_spaces": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "address_spaces"
+     }
+    ],
+    "get_assembly_context": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "listing"
+     }
+    ],
+    "get_bulk_function_hashes": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "function_hashes"
+     }
+    ],
+    "get_bulk_xrefs": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "xrefs"
+     }
+    ],
+    "get_current_program_info": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "program_info"
+     }
+    ],
+    "get_entry_points": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "entrypoints"
+     }
+    ],
+    "get_enum_values": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "listing"
+     }
+    ],
+    "get_external_location": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "listing"
+     }
+    ],
+    "get_field_access_context": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "listing"
+     }
+    ],
+    "get_full_call_graph": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "call_graph"
+     }
+    ],
+    "get_function_by_address": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "function_info"
+     }
+    ],
+    "get_function_call_graph": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "call_graph"
+     }
+    ],
+    "get_function_callees": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "callees"
+     }
+    ],
+    "get_function_callers": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "callers"
+     }
+    ],
+    "get_function_count": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "function_count"
+     }
+    ],
+    "get_function_documentation": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "listing"
+     }
+    ],
+    "get_function_hash": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "function_hash"
+     }
+    ],
+    "get_function_jump_targets": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "listing"
+     }
+    ],
+    "get_function_labels": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "listing"
+     }
+    ],
+    "get_function_signature": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "listing"
+     }
+    ],
+    "get_function_variables": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "listing"
+     }
+    ],
+    "get_function_xrefs": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "xrefs"
+     }
+    ],
+    "get_metadata": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "program_metadata"
+     }
+    ],
+    "get_plate_comment": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "listing"
+     }
+    ],
+    "get_project_info": [
+     {
+      "category": "list",
+      "kind": "listing"
+     }
+    ],
+    "get_struct_layout": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "listing"
+     }
+    ],
+    "get_type_size": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "listing"
+     }
+    ],
+    "get_valid_data_types": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "listing"
+     }
+    ],
+    "get_xrefs_from": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "xrefs"
+     }
+    ],
+    "get_xrefs_to": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "xrefs"
+     }
+    ],
+    "import_data_types": [
+     {
+      "category": "import",
+      "kind": "import"
+     }
+    ],
+    "import_file": [
+     {
+      "arguments": {
+       "path": "file_path"
+      },
+      "category": "import",
+      "kind": "file_import"
+     }
+    ],
+    "inspect_memory_content": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "analyze",
+      "kind": "memory_inspection"
+     }
+    ],
+    "list_analyzers": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "listing"
+     }
+    ],
+    "list_bookmarks": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "listing"
+     }
+    ],
+    "list_calling_conventions": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "listing"
+     }
+    ],
+    "list_classes": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "class_list"
+     }
+    ],
+    "list_data_items": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "listing"
+     }
+    ],
+    "list_data_items_by_xrefs": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "listing"
+     }
+    ],
+    "list_data_type_categories": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "listing"
+     }
+    ],
+    "list_data_types": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "listing"
+     }
+    ],
+    "list_exports": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "export_listing"
+     }
+    ],
+    "list_external_locations": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "external_locations"
+     }
+    ],
+    "list_functions": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "function_list"
+     }
+    ],
+    "list_functions_enhanced": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "function_listing_detail"
+     }
+    ],
+    "list_globals": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "symbols"
+     }
+    ],
+    "list_imports": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "import_listing",
+      "report_sections": [
+       "discovery"
+      ]
+     }
+    ],
+    "list_methods": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "method_list"
+     }
+    ],
+    "list_namespaces": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "listing"
+     }
+    ],
+    "list_open_programs": [
+     {
+      "category": "list",
+      "kind": "program_list"
+     }
+    ],
+    "list_project_files": [
+     {
+      "category": "list",
+      "kind": "listing"
+     }
+    ],
+    "list_scripts": [
+     {
+      "category": "list",
+      "kind": "listing"
+     }
+    ],
+    "list_segments": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "segments",
+      "report_sections": [
+       "packing_obfuscation",
+       "payloads"
+      ]
+     }
+    ],
+    "list_strings": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "listing_strings",
+      "report_sections": [
+       "cli_flags",
+       "persistence_detail",
+       "ransom_note",
+       "communications",
+       "command_and_control",
+       "string_resolution",
+       "host_identifiers"
+      ]
+     }
+    ],
+    "load_program": [
+     {
+      "arguments": {
+       "path": "file"
+      },
+      "category": "nav",
+      "kind": "load_sample",
+      "long_running": true
+     }
+    ],
+    "load_program_from_project": [
+     {
+      "arguments": {
+       "path": "path"
+      },
+      "category": "nav",
+      "kind": "project_load"
+     }
+    ],
+    "modify_struct_field": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "move_data_type_to_category": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "open_program": [
+     {
+      "arguments": {
+       "path": "path"
+      },
+      "category": "nav",
+      "kind": "open_project_program"
+     }
+    ],
+    "open_project": [
+     {
+      "category": "nav",
+      "kind": "project_navigation"
+     }
+    ],
+    "read_memory": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "read",
+      "kind": "memory_read"
+     }
+    ],
+    "reanalyze": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "tool",
+      "kind": "reanalysis"
+     }
+    ],
+    "remove_struct_field": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "rename_data": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "rename_external_location": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "rename_function": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "rename_function_by_address": [
+     {
+      "arguments": {
+       "address": "function_address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "rename_global_variable": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "rename_label": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "rename_or_label": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "rename_variable": [
+     {
+      "arguments": {
+       "address": "function_address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "rename_variables": [
+     {
+      "arguments": {
+       "address": "function_address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "run_analysis": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "exec",
+      "kind": "analyse_sample",
+      "long_running": true
+     }
+    ],
+    "run_ghidra_script": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "exec",
+      "kind": "script"
+     }
+    ],
+    "run_script_inline": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "exec",
+      "kind": "script"
+     }
+    ],
+    "save_all_programs": [
+     {
+      "category": "nav",
+      "kind": "project_navigation"
+     }
+    ],
+    "save_program": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "nav",
+      "kind": "project_navigation"
+     }
+    ],
+    "search_byte_patterns": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "byte_search"
+     }
+    ],
+    "search_data_types": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "listing"
+     }
+    ],
+    "search_functions": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "function_search"
+     }
+    ],
+    "search_functions_enhanced": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "function_search"
+     }
+    ],
+    "search_strings": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "list",
+      "kind": "string_search"
+     }
+    ],
+    "server_status": [
+     {
+      "category": "meta",
+      "kind": "status"
+     }
+    ],
+    "set_bookmark": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "set_decompiler_comment": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "set_disassembly_comment": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "set_function_no_return": [
+     {
+      "arguments": {
+       "address": "function_address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "set_function_prototype": [
+     {
+      "arguments": {
+       "address": "function_address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "set_image_base": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "set_local_variable_type": [
+     {
+      "arguments": {
+       "address": "function_address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "set_parameter_type": [
+     {
+      "arguments": {
+       "address": "function_address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "set_plate_comment": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "set_variable_storage": [
+     {
+      "arguments": {
+       "address": "function_address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "set_variables": [
+     {
+      "arguments": {
+       "address": "function_address",
+       "program": "program"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "suggest_field_names": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "tool",
+      "kind": "utility"
+     }
+    ],
+    "switch_program": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "nav",
+      "kind": "select_sample"
+     }
+    ],
+    "validate_data_type": [
+     {
+      "arguments": {
+       "address": "address",
+       "program": "program"
+      },
+      "category": "check",
+      "kind": "check"
+     }
+    ],
+    "validate_data_type_exists": [
+     {
+      "arguments": {
+       "program": "program"
+      },
+      "category": "check",
+      "kind": "check"
+     }
+    ],
+    "validate_function_prototype": [
+     {
+      "arguments": {
+       "address": "function_address",
+       "program": "program"
+      },
+      "category": "check",
+      "kind": "check"
+     }
+    ]
+   }
+  },
+  "static.r2": {
+   "releases": [
+    [
+     "7c988f65",
+     "a8d98e4c",
+     "f96cb89f",
+     "5e1f1792",
+     "bc6fd6be",
+     "1f415b17",
+     "a0ee72ba",
+     "2c2522b2",
+     "3770a52c",
+     "871ebf23",
+     "e2c0bfc2",
+     "767bd97a",
+     "174bd387",
+     "ba27771a",
+     "5520f868",
+     "5596cb4e",
+     "83469e98"
+    ]
+   ],
+   "states": [
+    {
+     "analyze": 0,
+     "calculate": 0,
+     "close_file": 0,
+     "decompile_function": 0,
+     "disassemble": 0,
+     "disassemble_function": 0,
+     "get_current_address": 0,
+     "get_function_prototype": 0,
+     "list_all_strings": 0,
+     "list_classes": 0,
+     "list_decompilers": 0,
+     "list_entrypoints": 0,
+     "list_exports": 0,
+     "list_files": 0,
+     "list_functions": 0,
+     "list_functions_tree": 0,
+     "list_imports": 0,
+     "list_libraries": 0,
+     "list_memory_maps": 0,
+     "list_methods": 0,
+     "list_sections": 0,
+     "list_strings": 0,
+     "list_symbols": 0,
+     "open_file": 0,
+     "rename_flag": 0,
+     "rename_function": 0,
+     "run_command": 0,
+     "set_comment": 0,
+     "set_function_prototype": 0,
+     "show_function_details": 0,
+     "show_info": 0,
+     "use_decompiler": 0,
+     "xrefs_to": 0
+    }
+   ],
+   "versions": {
+    "analyze": [
+     {
+      "category": "analyze",
+      "kind": "analyse_sample"
+     }
+    ],
+    "calculate": [
+     {
+      "category": "tool",
+      "kind": "calculator"
+     }
+    ],
+    "close_file": [
+     {
+      "category": "nav",
+      "kind": "sample_close"
+     }
+    ],
+    "decompile_function": [
+     {
+      "arguments": {
+       "address": "address"
+      },
+      "category": "analyze",
+      "kind": "decompile",
+      "report_sections": [
+       "cli_flags",
+       "discovery",
+       "persistence_detail",
+       "evasion_antiforensics",
+       "command_and_control",
+       "string_resolution",
+       "configuration",
+       "commands",
+       "payloads"
+      ]
+     }
+    ],
+    "disassemble": [
+     {
+      "arguments": {
+       "address": "address"
+      },
+      "category": "analyze",
+      "kind": "disassembly"
+     }
+    ],
+    "disassemble_function": [
+     {
+      "arguments": {
+       "address": "address"
+      },
+      "category": "analyze",
+      "kind": "function_disassembly"
+     }
+    ],
+    "get_current_address": [
+     {
+      "category": "list",
+      "kind": "current_address"
+     }
+    ],
+    "get_function_prototype": [
+     {
+      "arguments": {
+       "address": "address"
+      },
+      "category": "list",
+      "kind": "function_prototype"
+     }
+    ],
+    "list_all_strings": [
+     {
+      "category": "list",
+      "kind": "listing_all_strings"
+     }
+    ],
+    "list_classes": [
+     {
+      "category": "list",
+      "kind": "class_list"
+     }
+    ],
+    "list_decompilers": [
+     {
+      "category": "list",
+      "kind": "decompiler_list"
+     }
+    ],
+    "list_entrypoints": [
+     {
+      "category": "list",
+      "kind": "entrypoints"
+     }
+    ],
+    "list_exports": [
+     {
+      "category": "list",
+      "kind": "export_listing"
+     }
+    ],
+    "list_files": [
+     {
+      "category": "list",
+      "kind": "file_list"
+     }
+    ],
+    "list_functions": [
+     {
+      "category": "list",
+      "kind": "function_list"
+     }
+    ],
+    "list_functions_tree": [
+     {
+      "category": "list",
+      "kind": "function_tree"
+     }
+    ],
+    "list_imports": [
+     {
+      "category": "list",
+      "kind": "import_listing",
+      "report_sections": [
+       "discovery"
+      ]
+     }
+    ],
+    "list_libraries": [
+     {
+      "category": "list",
+      "kind": "library_list"
+     }
+    ],
+    "list_memory_maps": [
+     {
+      "category": "list",
+      "kind": "memory_maps"
+     }
+    ],
+    "list_methods": [
+     {
+      "category": "list",
+      "kind": "method_list"
+     }
+    ],
+    "list_sections": [
+     {
+      "category": "list",
+      "kind": "segments"
+     }
+    ],
+    "list_strings": [
+     {
+      "category": "list",
+      "kind": "listing_strings",
+      "report_sections": [
+       "cli_flags",
+       "persistence_detail",
+       "ransom_note",
+       "communications",
+       "command_and_control",
+       "string_resolution",
+       "host_identifiers"
+      ]
+     }
+    ],
+    "list_symbols": [
+     {
+      "category": "list",
+      "kind": "symbols"
+     }
+    ],
+    "open_file": [
+     {
+      "arguments": {
+       "path": "file_path"
+      },
+      "category": "nav",
+      "kind": "open_sample"
+     }
+    ],
+    "rename_flag": [
+     {
+      "arguments": {
+       "address": "address"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "rename_function": [
+     {
+      "arguments": {
+       "address": "address"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "run_command": [
+     {
+      "category": "exec",
+      "kind": "command"
+     }
+    ],
+    "set_comment": [
+     {
+      "arguments": {
+       "address": "address"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "set_function_prototype": [
+     {
+      "arguments": {
+       "address": "address"
+      },
+      "category": "modify",
+      "kind": "program_edit"
+     }
+    ],
+    "show_function_details": [
+     {
+      "category": "tool",
+      "kind": "function_info"
+     }
+    ],
+    "show_info": [
+     {
+      "category": "tool",
+      "kind": "file_info"
+     }
+    ],
+    "use_decompiler": [
+     {
+      "category": "tool",
+      "kind": "decompiler_choice"
+     }
+    ],
+    "xrefs_to": [
+     {
+      "arguments": {
+       "address": "address"
+      },
+      "category": "tool",
+      "kind": "xrefs"
+     }
+    ]
+   }
+  }
+ },
+ "defaults": {
+  "arguments": {},
+  "asserts_techniques": false,
+  "category": "",
+  "discloses_sample": false,
+  "display_name": "",
+  "holds_strings": false,
+  "kind": "",
+  "long_running": false,
+  "memory_peak_mb": null,
+  "places": {},
+  "reader": "",
+  "report_sections": [],
+  "reputation": null,
+  "rows": "",
+  "source": "",
+  "techniques": [],
+  "timeout_seconds": null,
+  "values": {},
+  "words": []
+ }
+}
