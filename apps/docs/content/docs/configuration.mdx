@@ -3412,13 +3412,20 @@ never touches a text and does nothing for a ledger with no such structure
 (every built-in's). So in the saved ledger and the report:
 
 - every text is what it would be with no structure kept;
-- each agent's kept bytes are within its budget;
+- a structure never takes an agent over its budget: its texts alone may
+  still exceed a budget exactly as they would with no structure (the judge,
+  for one, keeps its answers with no budget while the run goes on), and then
+  the agent keeps no structure;
 - no entry holds a structure longer, in characters, than the model could
   have been shown of the call, though the structure may hold rows the prose
   text only summarised.
 
 While the run is still going, the ledger in the run's state may hold, for a
-time, structures that the last pass will drop.
+time, structures that the last pass will drop. A fact read from such a
+structure during the run (a reputation record, a technique a declared path
+names, a line of the judge's evidence) can stay on the record after the last
+pass drops the structure, as dev's budget already leaves on the record what
+was read from a text it later blanked.
 
 **A provider registered at runtime.** A static or sandbox provider class
 registered with `register_static_provider` or `register_sandbox_provider`
