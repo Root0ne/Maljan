@@ -78,6 +78,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    TypeAdapter,
     ValidationError,
     field_validator,
     model_validator,
@@ -533,12 +534,35 @@ def _field_default(name: str) -> Any:
     return ToolFacts.model_fields[name].get_default(call_default_factory=True)
 
 
+# How a yes-or-no field's value is read: pydantic's lax rule (``0``, ``"no"``,
+# ``"off"``, ``"false"`` … are false), as the model reads it.
+_YES_OR_NO = TypeAdapter(bool)
+
+
+def is_set(name: str, value: Any) -> bool:
+    """Whether a declaration's field ``name`` says something: its value is not the default.
+
+    The one rule for "set", everywhere a declaration is read, saved or shown
+    in the console's box. A yes-or-no field is compared as the model reads
+    it (``0``, ``"false"``, ``"no"``, ``"off"`` are its default, ``False``);
+    a value the model cannot read as one is set (and refused by the model).
+    Every other field is compared as written, keys in any order.
+    """
+    default = _field_default(name)
+    if isinstance(default, bool):
+        try:
+            return _YES_OR_NO.validate_python(value) is not default
+        except ValidationError:
+            return True
+    return not _same(value, default)
+
+
 def _set_fields(raw: Mapping[str, Any]) -> dict[str, Any]:
     """The keys of a raw declaration that say something: unknown ones, and known ones set."""
     fields = ToolFacts.model_fields
     out: dict[str, Any] = {}
     for key, value in raw.items():
-        if key in fields and _same(value, _field_default(key)):
+        if key in fields and not is_set(key, value):
             continue
         out[str(key)] = value
     return out
@@ -567,7 +591,7 @@ def lenient_declaration(raw: Mapping[str, Any]) -> tuple[dict[str, Any], list[st
     kept = {key: value for key, value in raw.items() if key in fields}
     if kept.get("kind") in (None, ""):
         for name in KIND_DEPENDENT_FIELDS:
-            if name in kept and not _same(kept[name], _field_default(name)):
+            if name in kept and is_set(name, kept[name]):
                 left_out.append(name)
                 kept.pop(name)
     return kept, left_out
@@ -584,9 +608,7 @@ def reads_no_kind(raw: Mapping[str, Any]) -> bool:
     """
     if raw.get("kind") != NO_KIND:
         return False
-    return not any(
-        name in raw and not _same(raw[name], _field_default(name)) for name in KIND_DEPENDENT_FIELDS
-    )
+    return not any(name in raw and is_set(name, raw[name]) for name in KIND_DEPENDENT_FIELDS)
 
 
 def declaration_fields() -> dict[str, Any]:
@@ -595,7 +617,9 @@ def declaration_fields() -> dict[str, Any]:
     The word that names no kind, and each kind-free and kind-dependent field
     with its default as JSON: what the console's tool-declaration box needs
     to apply :func:`reads_no_kind` and the edit rules exactly as the API
-    does, a field counting as set only when it differs from its default.
+    does, a field counting as set only when it differs from its default
+    (:func:`is_set`: a yes-or-no field, one whose default is ``false``, read
+    as the model reads it).
     """
     defaults = ToolFacts.model_construct().model_dump(mode="json")
     return {

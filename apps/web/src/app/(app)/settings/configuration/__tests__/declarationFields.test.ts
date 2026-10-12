@@ -9,11 +9,13 @@ import {
   readToolFacts,
   readWorkDir,
   readsNoKind,
+  setFields,
   showJson,
   splitWords,
 } from "../declarationFields";
 import served from "@/test-fixtures/settings-schema.json";
 import shared from "@/test-fixtures/tool-declaration-cases.json";
+import generated from "@/test-fixtures/tool-declaration-generated.json";
 import type { SettingsSchema, ToolDeclarationFields } from "@/types/settings";
 
 /* The split the API serves with the settings schema, as the box reads it. */
@@ -103,6 +105,52 @@ describe("the server editor's declaration readers", () => {
       expect(readsNoKind(facts, FIELDS)).toBe(c.reads_no_kind);
     }
   );
+
+  it("counts a field as set as the API does over every generated declaration", () => {
+    // [declaration, accepted, reads_no_kind, fields set], the API's answers
+    // (scripts/dev/write_tool_declaration_cases.py).
+    const cases = generated.cases as unknown as [
+      Record<string, unknown>,
+      boolean,
+      boolean,
+      string[],
+    ][];
+    expect(cases.length).toBeGreaterThan(2000);
+    const disagree: string[] = [];
+    for (const [facts, accepted, noKind, named] of cases) {
+      const said = JSON.stringify(facts);
+      const refused = read(JSON.stringify({ t: facts })).error !== null;
+      if (refused && accepted) disagree.push(`box refuses what the API accepts: ${said}`);
+      if (readsNoKind(facts, FIELDS) !== noKind) disagree.push(`no-kind word read otherwise: ${said}`);
+      const counted = setFields(facts, FIELDS).sort();
+      if (JSON.stringify(counted) !== JSON.stringify(named)) {
+        disagree.push(`set fields ${JSON.stringify(counted)} != ${JSON.stringify(named)}: ${said}`);
+      }
+    }
+    expect(disagree).toEqual([]);
+  });
+
+  it("accepts a kindless declaration whose yes-or-no field is written as a falsy word", () => {
+    for (const word of [0, "0", "false", "False", "no", "NO", "off", "n", "f"]) {
+      const text = JSON.stringify({ t: { display_name: "X", asserts_techniques: word } });
+      expect(read(text).error).toBeNull();
+    }
+    expect(read('{"t": {"display_name": "X", "holds_strings": "yes"}}').error).toMatch(
+      /read only through a kind/
+    );
+  });
+
+  it("checks the shape alone when the served split is incomplete, and never throws", () => {
+    const empty = {} as unknown as ToolDeclarationFields;
+    const half = {
+      no_kind: FIELDS.no_kind,
+      kind_free: FIELDS.kind_free,
+    } as unknown as ToolDeclarationFields;
+    for (const split of [empty, half]) {
+      expect(readToolFacts('{"t": {"rows": "/m/*"}}', "", split).error).toBeNull();
+      expect(readToolFacts('{"t": {"kind": "Bad Word"}}', "", split).error).toMatch(/lowercase word/);
+    }
+  });
 
   it("shows nothing declared as an empty box and a value as pretty JSON", () => {
     expect(showJson(undefined)).toBe("");
