@@ -98,6 +98,8 @@ class StubState:
     cache: validate.PromptCache = field(default_factory=validate.PromptCache)
     # Where each request body is written, one file per request; ``None`` keeps none.
     dump_dir: Path | None = None
+    # How many request bodies were written so far: each file's number.
+    dumped: int = 0
 
     def facts(self, model: str) -> ModelFacts:
         own = self.windows.get(str(model or "").strip().lower())
@@ -207,7 +209,12 @@ def build_app(state: StubState) -> Any:
             return _error(api, 404, f"model: {request.model}")
         if state.dump_dir is not None:
             state.dump_dir.mkdir(parents=True, exist_ok=True)
-            (state.dump_dir / f"{len(state.log) + 1:04d}-{entry['role']}.json").write_text(
+            # Numbered by arrival under the lock, so two requests in flight
+            # together (parallel analysts, concurrent sections) never share a file.
+            with state.lock:
+                state.dumped += 1
+                number = state.dumped
+            (state.dump_dir / f"{number:04d}-{entry['role']}.json").write_text(
                 json.dumps(body, indent=1), encoding="utf-8"
             )
         try:
