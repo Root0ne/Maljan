@@ -3381,6 +3381,58 @@ that much of each agent's context on every turn, and declaring a
 `prompt_fragment` replaces it. A server whose every offered tool is declared
 (every built-in) carries what its declaration says and nothing more.
 
+**A proposed declaration.** The connection test (`POST
+/api/v1/settings/test/mcp`, admin only) proposes a declaration for each tool
+the server offers that its block and the shipped declarations say nothing
+about, under `details.proposals`, read from what the server says itself:
+
+| Read from | Proposes |
+|---|---|
+| MCP `inputSchema` (a property's name, `format`, `pattern`, length, description) | `arguments`: the `path`, `hash`, `address`, `ip`, `domain` and `url` roles, one argument each |
+| MCP `outputSchema` | `rows` (the first list of objects), `places` and `values` inside a row, `techniques` (`/**N/<field>`), the `reputation` paths where the answer holds a malicious count |
+| MCP `annotations` and `execution` | `display_name` (the tool's title), `long_running` (`execution.taskSupport`), `discloses_sample` (`openWorldHint` on a tool taking a path) |
+| the description and the `capabilities` manifest cell's `facts` | the `kind`, with the arguments and the answer's shape (`signature_rules` for rows with techniques and a rule match, `reputation` for a hash lookup with counts, a code kind for a decompiler); `unclassified`, read by no consumer, when nothing names one |
+| the `capabilities` manifest cell | `timeout_seconds`, `long_running` |
+
+Each field carries its `evidence` (the schema location or answer it was read
+from, never the server's text) and a `confidence`: `high` when the server named
+it outright (a `format`, the manifest's own budget), `medium` when a property's
+name or the schema's shape says it, `low` for a reading an operator should
+check (`asserts_techniques` always is). `requires` names the fields it needs to
+validate. Schemas are walked once, without recursion, to 16 levels below the
+answer's root, and a name that is not a plain identifier is never made a path
+or an argument. With `call_tools=true` (the console's "Propose declarations
+from one harmless call per undeclared tool"), each undeclared tool whose
+required arguments are all a path, a hash or an indicator, or which the server
+marks read-only and which takes none, is called once through the same client a
+run uses, five seconds each, with a path under a directory that does not
+exist, the digest of empty input, `192.0.2.1` or `example.invalid` (never a
+sample; a tool marked destructive or not read-only is never called). Its answer
+proposes the row shape when the tool has no `outputSchema`, the auto-name
+prefixes it writes twice beyond the defaults, and, for a one-line prose answer
+to the missing path that the platform does not already read as an error, an
+`error_patterns` entry matching that line with the path as any text;
+`details.proposals.probed` says per tool whether it was called. The server
+editor shows each proposal with an accept per field and per tool; accepting
+stages the field, with the fields it requires that the declaration does not
+hold yet, into the server's `tool_facts` (or adds the patterns and prefixes
+beside the server's own), and Apply saves it like a typed declaration. Nothing
+is applied without an accept, and no run reads a proposal.
+
+**Where an undeclared tool's answers go.** The composer shows a technical
+section the captured output of a tool its source declares nothing for when a
+claim the section is given cites the output's entry (the entry the report's
+evidence index holds under that call, with the same tool and agent), beside the
+outputs of the kinds it reads; the grounding a section is checked against is
+built from the report, the answers and the ledger, so a citation adds none.
+The served report (`GET /api/v1/reports/{id}`) names under `section_tabs` the
+console tab of each section built from an operator's undeclared or
+operator-declared tool: by the kind its tool declared (a sandbox kind on
+DYNAMIC, a capture on NETWORK, a reputation lookup on IDENTITY, a code
+listing, rule match, strings or import listing on STATIC), else by the
+analyst whose call it cites (`static`, `dynamic`, `network`). A section of a
+built-in tool, and a section neither reading places, keeps its place by key.
+
 A tool's answer that the server gives as `structuredContent` beside a prose
 text is kept as the entry's structure (`structured`, marked
 `structured_from_server`); the text is what the model read, as before. It is

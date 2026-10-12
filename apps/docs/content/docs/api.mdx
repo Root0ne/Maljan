@@ -290,6 +290,12 @@ of changes in one write; `DELETE /settings/{key}` and `DELETE /settings` remove
 one override or a group's. `GET /settings/export` and `POST /settings/import`
 carry configuration between instances, and `POST /settings/test/{probe}` (plus
 `/test/mcp` and `/test/agent`, which take a body) run the connection probes.
+`/test/mcp?server=<key>` answers the server's tools, its `capabilities`
+manifest and, under `details.proposals`, a proposed declaration for each
+undeclared tool with each field's evidence and confidence; `&call_tools=true`
+also calls each such tool once with a harmless argument, never a sample (see
+the configuration guide's "A proposed declaration"). Nothing it proposes is
+saved.
 `POST /settings/validate-condition` checks one stage's `when` expression
 against the parser that will run it and answers `{"valid": …, "problems":
 […]}`; it stores nothing, and the console calls it as each condition box loses
