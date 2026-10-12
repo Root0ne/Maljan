@@ -157,7 +157,7 @@ def validate_server_map(
             # release refuses that change, is not this save's edit: it is kept
             # as stored and left out of every check (``kept_stored_changes``).
             incoming = stored_changes(facts_in, shipped)
-            kept = kept_stored_changes(incoming, stored_facts, shipped)
+            kept = kept_stored_changes(incoming, stored_facts, shipped, server=key)
             in_force = merge_tool_facts(
                 shipped, {tool: change for tool, change in incoming.items() if tool not in kept}
             )

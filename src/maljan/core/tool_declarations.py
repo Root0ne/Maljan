@@ -499,6 +499,10 @@ def loggable_names(names: Iterable[Any]) -> str:
     held = [str(name) for name in names]
     shown = []
     for name in held[:_LOG_NAMES]:
+        if not name:
+            # An empty name, shown as such rather than as nothing at all.
+            shown.append('""')
+            continue
         text = name.replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t")
         text = _LOG_CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", text)
         shown.append(text[:_LOG_NAME_CHARS] + ("…" if len(text) > _LOG_NAME_CHARS else ""))
@@ -1224,8 +1228,57 @@ def without_mark(stored: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def with_mark(changes: Mapping[str, Any]) -> dict[str, Any]:
-    """``changes`` marked as a block's changes over what it ships, the form a save stores."""
-    return {CHANGES_MARK: CHANGES_FORM, **without_mark(changes)}
+    """``changes`` marked as a block's changes over what it ships, the form a save stores.
+
+    The mark always wins: an entry under the mark's key is never a tool, so
+    whatever ``changes`` holds there is left out rather than written over it.
+    """
+    return {
+        CHANGES_MARK: CHANGES_FORM,
+        **{tool: held for tool, held in without_mark(changes).items() if tool != CHANGES_MARK},
+    }
+
+
+def unreadable_map(stored: Any) -> bool:
+    """Whether a stored map of tool declarations has a form no release writes.
+
+    The mark's key names no tool (:func:`check_tool_name`), so a map holding
+    it with anything but :data:`CHANGES_FORM` is neither a map of changes nor
+    a whole map: which tools it means cannot be known. Such a map, and a
+    value that is not a map at all, is read as absent: the shipped
+    declarations are in force (:func:`stored_in_force`).
+    """
+    if not isinstance(stored, Mapping):
+        return True
+    return CHANGES_MARK in stored and stored[CHANGES_MARK] != CHANGES_FORM
+
+
+def refused_tool_names(sent: Mapping[str, Any]) -> list[str]:
+    """The names a sent map of tool declarations holds that no tool can have, in order.
+
+    Every key but the mark itself (:func:`holds_changes`) is a tool's name
+    and is checked as one (:func:`check_tool_name`); the mark's key holding
+    anything else is refused too. Time linear in the map.
+    """
+    marked = holds_changes(sent)
+    out: list[str] = []
+    for tool in sent:
+        if marked and tool == CHANGES_MARK:
+            continue
+        if not isinstance(tool, str):
+            out.append(str(tool))
+            continue
+        try:
+            check_tool_name(tool)
+        except ValueError:
+            out.append(tool)
+    return out
+
+
+def refused_names_message(names: Iterable[str]) -> str:
+    """One refusal naming each refused tool name, an empty one shown visibly."""
+    shown = ", ".join(repr(name) for name in names)
+    return f"tool_facts key {shown} must be a tool's name, not empty or padded"
 
 
 def whole_as_changes(whole: Mapping[str, Any], shipped: Mapping[str, Any]) -> dict[str, Any]:
@@ -1266,12 +1319,19 @@ def _refused_leniently(raw: Any) -> bool:
     return False
 
 
-def _refused_tool(tool: Any, held: Any) -> bool:
-    """Whether the model refuses a stored tool: its name, or its declaration read leniently."""
+def _refused_tool(tool: Any, held: Any, server: str = "") -> bool:
+    """Whether the model refuses a stored tool: its name, or its declaration read leniently.
+
+    ``server`` is the key of the tool server the block belongs to, if it is
+    one: a name spelled as that server's renamed tool is refused there
+    (:func:`check_own_prefix`).
+    """
     if not isinstance(tool, str):
         return True
     try:
         check_tool_name(tool)
+        if server:
+            check_own_prefix(server, [tool])
     except ValueError:
         return True
     return _refused_leniently(held)
@@ -1296,8 +1356,24 @@ def _warn_refused_changes(where: str, tools: Iterable[str]) -> None:
     )
 
 
+def _warn_unreadable_map(where: str) -> None:
+    marker = (f"unreadable:{where}", ())
+    if marker in _WARNED:
+        return
+    if len(_WARNED) >= _WARNED_MAX:
+        _WARNED.clear()
+    _WARNED.add(marker)
+    from maljan.core.logger import logger
+
+    logger.warning(
+        "A stored map of tool declarations (%s) has a form no release writes; it is left "
+        "out, and the declarations this release ships are in force",
+        loggable_names([where]),
+    )
+
+
 def stored_in_force(
-    shipped: Mapping[str, Any], stored: Mapping[str, Any], where: str = ""
+    shipped: Mapping[str, Any], stored: Any, where: str = "", server: str = ""
 ) -> tuple[dict[str, Any], list[str]]:
     """What a stored map of a block's tool declarations puts in force, and the changes refused.
 
@@ -1309,17 +1385,26 @@ def stored_in_force(
     refuses (its name, or a field it sets that needs one this release no
     longer ships, also for a tool this release no longer ships at all) is
     left out: the tool is in force as shipped, or not at all where nothing
-    ships for it, its name is returned, and one warning names it. So no
-    stored change ever stops the settings from being built. Time linear in
-    the two maps.
+    ships for it, its name is returned, and one warning names it. ``server``
+    is the block's tool-server key, if it is one, under which a name spelled
+    as its renamed tool is refused (:func:`check_own_prefix`). A stored value
+    whose form no release writes (:func:`unreadable_map`) is read as absent:
+    what ships is in force, the mark's key is returned for the whole map, and
+    one warning says so. So no stored map of tool declarations ever stops the
+    settings from being built. Time linear in the two maps.
     """
+    if unreadable_map(stored):
+        _warn_unreadable_map(where)
+        return _copy(dict(shipped)), [CHANGES_MARK]
     if holds_changes(stored):
         named = without_mark(stored)
         in_force = merge_tool_facts(shipped, named)
     else:
         named = dict(stored)
         in_force = _copy(named)
-    refused = [tool for tool in named if tool in in_force and _refused_tool(tool, in_force[tool])]
+    refused = [
+        tool for tool in named if tool in in_force and _refused_tool(tool, in_force[tool], server)
+    ]
     for tool in refused:
         if isinstance(shipped.get(tool), Mapping):
             in_force[tool] = _copy(shipped[tool])
@@ -1331,7 +1416,7 @@ def stored_in_force(
 
 
 def kept_stored_changes(
-    incoming: Mapping[str, Any], stored: Any, shipped: Mapping[str, Any]
+    incoming: Mapping[str, Any], stored: Any, shipped: Mapping[str, Any], server: str = ""
 ) -> dict[str, Any]:
     """The tools a save sends back with their refused stored change exactly as stored.
 
@@ -1340,11 +1425,13 @@ def kept_stored_changes(
     release refuses (:func:`stored_in_force`) and that the save names with
     that very change is not the save's edit: it is kept as stored, out of
     every check, so a stored change never blocks an unrelated edit of its
-    block and is never dropped by one. Time linear in the maps.
+    block and is never dropped by one. A stored map whose form no release
+    writes (:func:`unreadable_map`) keeps nothing: it is not in force, and
+    what a save sends is read on its own. Time linear in the maps.
     """
-    if not isinstance(stored, Mapping):
+    if unreadable_map(stored):
         return {}
-    refused = stored_in_force(shipped, stored)[1]
+    refused = stored_in_force(shipped, stored, server=server)[1]
     if not refused:
         return {}
     held = stored_changes(stored, shipped)

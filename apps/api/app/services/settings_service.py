@@ -69,17 +69,25 @@ def incoming_declaration_leaves(changes: dict[str, Any], current: dict[str, Any]
     over what it ships, so a shipped tool it leaves out stays as shipped and
     only ``null`` removes one; without the mark, whole, as an earlier release
     read it. A value sent back exactly as stored therefore says what the
-    stored one says; one stored marked is passed on as it is. Every other
-    key is unchanged.
+    stored one says; one stored marked is passed on as it is. A value holding
+    the mark's key with anything but the mark
+    (``tool_declarations.unreadable_map``) is passed on as sent, since marking
+    it would drop that key, for :func:`changed_declaration_refusals` to
+    refuse. Every other key is unchanged.
     """
-    from maljan.core.tool_declarations import holds_changes, stored_changes, with_mark
+    from maljan.core.tool_declarations import (
+        holds_changes,
+        stored_changes,
+        unreadable_map,
+        with_mark,
+    )
 
     out = dict(changes)
     for key, value in changes.items():
         if not _is_declaration_leaf(key, value):
             continue
         held = current.get(key)
-        if value == held and holds_changes(held):
+        if (value == held and holds_changes(held)) or unreadable_map(value):
             continue
         out[key] = with_mark(stored_changes(value, _shipped_leaf(key)))
     return out
@@ -112,20 +120,34 @@ def changed_declaration_refusals(
     declaration; one the save leaves as stored (or as shipped) is not held to
     the strict rules (``tool_declarations.changed_declaration_errors``), so a
     stored row with a key this version does not read blocks no unrelated
-    save. Keys are ``<leaf>.<tool>[.<field>]``.
+    save. Keys are ``<leaf>.<tool>[.<field>]``; a value that is not a map,
+    or that names a tool no tool can be called (``check_tool_name``) other
+    than one sent back with its stored change exactly as stored, is refused
+    under ``<leaf>`` itself, as the settings model refuses it.
     """
     from maljan.core.tool_declarations import (
         changed_declaration_errors,
         merge_tool_facts,
+        refused_names_message,
+        refused_tool_names,
         stored_in_force,
     )
 
     errors: dict[str, str] = {}
     for key, value in changes.items():
-        if not _is_declaration_leaf(key, value):
+        if not (key.startswith("core.") and key.endswith(TOOL_FACTS_LEAF_SUFFIX)):
+            continue
+        if value is None:
+            continue
+        if not isinstance(value, dict):
+            errors[key] = "tool declarations are a JSON object keyed by tool name"
             continue
         held = current.get(key)
-        shipped, edited, _kept = _leaf_changes(key, value, held)
+        shipped, edited, kept = _leaf_changes(key, value, held)
+        names = [name for name in refused_tool_names(value) if name not in kept]
+        if names:
+            errors[key] = refused_names_message(names)
+            continue
         before = stored_in_force(shipped, held)[0] if isinstance(held, dict) else None
         for where, message in changed_declaration_errors(
             merge_tool_facts(shipped, edited), [before, shipped]
@@ -163,9 +185,16 @@ def stored_declaration_leaves(
         if current is not None and value == held:
             continue
         shipped, edited, kept = _leaf_changes(key, value, held)
-        in_force = MCPServerConfig.model_validate(
-            {"tool_facts": merge_tool_facts(shipped, edited)}
-        ).model_dump(mode="json")["tool_facts"]
+        try:
+            in_force = MCPServerConfig.model_validate(
+                {"tool_facts": merge_tool_facts(shipped, edited)}
+            ).model_dump(mode="json")["tool_facts"]
+        except ValidationError as exc:
+            # Every refusal above should have said it first; this keeps a save
+            # a precise refusal of the leaf rather than a failed request.
+            raise SettingsValidationError(
+                {key: "; ".join(str(err["msg"]) for err in exc.errors())}
+            ) from None
         out[key] = with_mark({**tool_facts_changes(in_force, shipped), **kept})
     return out
 
@@ -177,10 +206,15 @@ def served_tool_facts(stored: dict[str, Any], shipped: dict[str, Any]) -> dict[s
     (``tool_declarations.with_mark``), whichever form it was stored in: one
     an earlier release stored whole is served as the changes that put the
     same in force, so what the console shows and sends back, and what an
-    export carries, reads the same as what is in force.
+    export carries, reads the same as what is in force. A stored map whose
+    form no release writes (``tool_declarations.unreadable_map``) is not in
+    force and is served as no change at all, so what the console sends back
+    keeps the shipped declarations in force.
     """
-    from maljan.core.tool_declarations import stored_changes, with_mark
+    from maljan.core.tool_declarations import stored_changes, unreadable_map, with_mark
 
+    if unreadable_map(stored):
+        return with_mark({})
     return with_mark(stored_changes(stored, shipped))
 
 
@@ -210,6 +244,7 @@ def lenient_imported_declarations(
         merge_tool_facts,
         reads_no_kind,
         tool_facts_changes,
+        unreadable_map,
         whole_as_changes,
         with_mark,
         without_mark,
@@ -225,7 +260,9 @@ def lenient_imported_declarations(
         warnings[key] = f"{held}; then {text}" if held else text
 
     def _clean(declared: Any, prefix: str, shipped: dict[str, Any]) -> Any:
-        if not isinstance(declared, dict):
+        if not isinstance(declared, dict) or unreadable_map(declared):
+            # Passed on as written (reading it would drop the mark's key), for
+            # the save to refuse with the key named.
             return declared
         # A map marked as changes is read as changes; one without the mark
         # (every map of a ``/1`` document, or of a ``/2`` one exported from a

@@ -122,9 +122,17 @@ def shipped_tool_facts(block: str) -> dict[str, Any]:
     return copy.deepcopy(dict(held)) if isinstance(held, Mapping) else {}
 
 
-def _block_in_force(block: str, stored: Mapping[str, Any]) -> tuple[dict[str, Any], list[str]]:
-    """What one block's stored tool declarations put in force, and the changes refused."""
-    return stored_in_force(shipped_tool_facts(block), stored, where=block)
+_SERVER_PREFIX = f"{SERVER_MAP_PATH}."
+
+
+def _block_in_force(block: str, stored: Any) -> tuple[dict[str, Any], list[str]]:
+    """What one block's stored tool declarations put in force, and the changes refused.
+
+    A block of the tool-server map refuses a name spelled as its own server's
+    renamed tool, as the settings model does (``check_own_prefix``).
+    """
+    server = block.removeprefix(_SERVER_PREFIX) if block.startswith(_SERVER_PREFIX) else ""
+    return stored_in_force(shipped_tool_facts(block), stored, where=block, server=server)
 
 
 def server_entry_in_force(name: str, entry: Any) -> Any:
@@ -135,22 +143,24 @@ def server_entry_in_force(name: str, entry: Any) -> Any:
     they are the shipped ones with those changes over them. One without the
     mark was stored whole by an earlier release and is in force as stored.
     An entry that sets no tool declarations is returned as it is, and takes
-    the shipped ones on load.
+    the shipped ones on load. One whose ``tool_facts`` is not a map at all is
+    read as setting none, with a warning (``stored_in_force``).
     """
-    if not isinstance(entry, Mapping) or not isinstance(entry.get(TOOL_FACTS_FIELD), Mapping):
+    if not isinstance(entry, Mapping) or TOOL_FACTS_FIELD not in entry:
         return entry
-    in_force, _refused = _block_in_force(f"{SERVER_MAP_PATH}.{name}", entry[TOOL_FACTS_FIELD])
+    held = entry[TOOL_FACTS_FIELD]
+    in_force, _refused = _block_in_force(f"{SERVER_MAP_PATH}.{name}", held)
+    if not isinstance(held, Mapping):
+        return {field: value for field, value in entry.items() if field != TOOL_FACTS_FIELD}
     return {**entry, TOOL_FACTS_FIELD: in_force}
 
 
 def _stored_blocks(core_overrides: Mapping[str, Any]) -> Iterable[tuple[str, Any]]:
     """Each stored map of a block's tool declarations, with the block's dotted path."""
     for key, value in core_overrides.items():
-        if not isinstance(value, Mapping):
-            continue
-        if key == SERVER_MAP_PATH:
+        if key == SERVER_MAP_PATH and isinstance(value, Mapping):
             for name, entry in value.items():
-                if isinstance(entry, Mapping) and isinstance(entry.get(TOOL_FACTS_FIELD), Mapping):
+                if isinstance(entry, Mapping) and TOOL_FACTS_FIELD in entry:
                     yield f"{SERVER_MAP_PATH}.{name}", entry[TOOL_FACTS_FIELD]
         elif key.endswith(_TOOL_FACTS_SUFFIX):
             yield key.removesuffix(_TOOL_FACTS_SUFFIX), value
@@ -167,16 +177,20 @@ def declarations_in_force(core_overrides: Mapping[str, Any]) -> dict[str, Any]:
     is read as the second, for every construction from stored overrides
     (:func:`build_settings`). A stored change the model refuses over this
     release's declaration is left out with a warning, never a refusal of the
-    settings. Every other key is passed through unchanged.
+    settings, and a stored value whose form no release writes (one that is not
+    a map, or holds the mark's key with anything but the mark) is read as
+    absent, with a warning. Every other key is passed through unchanged.
     """
     out = dict(core_overrides)
     for key, value in core_overrides.items():
-        if not isinstance(value, Mapping):
-            continue
-        if key == SERVER_MAP_PATH:
+        if key == SERVER_MAP_PATH and isinstance(value, Mapping):
             out[key] = {name: server_entry_in_force(name, entry) for name, entry in value.items()}
         elif key.endswith(_TOOL_FACTS_SUFFIX):
-            out[key] = _block_in_force(key.removesuffix(_TOOL_FACTS_SUFFIX), value)[0]
+            in_force = _block_in_force(key.removesuffix(_TOOL_FACTS_SUFFIX), value)[0]
+            if isinstance(value, Mapping):
+                out[key] = in_force
+            else:
+                out.pop(key)
     return out
 
 
