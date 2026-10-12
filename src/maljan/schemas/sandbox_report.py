@@ -214,7 +214,9 @@ class SandboxReport(BaseModel):
     # ("android.permissions", "linux.systemd", "macos.launchd") so two
     # sandboxes cannot collide on a bare word, and rows stay close to the
     # shape the sandbox published them in.
-    channels: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+    # Each channel's rows, or one block a reader keeps whole (a mapped
+    # report's unnamed block), held as the sandbox published it.
+    channels: dict[str, Any] = Field(default_factory=dict)
     screenshots: list[dict[str, Any]] = Field(default_factory=list)
     cti: dict[str, Any] = Field(default_factory=dict)
     # The sections this sandbox structurally cannot produce, by the platform's
@@ -257,12 +259,14 @@ class SandboxReport(BaseModel):
     # process dumps; ``memory`` the regions of process memory the sandbox
     # recorded; ``ids_alerts`` the alerts an intrusion detection engine raised
     # on the run's traffic.
-    process_tree: list[dict[str, Any]] = Field(default_factory=list)
-    resolved_apis: list[str] = Field(default_factory=list)
+    # Rows as the sandbox published them, held by reference: never copied
+    # or wrapped row by row.
+    process_tree: list[Any] = Field(default_factory=list)
+    resolved_apis: list[Any] = Field(default_factory=list)
     extracted: list[Any] | dict[str, Any] = Field(default_factory=list)
-    procdumps: list[dict[str, Any]] = Field(default_factory=list)
-    memory: list[dict[str, Any]] = Field(default_factory=list)
-    ids_alerts: list[dict[str, Any]] = Field(default_factory=list)
+    procdumps: list[Any] = Field(default_factory=list)
+    memory: list[Any] = Field(default_factory=list)
+    ids_alerts: list[Any] = Field(default_factory=list)
     # Every block the reader read that has no place above, under the source's
     # own name and nested as the source nests it in the document's sections
     # (``schemas.sandbox_document``): kept, never dropped, and read by the
@@ -951,28 +955,21 @@ _TRIAGE_FLOW_READ: frozenset[str] = frozenset(
 _TRIAGE_REQUEST_READ: frozenset[str] = frozenset(
     {"domain_req", "domain_resp", "web_req", "web_resp"}
 )
-# The key a kept task block's rows name their task by.
+# The keys of a kept task block's row: the task it came from, and the block.
 TASK_KEY = "task_report"
+TASK_ROWS_KEY = "rows"
 
 
-def _keep_task_block(
-    channels: dict[str, list[dict[str, Any]]], name: str, task: str, value: Any
-) -> None:
-    """One task report's block, kept as rows of the channel ``name`` that name the task.
+def _keep_task_block(channels: dict[str, Any], name: str, task: str, value: Any) -> None:
+    """One task report's block, kept whole in the channel ``name`` as one row naming its task.
 
-    A list's items are the rows (an object as it is, any other item wrapped),
-    an object is one row, any other value one wrapped row; nothing with no
-    value is kept.
+    The block is held by reference, as the task report holds it (``rows``):
+    nothing of it is copied or wrapped, so a block costs one small row
+    whatever its size. Nothing with no value is kept.
     """
     if value in (None, "", [], {}):
         return
-    items = value if isinstance(value, list) else [value]
-    rows = channels.setdefault(name, [])
-    for item in items:
-        if isinstance(item, dict):
-            rows.append({TASK_KEY: task, **item})
-        elif item not in (None, ""):
-            rows.append({TASK_KEY: task, "value": item})
+    channels.setdefault(name, []).append({TASK_KEY: task, TASK_ROWS_KEY: value})
 
 
 TRIAGE_NORMALISER_FILLS: frozenset[str] = frozenset(
@@ -1047,7 +1044,7 @@ def triage_overview_to_sandbox_report(
     # the overview's alone, and says so (``read_from``).
     tasks_read = 0
     extracted = _rows(overview.get("extracted"))
-    channels: dict[str, list[dict[str, Any]]] = {}
+    channels: dict[str, Any] = {}
     for task_name, task in (task_reports or {}).items():
         if not isinstance(task, dict):
             continue
@@ -1058,10 +1055,10 @@ def triage_overview_to_sandbox_report(
         # it extracted joins the overview's.
         for block, value in task.items():
             if block == "extracted":
-                # Each row as the task lists it, naming its task: a row the
+                # Each row as the task lists it, by reference: a row the
                 # overview lists too is kept twice rather than compared with
                 # every row before it.
-                extracted.extend({TASK_KEY: str(task_name), **row} for row in _rows(value))
+                extracted.extend(_rows(value))
             elif block not in _TRIAGE_TASK_READ:
                 _keep_task_block(channels, f"task.{block}", str(task_name), value)
         lineage = _sample_process_tree(task, sample)
@@ -1147,7 +1144,8 @@ def triage_overview_to_sandbox_report(
                         "answers": answers,
                     }
                     if req_extra:
-                        dns_row["extra"] = dict(req_extra)
+                        # One dict per request, shared by its questions' rows.
+                        dns_row["extra"] = req_extra
                     network.dns.append(dns_row)
                     network.domains.append(name)
 

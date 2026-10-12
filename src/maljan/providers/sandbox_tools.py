@@ -714,9 +714,11 @@ def sandbox_channels(
     key = str(name).strip()
     if not key:
         return {"channels": available, "rows": []}
-    rows = channels.get(key)
-    if not isinstance(rows, list):
+    if key not in channels:
         return {"error": f"no channel {key!r}", "channels": available}
+    held = channels[key]
+    # A block a reader kept whole is one row, answered as it is.
+    rows = held if isinstance(held, list) else [held]
     page, meta = _page(rows, offset, limit)
     return {"channel": key, "rows": page, "total": len(rows), **meta}
 

@@ -58,11 +58,13 @@ the overview's analysis, task and target blocks, each flow's and request's
 other fields under `extra` (source, times, bytes, the name and TLS facts, every
 header), and each task report's blocks with no part of their own (its
 signatures with their per-process indicators, the task, its other network
-logs) as `task.<block>` channels whose rows name the task (`task_report`). A
-report read through the JSONPath mapping keeps every top-level block no path
-starts in as a `report.<block>` channel, whole: the analyst reads it through
-`sandbox_channels` and the pack's channels section, and nothing is concluded
-from it for the analyst.
+logs) as `task.<block>` channels, one row per task holding the block whole
+(`task_report`, `rows`). A report read through the JSONPath mapping keeps every
+top-level block no path starts in as a `report.<block>` channel, whole: a list's
+items are its rows as they are, any other block is one row. The analyst reads it
+through `sandbox_channels` and the pack's channels section, and nothing is
+concluded from it for the analyst. A kept block is held once, by reference to
+the parsed report, never copied or wrapped row by row.
 
 | Provider | Detonates | Reached at |
 | :-- | :-- | :-- |
@@ -276,7 +278,7 @@ coding it:
 | `sandbox.rest.submit` | The multipart submission (`method`, `path`, `file_field`, `extra_fields`, `submit_fields`) and the JSONPath of the task id in its answer. |
 | `sandbox.rest.status` | The poll path, the JSONPath of the state, and the done and failed values. |
 | `sandbox.rest.report` | Where the report is, the registered reader that reads it (`cape2`, `cuckoo`, `triage`, `generic` or one an operator registers), an optional capture path, and for a `generic` report its signature scale (`signature_scale_rungs`, `signature_scale_name`). |
-| `sandbox.rest.mapping` | For a `generic` report, an RFC 9535 JSONPath per channel: processes, calls, signatures, DNS, HTTP, TCP, UDP, hosts, domains, dropped files, registry; and per report place with no channel (`places`): `process_tree`, `resolved_apis`, `extracted`, `procdumps`, `memory`, `ids_alerts`, each match kept as the sandbox published it and read whole. A channel is still cut at 5,000 rows, a limit kept from before. |
+| `sandbox.rest.mapping` | For a `generic` report, an RFC 9535 JSONPath per channel: processes, calls, signatures, DNS, HTTP, TCP, UDP, hosts, domains, dropped files, registry; and per report place with no channel (`places`): `process_tree`, `resolved_apis`, `extracted`, `procdumps`, `memory`, `ids_alerts`, each match kept as the sandbox published it and read whole, never more matches than the report holds values. That bound is on rows, not work: a path that descends again and again but rarely matches (`$..*..zz`) still walks the report once per descent, so keep place paths anchored where you can. A channel is still cut at 5,000 rows, a limit kept from before. |
 
 An empty path in `mapping` says the sandbox does not publish that channel, and
 the report lists it as unavailable rather than reading like a clean sample by

@@ -527,7 +527,9 @@ class Sections:
             section.no = NO_LIST.format(path="channels")
             return
         for name in sorted(str(key) for key in channels):
-            rows = self._list(channels.get(name))
+            held = channels.get(name)
+            # A block a reader kept whole is one item, read as it is.
+            rows = held if isinstance(held, list) else None if held is None else [held]
             if rows is not None:
                 section.parts.append(_Part(name, f"channels[{len(section.parts)}]", rows))
 

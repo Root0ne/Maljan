@@ -325,18 +325,7 @@ def _named_blocks(cfg: RestMappingConfig) -> set[str] | None:
     return named
 
 
-def _raw_rows(value: Any) -> list[dict[str, Any]]:
-    """One raw block as channel rows: an object whole, a list's items, any other value wrapped."""
-    if isinstance(value, dict):
-        return [value]
-    if isinstance(value, list):
-        return [item if isinstance(item, dict) else {"value": item} for item in value]
-    return [{"value": value}]
-
-
-def unnamed_blocks(
-    cfg: RestMappingConfig, payload: dict[str, Any]
-) -> dict[str, list[dict[str, Any]]]:
+def unnamed_blocks(cfg: RestMappingConfig, payload: dict[str, Any]) -> dict[str, Any]:
     """Each top-level block of ``payload`` no mapping path starts in, as a ``report.<block>``.
 
     One pass over the payload's top-level keys; the blocks are kept whole and
@@ -347,7 +336,7 @@ def unnamed_blocks(
     if named is None:
         return {}
     return {
-        f"{UNNAMED_BLOCK_PREFIX}{key}": _raw_rows(value)
+        f"{UNNAMED_BLOCK_PREFIX}{key}": value
         for key, value in payload.items()
         if key not in named and value not in (None, "", [], {})
     }
@@ -375,10 +364,14 @@ def _open_row(place: str, match: Any) -> Any:
     """One match of an open channel or place, as the row it lands as; ``None`` for no value."""
     if match in (None, ""):
         return None
-    if place == "resolved_apis":
-        text = match.get("value") if isinstance(match, dict) else match
-        return str(text) if text not in (None, "") else None
-    return match if isinstance(match, dict) else {"value": match}
+    if not place:
+        # An operator's channel: its rows are mappings, as on dev.
+        return match if isinstance(match, dict) else {"value": match}
+    if place == "resolved_apis" and isinstance(match, dict):
+        text = match.get("value")
+        return text if text not in (None, "") else None
+    # A place holds each match as the sandbox published it, by reference.
+    return match
 
 
 def _select(

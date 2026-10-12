@@ -204,3 +204,79 @@ def test_the_settled_lineage_answers_as_the_plain_walk_does() -> None:
         parent = {i: rng.choice([*ids, None, size + 5]) for i in range(1, size + 1)}
         roots = set(rng.sample(ids, rng.randint(0, min(4, len(ids)))))
         assert _reach(parent, roots) == _reach_by_walking_each_chain(parent, roots)
+
+
+def _questions_and_keys(n: int) -> dict[str, Any]:
+    """A Triage task body: one request with ``n`` questions and ``n`` keys of its own."""
+    request: dict[str, Any] = {f"k{i}": i for i in range(n)}
+    request["domain_req"] = {
+        "questions": [{"name": f"q{i}.example", "type": "A"} for i in range(n)]
+    }
+    return {"network": {"requests": [request]}}
+
+
+def _held(build: Callable[[], Any]) -> tuple[int, Any]:
+    """The bytes ``build`` leaves allocated, measured with the collector held."""
+    gc.collect()
+    tracemalloc.start()
+    try:
+        before = tracemalloc.get_traced_memory()[0]
+        built = build()
+        after = tracemalloc.get_traced_memory()[0]
+    finally:
+        tracemalloc.stop()
+    return after - before, built
+
+
+class TestEachRequestSFieldsAreHeldOnce:
+    def test_many_questions_times_many_keys_costs_linear_time(self) -> None:
+        _linear(
+            _questions_and_keys,
+            lambda task: triage_overview_to_sandbox_report({}, task_reports={"t": task}),
+            200,
+        )
+
+    def test_and_memory_in_step_with_the_body(self) -> None:
+        import json
+
+        body = json.dumps(_questions_and_keys(1_500))
+        parsed_bytes, task = _held(lambda: json.loads(body))
+        held, report = _held(
+            lambda: triage_overview_to_sandbox_report({}, task_reports={"t": task})
+        )
+        assert len(report.network.dns) == 1_500
+        assert held <= 2 * parsed_bytes, (held, parsed_bytes)
+
+
+class TestABlockIsHeldOnceByReference:
+    """A long scalar list costs at most twice the parsed payload, on each path that keeps it."""
+
+    N = 200_000
+
+    def _check(self, payload: dict[str, Any], read: Callable[[dict[str, Any]], Any]) -> None:
+        import json
+
+        body = json.dumps(payload)
+        parsed_bytes, parsed = _held(lambda: json.loads(body))
+        held, document = _held(lambda: read(parsed))
+        assert held <= 2 * parsed_bytes, (held, parsed_bytes)
+        assert len(json.dumps(document)) <= 2 * len(body) + 4_096
+
+    def test_an_unnamed_block(self) -> None:
+        mapping = RestMappingConfig(processes="$.run.procs[*]")
+        self._check(
+            {"run": {"procs": []}, "blk": list(range(self.N))},
+            lambda payload: _mapped(payload, mapping),
+        )
+
+    def test_a_mapped_place(self) -> None:
+        mapping = RestMappingConfig(target_sha256="", places={"memory": "$.x[*]"})
+        self._check({"x": list(range(self.N // 2))}, lambda payload: _mapped(payload, mapping))
+
+    def test_a_kept_task_block(self) -> None:
+        self._check(
+            {"foo": list(range(self.N))},
+            lambda task: sandbox_document(
+                triage_overview_to_sandbox_report({}, task_reports={"t": task})
+            ),
+        )

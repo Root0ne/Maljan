@@ -331,7 +331,8 @@ def _laid_out(report: SandboxReport) -> dict[str, Any]:
     elif report.recorded_fixture:
         document[FIXTURE_KEY] = True
     if report.channels:
-        document["channels"] = {name: list(rows) for name, rows in report.channels.items()}
+        # Each channel as the reader holds it: a block kept whole stays one block.
+        document["channels"] = dict(report.channels)
     if network.pcap_local_path:
         document["network"]["pcap_local_path"] = network.pcap_local_path
     # The run-time limit the sandbox set for the task, where its report says:
@@ -346,7 +347,7 @@ def _laid_out(report: SandboxReport) -> dict[str, Any]:
         if value:
             document[name] = value
     if report.ids_alerts:
-        document["ids"] = {"alerts": list(report.ids_alerts)}
+        document["ids"] = {"alerts": report.ids_alerts}
     if report.extras:
         _merge_extras(document, report.extras, ())
     return document

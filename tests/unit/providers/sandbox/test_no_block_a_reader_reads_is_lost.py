@@ -21,7 +21,7 @@ from maljan.providers.sandbox.readers import ReportReader, required_reader
 from maljan.providers.sandbox.rest_mapping import MAX_ROWS_PER_CHANNEL, unnamed_blocks
 from maljan.providers.sandbox_tools import sandbox_channels, sandbox_network
 from maljan.schemas.sandbox_document import sandbox_document
-from maljan.schemas.sandbox_report import TASK_KEY, SandboxReport
+from maljan.schemas.sandbox_report import TASK_KEY, TASK_ROWS_KEY, SandboxReport
 
 FIXTURES = Path(__file__).resolve().parents[3] / "fixtures" / "sandbox"
 
@@ -48,25 +48,20 @@ def _triage_document() -> dict[str, Any]:
 class TestATriageTaskReportKeepsItsBlocks:
     def test_the_task_s_own_blocks_are_channels_naming_the_task(self) -> None:
         document = _triage_document()
-        signatures = sandbox_channels(document, "task.signatures")["rows"]
-        assert signatures == [
-            {
-                TASK_KEY: "behavioral1",
-                "name": "task_only_signature",
-                "score": 7,
-                "indicators": [{"ioc": "C:\\Users\\user\\x.dll", "procid": 1000}],
-            }
-        ]
+        (signatures,) = sandbox_channels(document, "task.signatures")["rows"]
+        assert signatures[TASK_KEY] == "behavioral1"
+        # The task's block as the task report holds it, kept whole.
+        assert signatures[TASK_ROWS_KEY][0]["name"] == "task_only_signature"
+        assert signatures[TASK_ROWS_KEY][0]["indicators"][0]["procid"] == 1000
         assert sandbox_channels(document, "task.network.listening")["rows"] == [
-            {TASK_KEY: "behavioral1", "port": 8080}
+            {TASK_KEY: "behavioral1", TASK_ROWS_KEY: [{"port": 8080}]}
         ]
-        assert sandbox_channels(document, "task.task")["rows"][0]["kind"] == "behavioral"
+        (task,) = sandbox_channels(document, "task.task")["rows"]
+        assert task[TASK_ROWS_KEY]["kind"] == "behavioral"
 
     def test_what_the_task_extracted_joins_the_extracted_section(self) -> None:
         document = _triage_document()
-        assert {TASK_KEY: "behavioral1", "config": {"family": "f", "c2": ["192.0.2.9:443"]}} in (
-            document["extracted"]
-        )
+        assert {"config": {"family": "f", "c2": ["192.0.2.9:443"]}} in document["extracted"]
         index = ss.section_index(document, ("triage", "triage", "tasks"))["sections"]
         assert index["extracted"]["items"] == 1
         assert index["channels"]["items"] >= 3
@@ -103,11 +98,14 @@ class TestAMappedReportKeepsItsUnnamedBlocks:
         names = sandbox_channels(document)["channels"]
         assert names == ["report.iocs", "report.joe", "report.version"]
         assert sandbox_channels(document, "report.joe")["rows"] == [self.PAYLOAD["joe"]]
+        # Each block as the report holds it: a list's items as they are, any
+        # other value one row; nothing is wrapped or copied.
+        assert document["channels"]["report.iocs"] is self.PAYLOAD["iocs"]
         assert sandbox_channels(document, "report.iocs")["rows"] == [
-            {"value": "192.0.2.7"},
+            "192.0.2.7",
             {"domain": "relay.example"},
         ]
-        assert sandbox_channels(document, "report.version")["rows"] == [{"value": "2.1"}]
+        assert sandbox_channels(document, "report.version")["rows"] == ["2.1"]
         # The block a path reads is read through its channel, not kept twice.
         assert document["behavior"]["processes"][0]["process_name"] == "a.exe"
         index = ss.section_index(document, ("upload", "generic"))["sections"]
