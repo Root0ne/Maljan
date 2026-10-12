@@ -608,13 +608,13 @@ def build_events_from_sandbox(sandbox_report: dict[str, Any] | None) -> list[dic
     """
     if not isinstance(sandbox_report, dict):
         return []
-    behavior = sandbox_report.get("behavior")
-    if not isinstance(behavior, dict):
-        behavior = {}
+    from maljan.schemas.sandbox_document import place
 
     events: list[dict[str, str]] = []
 
-    procs = behavior.get("processes")
+    # The neutral report's document (``schemas.sandbox_document``), its parts
+    # read by name.
+    procs = place(sandbox_report, "processes")
     pid_to_name: dict[int, str] = {}
     if isinstance(procs, list):
         for proc in procs:
@@ -647,7 +647,7 @@ def build_events_from_sandbox(sandbox_report: dict[str, Any] | None) -> list[dic
             if trimmed:
                 events.append(trimmed)
 
-    calls = behavior.get("calls")
+    calls = place(sandbox_report, "calls")
     if isinstance(calls, list):
         for call in calls:
             if not isinstance(call, dict):

@@ -771,9 +771,10 @@ def build_evidence_corpus(
             corpus.add(v.lower())
 
     if isinstance(sandbox_report, dict):
-        network = sandbox_report.get("network") or {}
+        from maljan.schemas.sandbox_document import place
+
         for kind in ("dns", "http", "tcp", "udp"):
-            for entry in network.get(kind) or []:
+            for entry in place(sandbox_report, f"network.{kind}") or []:
                 if isinstance(entry, str):
                     corpus.add(entry.lower())
                 elif isinstance(entry, dict):

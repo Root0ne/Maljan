@@ -281,14 +281,17 @@ def test_fetch_maps_overview_and_task_report_into_a_sandbox_report():
     # The consumer shape, not Triage's own field names: a flow's combined
     # "host:port" is split, and a DNS/HTTP request is read from its
     # domain_req/domain_resp or web_req/web_resp sub-object.
-    assert report.network.dns == [
+    from maljan.schemas.sandbox_document import sandbox_document
+
+    # The request is held structurally; the document writes its rows.
+    assert _bare(sandbox_document(report)["network"]["dns"]) == [
         {"request": "update-relay-c9f2.net", "type": "A", "answers": [{"data": "45.33.32.23"}]}
     ]
     assert report.network.domains == ["update-relay-c9f2.net"]
     # Each flow carries the process that made it and whether that process is
     # the sample's tree (the submitted invoice.exe, procid 1000), and the AS
     # facts where Triage recorded them.
-    assert report.network.tcp == [
+    assert _bare(report.network.tcp) == [
         {
             "dst": "45.33.32.23",
             "dport": 443,
@@ -300,11 +303,11 @@ def test_fetch_maps_overview_and_task_report_into_a_sandbox_report():
             "country": "United States",
         }
     ]
-    assert report.network.udp == [
+    assert _bare(report.network.udp) == [
         {"dst": "10.0.2.3", "dport": 53, "procid": 1000, "sample_process_tree": True, "pid": 2100}
     ]
     assert {h["ip"] for h in report.network.hosts} == {"45.33.32.23", "10.0.2.3"}
-    assert report.network.http == [
+    assert _bare(report.network.http) == [
         {
             "host": "update-relay-c9f2.net",
             "uri": "/gate.php",
@@ -316,14 +319,25 @@ def test_fetch_maps_overview_and_task_report_into_a_sandbox_report():
         }
     ]
     assert [d["sha256"] for d in report.dropped_files] == [d["sha256"] for d in task["dumped"]]
+    # Every other field of a flow and a request is kept beside the consumer
+    # fields, under the report's own names.
+    assert report.network.tcp[0]["extra"]["src"] == "10.0.2.15:49512"
+    assert report.network.http[0]["extra"]["request"]["headers"] == {
+        "User-Agent": "Mozilla/5.0 (compatible)"
+    }
+
+
+def _bare(rows):
+    """Rows without the fields the reader keeps beside the consumer shape."""
+    return [{k: v for k, v in row.items() if k != "extra"} for row in rows]
 
 
 def test_the_rendered_dict_names_what_this_sandbox_cannot_provide():
-    from maljan.providers.cape_view import to_cape_shaped_dict
+    from maljan.schemas.sandbox_document import sandbox_document
     from maljan.schemas.sandbox_report import triage_overview_to_sandbox_report
 
     overview = json.loads((FIX / "triage_overview.json").read_text(encoding="utf-8"))
-    rendered = to_cape_shaped_dict(triage_overview_to_sandbox_report(overview))
+    rendered = sandbox_document(triage_overview_to_sandbox_report(overview))
     assert rendered["behavior"]["apistats"] == {}
     assert "apistats" in rendered["unavailable"]
 
@@ -350,7 +364,7 @@ def test_every_consumer_channel_is_populated_or_named_unavailable():
         ("screenshots", report.screenshots),
         ("processes", report.processes),
         ("signatures", report.signatures),
-        ("network.dns", report.network.dns),
+        ("network.dns", report.network.dns or report.network.dns_requests),
         ("network.http", report.network.http),
         ("network.tcp", report.network.tcp),
         ("network.udp", report.network.udp),
@@ -369,8 +383,8 @@ def test_the_mapped_network_survives_the_real_parsers_not_as_na():
     """The mapping is only proven correct once real consumers, not the
     mapper's own assertions, read real domains and IPs out of it."""
     from maljan.parsers.network_parser import NetworkParser
-    from maljan.providers.cape_view import to_cape_shaped_dict
     from maljan.reporting.ledger_projection import network_from_sandbox_report
+    from maljan.schemas.sandbox_document import sandbox_document
     from maljan.schemas.sandbox_report import triage_overview_to_sandbox_report
 
     overview = json.loads((FIX / "triage_overview.json").read_text(encoding="utf-8"))
@@ -378,7 +392,7 @@ def test_the_mapped_network_survives_the_real_parsers_not_as_na():
     report = triage_overview_to_sandbox_report(
         overview, task_reports={"behavioral1": task}, task_id="260904-abcdefgh1"
     )
-    rendered = to_cape_shaped_dict(report)
+    rendered = sandbox_document(report)
 
     parsed = NetworkParser().parse(rendered["network"])
     assert "update-relay-c9f2.net" in parsed

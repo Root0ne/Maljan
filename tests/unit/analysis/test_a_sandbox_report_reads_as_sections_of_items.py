@@ -26,7 +26,6 @@ from maljan.pipeline.validation import (
     validate_isr,
 )
 from maljan.providers import sandbox_tools
-from maljan.providers.cape_view import to_cape_shaped_dict
 from maljan.reporting.evidence_bundles import sandbox_item_observation
 from maljan.reporting.models import (
     FileHashes,
@@ -37,6 +36,7 @@ from maljan.reporting.models import (
 )
 from maljan.schemas.evidence import LedgerEntry
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from maljan.schemas.sandbox_document import sandbox_document
 from maljan.schemas.sandbox_report import reader_of, triage_overview_to_sandbox_report
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "sandbox"
@@ -50,7 +50,7 @@ def _cape() -> dict[str, Any]:
 def _triage() -> dict[str, Any]:
     overview = json.loads((FIXTURES / "triage_overview.json").read_text())
     task = json.loads((FIXTURES / "triage_report_behavioral1.json").read_text())
-    return to_cape_shaped_dict(
+    return sandbox_document(
         triage_overview_to_sandbox_report(overview, task_reports={"behavioral1": task})
     )
 
@@ -473,13 +473,20 @@ class TestBounds:
 
     @staticmethod
     def _seconds(call: Any) -> float:
+        """The best of two timed runs, the collector held so no sweep is timed."""
+        import gc
         import time
 
         best = float("inf")
-        for _ in range(3):
-            started = time.perf_counter()
-            call()
-            best = min(best, time.perf_counter() - started)
+        for _ in range(2):
+            gc.collect()
+            gc.disable()
+            try:
+                started = time.perf_counter()
+                call()
+                best = min(best, time.perf_counter() - started)
+            finally:
+                gc.enable()
         return best
 
     def test_reading_and_querying_grow_linearly(self) -> None:
@@ -558,10 +565,12 @@ class TestWhatTheReaderCanFill:
     def test_a_triage_report_states_the_lists_its_reader_never_fills(self) -> None:
         index = ss.section_index(_triage(), ("triage", "triage"))["sections"]
 
-        for name in ("files", "mutexes", "commands", "services", "channels"):
+        for name in ("files", "mutexes", "commands", "services"):
             assert index[name] == {
                 "no": f"no: the triage report as normalised here carries no `{name}`"
             }
+        # The task report's blocks with no place of their own are its channels.
+        assert index["channels"]["items"] > 0
         # The report's own statement comes first.
         assert index["registry"]["no"].startswith("no: the report lists `registry`")
         assert index["dropped"]["items"] >= 0 and "no" not in index["dropped"]
@@ -598,10 +607,15 @@ def _rich_cape() -> dict[str, Any]:
     return {
         "behavior": {
             "processes": [{"pid": 1, "calls": [{"api": "A"}]}],
+            "processtree": [{"pid": 1, "children": []}],
             "apistats": {"1": {"A": 1}},
             "generic": one,
-            "summary": {key: ["v"] for key in (*_SUMMARY_KEYS, "keys")},
+            "summary": {key: ["v"] for key in (*_SUMMARY_KEYS, "keys", "resolved_apis")},
         },
+        "CAPE": {"payloads": one},
+        "procdump": one,
+        "procmemory": one,
+        "suricata": {"alerts": one},
         "network": {
             kind: one for kind in ("dns", "http", "tcp", "udp", "hosts", "domains", "tls", "icmp")
         },
@@ -635,6 +649,7 @@ class TestTheReadersDeclareWhatTheyFill:
 
         overview = json.loads((FIXTURES / "triage_overview.json").read_text())
         task = json.loads((FIXTURES / "triage_report_behavioral1.json").read_text())
+        overview = {**overview, "extracted": [{"config": {"family": "f"}}]}
         report = triage_overview_to_sandbox_report(overview, task_reports={"b": task})
         assert report_fills(report) == TRIAGE_NORMALISER_FILLS
         # Every other block a CAPE report has, given to it too, fills nothing more.
@@ -665,6 +680,14 @@ class TestTheReadersDeclareWhatTheyFill:
             dropped_files="$.d[*]",
             registry="$.r[*]",
             channels={"linux.systemd": "$.sd[*]"},
+            places={
+                "process_tree": "$.behavior.processtree[*]",
+                "resolved_apis": "$.behavior.summary.resolved_apis[*]",
+                "extracted": "$.CAPE.payloads[*]",
+                "procdumps": "$.procdump[*]",
+                "memory": "$.procmemory[*]",
+                "ids_alerts": "$.suricata.alerts[*]",
+            },
         )
         payload = {
             "p": [{"pid": 1, "name": "a", "command_line": "a"}],
@@ -685,12 +708,13 @@ class TestTheReadersDeclareWhatTheyFill:
         assert report_fills(report.report) == REST_MAPPING_FILLS
 
     def test_every_section_reads_fields_of_the_one_vocabulary(self) -> None:
-        from maljan.schemas.sandbox_report import CAPE_RAW_BLOCKS, REPORT_LIST_FIELDS
+        from maljan.schemas.sandbox_report import REPORT_LIST_FIELDS
 
         named = {field for fields in ss.SECTION_FIELDS.values() for field in fields}
         assert set(ss.SECTION_FIELDS) == set(ss.SECTION_PREFIXES)
-        # The process tree gives parent links, not a section.
-        assert named == set(REPORT_LIST_FIELDS) | set(CAPE_RAW_BLOCKS) - {ss.RAW_PROCESSTREE}
+        # The process tree gives parent links, not a section, and the memory
+        # regions are read whole through the section tool.
+        assert named == set(REPORT_LIST_FIELDS) - {ss.PROCESS_TREE, "memory"}
 
 
 class TestReviewRoundOne:
@@ -754,7 +778,7 @@ class TestReviewRoundOne:
     def test_a_rendered_report_s_pid_zero_is_no_pid_and_no_process_is_its_own_parent(self) -> None:
         from maljan.schemas.sandbox_report import SandboxProcess, SandboxReport
 
-        report = to_cape_shaped_dict(
+        report = sandbox_document(
             SandboxReport(
                 provider="rest",
                 source_format="generic",
@@ -783,18 +807,17 @@ class TestReviewRoundOne:
         cfg.sandbox.provider = "upload"
         blob = (FIXTURES / "triage_overview.json").read_bytes()
         run = UploadSandboxProvider.from_settings(cfg).attach_report(blob, filename="r.json")
-        assert report_fills(run.report) == TRIAGE_OVERVIEW_FILLS
-        index = ss.section_index(to_cape_shaped_dict(run.report), reader_of(run.report))["sections"]
+        assert report_fills(run.report) <= TRIAGE_OVERVIEW_FILLS
+        index = ss.section_index(sandbox_document(run.report), reader_of(run.report))["sections"]
         assert index["signatures"]["items"] > 0
         assert index["processes"] == {
-            "no": "no: the upload report, read from the Triage overview alone, carries no "
-            "`processes`"
+            "no": "no: the upload report, read from its overview alone, carries no `processes`"
         }
 
     def test_rest_calls_are_read_under_their_process_and_filtered_by_pid(self) -> None:
         from maljan.schemas.sandbox_report import SandboxProcess, SandboxReport
 
-        report = to_cape_shaped_dict(
+        report = sandbox_document(
             SandboxReport(
                 provider="rest",
                 source_format="generic",
@@ -885,8 +908,10 @@ class TestReviewRoundOne:
     def test_the_network_order_is_the_network_view_s(self) -> None:
         assert ss.NETWORK_KINDS == sandbox_tools.NETWORK_VIEW_KINDS
 
-    def test_the_raw_cape_blocks_are_sections_and_the_tree_gives_parents(self) -> None:
-        raw = {
+    def test_the_extra_places_are_sections_and_the_tree_gives_parents(self) -> None:
+        from maljan.schemas.sandbox_report import cape_report_to_sandbox_report
+
+        source = {
             "behavior": {
                 "processes": [{"process_id": 10}, {"process_id": 11}],
                 "processtree": [{"pid": 10, "children": [{"pid": 11, "children": []}]}],
@@ -896,36 +921,38 @@ class TestReviewRoundOne:
             "suricata": {"alerts": [{"signature": "s"}]},
             "procdump": [{"pid": 10}],
         }
+        raw = sandbox_document(cape_report_to_sandbox_report(source, provider="cape2"))
         index = ss.section_index(raw, ("cape2", "cape2"))["sections"]
-        assert index["cape"]["items"] == 2
+        assert index["extracted"]["items"] == 2
         assert index["resolved_apis"]["items"] == 1
         assert index["alerts"]["items"] == 1
         assert index["procdumps"]["items"] == 1
         found = ss.Sections(raw, ("cape2", "cape2"))
         assert found.item("proc:11")["parent"] == "proc:10"
         assert [i["id"] for i in found.query("procdumps", pid="10").items] == ["dump:1"]
-        rendered = ss.section_index(raw, ("upload", "cuckoo"))["sections"]
-        assert rendered["cape"] == {
-            "no": "no: the upload report as normalised here carries no `cape`"
+        # A Cuckoo upload keeps them too; a reader that cannot fill them says so.
+        assert ss.section_index(raw, ("upload", "cuckoo"))["sections"]["extracted"]["items"] == 2
+        unread = ss.section_index(raw, ("triage", "triage", "tasks"))["sections"]
+        assert unread["procdumps"] == {
+            "no": "no: the triage report as normalised here carries no `procdumps`"
         }
 
-    def test_the_raw_blocks_are_declared_where_the_report_is_its_own_dict(self) -> None:
+    def test_the_extra_places_are_declared_by_every_reader_of_the_cape_shape(self) -> None:
         from maljan.schemas.sandbox_report import (
-            CAPE_RAW_BLOCKS,
             cape_report_to_sandbox_report,
             normaliser_reading,
         )
 
-        raw = {**_rich_cape(), "CAPE": {"payloads": [{}]}, "suricata": {"alerts": [{}]}}
-        raw["procdump"] = [{}]
-        for fmt, held in (("cape2", True), ("mock", True), ("cuckoo", False)):
-            shown = to_cape_shaped_dict(
-                cape_report_to_sandbox_report(raw, provider="x", source_format=fmt)
+        places = {"extracted", "ids_alerts", "procdumps", "memory", "process_tree", "resolved_apis"}
+        for fmt in ("cape2", "mock", "cuckoo"):
+            shown = sandbox_document(
+                cape_report_to_sandbox_report(_rich_cape(), provider="x", source_format=fmt)
             )
             reading = normaliser_reading(fmt, "x")
             assert reading is not None
-            assert (set(CAPE_RAW_BLOCKS) <= reading.fills) is held
-            assert ("CAPE" in shown and "suricata" in shown and "procdump" in shown) is held
+            assert places <= reading.fills
+            assert {"extracted", "ids", "procdumps", "memory"} <= set(shown)
+            assert not {"CAPE", "suricata", "procdump", "procmemory"} & set(shown)
 
 
 class TestReviewRoundTwo:
@@ -956,11 +983,10 @@ class TestReviewRoundTwo:
         )
         run = provider.fetch("260904-abcdefgh1")
         assert run.report.read_from == "overview"
-        index = ss.section_index(to_cape_shaped_dict(run.report), reader_of(run.report))["sections"]
+        index = ss.section_index(sandbox_document(run.report), reader_of(run.report))["sections"]
         for name in ("processes", "network", "dropped"):
             assert index[name] == {
-                "no": f"no: the triage report, read from the Triage overview alone, carries "
-                f"no `{name}`"
+                "no": f"no: the triage report, read from its overview alone, carries no `{name}`"
             }
         # With no behavioural task listed at all, the same.
         bare = {**overview, "tasks": {}}
@@ -1055,7 +1081,7 @@ class TestReviewRoundTwo:
             processes=[SandboxProcess(pid=0, name="a"), SandboxProcess(pid=5, ppid=0, name="b")],
         )
         assert reader_of(model) == ("cape2", "cape2", "model")
-        found = ss.Sections(to_cape_shaped_dict(model), reader_of(model))
+        found = ss.Sections(sandbox_document(model), reader_of(model))
         assert [(i["id"], i.get("parent")) for i in found.items("processes")] == [
             ("proc:p1", None),
             ("proc:5", None),

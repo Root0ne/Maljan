@@ -2,6 +2,7 @@ from typing import Any
 
 from maljan.parsers.base_parser import BaseParser
 from maljan.parsers.registry import register_parser
+from maljan.schemas.sandbox_document import DnsAnswers
 
 # The column a flow or host table names each destination's ASN and country
 # under, and the heading of the paragraph about reputation permalinks; the
@@ -18,7 +19,7 @@ class NetworkParser(BaseParser):
         """Sifts through network JSON logs for C2 and exfiltration indicators.
 
         Supports two shapes:
-          * dict — CAPEv2 ``network`` block (dns/http/tcp/hosts/domains keys)
+          * dict — the sandbox report document's ``network`` section (dns/http/tcp/hosts/domains)
           * list — Zeek (Bro) connection log
         """
         if isinstance(raw_data, dict):
@@ -61,12 +62,14 @@ class NetworkParser(BaseParser):
             if isinstance(h, dict) and h.get("ip"):
                 host_meta[str(h["ip"])] = h
 
-        # DNS
-        for entry in raw_data.get("dns", []):
+        # DNS: a later question of a request reads the request's answers.
+        dns_entries = raw_data.get("dns", [])
+        resolved = DnsAnswers(dns_entries)
+        for entry in dns_entries:
             if not isinstance(entry, dict):
                 continue
             query = entry.get("request", entry.get("query", "N/A"))
-            answers = entry.get("answers") or []
+            answers = resolved.of(entry)
             ans = answers[0] if answers else "N/A"
             if isinstance(ans, dict):
                 ans = ans.get("data") or ans.get("ip") or "N/A"

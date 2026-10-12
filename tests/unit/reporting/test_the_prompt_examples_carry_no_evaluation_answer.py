@@ -1064,7 +1064,9 @@ def _sandbox_sections_sentences() -> str:
     """What the sandbox sections tell a model: the index, the tool, its answers, the questions."""
     from maljan.analysis import sandbox_sections as ss
     from maljan.providers import sandbox_tools as st
+    from maljan.providers.sandbox.readers import TriageReportReader
     from maljan.schemas.evidence import LedgerEntry
+    from maljan.schemas.sandbox_document import DNS_AS_WRITTEN_KEY
 
     report: dict[str, Any] = {
         "behavior": {
@@ -1119,8 +1121,13 @@ def _sandbox_sections_sentences() -> str:
             json.dumps(ss.section_index(report, ("cape2", "cape2"))),
             json.dumps(st.sandbox_items(report, "files", normalised_by=("rest", "generic"))),
             json.dumps(st.sandbox_items(report, "signatures", pid=7)),
-            *(ss.NO_OVERVIEW.format(provider="upload", section=n) for n in ss.SECTION_PREFIXES),
+            *(
+                ss.NO_PARTIAL.format(provider="upload", how=TriageReportReader.PARTIAL, section=n)
+                for n in ss.SECTION_PREFIXES
+            ),
             *(ss.NO_PID_ROWS.format(section=n) for n in ss.SECTION_PREFIXES),
+            # The key a network section answer may show a source's unread DNS value under.
+            DNS_AS_WRITTEN_KEY,
             ITEM_UNREAD.format(item="net:1"),
         ]
     )
@@ -2499,8 +2506,8 @@ def _without_named_operations(text: str) -> str:
 
 
 # The entry that names the sandbox report's sections and lists as the report
-# names them (``analysis.sandbox_sections``): ``mutexes`` is a section and a
-# CAPE report's own list, ``mutex:<n>`` the form of its items' ids. The
+# names them (``analysis.sandbox_sections``): ``mutexes`` is a section and the
+# report document's own list, ``mutex:<n>`` the form of its items' ids. The
 # allowance is those names, written as identifiers (between backticks, as a
 # JSON string, or as an id prefix before its number) in that entry and nowhere
 # else; the same word written as a word is scanned as it stands.
@@ -2512,11 +2519,11 @@ _REPORT_NAME_ID = re.compile(
 
 def _report_names() -> frozenset[str]:
     from maljan.analysis import sandbox_sections as ss
+    from maljan.schemas.sandbox_document import place_path
 
-    paths = {f"behavior.summary.{key}" for keys in ss._SUMMARY_LISTS.values() for key in keys} | {
-        key for keys in ss._SUMMARY_LISTS.values() for key in keys
-    }
-    return frozenset({*ss.SECTION_PREFIXES, *ss.SECTION_PREFIXES.values(), *paths})
+    paths = {place_path(name) for names in ss._SUMMARY_LISTS.values() for name in names}
+    keys = {path.rsplit(".", 1)[-1] for path in paths}
+    return frozenset({*ss.SECTION_PREFIXES, *ss.SECTION_PREFIXES.values(), *paths, *keys})
 
 
 # What an allowed identifier is replaced by: a token no scored term holds, so

@@ -2,20 +2,20 @@ from typing import Any
 
 from maljan.parsers.base_parser import BaseParser
 from maljan.parsers.registry import register_parser
+from maljan.schemas.sandbox_document import place
 
 
 @register_parser("dynamic")
 class DynamicParser(BaseParser):
-    """Sandbox (CAPEv2/Cuckoo) JSON Refinement Engine."""
+    """The neutral sandbox report's document, refined to its behaviour summary."""
 
     def parse(self, raw_data: Any) -> str:
-        """Sifts through behavioral JSON for high-severity threat indicators."""
+        """Sifts through the report's parts (``schemas.sandbox_document``) for threat indicators."""
         if not isinstance(raw_data, dict):
             return "Invalid sandbox data format."
 
-        behavior = raw_data.get("behavior", {})
-        generic_events = behavior.get("generic", [])
-        apistats = behavior.get("apistats", {})
+        generic_events = place(raw_data, "generic_events", [])
+        apistats = place(raw_data, "apistats", {})
 
         # A sandbox that reported success and traced nothing has said
         # something, and the table of zero rows does not say it. The parser
@@ -27,7 +27,7 @@ class DynamicParser(BaseParser):
             len(_network_root.get(k, []) or [])
             for k in ("dns", "http", "tcp", "hosts", "domains", "udp")
         )
-        _signatures = raw_data.get("signatures") or []
+        _signatures = place(raw_data, "signatures") or []
         if not generic_events and not apistats and not _signatures and _net_total == 0:
             return (
                 "### Sandbox Behavioral Summary\n\n"
@@ -59,24 +59,23 @@ class DynamicParser(BaseParser):
         )
 
         # 3. Network Indicators (C2 / Exfiltration)
-        network = raw_data.get("network", {})
         net_rows: list[list[str]] = []
         # Every row: the analyst reads the whole observed network, not its
         # first ten of each kind.
-        for dns in network.get("dns", []):
+        for dns in place(raw_data, "network.dns", []):
             req = dns.get("request", dns.get("query", "N/A"))
             net_rows.append(["DNS", str(req), "—"])
-        for http in network.get("http", []):
+        for http in place(raw_data, "network.http", []):
             host = http.get("host", "N/A")
             uri = http.get("uri", "/")
             net_rows.append(["HTTP", f"{host}{uri}", str(http.get("status", "?"))])
-        for tcp in network.get("tcp", []):
+        for tcp in place(raw_data, "network.tcp", []):
             dst = tcp.get("dst", "N/A")
             dport = tcp.get("dport", "?")
             net_rows.append(["TCP", f"{dst}:{dport}", "—"])
-        for host in network.get("hosts", []):
+        for host in place(raw_data, "network.hosts", []):
             net_rows.append(["HOST", str(host), "—"])
-        for domain in network.get("domains", []):
+        for domain in place(raw_data, "network.domains", []):
             net_rows.append(["DOMAIN", str(domain), "—"])
 
         net_table = self._format_as_table(headers=["Type", "Indicator", "Status"], rows=net_rows)

@@ -12,8 +12,8 @@ from __future__ import annotations
 from typing import Any
 
 from maljan.core.config import RestMappingConfig
-from maljan.providers.cape_view import to_cape_shaped_dict
 from maljan.providers.sandbox.rest_mapping import apply_mapping, compile_mapping
+from maljan.schemas.sandbox_document import sandbox_document
 from maljan.schemas.sandbox_report import SandboxReport, cape_report_to_sandbox_report
 
 
@@ -75,13 +75,13 @@ class TestTheCapeView:
             source_format="generic",
             channels={"android.receivers": [{"name": "BootReceiver"}]},
         )
-        assert to_cape_shaped_dict(report)["channels"] == {
+        assert sandbox_document(report)["channels"] == {
             "android.receivers": [{"name": "BootReceiver"}]
         }
 
     def test_a_report_with_no_channels_grows_no_key(self) -> None:
         report = SandboxReport(provider="rest", source_format="generic")
-        assert "channels" not in to_cape_shaped_dict(report)
+        assert "channels" not in sandbox_document(report)
 
 
 class TestTheRestDsl:
@@ -127,6 +127,4 @@ class TestTheRestDsl:
             {"apk": {"permissions": [{"name": "SEND_SMS"}]}},
             {"android.permissions": "$.apk.permissions[*]"},
         )
-        assert to_cape_shaped_dict(report)["channels"]["android.permissions"] == [
-            {"name": "SEND_SMS"}
-        ]
+        assert sandbox_document(report)["channels"]["android.permissions"] == [{"name": "SEND_SMS"}]

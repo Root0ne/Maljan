@@ -19,9 +19,9 @@ from pydantic import SecretStr, ValidationError
 
 from maljan.analysis.run_summary import RunSummaryBuilder
 from maljan.core.config import SandboxTriageConfig, Settings
-from maljan.providers.cape_view import to_cape_shaped_dict
 from maljan.providers.errors import ProviderError
 from maljan.providers.sandbox.triage import TriageSandboxProvider
+from maljan.schemas.sandbox_document import sandbox_document
 from maljan.schemas.sandbox_report import triage_overview_to_sandbox_report
 
 FIX = Path(__file__).resolve().parents[3] / "fixtures" / "sandbox"
@@ -111,7 +111,7 @@ class TestTheRunTimeTriageReports:
         assert triage_overview_to_sandbox_report(overview).run_limit_seconds is None
 
     def test_the_run_summary_states_it(self) -> None:
-        view = to_cape_shaped_dict(triage_overview_to_sandbox_report(self._overview()))
+        view = sandbox_document(triage_overview_to_sandbox_report(self._overview()))
         summary = RunSummaryBuilder(start_time=0.0).set_sandbox(view).build()
         assert summary.to_dict()["sandbox_run_limit"] == {"seconds": 150, "set_by": "Triage"}
         assert (

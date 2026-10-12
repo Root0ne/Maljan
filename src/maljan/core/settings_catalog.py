@@ -31,6 +31,7 @@ ChoicesFrom = Literal[
     "profiles",
     "memory_backends",
     "llm_providers",
+    "sandbox_report_readers",
 ]
 Editor = Literal["server_map", "rest_sandbox", "agent_definitions", "stages"]
 
@@ -217,6 +218,10 @@ def _registry_choices(source: str | None) -> list[str] | None:
         from maljan.llm.provider_base import provider_names
 
         return provider_names()
+    if source == "sandbox_report_readers":
+        from maljan.providers.sandbox.readers import choosable_reader_ids
+
+        return choosable_reader_ids()
     if source in ("static_providers", "sandbox_providers"):
         from maljan.providers.registry import (
             sandbox_provider_class,

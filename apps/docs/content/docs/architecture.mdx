@@ -823,11 +823,14 @@ report, so neither the pack's time budget nor its evidence byte budget stops or 
 run holds into fixed sections: processes, API calls, file operations,
 registry operations, network rows (DNS, hosts, HTTP, TCP, UDP, domains, ICMP,
 TLS), signatures, dropped files, mutexes, executed commands, services, generic
-events, the per-process API counts, the platform channels and the
-screenshots, and for a raw CAPE report its extracted configurations and
-payloads, the resolved API names, the Suricata alerts and the process dumps;
-CAPE's process tree gives a process its parent where the row states none,
-and no items of its own. An item is
+events, the per-process API counts, the platform channels, the
+screenshots, what the sandbox extracted (configurations and payloads,
+`extracted`, ids `ext:<n>`), the resolved API names, the intrusion detection
+alerts and the process dumps, each read from the neutral report's document by
+the part's name ([one neutral report](/tools/sandboxes/#one-neutral-report));
+the process tree gives a process its parent where the row states none, and no
+items of its own. An index recorded before the `extracted` section was named
+so (`cape`, ids `cape:<n>`) is read as that section. An item is
 one row of the report, with the report's own fields and the list it came
 from; nothing is summarised, ranked or labelled. A process's id is its pid as
 the report writes it (`proc:84`, `proc:84.2` for a second process with that
@@ -847,9 +850,10 @@ than 0, since that reader writes the list empty for every report, while a
 reader that can fill a list and found nothing still says 0. A Triage report
 read from its overview alone (uploaded, answered by a REST sandbox, or
 fetched with every behavioural task report missing, as the reader records)
-fills the signatures and nothing else, and says so in its own `no:`; a CAPE
-report that reaches the readers without its raw dict is read as rendered
-from the model. In a
+fills the signatures and what Triage extracted and nothing else, and says so
+in its own `no:` (`read from its overview alone`); a report a reader that keeps
+its source's arrangement built without a source is read as laid out from the
+form. In a
 report the platform rendered from its normalised model, a pid or parent of 0
 is the model's "not stated": such a process gets a positional id, and no
 process is linked to itself or to an unstated parent; its line states the count and the id form of each

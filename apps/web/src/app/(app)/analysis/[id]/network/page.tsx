@@ -247,6 +247,12 @@ function DomainCard({ domain }: { domain: NetworkDomain }) {
               {domain.resolved_ips.join(", ")}
             </div>
           )}
+          {domain.resolved_ips_partial && (
+            <div className="text-xs text-text-muted mt-1">
+              Some addresses withheld for size ({domain.resolved_ips_withheld ?? 0} of its DNS
+              request&apos;s answers not read).
+            </div>
+          )}
           {/* Sandbox telemetry only, so usually absent — but when a dropped
               child resolves the C2 rather than the parent, this is the story. */}
           {domain.queried_pids.length > 0 && (

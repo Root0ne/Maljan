@@ -5,8 +5,10 @@ already runs its own sandbox brings the report it has. Validation is layered so
 nothing is stored before it is known to be a sandbox report: stream to a size
 cap, inflate a gzip under the same cap, parse the JSON, sniff the format, and
 only then put the object. The format, its task id and its target hash are read
-from the declared report formats (``maljan.core.report_formats``, built-ins
-plus ``sandbox.report_formats``), never from a format's name in this route. A
+from the registry's formats (``maljan.providers.sandbox.readers.sandbox_formats``:
+the declared report formats, built-ins plus ``sandbox.report_formats``, and the
+registered readers no declaration names), never from a format's name in this
+route. A
 claimed target hash that disagrees with the sample is
 a warning carried into the run summary, not a refusal — re-hashing a sample the
 sandbox unpacked is a legitimate reason for the two to differ. The comparison
@@ -31,9 +33,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, stat
 from maljan.core.report_formats import (
     BUILTIN_REPORT_FORMATS,
     ReportFormat,
-    effective_formats,
     sniff,
 )
+from maljan.providers.sandbox.readers import report_reader, sandbox_formats
 from pydantic import SecretStr
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -200,8 +202,8 @@ async def _read_payload(file: UploadFile, db: AsyncSession) -> tuple[bytes, dict
 
 
 def _read_declared(
-    payload: dict[str, Any], formats: tuple[ReportFormat, ...]
-) -> tuple[ReportFormat | None, str | None, str]:
+    payload: dict[str, Any], formats: tuple[Any, ...]
+) -> tuple[Any, str | None, str]:
     """The format that recognises ``payload``, its task id and its claimed target hash."""
     fmt = sniff(payload, formats)
     if fmt is None:
@@ -209,7 +211,7 @@ def _read_declared(
     return fmt, _task_id_of(payload, fmt), fmt.target_sha256(payload)
 
 
-def _task_id_of(payload: dict[str, Any], fmt: ReportFormat) -> str | None:
+def _task_id_of(payload: dict[str, Any], fmt: Any) -> str | None:
     """The source sandbox's task id, where the format declares it, cut to the column width."""
     raw = fmt.task_id(payload)
     return raw[:_TASK_ID_MAX_LENGTH] if raw is not None else None
@@ -270,7 +272,7 @@ async def upload_sandbox_report(
     # walk is linear in the report, and a large report is still a walk, so it
     # runs in a worker thread rather than on the event loop.
     fmt, task_id, target_sha = await asyncio.to_thread(
-        _read_declared, payload, effective_formats(sandbox.report_formats)
+        _read_declared, payload, sandbox_formats(sandbox.report_formats)
     )
     allowed = set(sandbox.upload.allowed_formats)
     if fmt is None or fmt.name not in allowed:
@@ -278,12 +280,12 @@ async def upload_sandbox_report(
             status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             f"Unrecognised sandbox report format. Accepted: {', '.join(sorted(allowed))}",
         )
-    if not fmt.reader:
+    if report_reader(fmt.reader) is None:
         # Stored, it would be evidence no run can read: the job would go on
         # without it. Refused here, where the operator is told why.
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
-            f"The report is format {fmt.name!r}, which is declared without a reader; "
+            f"The report is format {fmt.name!r}, which names no registered reader; "
             "no analysis can read it yet.",
         )
     report_id = uuid.uuid4()
@@ -415,7 +417,7 @@ async def delete_sandbox_report(
 
 
 def _format_response(
-    fmt: ReportFormat, allowed: set[str], declared: ReportFormat | None
+    fmt: Any, allowed: set[str], declared: ReportFormat | None
 ) -> SandboxReportFormatResponse:
     scale = fmt.signature_scale
     return SandboxReportFormatResponse(
@@ -439,12 +441,16 @@ async def list_sandbox_report_formats(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> SandboxReportFormatListResponse:
-    """Every report format a payload is tried against, in that order, with its declaration."""
+    """Every report format a payload is tried against, in that order, with its declaration.
+
+    The registry's formats: the declared ones and each registered reader no
+    declaration names, which recognises a payload by its own code.
+    """
     sandbox = await _sandbox_settings(db)
     allowed = set(sandbox.upload.allowed_formats)
     declared = {fmt.name: fmt for fmt in sandbox.report_formats}
     items = [
         _format_response(fmt, allowed, declared.get(fmt.name))
-        for fmt in effective_formats(sandbox.report_formats)
+        for fmt in sandbox_formats(sandbox.report_formats)
     ]
     return SandboxReportFormatListResponse(items=items, total=len(items))

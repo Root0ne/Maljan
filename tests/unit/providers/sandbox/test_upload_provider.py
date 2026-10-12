@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 
 from maljan.core.config import Settings
-from maljan.providers.cape_view import to_cape_shaped_dict
 from maljan.providers.errors import ProviderError
 from maljan.providers.sandbox.upload import UploadSandboxProvider
+from maljan.schemas.sandbox_document import sandbox_document
 from tests.unit.providers._cape_fixture import first_cape_report_path
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -54,12 +54,14 @@ def test_submitting_is_refused_with_a_legible_message():
     assert "does not detonate" in str(exc.value)
 
 
-def test_a_cape_upload_re_sniffs_and_keeps_identity():
+def test_a_cape_upload_re_sniffs_and_keeps_the_report_as_published():
     raw = json.loads(_blob().decode())
     run = _provider().attach_report(_blob(), filename="report.json")
     assert run.report.source_format == "cape2"
     assert run.status == "reported"
-    assert to_cape_shaped_dict(run.report) == raw
+    from tests.unit.providers._document import as_published
+
+    assert as_published(sandbox_document(run.report), raw)
     # Real CAPE reports nest sample identity under target.file.sha256, never a
     # flat target.sha256 — confirmed against every file under data/cape_reports/
     # and already the shape the cape2 provider's own golden test reads.

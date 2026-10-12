@@ -44,11 +44,11 @@ class SubmissionResult:
         sample_sha256: SHA-256 of the submitted sample.
         sample_name:   Original filename of the submitted sample.
         status:        Final task status string (e.g. "reported", "failed").
-        report:        Full sandbox JSON report dict. Matches the structure
-                       of existing fixture files under data/samples/:
-                         report["behavior"]  -> DynamicParser / NetworkParser
-                         report["target"]    -> metadata (sha256, name, md5)
-                         report["signatures"]-> behavioral signature matches
+        report:        The sandbox report as one dict: on the provider-backed
+                       path the neutral report's document
+                       (``schemas.sandbox_document``), whose parts every
+                       consumer reads by name; from a plain client, the
+                       backend's own JSON.
         error:         Error message when status != "reported". Empty string
                        on success.
         normalized:    The provider's neutral ``SandboxReport`` view of this

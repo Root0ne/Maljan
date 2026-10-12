@@ -905,7 +905,16 @@ def network_from_ledger(
     resolved: set[str] = set()
     tls_names: set[str] = set()
 
+    from maljan.schemas.sandbox_document import ADDRESS_TYPES, DnsAnswers
+
+    # The addresses each name already holds, so a value is added once.
+    held_ips: dict[str, set[str]] = {}
     for data, whole in _sandbox_views(ledger, sandbox_report):
+        # Each DNS question reads the answers for its own name, and a request's
+        # unnamed answers, within the request's own size. A ``domains`` row is
+        # no DNS question: it reads its own answers, as dev read it, whatever
+        # link it carries.
+        answers_of = DnsAnswers(data.get("dns"))
         for key in ("dns", "domains"):
             for row in data.get(key) or []:
                 name = _first_str(row, "request", "hostname", "domain", "name")
@@ -913,15 +922,39 @@ def network_from_ledger(
                 resolved.add(value_key("domain", name))
                 # The addresses the answer gave for it, as the record states them.
                 known_name = domains.get(value_key("domain", name)) if name else None
-                answers = row.get("answers") if isinstance(row, dict) else None
-                for answer in answers if isinstance(answers, list) else []:
+                if known_name is None:
+                    continue
+                name_ips = held_ips.setdefault(
+                    value_key("domain", name), set(known_name.resolved_ips)
+                )
+                if key == "dns":
+                    answers = answers_of.of(row)
+                else:
+                    own = row.get("answers") if isinstance(row, dict) else None
+                    answers = own if isinstance(own, list) else []
+                for answer in answers:
+                    # Only an address record names an address; a TXT or MX
+                    # value that reads as one is no resolution.
+                    kind = answer.get("type") if isinstance(answer, dict) else None
+                    if kind and str(kind).strip().lower() not in ADDRESS_TYPES:
+                        continue
                     address = address_key(_first_str(answer, "data", "ip", "address"))
-                    if (
-                        known_name is not None
-                        and _parses_as_an_address(address)
-                        and address not in known_name.resolved_ips
-                    ):
+                    if _parses_as_an_address(address) and address not in name_ips:
+                        name_ips.add(address)
                         known_name.resolved_ips.append(address)
+                withheld = answers_of.withheld(row) if key == "dns" else 0
+                if withheld:
+                    # Several views of one report cut the same request alike:
+                    # the most any of them withheld, never their sum.
+                    known_name.resolved_ips_partial = True
+                    known_name.resolved_ips_withheld = max(
+                        known_name.resolved_ips_withheld, withheld
+                    )
+        if answers_of.cut:
+            logger.warning(
+                "network block: a DNS request's questions share more answers than the "
+                "request holds; later names were given fewer resolved addresses."
+            )
         # An address the sample really reached, labelled as one: the default
         # source is ``strings``, so every observed address was recorded as
         # though a string sweep had produced it, which is the weakest claim
@@ -1623,7 +1656,17 @@ def _sandbox_views(
 
     The job's report read whole when it holds an observation; otherwise every
     ``sandbox_network`` answer in the ledger, a paged one marked as a page.
+    Only an answer the platform's own sandbox tools or triage pack wrote (its
+    recorded declaration source) may carry the platform's DNS request links;
+    any other answer, a server's whatever its name, has them removed
+    (``schemas.sandbox_document.without_dns_links``), so its rows read their
+    own answers.
     """
+    from maljan.agents.prompt_fragments import SANDBOX_FAMILY
+    from maljan.pipeline.triage_pack import PACK_SOURCE
+    from maljan.schemas.sandbox_document import without_dns_links
+
+    platform_sources = {SANDBOX_FAMILY, PACK_SOURCE}
     if isinstance(sandbox_report, dict) and sandbox_report:
         from maljan.providers.sandbox_tools import sandbox_network
 
@@ -1637,6 +1680,10 @@ def _sandbox_views(
             str(k).endswith("_total") or k in ("next_offset", "shortened", "truncated")
             for k in data
         )
+        if getattr(entry, "source", None) not in platform_sources and isinstance(
+            data.get("dns"), list
+        ):
+            data = {**data, "dns": without_dns_links(data["dns"])}
         # A shortened or truncated answer is a part of the view, like a page.
         views.append((data, not paged and not getattr(entry, "truncated", False)))
     return views

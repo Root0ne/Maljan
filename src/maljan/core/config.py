@@ -48,6 +48,7 @@ from maljan.agents.prompts import (
 )
 from maljan.core import virustotal
 from maljan.core.report_formats import (
+    READER_ID_PATTERN,
     ReportFormat,
     SeverityRung,
     SignatureScale,
@@ -3835,13 +3836,15 @@ class RestReportConfig(BaseModel):
     """Where the report is, what shape it is in, and the optional capture."""
 
     path: str = "/samples/{task_id}/report"
-    format: Literal["cape2", "cuckoo", "triage", "generic"] = "generic"
+    # The id of the registered report reader (``providers.sandbox.readers``)
+    # that reads the fetched body; ``generic`` reads it through the mapping.
+    format: str = Field(default="generic", pattern=READER_ID_PATTERN, min_length=1)
     pcap_path: str = ""
     # The signature severity scale of a report read through the mapping
-    # (``format`` generic), where the sandbox documents one: the rung each
-    # score from 1 up means, and the scale's name ("1–N" when unnamed). No
-    # rungs: no scale, and the console draws the numbers unrated. A cape2,
-    # cuckoo or triage report takes its format's declared scale.
+    # through the mapping reader, where the sandbox documents one: the rung
+    # each score from 1 up means, and the scale's name ("1–N" when unnamed). No
+    # rungs: no scale, and the console draws the numbers unrated. A report read
+    # by another reader takes its format's declared scale.
     signature_scale_name: str = ""
     signature_scale_rungs: list[SeverityRung] = Field(default_factory=list)
 
@@ -3882,6 +3885,25 @@ class RestMappingConfig(BaseModel):
     # SandboxReport.channels under that name. Namespace the name by platform,
     # e.g. {"android.permissions": "$.apk.permissions[*]"}.
     channels: dict[str, str] = Field(default_factory=dict)
+    # The report's places with no channel above (``schemas.sandbox_document.
+    # OPEN_PLACES``: the process tree, the resolved API names, what the
+    # sandbox extracted, the process dumps, the memory regions, the IDS
+    # alerts): "<place>" -> JSONPath, each match kept as the sandbox published
+    # it, e.g. {"extracted": "$.configs[*]"}.
+    places: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("places")
+    @classmethod
+    def _places_are_open_places(cls, value: dict[str, str]) -> dict[str, str]:
+        from maljan.schemas.sandbox_document import OPEN_PLACES
+
+        unknown = sorted(set(value) - set(OPEN_PLACES))
+        if unknown:
+            raise ValueError(
+                f"no such report place {', '.join(unknown)}; the places a path may name are "
+                f"{', '.join(OPEN_PLACES)}"
+            )
+        return value
 
 
 class SandboxRestConfig(BaseModel):

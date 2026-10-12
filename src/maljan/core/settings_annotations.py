@@ -36,6 +36,7 @@ class Annotation(TypedDict):
             "profiles",
             "memory_backends",
             "llm_providers",
+            "sandbox_report_readers",
         ]
     ]
     editor: NotRequired[Literal["server_map", "rest_sandbox", "agent_definitions", "stages"]]
@@ -2074,8 +2075,9 @@ ANNOTATIONS.update(
             "title": "Accepted report formats",
             "description": (
                 "Formats the sniffer may accept for an uploaded report: cape2, "
-                "cuckoo, triage, and the name of any format declared in "
-                "sandbox.report_formats. A file "
+                "cuckoo, triage, the name of any format declared in "
+                "sandbox.report_formats, and the id of any report reader "
+                "registered at run time or by an installed package. A file "
                 "that sniffs as anything else is refused."
             ),
             "applies_when": _SANDBOX_UPLOAD,
@@ -2357,12 +2359,16 @@ ANNOTATIONS.update(
         "sandbox.rest.report.path": _rest(
             "Report path", "Path the finished report is fetched from; {task_id} is substituted."
         ),
-        "sandbox.rest.report.format": _rest(
-            "Report format",
-            "Shape of the fetched report. cape2, cuckoo and triage reuse the mappers the "
-            "report-upload provider already uses; generic maps the response with the "
-            "JSONPaths below.",
-        ),
+        "sandbox.rest.report.format": {
+            **_rest(
+                "Report format",
+                "The registered report reader that reads the fetched report: each one is "
+                "the reader the report-upload provider uses for that format, and an "
+                "installed package can register more; generic maps the response with the "
+                "JSONPaths below.",
+            ),
+            "choices_from": "sandbox_report_readers",
+        },
         "sandbox.rest.report.pcap_path": _rest(
             "PCAP path", "Optional capture path; empty means this sandbox publishes no PCAP."
         ),
@@ -2439,6 +2445,13 @@ ANNOTATIONS.update(
             "Mapping: open channels",
             "Extra channels this schema has no field for, as name/JSONPath pairs; "
             "namespace the name by platform, e.g. android.permissions.",
+            generic_only=True,
+        ),
+        "sandbox.rest.mapping.places": _rest(
+            "Mapping: report places",
+            "The report's places with no channel above, as place/JSONPath pairs: "
+            "process_tree, resolved_apis, extracted, procdumps, memory or ids_alerts, "
+            "each match kept as the sandbox published it.",
             generic_only=True,
         ),
         "sandbox.rest.mapping.field_names": _rest(

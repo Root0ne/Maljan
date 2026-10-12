@@ -1903,7 +1903,9 @@ class RunSummaryBuilder:
             if found.status == OBSERVED
             else {"status": found.status, "statement": found.statement}
         )
-        limit = report.get("run_limit") if isinstance(report, dict) else None
+        from maljan.schemas.sandbox_document import place
+
+        limit = place(report, "run_limit")
         seconds = limit.get("seconds") if isinstance(limit, dict) else None
         self._sandbox_run_limit = (
             {

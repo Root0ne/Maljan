@@ -4862,7 +4862,9 @@ def make_judge_node(
                 re.IGNORECASE,
             )
             _anti_emu_hits: list[str] = []
-            for sig in (state.get("sandbox_report") or {}).get("signatures") or []:
+            from maljan.schemas.sandbox_document import place as _place
+
+            for sig in _place(state.get("sandbox_report"), "signatures") or []:
                 if not isinstance(sig, dict):
                     continue
                 _haystack = f"{sig.get('name', '')} {sig.get('description', '')}"

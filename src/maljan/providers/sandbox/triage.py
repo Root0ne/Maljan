@@ -77,7 +77,11 @@ from maljan.providers.base import ProviderProbe, SandboxCapabilities, SandboxPro
 from maljan.providers.errors import ProviderError
 from maljan.providers.registry import register_sandbox_provider
 from maljan.providers.sandbox.limits import read_capped, stream_to_file_capped
-from maljan.schemas.sandbox_report import triage_overview_to_sandbox_report
+from maljan.providers.sandbox.readers import required_reader
+
+# The registered report reader (``providers.sandbox.readers``) this provider's
+# reports are read by.
+_READER = "triage"
 
 if TYPE_CHECKING:
     from maljan.core.config import SandboxTriageConfig, Settings
@@ -211,7 +215,7 @@ class TriageSandboxProvider(SandboxProvider):
             can_fetch_report=True,
             can_fetch_pcap=bool(self._cfg.fetch_pcap),
             provides_tools=False,
-            report_format="triage",
+            report_format=_READER,
             degrade_on_failure=True,
         )
 
@@ -531,8 +535,8 @@ class TriageSandboxProvider(SandboxProvider):
                 continue
             task_reports[name] = report
 
-        report = triage_overview_to_sandbox_report(
-            overview, provider="triage", task_reports=task_reports, task_id=str(task_id)
+        report = required_reader(_READER).read(
+            overview, provider=self.id, task_id=str(task_id), task_reports=task_reports
         )
         return SandboxRun(
             task_id=str(task_id),
