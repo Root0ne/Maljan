@@ -3400,12 +3400,21 @@ the server's title and a proposed error pattern its answer's line) and a
 `confidence`: `high` when the server named it outright (a `format`, the
 manifest's own budget), `medium` when a property's name or the schema's shape
 says it, `low` for a reading an operator should check (`asserts_techniques`
-always is). `requires` names only the fields it needs to validate (a row field
-needs `rows`). A declaration may name no kind: `tool_facts` then states the
-tool's other facts (its display name, budget, arguments), and the tool keeps
-every reading an undeclared tool gets — the composer's citation routing below,
-the code-listing reading of its name, its server's own words, the network
-line — until a kind is accepted for it; `unclassified` is read as no kind.
+always is). `requires` names the fields it needs: a field read only through a
+kind (`rows`, `places`, `values`, `techniques`, `reputation`, `reader`,
+`report_sections`, `asserts_techniques`, `source`, `holds_strings`) requires
+the kind and is offered only with one, accepting it stages both or neither,
+and a row field also needs `rows`. A tool declaration names a kind or states
+only the fields read without one (`display_name`, `category`, `words`,
+`timeout_seconds`, `long_running`, `memory_peak_mb`, `discloses_sample`,
+`arguments`; `core.tool_declarations.KIND_FREE_FIELDS`): a declaration with an
+unknown key (`{"knd": …}`), an empty one, or one of no kind that sets a field
+read only through a kind is refused on save, by the API and the console's box
+alike. A declaration of no kind keeps every reading an undeclared tool gets —
+the composer's citation routing below, the code-listing reading of its name,
+its server's own words, the network line — until a kind is accepted for it;
+`unclassified` is read as no kind. Records stored before always named a kind
+and read as they did.
 Schemas are walked once, without recursion, to 16 levels below the answer's
 root, and a name that is not a plain identifier is never made a path or an
 argument. A tool whose schema cannot be read loses only its own proposal
@@ -3419,14 +3428,19 @@ An unannotated tool is never called. Each planned call names its arguments (a
 path under a directory that does not exist, the digest of empty input,
 `192.0.2.1`, `example.invalid`; never a sample), whether the tool may reach a
 service of its own (its server does not mark it `openWorldHint: false`) and
-whether the call carries this server's credential. Nothing is called until the
-admin confirms the list in the server editor; the confirmed request names the
-tools (`confirmed_calls` in the body), only tools still planned are called,
-once each, five seconds each, and without the server's credentials — no auth
-token, and only the environment names it declares non-secret
-(`variable_names`) — unless its declaration says it needs one
-(`credential_bootstrap` or `required_env_allow`), which the list says.
-`details.proposals.probed` says per tool whether it was called. An answer
+what the call is made without (`withheld`). Nothing is called until the admin
+confirms the list in the server editor; the confirmed request names the tools
+(`confirmed_calls` in the body), only tools still planned are called, once
+each, five seconds each, on an attach of their own that uses the server
+exactly as it is configured (its URL, arguments and files) and withholds only
+its auth token and the environment values it does not declare non-secret
+(`variable_names`), each named in `withheld`; a server whose declaration says
+it needs a credential (`credential_bootstrap` or `required_env_allow`) is sent
+it, which the list says (`credential`). The connection test's verdict is the
+configured server's own handshake. `details.proposals.probed` says per tool
+whether it was called and what it was made without; a server that does not
+answer without the withheld values, and a call that answers with an error, say
+so plainly. An answer
 proposes the row shape when the tool has no `outputSchema`, the auto-name
 prefixes it writes twice beyond the defaults, and, for a one-line prose answer
 to the missing path that the platform does not already read as an error and
@@ -3449,18 +3463,22 @@ claim the section is given cites the output's entry (the entry the report's
 evidence index holds under that call, with the same tool and agent; an output
 that carries no call number is not routed), beside the outputs of the kinds it
 reads; the grounding a section is checked against is built from the report,
-the answers and the ledger, so a citation adds none. Every ledger entry records
-the role its calling agent's definition declares (`agent_role`: static,
-dynamic, network, judge, generic …; none for the pack), and the evidence index
-copies it. The served report (`GET /api/v1/reports/{id}`) names under
-`section_tabs` the console tab of each section built from an operator's tool:
-by the kind its tool declared (a sandbox kind on DYNAMIC, a capture on NETWORK,
-a reputation lookup on IDENTITY, a code listing, rule match, strings or import
-listing on STATIC), else by the stored role of the agent whose calls it cites
-(a static, dynamic or network role on its tab, the judge's on IDENTITY; a
-cloned or renamed agent places by its role, never its name). A section of a
-built-in tool, a section of a stored run written before roles, and a section
-neither reading places, keeps its place by key.
+the answers and the ledger, so a citation adds none. An agent definition
+declares the console tab its tools' sections are drawn on (`tab`: identity,
+static, dynamic, network or persistence; the built-ins declare theirs — the
+three analysts their own tabs, the judge identity — a generic or lead agent
+none until an operator sets one, a clone copies its source's, and a definition
+written before the field reads its role's). Every ledger entry records the
+calling agent's declared role and tab (`agent_role`, `agent_tab`; none for the
+pack), and the evidence index copies them. The served report (`GET
+/api/v1/reports/{id}`) names under `section_tabs` the console tab of each
+section built from an operator's tool: by the kind its tool declared (a sandbox
+kind on DYNAMIC, a capture on NETWORK, a reputation lookup on IDENTITY, a code
+listing, rule match, strings or import listing on STATIC), else by the stored
+tab of the agent whose calls it cites, read from the entry and never from
+settings or an agent's name. A section of a built-in tool, a section of a
+stored run written before tabs, and a section neither reading places, keeps
+its place by key.
 
 A tool's answer that the server gives as `structuredContent` beside a prose
 text is kept as the entry's structure (`structured`, marked
