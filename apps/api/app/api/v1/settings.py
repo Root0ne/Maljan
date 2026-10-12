@@ -57,6 +57,10 @@ from app.schemas.settings import (
 from app.services import credential_bootstrap
 from app.services.audit import record as audit_record
 from app.services.mapping_preview import PREVIEW_MAX_BYTES, preview_mapping
+from app.services.report_formats_lock import (
+    report_formats_serialised,
+    touches_report_formats,
+)
 from app.services.server_map import SERVER_MAP_KEY, TOKEN_MASK
 from app.services.settings_catalog_api import catalog_index, full_catalog, resolved_catalog
 from app.services.settings_probes import (
@@ -304,7 +308,7 @@ async def _mapping_warnings(db: AsyncSession, changes: dict[str, Any]) -> dict[s
     """
     from maljan.core.report_mapping import costly_paths
 
-    if not any(str(key).startswith("sandbox.") for key in changes):
+    if not any(str(key).startswith("core.sandbox.") for key in changes):
         return {}
     try:
         sandbox = (await effective_core_settings(db)).sandbox
@@ -312,13 +316,13 @@ async def _mapping_warnings(db: AsyncSession, changes: dict[str, Any]) -> dict[s
         logger.debug("Could not read the mapping paths (%s); continuing.", type(exc).__name__)
         return {}
     out = {
-        f"sandbox.rest.mapping.{field}": said
+        f"core.sandbox.rest.mapping.{field}": said
         for field, said in costly_paths(sandbox.rest.mapping).items()
     }
     for index, fmt in enumerate(sandbox.report_formats):
         if fmt.mapping is not None:
             for field, said in costly_paths(fmt.mapping).items():
-                out[f"sandbox.report_formats.{index}.mapping.{field}"] = said
+                out[f"core.sandbox.report_formats.{index}.mapping.{field}"] = said
     return out
 
 
@@ -378,7 +382,10 @@ async def patch_values(
             content={"errors": {AGENT_MODELS_KEY: refusal_sentence(unprobed)}},
         )
     try:
-        res = await SettingsService(db).save(changes, user_id=user.id, ip=_client_ip(request))
+        # A write of the declared report formats waits for an accept that is
+        # rewriting them, and an accept for it (``services.report_formats_lock``).
+        async with report_formats_serialised(db, needed=touches_report_formats(changes)):
+            res = await SettingsService(db).save(changes, user_id=user.id, ip=_client_ip(request))
     except SettingsValidationError as exc:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": exc.errors}
@@ -402,7 +409,8 @@ async def reset_group(
     keys = [e.key for e in full_catalog() if e.group == group and e.editable]
     if not keys:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown group: {group}")
-    removed = await SettingsService(db).reset(keys, user_id=user.id, ip=_client_ip(request))
+    async with report_formats_serialised(db, needed=touches_report_formats(keys)):
+        removed = await SettingsService(db).reset(keys, user_id=user.id, ip=_client_ip(request))
     runtime_config.invalidate()
     core_settings_cache.invalidate()
     return ResetResponse(reset=removed)
@@ -418,7 +426,8 @@ async def reset_key(
     # A row whose key left the catalog (a later deploy renamed the field) must
     # still be removable, so the catalog check only decides between 404 and
     # an empty reset when nothing is stored either.
-    removed = await SettingsService(db).reset([key], user_id=user.id, ip=_client_ip(request))
+    async with report_formats_serialised(db, needed=touches_report_formats([key])):
+        removed = await SettingsService(db).reset([key], user_id=user.id, ip=_client_ip(request))
     if not removed and key not in catalog_index():
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown setting: {key}")
     runtime_config.invalidate()
@@ -603,7 +612,8 @@ async def import_values(
         values, whole_maps=body.format == WHOLE_MAP_FORMAT
     )
     try:
-        res = await SettingsService(db).save(values, user_id=user.id, ip=_client_ip(request))
+        async with report_formats_serialised(db, needed=touches_report_formats(values)):
+            res = await SettingsService(db).save(values, user_id=user.id, ip=_client_ip(request))
     except SettingsValidationError as exc:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": exc.errors}

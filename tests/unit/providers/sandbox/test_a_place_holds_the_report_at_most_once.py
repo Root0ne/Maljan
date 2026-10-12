@@ -186,10 +186,10 @@ def test_the_settings_save_warns_beside_a_costly_path_and_saves_it(monkeypatch: 
         return settings
 
     monkeypatch.setattr(route, "effective_core_settings", _effective)
-    warnings = asyncio.run(route._mapping_warnings(object(), {"sandbox.rest.mapping": {}}))
+    warnings = asyncio.run(route._mapping_warnings(object(), {"core.sandbox.rest.mapping": {}}))
     assert set(warnings) == {
-        "sandbox.rest.mapping.places.memory",
-        "sandbox.report_formats.0.mapping.processes",
+        "core.sandbox.rest.mapping.places.memory",
+        "core.sandbox.report_formats.0.mapping.processes",
     }
-    assert "anchor it" in warnings["sandbox.rest.mapping.places.memory"]
+    assert "anchor it" in warnings["core.sandbox.rest.mapping.places.memory"]
     assert asyncio.run(route._mapping_warnings(object(), {"llm.provider": "x"})) == {}

@@ -68,6 +68,11 @@ from app.schemas.job import (
     SignatureScaleResponse,
 )
 from app.services import audit
+from app.services.report_formats_lock import (
+    ALLOWED_FORMATS_KEY,
+    REPORT_FORMATS_KEY,
+    report_formats_serialised,
+)
 from app.services.settings_service import effective_core_settings
 
 if TYPE_CHECKING:
@@ -604,23 +609,6 @@ def _accepted_formats(
     return formats, allowed
 
 
-# Accepts rewrite the whole ``sandbox.report_formats`` list: one at a time, so
-# none drops another's declaration (in this process by this lock, across
-# processes by a transaction-scoped database lock where the database has one).
-_ACCEPT_LOCK = asyncio.Lock()
-_ACCEPT_LOCK_KEY = int.from_bytes(hashlib.sha256(b"sandbox.report_formats").digest()[:4], "big")
-
-
-async def _serialise_accepts(db: AsyncSession) -> None:
-    """Hold the database's transaction lock on the report formats, where it has one."""
-    from sqlalchemy import text
-
-    bind = getattr(db, "bind", None)
-    dialect = getattr(getattr(bind, "dialect", None), "name", "")
-    if dialect == "postgresql":
-        await db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _ACCEPT_LOCK_KEY})
-
-
 def _trial_read(payload: dict[str, Any], declaration: ReportFormat, fallback: Any) -> str:
     """Why ``declaration`` reads no fact of ``payload``, in words; empty where it reads one.
 
@@ -677,10 +665,12 @@ async def accept_report_format(
     The declaration must be the format that recognises the upload (a format
     read through a mapping is tried after every built-in, so one a built-in
     also recognises is refused, named), and a trial read of the upload with it
-    must read something, or nothing is saved: an accepted declaration that
-    reads nothing would leave the report unread with the operator told
-    otherwise. An admin accepts for any stored report. Accepts run one at a
-    time, each reading the formats as they stand, so none drops another. On
+    must read a fact (:func:`_trial_read`), or nothing is saved: an accepted
+    declaration that reads nothing would leave the report unread with the
+    operator told otherwise. An admin accepts for any stored report. Accepts
+    and the settings routes' writes of the formats run one at a time
+    (``services.report_formats_lock``), each reading the formats as they
+    stand, so none drops another. On
     success the declaration is saved through the settings path every
     declaration takes (validated and audited), its name is allowed for
     upload, and the upload's row records the format, its task id and target
@@ -711,8 +701,9 @@ async def accept_report_format(
             f"This report is read as {row.format!r} already, not unread.",
         )
     payload = await _stored_payload(row)
-    async with _ACCEPT_LOCK:
-        await _serialise_accepts(db)
+    # The settings routes write the formats under the same lock
+    # (``services.report_formats_lock``).
+    async with report_formats_serialised(db):
         # The formats as they stand now, not as a cache read them a moment ago.
         core_settings_cache.invalidate()
         sandbox = await _sandbox_settings(db)
@@ -747,7 +738,7 @@ async def accept_report_format(
         await db.flush()
         try:
             await SettingsService(db).save(
-                {"sandbox.report_formats": formats, "sandbox.upload.allowed_formats": allowed},
+                {REPORT_FORMATS_KEY: formats, ALLOWED_FORMATS_KEY: allowed},
                 user_id=user.id,
                 ip=request.client.host if request.client else None,
             )

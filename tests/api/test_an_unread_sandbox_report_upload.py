@@ -166,8 +166,12 @@ def test_accepting_the_proposal_saves_it_and_reads_the_upload_as_it(monkeypatch)
     assert row.format == "acme_flat"
     assert row.task_id == "99812"
     changes = saved.await_args.args[0]
-    assert [fmt["name"] for fmt in changes["sandbox.report_formats"]] == ["acme_flat"]
-    assert changes["sandbox.upload.allowed_formats"] == ["cape2", "unread", "acme_flat"]
+    assert [fmt["name"] for fmt in changes["core.sandbox.report_formats"]] == ["acme_flat"]
+    assert changes["core.sandbox.upload.allowed_formats"] == ["cape2", "unread", "acme_flat"]
+    # The keys are the settings catalog's: the save path refuses any other.
+    from app.services.settings_service import SettingsService
+
+    SettingsService(MagicMock()).check_keys(changes)
 
 
 def test_a_declaration_that_does_not_recognise_the_upload_saves_nothing(monkeypatch) -> None:
@@ -267,7 +271,7 @@ def test_an_accepted_format_never_takes_a_built_in_report(monkeypatch, loosened:
         ]
     r = _accept(api, sample, state["rows"][0], declaration)
     assert r.status_code == 200, r.text
-    accepted = saved.await_args.args[0]["sandbox.report_formats"]
+    accepted = saved.await_args.args[0]["core.sandbox.report_formats"]
     assert _sniffed(accepted) == before
 
 
@@ -385,8 +389,8 @@ def test_concurrent_accepts_keep_every_declaration(monkeypatch) -> None:
         await asyncio.sleep(0.05)
         state["sandbox"] = SandboxConfig.model_validate(
             {
-                "report_formats": changes["sandbox.report_formats"],
-                "upload": {"allowed_formats": changes["sandbox.upload.allowed_formats"]},
+                "report_formats": changes["core.sandbox.report_formats"],
+                "upload": {"allowed_formats": changes["core.sandbox.upload.allowed_formats"]},
             }
         )
 
@@ -438,3 +442,74 @@ def test_the_upload_body_is_read_off_the_event_loop(monkeypatch) -> None:
     monkeypatch.setattr(module, "loads", _loads)
     assert _upload(api, sample, _blob("unread_flat_report.json")).status_code == 201
     assert on_loop == [False]
+
+
+def test_a_settings_write_of_the_formats_and_an_accept_never_overlap(monkeypatch) -> None:
+    """The settings PATCH holds the accept's lock while it writes the formats: they run in turn."""
+    import asyncio
+
+    import httpx
+
+    from app.api.v1 import settings as settings_route
+    from app.services import report_formats_lock
+    from app.services.settings_service import SaveResult
+
+    api, sample, state = _client(monkeypatch, ["unread"])
+    api.app.include_router(settings_route.router, prefix="/api/v1")
+    flat = _upload(api, sample, _blob("unread_flat_report.json")).json()
+    spans: list[tuple[str, float, float]] = []
+    locked: dict[str, bool] = {}
+
+    async def _save(self: Any, changes: dict[str, Any], **_kw: Any) -> Any:
+        first = next(iter(changes))
+        locked[first] = report_formats_lock.held_lock().locked()
+        started = asyncio.get_running_loop().time()
+        await asyncio.sleep(0.05)
+        spans.append((first, started, asyncio.get_running_loop().time()))
+        return SaveResult(list(changes), {})
+
+    async def _quiet(*_a: Any, **_kw: Any) -> dict[str, str]:
+        return {}
+
+    monkeypatch.setattr("app.services.settings_service.SettingsService.save", _save)
+    monkeypatch.setattr(settings_route, "_unprobed_models_in", _quiet)
+    monkeypatch.setattr(settings_route, "_agent_warnings", _quiet)
+    monkeypatch.setattr(settings_route, "_mapping_warnings", _quiet)
+
+    async def _together() -> list[Any]:
+        transport = httpx.ASGITransport(app=api.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+            return list(
+                await asyncio.gather(
+                    client.post(
+                        "/api/v1/sandbox-report-formats/accept",
+                        json={
+                            "declaration": flat["proposal"]["declaration"],
+                            "sample_id": str(sample.id),
+                            "report_id": str(state["rows"][0].id),
+                        },
+                    ),
+                    client.patch(
+                        "/api/v1/settings",
+                        json={"changes": {"core.sandbox.upload.allowed_formats": ["unread"]}},
+                    ),
+                )
+            )
+
+    answers = asyncio.run(_together())
+    assert [a.status_code for a in answers] == [200, 200], [a.text for a in answers]
+    assert locked == {
+        "core.sandbox.report_formats": True,
+        "core.sandbox.upload.allowed_formats": True,
+    }
+    formats = sorted((start, end) for key, start, end in spans if key.startswith("core.sandbox."))
+    assert len(formats) == 2
+    assert formats[0][1] <= formats[1][0], formats
+
+
+def test_only_a_write_naming_the_formats_takes_the_lock() -> None:
+    from app.services.report_formats_lock import touches_report_formats
+
+    assert touches_report_formats(["core.sandbox.report_formats"])
+    assert touches_report_formats(["core.llm.provider", "core.sandbox.upload.allowed_formats"])
+    assert not touches_report_formats(["core.sandbox.rest.mapping", "core.sandbox.upload"])
