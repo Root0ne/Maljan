@@ -923,7 +923,7 @@ def _reputation(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> Non
     answer = reputation_of(entry)
     if answer is None:
         return
-    section = acc.get(f"tool_{entry.tool}", entry.tool.replace("_", " ").capitalize(), "kv")
+    section = acc.get(f"tool_{entry.tool}", tool_kinds.section_title(entry), "kv")
     for name in ("malicious", "suspicious", "undetected", "harmless"):
         if name in answer.stats:
             acc.add_row(section, [f"engines {name}", str(answer.stats[name])])
@@ -987,7 +987,7 @@ def _generic_table(
                 columns.append(str(column))
     section = acc.get(
         key or f"tool_{entry.tool}",
-        title or entry.tool.replace("_", " ").capitalize(),
+        title or tool_kinds.section_title(entry),
         "table",
         columns=columns,
     )
@@ -1009,7 +1009,7 @@ def _generic_kv(
 ) -> None:
     section = acc.get(
         key or f"tool_{entry.tool}",
-        title or entry.tool.replace("_", " ").capitalize(),
+        title or tool_kinds.section_title(entry),
         "kv",
         columns=["Field", "Value"],
     )
@@ -1033,7 +1033,7 @@ def _generic_kv(
 def _generic_text(acc: _Sections, entry: LedgerEntry) -> None:
     if not entry.output.strip():
         return
-    section = acc.get(f"tool_{entry.tool}", entry.tool.replace("_", " ").capitalize(), "text")
+    section = acc.get(f"tool_{entry.tool}", tool_kinds.section_title(entry), "text")
     if not section.text:
         section.text = _cut_text(entry.output, entry.id)
     acc.credit(section, entry)
@@ -1048,9 +1048,7 @@ def _fallback(acc: _Sections, entry: LedgerEntry) -> None:
         if any(isinstance(row, dict) for row in data):
             _generic_table(acc, entry, data)
         else:
-            section = acc.get(
-                f"tool_{entry.tool}", entry.tool.replace("_", " ").capitalize(), "list"
-            )
+            section = acc.get(f"tool_{entry.tool}", tool_kinds.section_title(entry), "list")
             for item in data:
                 acc.add_item(section, _text(item))
             acc.credit(section, entry)

@@ -725,18 +725,42 @@ async def _confirmed_calls(
     Made on ``config`` less what ``withheld`` names. A server that does not
     start or answer that way is reported per planned tool, saying what was
     withheld; a call that answered with an error says the same, plainly.
+
+    A stdio child that dies while it starts can end the attach with a bare
+    ``asyncio.CancelledError`` (its transport's task group cancels the
+    scope), or a group of such: that is the server's failure and is reported
+    like any other. The probe's own cancellation is not, and propagates:
+    it is told apart by this task's pending cancellation requests.
     """
     from maljan.tools.errors import error_parts
 
     attached = _without_credentials(config)
     missing = ", ".join(withheld or [])
-    try:
-        found = await _inspect(attached, name, plan)
-    except Exception as exc:  # noqa: BLE001 — the calls are reported, never the test's failure
+
+    def _not_called(exc: BaseException) -> dict[str, str]:
         reason = f"not called: the server did not answer ({type(exc).__name__})"
         if missing:
             reason += f" when started without {missing}"
         return {"": reason}
+
+    def _the_probe_is_cancelled() -> bool:
+        task = asyncio.current_task()
+        return task is not None and task.cancelling() > 0
+
+    try:
+        found = await _inspect(attached, name, plan)
+    except asyncio.CancelledError as exc:
+        if _the_probe_is_cancelled():
+            raise
+        return _not_called(exc)
+    except BaseExceptionGroup as group:
+        if _the_probe_is_cancelled() or (
+            group.subgroup((KeyboardInterrupt, SystemExit)) is not None
+        ):
+            raise
+        return _not_called(group)
+    except Exception as exc:  # noqa: BLE001 — the calls are reported, never the test's failure
+        return _not_called(exc)
     if missing:
         for tool, said in list(found.probed.items()):
             note = WITHHELD_NOTE.format(withheld=missing)

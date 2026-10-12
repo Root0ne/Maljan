@@ -699,3 +699,87 @@ def test_a_tool_declared_without_a_kind_is_still_introduced_by_the_server_s_own_
     assert _own_words(_Handle({}), tools)
     assert _own_words(_Handle({"section_list": {"display_name": "Sections"}}), tools)
     assert _own_words(_Handle({"section_list": {"kind": "listing_strings"}}), tools) == ""
+
+
+def test_a_name_and_words_declared_without_a_kind_take_effect_and_keep_the_fallbacks(
+    installed: Any,
+) -> None:
+    from maljan.pipeline.validation import entry_words
+    from maljan.reporting import tool_kinds
+    from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
+    from maljan.reporting.renderers import MarkdownRenderer
+
+    undeclared, tools = _lister_call(installed(_settings(None)))
+    before = _what_an_undeclared_tool_gets(undeclared, tools)
+    named = {"section_list": {"display_name": "Section scanner", "words": ["sectioner"]}}
+    entry, tools = _lister_call(installed(_settings(named)))
+    # Every kind reader still reads it as undeclared: the fallbacks and routing hold.
+    assert _what_an_undeclared_tool_gets(entry, tools) == before
+    # The name and words it declares are read without a kind.
+    assert tool_kinds.display_name(entry) == "Section scanner"
+    assert "sectioner" in entry_words(entry)
+    assert "sectioner" not in entry_words(undeclared)
+    sections = {s.key: s for s in build_sections([entry])}
+    (drawn,) = [s for s in sections.values() if entry.id in s.evidence_ids]
+    # The section the report prints and the console draws carries its name.
+    assert drawn.title == "Section scanner"
+    plain = {s.key: s for s in build_sections([undeclared])}
+    assert [s.title for s in plain.values() if undeclared.id in s.evidence_ids] == ["Section list"]
+    report = MalwareReport(
+        identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
+        sections=list(sections.values()),
+    )
+    assert "Section scanner" in MarkdownRenderer().render(report)
+
+
+def test_a_child_that_dies_at_start_keeps_the_configured_verdict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import settings_probes
+
+    real = settings_probes._inspect
+    attaches: list[Any] = []
+
+    async def _child_dies(config: Any, name: str, plan: Any) -> Any:
+        attaches.append(config)
+        if len(attaches) > 1:
+            raise asyncio.CancelledError()
+        return await real(config, name, plan)
+
+    monkeypatch.setattr(settings_probes, "_inspect", _child_dies)
+    result = _probe(confirmed=["section_list"])
+    assert result.ok is True
+    assert result.details["proposals"]["probed"] == {
+        "section_list": "not called: the server did not answer (CancelledError)"
+    }
+
+
+def test_a_cancelled_probe_is_still_cancelled(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.services import settings_probes
+
+    real = settings_probes._inspect
+    attaches: list[Any] = []
+
+    async def _run() -> None:
+        calls_started = asyncio.Event()
+
+        async def _hangs(config: Any, name: str, plan: Any) -> Any:
+            attaches.append(config)
+            if len(attaches) > 1:
+                calls_started.set()
+                await asyncio.Event().wait()
+            return await real(config, name, plan)
+
+        monkeypatch.setattr(settings_probes, "_inspect", _hangs)
+        entry = {"enabled": True, "command": "invented-server"}
+        task = asyncio.ensure_future(
+            settings_probes.probe_mcp(
+                {"name": SERVER, "entry": entry, "confirmed_calls": ["section_list"]}
+            )
+        )
+        await calls_started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(_run())

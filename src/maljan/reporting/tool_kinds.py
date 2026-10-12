@@ -365,10 +365,33 @@ def sweeps_the_strings(row: Any, named: str) -> bool:
 
 
 def display_name(entry: Any, tool: str | None = None) -> str:
-    """The name published text gives an entry's tool: its declared display name, else its name."""
+    """The name published text gives an entry's tool: its declared display name, else its name.
+
+    A declaration that names no kind still names the tool
+    (``declared_reading.named_facts``), though it declares nothing else.
+    """
     name = tool if tool is not None else tool_of(entry)
     facts = facts_of(entry, name)
-    return (facts.display_name if facts is not None else "") or name
+    if facts is not None:
+        return facts.display_name or name
+    if stored(entry):
+        return declared_reading.named_facts(entry)[0] or name
+    return name
+
+
+def section_title(entry: Any) -> str:
+    """The title of a section built from an entry's answers by the generic reading.
+
+    An operator's tool is titled by the name its declaration gives it, with
+    a kind or without (:func:`display_name`); every other tool by its name,
+    as its sections always were, so a stored run and the built-ins draw as
+    before.
+    """
+    plain = tool_of(entry).replace("_", " ").capitalize()
+    if not from_an_operator_source(entry):
+        return plain
+    # The name the stored record gives, with a kind or without; none: its name.
+    return declared_reading.named_facts(entry)[0] or plain
 
 
 def index_by_id(rows: Iterable[Any]) -> dict[str, Any]:

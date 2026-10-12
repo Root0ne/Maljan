@@ -296,6 +296,35 @@ def facts_of(entry: Any) -> ToolFacts | None:
     return shipped_by_name().get(bare_name(_field(entry, "tool")))
 
 
+def named_facts(entry: Any) -> tuple[str, tuple[str, ...]]:
+    """The display name and words an entry's tool declared, whatever its kind.
+
+    Read from the record the entry stored, like every other fact, never from
+    the reading process's settings. A record that names no kind still gives
+    these two, which are read without one (``tool_declarations.
+    KIND_FREE_FIELDS``); every reader of a kind reads that record as a tool
+    that declares nothing (:func:`facts_of`), so the tool keeps each reading
+    an undeclared tool gets. ``("", ())`` for none.
+    """
+    facts = facts_of(entry)
+    if facts is not None:
+        return facts.display_name, tuple(facts.words)
+    held = _field(entry, "facts")
+    if not isinstance(held, Mapping):
+        return "", ()
+    version = held.get("v")
+    if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+        return "", ()
+    name = held.get("display_name")
+    words = held.get("words")
+    said = (
+        tuple(str(word) for word in words if isinstance(word, str))
+        if isinstance(words, list | tuple)
+        else ()
+    )
+    return (name if isinstance(name, str) else ""), said
+
+
 def legacy_tool_words(tool: str) -> set[str]:
     """The legacy reading of the words a statement names an entry by: its name's words and
     the words the old table gave a part of it (``legacy_tool_tables.TOOL_WORDS``)."""

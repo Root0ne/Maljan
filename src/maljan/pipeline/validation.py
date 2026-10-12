@@ -6651,13 +6651,13 @@ def entry_words(entry: Any) -> frozenset[str]:
 
     An entry with no stored facts is read as it always was (:func:`_tool_words`).
     """
-    from maljan.core.declared_reading import facts_of, read_by_name
+    from maljan.core.declared_reading import named_facts, read_by_name
 
     tool = str(getattr(entry, "tool", "") or "")
     if read_by_name(entry):
         return frozenset(_tool_words(tool))
-    facts = facts_of(entry)
-    declared = {str(word).lower() for word in facts.words} if facts is not None else set()
+    # A declaration's words name the entry with a kind or without one.
+    declared = {str(word).lower() for word in named_facts(entry)[1]}
     return frozenset(_name_words(tool) | declared)
 
 
