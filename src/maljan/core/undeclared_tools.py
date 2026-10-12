@@ -397,5 +397,11 @@ def entry_is_strings_source(entry: Any) -> bool:
 
 
 def entry_address_arguments(entry: Any) -> tuple[str, ...]:
-    """The arguments an entry's call gave an address in (:func:`address_arguments`)."""
-    return address_arguments(entry_facts(entry))
+    """The arguments an entry's call gave an address in (:func:`address_arguments`).
+
+    ``arguments`` is read without a kind, so a record that names none still
+    gives its declared address argument (``declared_reading.kind_free_facts``).
+    """
+    from maljan.core.declared_reading import kind_free_facts
+
+    return address_arguments(kind_free_facts(entry))
