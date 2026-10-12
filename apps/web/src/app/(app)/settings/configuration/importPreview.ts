@@ -9,7 +9,7 @@
  */
 import type { CatalogEntry } from "@/types/settings";
 import { deepEqual, describeChange, type ChangeLine } from "./describeChange";
-import { SETTINGS_EXPORT_FORMAT } from "@/types/settings";
+import { SETTINGS_IMPORT_FORMATS } from "@/types/settings";
 
 /** The shape of a parsed `.json` export file, before it is known to be valid.
  *  `values` is `unknown` rather than `Record<string, unknown>` on purpose: a
@@ -46,7 +46,7 @@ export function buildImportPreview(
   currentValues: Record<string, unknown>
 ): ImportPreview {
   if (
-    doc.format !== SETTINGS_EXPORT_FORMAT ||
+    !SETTINGS_IMPORT_FORMATS.includes(doc.format) ||
     typeof doc.values !== "object" ||
     doc.values === null ||
     Array.isArray(doc.values)
