@@ -76,9 +76,19 @@ describe("buildImportPreview", () => {
     expect(result.errors).toEqual({ [readOnlyEntry.key]: "read-only" });
   });
 
+  it("reads the format an export writes now and the one written before", () => {
+    for (const format of ["maljan-settings/2", "maljan-settings/1"]) {
+      const result = buildImportPreview(doc({ [knownEntry.key]: 20 }, format), entriesByKey, {
+        [knownEntry.key]: 5,
+      });
+      expect(result.errors).toEqual({});
+      expect(result.lines).toHaveLength(1);
+    }
+  });
+
   it("errors an unsupported format and skips every value", () => {
     const result = buildImportPreview(
-      doc({ [knownEntry.key]: 20 }, "maljan-settings/2"),
+      doc({ [knownEntry.key]: 20 }, "maljan-settings/3"),
       entriesByKey,
       { [knownEntry.key]: 5 }
     );

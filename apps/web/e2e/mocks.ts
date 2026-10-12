@@ -111,6 +111,7 @@ function withServedDeclarations<T extends { groups: { entries: unknown[] }[] }>(
     probe_labels: SERVED.probe_labels ?? {},
     enrichment_sources: SERVED.enrichment_sources ?? [],
     credential_servers: SERVED.credential_servers ?? {},
+    tool_declaration_fields: SERVED.tool_declaration_fields,
   };
 }
 

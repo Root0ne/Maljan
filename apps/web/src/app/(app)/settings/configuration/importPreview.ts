@@ -7,9 +7,9 @@
  * read-only key, an unsupported `format`, a key that imports unchanged) are
  * unit-tested directly.
  */
-import type { CatalogEntry } from "@/types/settings";
+import type { CatalogEntry, ToolDeclarationFields } from "@/types/settings";
 import { deepEqual, describeChange, type ChangeLine } from "./describeChange";
-import { SETTINGS_EXPORT_FORMAT } from "@/types/settings";
+import { SETTINGS_IMPORT_FORMATS } from "@/types/settings";
 
 /** The shape of a parsed `.json` export file, before it is known to be valid.
  *  `values` is `unknown` rather than `Record<string, unknown>` on purpose: a
@@ -43,10 +43,11 @@ export interface ImportPreview {
 export function buildImportPreview(
   doc: ImportDoc,
   entriesByKey: Record<string, CatalogEntry>,
-  currentValues: Record<string, unknown>
+  currentValues: Record<string, unknown>,
+  fields: ToolDeclarationFields | null = null
 ): ImportPreview {
   if (
-    doc.format !== SETTINGS_EXPORT_FORMAT ||
+    !SETTINGS_IMPORT_FORMATS.includes(doc.format) ||
     typeof doc.values !== "object" ||
     doc.values === null ||
     Array.isArray(doc.values)
@@ -78,7 +79,13 @@ export function buildImportPreview(
     }
     const current = currentValues[key];
     if (deepEqual(current, importedValue)) continue;
-    lines.push(describeChange(entry, current, importedValue));
+    const line = describeChange(entry, current, importedValue, fields);
+    // A block's tool declarations are compared as they are in force, also
+    // inside the server map: a file that writes them in another form but
+    // changes no tool (and, for the map, no other field of any server) is no
+    // change.
+    if ((entry.editor === "tool_facts" || entry.editor === "server_map") && !line.detail) continue;
+    lines.push(line);
   }
 
   return { lines, errors };

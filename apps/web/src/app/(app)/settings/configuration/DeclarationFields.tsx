@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { McpServerEntry, SampleOpenEntry } from "@/types/settings";
+import { shippedServerToolFacts } from "@/lib/providerFacts";
+import type {
+  McpServerEntry,
+  SampleOpenEntry,
+  ToolDeclarationFields,
+  ToolFactsEntry,
+} from "@/types/settings";
 import { deepEqual } from "./mapEditorHelpers";
 import { useOptionalSettingsContext } from "./SettingsContext";
 import {
@@ -15,8 +21,20 @@ import {
   readToolFacts,
   readWorkDir,
   showJson,
+  usableFields,
   type Read,
 } from "./declarationFields";
+import {
+  asChanges,
+  CHANGES_MARK,
+  changedTools,
+  mergeToolFacts,
+  namesAnyTool,
+  resetTool,
+  toolFactsChanges,
+  type ToolChange,
+  type ToolFactsChanges,
+} from "./toolFactsChanges";
 
 const input =
   "w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent";
@@ -148,6 +166,147 @@ function ReadField<T>({
   );
 }
 
+/** A tool's name as the console shows it: an empty one as `""`, so it is seen. */
+function shownToolName(tool: string): string {
+  return tool === "" ? '""' : tool;
+}
+
+/** The word on a tool's reset button. A tool the block does not ship is the
+ *  operator's own and is removed; one whose stored change conflicts with this
+ *  release is reset (its stored change removed), shipped or not. */
+function resetWord(state: ToolChange["state"], conflicting: boolean): string {
+  if (state !== "added") return "Reset to shipped";
+  return conflicting ? "Reset" : "Remove";
+}
+
+const CHANGE_LABEL: Record<ToolChange["state"], string> = {
+  changed: "changed",
+  removed: "removed",
+  added: "yours, not shipped",
+};
+
+/**
+ * A block's tool declarations, edited as they are in force.
+ *
+ * What is stored (`changes`) is the block's changes over what it ships, one
+ * tool at a time; the box shows the shipped declarations with those changes
+ * over them, and stages what the edited text changes of the shipped ones. A
+ * tool left as shipped is not staged, so it keeps following later releases.
+ * Below the box, each tool that carries a change is listed with a reset to
+ * what ships. With nothing shipped (a server an operator added) the box is
+ * the whole map and nothing is listed.
+ *
+ * While the typed text stands for the changes staged, the box keeps showing
+ * it as typed rather than re-rendering it filled from the shipped values.
+ *
+ * A tool named in `conflicts` carries a stored change the API leaves out
+ * because it does not validate over what this release ships (the tool is in
+ * force as shipped); it is marked so the operator resets or edits it.
+ */
+export function ToolFactsBox({
+  id,
+  ariaLabel,
+  serverKey,
+  shipped,
+  changes,
+  fields,
+  conflicts = [],
+  onChanges,
+}: {
+  id: string;
+  ariaLabel: string;
+  serverKey: string;
+  shipped: Record<string, Record<string, unknown>>;
+  changes: ToolFactsChanges | undefined;
+  fields: ToolDeclarationFields | null;
+  conflicts?: readonly string[];
+  onChanges: (changes: ToolFactsChanges) => void;
+}) {
+  const [held, setHeld] = useState<{
+    changes: ToolFactsChanges;
+    inForce: Record<string, ToolFactsEntry>;
+  } | null>(null);
+  // Read as the API reads it: a map without the mark is the whole map.
+  const read = asChanges(shipped, changes, fields);
+  const inForce =
+    held !== null && deepEqual(held.changes, changes ?? {})
+      ? held.inForce
+      : mergeToolFacts(shipped, read);
+  const ships = Object.keys(shipped).length > 0;
+  const changed = ships ? changedTools(shipped, read) : [];
+  // A conflicting name no row below carries (the mark's key stands for the
+  // stored map as a whole) is said on its own line, never dropped.
+  const listed = new Set(changed.map(({ tool }) => tool));
+  const unlisted = conflicts.filter((tool) => !listed.has(tool));
+  return (
+    <>
+      <ReadField
+        id={id}
+        label={
+          ships
+            ? "Tool declarations in force (JSON object keyed by tool name; a tool left as shipped keeps following later releases)"
+            : "Tool declarations (JSON object keyed by tool name, each with its facts; a kind is optional)"
+        }
+        ariaLabel={ariaLabel}
+        value={inForce}
+        show={showJson}
+        rows={6}
+        mono
+        read={(text) => readToolFacts(text, serverKey, fields)}
+        onValue={(next) => {
+          const staged = toolFactsChanges(next, shipped, fields);
+          setHeld({ changes: staged, inForce: next });
+          onChanges(staged);
+        }}
+      />
+      {unlisted.length > 0 && (
+        <p className="mt-1 text-[11px] text-status-orange" data-tool-conflicts-unlisted={serverKey}>
+          {unlisted.includes(CHANGES_MARK)
+            ? "The stored tool declarations of this block have a form no release writes, so " +
+              "they are not in force and what ships is; saving the block writes them anew."
+            : `Stored changes not in force: ${unlisted.map(shownToolName).join(", ")}`}
+        </p>
+      )}
+      {ships && (
+        <div className="mt-1 text-[11px] text-text-secondary" data-tool-changes={serverKey}>
+          {changed.length === 0 ? (
+            <p>Every tool is as shipped.</p>
+          ) : (
+            <>
+              <p>Tools carrying your changes:</p>
+              <ul className="mt-1 space-y-0.5">
+                {changed.map(({ tool, state }) => (
+                  <li key={tool} className="flex items-center gap-2" data-tool-change={state}>
+                    <span className="font-mono text-text-primary">{tool}</span>
+                    <span className="text-text-muted">{CHANGE_LABEL[state]}</span>
+                    {conflicts.includes(tool) && (
+                      <span className="text-status-orange" data-tool-conflict={tool}>
+                        conflicts with this release&apos;s declaration: your change is not in
+                        force until you reset or edit it
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      className="text-accent-strong"
+                      aria-label={`reset ${tool} to shipped`}
+                      onClick={() => {
+                        setHeld(null);
+                        onChanges(resetTool(read, tool));
+                      }}
+                    >
+                      {resetWord(state, conflicts.includes(tool))}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
 const joinComma = (v: string[]) => v.join(", ");
 const joinLines = (v: string[]) => v.join("\n");
 const asIs = (v: string) => v;
@@ -167,7 +326,9 @@ export default function DeclarationFields({
   server: McpServerEntry;
   put: (next: Partial<McpServerEntry>) => void;
 }) {
-  const fields = useOptionalSettingsContext()?.schema?.tool_declaration_fields ?? null;
+  const schema = useOptionalSettingsContext()?.schema;
+  const fields = usableFields(schema?.tool_declaration_fields);
+  const shipped = shippedServerToolFacts(schema, serverKey);
   const open = server.sample_open ?? EMPTY_OPEN;
   const box = (field: string) => `${serverKey}.${field}`;
   return (
@@ -310,16 +471,20 @@ export default function DeclarationFields({
           />
         </div>
         <div className="sm:col-span-2">
-          <ReadField
+          <ToolFactsBox
             id={box("tool_facts")}
-            label="Tool declarations (JSON object keyed by tool name, each with its facts; a kind is optional)"
             ariaLabel={`${serverKey} tool_facts`}
-            value={server.tool_facts ?? {}}
-            show={showJson}
-            rows={6}
-            mono
-            read={(text) => readToolFacts(text, serverKey, fields)}
-            onValue={(tool_facts) => put({ tool_facts })}
+            serverKey={serverKey}
+            shipped={shipped}
+            changes={server.tool_facts}
+            fields={fields}
+            conflicts={schema?.tool_facts_conflicts?.[`mcp.servers.${serverKey}`]}
+            onChanges={(tool_facts) => {
+              // Nothing changed of what ships, where nothing was stored:
+              // leave the entry as it was rather than stage an empty map.
+              if (!namesAnyTool(tool_facts) && server.tool_facts === undefined) return;
+              put({ tool_facts: tool_facts as McpServerEntry["tool_facts"] });
+            }}
           />
         </div>
         <div className="sm:col-span-2">

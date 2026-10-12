@@ -290,6 +290,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "Run `alembic upgrade head` from your deploy pipeline instead."
         )
 
+    from app.services.migration_state import CHECK_FAILED, check_revision_at_start
+
+    try:
+        async with async_engine.connect() as conn:
+            await conn.run_sync(check_revision_at_start)
+    except Exception as exc:
+        # Best effort: the check only says something; it never stops a start,
+        # and nothing a driver says reaches the log.
+        logger.warning(CHECK_FAILED, type(exc).__name__)
+
     from app.database import async_session_factory
     from app.services.composite_secrets import (
         repair_frontier_arm_keys,

@@ -26,7 +26,7 @@ export type ChoicesFrom =
   | "memory_backends"
   | "sandbox_report_readers";
 
-export type Editor = "server_map" | "rest_sandbox" | "agent_definitions" | "stages";
+export type Editor = "server_map" | "rest_sandbox" | "agent_definitions" | "stages" | "tool_facts";
 
 export interface CatalogEntry {
   key: string;
@@ -160,7 +160,11 @@ export interface McpServerEntry {
   platform_owned?: boolean;
   auto_name_prefixes?: string[];
   reference_urls?: string[];
-  tool_facts?: Record<string, ToolFactsEntry>;
+  /** Per tool, as served: its changes over the shipped declaration of that
+   *  tool (the changed fields, `null` for a removed shipped tool, the whole
+   *  declaration of a tool it does not ship; for a server an operator added,
+   *  its whole map), marked as such by `"": "changes"`. */
+  tool_facts?: Record<string, ToolFactsEntry | null | "changes">;
   /** How the server's credential is obtained by one request, or null when its
    *  token is typed in (`core.tool_declarations.CredentialBootstrap`). */
   credential_bootstrap?: CredentialBootstrapEntry | null;
@@ -402,6 +406,10 @@ export interface SettingsSchema {
   credential_servers?: Record<string, CredentialServerFacts>;
   /** How a tool declaration's fields split, as the API reads them. */
   tool_declaration_fields?: ToolDeclarationFields;
+  /** Per block (`mcp.servers.<key>` or a provider block's path), the tools
+   *  whose stored change the API leaves out because it does not validate
+   *  over what this release ships; each is in force as shipped. */
+  tool_facts_conflicts?: Record<string, string[]>;
 }
 
 /** The word naming no kind, and each kind-free and kind-dependent field of a
@@ -460,10 +468,12 @@ export interface PatchResult {
   warnings?: Record<string, string>;
 }
 
-/** The wire format both `GET /settings/export` and `POST /settings/import`
- *  speak, mirrored from `ExportResponse` / `ImportRequest` in
- *  `apps/api/app/schemas/settings.py`. */
-export const SETTINGS_EXPORT_FORMAT = "maljan-settings/1";
+/** The wire format `GET /settings/export` writes, mirrored from
+ *  `EXPORT_FORMAT` in `apps/api/app/api/v1/settings.py`. */
+export const SETTINGS_EXPORT_FORMAT = "maljan-settings/2";
+/** Every format `POST /settings/import` reads (`IMPORT_FORMATS`): `/1`, written
+ *  before a built-in block's tool declarations were stored per tool, too. */
+export const SETTINGS_IMPORT_FORMATS: readonly string[] = [SETTINGS_EXPORT_FORMAT, "maljan-settings/1"];
 
 export interface ExportResponse {
   format: string;

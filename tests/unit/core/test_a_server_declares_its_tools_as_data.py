@@ -904,47 +904,270 @@ def test_an_address_argument_declared_without_a_kind_is_read_first() -> None:
     assert address_arguments(declared_reading.kind_free_facts(plain)) == ADDRESS_ARGUMENTS
 
 
-def test_no_kind_free_field_is_read_only_through_a_kind() -> None:
-    """A stored kind-free field is never read off what a kind-gated reader returned."""
+@pytest.mark.parametrize("kind", ["", "unclassified"])
+def test_an_entry_s_address_argument_declared_without_a_kind_is_read(kind: str) -> None:
+    from maljan.core.undeclared_tools import ADDRESS_ARGUMENTS, entry_address_arguments
+
+    entry = _dev_entry({"v": 1, "kind": kind, "arguments": {"address": "offset_va"}})
+    assert entry_address_arguments(entry)[0] == "offset_va"
+    assert entry_address_arguments(_dev_entry({"v": 1, "kind": kind})) == ADDRESS_ARGUMENTS
+
+
+_KIND_GATED = {"facts_of", "entry_facts", "declared_facts", "stored_facts_by_name"}
+_READERS_OF_FIELDS = {"address_arguments"}
+
+
+def _kind_gated_reads(source: str, where: str = "") -> list[str]:
+    """Each place ``source`` reads a stored kind-free field off a kind-gated reader's answer.
+
+    The answer is followed wherever it can stand for the gated call: the call
+    itself, an ``or``/``and`` or conditional expression holding it, a walrus,
+    an ``await``, and a name bound to any of these by ``=`` (one target or
+    position by position in a tuple), an annotated assignment, a walrus, a
+    ``for`` or comprehension target over a literal holding it, a ``with``
+    target of it (or of a call handed it first), and a lambda parameter the
+    lambda is called with it for. A field is read off it as an attribute, by
+    ``getattr`` with the field's name, by handing it to a reader of the
+    fields, or by name (``.get("<field>")`` or ``["<field>"]``) off its
+    ``model_dump()``, ``dict()``, ``vars()`` or ``__dict__``. Function bodies
+    and the code outside every function (module and class bodies) are walked.
+
+    Not followed (none is used anywhere; a reader that needs one reads
+    ``declared_reading.kind_free_facts`` instead): ``functools.partial`` and
+    ``operator.attrgetter`` over it, ``getattr`` with a field name held in a
+    variable, star-unpacking with unequal lengths, a ``match`` capture, the
+    answer stored in a container (or iterated from a name bound to one) and
+    read back, a helper that returns the answer, and the answer passed
+    through any other call.
+    """
     import ast
-    from pathlib import Path
 
-    repo = Path(__file__).resolve().parents[3]
-    gated = {"facts_of", "entry_facts", "declared_facts", "stored_facts_by_name"}
     fields = set(_stored_kind_free_fields())
-    readers_of_fields = {"address_arguments"}
+    mappings = {"model_dump", "dict"}
 
-    def _callee(node: ast.Call) -> str:
+    def callee(node: ast.Call) -> str:
         func = node.func
         if isinstance(func, ast.Name):
             return func.id
         return func.attr if isinstance(func, ast.Attribute) else ""
 
+    def yields_gated(node: ast.AST | None, bound: set[str]) -> bool:
+        if isinstance(node, ast.Call):
+            return callee(node) in _KIND_GATED
+        if isinstance(node, ast.Name):
+            return node.id in bound
+        if isinstance(node, ast.BoolOp):
+            return any(yields_gated(value, bound) for value in node.values)
+        if isinstance(node, ast.IfExp):
+            return yields_gated(node.body, bound) or yields_gated(node.orelse, bound)
+        if isinstance(node, ast.NamedExpr | ast.Await):
+            return yields_gated(node.value, bound)
+        return False
+
+    def holds_gated(node: ast.AST | None, bound: set[str]) -> bool:
+        """A literal collection with the answer in it: what a loop target takes."""
+        return isinstance(node, ast.Tuple | ast.List | ast.Set) and any(
+            yields_gated(element, bound) for element in node.elts
+        )
+
+    def mapping_of_gated(node: ast.AST, bound: set[str]) -> bool:
+        """The answer's fields by name: ``model_dump()``, ``dict()``, ``vars()``, ``__dict__``."""
+        if isinstance(node, ast.Attribute) and node.attr == "__dict__":
+            return yields_gated(node.value, bound)
+        if not isinstance(node, ast.Call):
+            return False
+        if isinstance(node.func, ast.Attribute) and node.func.attr in mappings:
+            return yields_gated(node.func.value, bound)
+        if isinstance(node.func, ast.Name) and node.func.id == "vars" and node.args:
+            return yields_gated(node.args[0], bound)
+        return False
+
+    def names_field(node: ast.AST | None) -> bool:
+        return isinstance(node, ast.Constant) and node.value in fields
+
+    def bind(target: ast.AST, value: ast.AST | None, bound: set[str]) -> bool:
+        if isinstance(target, ast.Name) and target.id not in bound:
+            if yields_gated(value, bound):
+                bound.add(target.id)
+                return True
+        if isinstance(target, ast.Tuple | ast.List) and isinstance(value, ast.Tuple | ast.List):
+            if len(target.elts) == len(value.elts):
+                return any(bind(t, v, bound) for t, v in zip(target.elts, value.elts, strict=True))
+        return False
+
+    def bind_name(target: ast.AST | None, bound: set[str]) -> bool:
+        if isinstance(target, ast.Name) and target.id not in bound:
+            bound.add(target.id)
+            return True
+        if isinstance(target, ast.arg) and target.arg not in bound:
+            bound.add(target.arg)
+            return True
+        return False
+
+    def bindings(node: ast.AST, bound: set[str]) -> bool:
+        if isinstance(node, ast.Assign):
+            return any(bind(t, node.value, bound) for t in node.targets)
+        if isinstance(node, ast.AnnAssign | ast.NamedExpr):
+            return bind(node.target, node.value, bound)
+        if isinstance(node, ast.For | ast.AsyncFor | ast.comprehension):
+            return holds_gated(node.iter, bound) and bind_name(node.target, bound)
+        if isinstance(node, ast.withitem):
+            held = node.context_expr
+            handed = isinstance(held, ast.Call) and bool(held.args)
+            if yields_gated(held, bound) or (
+                handed and isinstance(held, ast.Call) and yields_gated(held.args[0], bound)
+            ):
+                return bind_name(node.optional_vars, bound)
+            return False
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Lambda):
+            grew = False
+            for param, arg in zip(node.func.args.args, node.args, strict=False):
+                if yields_gated(arg, bound):
+                    grew |= bind_name(param, bound)
+            return grew
+        return False
+
+    def outside_functions(tree: ast.AST) -> list[ast.AST]:
+        """The nodes of the module and class bodies, without any function's body."""
+        out: list[ast.AST] = []
+        pending: list[ast.AST] = [tree]
+        while pending:
+            node = pending.pop()
+            out.append(node)
+            for child in ast.iter_child_nodes(node):
+                if not isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+                    pending.append(child)
+        return out
+
+    found: list[str] = []
+    tree = ast.parse(source)
+    scopes: list[tuple[str, list[ast.AST]]] = [("<module>", outside_functions(tree))]
+    for fn in ast.walk(tree):
+        if isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
+            scopes.append((fn.name, list(ast.walk(fn))))
+    for name_of_scope, nodes in scopes:
+        bound: set[str] = set()
+        grew = True
+        while grew:  # a name bound from a name bound earlier
+            grew = False
+            for node in nodes:
+                grew |= bindings(node, bound)
+        for node in nodes:
+            here = f"{where}:{getattr(node, 'lineno', 0)} {name_of_scope}"
+            if isinstance(node, ast.Attribute) and node.attr in fields:
+                if yields_gated(node.value, bound):
+                    found.append(here)
+            if isinstance(node, ast.Subscript) and names_field(node.slice):
+                if mapping_of_gated(node.value, bound):
+                    found.append(here)
+            if not isinstance(node, ast.Call):
+                continue
+            name = callee(node)
+            if name == "getattr" and len(node.args) >= 2:
+                if names_field(node.args[1]) and yields_gated(node.args[0], bound):
+                    found.append(here)
+            if name in _READERS_OF_FIELDS and any(yields_gated(a, bound) for a in node.args):
+                found.append(here)
+            if (
+                name == "get"
+                and isinstance(node.func, ast.Attribute)
+                and node.args
+                and names_field(node.args[0])
+                and mapping_of_gated(node.func.value, bound)
+            ):
+                found.append(here)
+    return found
+
+
+def test_no_kind_free_field_is_read_only_through_a_kind() -> None:
+    """A stored kind-free field is never read off what a kind-gated reader returned."""
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[3]
     found: list[str] = []
     for root in ("src/maljan", "apps/api/app"):
         for path in sorted((repo / root).rglob("*.py")):
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            for fn in ast.walk(tree):
-                if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
-                    continue
-                bound = {
-                    target.id
-                    for node in ast.walk(fn)
-                    if isinstance(node, ast.Assign)
-                    and isinstance(node.value, ast.Call)
-                    and _callee(node.value) in gated
-                    for target in node.targets
-                    if isinstance(target, ast.Name)
-                }
-                for node in ast.walk(fn):
-                    where = f"{path.relative_to(repo)}:{getattr(node, 'lineno', 0)} {fn.name}"
-                    if isinstance(node, ast.Attribute) and node.attr in fields:
-                        held = node.value
-                        if (isinstance(held, ast.Name) and held.id in bound) or (
-                            isinstance(held, ast.Call) and _callee(held) in gated
-                        ):
-                            found.append(where)
-                    if isinstance(node, ast.Call) and _callee(node) in readers_of_fields:
-                        if any(isinstance(a, ast.Name) and a.id in bound for a in node.args):
-                            found.append(where)
+            found += _kind_gated_reads(
+                path.read_text(encoding="utf-8"), str(path.relative_to(repo))
+            )
     assert not found, found
+
+
+_GATED_READ_FORMS = {
+    "an assignment": "facts = tool_kinds.facts_of(row)\n    return facts.arguments",
+    "an annotated assignment": "facts: Any = tool_kinds.facts_of(row)\n    return facts.arguments",
+    "a walrus": "if (facts := tool_kinds.facts_of(row)) is not None:\n        return facts.words",
+    "an or around the call": "return (tool_kinds.facts_of(row) or ToolFacts()).arguments",
+    "a conditional around the call": (
+        "return (tool_kinds.facts_of(row) if row else ToolFacts()).display_name"
+    ),
+    "getattr on the call": 'return getattr(tool_kinds.facts_of(row), "arguments")',
+    "getattr on a bound name": (
+        'facts = declared_reading.facts_of(row)\n    return getattr(facts, "words", None)'
+    ),
+    "a name bound from a bound name": (
+        "facts = tool_kinds.facts_of(row)\n    held = facts or None\n    return held.arguments"
+    ),
+    "a tuple assignment": "facts, n = tool_kinds.facts_of(row), 1\n    return facts.display_name",
+    "a reader of the fields": (
+        "facts = tool_kinds.facts_of(row)\n    return address_arguments(facts)"
+    ),
+    "an awaited call": "return (await tool_kinds.facts_of(row)).arguments",
+    "a list comprehension target": ("return [f.arguments for f in [tool_kinds.facts_of(row)]]"),
+    "a generator target": "return next(f.words for f in (tool_kinds.facts_of(row),))",
+    "a dict comprehension target": (
+        "return {1: f.display_name for f in {tool_kinds.facts_of(row)}}"
+    ),
+    "a for target": "for facts in (tool_kinds.facts_of(row),):\n        return facts.arguments",
+    "an async for target": (
+        "async for facts in [tool_kinds.facts_of(row)]:\n        return facts.words"
+    ),
+    "a with target of the answer": (
+        "with tool_kinds.facts_of(row) as facts:\n        return facts.arguments"
+    ),
+    "a with target of a call handed the answer": (
+        "with nullcontext(tool_kinds.facts_of(row)) as facts:\n        return facts.arguments"
+    ),
+    "a lambda parameter": "return (lambda f: f.arguments)(tool_kinds.facts_of(row))",
+    "model_dump get": 'return tool_kinds.facts_of(row).model_dump().get("arguments")',
+    "model_dump subscript": 'return tool_kinds.facts_of(row).model_dump()["arguments"]',
+    "model_dump on a bound name": (
+        'facts = tool_kinds.facts_of(row)\n    return facts.model_dump(mode="json")["words"]'
+    ),
+    "vars subscript": 'return vars(tool_kinds.facts_of(row))["arguments"]',
+    "vars get": 'return vars(tool_kinds.facts_of(row)).get("display_name")',
+    "__dict__ get": 'facts = tool_kinds.facts_of(row)\n    return facts.__dict__.get("words")',
+}
+
+
+@pytest.mark.parametrize("form", sorted(_GATED_READ_FORMS))
+def test_the_guard_catches_a_kind_gated_read_in_every_form(form: str) -> None:
+    body = _GATED_READ_FORMS[form]
+    source = f"async def reader(row):\n    {body}\n"
+    assert _kind_gated_reads(source), form
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "x = tool_kinds.facts_of(row).arguments\n",
+        "facts = tool_kinds.facts_of(row)\nx = facts.words\n",
+        "class C:\n    x = tool_kinds.facts_of(row).display_name\n",
+    ],
+)
+def test_the_guard_reads_module_and_class_bodies_too(source: str) -> None:
+    assert _kind_gated_reads(source), source
+
+
+def test_the_guard_passes_the_one_reader_of_kind_free_facts() -> None:
+    clean = (
+        "def reader(row):\n"
+        "    facts = declared_reading.kind_free_facts(row)\n"
+        "    kind = tool_kinds.facts_of(row)\n"
+        '    return facts.arguments, getattr(facts, "words"), address_arguments(facts), kind.rows\n'
+        "def other(row):\n"
+        "    kind = tool_kinds.facts_of(row)\n"
+        '    held = kind.model_dump()["rows"], vars(kind).get("kind")\n'
+        "    return [f.arguments for f in [declared_reading.kind_free_facts(row)]], held\n"
+    )
+    assert _kind_gated_reads(clean) == []

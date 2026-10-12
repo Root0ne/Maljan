@@ -88,6 +88,31 @@ export function builtinServerKeys(schema: SettingsSchema | null | undefined): Re
   return new Set(serverMapEntry(schema)?.builtin_servers ?? []);
 }
 
+/** The tool declarations a built-in server ships, as the server map's
+ *  default holds them; `{}` for a server that is not a built-in, or a schema
+ *  served without defaults. A stored entry's `tool_facts` are its changes
+ *  over these, one tool at a time. */
+export function shippedServerToolFacts(
+  schema: SettingsSchema | null | undefined,
+  serverKey: string
+): Record<string, Record<string, unknown>> {
+  return shippedToolFactsOf(serverMapEntry(schema), serverKey);
+}
+
+/** The tool declarations a built-in server ships, read off the server map's
+ *  own catalog entry (`shippedServerToolFacts` finds that entry in a schema). */
+export function shippedToolFactsOf(
+  entry: CatalogEntry | null | undefined,
+  serverKey: string
+): Record<string, Record<string, unknown>> {
+  if (!entry || !(entry.builtin_servers ?? []).includes(serverKey)) return {};
+  const servers = entry.default as Record<string, { tool_facts?: unknown }> | null | undefined;
+  const shipped = servers?.[serverKey]?.tool_facts;
+  return shipped && typeof shipped === "object" && !Array.isArray(shipped)
+    ? (shipped as Record<string, Record<string, unknown>>)
+    : {};
+}
+
 /** The tool-server keys no operator's server may take, as core defines them. */
 export function reservedServerKeys(schema: SettingsSchema | null | undefined): ReadonlySet<string> {
   return new Set(serverMapEntry(schema)?.reserved_servers ?? []);

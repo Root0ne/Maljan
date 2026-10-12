@@ -99,8 +99,13 @@ async def test_resending_the_stored_leaf_as_stored_or_as_shown_goes_through() ->
 
 @pytest.mark.asyncio
 async def test_a_new_hand_edit_with_an_unknown_key_is_still_refused() -> None:
+    from maljan.core.settings_overrides import shipped_tool_facts
+
     db = _db([_stored_row()])
-    edit = {**STORED, "new_tool": {"kind": "strings", "nott": "a typo"}}
+    # The console edits the leaf as the API serves it: the stored whole map
+    # as the changes that put the same in force.
+    served = svc.served_tool_facts(STORED, shipped_tool_facts("static.ghidra"))
+    edit = {**served, "new_tool": {"kind": "strings", "nott": "a typo"}}
     with pytest.raises(svc.SettingsValidationError) as refused:
         await svc.SettingsService(db).save({LEAF: edit}, user_id=uuid.uuid4(), ip=None)
     assert set(refused.value.errors) == {f"{LEAF}.new_tool.nott"}
@@ -149,7 +154,9 @@ def test_the_server_map_refuses_only_the_entries_a_save_adds_or_changes() -> Non
     assert set(refused.value.errors) == {"invented.tool_facts.u.nott"}
 
 
-def test_an_import_leaves_the_unknown_key_out_and_says_so() -> None:
+def _imported(
+    document_format: str, *, marked: bool = False
+) -> tuple[dict[str, Any], dict[str, str]]:
     from app.api.v1.settings import router
     from app.database import get_db
     from app.deps import require_admin
@@ -160,12 +167,13 @@ def test_an_import_leaves_the_unknown_key_out_and_says_so() -> None:
         id="00000000-0000-0000-0000-000000000001"
     )
     app.dependency_overrides[get_db] = lambda: MagicMock()
+    mark = tool_declarations.with_mark if marked else dict
     exported = {
-        LEAF: STORED,
+        LEAF: mark(STORED),
         "core.mcp.servers": {
             "invented": {
                 "command": "invented-server",
-                "tool_facts": {"t": {"kind": "strings", "note": "older"}, "e": {"knd": "x"}},
+                "tool_facts": mark({"t": {"kind": "strings", "note": "older"}, "e": {"knd": "x"}}),
             }
         },
     }
@@ -178,16 +186,48 @@ def test_an_import_leaves_the_unknown_key_out_and_says_so() -> None:
     ):
         response = TestClient(app).post(
             "/api/v1/settings/import",
-            json={"format": "maljan-settings/1", "values": exported},
+            json={"format": document_format, "values": exported},
         )
     assert response.status_code == 200
-    saved = save.call_args.args[0]
-    assert saved[LEAF] == {"decompile_function": {"kind": "decompile"}}
-    assert saved["core.mcp.servers"]["invented"]["tool_facts"] == {"t": {"kind": "strings"}}
-    warnings = response.json()["warnings"]
+    return save.call_args.args[0], response.json()["warnings"]
+
+
+def test_an_import_leaves_the_unknown_key_out_and_says_so() -> None:
+    saved, warnings = _imported("maljan-settings/2", marked=True)
+    # What is left of the provider's declaration is what it ships: no change.
+    assert saved[LEAF] == tool_declarations.with_mark({})
+    assert saved["core.mcp.servers"]["invented"]["tool_facts"] == tool_declarations.with_mark(
+        {"t": {"kind": "strings"}}
+    )
     assert "note" in warnings[f"{LEAF}.decompile_function"]
     assert "note" in warnings["core.mcp.servers.invented.tool_facts.t"]
     assert "declares nothing" in warnings["core.mcp.servers.invented.tool_facts.e"]
+
+
+@pytest.mark.parametrize("document_format", ["maljan-settings/1", "maljan-settings/2"])
+def test_an_import_written_whole_keeps_reading_whole(document_format: str) -> None:
+    """A ``/1`` document, and a map of a ``/2`` one without the mark, are whole maps."""
+    from maljan.core.settings_overrides import shipped_tool_facts
+
+    saved, warnings = _imported(document_format)
+    shipped = shipped_tool_facts("static.ghidra")
+    # The map was the provider's whole map: every shipped tool it lacks was
+    # removed, and the one it holds reads as written, its other fields at
+    # their default rather than the shipped value.
+    assert tool_declarations.holds_changes(saved[LEAF])
+    removed = {
+        tool
+        for tool, change in tool_declarations.without_mark(saved[LEAF]).items()
+        if change is None
+    }
+    assert removed == set(shipped) - {"decompile_function"}
+    held = saved[LEAF]["decompile_function"]
+    assert held and "kind" not in held
+    assert all(value in ({}, [], "", None, False) for value in held.values())
+    assert saved["core.mcp.servers"]["invented"]["tool_facts"] == tool_declarations.with_mark(
+        {"t": {"kind": "strings"}}
+    )
+    assert "note" in warnings[f"{LEAF}.decompile_function"]
 
 
 @pytest.mark.asyncio
@@ -200,9 +240,13 @@ async def test_the_cleaned_import_then_saves() -> None:
 
 def test_every_import_warning_about_one_tool_is_kept() -> None:
     values, warnings = svc.lenient_imported_declarations(
-        {LEAF: {"a": {"kind": "unclassified", "nott": 1}, "b": {"kind": "", "zz\x1b[31m": 1}}}
+        {
+            LEAF: tool_declarations.with_mark(
+                {"a": {"kind": "unclassified", "nott": 1}, "b": {"kind": "", "zz\x1b[31m": 1}}
+            )
+        }
     )
-    assert values[LEAF] == {}
+    assert values[LEAF] == tool_declarations.with_mark({})
     said = warnings[f"{LEAF}.a"]
     assert "left out nott" in said and "declares nothing" in said
     assert said.index("nott") < said.index("declares nothing")

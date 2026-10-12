@@ -33,7 +33,7 @@ ChoicesFrom = Literal[
     "llm_providers",
     "sandbox_report_readers",
 ]
-Editor = Literal["server_map", "rest_sandbox", "agent_definitions", "stages"]
+Editor = Literal["server_map", "rest_sandbox", "agent_definitions", "stages", "tool_facts"]
 
 # Field names that are secrets although typed as plain str.
 _SECRET_NAMES = {"auth_token", "api_key", "cape2_api_token"}

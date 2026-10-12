@@ -3202,7 +3202,7 @@
      "choices": null,
      "choices_from": null,
      "editable": true,
-     "editor": null,
+     "editor": "tool_facts",
      "group": "static",
      "key": "core.static.ghidra.tool_facts",
      "maximum": null,
@@ -4424,7 +4424,7 @@
      "choices": null,
      "choices_from": null,
      "editable": true,
-     "editor": null,
+     "editor": "tool_facts",
      "group": "static",
      "key": "core.static.r2.tool_facts",
      "maximum": null,
@@ -5853,7 +5853,7 @@
      "choices": null,
      "choices_from": null,
      "editable": true,
-     "editor": null,
+     "editor": "tool_facts",
      "group": "sandbox",
      "key": "core.sandbox.cape2.mcp.tool_facts",
      "maximum": null,
@@ -11555,5 +11555,6 @@
    "words": []
   },
   "no_kind": "unclassified"
- }
+ },
+ "tool_facts_conflicts": {}
 }

@@ -23,8 +23,16 @@ block never set takes the built-in's value; a field the operator set, even to
 an empty value, is kept as set (:func:`fill_declaration`). A save stores a
 built-in's field only where it differs from the shipped value at the time of
 the save (:func:`strip_declaration_defaults`), so a value written equal to the
-shipped one is not recorded and follows later releases. A server that is not a
-built-in starts from nothing and inherits nothing.
+shipped one is not recorded and follows later releases. A built-in's tool
+declarations (``tool_facts``) follow the same rule one tool at a time: what is
+stored is each tool's change over the shipped declaration of that tool (only
+the fields that differ; ``null`` for a shipped tool an operator removed; the
+whole declaration of a tool the block does not ship), and what is in force is
+the shipped map with those changes over it (:func:`merge_tool_facts`,
+:func:`tool_facts_changes`). A tool an operator never changed keeps following
+later releases, and a tool shipped after the save appears. A server that is
+not a built-in starts from nothing and inherits nothing: its stored map is its
+whole map.
 
 The read API (:class:`ToolDeclarations`, :func:`declaration_for`,
 :func:`tools_of_kind`, :func:`servers_with_role`) resolves a ledger entry by the
@@ -70,6 +78,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    TypeAdapter,
     ValidationError,
     field_validator,
     model_validator,
@@ -490,6 +499,10 @@ def loggable_names(names: Iterable[Any]) -> str:
     held = [str(name) for name in names]
     shown = []
     for name in held[:_LOG_NAMES]:
+        if not name:
+            # An empty name, shown as such rather than as nothing at all.
+            shown.append('""')
+            continue
         text = name.replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t")
         text = _LOG_CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", text)
         shown.append(text[:_LOG_NAME_CHARS] + ("…" if len(text) > _LOG_NAME_CHARS else ""))
@@ -525,12 +538,35 @@ def _field_default(name: str) -> Any:
     return ToolFacts.model_fields[name].get_default(call_default_factory=True)
 
 
+# How a yes-or-no field's value is read: pydantic's lax rule (``0``, ``"no"``,
+# ``"off"``, ``"false"`` … are false), as the model reads it.
+_YES_OR_NO = TypeAdapter(bool)
+
+
+def is_set(name: str, value: Any) -> bool:
+    """Whether a declaration's field ``name`` says something: its value is not the default.
+
+    The one rule for "set", everywhere a declaration is read, saved or shown
+    in the console's box. A yes-or-no field is compared as the model reads
+    it (``0``, ``"false"``, ``"no"``, ``"off"`` are its default, ``False``);
+    a value the model cannot read as one is set (and refused by the model).
+    Every other field is compared as written, keys in any order.
+    """
+    default = _field_default(name)
+    if isinstance(default, bool):
+        try:
+            return _YES_OR_NO.validate_python(value) is not default
+        except ValidationError:
+            return True
+    return not _same(value, default)
+
+
 def _set_fields(raw: Mapping[str, Any]) -> dict[str, Any]:
     """The keys of a raw declaration that say something: unknown ones, and known ones set."""
     fields = ToolFacts.model_fields
     out: dict[str, Any] = {}
     for key, value in raw.items():
-        if key in fields and _same(value, _field_default(key)):
+        if key in fields and not is_set(key, value):
             continue
         out[str(key)] = value
     return out
@@ -559,7 +595,7 @@ def lenient_declaration(raw: Mapping[str, Any]) -> tuple[dict[str, Any], list[st
     kept = {key: value for key, value in raw.items() if key in fields}
     if kept.get("kind") in (None, ""):
         for name in KIND_DEPENDENT_FIELDS:
-            if name in kept and not _same(kept[name], _field_default(name)):
+            if name in kept and is_set(name, kept[name]):
                 left_out.append(name)
                 kept.pop(name)
     return kept, left_out
@@ -576,9 +612,7 @@ def reads_no_kind(raw: Mapping[str, Any]) -> bool:
     """
     if raw.get("kind") != NO_KIND:
         return False
-    return not any(
-        name in raw and not _same(raw[name], _field_default(name)) for name in KIND_DEPENDENT_FIELDS
-    )
+    return not any(name in raw and is_set(name, raw[name]) for name in KIND_DEPENDENT_FIELDS)
 
 
 def declaration_fields() -> dict[str, Any]:
@@ -587,7 +621,9 @@ def declaration_fields() -> dict[str, Any]:
     The word that names no kind, and each kind-free and kind-dependent field
     with its default as JSON: what the console's tool-declaration box needs
     to apply :func:`reads_no_kind` and the edit rules exactly as the API
-    does, a field counting as set only when it differs from its default.
+    does, a field counting as set only when it differs from its default
+    (:func:`is_set`: a yes-or-no field, one whose default is ``false``, read
+    as the model reads it).
     """
     defaults = ToolFacts.model_construct().model_dump(mode="json")
     return {
@@ -1142,14 +1178,39 @@ def check_tool_facts_keys(value: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _copy(value: Any) -> Any:
+def _copy_node(value: Any, pending: list[tuple[Any, Any]]) -> Any:
+    """One node of :func:`_copy`: a leaf as it is, a container empty and queued to fill."""
     if isinstance(value, BaseModel):
         return value.model_copy(deep=True)
     if isinstance(value, dict):
-        return {k: _copy(v) for k, v in value.items()}
+        out: dict[Any, Any] = {}
+        pending.append((value, out))
+        return out
     if isinstance(value, list):
-        return [_copy(v) for v in value]
+        items: list[Any] = []
+        pending.append((value, items))
+        return items
     return value
+
+
+def _copy(value: Any) -> Any:
+    """A copy of ``value``'s dicts and lists, at any depth.
+
+    Walked with an explicit stack rather than by recursion, so stored
+    declaration data nested however deep is copied, never refused with a
+    ``RecursionError``. Time linear in the value.
+    """
+    pending: list[tuple[Any, Any]] = []
+    root = _copy_node(value, pending)
+    while pending:
+        source, target = pending.pop()
+        if isinstance(source, dict):
+            for key, item in source.items():
+                target[key] = _copy_node(item, pending)
+        else:
+            for item in source:
+                target.append(_copy_node(item, pending))
+    return root
 
 
 def fill_declaration(stored: MCPServerConfig, default: MCPServerConfig) -> MCPServerConfig:
@@ -1169,6 +1230,377 @@ def fill_declaration(stored: MCPServerConfig, default: MCPServerConfig) -> MCPSe
     return stored
 
 
+# A stored map of a block's tool declarations that holds its changes over what
+# the block ships (:func:`tool_facts_changes`) says so under this key. No tool
+# can be named by it (a tool's name is never empty, :func:`check_tool_name`), so
+# the mark never stands for a tool. A map without it was written whole by an
+# earlier release and is read whole, exactly as that release read it: a shipped
+# tool it does not name was removed. Nothing guesses the form from the shape.
+CHANGES_MARK = ""
+CHANGES_FORM = "changes"
+
+
+def holds_changes(stored: Any) -> bool:
+    """Whether a stored map of tool declarations is marked as its changes over what ships."""
+    return isinstance(stored, Mapping) and stored.get(CHANGES_MARK) == CHANGES_FORM
+
+
+def without_mark(stored: Mapping[str, Any]) -> dict[str, Any]:
+    """``stored`` without its mark: the tools it names and what it says of each."""
+    if holds_changes(stored):
+        return {tool: held for tool, held in stored.items() if tool != CHANGES_MARK}
+    return dict(stored)
+
+
+def with_mark(changes: Mapping[str, Any]) -> dict[str, Any]:
+    """``changes`` marked as a block's changes over what it ships, the form a save stores.
+
+    The mark always wins: an entry under the mark's key is never a tool, so
+    whatever ``changes`` holds there is left out rather than written over it.
+    """
+    return {
+        CHANGES_MARK: CHANGES_FORM,
+        **{tool: held for tool, held in without_mark(changes).items() if tool != CHANGES_MARK},
+    }
+
+
+def unreadable_map(stored: Any) -> bool:
+    """Whether a stored map of tool declarations has a form no release writes.
+
+    The mark's key names no tool (:func:`check_tool_name`), so a map holding
+    it with anything but :data:`CHANGES_FORM` is neither a map of changes nor
+    a whole map: which tools it means cannot be known. Such a map, and a
+    value that is not a map at all, is read as absent: the shipped
+    declarations are in force (:func:`stored_in_force`).
+    """
+    if not isinstance(stored, Mapping):
+        return True
+    return CHANGES_MARK in stored and stored[CHANGES_MARK] != CHANGES_FORM
+
+
+def refused_tool_names(sent: Mapping[str, Any]) -> list[str]:
+    """The names a sent map of tool declarations holds that no tool can have, in order.
+
+    Every key but the mark itself (:func:`holds_changes`) is a tool's name
+    and is checked as one (:func:`check_tool_name`); the mark's key holding
+    anything else is refused too. Time linear in the map.
+    """
+    marked = holds_changes(sent)
+    out: list[str] = []
+    for tool in sent:
+        if marked and tool == CHANGES_MARK:
+            continue
+        if not isinstance(tool, str):
+            out.append(str(tool))
+            continue
+        try:
+            check_tool_name(tool)
+        except ValueError:
+            out.append(tool)
+    return out
+
+
+def refused_names_message(names: Iterable[str]) -> str:
+    """One refusal naming each refused tool name, an empty one shown visibly."""
+    shown = ", ".join(repr(name) for name in names)
+    return f"tool_facts key {shown} must be a tool's name, not empty or padded"
+
+
+def own_prefixed_names(sent: Mapping[str, Any], server: str) -> list[str]:
+    """The names a sent map of tool server ``server`` spells as its renamed tools, in order.
+
+    The mark of a marked map (:func:`holds_changes`) is no tool and is
+    skipped; ``server`` empty (a block that is no tool server) names none.
+    Time linear in the map.
+    """
+    if not server:
+        return []
+    marked = holds_changes(sent)
+    out: list[str] = []
+    for tool in sent:
+        if not isinstance(tool, str) or (marked and tool == CHANGES_MARK):
+            continue
+        try:
+            check_own_prefix(server, [tool])
+        except ValueError:
+            out.append(tool)
+    return out
+
+
+def sent_names_refusal(sent: Mapping[str, Any], kept: Iterable[str] = (), server: str = "") -> str:
+    """The refusal of the tool names a sent map holds that no tool can have, or ``""``.
+
+    Every key of the map as sent is read, whatever its value (``null``
+    included), before the map is merged over what ships: a name no tool can
+    have (:func:`refused_tool_names`) and, for the map of tool server
+    ``server``, a name spelled as its renamed tool (:func:`own_prefixed_names`).
+    A name in ``kept`` is sent back with its stored change exactly as stored
+    (:func:`kept_stored_changes`), is not this save's edit, and is not
+    refused. Time linear in the map.
+    """
+    held = set(kept)
+    names = [name for name in refused_tool_names(sent) if name not in held]
+    if names:
+        return refused_names_message(names)
+    prefixed = [name for name in own_prefixed_names(sent, server) if name not in held]
+    if prefixed:
+        try:
+            check_own_prefix(server, prefixed)
+        except ValueError as exc:
+            return str(exc)
+    return ""
+
+
+def whole_as_changes(whole: Mapping[str, Any], shipped: Mapping[str, Any]) -> dict[str, Any]:
+    """A map stored whole, as the changes over ``shipped`` that put the same in force.
+
+    Read whole, a shipped tool the map does not name was removed (``None``),
+    and a field a shipped tool's declaration leaves out is at its default,
+    not at the shipped value. Time linear in the two maps.
+    """
+    unset = ToolFacts.model_construct().model_dump(mode="json")
+    filled = {
+        tool: {**unset, **held} if tool in shipped and isinstance(held, Mapping) else held
+        for tool, held in without_mark(whole).items()
+    }
+    return tool_facts_changes(filled, shipped)
+
+
+def stored_changes(stored: Mapping[str, Any], shipped: Mapping[str, Any]) -> dict[str, Any]:
+    """What a stored map changes of ``shipped``, per tool, whichever form it was stored in."""
+    if holds_changes(stored):
+        return without_mark(stored)
+    return whole_as_changes(stored, shipped)
+
+
+def _refused_leniently(raw: Any) -> bool:
+    """Whether the model refuses ``raw`` as a stored declaration is read (leniently).
+
+    What the lenient read leaves out is left out first (:func:`lenient_declaration`),
+    so the check itself warns of nothing; the read that builds the settings does.
+    """
+    token = STRICT_DECLARATIONS.set(False)
+    try:
+        ToolFacts.model_validate(lenient_declaration(raw)[0] if isinstance(raw, Mapping) else raw)
+    except (ValidationError, ValueError):
+        return True
+    finally:
+        STRICT_DECLARATIONS.reset(token)
+    return False
+
+
+def _refused_tool(tool: Any, held: Any, server: str = "") -> bool:
+    """Whether the model refuses a stored tool: its name, or its declaration read leniently.
+
+    ``server`` is the key of the tool server the block belongs to, if it is
+    one: a name spelled as that server's renamed tool is refused there
+    (:func:`check_own_prefix`).
+    """
+    return _refused_name(tool, server) or _refused_leniently(held)
+
+
+def _refused_name(tool: Any, server: str = "") -> bool:
+    """Whether no tool (of tool server ``server``, if given) can be named ``tool``."""
+    if not isinstance(tool, str):
+        return True
+    try:
+        check_tool_name(tool)
+        if server:
+            check_own_prefix(server, [tool])
+    except ValueError:
+        return True
+    return False
+
+
+def _warn_refused_changes(where: str, tools: Iterable[str]) -> None:
+    held = tuple(sorted(str(tool) for tool in tools))
+    marker = (f"refused:{where}", held)
+    if marker in _WARNED:
+        return
+    if len(_WARNED) >= _WARNED_MAX:
+        _WARNED.clear()
+    _WARNED.add(marker)
+    from maljan.core.logger import logger
+
+    logger.warning(
+        "A stored change of a tool declaration (%s) does not validate over the declarations "
+        "this release ships; the change is left out, and the tool is in force as shipped, "
+        "or not at all where this release ships none for it: %s",
+        loggable_names([where]),
+        loggable_names(held),
+    )
+
+
+def _warn_unreadable_map(where: str) -> None:
+    marker = (f"unreadable:{where}", ())
+    if marker in _WARNED:
+        return
+    if len(_WARNED) >= _WARNED_MAX:
+        _WARNED.clear()
+    _WARNED.add(marker)
+    from maljan.core.logger import logger
+
+    logger.warning(
+        "A stored map of tool declarations (%s) has a form no release writes; it is left "
+        "out, and the declarations this release ships are in force",
+        loggable_names([where]),
+    )
+
+
+def stored_in_force(
+    shipped: Mapping[str, Any], stored: Any, where: str = "", server: str = ""
+) -> tuple[dict[str, Any], list[str]]:
+    """What a stored map of a block's tool declarations puts in force, and the changes refused.
+
+    A map marked as changes (:func:`holds_changes`) is merged over
+    ``shipped`` one tool at a time (:func:`merge_tool_facts`). A map without
+    the mark was stored whole by an earlier release and is in force as
+    stored, as it was then. Either way, each tool the stored map names is
+    read as the model reads a stored declaration (leniently); one the model
+    refuses (its name, or a field it sets that needs one this release no
+    longer ships, also for a tool this release no longer ships at all) is
+    left out: the tool is in force as shipped, or not at all where nothing
+    ships for it, its name is returned, and one warning names it. ``server``
+    is the block's tool-server key, if it is one, under which a name spelled
+    as its renamed tool is refused (:func:`check_own_prefix`). A stored value
+    whose form no release writes (:func:`unreadable_map`) is read as absent:
+    what ships is in force, the mark's key is returned for the whole map, and
+    one warning says so. So no stored map of tool declarations ever stops the
+    settings from being built. Time linear in the two maps.
+    """
+    if unreadable_map(stored):
+        _warn_unreadable_map(where)
+        return _copy(dict(shipped)), [CHANGES_MARK]
+    if holds_changes(stored):
+        named = without_mark(stored)
+        in_force = merge_tool_facts(shipped, named)
+    else:
+        named = dict(stored)
+        in_force = _copy(named)
+    refused = [
+        tool for tool in named if tool in in_force and _refused_tool(tool, in_force[tool], server)
+    ]
+    for tool in refused:
+        if isinstance(shipped.get(tool), Mapping):
+            in_force[tool] = _copy(shipped[tool])
+        else:
+            in_force.pop(tool, None)
+    if refused:
+        _warn_refused_changes(where, refused)
+    return in_force, [str(tool) for tool in refused]
+
+
+def kept_stored_changes(
+    incoming: Mapping[str, Any], stored: Any, shipped: Mapping[str, Any], server: str = ""
+) -> dict[str, Any]:
+    """The tools a save sends back with their refused stored change exactly as stored.
+
+    ``incoming`` is a save's changes per tool (:func:`stored_changes`),
+    ``stored`` the map stored for the block. A tool whose stored change this
+    release refuses (:func:`stored_in_force`) and that the save names with
+    that very change is not the save's edit: it is kept as stored, out of
+    every check, so a stored change never blocks an unrelated edit of its
+    block and is never dropped by one. A stored map whose form no release
+    writes (:func:`unreadable_map`) keeps nothing: it is not in force, and
+    what a save sends is read on its own. Time linear in the maps.
+    """
+    if unreadable_map(stored):
+        return {}
+    refused = stored_in_force(shipped, stored, server=server)[1]
+    held = stored_changes(stored, shipped)
+    # A refused name stored as ``null`` removes nothing and is never in force,
+    # so it is not among the refused changes above; sent back as stored, it
+    # is not this save's edit either, and is kept as stored like them.
+    removed = [
+        tool
+        for tool, change in held.items()
+        if change is None and tool not in shipped and _refused_name(tool, server)
+    ]
+    return {
+        tool: _copy(held[tool])
+        for tool in [*refused, *removed]
+        if tool in incoming and tool in held and _same(incoming[tool], held[tool])
+    }
+
+
+def sent_in_force(shipped: Mapping[str, Any], sent: Mapping[str, Any]) -> dict[str, Any]:
+    """What a map of a block's tool declarations a client sends puts in force.
+
+    The one reading of a sent map, on every path that takes one: marked as
+    changes (:func:`holds_changes`), its changes over ``shipped``; without
+    the mark, the whole map, as an earlier release read it (a shipped tool it
+    does not name is removed). Time linear in the two maps.
+    """
+    return merge_tool_facts(shipped, stored_changes(sent, shipped))
+
+
+def merge_tool_facts(shipped: Mapping[str, Any], stored: Mapping[str, Any]) -> dict[str, Any]:
+    """The tool declarations in force: ``shipped`` with the ``stored`` changes over it, per tool.
+
+    ``stored`` is a block's tool declarations as a save writes them
+    (:func:`tool_facts_changes`): per tool, the fields that differ from the
+    shipped declaration of that tool, which replace those fields; ``None``
+    for a shipped tool the operator removed, which is left out; the whole
+    declaration of a tool ``shipped`` does not declare. A shipped tool the
+    stored map does not name is in force as shipped, so a correction a later
+    release ships reaches it, and so does a tool shipped after the save. With
+    nothing shipped (a server that is not a built-in) the stored map is the
+    whole map. A change that is not a mapping is kept for the model to read
+    or refuse as ever. The mark of a stored map (:data:`CHANGES_MARK`) is
+    not a tool and is not read as one. Time linear in the two maps.
+    """
+    stored = without_mark(stored)
+    out: dict[str, Any] = {}
+    for tool, facts in shipped.items():
+        if tool not in stored:
+            out[tool] = _copy(facts)
+            continue
+        change = stored[tool]
+        if change is None:
+            continue
+        if isinstance(change, Mapping) and isinstance(facts, Mapping):
+            out[tool] = {**_copy(dict(facts)), **_copy(dict(change))}
+        else:
+            out[tool] = _copy(change)
+    for tool, change in stored.items():
+        if tool not in shipped and change is not None:
+            out[tool] = _copy(change)
+    return out
+
+
+def tool_facts_changes(in_force: Mapping[str, Any], shipped: Mapping[str, Any]) -> dict[str, Any]:
+    """What ``in_force`` changes of ``shipped``, per tool: how a block's declarations are stored.
+
+    The inverse of :func:`merge_tool_facts`: a tool declared as shipped is
+    not named; a shipped tool ``in_force`` declares otherwise names only the
+    fields that differ (keys in any order, as :func:`_same` compares them); a
+    shipped tool ``in_force`` lacks is ``None``; a tool ``shipped`` does not
+    declare is named whole. A field ``in_force`` leaves out of a shipped
+    tool's declaration follows the shipped value, as on load. Time linear in
+    the two maps.
+    """
+    out: dict[str, Any] = {}
+    for tool, facts in shipped.items():
+        if tool not in in_force:
+            out[tool] = None
+            continue
+        held = in_force[tool]
+        if isinstance(held, Mapping) and isinstance(facts, Mapping):
+            changed = {
+                str(name): _copy(value)
+                for name, value in held.items()
+                if name not in facts or not _same(value, facts[name])
+            }
+            if changed:
+                out[tool] = changed
+        elif not _same(held, facts):
+            out[tool] = _copy(held)
+    for tool, held in in_force.items():
+        if tool not in shipped:
+            out[tool] = _copy(held)
+    return out
+
+
 def strip_declaration_defaults(dumped: dict[str, Any], default: MCPServerConfig) -> dict[str, Any]:
     """A built-in's stored row without the declaration fields equal to its default.
 
@@ -1177,14 +1609,20 @@ def strip_declaration_defaults(dumped: dict[str, Any], default: MCPServerConfig)
     save and a later release could never correct it. A value that differs
     from the default, an empty one included, is the operator's and is stored;
     a value equal to the shipped one at the time of the save is not recorded,
-    and follows later releases.
+    and follows later releases. The tool declarations are stored one tool at
+    a time, as their changes over the shipped ones (:func:`tool_facts_changes`)
+    marked as such (:func:`with_mark`), and not at all when no tool differs.
     """
     reference = default.model_dump(mode="json")
-    return {
-        key: value
-        for key, value in dumped.items()
-        if key not in DECLARATION_FIELDS or value != reference.get(key)
-    }
+    out: dict[str, Any] = {}
+    for key, value in dumped.items():
+        if key == "tool_facts" and isinstance(value, Mapping):
+            changes = tool_facts_changes(value, reference.get(key) or {})
+            if changes:
+                out[key] = with_mark(changes)
+        elif key not in DECLARATION_FIELDS or value != reference.get(key):
+            out[key] = value
+    return out
 
 
 def declaration_digest(cfg: Any) -> str:

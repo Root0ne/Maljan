@@ -12,9 +12,12 @@ import type {
   CatalogEntry,
   ProfileEntry,
   StageEntry,
+  ToolDeclarationFields,
 } from "@/types/settings";
 import type { AgentLLMOverride } from "./AgentDefinitionsEditor";
 import { deepEqual } from "./deepEqual";
+import { shippedToolFactsOf } from "@/lib/providerFacts";
+import { toolFactsDiff, type ToolFactsDiff } from "./toolFactsChanges";
 
 export interface ChangeLine {
   key: string;
@@ -27,11 +30,13 @@ export interface ChangeLine {
 const MAX_SCALAR_LENGTH = 60;
 
 /** Renders a scalar for a `before → after` line: `unset` for null/undefined,
- *  plain (unquoted) text for strings, `String()` for everything else. Long
- *  strings are cut to 60 chars with an ellipsis. Exported so tests (and any
- *  other scalar-rendering call site) share one rule. */
+ *  `""` for the empty string (so an empty side still shows), plain (unquoted)
+ *  text for other strings, `String()` for everything else. Long strings are
+ *  cut to 60 chars with an ellipsis. Exported so tests (and any other
+ *  scalar-rendering call site) share one rule. */
 export function formatScalar(v: unknown): string {
   if (v === null || v === undefined) return "unset";
+  if (v === "") return '""';
   if (typeof v === "string") return truncate(v);
   return String(v);
 }
@@ -146,6 +151,7 @@ const SERVER_FIELDS = [
   "env_allow",
   "label",
   "agents",
+  "call_timeout_seconds",
   // The server's declaration (`maljan.core.tool_declarations`).
   "sample_open",
   "sample_mount",
@@ -177,7 +183,16 @@ function describeTokenChange(before: unknown, after: unknown): string | null {
   return "token replaced";
 }
 
-function describeServerMap(before: unknown, after: unknown): {
+/** The server map, one server at a time. A server's `tool_facts` are compared
+ *  per tool as they are in force (`toolFactsDiff` over what the server ships,
+ *  read off the map's catalog entry), so a value written in another form that
+ *  puts the same tools in force is no change. */
+function describeServerMap(
+  entry: CatalogEntry,
+  before: unknown,
+  after: unknown,
+  fields: ToolDeclarationFields | null
+): {
   summary: string;
   detail?: string[];
 } {
@@ -204,30 +219,37 @@ function describeServerMap(before: unknown, after: unknown): {
     const bs = asRecord(b[key]);
     const as = asRecord(a[key]);
     const enabledChanged = bs.enabled !== as.enabled;
-    const fields: string[] = [];
+    const changed: string[] = [];
     for (const field of SERVER_FIELDS) {
-      if (!deepEqual(bs[field], as[field])) fields.push(field);
+      if (deepEqual(bs[field], as[field])) continue;
+      if (
+        field === "tool_facts" &&
+        toolFactsDiff(shippedToolFactsOf(entry, key), bs[field], as[field], fields).length === 0
+      ) {
+        continue;
+      }
+      changed.push(field);
     }
     if (!deepEqual(bs.tools, as.tools)) {
       const beforeCount =
         bs.tools === null || bs.tools === undefined ? "all" : (bs.tools as unknown[]).length;
       const afterCount =
         as.tools === null || as.tools === undefined ? "all" : (as.tools as unknown[]).length;
-      fields.push(`tools (${beforeCount} → ${afterCount})`);
+      changed.push(`tools (${beforeCount} → ${afterCount})`);
     }
     const tokenChange = describeTokenChange(bs.auth_token, as.auth_token);
-    if (tokenChange) fields.push(tokenChange);
+    if (tokenChange) changed.push(tokenChange);
 
     // A flip that happens alongside other edits joins the `changed:` list
     // rather than being dropped for them: "disabled" is usually the most
     // consequential half of such a change.
-    if (enabledChanged) fields.unshift(as.enabled ? "enabled" : "disabled");
+    if (enabledChanged) changed.unshift(as.enabled ? "enabled" : "disabled");
 
-    if (fields.length === 1 && enabledChanged) {
+    if (changed.length === 1 && enabledChanged) {
       detail.push(`${key}: ${as.enabled ? "enabled" : "disabled"}`);
       changedCount++;
-    } else if (fields.length > 0) {
-      detail.push(`${key}: changed: ${fields.join(", ")}`);
+    } else if (changed.length > 0) {
+      detail.push(`${key}: changed: ${changed.join(", ")}`);
       changedCount++;
     }
   }
@@ -502,14 +524,72 @@ function describeChannelMapping(entry: CatalogEntry, before: unknown, after: unk
 }
 
 // ---------------------------------------------------------------------------
+// A block's tool declarations (editor "tool_facts")
+// ---------------------------------------------------------------------------
+
+const TOOL_STATE_WORDS: Record<ToolFactsDiff["state"], string> = {
+  changed: "changed",
+  reset: "reset to shipped",
+  removed: "removed",
+  added: "added",
+};
+
+const isStructured = (v: unknown) => v !== null && typeof v === "object";
+
+/** One tool's line: its state, and for a changed tool each field that differs
+ *  (a scalar one with its value before and after, a structured one by name). */
+function describeToolLine({ tool, state, fields }: ToolFactsDiff): string {
+  if (state !== "changed" || !fields?.length) return `${tool}: ${TOOL_STATE_WORDS[state]}`;
+  const parts = fields.map(({ name, before, after }) =>
+    isStructured(before) || isStructured(after)
+      ? name
+      : `${name} ${formatScalar(before)} → ${formatScalar(after)}`
+  );
+  return `${tool}: changed: ${parts.join(", ")}`;
+}
+
+/** A block's tool declarations, compared per tool as they are in force: the
+ *  catalog default is what the block ships, and the stored and staged values
+ *  are read as the API reads them (`toolFactsDiff`). Never names the mark or
+ *  a tool both sides hold as shipped. */
+export function describeToolFacts(
+  entry: CatalogEntry,
+  before: unknown,
+  after: unknown,
+  fields: ToolDeclarationFields | null = null
+): { summary: string; detail?: string[] } {
+  const shipped = (
+    entry.default && typeof entry.default === "object" && !Array.isArray(entry.default)
+      ? entry.default
+      : {}
+  ) as Record<string, Record<string, unknown>>;
+  const diff = toolFactsDiff(shipped, before, after, fields);
+  if (diff.length === 0) return { summary: "no tool changes" };
+  const counts = (["changed", "reset", "removed", "added"] as const)
+    .map((state) => [state, diff.filter((d) => d.state === state).length] as const)
+    .filter(([, n]) => n > 0)
+    .map(([state, n]) => `${countLabel(n, "tool")} ${TOOL_STATE_WORDS[state]}`);
+  return { summary: counts.join(", "), detail: diff.map(describeToolLine) };
+}
+
+// ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
-export function describeChange(entry: CatalogEntry, before: unknown, after: unknown): ChangeLine {
+export function describeChange(
+  entry: CatalogEntry,
+  before: unknown,
+  after: unknown,
+  fields: ToolDeclarationFields | null = null
+): ChangeLine {
   const base = { key: entry.key, title: entry.title, applies: entry.applies };
 
+  if (entry.editor === "tool_facts") {
+    return { ...base, ...describeToolFacts(entry, before, after, fields) };
+  }
+
   if (entry.key === "core.mcp.servers") {
-    return { ...base, ...describeServerMap(before, after) };
+    return { ...base, ...describeServerMap(entry, before, after, fields) };
   }
   if (entry.key === AGENT_DEFINITIONS_KEY) {
     return { ...base, ...describeDefinitionsMap(before, after) };

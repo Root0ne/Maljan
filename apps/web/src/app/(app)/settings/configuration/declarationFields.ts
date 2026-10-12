@@ -146,15 +146,55 @@ function canonical(value: unknown): string {
   return JSON.stringify(value === undefined ? null : value);
 }
 
-function sameJson(left: unknown, right: unknown): boolean {
+export function sameJson(left: unknown, right: unknown): boolean {
   return canonical(left) === canonical(right);
+}
+
+/* A yes-or-no value as the API's model reads it (pydantic's lax rule), or
+ * `undefined` when the model would refuse it. */
+const NO_WORDS = new Set(["0", "off", "f", "false", "n", "no"]);
+const YES_WORDS = new Set(["1", "on", "t", "true", "y", "yes"]);
+function yesOrNo(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (value === 0 || value === 1) return value === 1;
+  if (typeof value === "string") {
+    const word = value.toLowerCase();
+    if (NO_WORDS.has(word)) return false;
+    if (YES_WORDS.has(word)) return true;
+  }
+  return undefined;
+}
+
+/** Whether a field's `value` says something against its `fallback` (default):
+ *  the API's `tool_declarations.is_set`. A yes-or-no field (its default is a
+ *  boolean) is compared as the model reads it, so `0`, `"false"`, `"no"` and
+ *  `"off"` are its default; any other field as written, keys in any order. */
+export function isSet(value: unknown, fallback: unknown): boolean {
+  if (typeof fallback === "boolean") {
+    const read = yesOrNo(value);
+    return read === undefined || read !== fallback;
+  }
+  return !sameJson(value, fallback);
 }
 
 /* The fields `facts` sets among `defaults`: present, and not at the default. */
 function setAmong(facts: Record<string, unknown>, defaults: Record<string, unknown>): string[] {
   return Object.keys(defaults).filter(
-    (key) => Object.prototype.hasOwnProperty.call(facts, key) && !sameJson(facts[key], defaults[key])
+    (key) => Object.prototype.hasOwnProperty.call(facts, key) && isSet(facts[key], defaults[key])
   );
+}
+
+/** The split as served, or `null` when it is not one the box can read
+ *  (an older API, a mock, the schema's empty default). */
+export function usableFields(fields: ToolDeclarationFields | null | undefined): ToolDeclarationFields | null {
+  if (!fields || !isObject(fields.kind_free) || !isObject(fields.kind_dependent)) return null;
+  return fields;
+}
+
+/** The fields a declaration sets, as the box counts them: each known field
+ *  present and not at its default (`isSet`). */
+export function setFields(facts: Record<string, unknown>, fields: ToolDeclarationFields): string[] {
+  return [...setAmong(facts, fields.kind_free), ...setAmong(facts, fields.kind_dependent)];
 }
 
 /** Whether the no-kind word in `facts` names no kind: only when no
@@ -167,18 +207,20 @@ export function readsNoKind(facts: Record<string, unknown>, fields: ToolDeclarat
  *  A name may hold `__`; only one spelled as this server's renamed tool
  *  (`<serverKey>__…`) is refused.
  *
- *  `fields` is the split the API serves with the settings schema
+ *  `served` is the split the API serves with the settings schema
  *  (`tool_declaration_fields`): the field rules are applied from it, exactly
  *  as the API applies them to an edit -- no unknown field; the no-kind word
  *  names no kind only when no kind-dependent field is set; a declaration of
  *  no kind sets at least one field and no kind-dependent one, a field
- *  counting as set only when it differs from its default. Without it the box
- *  checks the shape alone and the API answers the rest on save. */
+ *  counting as set only when it differs from its default (`isSet`). Without
+ *  a split it can read (none, or one missing either half) the box checks the
+ *  shape alone and the API answers the rest on save. */
 export function readToolFacts(
   text: string,
   serverKey = "",
-  fields: ToolDeclarationFields | null = null
+  served: ToolDeclarationFields | null = null
 ): Read<Record<string, ToolFactsEntry>> {
+  const fields = usableFields(served);
   const parsed = parseJson(text);
   if (parsed.error !== null) return bad(parsed.error);
   if (parsed.value === undefined) return ok({});

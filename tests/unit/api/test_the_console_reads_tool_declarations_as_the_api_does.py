@@ -26,7 +26,8 @@ from maljan.core.tool_declarations import (
     strict_declarations,
 )
 
-_WEB = Path(__file__).resolve().parents[3] / "apps/web/src"
+_ROOT = Path(__file__).resolve().parents[3]
+_WEB = _ROOT / "apps/web/src"
 _CASES = json.loads((_WEB / "test-fixtures/tool-declaration-cases.json").read_text("utf-8"))[
     "cases"
 ]
@@ -75,3 +76,35 @@ def test_the_console_holds_no_second_copy_of_the_field_list() -> None:
     for name in (*KIND_FREE_FIELDS, *KIND_DEPENDENT_FIELDS):
         assert f'"{name}"' not in box, name
     assert f'"{NO_KIND}"' not in box
+
+
+def _generator() -> Any:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "write_tool_declaration_cases", _ROOT / "scripts/dev/write_tool_declaration_cases.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_generated_cases_are_the_api_s_answers() -> None:
+    writer = _generator()
+    held = (_ROOT / writer.FIXTURE).read_text("utf-8")
+    assert held == writer.rendered(), (
+        "the generated cases are stale: run scripts/dev/write_tool_declaration_cases.py"
+    )
+
+
+def test_a_yes_or_no_field_written_as_a_falsy_word_is_not_set() -> None:
+    from maljan.core.tool_declarations import is_set
+
+    for word in (0, "0", "false", "False", "no", "NO", "off", "n", "f", False):
+        declaration = {"display_name": "X", "asserts_techniques": word}
+        assert not is_set("asserts_techniques", word), word
+        assert _accepted(declaration), word
+        assert reads_no_kind({**declaration, "kind": NO_KIND}), word
+    assert is_set("asserts_techniques", "maybe")
+    assert is_set("holds_strings", "yes")

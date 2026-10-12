@@ -75,7 +75,13 @@ from app.services.settings_service import (
     lenient_imported_declarations,
 )
 
-EXPORT_FORMAT = "maljan-settings/1"
+# The settings document an export writes and an import reads. In ``/2`` a
+# block's tool declarations are its changes over what the block ships, one
+# tool at a time, as they are stored; an import also reads ``/1``, written
+# before that, where a block's tool declarations are its whole map.
+EXPORT_FORMAT = "maljan-settings/2"
+WHOLE_MAP_FORMAT = "maljan-settings/1"
+IMPORT_FORMATS = (EXPORT_FORMAT, WHOLE_MAP_FORMAT)
 
 logger = get_logger("api.settings")
 
@@ -109,15 +115,16 @@ async def _effective_agents(db: AsyncSession) -> tuple[list[str], list[str]]:
 async def get_schema(
     _: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
 ) -> SchemaResponse:
-    from maljan.core.settings_overrides import build_settings
+    from maljan.core.settings_overrides import build_settings, refused_tool_changes
 
     from app.services.enrichment_sources import ENRICHMENT_SOURCES_KEY
     from app.services.settings_service import load_core_overrides
 
     profiles, agents = await _effective_agents(db)
     stored = await SettingsService(db).load_overrides()
+    core = await load_core_overrides(db)
     try:
-        configs = build_settings(await load_core_overrides(db)).mcp.servers
+        configs = build_settings(core).mcp.servers
     except (ValueError, ValidationError):
         configs = build_settings({}).mcp.servers
     return served_schema(
@@ -126,6 +133,7 @@ async def get_schema(
         agents=agents,
         enrichment_sources=stored.get(ENRICHMENT_SOURCES_KEY),
         server_configs=configs,
+        tool_facts_conflicts=refused_tool_changes(core),
     )
 
 
@@ -136,6 +144,7 @@ def served_schema(
     agents: list[str],
     enrichment_sources: Any = None,
     server_configs: dict[str, Any] | None = None,
+    tool_facts_conflicts: dict[str, list[str]] | None = None,
 ) -> SchemaResponse:
     """The settings schema as ``GET /settings/schema`` serves it for these choices.
 
@@ -144,6 +153,8 @@ def served_schema(
     ``enrichment_sources`` is the stored ``api.enrichment_sources`` map and
     ``server_configs`` the tool servers in force; the schema says what the
     console's guides offer for each, never a credential.
+    ``tool_facts_conflicts`` names, per block, the tools whose stored change
+    is refused over what ships now (``refused_tool_changes``).
     """
     from app.services.credential_bootstrap import bootstrap_facts
     from app.services.enrichment_sources import source_facts
@@ -170,6 +181,7 @@ def served_schema(
         enrichment_sources=source_facts(enrichment_sources, server_configs),
         credential_servers=bootstrap_facts(server_configs),
         tool_declaration_fields=declaration_fields(),
+        tool_facts_conflicts=tool_facts_conflicts or {},
     )
 
 
@@ -298,6 +310,17 @@ async def patch_values(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> PatchResponse | JSONResponse:
+    """Save a set of staged values at once.
+
+    A block's tool declarations (an entry's ``tool_facts`` in
+    ``core.mcp.servers``, a ``core.<block>.tool_facts`` leaf) are read by
+    their mark: a map holding ``"": "changes"`` is the block's changes over
+    what it ships, one tool at a time (``null`` removes a shipped tool, and a
+    tool it leaves out stays as shipped); a map without the mark is the whole
+    map, so a shipped tool it leaves out is removed. A map sent back exactly
+    as stored keeps the reading it is stored with. ``GET`` serves every
+    stored map marked.
+    """
     changes = _current_keys(body.changes)
     unprobed = await _unprobed_models_in(db, changes)
     if unprobed:
@@ -505,7 +528,7 @@ async def import_values(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> PatchResponse | JSONResponse:
-    if body.format != EXPORT_FORMAT:
+    if body.format not in IMPORT_FORMATS:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"errors": {"format": "unsupported format"}},
@@ -530,7 +553,9 @@ async def import_values(
         )
     # A declaration another version wrote may hold what this one does not
     # read: it is left out with a warning, never a refusal of the file.
-    values, left_out = lenient_imported_declarations(values)
+    values, left_out = lenient_imported_declarations(
+        values, whole_maps=body.format == WHOLE_MAP_FORMAT
+    )
     try:
         res = await SettingsService(db).save(values, user_id=user.id, ip=_client_ip(request))
     except SettingsValidationError as exc:
