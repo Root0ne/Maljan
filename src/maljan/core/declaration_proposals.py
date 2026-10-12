@@ -818,16 +818,17 @@ def propose_tool(
             list(reading.techniques), list(reading.techniques_evidence), reading.confidence
         )
 
-    # A sandbox's rows, by the shape test: the kind, and the parts a run reads.
-    sandbox = _sandbox_kind(reading)
+    # The kind, when something the server said names one; a sandbox's rows, by
+    # the shape test, only where nothing else names a kind, with the parts a
+    # run reads.
+    found_kind = _kind_of(name, words, word_origin, proposal, reading)
+    sandbox = None if found_kind is not None else _sandbox_kind(name, reading)
     if sandbox is not None:
         kind, extra = sandbox
+        found_kind = kind, extra["_kind"].confidence, list(extra["_kind"].evidence)
         for key, held in extra.items():
             if key != "_kind":
                 proposal.fields[key] = held
-
-    # The kind, when something the server said names one.
-    found_kind = _kind_of(name, words, word_origin, proposal, reading)
     if found_kind is not None:
         kind, kind_confidence, kind_evidence = found_kind
         if kind in _RULE_KINDS and reading.techniques:
@@ -901,10 +902,6 @@ def _kind_of(
 ) -> tuple[str, str, list[str]] | None:
     """The proposed kind, how sure, and what said it; ``None`` when nothing names one."""
     roles = proposal.roles
-    sandbox = _sandbox_kind(reading)
-    if sandbox is not None:
-        kind, extra = sandbox
-        return kind, extra["_kind"].confidence, list(extra["_kind"].evidence)
     counts = f"a malicious count in the answer ({reading.reputation.get('malicious', '')})"
     if reading.reputation and "hash" in roles:
         return "reputation", MEDIUM, [counts, "inputSchema hash argument"]
@@ -951,19 +948,22 @@ _SANDBOX_KIND_OF_SHAPE = {
 }
 
 
-def _sandbox_kind(reading: _AnswerReading) -> tuple[str, dict[str, Proposed]] | None:
+def _sandbox_kind(name: str, reading: _AnswerReading) -> tuple[str, dict[str, Proposed]] | None:
     """A sandbox kind for an answer whose rows pass the shape test, with the fields it reads.
 
     ``("sandbox_processes", {...})`` gives the row's process id as the place
     a ``run`` root is read from and its name and command line as values; a
     network answer laid out as a flow table gets that reader. The returned
     mapping's ``_kind`` entry is the kind's own evidence; every other entry is
-    a field to propose. ``None`` where the rows pass no shape test.
+    a field to propose. ``None`` where the rows pass no shape test. The names
+    the rows sit under, for the test's evidence, are the list's own, the
+    block's holding it and the tool's (``name``). Asked only where nothing
+    else the server said names a kind (:func:`_kind_of` first).
     """
     if reading.rows is None or not reading.row_keys:
         return None
-    list_name = next((s for s in reversed(reading.row_list) if s != "*"), "")
-    shape = row_shape(list_name, reading.row_keys)
+    names = [s for s in reversed(reading.row_list) if s != "*"][:2]
+    shape = row_shape([*names, name], reading.row_keys)
     if shape is None:
         return None
     kind = _SANDBOX_KIND_OF_SHAPE[shape.kind]

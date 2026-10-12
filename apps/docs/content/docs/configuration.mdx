@@ -3572,7 +3572,13 @@ command line as values; rows naming a destination and a port, or a DNS
 question, propose `sandbox_network` (with the `flow_table` reader where the
 answer lays its rows out as one, under `tcp`, `udp`, `conversations` or
 `dns`); rows naming a digest, a name and a size propose
-`sandbox_dropped_files`. An accepted sandbox kind gives the tool's answers what
+`sandbox_dropped_files`. A DNS question needs evidence of its own (a key only
+DNS rows write, an answer, or a list or tool name saying DNS), and dropped
+files a list or tool name saying so: a name and a type, or a digest, a name and
+a size, are what function, section, rule and archive listings hold. The shape
+is asked only where nothing else the server said names a kind, so a tool its
+words or roles name (a decompiler, a rule scanner, a reputation lookup) keeps
+that kind. An accepted sandbox kind gives the tool's answers what
 the built-in sandbox tools' answers get: a `run` root per process or flow, a
 place among the sandbox's entries (observed steps) and the built-in section
 drawn from the declared rows.

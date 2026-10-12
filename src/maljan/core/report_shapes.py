@@ -20,6 +20,8 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
+from maljan.schemas.sandbox_document import DNS_NAME_KEYS
+
 # Each part a row of a kind holds, the consumer's own field name first, then
 # the spellings sandboxes write it under (lower case).
 _PROCESS_PARTS: dict[str, tuple[str, ...]] = {
@@ -61,10 +63,13 @@ _FLOW_PARTS: dict[str, tuple[str, ...]] = {
 }
 _PROTOCOL_KEYS = ("protocol", "proto", "transport")
 _DNS_PARTS: dict[str, tuple[str, ...]] = {
-    "request": ("request", "query", "qname", "domain", "hostname", "name"),
-    "type": ("type", "qtype", "query_type", "record_type"),
-    "answers": ("answers", "answer", "response", "responses", "resolved", "addresses", "ips"),
+    # The keys every DNS row reader reads a name under, and one more spelling.
+    "request": (*DNS_NAME_KEYS, "qname"),
+    "type": ("type", "qtype", "query_type", "record_type", "rrtype"),
+    "answers": ("answers", "answer", "resolved", "resolutions", "addresses", "ips"),
 }
+# The keys a DNS row's question type is written under (lower case).
+DNS_TYPE_KEYS = frozenset(_DNS_PARTS["type"])
 _DROPPED_PARTS: dict[str, tuple[str, ...]] = {
     "sha256": ("sha256", "sha_256"),
     "name": ("name", "filename", "file_name", "path", "filepath", "file_path"),
@@ -88,9 +93,19 @@ _PARTS: dict[str, dict[str, tuple[str, ...]]] = {
 KINDS: tuple[str, ...] = ("processes", "dropped_files", "flows", "dns")
 
 _WORD = re.compile(r"[a-z0-9]+")
-# DNS rows name a name under keys other lists use too (``name``, ``domain``):
-# without a question type or an answer, the list's own name must say DNS.
-_DNS_LIST_WORDS = frozenset({"dns", "queries", "query", "lookups", "resolutions"})
+# A name and a type are what many lists hold (functions, sections, rules,
+# classifications), and a digest, a name and a size what every archive or
+# resource listing holds. Such rows read as DNS questions, or as files a run
+# dropped, only with evidence of their own: the words of a name the list sits
+# under (its own, the block holding it, the tool answering it), a key only
+# DNS rows write, an answer, or (where the values are seen) a question type
+# that is a DNS record type.
+_DNS_WORDS = frozenset({"dns", "lookups", "resolutions", "queries"})
+_DNS_KEYS = frozenset({"qname", "qtype", "query_type", "record_type", "rrtype", "rrname", "rdata"})
+_DNS_RECORD_TYPES = frozenset(
+    {"a", "aaaa", "cname", "mx", "ns", "ptr", "soa", "srv", "txt", "caa", "any", "https", "svcb"}
+)
+_DROPPED_WORDS = frozenset({"dropped", "drop", "drops", "droppedfiles", "written", "created"})
 
 
 @dataclass
@@ -109,13 +124,34 @@ def _words(name: str) -> set[str]:
     return set(_WORD.findall(name.lower()))
 
 
-def row_shape(list_name: str, keys: Iterable[str]) -> RowShape | None:
-    """The kind a list named ``list_name`` whose rows carry ``keys`` reads as, or ``None``.
+def _named(names: Iterable[str], kind_words: frozenset[str]) -> bool:
+    return any(_words(name) & kind_words for name in names if isinstance(name, str))
 
-    ``high`` where every part is under the consumer's own field name, ``medium``
-    where some part is under another spelling, ``low`` for a DNS list
-    recognised by its name alone.
+
+def is_record_type(value: object) -> bool:
+    """Whether ``value`` is a DNS record type's name (``A``, ``AAAA``, ``CNAME`` ...)."""
+    return isinstance(value, str) and value.strip().lower() in _DNS_RECORD_TYPES
+
+
+def row_shape(
+    list_name: str | Iterable[str],
+    keys: Iterable[str],
+    *,
+    record_types: bool = False,
+) -> RowShape | None:
+    """The kind a list whose rows carry ``keys`` reads as, or ``None``.
+
+    ``list_name`` is the list's own name, or the names the list sits under,
+    its own first (the block holding it, the tool answering it).
+    ``record_types`` says every value seen under the rows' question-type key is
+    a DNS record type. ``high`` where every part is under the consumer's own
+    field name, ``medium`` where some part is under another spelling, ``low``
+    for a DNS list recognised by its name alone. A list whose evidence fits
+    another kind better reads as none: a name and a type are not a DNS
+    question, a digest, a name and a size not a dropped file, without evidence
+    of their own (see :data:`_DNS_WORDS`).
     """
+    names = (list_name,) if isinstance(list_name, str) else tuple(list_name)
     by_lower: dict[str, str] = {}
     for key in keys:
         if isinstance(key, str):
@@ -128,15 +164,20 @@ def row_shape(list_name: str, keys: Iterable[str]) -> RowShape | None:
                 parts[part] = found
         if not all(part in parts for part in _REQUIRED[kind]):
             continue
-        if kind == "dns" and not ({"type", "answers"} & set(parts)):
-            if not (_words(list_name) & _DNS_LIST_WORDS):
+        confidence = "high" if all(parts[part] == part for part in parts) else "medium"
+        if kind == "dns":
+            dns_key = bool(_DNS_KEYS & set(by_lower)) or any("dns" in _words(k) for k in by_lower)
+            if "answers" in parts or dns_key or (record_types and "type" in parts):
+                pass
+            elif _named(names, _DNS_WORDS):
+                confidence = "low" if "type" not in parts else confidence
+            else:
                 continue
-            shape = RowShape(kind, parts, "low")
-        else:
-            exact = all(parts[part] == part for part in parts)
-            shape = RowShape(kind, parts, "high" if exact else "medium")
+        if kind == "dropped_files" and not _named(names, _DROPPED_WORDS):
+            continue
         if kind == "processes" and parts["ppid"] == parts["name"]:
             continue
+        shape = RowShape(kind, parts, confidence)
         if kind == "flows":
             shape.protocol_key = next((by_lower[k] for k in _PROTOCOL_KEYS if k in by_lower), "")
         return shape
