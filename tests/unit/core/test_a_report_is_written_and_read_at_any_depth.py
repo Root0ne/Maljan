@@ -19,7 +19,16 @@ import pytest
 from pydantic import BaseModel
 
 from maljan.core import safe_json
-from maljan.core.safe_json import DEEPER_MARK, DEPTH_GUARD, dumps, exceeds_depth, loads
+from maljan.core.safe_json import (
+    CYCLE_MARK,
+    DEEPER_MARK,
+    DEPTH_GUARD,
+    SHARED_MARK,
+    dumps,
+    exceeds_depth,
+    loads,
+    within_depth,
+)
 
 
 def _deep_list(depth: int, leaf: Any = 1) -> Any:
@@ -145,30 +154,37 @@ class TestADeepValueNeverRaises:
 
 
 class TestAnyDepthIsRead:
-    @pytest.mark.parametrize("depth", [10_000, 200_000])
-    def test_a_body_too_deep_for_json_loads_is_read(self, depth: int) -> None:
+    @pytest.mark.parametrize("depth", [DEPTH_GUARD + 1, 3_000, 10_000, 200_000])
+    def test_a_deep_body_is_read_marked_below_the_guard(self, depth: int) -> None:
         text = "[" * depth + '{"k": "v"}' + "]" * depth
-        with pytest.raises(RecursionError):
-            json.loads(text)
         value = loads(text)
-        assert _depth(value) == depth + 1
+        assert _depth(value) == DEPTH_GUARD
         node = value
-        for _ in range(depth):
+        for _ in range(DEPTH_GUARD - 1):
             assert isinstance(node, list)
             assert len(node) == 1
             node = node[0]
-        assert node == {"k": "v"}
+        assert node == [DEEPER_MARK]
 
-    def test_a_deep_object_body_keeps_its_keys(self) -> None:
+    def test_a_body_within_the_guard_is_read_whole(self) -> None:
+        text = "[" * (DEPTH_GUARD - 1) + '{"k": "v"}' + "]" * (DEPTH_GUARD - 1)
+        assert loads(text) == json.loads(text)
+        assert safe_json._loads_iteratively(text) == json.loads(text)
+
+    def test_a_deep_object_body_keeps_its_keys_down_to_the_guard(self) -> None:
         depth = 5_000
         text = '{"a": ' * depth + "1" + ', "b": [true, null]}' * depth
-        value = loads(text)
-        node = value
-        for _ in range(depth - 1):
-            assert list(node) == ["a", "b"]
-            assert node["b"] == [True, None]
-            node = node["a"]
-        assert node == {"a": 1, "b": [True, None]}
+        for value in (loads(text), safe_json._loads_iteratively(text)):
+            node = value
+            for _ in range(DEPTH_GUARD - 1):
+                assert list(node) == ["a", "b"]
+                assert node["b"] == [True, None]
+                node = node["a"]
+            assert node == {"a": DEEPER_MARK, "b": DEEPER_MARK}
+
+    def test_the_iterative_reader_gives_what_json_loads_marked_gives(self) -> None:
+        text = '{"x": ' + "[" * 400 + "1" + "]" * 400 + ', "y": [1, {"z": []}]}'
+        assert safe_json._loads_iteratively(text) == within_depth(json.loads(text))
 
     def test_bytes_are_read_as_json_loads_reads_them(self) -> None:
         text = "[" * 3_000 + '"\\u00e9"' + "]" * 3_000
@@ -260,6 +276,103 @@ class TestLinearTime:
             safe_json._loads_iteratively,
             5_000,
         )
+
+
+def _shared_chain(n: int) -> Any:
+    """``n`` levels, each a list holding the level below twice: 2**n paths, n containers."""
+    node: Any = [1]
+    for _ in range(n):
+        node = [node, node]
+    return node
+
+
+def _cycle(n: int) -> Any:
+    """``n`` levels of shared lists whose innermost holds the outermost."""
+    innermost: list[Any] = [1]
+    node: Any = innermost
+    for _ in range(n):
+        node = [node, node, {"k": node}]
+    innermost.append(node)
+    return node
+
+
+def _peak(run: Callable[[], Any]) -> int:
+    import tracemalloc
+
+    gc.collect()
+    tracemalloc.start()
+    try:
+        run()
+        return tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+
+
+class TestSharedContainersAndCycles:
+    def test_a_shared_chain_within_the_guard_is_measured_once(self) -> None:
+        # 2**100 paths: walked path by path it would never end.
+        value = _shared_chain(100)
+        assert not exceeds_depth(value)
+        assert within_depth(value) is value
+
+    def test_a_shared_chain_past_the_guard_is_copied_once_and_written_linearly(self) -> None:
+        value = _shared_chain(5_000)
+        assert exceeds_depth(value)
+        text = dumps(value)
+        assert len(text) < 200 * 5_000
+        assert SHARED_MARK in text
+        assert _depth(json.loads(text)) <= DEPTH_GUARD
+
+    def test_a_cycle_is_written_once_and_marked(self) -> None:
+        for value in (_cycle(3), _cycle(400)):
+            with pytest.raises(ValueError):
+                json.dumps(value)
+            text = dumps(value)
+            # The return is a cycle within the guard, and below it a deeper container.
+            assert CYCLE_MARK in text or DEEPER_MARK in text
+            assert _depth(json.loads(text)) <= DEPTH_GUARD
+        assert CYCLE_MARK in dumps(_cycle(3))
+        holder: dict[str, Any] = {"a": 1}
+        holder["self"] = holder
+        assert json.loads(dumps(holder)) == {"a": 1, "self": CYCLE_MARK}
+
+    def test_the_shared_and_cyclic_walks_are_linear(self) -> None:
+        _linear(_shared_chain, exceeds_depth, 20_000)
+        _linear(_shared_chain, dumps, 20_000)
+        _linear(_cycle, dumps, 5_000)
+
+    def test_the_shared_walk_holds_memory_linear_in_the_containers(self) -> None:
+        small = _peak(lambda: dumps(_shared_chain(5_000)))
+        large = _peak(lambda: dumps(_shared_chain(50_000)))
+        assert large <= 10 * small * 1.5, (small, large)
+
+
+class TestAHostileDeepBody:
+    def test_a_ten_million_character_body_is_read_linearly_in_time_and_memory(self) -> None:
+        depth = 5_000_000
+        text = "[" * depth + "]" * depth
+        assert len(text) == 10_000_000
+        value = loads(text)
+        assert _depth(value) == DEPTH_GUARD
+        small_text = "[" * (depth // 10) + "]" * (depth // 10)
+        small = _peak(lambda: loads(small_text))
+        large = _peak(lambda: loads(text))
+        # The dropped levels are held as runs of one bracket: a fraction of the body.
+        assert large <= len(text), (small, large)
+        assert large <= 10 * small * 1.5 + 65_536, (small, large)
+        _linear(lambda n: "[" * n + "]" * n, loads, 500_000)
+
+    def test_a_deep_body_of_mixed_brackets_is_read_linearly(self) -> None:
+        def body(n: int) -> str:
+            return '[{"a": ' * n + "1" + "}]" * n
+
+        assert _depth(loads(body(50_000))) == DEPTH_GUARD
+        _linear(body, loads, 20_000)
+
+    def test_a_deep_object_body_is_validated_while_dropped(self) -> None:
+        bad = '{"a": ' * 10_000 + "1" + "}" * 9_999 + ","
+        with pytest.raises(json.JSONDecodeError):
+            loads(bad)
 
 
 def _stored_report_paths() -> list[Any]:

@@ -2,26 +2,38 @@
 
 A sandbox report is the remote end's choice, nesting included. ``json.dumps``
 and ``json.loads`` recurse once per level and raise ``RecursionError`` some
-thousands of levels down; pydantic's serializer and validator, which store the
-ledger and the report, refuse a value nested past about 250 levels. A report
-nested deeper than that must still be read, laid out and handed to the
-analysts, so every path that writes a sandbox document or a part of one out as
-text goes through :func:`dumps`, and every path that reads a report body goes
-through :func:`loads`.
+thousands of levels down; pydantic's JSON reader, which reads the stored ledger
+and report back, refuses a text nested past 200 levels. A report nested deeper
+than that must still be read, laid out and handed to the analysts, so every
+path that reads a report body goes through :func:`loads`, and every path that
+writes a sandbox document or a part of one out as text goes through
+:func:`dumps`.
 
+* :func:`loads` reads what ``json.loads`` reads, the same values, for any body
+  nested no deeper than :data:`DEPTH_GUARD` containers. A container nested
+  below the guard is read as :data:`DEEPER_MARK`, a marked placeholder, at
+  read time: no consumer after it ever holds a value nested deeper than the
+  guard, so none can recurse past it. A body nested too deeply for
+  ``json.loads`` is read by an iterative reader that validates the whole body
+  but keeps an open-container entry only down to the guard (the levels below
+  it as runs of one bracket, a long run read in one step), so its time and
+  memory are linear in the body and it uses no call depth.
 * :func:`dumps` writes exactly what ``json.dumps`` writes for any value nested
-  no deeper than :data:`DEPTH_GUARD` containers: the value itself is handed to
-  ``json.dumps``, so the bytes are the same bytes. A deeper value is written
-  with each container below the guard replaced by :data:`DEEPER_MARK`, a
-  marked placeholder saying what was not written, never dropped in silence and
-  never a raise. The text it writes is always one every reader of the
-  platform reads back, pydantic included.
-* :func:`loads` reads what ``json.loads`` reads, the same values. A body
-  nested too deeply for ``json.loads`` is read again by an iterative reader
-  with an explicit stack, so it costs time linear in the body and no call
-  depth.
+  no deeper than the guard: the value itself is handed to ``json.dumps``, so
+  the bytes are the same bytes. A deeper value (one built in process) is
+  written as a marked copy: each container below the guard as
+  :data:`DEEPER_MARK`, a container that holds itself written once and its
+  return as :data:`CYCLE_MARK` (where ``json.dumps`` would raise), and a
+  container reached along a second path written once and then as
+  :data:`SHARED_MARK`. Never a raise.
 
-Both walks are iterative: no step of either recurses.
+Every walk is iterative and linear in the distinct containers a value holds:
+a container reached along several paths is measured once and copied once, so
+a value that shares containers costs no more than the containers it has. A
+value within the guard that shares containers is handed to ``json.dumps``
+itself, which writes a shared container at each place it appears, as dev
+wrote it: a report body is a tree once read, and the platform's readers hold
+its parts by reference only where each part is written once.
 """
 
 from __future__ import annotations
@@ -32,68 +44,119 @@ from json.decoder import scanstring  # type: ignore[attr-defined]
 from json.scanner import NUMBER_RE
 from typing import Any
 
-# The deepest nesting, in containers, written out as it is. pydantic's JSON
-# reader, which reads the stored ledger and report back, refuses a text nested
-# past 200 levels in all, and a ledger entry or a report holds a tool's answer
-# a few levels down; the guard leaves forty of them for that. The platform's
-# deepest stored sandbox report nests 112 levels. A container below this depth
-# is written as :data:`DEEPER_MARK`.
+# The deepest nesting, in containers, read and written out as it is. pydantic's
+# JSON reader, which reads the stored ledger and report back, refuses a text
+# nested past 200 levels in all, and a ledger entry or a report holds a tool's
+# answer a few levels down; the guard leaves forty of them for that. The
+# platform's deepest stored sandbox report nests 112 levels. A container below
+# this depth is read and written as :data:`DEEPER_MARK`.
 DEPTH_GUARD = 160
 
-# What a container nested below :data:`DEPTH_GUARD` is written as.
-DEEPER_MARK = f"[nested deeper than {DEPTH_GUARD} levels: not written out]"
+# What a container nested below :data:`DEPTH_GUARD` is read and written as.
+DEEPER_MARK = f"[nested deeper than {DEPTH_GUARD} levels: not kept]"
+# What a container that holds itself is written as where it returns.
+CYCLE_MARK = "[a container that holds itself: written once, not again]"
+# What a container reached along a second path is written as, in a marked copy.
+SHARED_MARK = "[the same container as written earlier: not written again]"
 
 _CONTAINERS = (dict, list, tuple)
 
 
-def exceeds_depth(value: Any, limit: int = DEPTH_GUARD) -> bool:
-    """Whether ``value`` holds a container nested deeper than ``limit`` containers.
+def _children(node: Any) -> Any:
+    return node.values() if isinstance(node, dict) else node
 
-    The value itself, when a container, is at depth 1. Walked with a stack,
-    each value visited at most once, stopping at the first container too deep.
+
+def _height(value: Any) -> int | None:
+    """How many containers deep ``value`` nests; ``None`` where a container holds itself.
+
+    A post-order walk with a stack, each distinct container measured once (by
+    identity), so shared containers cost nothing more.
     """
     if not isinstance(value, _CONTAINERS):
-        return False
-    stack: list[tuple[Any, int]] = [(value, 1)]
+        return 0
+    heights: dict[int, int] = {}
+    open_: set[int] = set()
+    stack: list[tuple[Any, bool]] = [(value, False)]
     while stack:
-        node, depth = stack.pop()
-        if depth > limit:
-            return True
-        children = node.values() if isinstance(node, dict) else node
-        below = depth + 1
-        stack.extend((child, below) for child in children if isinstance(child, _CONTAINERS))
-    return False
+        node, closing = stack.pop()
+        key = id(node)
+        if closing:
+            open_.discard(key)
+            below = [heights[id(c)] for c in _children(node) if isinstance(c, _CONTAINERS)]
+            heights[key] = 1 + max(below, default=0)
+            continue
+        if key in heights:
+            continue
+        if key in open_:
+            # Reached again before it closed: it is inside itself.
+            return None
+        open_.add(key)
+        stack.append((node, True))
+        stack.extend(
+            (child, False)
+            for child in _children(node)
+            if isinstance(child, _CONTAINERS) and id(child) not in heights
+        )
+    return heights[id(value)]
+
+
+def exceeds_depth(value: Any, limit: int = DEPTH_GUARD) -> bool:
+    """Whether ``value`` nests deeper than ``limit`` containers, or holds itself.
+
+    The value itself, when a container, is at depth 1. Linear in the distinct
+    containers ``value`` holds.
+    """
+    height = _height(value)
+    return height is None or height > limit
 
 
 def within_depth(value: Any, limit: int = DEPTH_GUARD) -> Any:
-    """``value`` itself where it nests no deeper than ``limit``; else a copy marked below it.
+    """``value`` itself where it nests no deeper than ``limit``; else a marked copy.
 
     The copy keeps every key in its order and every value down to ``limit``
-    containers; each container below is :data:`DEEPER_MARK`. A tuple is copied
-    as a list, which JSON writes alike. Built with a stack, never recursion.
+    containers; each container below is :data:`DEEPER_MARK`, a container
+    reached again inside itself is :data:`CYCLE_MARK`, and a container reached
+    again along another path is :data:`SHARED_MARK`: each distinct container
+    is copied once, so the copy is linear in them. A tuple is copied as a
+    list, which JSON writes alike. Built with a stack, never recursion.
     """
     if not exceeds_depth(value, limit):
         return value
     holder: list[Any] = [None]
+    copied: set[int] = set()
+    on_path: set[int] = set()
+    # Each entry: (node, parent, key, depth), or (None, None, id, 0) to close a container.
     stack: list[tuple[Any, Any, Any, int]] = [(value, holder, 0, 1)]
     while stack:
         node, parent, key, depth = stack.pop()
-        if isinstance(node, dict):
-            if depth > limit:
-                parent[key] = DEEPER_MARK
-                continue
-            out: dict[Any, Any] = dict.fromkeys(node)
-            parent[key] = out
-            stack.extend((child, out, name, depth + 1) for name, child in node.items())
-        elif isinstance(node, list | tuple):
-            if depth > limit:
-                parent[key] = DEEPER_MARK
-                continue
-            items: list[Any] = [None] * len(node)
-            parent[key] = items
-            stack.extend((child, items, index, depth + 1) for index, child in enumerate(node))
-        else:
+        if parent is None:
+            on_path.discard(key)
+            continue
+        if not isinstance(node, _CONTAINERS):
             parent[key] = node
+            continue
+        if depth > limit:
+            parent[key] = DEEPER_MARK
+            continue
+        node_id = id(node)
+        if node_id in on_path:
+            parent[key] = CYCLE_MARK
+            continue
+        if node_id in copied:
+            parent[key] = SHARED_MARK
+            continue
+        out: Any
+        if isinstance(node, dict):
+            out = dict.fromkeys(node)
+            entries = list(node.items())
+        else:
+            out = [None] * len(node)
+            entries = list(enumerate(node))
+        parent[key] = out
+        copied.add(node_id)
+        on_path.add(node_id)
+        stack.append((None, None, node_id, 0))
+        stack.extend((child, out, name, depth + 1) for name, child in reversed(entries))
     return holder[0]
 
 
@@ -103,14 +166,18 @@ def dumps(value: Any, **kwargs: Any) -> str:
 
 
 def loads(text: str | bytes | bytearray) -> Any:
-    """``json.loads(text)``; a body nested too deeply for it is read again iteratively."""
+    """``json.loads(text)``, each container below :data:`DEPTH_GUARD` read as :data:`DEEPER_MARK`.
+
+    A body nested too deeply for ``json.loads`` is read by the iterative reader.
+    """
     try:
-        return json.loads(text)
+        value = json.loads(text)
     except RecursionError:
         if isinstance(text, bytes | bytearray):
             # Decoded as ``json.loads`` decodes bytes.
             text = text.decode(json.detect_encoding(text), "surrogatepass")
         return _loads_iteratively(text)
+    return within_depth(value)
 
 
 _WHITESPACE = re.compile(r"[ \t\n\r]*")
@@ -122,6 +189,12 @@ _LITERALS: tuple[tuple[str, Any], ...] = (
     ("Infinity", float("inf")),
     ("-Infinity", float("-inf")),
 )
+# A run of array openers with the whitespace among them, and a run of one
+# closer: below the guard a run is consumed in one step (one character class,
+# which the C regex engine walks holding no state per character), so a long
+# run of brackets costs no Python step per bracket.
+_ARRAY_OPENERS = re.compile(r"[\[ \t\n\r]+")
+_CLOSER_RUN = {"]": re.compile(r"\]+"), "}": re.compile(r"\}+")}
 
 
 def _skip(text: str, index: int) -> int:
@@ -157,53 +230,117 @@ def _scalar(text: str, index: int) -> tuple[Any, int]:
     raise json.JSONDecodeError("Expecting value", text, index)
 
 
-def _loads_iteratively(text: str) -> Any:
-    """``text`` read as ``json.loads`` reads it, with an explicit stack instead of recursion."""
-    # Each open container, with the key its next value is stored under.
+def _loads_iteratively(text: str, limit: int = DEPTH_GUARD) -> Any:
+    """``text`` read as ``json.loads`` reads it, with an explicit stack instead of recursion.
+
+    Every character is validated as ``json.loads`` validates it. Containers
+    down to ``limit`` are kept, each with one stack entry; a container below is
+    read as :data:`DEEPER_MARK`, its contents parsed and dropped, and the
+    dropped levels are held run-length encoded (one ``[bracket, count]`` pair
+    per run of one bracket), so a run of brackets costs one pair. Time and
+    memory linear in ``text``.
+    """
+    # Each kept open container, with the key its next value is stored under.
     stack: list[list[Any]] = []
+    # The brackets of the open containers below the guard, innermost last, as runs.
+    dropped: list[list[Any]] = []
     index = _skip(text, 0)
     while True:
         opener = text[index : index + 1]
         value: Any
-        if opener == "{":
-            index = _skip(text, index + 1)
-            if text[index : index + 1] == "}":
-                value, index = {}, index + 1
-            else:
-                key, index = _key(text, index)
-                stack.append([{}, key])
+        if opener == "[" and (dropped or len(stack) >= limit):
+            # A run of arrays opened below the guard, read in one step.
+            run = _ARRAY_OPENERS.match(text, index)
+            assert run is not None
+            count, index = text.count("[", index, run.end()), run.end()
+            if text[index : index + 1] != "]":
+                _drop(dropped, "[", count)
                 continue
-        elif opener == "[":
+            # The innermost is empty: a whole value, the mark its parent holds.
+            _drop(dropped, "[", count - 1)
+            value, index = DEEPER_MARK, index + 1
+        elif opener in ("{", "["):
             index = _skip(text, index + 1)
-            if text[index : index + 1] == "]":
-                value, index = [], index + 1
+            closer = "}" if opener == "{" else "]"
+            if text[index : index + 1] == closer:
+                index += 1
+                if dropped or len(stack) >= limit:
+                    value = DEEPER_MARK
+                else:
+                    value = {} if closer == "}" else []
             else:
-                stack.append([[], None])
+                if opener == "{":
+                    key, index = _key(text, index)
+                if dropped or len(stack) >= limit:
+                    _drop(dropped, opener, 1)
+                else:
+                    stack.append([{}, key] if opener == "{" else [[], None])
                 continue
         else:
             value, index = _scalar(text, index)
         # A whole value: store it in its container, closing every container it completes.
         while True:
-            if not stack:
+            if dropped:
+                is_object = dropped[-1][0] == "{"
+            elif stack:
+                is_object = isinstance(stack[-1][0], dict)
+            else:
                 index = _skip(text, index)
                 if index != len(text):
                     raise json.JSONDecodeError("Extra data", text, index)
                 return value
-            top = stack[-1]
-            container = top[0]
-            if isinstance(container, dict):
-                container[top[1]] = value
-            else:
-                container.append(value)
+            if not dropped:
+                top = stack[-1]
+                if is_object:
+                    top[0][top[1]] = value
+                else:
+                    top[0].append(value)
             index = _skip(text, index)
             delimiter = text[index : index + 1]
             if delimiter == ",":
                 index = _skip(text, index + 1)
-                if isinstance(container, dict):
-                    top[1], index = _key(text, index)
+                if is_object:
+                    key, index = _key(text, index)
+                    if not dropped:
+                        stack[-1][1] = key
                 break
-            if delimiter == ("}" if isinstance(container, dict) else "]"):
-                stack.pop()
-                value, index = container, index + 1
+            if delimiter == ("}" if is_object else "]"):
+                if dropped:
+                    # Every container of the run this closer begins, closed in one step;
+                    # the outermost one closed is the mark its parent holds.
+                    index = _close_dropped(text, index, dropped)
+                    value = DEEPER_MARK
+                else:
+                    index += 1
+                    value = stack.pop()[0]
                 continue
             raise json.JSONDecodeError("Expecting ',' delimiter", text, index)
+
+
+def _drop(dropped: list[list[Any]], bracket: str, count: int) -> None:
+    """``count`` more open containers of ``bracket`` below the guard."""
+    if count <= 0:
+        return
+    if dropped and dropped[-1][0] == bracket:
+        dropped[-1][1] += count
+    else:
+        dropped.append([bracket, count])
+
+
+def _close_dropped(text: str, index: int, dropped: list[list[Any]]) -> int:
+    """Close the innermost dropped containers the closers at ``index`` close; the index after.
+
+    The closer at ``index`` matches the innermost dropped container (the
+    caller checked). A run of that one closer, with no whitespace in it,
+    closes up to the whole innermost run of dropped containers in one step.
+    """
+    held = dropped[-1][1]
+    # The run of this one closer, read no further than the containers it can close,
+    # so each character is scanned once.
+    run = _CLOSER_RUN[text[index]].match(text, index, index + held)
+    count = run.end() - index if run is not None else 1
+    if count == held:
+        dropped.pop()
+    else:
+        dropped[-1][1] = held - count
+    return index + count
