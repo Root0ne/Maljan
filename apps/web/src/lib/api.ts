@@ -144,6 +144,11 @@ export interface ReportDetailDTO {
    * back to rebuilding what it can from ``agent_findings`` for those. */
   transcript?: TranscriptRow[];
   malware_report: MalwareReport | null;
+  /** The tab each section an operator's tool produced is drawn on, by section
+   *  key, as the API placed it (by the kind its tool declared, else the
+   *  analyst whose call it cites). Absent or `null` when no section is
+   *  placed; every section is then placed by its key. */
+  section_tabs?: Record<string, string> | null;
   /** Set on a report kept from a run that failed after the report was built:
    *  where the run failed and the error id. Absent or `null` on a report of a
    *  completed run. */
@@ -674,10 +679,13 @@ class ApiClient {
     });
   }
 
-  /** Probe one entry of the tool-server map, staged values included. */
-  testMcpServer(server: string, values: Record<string, unknown>) {
+  /** Probe one entry of the tool-server map, staged values included.
+   *  `callTools` also calls each undeclared tool once with a harmless
+   *  argument, so its answer can propose its declaration. */
+  testMcpServer(server: string, values: Record<string, unknown>, callTools = false) {
+    const call = callTools ? "&call_tools=true" : "";
     return this.request<ProbeResult>(
-      `/api/v1/settings/test/mcp?server=${encodeURIComponent(server)}`,
+      `/api/v1/settings/test/mcp?server=${encodeURIComponent(server)}${call}`,
       { method: "POST", body: JSON.stringify({ values }) }
     );
   }

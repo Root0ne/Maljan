@@ -37,7 +37,7 @@ export default function IdentityTab() {
   /* The `identity` section is the one that overlaps this tab's own blocks: its
    * hashes are the File hashes block and its three signing rows are one fact
    * about one format. It is split rather than drawn as it arrives. */
-  const tabSections = sectionsForTab(reportSections, "identity");
+  const tabSections = sectionsForTab(reportSections, "identity", report?.section_tabs);
   const identitySection = tabSections.find((section) => section.key === "identity") ?? null;
   const {
     section: splitIdentity,

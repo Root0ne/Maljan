@@ -90,7 +90,11 @@ export default function PersistenceTab() {
   }
 
   const items = report?.malware_report?.persistence;
-  const evidenceSections = sectionsForTab(report?.malware_report?.sections, "persistence");
+  const evidenceSections = sectionsForTab(
+    report?.malware_report?.sections,
+    "persistence",
+    report?.section_tabs,
+  );
   if ((!items || items.length === 0) && evidenceSections.length === 0) {
     return (
       <div className="p-8 text-center text-sm text-text-secondary">

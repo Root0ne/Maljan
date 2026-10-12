@@ -24,7 +24,7 @@ export default function NetworkTab() {
     (s) => s.kind === "domain" || s.kind === "ip" || s.kind === "url",
   );
   const reportSections = mr?.sections;
-  const evidenceSections = sectionsForTab(reportSections, "network");
+  const evidenceSections = sectionsForTab(reportSections, "network", report?.section_tabs);
   // The observed-traffic tables and the static-string list each have one
   // section that says the same thing; where it exists, the typed table stands
   // down rather than printing the same endpoints a second time.

@@ -8,6 +8,8 @@ import { getErrorMessage } from "@/lib/errors";
 import type { CatalogEntry, McpServerEntry, ProbeResult, SettingValue } from "@/types/settings";
 import { unavailableTools } from "@/types/settings";
 import DeclarationFields from "./DeclarationFields";
+import DeclarationProposals from "./DeclarationProposals";
+import { readProposals } from "./declarationProposals";
 import Dot from "./Dot";
 import {
   addedEnvNames,
@@ -222,7 +224,8 @@ export interface ServerProbeApi {
   result: ProbeResult | "running" | undefined;
   /** The focused server's result was dropped by an edit to what it dialled. */
   stale: boolean;
-  probe: (key: string) => Promise<void>;
+  /** `callTools`: also call each undeclared tool once with a harmless argument. */
+  probe: (key: string, callTools?: boolean) => Promise<void>;
   /** Called before an edit is staged: drops a result the edit invalidates. */
   noteEdit: (key: string, next: Partial<McpServerEntry>) => void;
 }
@@ -249,11 +252,11 @@ export function useServerProbe(
     setStaleProbe((s) => ({ ...s, [key]: true }));
   };
 
-  const probe = async (key: string) => {
+  const probe = async (key: string, callTools = false) => {
     setStaleProbe((s) => ({ ...s, [key]: false }));
     setProbes((p) => ({ ...p, [key]: "running" }));
     try {
-      const result = await api.testMcpServer(key, { "core.mcp.servers": value });
+      const result = await api.testMcpServer(key, { "core.mcp.servers": value }, callTools);
       setProbes((p) => ({ ...p, [key]: result }));
     } catch (e) {
       setProbes((p) => ({
@@ -336,6 +339,7 @@ export function ServerDetail({
   const unavailable =
     result && result !== "running" ? unavailableTools(result) : [];
   const allowed = server.tools;
+  const proposals = has("tools") && result && result !== "running" ? readProposals(result) : null;
   const tableShown = has("tools") && !!manifest && manifest.length > 0;
   const detailError = Object.entries(errors).find(
     ([k]) => k === `${entryKey}.${serverKey}` || k.startsWith(`${entryKey}.${serverKey}.`)
@@ -600,6 +604,29 @@ export function ServerDetail({
             </div>
           )}
         </fieldset>
+      )}
+
+      {has("tools") && manifest && manifest.length > 0 && (
+        <div className="space-y-1">
+          {proposals && (
+            <DeclarationProposals
+              serverKey={serverKey}
+              server={server}
+              proposals={proposals}
+              put={(next) => put(serverKey, next)}
+            />
+          )}
+          {/* The harmless calls are the operator's request: a path that does
+              not exist, the digest of empty input, never a sample. */}
+          <button
+            type="button"
+            className="text-[11px] text-accent-strong disabled:opacity-50"
+            disabled={result === "running"}
+            onClick={() => void probe.probe(serverKey, true)}
+          >
+            Propose declarations from one harmless call per undeclared tool
+          </button>
+        </div>
       )}
 
       {has("agents") && (
