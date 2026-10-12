@@ -13,6 +13,7 @@ import math
 import random
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -357,7 +358,7 @@ class TestAHostileDeepBody:
         small_text = "[" * (depth // 10) + "]" * (depth // 10)
         small = _peak(lambda: loads(small_text))
         large = _peak(lambda: loads(text))
-        # The dropped levels are held as runs of one bracket: a fraction of the body.
+        # The dropped levels are held as one byte each: never more than the body.
         assert large <= len(text), (small, large)
         assert large <= 10 * small * 1.5 + 65_536, (small, large)
         _linear(lambda n: "[" * n + "]" * n, loads, 500_000)
@@ -369,10 +370,92 @@ class TestAHostileDeepBody:
         assert _depth(loads(body(50_000))) == DEPTH_GUARD
         _linear(body, loads, 20_000)
 
+    @pytest.mark.parametrize(
+        "unit",
+        ['[{"":', '{"":['],
+        ids=["array-object", "object-array"],
+    )
+    def test_an_alternating_deep_body_costs_no_more_memory_than_a_shallow_one(
+        self, unit: str
+    ) -> None:
+        """Peak memory within a small constant factor of ``json.loads`` on a shallow body.
+
+        Alternating brackets make every level a run of its own; each still
+        costs one byte, so a deep body never costs more than a shallow body of
+        the same size read by ``json.loads``. Measured as the peak resident
+        size a fresh process adds while reading, one process per reading.
+        """
+        held = _added_peak("deep", unit, 1_000_000)
+        size = len(unit) * 1_000_000
+        baseline = _added_peak("shallow", unit, size)
+        assert held <= 2 * baseline, (held, baseline)
+        assert held <= size, (held, size)
+        small = _added_peak("deep", unit, 100_000)
+        assert held <= 10 * small * 1.5 + 8 * 2**20, (small, held)
+
+    def test_an_alternating_deep_body_is_read_linearly(self) -> None:
+        _linear(lambda n: '[{"":' * n + "0" + "}]" * n, loads, 20_000)
+
+    def test_a_shallow_body_is_measured_without_a_record_per_container(self) -> None:
+        text = json.dumps([{"k": [i, {"v": i}]} for i in range(20_000)])
+        read = _peak(lambda: json.loads(text))
+        held = _peak(lambda: loads(text))
+        # What ``json.loads`` builds, and a walk holding one iterator per level.
+        assert held <= read * 1.05 + 65_536, (read, held)
+
+    def test_the_guard_says_how_many_containers_it_marked(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        caplog.set_level("WARNING", logger="maljan.core.safe_json")
+        loads('{"a": ' + "[" * 10_000 + "]" * 10_000 + ', "b": ' + "[" * 300 + "]" * 300 + "}")
+        loads("[" * 300 + "]" * 300)
+        said = [r.getMessage() for r in caplog.records]
+        assert len(said) == 2
+        assert "2 containers" in said[0]
+        assert "1 containers" in said[1]
+        caplog.clear()
+        loads(json.dumps({"a": [[1]]}))
+        assert not caplog.records
+
     def test_a_deep_object_body_is_validated_while_dropped(self) -> None:
         bad = '{"a": ' * 10_000 + "1" + "}" * 9_999 + ","
         with pytest.raises(json.JSONDecodeError):
             loads(bad)
+
+
+_PEAK_SCRIPT = """
+import json, resource, sys
+from maljan.core.safe_json import loads
+kind, unit, n = sys.argv[1], sys.argv[2], int(sys.argv[3])
+closer = "}]" if unit.startswith("[") else "]}"
+if kind == "deep":
+    text, read = unit * n + "0" + closer * n, loads
+else:
+    text, read = "[" + ",".join(['{"":0}'] * (n // 7)) + "]", json.loads
+base = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+value = read(text)
+print((resource.getrusage(resource.RUSAGE_SELF).ru_maxrss - base) * 1024)
+"""
+
+
+def _added_peak(kind: str, unit: str, n: int) -> int:
+    """The peak resident bytes a fresh process adds reading the body (``ru_maxrss``)."""
+    import os
+    import subprocess
+    import sys
+
+    import maljan
+
+    env = {**os.environ, "PYTHONPATH": str(Path(maljan.__file__).resolve().parents[1])}
+    done = subprocess.run(
+        [sys.executable, "-c", _PEAK_SCRIPT, kind, unit, str(n)],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=env,
+        timeout=300,
+    )
+    return int(done.stdout.strip().splitlines()[-1])
 
 
 def _stored_report_paths() -> list[Any]:

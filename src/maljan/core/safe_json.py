@@ -39,6 +39,7 @@ its parts by reference only where each part is written once.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from json.decoder import scanstring  # type: ignore[attr-defined]
 from json.scanner import NUMBER_RE
@@ -60,6 +61,8 @@ CYCLE_MARK = "[a container that holds itself: written once, not again]"
 SHARED_MARK = "[the same container as written earlier: not written again]"
 
 _CONTAINERS = (dict, list, tuple)
+
+logger = logging.getLogger(__name__)
 
 
 def _children(node: Any) -> Any:
@@ -165,10 +168,35 @@ def dumps(value: Any, **kwargs: Any) -> str:
     return json.dumps(within_depth(value), **kwargs)
 
 
+def _tree_deeper_than(value: Any, limit: int) -> bool:
+    """Whether a tree ``value`` (what ``json.loads`` returns) nests deeper than ``limit``.
+
+    A depth-first walk holding one iterator per open level, stopping at the
+    guard: no record per container, so its memory is the guard's depth, and
+    its time linear in the value. Only for a tree (a value read from text):
+    one that shares or holds itself is measured by :func:`exceeds_depth`.
+    """
+    if not isinstance(value, dict | list):
+        return False
+    stack = [iter(_children(value))]
+    while stack:
+        for child in stack[-1]:
+            if isinstance(child, dict | list):
+                if len(stack) >= limit:
+                    return True
+                stack.append(iter(_children(child)))
+                break
+        else:
+            stack.pop()
+    return False
+
+
 def loads(text: str | bytes | bytearray) -> Any:
     """``json.loads(text)``, each container below :data:`DEPTH_GUARD` read as :data:`DEEPER_MARK`.
 
     A body nested too deeply for ``json.loads`` is read by the iterative reader.
+    Where the guard marks anything, a warning says how many containers it
+    marked (once per body).
     """
     try:
         value = json.loads(text)
@@ -176,8 +204,38 @@ def loads(text: str | bytes | bytearray) -> Any:
         if isinstance(text, bytes | bytearray):
             # Decoded as ``json.loads`` decodes bytes.
             text = text.decode(json.detect_encoding(text), "surrogatepass")
-        return _loads_iteratively(text)
-    return within_depth(value)
+        marked = [0]
+        value = _loads_iteratively(text, marked=marked)
+        _say_marked(marked[0])
+        return value
+    if not _tree_deeper_than(value, DEPTH_GUARD):
+        return value
+    copy = within_depth(value)
+    _say_marked(_count_marks(copy))
+    return copy
+
+
+def _count_marks(value: Any) -> int:
+    """How many :data:`DEEPER_MARK` values a tree within the guard holds."""
+    count = 0
+    stack = [value]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict | list):
+            stack.extend(_children(node))
+        elif node == DEEPER_MARK:
+            count += 1
+    return count
+
+
+def _say_marked(count: int) -> None:
+    if count:
+        logger.warning(
+            "A report body nests deeper than %d levels: %d containers below that depth were "
+            "read as a marked placeholder and are not kept.",
+            DEPTH_GUARD,
+            count,
+        )
 
 
 _WHITESPACE = re.compile(r"[ \t\n\r]*")
@@ -230,20 +288,24 @@ def _scalar(text: str, index: int) -> tuple[Any, int]:
     raise json.JSONDecodeError("Expecting value", text, index)
 
 
-def _loads_iteratively(text: str, limit: int = DEPTH_GUARD) -> Any:
+def _loads_iteratively(
+    text: str, limit: int = DEPTH_GUARD, *, marked: list[int] | None = None
+) -> Any:
     """``text`` read as ``json.loads`` reads it, with an explicit stack instead of recursion.
 
     Every character is validated as ``json.loads`` validates it. Containers
     down to ``limit`` are kept, each with one stack entry; a container below is
     read as :data:`DEEPER_MARK`, its contents parsed and dropped, and the
-    dropped levels are held run-length encoded (one ``[bracket, count]`` pair
-    per run of one bracket), so a run of brackets costs one pair. Time and
-    memory linear in ``text``.
+    dropped levels are held as one byte each (the bracket that opened it) in a
+    ``bytearray``, never more bytes than the body has brackets; a run of one
+    bracket is added and closed in one step. Time and memory linear in
+    ``text``. ``marked[0]``, where given, counts the marks written.
     """
+    counter = marked if marked is not None else [0]
     # Each kept open container, with the key its next value is stored under.
     stack: list[list[Any]] = []
-    # The brackets of the open containers below the guard, innermost last, as runs.
-    dropped: list[list[Any]] = []
+    # The brackets of the open containers below the guard, innermost last.
+    dropped = bytearray()
     index = _skip(text, 0)
     while True:
         opener = text[index : index + 1]
@@ -254,11 +316,12 @@ def _loads_iteratively(text: str, limit: int = DEPTH_GUARD) -> Any:
             assert run is not None
             count, index = text.count("[", index, run.end()), run.end()
             if text[index : index + 1] != "]":
-                _drop(dropped, "[", count)
+                _open_arrays(dropped, count)
                 continue
             # The innermost is empty: a whole value, the mark its parent holds.
-            _drop(dropped, "[", count - 1)
+            _open_arrays(dropped, count - 1)
             value, index = DEEPER_MARK, index + 1
+            counter[0] += 1 if not dropped else 0
         elif opener in ("{", "["):
             index = _skip(text, index + 1)
             closer = "}" if opener == "{" else "]"
@@ -266,13 +329,14 @@ def _loads_iteratively(text: str, limit: int = DEPTH_GUARD) -> Any:
                 index += 1
                 if dropped or len(stack) >= limit:
                     value = DEEPER_MARK
+                    counter[0] += 1 if not dropped else 0
                 else:
                     value = {} if closer == "}" else []
             else:
                 if opener == "{":
                     key, index = _key(text, index)
                 if dropped or len(stack) >= limit:
-                    _drop(dropped, opener, 1)
+                    dropped.append(ord(opener))
                 else:
                     stack.append([{}, key] if opener == "{" else [[], None])
                 continue
@@ -281,7 +345,7 @@ def _loads_iteratively(text: str, limit: int = DEPTH_GUARD) -> Any:
         # A whole value: store it in its container, closing every container it completes.
         while True:
             if dropped:
-                is_object = dropped[-1][0] == "{"
+                is_object = dropped[-1] == _OBJECT
             elif stack:
                 is_object = isinstance(stack[-1][0], dict)
             else:
@@ -310,6 +374,7 @@ def _loads_iteratively(text: str, limit: int = DEPTH_GUARD) -> Any:
                     # the outermost one closed is the mark its parent holds.
                     index = _close_dropped(text, index, dropped)
                     value = DEEPER_MARK
+                    counter[0] += 1 if not dropped else 0
                 else:
                     index += 1
                     value = stack.pop()[0]
@@ -317,30 +382,39 @@ def _loads_iteratively(text: str, limit: int = DEPTH_GUARD) -> Any:
             raise json.JSONDecodeError("Expecting ',' delimiter", text, index)
 
 
-def _drop(dropped: list[list[Any]], bracket: str, count: int) -> None:
-    """``count`` more open containers of ``bracket`` below the guard."""
-    if count <= 0:
-        return
-    if dropped and dropped[-1][0] == bracket:
-        dropped[-1][1] += count
-    else:
-        dropped.append([bracket, count])
+_OBJECT = ord("{")
+# Array openers added in pieces of this many, so adding a run holds no copy of it.
+_ARRAYS = b"[" * 65_536
 
 
-def _close_dropped(text: str, index: int, dropped: list[list[Any]]) -> int:
+def _open_arrays(dropped: bytearray, count: int) -> None:
+    """``count`` more dropped arrays, one byte each, added without a temporary copy of the run."""
+    while count > 0:
+        piece = min(count, len(_ARRAYS))
+        dropped += _ARRAYS[:piece] if piece < len(_ARRAYS) else _ARRAYS
+        count -= piece
+
+
+_OTHER_OPENER = {"]": b"{", "}": b"["}
+
+
+def _close_dropped(text: str, index: int, dropped: bytearray) -> int:
     """Close the innermost dropped containers the closers at ``index`` close; the index after.
 
     The closer at ``index`` matches the innermost dropped container (the
     caller checked). A run of that one closer, with no whitespace in it,
-    closes up to the whole innermost run of dropped containers in one step.
+    closes in one step every innermost dropped container it matches: the run
+    is read no further than the dropped containers, and the matching ones are
+    the innermost bytes up to the last opener of the other kind, found by one
+    search over no more bytes than the run. Each character is scanned a
+    constant number of times.
     """
-    held = dropped[-1][1]
-    # The run of this one closer, read no further than the containers it can close,
-    # so each character is scanned once.
-    run = _CLOSER_RUN[text[index]].match(text, index, index + held)
+    closer = text[index]
+    run = _CLOSER_RUN[closer].match(text, index, index + len(dropped))
     count = run.end() - index if run is not None else 1
-    if count == held:
-        dropped.pop()
-    else:
-        dropped[-1][1] = held - count
+    start = len(dropped) - count
+    other = dropped.rfind(_OTHER_OPENER[closer], start)
+    if other >= 0:
+        count = len(dropped) - other - 1
+    del dropped[len(dropped) - count :]
     return index + count
