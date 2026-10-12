@@ -750,17 +750,20 @@ class _Pack:
     def run(self) -> PackResult:
         started = time.monotonic()
         ran = {step.id for step in self.steps}
+        starting: dict[str, list[PackStep]] = {}
+        for early in self.steps:
+            if early.starts_after:
+                # A step started beside the pack after a step that does not
+                # run starts before the first one.
+                anchor = early.starts_after if early.starts_after in ran else ""
+                starting.setdefault(anchor, []).append(early)
         try:
-            # A step started beside the pack after a step that does not run
-            # starts before the first one.
-            for early in self.steps:
-                if early.starts_after and early.starts_after not in ran:
-                    self._start_early(early)
+            for early in starting.get("", ()):
+                self._start_early(early)
             for step in self.steps:
                 self._run_step(step)
-                for early in self.steps:
-                    if early.starts_after == step.id:
-                        self._start_early(early)
+                for early in starting.get(step.id, ()):
+                    self._start_early(early)
         finally:
             for pool in self._pools:
                 pool.shutdown(wait=False)
@@ -2217,9 +2220,49 @@ def render_pack(entries: list[LedgerEntry], max_chars: int) -> str:
         return _render_with_passes(entries, max_chars)[0]
 
 
+@dataclass
+class _View:
+    """The entries rendered together, read once: the tools a line may name, by position.
+
+    ``rules`` and ``decoders`` are the display names of the rule matchers and
+    of the decoders of call-site strings, each once, in the order first
+    recorded; ``before[id]`` is how many of each were recorded before that
+    entry. A line names those before it in time linear in what it names.
+    """
+
+    rules: list[str] = field(default_factory=list)
+    decoders: list[str] = field(default_factory=list)
+    before: dict[str, tuple[int, int]] = field(default_factory=dict)
+    labels: dict[str, str] = field(default_factory=dict)
+
+    @classmethod
+    def of(cls, entries: Sequence[LedgerEntry]) -> _View:
+        view = cls()
+        seen_rules: set[str] = set()
+        seen_decoders: set[str] = set()
+        for entry in entries:
+            view.before.setdefault(entry.id, (len(view.rules), len(view.decoders)))
+            name = display_name(entry)
+            if kind_of(entry) == RULE_KIND:
+                view.labels[entry.id] = name
+                if name not in seen_rules:
+                    seen_rules.add(name)
+                    view.rules.append(name)
+            if _is_site_source(facts_of(entry)) and name not in seen_decoders:
+                seen_decoders.add(name)
+                view.decoders.append(name)
+        return view
+
+    def counts(self) -> tuple[int, int]:
+        current = _CURRENT.get()
+        if current is None or current.id not in self.before:
+            return len(self.rules), len(self.decoders)
+        return self.before[current.id]
+
+
 # The entries rendered together, and the one whose line is being written: a
 # line that names another tool's answer reads its name from those before it.
-_IN_VIEW: ContextVar[tuple[LedgerEntry, ...] | None] = ContextVar("pack_in_view", default=None)
+_IN_VIEW: ContextVar[_View | None] = ContextVar("pack_in_view", default=None)
 _CURRENT: ContextVar[LedgerEntry | None] = ContextVar("pack_current", default=None)
 
 
@@ -2229,25 +2272,11 @@ def _viewing(entries: Sequence[LedgerEntry]) -> Iterator[None]:
     if _IN_VIEW.get() is not None:
         yield
         return
-    token = _IN_VIEW.set(tuple(entries))
+    token = _IN_VIEW.set(_View.of(entries))
     try:
         yield
     finally:
         _IN_VIEW.reset(token)
-
-
-def _earlier_in_view() -> list[LedgerEntry] | None:
-    """The entries in view before the one being rendered; ``None`` with nothing in view."""
-    view = _IN_VIEW.get()
-    if view is None:
-        return None
-    current = _CURRENT.get()
-    if current is None:
-        return list(view)
-    for index, entry in enumerate(view):
-        if entry is current or entry.id == current.id:
-            return list(view[:index])
-    return list(view)
 
 
 def _rules_in_view() -> str:
@@ -2256,10 +2285,10 @@ def _rules_in_view() -> str:
     ``""`` when there were none; a line rendered alone names the pack's shipped
     rule matcher (``_shipped_kind_name``).
     """
-    earlier = _earlier_in_view()
-    if earlier is None:
+    view = _IN_VIEW.get()
+    if view is None:
         return _shipped_kind_name((RULE_KIND,))
-    return _joined(dict.fromkeys(display_name(e) for e in earlier if kind_of(e) == RULE_KIND))
+    return _joined(view.rules[: view.counts()[0]])
 
 
 def _rules_named() -> str:
@@ -2269,10 +2298,10 @@ def _rules_named() -> str:
 
 def _decoders_in_view() -> str:
     """The decoders of call-site strings recorded before the line, by name (``""``: none)."""
-    earlier = _earlier_in_view()
-    if earlier is None:
+    view = _IN_VIEW.get()
+    if view is None:
         return _shipped_kind_name(("emulated_strings",))
-    return _joined(dict.fromkeys(display_name(e) for e in earlier if _is_site_source(facts_of(e))))
+    return _joined(view.decoders[: view.counts()[1]])
 
 
 def _current_names(kind: str) -> tuple[str, str]:
@@ -2291,7 +2320,8 @@ def _current_names(kind: str) -> tuple[str, str]:
 
 def _rule_labels() -> dict[str, str]:
     """Every rule matcher's entry in view, by id, with its display name."""
-    return {e.id: display_name(e) for e in _IN_VIEW.get() or () if kind_of(e) == RULE_KIND}
+    view = _IN_VIEW.get()
+    return dict(view.labels) if view is not None else {}
 
 
 # Why a pass entry is in neither the pack nor its trailer, as the pack record says it.

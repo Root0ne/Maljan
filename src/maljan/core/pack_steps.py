@@ -51,7 +51,7 @@ the same kind.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -350,14 +350,25 @@ def default_steps() -> tuple[PackStep, ...]:
     return _DEFAULT[0]
 
 
+_INDEXES: list[tuple[dict[str, PackStep], dict[str, PackStep]]] = []
+
+
+def _indexes() -> tuple[dict[str, PackStep], dict[str, PackStep]]:
+    """The shipped steps by id, and by the tool each records under, built once."""
+    if not _INDEXES:
+        steps = default_steps()
+        _INDEXES.append(({s.id: s for s in steps}, {s.called: s for s in steps}))
+    return _INDEXES[0]
+
+
 def shipped_step(step_id: str) -> PackStep | None:
     """The shipped step of ``step_id``, or ``None``."""
-    return next((step for step in default_steps() if step.id == step_id), None)
+    return _indexes()[0].get(step_id)
 
 
 def _by_tool() -> dict[str, PackStep]:
     """The shipped steps by the tool each records under; two steps of one tool share both."""
-    return {step.called: step for step in default_steps()}
+    return _indexes()[1]
 
 
 def shipped_renderer(tool: str) -> str:
@@ -422,22 +433,69 @@ def effective_steps(declared: Iterable[Any] = ()) -> tuple[PackStep, ...]:
 
 
 def _effective(declared: list[PackStep]) -> list[PackStep]:
-    steps = list(default_steps())
-    for step in declared:
-        index = next((i for i, held in enumerate(steps) if held.id == step.id), None)
-        if index is None:
-            placed = step
-            at = len(steps)
+    """The shipped list with ``declared`` laid over it, in one pass over each.
+
+    Held as a linked list by id, so placing a step after another, or in its
+    own place, costs the same whatever the list's length.
+    """
+    held: dict[str, PackStep] = {}
+    after: dict[str, str] = {}
+    before: dict[str, str] = {}
+    head, tail = "", ""
+
+    def link(step_id: str, anchor: str) -> None:
+        nonlocal head, tail
+        follower = after.get(anchor, "") if anchor else head
+        if anchor:
+            after[anchor] = step_id
+            before[step_id] = anchor
         else:
-            placed = _laid_over(steps[index], step)
-            at = index
-            del steps[index]
+            head = step_id
+        if follower:
+            after[step_id] = follower
+            before[follower] = step_id
+        else:
+            tail = step_id
+
+    def unlink(step_id: str) -> str:
+        nonlocal head, tail
+        previous, following = before.pop(step_id, ""), after.pop(step_id, "")
+        if previous:
+            if following:
+                after[previous] = following
+            else:
+                after.pop(previous, None)
+        else:
+            head = following
+        if following:
+            if previous:
+                before[following] = previous
+            else:
+                before.pop(following, None)
+        else:
+            tail = previous
+        return previous
+
+    for step in default_steps():
+        held[step.id] = step
+        link(step.id, tail)
+    for step in declared:
+        if step.id in held:
+            held[step.id] = _laid_over(held[step.id], step)
+            anchor = unlink(step.id)
+        else:
+            held[step.id] = step
+            anchor = tail
         if step.after:
-            anchor = next((i for i, held in enumerate(steps) if held.id == step.after), None)
-            if anchor is None:
+            if step.after not in held or step.after == step.id:
                 raise ValueError(f"step {step.id!r} comes after {step.after!r}, which no step is")
-            at = anchor + 1
-        steps.insert(at, placed)
+            anchor = step.after
+        link(step.id, anchor)
+    steps: list[PackStep] = []
+    cursor = head
+    while cursor:
+        steps.append(held[cursor])
+        cursor = after.get(cursor, "")
     problems: list[str] = []
     ids = {step.id for step in steps}
     for step in steps:
@@ -452,11 +510,6 @@ def _effective(declared: list[PackStep]) -> list[PackStep]:
     if problems:
         raise ValueError("; ".join(problems))
     return steps
-
-
-def steps_record(steps: Sequence[PackStep]) -> list[dict[str, Any]]:
-    """The steps as stored data, each with only the fields it sets."""
-    return [step.model_dump(mode="json", exclude_unset=True) for step in steps]
 
 
 def placeholder_values(template: Mapping[str, Any], values: Mapping[str, str]) -> dict[str, Any]:
