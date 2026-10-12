@@ -342,6 +342,12 @@ class ReportDetailResponse(BaseModel):
     # produced before the report feature shipped. Frontend tabs fall back
     # to the legacy fields above when this is missing.
     malware_report: dict | None = None
+    # The console tab each section an operator's tool produced is drawn on,
+    # by section key (``maljan.reporting.section_tabs``): read from the kind
+    # its tool declared, else the analyst whose call it cites. Computed when
+    # the report is served, never stored; a section it does not name is
+    # placed by its key, as before. ``None`` when no section is placed.
+    section_tabs: dict[str, str] | None = None
     # A report kept from a run that failed after the report was built says so
     # here: where the run failed and the error id. ``None`` on a report of a
     # completed run.
