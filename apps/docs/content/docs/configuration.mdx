@@ -3583,10 +3583,28 @@ reaches the run, and a tool shipped later appears. The declaration box shows
 the declarations in force (shipped, with your changes over them), lists each
 tool that carries a change (changed, removed, or yours) and has a **Reset to
 shipped** per tool; a provider block's tool declarations are edited the same
-way under its **Declaration** heading. A stored map sent back through the API
-is read the same way: a tool it leaves out is not removed (write `null` to
-remove one). A server you add has nothing shipped, so its stored map is its
-whole map.
+way under its **Declaration** heading. A field holding a map or a list
+(`arguments`, `places`, `values`, `techniques`, `reputation`, `words`,
+`report_sections`) is one field: changing one key of it stores the whole field,
+which then no longer takes a key a later release adds to it. A map sent
+through the API is read the same way: a tool it leaves out is not removed
+(write `null` to remove one). A server you add has nothing shipped, so its
+stored map is its whole map.
+
+A map stored as changes carries a mark, `"": "changes"` (the empty key, which
+no tool can be named by), and `GET /api/v1/settings` and the export serve every
+stored map in this marked form. A map without the mark was stored whole by an
+earlier release and is read whole, exactly as that release read it: a shipped
+tool it does not name stays removed. Nothing tells the two forms apart by their
+shape.
+
+When a later release changes a shipped declaration so that your stored change
+of that tool no longer validates over it (a field you set needs one the release
+no longer ships), the change is left out of what is in force with one warning
+in the log: the tool runs as shipped and the rest of the settings is built. The
+declaration box marks that tool as conflicting with its stored change (the
+settings schema lists it under `tool_facts_conflicts`), so you can reset it or
+edit it.
 
 Settings saved by an earlier release stored a built-in's tool declarations
 whole. The database migration (revision `20261012000000`) rewrites each such
@@ -3595,7 +3613,13 @@ a frozen record of what every earlier release shipped), a tool stored as that
 release shipped it is dropped and follows today's declaration, an edited tool
 keeps the fields you changed, and a missing shipped tool stays removed. Where
 the writing release cannot be told apart, the stored map is kept whole as
-yours. It logs one line when it rewrites anything.
+yours. Each rewritten map is marked; a marked map, one this release saved also
+before the migration ran, is left alone, so running it again changes nothing.
+It logs one line when it rewrites anything. Run the migration (`make migrate`)
+before starting this release: until it has run, a map an earlier release stored
+reads as that release read it, and the API logs one warning at startup while
+the database is not at its latest migration. A downgrade writes every marked
+map whole again.
 
 **A declaration for a server you add.** `docs/examples/profiles/qu1cksc0pe.declaration.json`
 holds the declaration fields of a Qu1cksc0pe server, its six tools' kinds,
@@ -3737,7 +3761,8 @@ sets `Content-Disposition: attachment; filename=maljan-settings.json`:
 `maljan-settings/2` a built-in block's tool declarations are stored as their
 changes over the shipped ones, one tool at a time (see **Tool declarations are
 saved one tool at a time**), so an export and import round trip keeps exactly
-those changes. A document in `maljan-settings/1`, written before, is still
+those changes. A map in a `/2` document without the mark is read whole, as
+a stored one is. A document in `maljan-settings/1`, written before, is still
 accepted: a built-in block's tool declarations there are its whole map, so a
 shipped tool it does not name stays removed and a tool it names reads as
 written. A `format` other than these two is rejected with 422; unknown or read-only keys
