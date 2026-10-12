@@ -809,49 +809,62 @@ class TestEveryReaderReadsADnsRowSNameAlike:
             assert "dns_row_name" in text, relative
             assert not re.search(r"get\(\s*\"request\"", text), relative
 
-    def test_no_module_holds_a_tuple_of_the_name_fields_of_its_own(self) -> None:
-        """A tuple naming ``request`` beside another DNS name key is a second copy of the fields.
+    def test_no_module_holds_a_copy_of_the_name_fields_of_its_own(self) -> None:
+        """A tuple, list or set naming two DNS name keys is a second copy of the fields.
 
-        Only the one reader's own tuple (``DNS_NAME_KEYS``) holds them, and the
-        Markdown table's keys of a row that is no DNS row, read past the DNS
-        row reader for a DNS row.
+        Any two of them, ``request`` or not, and a ``.get(...) or .get(...)``
+        chain over two of them alike (:func:`_name_field_copies`). Only the one
+        reader's own tuple (``DNS_NAME_KEYS``) holds them, beside the Markdown
+        table's keys of a row that is no DNS row (read past the DNS row reader
+        for a DNS row) and the word lists that hold two of the words with
+        another meaning: an argument's role words, a description's vocabulary,
+        a card's source fields, indicator kinds and code identifiers. Each is
+        named by the name it is assigned to, or the function holding it.
         """
-        import ast
         from pathlib import Path
 
-        from maljan.schemas.sandbox_document import DNS_NAME_KEYS
-
         root = Path(__file__).resolve().parents[4] / "src" / "maljan"
-        others = set(DNS_NAME_KEYS) - {"request"}
-        allowed = {("schemas/sandbox_document.py", "DNS_NAME_KEYS")}
-        allowed |= {("reporting/ledger_report.py", "_NON_DNS_ENDPOINT_KEYS")}
+        allowed = {
+            ("schemas/sandbox_document.py", "DNS_NAME_KEYS"),
+            ("reporting/ledger_report.py", "_NON_DNS_ENDPOINT_KEYS"),
+            ("core/declaration_proposals.py", "_DESCRIPTION_WORDS"),
+            ("core/declaration_proposals.py", "_argument_role"),
+            ("memory/technique_cards.py", "SOURCE_FIELDS"),
+            ("reporting/dedupe.py", "_CASE_BLIND"),
+            ("tools/strings.py", "_CODE_IDENTIFIER_LABELS"),
+        }
         found: list[str] = []
         for path in sorted(root.rglob("*.py")):
             relative = path.relative_to(root).as_posix()
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            assigned = {
-                id(node.value): target.id
-                for node in ast.walk(tree)
-                if isinstance(node, ast.Assign | ast.AnnAssign)
-                for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
-                if isinstance(target, ast.Name) and node.value is not None
-            }
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Tuple | ast.List):
-                    continue
-                words = {
-                    e.value
-                    for e in node.elts
-                    if isinstance(e, ast.Constant) and isinstance(e.value, str)
-                }
-                if "request" in words and words & others:
-                    if (relative, assigned.get(id(node), "")) not in allowed:
-                        found.append(f"{relative}:{node.lineno}")
+            text = path.read_text(encoding="utf-8")
+            found += [
+                f"{relative}:{line}"
+                for line, owner in _name_field_copies(text)
+                if (relative, owner) not in allowed
+            ]
             if relative != "schemas/sandbox_document.py":
-                text = path.read_text(encoding="utf-8")
                 if re.search(r"get\(\s*\"request\"", text) and "dns" in relative:
                     found.append(f'{relative}: get("request")')
         assert found == []
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            'KEYS = ("query", "hostname", "domain")',
+            'KEYS = {"hostname", "domain"}',
+            'KEYS = ["name", "request"]',
+            'def f(row):\n    return row.get("hostname") or row.get("domain")',
+        ],
+    )
+    def test_the_guard_finds_a_copy_with_or_without_request(self, source: str) -> None:
+        assert len(_name_field_copies(source)) == 1
+
+    @pytest.mark.parametrize(
+        "source",
+        ['KEYS = ("hostname", "port")', 'def f(row):\n    return row.get("name") or ""'],
+    )
+    def test_one_name_field_is_no_copy(self, source: str) -> None:
+        assert _name_field_copies(source) == []
 
     @pytest.mark.parametrize("key", ["request", "query", "hostname", "domain", "name"])
     def test_the_markdown_network_table_prints_a_row_named_under_any_name_key(
@@ -986,3 +999,57 @@ def test_a_bare_string_domains_row_is_projected_as_dev_projected_it() -> None:
         ("row-m6.example", (), "sandbox"),
         ("spaced-m6.example", (), "sandbox"),
     ]
+
+
+def _name_field_copies(source: str) -> list[tuple[int, str]]:
+    """``(line, owner)`` of each tuple, list, set or ``.get`` chain naming two DNS name keys.
+
+    The owner is the name the node is assigned to, else the function holding
+    it, else empty.
+    """
+    import ast
+
+    from maljan.schemas.sandbox_document import DNS_NAME_KEYS
+
+    names = set(DNS_NAME_KEYS)
+    tree = ast.parse(source)
+    owner: dict[int, str] = {}
+    stack: list[tuple[ast.AST, str]] = [(tree, "")]
+    while stack:
+        node, held = stack.pop()
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            held = node.name
+        elif isinstance(node, ast.Assign | ast.AnnAssign):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            named = [t.id for t in targets if isinstance(t, ast.Name)]
+            held = named[0] if named else held
+        owner[id(node)] = held
+        stack.extend((child, held) for child in ast.iter_child_nodes(node))
+
+    def got(node: ast.AST) -> str:
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "get"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            return node.args[0].value
+        return ""
+
+    out: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Tuple | ast.List | ast.Set):
+            words = {
+                e.value
+                for e in node.elts
+                if isinstance(e, ast.Constant) and isinstance(e.value, str)
+            }
+        elif isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or):
+            words = {got(value) for value in node.values} - {""}
+        else:
+            continue
+        if len(words & names) >= 2:
+            out.append((node.lineno, owner[id(node)]))
+    return out
