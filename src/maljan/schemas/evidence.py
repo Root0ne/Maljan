@@ -354,6 +354,18 @@ class LedgerEntry(BaseModel):
         ),
     )
 
+    agent_role: str | None = Field(
+        default=None,
+        # Like ``source``: an entry written without one dumps as it did.
+        exclude_if=lambda value: value is None,
+        description=(
+            "The role the calling agent's definition declared when the entry was written "
+            "(core.config.AgentDefinition.role: static, dynamic, network, judge, generic …), "
+            "read later from here, never from the reading process's settings. None for a "
+            "call no agent definition made (the pack) and an entry written before roles were."
+        ),
+    )
+
     def to_captured(self) -> CapturedToolOutput:
         """This entry in the shape readers of the previous capture expect."""
         return CapturedToolOutput(
@@ -414,6 +426,7 @@ def build_entry(
     chars_dropped: int = 0,
     source: str | None = None,
     structured_content: dict[str, Any] | None = None,
+    agent_role: str | None = None,
 ) -> LedgerEntry:
     """One entry, with the output trimmed and parsed the same way every time.
 
@@ -512,6 +525,7 @@ def build_entry(
         source=source or None,
         facts=facts,
         structured_from_server=content is not None,
+        agent_role=agent_role or None,
         reputation=_reputation_at_write(
             facts,
             ok=ok and not repeated_of and not cut,

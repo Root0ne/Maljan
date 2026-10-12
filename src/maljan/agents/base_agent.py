@@ -3899,6 +3899,15 @@ class BaseAnalyst(BudgetMeter, ABC):
         """A per-job identity for the handles' same-job short circuit."""
         return self._job_id or "job"
 
+    def _definition_role(self) -> str | None:
+        """The role this agent's definition declares, or ``None`` outside a container."""
+        container = getattr(self, "_container", None)
+        if container is None:
+            return None
+        from maljan.agents.composition import role_of
+
+        return role_of(container.config, self.name)
+
     def _definition_tool_refs(self) -> list[Any]:
         """This agent definition's ``ToolRef``s, under the active profile.
 
@@ -4614,6 +4623,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             corpus=getattr(self, "evidence_corpus", None),
             # The model a call is filed under until a turn names another.
             model=self._model_label(),
+            # The role this agent's definition declares, stored on each entry.
+            agent_role=self._definition_role(),
         )
         # The repeat guard is per loop, like the recorder, and a later chunk's
         # starts with the calls the earlier chunks of the same analysis made:

@@ -281,6 +281,7 @@ class MalwareReportBuilder:
                 repeated_of=entry.repeated_of or None,
                 source=entry.source,
                 facts=entry.facts,
+                agent_role=entry.agent_role,
             )
             for entry in self.evidence_ledger
         ]

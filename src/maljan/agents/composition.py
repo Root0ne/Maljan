@@ -751,6 +751,14 @@ def _mcp_refs(settings: Settings, definition: AgentDefinition, key: str) -> list
     return [ref for ref in _server_refs(settings, definition) if str(ref.server) not in excluded]
 
 
+def role_of(settings: Any, key: str) -> str | None:
+    """The role agent ``key``'s definition declares, or ``None`` when it has none."""
+    definitions = getattr(getattr(settings, "agents", None), "definitions", None) or {}
+    definition = definitions.get(key) if hasattr(definitions, "get") else None
+    role = getattr(definition, "role", None)
+    return str(role) if role else None
+
+
 def mcp_refs_for(settings: Settings, key: str) -> list[ToolRef]:
     """Agent ``key``'s server references under the active profile, or ``[]``.
 

@@ -55,13 +55,16 @@ def _capture(
     return out
 
 
-def _row(entry_id: str, tool: str, *, agent: str = "static", **over: Any) -> EvidenceIndexRow:
+def _row(
+    entry_id: str, tool: str, *, agent: str = "static", role: str | None = "static", **over: Any
+) -> EvidenceIndexRow:
     return EvidenceIndexRow(
         id=entry_id,
         agent=agent,
         tool=tool,
         source=over.get("source", OPERATOR),
         facts=over.get("facts", UNDECLARED),
+        agent_role=role,
     )
 
 
@@ -143,6 +146,20 @@ def test_a_report_with_no_index_row_for_the_entry_routes_nothing() -> None:
     assert _shown("persistence_detail", report, isr) == []
 
 
+@pytest.mark.parametrize("seq", [None, "4", -1, True])
+def test_an_output_that_carries_no_call_number_is_not_routed(seq: Any) -> None:
+    capture = _capture("read_autoruns", 0)
+    if seq is None:
+        del capture["seq"]
+    else:
+        capture["seq"] = seq
+    report = _report(
+        [capture], [_row("ev_0001", "read_autoruns"), _row("ev_0005", "read_autoruns")]
+    )
+    isr = _isr(("The sample persists through a run key.", "ev_0001 ev_0005"))
+    assert _shown("persistence_detail", report, isr) == []
+
+
 def test_a_declared_output_is_routed_by_its_kind_alone() -> None:
     declared = {"v": 1, "kind": "crypto_constants"}
     report = _report(
@@ -201,13 +218,22 @@ def _placed(sections: list[EvidenceSection], rows: list[EvidenceIndexRow]) -> di
     return by_model
 
 
-def test_an_undeclared_section_is_placed_by_the_analyst_whose_call_it_cites() -> None:
-    assert _placed([_section("tool_x", ["ev_0001"])], [_row("ev_0001", "x")]) == {
+def test_an_undeclared_section_is_placed_by_the_role_of_the_agent_whose_call_it_cites() -> None:
+    section = [_section("tool_x", ["ev_0001"])]
+    assert _placed(section, [_row("ev_0001", "x")]) == {"tool_x": "static"}
+    # A renamed or cloned agent places by its declared role, never its name.
+    assert _placed(section, [_row("ev_0001", "x", agent="reverser", role="static")]) == {
         "tool_x": "static"
     }
-    assert _placed([_section("tool_x", ["ev_0001"])], [_row("ev_0001", "x", agent="network")]) == {
+    assert _placed(section, [_row("ev_0001", "x", agent="pcap_reader", role="network")]) == {
         "tool_x": "network"
     }
+    # The judge's own lookups are drawn where the sample's identity is.
+    assert _placed(section, [_row("ev_0001", "x", agent="judge", role="judge")]) == {
+        "tool_x": "identity"
+    }
+    # An agent named like a tab, whose role names none, places nothing.
+    assert _placed(section, [_row("ev_0001", "x", agent="static", role="generic")]) == {}
 
 
 @pytest.mark.parametrize(
@@ -221,24 +247,28 @@ def test_an_undeclared_section_is_placed_by_the_analyst_whose_call_it_cites() ->
     ],
 )
 def test_an_accepted_declaration_places_the_section_by_its_kind(facts: Any, tab: str) -> None:
-    rows = [_row("ev_0001", "x", agent="judge", facts=facts)]
+    rows = [_row("ev_0001", "x", agent="lead", role="lead", facts=facts)]
     assert _placed([_section("tool_x", ["ev_0001"])], rows) == {"tool_x": tab}
 
 
-def test_a_kind_no_tab_reads_falls_back_to_the_analyst() -> None:
-    rows = [_row("ev_0001", "x", facts={"v": 1, "kind": "unclassified"})]
-    assert _placed([_section("tool_x", ["ev_0001"])], rows) == {"tool_x": "static"}
+@pytest.mark.parametrize(
+    "facts",
+    [{"v": 1, "kind": "unclassified"}, {"v": 1, "kind": "a_kind_no_tab_reads"}, {"v": 1}],
+)
+def test_a_kind_no_tab_reads_falls_back_to_the_agent_s_role(facts: Any) -> None:
+    rows = [_row("ev_0001", "x", agent="mine", role="dynamic", facts=facts)]
+    assert _placed([_section("tool_x", ["ev_0001"])], rows) == {"tool_x": "dynamic"}
 
 
 @pytest.mark.parametrize(
     ("sections", "rows"),
     [
-        # Called by the judge, declaring nothing: no tab to name.
-        ([_section("tool_x", ["ev_0001"])], [_row("ev_0001", "x", agent="judge")]),
-        # Two analysts' calls in one section.
+        # An entry written without a role (a stored run), declaring nothing.
+        ([_section("tool_x", ["ev_0001"])], [_row("ev_0001", "x", role=None)]),
+        # Two roles' calls in one section.
         (
             [_section("tool_x", ["ev_0001", "ev_0002"])],
-            [_row("ev_0001", "x"), _row("ev_0002", "x", agent="dynamic")],
+            [_row("ev_0001", "x"), _row("ev_0002", "x", role="dynamic")],
         ),
         # A cited entry the index does not hold.
         ([_section("tool_x", ["ev_0001", "ev_0009"])], [_row("ev_0001", "x")]),
@@ -254,6 +284,53 @@ def test_what_neither_reading_places_is_left_to_the_key_map(
     sections: list[EvidenceSection], rows: list[EvidenceIndexRow]
 ) -> None:
     assert _placed(sections, rows) == {}
+
+
+def test_no_agent_name_places_a_section() -> None:
+    """Placement reads the stored role, never an agent's name, through the role vocabulary."""
+    import ast
+    import inspect
+    from typing import get_args
+
+    from maljan.core.config import AnalystRole
+    from maljan.reporting import section_tabs as module
+
+    assert set(module.TAB_OF_ROLE) <= set(get_args(AnalystRole))
+    tree = ast.parse(inspect.getsource(module))
+    read_fields = {
+        node.args[1].value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "id", "") == "_field"
+        and len(node.args) == 2
+        and isinstance(node.args[1], ast.Constant)
+    }
+    assert "agent" not in read_fields
+    assert "agent_role" in read_fields
+
+
+def test_an_entry_records_its_agent_s_declared_role(monkeypatch: pytest.MonkeyPatch) -> None:
+    from maljan.agents.evidence_recorder import EvidenceRecorder
+
+    recorder = EvidenceRecorder("reverser", agent_role="static")
+    entry = recorder.record(tool="x", args={}, output="answer", server="invented")
+    assert entry.agent_role == "static"
+    assert json.loads(entry.model_dump_json())["agent_role"] == "static"
+    bare = EvidenceRecorder("pack").record(tool="x", args={}, output="answer", server=None)
+    assert "agent_role" not in json.loads(bare.model_dump_json())
+
+
+def test_an_agent_reads_its_role_from_its_definition_whatever_its_name() -> None:
+    from maljan.agents.composition import role_of
+    from maljan.core.config import Settings
+
+    settings = Settings()
+    assert role_of(settings, "judge") == "judge"
+    assert role_of(settings, "static") == "static"
+    assert role_of(settings, "no_such_agent") is None
+    clone = settings.agents.definitions["static"].model_copy()
+    settings.agents.definitions["reverser"] = clone
+    assert role_of(settings, "reverser") == "static"
 
 
 @pytest.mark.parametrize("odd", [None, {}, {"sections": "x"}, {"sections": [1, {"key": 3}]}])
@@ -279,7 +356,7 @@ def test_the_served_report_carries_the_placements() -> None:
     report = MalwareReport(
         identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
         sections=[_section("tool_x", ["ev_0001"])],
-        evidence_index=[_row("ev_0001", "x", agent="dynamic")],
+        evidence_index=[_row("ev_0001", "x", agent="dynamic", role="dynamic")],
     )
 
     def _row_of(malware_report: Any) -> Any:
