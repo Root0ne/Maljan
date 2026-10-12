@@ -873,6 +873,9 @@ class _Pack:
     def _peak(self, step: PackStep) -> tuple[int | None, str]:
         """A step's peak memory and how it is known: this worker's measure, else its declaration.
 
+        Its declaration is the step's ``peak_mb``, else its tool's declared
+        ``memory_peak_mb`` (the pack's own, or its server's block).
+
         ``(None, "measured")`` for a step that measures its peak and has not
         yet in this worker; ``(None, "declared")`` for one with neither.
         """
@@ -883,7 +886,7 @@ class _Pack:
                 return int(value), MEASURED
         if step.peak_mb:
             return int(step.peak_mb) * _MIB, DECLARED
-        declared = _pack_facts(step) if step.builtin else None
+        declared = _pack_facts(step) if step.builtin else _server_facts(step)
         if declared is not None and declared.memory_peak_mb:
             return int(declared.memory_peak_mb) * _MIB, DECLARED
         return None, MEASURED if measure is not None else DECLARED
@@ -1877,6 +1880,22 @@ def _pack_facts(step: PackStep) -> ToolFacts | None:
 
     held = in_process_declarations().get(PACK)
     return held.tool_facts.get(step.called) if held is not None else None
+
+
+def _server_facts(step: PackStep) -> ToolFacts | None:
+    """What a server step's tool declares now (its server's block): read for scheduling alone.
+
+    A live declaration, read where nothing persisted depends on it beyond the
+    schedule this run states (``core.declared_reading``); ``None`` when it
+    cannot be read.
+    """
+    from maljan.core.declared_reading import declarations
+
+    try:
+        return declarations().declaration_for((f"mcp:{step.server}", step.called))
+    except Exception as exc:  # noqa: BLE001 — an unread declaration declares nothing
+        logger.debug("triage pack: %s's declaration was not read (%s).", step.called, exc)
+        return None
 
 
 def _shipped_kind_name(kinds: Iterable[str]) -> str:

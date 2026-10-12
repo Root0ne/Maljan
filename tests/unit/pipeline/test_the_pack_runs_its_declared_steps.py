@@ -399,6 +399,30 @@ class TestAnInventedToolAsAStep:
         assert result.to_state()["inventory"] == "in turn: Inventory declares no memory peak"
         assert result.entries[-1].ok
 
+    def test_its_tool_s_declared_peak_sizes_it_against_the_floor(
+        self, settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.core import declared_reading
+
+        facts = {**INVENTORY["tool_facts"]["count_sections"], "memory_peak_mb": 2048}
+        declared = {**INVENTORY, "tool_facts": {"count_sections": facts}}
+        settings.mcp.servers["inventory"] = MCPServerConfig.model_validate(declared)
+        declared_reading.forget()
+        monkeypatch.setattr(triage_pack, "available_memory_bytes", lambda: 11 * 1024**3)
+        monkeypatch.setattr(triage_pack, "cgroup_headroom_bytes", lambda: None)
+        step = {**self.STEP, "starts_after": "signing_info"}
+        result = _pack(
+            _sample(tmp_path),
+            steps=[step],
+            server_step=_Calls({"inventory": INVENTORY_ANSWER}),
+            memory_floor_bytes=10240 * 1024 * 1024,
+        )
+        declared_reading.forget()
+        assert result.to_state()["inventory"] == (
+            "in turn: 11264 MiB available, less Inventory's 2048 MiB bound, is under the "
+            "10240 MiB floor"
+        )
+
 
 @pytest.mark.usefixtures("settings")
 class TestASwappedRuleMatcher:
