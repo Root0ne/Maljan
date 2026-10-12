@@ -49,3 +49,26 @@ def test_a_database_behind_head_is_named_in_one_fixed_line(
 
 def test_there_is_one_head() -> None:
     assert len(migration_state.head_revisions()) == 1
+
+
+def test_a_database_ahead_of_head_is_named_as_ahead(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING):
+        assert migration_state.warn_when_behind_head(_stamped("29991231000000")) is True
+    assert [r.getMessage() for r in _said(caplog)] == [migration_state.AHEAD_OF_HEAD]
+    assert "ahead" in migration_state.AHEAD_OF_HEAD
+    assert "behind" in migration_state.BEHIND_HEAD
+
+
+def test_a_failed_check_logs_one_fixed_line_without_what_the_driver_said(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(_connection: object) -> set[str]:
+        raise RuntimeError("driver text: host=db port=5432")
+
+    monkeypatch.setattr(migration_state, "current_revisions", broken)
+    with caplog.at_level(logging.DEBUG):
+        migration_state.check_revision_at_start(object())
+    said = _said(caplog)
+    assert [r.getMessage() for r in said] == [migration_state.CHECK_FAILED % "RuntimeError"]
+    assert all(r.exc_info is None for r in said)
+    assert "driver text" not in caplog.text
