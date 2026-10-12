@@ -260,15 +260,23 @@ def _select_open_channels(
     sandbox publishes there. A mapping is kept as it is, anything else is
     wrapped so every row is still a mapping (a name the resolved API names
     place holds is kept as the text it is). A channel is capped as every other
-    channel is. A place is read whole, bounded by the report's own size: a path
-    that names each node of the report at most once matches no more nodes than
-    the report holds, so one that matches more repeats nodes and is cut there,
-    and says so (``truncated``), never past what the report itself holds.
+    channel is. A place is read whole, bounded by the report's own size, in
+    what it holds as well as in its rows: each match is kept by reference, and
+    a document writes each match out whole, so a descendant path whose matches
+    nest (``$..x`` where an ``x`` holds an ``x``) would write the inner ones
+    again inside the outer ones. The values a place's kept matches hold, each
+    match counted with everything nested in it, never exceed the values the
+    report holds: a place reaching that is cut there and says so
+    (``truncated``, and a warning). A path whose matches do not nest holds at
+    most the report once and is never cut. Each match's size is looked up in
+    one measure of the report taken before (:func:`subtree_sizes`), so the
+    bound costs time linear in the report.
     """
     rows: dict[str, list[Any]] = {}
     stats: dict[str, ChannelStats] = {}
     paths = compiled.place_paths if places else compiled.channel_paths
-    bound = node_count(payload) if places and paths else MAX_ROWS_PER_CHANNEL
+    sizes = subtree_sizes(payload) if places and paths else {}
+    bound = sizes.get(id(payload), 1) if places and paths else MAX_ROWS_PER_CHANNEL
     for name, path in paths.items():
         label = f"places.{name}" if places else f"channels.{name}"
         try:
@@ -280,11 +288,18 @@ def _select_open_channels(
         limit = bound if places else MAX_ROWS_PER_CHANNEL
         truncated = len(peeked) > limit
         matches = peeked[:limit]
+        if places:
+            held = 0
+            for kept_count, match in enumerate(matches):
+                held += sizes.get(id(match), 1)
+                if held > bound:
+                    matches, truncated = matches[:kept_count], True
+                    break
         if truncated and places:
             logger.warning(
-                "rest mapping: a place path matched more nodes than the report holds (%d); "
-                "it repeats nodes and was cut there.",
-                limit,
+                "rest mapping: a place path matched more than the report holds (%d values); "
+                "its matches repeat or nest, and it was cut there.",
+                bound,
             )
         converted = (_open_row(name if places else "", m) for m in matches)
         kept = [row for row in converted if row is not None]
@@ -340,6 +355,35 @@ def unnamed_blocks(cfg: RestMappingConfig, payload: dict[str, Any]) -> dict[str,
         for key, value in payload.items()
         if key not in named and value not in (None, "", [], {})
     }
+
+
+def subtree_sizes(payload: Any) -> dict[int, int]:
+    """How many values each container of ``payload`` holds, itself and all nested, by identity.
+
+    One post-order walk with a stack, each distinct container measured once,
+    so a report costs time and memory linear in its size, and a container
+    reached twice is counted once. A value that is no container holds one.
+    """
+    sizes: dict[int, int] = {}
+    stack: list[tuple[Any, bool]] = [(payload, False)]
+    while stack:
+        node, closing = stack.pop()
+        if not isinstance(node, dict | list):
+            continue
+        key = id(node)
+        children = node.values() if isinstance(node, dict) else node
+        if closing:
+            sizes[key] = 1 + sum(
+                sizes.get(id(child), 1) if isinstance(child, dict | list) else 1
+                for child in children
+            )
+            continue
+        if key in sizes:
+            continue
+        sizes[key] = 1  # open: a container reached again inside itself counts once
+        stack.append((node, True))
+        stack.extend((child, False) for child in children if isinstance(child, dict | list))
+    return sizes
 
 
 def node_count(payload: Any) -> int:

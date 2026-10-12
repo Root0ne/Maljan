@@ -72,6 +72,7 @@ from app.services.settings_service import (
     SettingsService,
     SettingsValidationError,
     core_settings_cache,
+    effective_core_settings,
     lenient_imported_declarations,
 )
 
@@ -293,6 +294,34 @@ async def _agent_warnings(db: AsyncSession) -> dict[str, str]:
         return {}
 
 
+async def _mapping_warnings(db: AsyncSession, changes: dict[str, Any]) -> dict[str, str]:
+    """A warning beside each saved report-mapping path whose reading is not linear in the report.
+
+    Read from the settings as they now stand, for a save that touched the
+    sandbox settings; the save itself is never refused for it
+    (``core.report_mapping.costly_paths``). Never raises, as
+    :func:`_agent_warnings` never does.
+    """
+    from maljan.core.report_mapping import costly_paths
+
+    if not any(str(key).startswith("sandbox.") for key in changes):
+        return {}
+    try:
+        sandbox = (await effective_core_settings(db)).sandbox
+    except Exception as exc:  # noqa: BLE001 — advisory, and the write is done
+        logger.debug("Could not read the mapping paths (%s); continuing.", type(exc).__name__)
+        return {}
+    out = {
+        f"sandbox.rest.mapping.{field}": said
+        for field, said in costly_paths(sandbox.rest.mapping).items()
+    }
+    for index, fmt in enumerate(sandbox.report_formats):
+        if fmt.mapping is not None:
+            for field, said in costly_paths(fmt.mapping).items():
+                out[f"sandbox.report_formats.{index}.mapping.{field}"] = said
+    return out
+
+
 async def _unprobed_models_in(db: AsyncSession, changes: dict[str, Any]) -> list[str]:
     """Every per-agent model this save names that no probe has reached.
 
@@ -357,7 +386,9 @@ async def patch_values(
     runtime_config.invalidate()
     core_settings_cache.invalidate()
     return PatchResponse(
-        applied=res.applied, applies=res.applies, warnings=await _agent_warnings(db)
+        applied=res.applied,
+        applies=res.applies,
+        warnings={**await _agent_warnings(db), **await _mapping_warnings(db, changes)},
     )
 
 
