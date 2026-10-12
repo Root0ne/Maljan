@@ -594,17 +594,18 @@ def _probe_config(entry: dict[str, Any], name: str) -> MCPServerConfig:
     built-in, and a built-in is started with the environment names a job
     starts it with (``builtin_env_allow``) rather than with whatever a stored
     row holds — the probe exists so that the console tests the same server the
-    run gets. Its tool declarations are read as a save would put them in
-    force: the entry's are its changes over what the server ships, marked as
-    such or not, as the console stages them.
+    run gets. Its tool declarations are read as every path reads a sent map
+    (``tool_declarations.sent_in_force``): marked, as the entry's changes over
+    what the server ships, as the console stages them; without the mark,
+    whole, as an earlier release read it.
     """
     from maljan.core.settings_overrides import SERVER_MAP_PATH, shipped_tool_facts
-    from maljan.core.tool_declarations import merge_tool_facts
+    from maljan.core.tool_declarations import sent_in_force
 
     facts = entry.get("tool_facts")
     if isinstance(facts, dict):
         shipped = shipped_tool_facts(f"{SERVER_MAP_PATH}.{name}")
-        entry = {**entry, "tool_facts": merge_tool_facts(shipped, facts)}
+        entry = {**entry, "tool_facts": sent_in_force(shipped, facts)}
     config = MCPServerConfig.model_validate(entry)
     update: dict[str, Any] = {"enabled": True, "tools": None}
     if name in BUILTIN_SERVER_KEYS:

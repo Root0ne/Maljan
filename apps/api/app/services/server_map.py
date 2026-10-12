@@ -41,9 +41,12 @@ from maljan.core.tool_declarations import (
     check_own_prefix,
     fill_declaration,
     holds_changes,
+    kept_stored_changes,
     merge_tool_facts,
+    stored_changes,
     strip_declaration_defaults,
     with_mark,
+    without_mark,
 )
 from pydantic import ValidationError
 
@@ -131,6 +134,8 @@ def validate_server_map(
         # was (leniently, below), so a stored entry never blocks an unrelated
         # save.
         facts_in = entry.get("tool_facts")
+        stored_facts: Any = None
+        kept: dict[str, Any] = {}
         if isinstance(facts_in, dict):
             shipped = shipped_tool_facts(f"{SERVER_MAP_PATH}.{key}")
             stored_entry = (stored or {}).get(key)
@@ -142,15 +147,19 @@ def validate_server_map(
                 if isinstance(stored_facts, dict)
                 else None
             )
-            # A map sent back exactly as stored says what the stored one says,
-            # in whichever form it was stored (a whole map an earlier release
-            # wrote stays whole); any other is the entry's changes over what
-            # the server ships, marked or not, so a shipped tool it leaves out
-            # stays as shipped and only ``null`` removes one.
-            in_force = (
-                stored_in_force
-                if stored_in_force is not None and facts_in == stored_facts
-                else merge_tool_facts(shipped, facts_in)
+            # A sent map is read as every path reads one
+            # (``tool_declarations.sent_in_force``): marked, as the entry's
+            # changes over what the server ships, so a shipped tool it leaves
+            # out stays as shipped and only ``null`` removes one; without the
+            # mark, whole, as an earlier release read it. A map sent back
+            # exactly as stored therefore says what the stored one says. A
+            # tool sent with its stored change exactly as stored, where this
+            # release refuses that change, is not this save's edit: it is kept
+            # as stored and left out of every check (``kept_stored_changes``).
+            incoming = stored_changes(facts_in, shipped)
+            kept = kept_stored_changes(incoming, stored_facts, shipped)
+            in_force = merge_tool_facts(
+                shipped, {tool: change for tool, change in incoming.items() if tool not in kept}
             )
             entry = {**entry, "tool_facts": in_force}
             before: list[Any] = [stored_in_force, shipped]
@@ -195,9 +204,13 @@ def validate_server_map(
                 # leaves out of what is in force (``stored_in_force``) included,
                 # so an unrelated save never drops the operator's change.
                 dumped["tool_facts"] = stored_facts
-            elif builtin is None and dumped.get("tool_facts"):
-                # A server that ships nothing: its whole map is its changes.
-                dumped["tool_facts"] = with_mark(dumped["tool_facts"])
+            else:
+                # Stored marked as changes (a server that ships nothing: its
+                # whole map), with each tool kept as stored put back as it was.
+                changes = without_mark(dumped.get("tool_facts") or {})
+                changes.update(kept)
+                if changes:
+                    dumped["tool_facts"] = with_mark(changes)
         if key in BUILTIN_SERVER_KEYS:
             # The row an operator saves is the one every later load starts
             # from, so the names the sidecar cannot run without are written

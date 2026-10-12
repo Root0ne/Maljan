@@ -64,35 +64,53 @@ def _is_declaration_leaf(key: str, value: Any) -> bool:
 def incoming_declaration_leaves(changes: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
     """``changes`` with each provider block's tool declarations marked as changes over what ships.
 
-    A ``core.<block>.tool_facts`` value sent back exactly as stored says what
-    the stored one says, in whichever form it was stored: one an earlier
-    release stored whole is turned into the changes that put the same in
-    force. Any other value is the block's changes over what it ships, marked
-    or not (``tool_declarations.with_mark``): a shipped tool it leaves out
-    stays as shipped, and only ``null`` removes one. Every other key is
-    unchanged.
+    A ``core.<block>.tool_facts`` value is read as every path reads a sent
+    map (``tool_declarations.sent_in_force``): marked, as the block's changes
+    over what it ships, so a shipped tool it leaves out stays as shipped and
+    only ``null`` removes one; without the mark, whole, as an earlier release
+    read it. A value sent back exactly as stored therefore says what the
+    stored one says; one stored marked is passed on as it is. Every other
+    key is unchanged.
     """
-    from maljan.core.tool_declarations import holds_changes, whole_as_changes, with_mark
+    from maljan.core.tool_declarations import holds_changes, stored_changes, with_mark
 
     out = dict(changes)
     for key, value in changes.items():
         if not _is_declaration_leaf(key, value):
             continue
         held = current.get(key)
-        if value == held and not holds_changes(held):
-            out[key] = with_mark(whole_as_changes(held, _shipped_leaf(key)))
-        elif value != held:
-            out[key] = with_mark(value)
+        if value == held and holds_changes(held):
+            continue
+        out[key] = with_mark(stored_changes(value, _shipped_leaf(key)))
     return out
+
+
+def _leaf_changes(
+    key: str, value: dict[str, Any], held: Any
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """What a leaf's save ships, changes (kept tools aside) and keeps as stored.
+
+    ``value`` is marked (:func:`incoming_declaration_leaves`); a tool it
+    sends with its refused stored change exactly as stored is kept as stored
+    (``tool_declarations.kept_stored_changes``) and left out of the rest.
+    """
+    from maljan.core.tool_declarations import kept_stored_changes, without_mark
+
+    shipped = _shipped_leaf(key)
+    incoming = without_mark(value)
+    kept = kept_stored_changes(incoming, held, shipped)
+    edited = {tool: change for tool, change in incoming.items() if tool not in kept}
+    return shipped, edited, kept
 
 
 def changed_declaration_refusals(
     changes: dict[str, Any], current: dict[str, Any]
 ) -> dict[str, str]:
-    """The strict refusals of the tool declarations a save adds or changes in a provider block.
+    """The strict refusals of the provider tool declarations a save adds or changes.
 
-    Per tool, against what is stored and what ships for the leaf: one the
-    save leaves as it was is read leniently as ever and never refused, so a
+    Each ``core.<block>.tool_facts`` value is a map of tool name to
+    declaration; one the save leaves as stored (or as shipped) is not held to
+    the strict rules (``tool_declarations.changed_declaration_errors``), so a
     stored row with a key this version does not read blocks no unrelated
     save. Keys are ``<leaf>.<tool>[.<field>]``.
     """
@@ -106,11 +124,11 @@ def changed_declaration_refusals(
     for key, value in changes.items():
         if not _is_declaration_leaf(key, value):
             continue
-        shipped = _shipped_leaf(key)
         held = current.get(key)
+        shipped, edited, _kept = _leaf_changes(key, value, held)
         before = stored_in_force(shipped, held)[0] if isinstance(held, dict) else None
         for where, message in changed_declaration_errors(
-            merge_tool_facts(shipped, value), [before, shipped]
+            merge_tool_facts(shipped, edited), [before, shipped]
         ).items():
             errors[f"{key}.{where}"] = message
     return errors
@@ -130,8 +148,9 @@ def stored_declaration_leaves(
     is validated as it is in force and stored as its changes one tool at a
     time (``tool_declarations.tool_facts_changes``), marked as such, so a
     tool an operator never changed keeps following later releases. A value
-    sent back exactly as stored is stored as it was, a change this release
-    leaves out of what is in force included. Every other key is unchanged.
+    sent back exactly as stored is stored as it was, and so is each tool sent
+    with its refused stored change exactly as stored (:func:`_leaf_changes`).
+    Every other key is unchanged.
     """
     from maljan.core.config import MCPServerConfig
     from maljan.core.tool_declarations import merge_tool_facts, tool_facts_changes, with_mark
@@ -140,13 +159,14 @@ def stored_declaration_leaves(
     for key, value in changes.items():
         if not _is_declaration_leaf(key, value):
             continue
-        if current is not None and value == current.get(key):
+        held = None if current is None else current.get(key)
+        if current is not None and value == held:
             continue
-        shipped = _shipped_leaf(key)
+        shipped, edited, kept = _leaf_changes(key, value, held)
         in_force = MCPServerConfig.model_validate(
-            {"tool_facts": merge_tool_facts(shipped, value)}
+            {"tool_facts": merge_tool_facts(shipped, edited)}
         ).model_dump(mode="json")["tool_facts"]
-        out[key] = with_mark(tool_facts_changes(in_force, shipped))
+        out[key] = with_mark({**tool_facts_changes(in_force, shipped), **kept})
     return out
 
 

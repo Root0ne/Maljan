@@ -41,10 +41,10 @@ def _accept(stored: dict[str, Any], server: str, tool: str, facts: dict[str, Any
     """What the console sends when one proposal is accepted on ``server``.
 
     The editor holds the stored entry, whose ``tool_facts`` are its changes,
-    and adds the accepted tool to them.
+    and adds the accepted tool to them, marked as changes.
     """
     entry = dict(stored[server])
-    entry["tool_facts"] = {**(entry.get("tool_facts") or {}), tool: facts}
+    entry["tool_facts"] = with_mark({**(entry.get("tool_facts") or {}), tool: facts})
     return {**stored, server: entry}
 
 
@@ -244,18 +244,89 @@ def _unset() -> dict[str, Any]:
     return ToolFacts.model_construct().model_dump(mode="json")
 
 
-def test_a_map_sent_without_the_mark_is_read_as_changes() -> None:
-    """Through the API a whole map no longer removes the shipped tools it
-    leaves out; ``null`` removes one."""
+def _every_path_in_force(server_facts: dict[str, Any], leaf_facts: dict[str, Any]) -> list:
+    """What each path that takes a sent map puts in force for the same map.
+
+    A save through ``PATCH /settings`` (the server map and a provider leaf),
+    a connection test (``_probe_config``), a probe's candidate settings, and
+    an import of a ``/2`` and of a ``/1`` document.
+    """
+    from app.services.settings_probes import _probe_config, candidate_settings
+
     stored = _stored_map()
+    sent = {**stored, "analysis": {**stored["analysis"], "tool_facts": server_facts}}
+    out: list[tuple[str, set[str], set[str]]] = []
+
+    saved = validate_server_map(sent, stored=stored)
+    leaf = svc.stored_declaration_leaves(
+        svc.incoming_declaration_leaves({LEAF: leaf_facts}, {}), {}
+    )[LEAF]
+    built = so.build_settings({"mcp.servers": saved, "static.ghidra.tool_facts": leaf})
+    out.append(
+        (
+            "patch",
+            set(built.mcp.servers["analysis"].tool_facts),
+            set(built.static.ghidra.tool_facts),
+        )
+    )
+
+    probed = _probe_config(dict(sent["analysis"]), "analysis")
+    out.append(("probe", set(probed.tool_facts), set()))
+
+    candidate = candidate_settings({"core.mcp.servers": sent, LEAF: leaf_facts}, {})
+    out.append(
+        (
+            "candidate",
+            set(candidate.mcp.servers["analysis"].tool_facts),
+            set(candidate.static.ghidra.tool_facts),
+        )
+    )
+
+    for whole_maps in (False, True):
+        imported, _warnings = svc.lenient_imported_declarations(
+            {"core.mcp.servers": sent, LEAF: leaf_facts}, whole_maps=whole_maps
+        )
+        saved = validate_server_map(imported["core.mcp.servers"], stored=stored)
+        leaf = svc.stored_declaration_leaves({LEAF: imported[LEAF]}, {})[LEAF]
+        built = so.build_settings({"mcp.servers": saved, "static.ghidra.tool_facts": leaf})
+        out.append(
+            (
+                "import /1" if whole_maps else "import /2",
+                set(built.mcp.servers["analysis"].tool_facts),
+                set(built.static.ghidra.tool_facts),
+            )
+        )
+    return out
+
+
+def test_an_unmarked_map_is_read_whole_on_every_path() -> None:
+    """One reading of a map without the mark, as dev read every map: whole, so
+    a shipped tool it does not name is removed, whichever path it comes by."""
     shipped = so.shipped_tool_facts("mcp.servers.analysis")
-    first, second, *_ = list(shipped)
-    sent = {**stored, "analysis": {**stored["analysis"], "tool_facts": {first: shipped[first]}}}
-    out = validate_server_map(sent, stored=stored)
-    assert "tool_facts" not in out["analysis"]
-    assert set(_in_force(out)) == set(shipped)
-    sent["analysis"]["tool_facts"] = {second: None}
-    assert second not in _in_force(validate_server_map(sent, stored=stored))
+    ghidra = so.shipped_tool_facts("static.ghidra")
+    first = next(iter(shipped))
+    leaf_tool = next(iter(ghidra))
+    held = _every_path_in_force({first: shipped[first]}, {leaf_tool: ghidra[leaf_tool]})
+    assert [path for path, *_ in held] == ["patch", "probe", "candidate", "import /2", "import /1"]
+    for path, server_tools, leaf_tools in held:
+        assert server_tools == {first}, path
+        assert leaf_tools == (set() if path == "probe" else {leaf_tool}), path
+
+
+def test_a_marked_map_is_read_as_changes_on_every_path_but_a_whole_import() -> None:
+    """A marked map holds changes: a shipped tool it does not name stays as
+    shipped and ``null`` removes one, on every path; a ``/1`` document was
+    written before the mark and is read whole, mark or not."""
+    shipped = so.shipped_tool_facts("mcp.servers.analysis")
+    ghidra = so.shipped_tool_facts("static.ghidra")
+    first = next(iter(shipped))
+    leaf_tool = next(iter(ghidra))
+    held = _every_path_in_force(with_mark({first: None}), with_mark({leaf_tool: None}))
+    for path, server_tools, leaf_tools in held:
+        if path == "import /1":
+            continue
+        assert server_tools == set(shipped) - {first}, path
+        assert leaf_tools == (set() if path == "probe" else set(ghidra) - {leaf_tool}), path
 
 
 def test_a_whole_map_sent_back_as_stored_keeps_reading_whole() -> None:
