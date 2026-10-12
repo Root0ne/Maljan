@@ -47,7 +47,13 @@ from maljan.agents.prompts import (
     TRIAGE_PROMPT,
 )
 from maljan.core import virustotal
-from maljan.core.pack_steps import PackStep, check_steps, effective_steps
+from maljan.core.pack_steps import (
+    DECLARED_FACT_RENDERERS,
+    PackStep,
+    check_steps,
+    effective_steps,
+    written_for,
+)
 from maljan.core.report_formats import (
     READER_ID_PATTERN,
     ReportFormat,
@@ -4498,8 +4504,9 @@ class Settings(BaseSettings):
         # agent's reference is, so a list that cannot run is refused here, and
         # so is removing a server a step uses.
         for step in effective_steps(self.triage.steps):
-            if not step.builtin:
-                self._check_server_tool(f"triage step {step.id!r}", step.server, step.called)
+            problem = self.pack_step_problem(step)
+            if problem:
+                raise ValueError(problem)
 
         self._rederive_converted_profiles()
 
@@ -4513,6 +4520,54 @@ class Settings(BaseSettings):
                         f"Available: {available}"
                     )
         return self
+
+    def pack_step_problem(self, step: PackStep) -> str:
+        """Why these settings cannot run the enabled pack ``step`` as declared; ``""`` for none.
+
+        A server's tool is checked as an agent's reference is
+        (:meth:`_check_server_tool`). A renderer that reads a tool's answer by
+        its declared facts (``core.pack_steps.DECLARED_FACT_RENDERERS``)
+        reads the facts of its own kind only: on a step whose tool is declared
+        another kind, or none, it would call that tool's rows what they are
+        not. The step's own ``kind`` declares its tool's kind where it is set.
+        Read strictly on a save, leniently for stored settings
+        (``core.pack_steps.lenient_steps``).
+        """
+        if not step.builtin:
+            try:
+                self._check_server_tool(f"triage step {step.id!r}", step.server, step.called)
+            except ValueError as exc:
+                return str(exc)
+        if step.renderer not in DECLARED_FACT_RENDERERS or (
+            step.builtin and written_for(step.renderer, step.called)
+        ):
+            return ""
+        kind = step.kind or self._step_tool_kind(step)
+        if kind == step.renderer:
+            return ""
+        declared = f"is declared of kind {kind!r}" if kind else "declares no kind"
+        return (
+            f"triage step {step.id!r}: renderer {step.renderer!r} reads the declared facts of a "
+            f"tool of kind {step.renderer!r}, and {step.called!r} {declared}; leave renderer "
+            f"empty for the generic line, or set the step's kind to {step.renderer!r} if its "
+            "tool answers rule matches"
+        )
+
+    def _step_tool_kind(self, step: PackStep) -> str:
+        """The kind ``step``'s tool declares: its server's declaration, else the pack's own."""
+        from maljan.core.tool_declarations import renamed_tool
+
+        if step.builtin:
+            from maljan.core.builtin_declarations import in_process_declarations
+            from maljan.core.tool_declarations import PACK
+
+            pack = in_process_declarations().get(PACK)
+            held = pack.tool_facts.get(step.called) if pack is not None else None
+        else:
+            server = self.mcp.servers.get(step.server)
+            facts = server.tool_facts if server is not None else {}
+            held = facts.get(step.called) or facts.get(renamed_tool(step.server, step.called))
+        return held.kind if held is not None else ""
 
     def _check_server_tool(self, owner: str, server_key: str, tool: str | None) -> None:
         """Refuse a reference by ``owner`` to a server not in ``mcp.servers``, or to a tool
