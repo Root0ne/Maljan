@@ -9,18 +9,51 @@
  * (`merge_tool_facts`). The editor shows and edits what is in force and
  * stages the changes; with nothing shipped (a server an operator added) the
  * two are the same map. Nothing in this file names a tool or a server.
+ *
+ * A map of changes carries a mark (`"": "changes"`, under a key no tool can
+ * be named by: a tool's name is never empty), which the API stores so it
+ * never has to guess whether a map holds changes or was stored whole by an
+ * earlier release. The API serves every stored map marked; the editor keeps
+ * the mark on what it stages and never reads it as a tool.
  */
 
 import type { ToolDeclarationFields, ToolFactsEntry } from "@/types/settings";
 import { sameJson } from "./declarationFields";
 
+/** The key and value that mark a map as a block's changes over what it ships
+ *  (`maljan.core.tool_declarations.CHANGES_MARK` and `CHANGES_FORM`). */
+export const CHANGES_MARK = "";
+export const CHANGES_FORM = "changes";
+
 /** A stored change of one tool: its changed fields, its whole declaration, or `null`. */
 export type ToolFactsChange = Partial<ToolFactsEntry> | Record<string, unknown> | null;
-export type ToolFactsChanges = Record<string, ToolFactsChange>;
+export type ToolFactsChanges = Record<string, ToolFactsChange | typeof CHANGES_FORM>;
 type Declarations = Record<string, Record<string, unknown>>;
 
 function isObject(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+
+/** The tools `changes` names and what it says of each, without the mark. */
+export function withoutMark(
+  changes: ToolFactsChanges | undefined | null
+): Record<string, ToolFactsChange> {
+  const out: Record<string, ToolFactsChange> = {};
+  for (const [tool, change] of Object.entries(changes ?? {})) {
+    if (tool === CHANGES_MARK && change === CHANGES_FORM) continue;
+    out[tool] = change as ToolFactsChange;
+  }
+  return out;
+}
+
+/** `changes` marked as a block's changes over what it ships, as the API stores them. */
+export function withMark(changes: ToolFactsChanges | undefined | null): ToolFactsChanges {
+  return { [CHANGES_MARK]: CHANGES_FORM, ...withoutMark(changes) };
+}
+
+/** Whether `changes` names any tool (the mark alone names none). */
+export function namesAnyTool(changes: ToolFactsChanges | undefined | null): boolean {
+  return Object.keys(withoutMark(changes)).length > 0;
 }
 
 /** The declarations in force: `shipped` with `changes` over it, one tool at a time. */
@@ -28,7 +61,7 @@ export function mergeToolFacts(
   shipped: Declarations,
   changes: ToolFactsChanges | undefined
 ): Record<string, ToolFactsEntry> {
-  const held = changes ?? {};
+  const held = withoutMark(changes);
   const out: Record<string, ToolFactsEntry> = {};
   for (const [tool, facts] of Object.entries(shipped)) {
     if (!Object.prototype.hasOwnProperty.call(held, tool)) {
@@ -48,7 +81,7 @@ export function mergeToolFacts(
 }
 
 /** The default of a declaration field, from the served split; `undefined` when unknown. */
-function fieldDefault(name: string, fields: ToolDeclarationFields | null): unknown {
+export function fieldDefault(name: string, fields: ToolDeclarationFields | null): unknown {
   if (fields === null) return undefined;
   if (name === "kind") return "";
   if (Object.prototype.hasOwnProperty.call(fields.kind_free, name)) return fields.kind_free[name];
@@ -58,7 +91,7 @@ function fieldDefault(name: string, fields: ToolDeclarationFields | null): unkno
   return undefined;
 }
 
-/** What `inForce` changes of `shipped`, per tool: the form the editor stages.
+/** What `inForce` changes of `shipped`, per tool, marked: the form the editor stages.
  *
  *  A field an edited shipped tool no longer names is its default (the
  *  operator deleted it), when the served split says what the default is;
@@ -68,7 +101,7 @@ export function toolFactsChanges(
   shipped: Declarations,
   fields: ToolDeclarationFields | null = null
 ): ToolFactsChanges {
-  const out: ToolFactsChanges = {};
+  const out: ToolFactsChanges = { [CHANGES_MARK]: CHANGES_FORM };
   for (const [tool, facts] of Object.entries(shipped)) {
     if (!Object.prototype.hasOwnProperty.call(inForce, tool)) {
       out[tool] = null;
@@ -107,7 +140,7 @@ export interface ToolChange {
 /** The tools `changes` makes a difference to, in the order they are named. */
 export function changedTools(shipped: Declarations, changes: ToolFactsChanges | undefined): ToolChange[] {
   const out: ToolChange[] = [];
-  for (const [tool, change] of Object.entries(changes ?? {})) {
+  for (const [tool, change] of Object.entries(withoutMark(changes))) {
     const ships = Object.prototype.hasOwnProperty.call(shipped, tool);
     if (!ships) {
       if (change !== null) out.push({ tool, state: "added" });
@@ -124,9 +157,9 @@ export function changedTools(shipped: Declarations, changes: ToolFactsChanges | 
   return out;
 }
 
-/** `changes` with one tool back as shipped (an operator's own tool is dropped). */
+/** `changes` with one tool back as shipped (an operator's own tool is dropped), marked. */
 export function resetTool(changes: ToolFactsChanges | undefined, tool: string): ToolFactsChanges {
-  const out: ToolFactsChanges = { ...(changes ?? {}) };
-  delete out[tool];
+  const out = withMark(changes);
+  if (tool !== CHANGES_MARK) delete out[tool];
   return out;
 }

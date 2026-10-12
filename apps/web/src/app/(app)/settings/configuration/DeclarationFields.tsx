@@ -27,6 +27,7 @@ import {
 import {
   changedTools,
   mergeToolFacts,
+  namesAnyTool,
   resetTool,
   toolFactsChanges,
   type ToolChange,
@@ -182,6 +183,10 @@ const CHANGE_LABEL: Record<ToolChange["state"], string> = {
  *
  * While the typed text stands for the changes staged, the box keeps showing
  * it as typed rather than re-rendering it filled from the shipped values.
+ *
+ * A tool named in `conflicts` carries a stored change the API leaves out
+ * because it does not validate over what this release ships (the tool is in
+ * force as shipped); it is marked so the operator resets or edits it.
  */
 export function ToolFactsBox({
   id,
@@ -190,6 +195,7 @@ export function ToolFactsBox({
   shipped,
   changes,
   fields,
+  conflicts = [],
   onChanges,
 }: {
   id: string;
@@ -198,6 +204,7 @@ export function ToolFactsBox({
   shipped: Record<string, Record<string, unknown>>;
   changes: ToolFactsChanges | undefined;
   fields: ToolDeclarationFields | null;
+  conflicts?: readonly string[];
   onChanges: (changes: ToolFactsChanges) => void;
 }) {
   const [held, setHeld] = useState<{
@@ -243,6 +250,12 @@ export function ToolFactsBox({
                   <li key={tool} className="flex items-center gap-2" data-tool-change={state}>
                     <span className="font-mono text-text-primary">{tool}</span>
                     <span className="text-text-muted">{CHANGE_LABEL[state]}</span>
+                    {conflicts.includes(tool) && (
+                      <span className="text-status-orange" data-tool-conflict={tool}>
+                        conflicts with this release&apos;s declaration: your change is not in
+                        force until you reset or edit it
+                      </span>
+                    )}
                     <button
                       type="button"
                       className="text-accent-strong"
@@ -436,10 +449,11 @@ export default function DeclarationFields({
             shipped={shipped}
             changes={server.tool_facts}
             fields={fields}
+            conflicts={schema?.tool_facts_conflicts?.[`mcp.servers.${serverKey}`]}
             onChanges={(tool_facts) => {
               // Nothing changed of what ships, where nothing was stored:
               // leave the entry as it was rather than stage an empty map.
-              if (Object.keys(tool_facts).length === 0 && server.tool_facts === undefined) return;
+              if (!namesAnyTool(tool_facts) && server.tool_facts === undefined) return;
               put({ tool_facts: tool_facts as McpServerEntry["tool_facts"] });
             }}
           />

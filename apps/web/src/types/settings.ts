@@ -160,11 +160,11 @@ export interface McpServerEntry {
   platform_owned?: boolean;
   auto_name_prefixes?: string[];
   reference_urls?: string[];
-  /** Per tool, as stored: for a built-in, its changes over the shipped
-   *  declaration of that tool (the changed fields, `null` for a removed
-   *  shipped tool, the whole declaration of a tool it does not ship); for a
-   *  server an operator added, its whole map. */
-  tool_facts?: Record<string, ToolFactsEntry | null>;
+  /** Per tool, as served: its changes over the shipped declaration of that
+   *  tool (the changed fields, `null` for a removed shipped tool, the whole
+   *  declaration of a tool it does not ship; for a server an operator added,
+   *  its whole map), marked as such by `"": "changes"`. */
+  tool_facts?: Record<string, ToolFactsEntry | null | "changes">;
   /** How the server's credential is obtained by one request, or null when its
    *  token is typed in (`core.tool_declarations.CredentialBootstrap`). */
   credential_bootstrap?: CredentialBootstrapEntry | null;
@@ -406,6 +406,10 @@ export interface SettingsSchema {
   credential_servers?: Record<string, CredentialServerFacts>;
   /** How a tool declaration's fields split, as the API reads them. */
   tool_declaration_fields?: ToolDeclarationFields;
+  /** Per block (`mcp.servers.<key>` or a provider block's path), the tools
+   *  whose stored change the API leaves out because it does not validate
+   *  over what this release ships; each is in force as shipped. */
+  tool_facts_conflicts?: Record<string, string[]>;
 }
 
 /** The word naming no kind, and each kind-free and kind-dependent field of a
