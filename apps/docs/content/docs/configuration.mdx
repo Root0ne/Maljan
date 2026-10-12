@@ -3564,6 +3564,19 @@ without an accept, and no run reads a proposal. Accepting on a built-in server
 stores only the tools you accept (see **Saving** below); every other tool keeps
 following what the server ships.
 
+A live sandbox server's tools are proposed sandbox kinds by the shape of
+their rows, read from the `outputSchema` or from a confirmed harmless call's
+answer: rows naming a process id, its parent and a name propose
+`sandbox_processes`, with the process id as the `pid` place and the name and
+command line as values; rows naming a destination and a port, or a DNS
+question, propose `sandbox_network` (with the `flow_table` reader where the
+answer lays its rows out as one, under `tcp`, `udp`, `conversations` or
+`dns`); rows naming a digest, a name and a size propose
+`sandbox_dropped_files`. An accepted sandbox kind gives the tool's answers what
+the built-in sandbox tools' answers get: a `run` root per process or flow, a
+place among the sandbox's entries (observed steps) and the built-in section
+drawn from the declared rows.
+
 **Where an undeclared tool's answers go.** The composer shows a technical
 section the captured output of a tool its source declares no kind for when a
 claim the section is given cites the output's entry (the entry the report's
