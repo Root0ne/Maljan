@@ -622,12 +622,16 @@ async def _serialise_accepts(db: AsyncSession) -> None:
 
 
 def _trial_read(payload: dict[str, Any], declaration: ReportFormat, fallback: Any) -> str:
-    """Why ``declaration`` reads nothing of ``payload``, in words; empty where it reads something.
+    """Why ``declaration`` reads no fact of ``payload``, in words; empty where it reads one.
 
-    The report is read as an upload of the format would be: a format read
-    through a mapping must select something with one of its paths (a row in a
-    channel or a place, or the target hash); any other reader must read it
-    without failing.
+    The report is read as an upload of the format would be. A format read
+    through a mapping must keep a row with one of its fact paths: a consumer
+    channel (processes, calls, signatures, DNS, HTTP, TCP, UDP, hosts,
+    domains, dropped files, registry) or a place, or name the target hash.
+    Its own ``channels`` are not counted: a kept raw ``report.<block>``
+    channel keeps a row from any report, so a mapping whose fact paths all
+    miss would pass on it while reading only what the unread read gave. Any
+    other reader must read the report without failing.
     """
     from maljan.providers.sandbox.readers import format_mapping
     from maljan.providers.sandbox.rest_mapping import (
@@ -650,13 +654,14 @@ def _trial_read(payload: dict[str, Any], declaration: ReportFormat, fallback: An
     selected = [
         name
         for name, stats in result.stats.items()
-        if stats.kept and (name in CHANNELS or name.startswith(("channels.", "places.")))
+        if stats.kept and (name in CHANNELS or name.startswith("places."))
     ]
     if selected or result.report.target.sha256:
         return ""
     return (
-        "Read with this report, its mapping selects nothing: no path keeps a row and the "
-        "target hash path names no hash. Correct the paths before accepting it."
+        "Read with this report, its mapping reads no fact: no channel or place path keeps a "
+        "row and the target hash path names no hash (the kept raw channels are not "
+        "counted). Correct the paths before accepting it."
     )
 
 

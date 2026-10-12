@@ -300,7 +300,36 @@ def test_a_declaration_whose_mapping_reads_nothing_is_refused(monkeypatch) -> No
     }
     r = _accept(api, sample, state["rows"][0], declaration)
     assert r.status_code == 422
-    assert "selects nothing" in r.json()["detail"]
+    assert "reads no fact" in r.json()["detail"]
+    saved.assert_not_awaited()
+    assert state["rows"][0].format == "unread"
+
+
+@pytest.mark.parametrize("name", ["unread_flat_report.json", "unread_nested_report.json"])
+def test_the_kept_raw_channels_never_pass_a_mapping_whose_fact_paths_miss(
+    monkeypatch, name: str
+) -> None:
+    """Every fact path and the target hash pointed at nothing, the proposed kept channels left.
+
+    A kept ``report.<block>`` channel keeps a row from any report, so counting
+    it would accept a declaration that reads only what the unread read gave.
+    """
+    api, sample, state = _client(monkeypatch, ["unread"])
+    saved = AsyncMock()
+    monkeypatch.setattr("app.services.settings_service.SettingsService.save", saved)
+    body = _upload(api, sample, _blob(name)).json()
+    declaration = body["proposal"]["declaration"]
+    mapping = declaration["mapping"]
+    assert mapping.get("channels"), mapping
+    for key in list(mapping):
+        if key == "target_sha256":
+            mapping[key] = "$['no_such']"
+        elif key not in ("channels", "field_names"):
+            mapping[key] = "$['no_such'][*]"
+    mapping.pop("field_names", None)
+    r = _accept(api, sample, state["rows"][0], declaration)
+    assert r.status_code == 422, r.text
+    assert "reads no fact" in r.json()["detail"]
     saved.assert_not_awaited()
     assert state["rows"][0].format == "unread"
 
