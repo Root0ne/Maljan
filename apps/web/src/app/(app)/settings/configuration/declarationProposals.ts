@@ -85,8 +85,14 @@ function readField(value: unknown): ProposedField | null {
   };
 }
 
+/** An empty map keyed by tool name, with no prototype, so a tool named like one
+ *  of `Object.prototype`'s keys (`__proto__`) is an own key like any other. */
+function toolMap<T>(): Record<string, T> {
+  return Object.create(null) as Record<string, T>;
+}
+
 function readStringMap(value: unknown): Record<string, string> {
-  const out: Record<string, string> = {};
+  const out = toolMap<string>();
   for (const [key, said] of Object.entries(isRecord(value) ? value : {})) {
     if (typeof said === "string") out[key] = said;
   }
@@ -98,7 +104,7 @@ export function readProposals(result: ProbeResult | null | undefined): Proposals
   const details = result?.details as { proposals?: unknown } | null | undefined;
   const raw = details?.proposals;
   if (!isRecord(raw) || !isRecord(raw.tools)) return null;
-  const tools: Record<string, ToolProposal> = {};
+  const tools = toolMap<ToolProposal>();
   for (const [name, held] of Object.entries(raw.tools)) {
     if (!isRecord(held) || !isRecord(held.facts)) continue;
     if (held.facts.kind !== undefined && typeof held.facts.kind !== "string") continue;

@@ -154,6 +154,17 @@ describe("readProposals", () => {
     expect(read!.failed).toEqual({ deep: "no proposal: reading its schema raised RecursionError" });
   });
 
+  it("keeps a tool named like a prototype key as its own proposal", () => {
+    // JSON.parse keeps `__proto__` an own key, as the probe serves it.
+    const raw = JSON.parse(
+      `{"v": 1, "tools": {"__proto__": ${JSON.stringify(SCAN)}}, "probed": {"__proto__": "called"}}`,
+    );
+    const read = readProposals(result(raw));
+    expect(Object.keys(read!.tools)).toEqual(["__proto__"]);
+    expect(Object.prototype.hasOwnProperty.call(read!.tools, "__proto__")).toBe(true);
+    expect(Object.keys(read!.probed ?? {})).toEqual(["__proto__"]);
+  });
+
   it("is null for a result without proposals", () => {
     expect(readProposals(null)).toBeNull();
     expect(readProposals(result(undefined))).toBeNull();

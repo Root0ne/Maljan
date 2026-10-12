@@ -3617,7 +3617,17 @@ with its stored change (the settings schema lists it under
 `tool_facts_conflicts`), with **Reset** (**Reset to shipped** for a shipped
 tool), which removes the stored change, or you can edit it. Until then a save
 that sends the change back as stored, also one that edits another tool of the
-same block, keeps it exactly as stored.
+same block, keeps it exactly as stored. A stored tool named as its own
+server's renamed tool (`<server>__<tool>`) is left out the same way.
+
+A stored value of a form no release writes (a block's tool declarations that
+are not a map, or a map whose `""` key holds anything but `"changes"`; only a
+hand edit of the database makes one) is read as absent: what ships is in
+force, one warning in the log says so, the settings schema lists the `""` key
+under `tool_facts_conflicts`, and the settings serve the block as no change,
+so saving it writes a marked map anew. A save or an import that names a tool
+by an empty or padded name, or sends a value that is not a map, is refused
+with the key named.
 
 Settings saved by an earlier release stored a built-in's tool declarations
 whole. The database migration (revision `20261012000000`) rewrites each such

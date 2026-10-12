@@ -275,3 +275,20 @@ describe("an empty value and an empty name", () => {
     expect(html).toContain("Stored changes not in force: mine__scan");
   });
 });
+
+describe("a tool named like a prototype key", () => {
+  // JSON.parse keeps `__proto__` an own key, as the API serves it.
+  const proto = JSON.parse('{"__proto__": {"kind": "strings", "display_name": "P"}}');
+
+  it("is named by the review line when it is added", () => {
+    const line = describeChange(LEAF, { ...MARK }, { ...MARK, ...proto }, FIELDS);
+    expect(line.summary).toBe("1 tool added");
+    expect(line.detail).toEqual(["__proto__: added"]);
+  });
+
+  it("is named by the review line when it is removed", () => {
+    const before = toolFactsChanges(mergeToolFacts(SHIPPED, { ...MARK, ...proto }), SHIPPED, FIELDS);
+    const line = describeChange(LEAF, before, resetTool(before, "__proto__"), FIELDS);
+    expect(line.detail).toEqual(["__proto__: removed"]);
+  });
+});
