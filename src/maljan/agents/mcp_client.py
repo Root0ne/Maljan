@@ -59,13 +59,25 @@ def with_structured_content(text: str, content: Any, limit: int) -> str:
     """``text``, carrying ``content`` when it is the JSON object MCP's ``structuredContent`` is.
 
     Held to ``limit``, the number of characters the model could be shown of
-    this call's answer (the guardrail's limit for the call): a structure whose
-    JSON is longer is not carried, and the text goes on alone, as it always
-    did. A limit of zero (no room for any answer) carries nothing.
+    this call's answer (the guardrail's limit for the call, in its unit,
+    characters): a structure whose JSON is longer is not carried, and the
+    text goes on alone, as it always did. A limit of zero (no room for any
+    answer) carries nothing. Nothing is serialised for a text that is JSON
+    or an object that only wraps the text. CPU-bound on a large answer: a
+    coroutine runs it on a thread.
     """
     import json
 
+    from maljan.schemas.evidence import parse_structured
+
     if not isinstance(content, dict) or not content or limit <= 0:
+        return text
+    # Decided before anything is serialised: a JSON text already is the
+    # answer's structure (every built-in's case), and an object that only
+    # wraps the text again adds nothing.
+    if len(content) == 1 and next(iter(content.values())) == text:
+        return text
+    if parse_structured(text) is not None:
         return text
     try:
         size = len(json.dumps(content, ensure_ascii=False))
@@ -488,7 +500,11 @@ class MCPLangChainToolkit:
             # The server's own structured answer, when it gave one and it is no
             # larger than what the model could be shown, rides on the text to
             # the ledger; the text the model reads is unchanged.
-            return with_structured_content(shown, getattr(result, "structuredContent", None), limit)
+            content = getattr(result, "structuredContent", None)
+            if not isinstance(content, dict) or not content or limit <= 0:
+                return shown
+            # Parsing the text and sizing the structure are CPU-bound too.
+            return await asyncio.to_thread(with_structured_content, shown, content, limit)
         except Exception as exc:
             if guard is not None and not settled:
                 reason = transport_failure(exc)

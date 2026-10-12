@@ -423,7 +423,7 @@ def _two_loops(budget: int, structure: Any) -> tuple[list[Any], list[Any]]:
     from maljan.agents.base_agent import BaseAnalyst
 
     agent = SimpleNamespace(
-        name="network",
+        name="a",  # the agent the entries were recorded under
         logger=SimpleNamespace(warning=lambda *a, **k: None, debug=lambda *a, **k: None),
         truncation_ledger=None,
         _evidence_entries=[],
@@ -508,3 +508,141 @@ def test_an_answer_cut_or_not_shown_keeps_no_uncut_structure(cut: dict[str, Any]
 def test_an_object_that_only_wraps_the_text_again_adds_nothing() -> None:
     entry = _prose_entry(text="a plain note", structure={"result": "a plain note"})
     assert not entry.structured_from_server and entry.structured is None
+
+
+# ---------------------------------------------------------------------------
+# The last pass over the run's ledger, per agent
+# ---------------------------------------------------------------------------
+
+
+def _of(agent: str, entry: Any) -> Any:
+    return entry.model_copy(update={"agent": agent})
+
+
+def test_the_last_pass_charges_a_callee_s_structure_to_the_callee() -> None:
+    from maljan.schemas.evidence import fit_structures_to_budget
+
+    structure = {"rows": ["r" * 1000 for _ in range(50)]}  # about 50 KB
+    budget = 200_000
+    callee = [_of("callee", _prose_entry(1, structure))]
+    caller = [_of("lead", _text_entry(2, 190_000))]
+    # The callee's record, handed over, sits among the caller's entries.
+    ledger = [*caller, *callee]
+    assert fit_structures_to_budget(ledger, budget) == 0
+    assert callee[0].structured == structure
+    assert caller[0].output == "x" * 190_000
+
+
+def test_a_caller_s_loop_never_evicts_its_callee_s_structure() -> None:
+    from types import SimpleNamespace
+
+    from maljan.agents.base_agent import BaseAnalyst
+
+    structure = {"rows": ["r" * 1000 for _ in range(50)]}
+    handed_over = _of("callee", _prose_entry(1, structure))
+    lead = SimpleNamespace(
+        name="lead",
+        logger=SimpleNamespace(warning=lambda *a, **k: None, debug=lambda *a, **k: None),
+        truncation_ledger=None,
+        _evidence_entries=[handed_over],
+        _evidence_bytes_spent=0,
+        _evidence_beside_spent=0,
+        _keep_for_function_map=lambda entries: None,
+        _live_map_entries=None,
+    )
+    with patch("maljan.agents.base_agent.get_settings") as settings:
+        settings.return_value.reporting.evidence_budget_bytes = 200_000
+        BaseAnalyst._finish_evidence(
+            lead, SimpleNamespace(entries=[_of("lead", _text_entry(2, 190_000))])
+        )
+    assert handed_over.structured == structure
+
+
+def test_an_agent_that_runs_again_in_a_later_node_ends_within_its_budget() -> None:
+    from maljan.schemas.evidence import apply_budget, beside_bytes, fit_structures_to_budget
+
+    structure = {"rows": ["r" * 1000 for _ in range(100)]}  # about 100 KB
+    budget = 260_000
+    # Round 1: the structure is kept, and the node hands the record over.
+    round_one = [
+        _of("network", _prose_entry(1, structure)),
+        _of("network", _text_entry(2, 100_000)),
+    ]
+    _, spent = apply_budget(round_one, budget)
+    assert round_one[0].structured == structure
+    handed_over = beside_bytes(round_one[0])
+    # Round 2 (a revision or a later node): its texts need the room, and the
+    # handed-over structure can no longer be evicted inside the agent.
+    round_two = [_of("network", _text_entry(3, 150_000))]
+    apply_budget(round_two, budget, already_spent=spent, already_beside=handed_over)
+    dev_two = [_of("network", _text_entry(3, 150_000))]
+    dev_one = _without_structures(
+        [_of("network", _prose_entry(1, structure)), _of("network", _text_entry(2, 100_000))]
+    )
+    _, dev_spent = apply_budget(dev_one, budget)
+    apply_budget(dev_two, budget, already_spent=dev_spent)
+    assert _outcome(round_two) == _outcome(dev_two)
+    ledger = [*round_one, *round_two]
+    assert _kept_bytes(ledger) > budget  # before the last pass
+    # The last pass over the run's ledger.
+    assert fit_structures_to_budget(ledger, budget) == 1
+    assert round_one[0].structured is None and round_one[0].output == "1 rule matched"
+    assert [e.model_dump_json() for e in ledger] == [
+        e.model_dump_json() for e in [*dev_one, *dev_two]
+    ]
+    assert _kept_bytes(ledger) <= budget
+
+
+def test_the_last_pass_works_on_the_saved_dumps_and_largest_first() -> None:
+    from maljan.schemas.evidence import fit_structures_to_budget
+
+    big = {"rows": ["r" * 1000 for _ in range(60)]}
+    small = {"rows": ["r" * 1000 for _ in range(10)]}
+    dumps = [
+        _prose_entry(1, small).model_dump(mode="json"),
+        _prose_entry(2, big).model_dump(mode="json"),
+        _text_entry(3, 100_000).model_dump(mode="json"),
+    ]
+    budget = 100_000 + 28 + len(json.dumps(small)) + 10
+    assert fit_structures_to_budget(dumps, budget) == 1
+    assert dumps[0]["structured"] == small and dumps[0]["structured_from_server"] is True
+    assert dumps[1]["structured"] is None and "structured_from_server" not in dumps[1]
+    assert dumps[1]["output"] == "1 rule matched" and dumps[2]["output"] == "x" * 100_000
+
+
+def test_the_last_pass_leaves_a_ledger_with_no_kept_structure_alone() -> None:
+    from maljan.schemas.evidence import build_entry, fit_structures_to_budget
+
+    ledger = [
+        build_entry(
+            entry_id=f"ev_{n:04d}",
+            seq=n,
+            agent="static",
+            tool="strings",
+            args={},
+            server="analysis",
+            output=json.dumps({"strings": [{"text": "x" * 2000}] * 50}),
+            source="mcp:analysis",
+        )
+        for n in range(1, 30)
+    ]
+    before = [e.model_dump_json() for e in ledger]
+    dumps = [json.loads(text) for text in before]
+    assert fit_structures_to_budget(ledger, 1_000) == 0
+    assert fit_structures_to_budget(dumps, 1_000) == 0
+    assert [e.model_dump_json() for e in ledger] == before
+    assert dumps == [json.loads(text) for text in before]
+
+
+def test_a_json_text_is_never_serialised_again_to_size_its_structure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from maljan.agents import mcp_client
+
+    def _refuse(*_a: Any, **_k: Any) -> str:
+        raise AssertionError("the structure was serialised")
+
+    monkeypatch.setattr(json, "dumps", _refuse)
+    text = '{"rows": [1, 2]}'
+    assert mcp_client.with_structured_content(text, {"rows": [1, 2]}, 10_000) == text
+    assert mcp_client.with_structured_content("a note", {"result": "a note"}, 10_000) == "a note"

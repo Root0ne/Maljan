@@ -597,6 +597,79 @@ def _drop_beside(entry: LedgerEntry) -> None:
     entry.structured_from_server = False
 
 
+def _get(entry: Any, name: str) -> Any:
+    return entry.get(name) if isinstance(entry, Mapping) else getattr(entry, name, None)
+
+
+def _text_cost(entry: Any) -> int:
+    """:func:`stored_bytes` of a ledger entry or of its dump."""
+    if isinstance(entry, LedgerEntry):
+        return stored_bytes(entry)
+    text = len(str(_get(entry, "output") or "").encode("utf-8", errors="ignore"))
+    structured = _get(entry, "structured")
+    if structured is None or _get(entry, "structured_from_server"):
+        return text
+    try:
+        parsed = len(json.dumps(structured, ensure_ascii=False).encode("utf-8"))
+    except (TypeError, ValueError):
+        return text
+    return max(text, parsed)
+
+
+def _beside_cost(entry: Any) -> int:
+    """:func:`beside_bytes` of a ledger entry or of its dump."""
+    if not _get(entry, "structured_from_server") or _get(entry, "structured") is None:
+        return 0
+    try:
+        return len(json.dumps(_get(entry, "structured"), ensure_ascii=False).encode("utf-8"))
+    except (TypeError, ValueError):
+        return 0
+
+
+def fit_structures_to_budget(entries: Sequence[Any], budget_bytes: int) -> int:
+    """Drop kept structures, largest first, until each agent's kept bytes fit its budget.
+
+    The last pass over a run's ledger (ledger entries or their dumps) before
+    it is saved and built into the report. Per agent, the entry's own
+    ``agent``: its texts cost what :func:`apply_budget` charged them, and the
+    structures servers returned beside prose texts (``structured_from_server``)
+    are dropped largest first until texts and structures together are within
+    ``budget_bytes``. A text is never touched. Nothing happens when no entry
+    carries such a structure (every built-in's ledger) or with no budget.
+    Returns how many structures were dropped.
+    """
+    if budget_bytes <= 0:
+        return 0
+    flagged = [entry for entry in entries if _beside_cost(entry)]
+    if not flagged:
+        return 0
+    texts: dict[str, int] = {}
+    for entry in entries:
+        if _get(entry, "repeated_of"):
+            continue
+        agent = str(_get(entry, "agent") or "")
+        texts[agent] = texts.get(agent, 0) + _text_cost(entry)
+    dropped = 0
+    for agent in dict.fromkeys(str(_get(entry, "agent") or "") for entry in flagged):
+        own = sorted(
+            (entry for entry in flagged if str(_get(entry, "agent") or "") == agent),
+            key=lambda entry: (_beside_cost(entry), str(_get(entry, "id") or "")),
+            reverse=True,
+        )
+        total = texts.get(agent, 0) + sum(_beside_cost(entry) for entry in own)
+        for entry in own:
+            if total <= budget_bytes:
+                break
+            total -= _beside_cost(entry)
+            if isinstance(entry, LedgerEntry):
+                _drop_beside(entry)
+            else:
+                entry["structured"] = None
+                entry.pop("structured_from_server", None)
+            dropped += 1
+    return dropped
+
+
 def apply_budget(
     entries: list[LedgerEntry],
     budget_bytes: int,

@@ -5999,9 +5999,10 @@ class BaseAnalyst(BudgetMeter, ABC):
                 budget,
                 already_spent=self._evidence_bytes_spent,
                 already_beside=getattr(self, "_evidence_beside_spent", 0),
-                # The entries of earlier loops not yet handed over: their
+                # This agent's own entries of earlier loops not yet handed
+                # over (a callee's handed-over record is the callee's): their
                 # structures are evicted first when this loop's texts take room.
-                earlier=list(self._evidence_entries),
+                earlier=[e for e in self._evidence_entries if e.agent == self.name],
             )
             if trimmed:
                 self.logger.warning(

@@ -283,6 +283,13 @@ def _deterministic_report(state: dict[str, Any], container: Any) -> dict[str, An
         except Exception:  # noqa: BLE001 — one bad row is not a lost report
             continue
     ledger.sort(key=lambda entry: entry.seq)
+    # The last pass before the report is built from it (``schemas.evidence``).
+    from maljan.core.config import get_settings
+    from maljan.schemas.evidence import fit_structures_to_budget
+
+    fit_structures_to_budget(
+        ledger, int(getattr(get_settings().reporting, "evidence_budget_bytes", 0) or 0)
+    )
     reasons = corrected_reasons(state.get("degradation_reasons"), ledger)
     if not judge_ran(state):
         reasons = [*reasons, NO_VERDICT_REASON]

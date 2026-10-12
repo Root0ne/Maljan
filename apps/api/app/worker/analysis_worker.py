@@ -3995,6 +3995,22 @@ def _report_inputs(
     return stix_bundle_for_persist, _run_summary
 
 
+def evidence_budget_of(run_summary: Mapping[str, Any] | None) -> int:
+    """The per-agent evidence budget the run ran with: its settings snapshot, else the settings."""
+    snapshot = (run_summary or {}).get("settings_snapshot")
+    value = (
+        snapshot.get("reporting.evidence_budget_bytes") if isinstance(snapshot, Mapping) else None
+    )
+    if value is None:
+        from maljan.core.config import get_settings
+
+        value = getattr(get_settings().reporting, "evidence_budget_bytes", 0)
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 async def _store_the_report(
     db: Any,
     *,
@@ -4188,6 +4204,15 @@ async def _store_the_report(
     # one transaction: a report whose citations resolve to nothing is
     # worse than one that was never saved.
     _ledger = pipeline_result.get("evidence_ledger") or []
+    from maljan.schemas.evidence import fit_structures_to_budget
+
+    # The last pass before it is saved: each agent's kept bytes within its
+    # budget, structures dropped first, texts untouched (a no-op for a ledger
+    # with no structure kept beside a prose text, every built-in's).
+    fit_structures_to_budget(
+        [_entry for _entry in _ledger if isinstance(_entry, dict)],
+        evidence_budget_of(run_summary),
+    )
     for _entry in _ledger:
         if not isinstance(_entry, dict):
             continue

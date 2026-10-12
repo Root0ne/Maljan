@@ -136,3 +136,9 @@ def test_a_server_no_agent_of_the_job_binds_is_not_copied(samples: Path, tmp_pat
     settings = build_settings({"mcp.servers": {"bound": _server(mount="/srv/in")}})
     hosts, paths = _mirror(settings, tmp_path, analysts=("dynamic",))
     assert (hosts, paths) == ([], {})
+
+
+def test_the_saved_ledger_is_held_to_the_budget_the_run_ran_with() -> None:
+    summary = {"settings_snapshot": {"reporting.evidence_budget_bytes": 4096}}
+    assert analysis_worker.evidence_budget_of(summary) == 4096
+    assert analysis_worker.evidence_budget_of({"settings_snapshot": {}}) >= 0
