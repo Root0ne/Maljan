@@ -490,7 +490,12 @@ CAPE_NORMALISER_FILLS: frozenset[str] = frozenset(REPORT_LIST_FIELDS)
 
 def report_fills(report: SandboxReport) -> frozenset[str]:
     """The list fields of ``report`` that hold at least one row."""
+    from maljan.schemas.sandbox_document import dns_requests_have_place
+
     network = report.network
+    # The structural requests fill ``network.dns`` only where the document can
+    # hold their rows.
+    requests = network.dns_requests if dns_requests_have_place(report) else ()
     held: dict[str, Any] = {
         "processes": report.processes,
         "processes.calls": any(p.calls for p in report.processes),
@@ -506,7 +511,7 @@ def report_fills(report: SandboxReport) -> frozenset[str]:
             f"network.{kind}": getattr(network, kind)
             for kind in ("dns", "http", "tcp", "udp", "hosts", "domains", "tls", "icmp")
         },
-        "network.dns": network.dns or network.dns_requests,
+        "network.dns": network.dns or requests,
         **{f"summary.{key}": report.summary.get(key) for key in _SUMMARY_KEYS},
         "process_tree": report.process_tree,
         "resolved_apis": report.resolved_apis,

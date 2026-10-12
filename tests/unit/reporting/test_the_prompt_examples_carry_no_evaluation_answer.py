@@ -1066,6 +1066,7 @@ def _sandbox_sections_sentences() -> str:
     from maljan.providers import sandbox_tools as st
     from maljan.providers.sandbox.readers import TriageReportReader
     from maljan.schemas.evidence import LedgerEntry
+    from maljan.schemas.sandbox_document import DNS_AS_WRITTEN_KEY
 
     report: dict[str, Any] = {
         "behavior": {
@@ -1125,6 +1126,8 @@ def _sandbox_sections_sentences() -> str:
                 for n in ss.SECTION_PREFIXES
             ),
             *(ss.NO_PID_ROWS.format(section=n) for n in ss.SECTION_PREFIXES),
+            # The key a network section answer may show a source's unread DNS value under.
+            DNS_AS_WRITTEN_KEY,
             ITEM_UNREAD.format(item="net:1"),
         ]
     )

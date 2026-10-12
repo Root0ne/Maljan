@@ -217,9 +217,9 @@ def channel_rows(held: Any) -> Sequence[Any] | None:
 #
 # The two link keys are the platform's own and no reader writes them: the
 # document's one chokepoint (:func:`compose`, through :func:`dns_rows` and
-# :func:`_network_without_links`) removes them from every network row a reader
-# filled, of every kind and whatever the reader, and mints them itself for the
-# requests a reader expresses structurally
+# :func:`_network_without_links`) removes them from the rows of every declared
+# network kind (:data:`NETWORK_KINDS`) a reader filled, whatever the reader,
+# and mints them itself for the requests a reader expresses structurally
 # (``schemas.sandbox_report.SandboxDnsRequest``); a reader that keeps its
 # source's arrangement removes them too (:func:`kept_source`). The resolver
 # honours a link only in the exact form the chokepoint writes it, and only on
@@ -228,6 +228,16 @@ def channel_rows(held: Any) -> Sequence[Any] | None:
 DNS_REQUEST_KEY = "@dns_request"
 SAME_REQUEST_KEY = "@same_request_as"
 _LINK_KEYS = (DNS_REQUEST_KEY, SAME_REQUEST_KEY)
+# Where the network block keeps, as the source wrote it, a source's DNS value
+# that is not a list and that no DNS row reader can read (a status word, a
+# number, a boolean, an object naming no name), when the structural requests'
+# rows take ``network.dns``: kept in the document and read by nothing, as such
+# a value is under ``network.dns`` where there is no request. A null holds no
+# value and is not kept. The platform's own key.
+DNS_AS_WRITTEN_KEY = "@dns_as_written"
+# The fields a DNS row reader reads a row's name from, any of them: an object
+# with none is no DNS row.
+DNS_NAME_KEYS = ("request", "query", "hostname", "domain", "name")
 # The record type an answer that points one name at another carries, and the
 # types whose value is an address.
 _ALIAS_TYPE = "cname"
@@ -267,6 +277,34 @@ def _network_without_links(network: dict[str, Any]) -> None:
             network[kind] = without_dns_links(network[kind])
 
 
+def reads_as_dns_row(value: Any) -> bool:
+    """Whether ``value`` is an object a DNS row reader reads: one naming a name.
+
+    A name is a non-blank string under any of :data:`DNS_NAME_KEYS`.
+    """
+    if not isinstance(value, Mapping):
+        return False
+    for key in DNS_NAME_KEYS:
+        name = value.get(key)
+        if isinstance(name, str) and name.strip():
+            return True
+    return False
+
+
+def dns_requests_have_place(report: SandboxReport) -> bool:
+    """Whether ``report``'s document can hold the rows of its structural DNS requests.
+
+    A report laid out from the form always can, and so can a kept source with
+    no network block (one is made) or with a network object. A kept source
+    whose network block is some other value has no place for them.
+    """
+    arrangement = report.arrangement or {}
+    top = arrangement.get("")
+    if not top or "network" not in top:
+        return True
+    return "network" in arrangement or "network" not in report.extras
+
+
 def dns_rows(rows: Any, requests: Any) -> Any:
     """The document's DNS rows: a reader's own rows with no link key, then each request's rows.
 
@@ -278,12 +316,14 @@ def dns_rows(rows: Any, requests: Any) -> Any:
     (``DNS_REQUEST_KEY``), which each later name's row names
     (``SAME_REQUEST_KEY``). Ids count the report's multi-name requests from 0.
     A source's DNS value that is not a list stays as the source wrote it where
-    there is no request, and is kept as the first row, before the requests'
-    rows, where there is. Linear in the rows, the names and the answers, each
-    held once.
+    there is no request; where there is, an object a DNS row reader reads
+    (:func:`reads_as_dns_row`) is kept as the first row, before the requests'
+    rows, and any other value is no row (:func:`compose` keeps it under
+    :data:`DNS_AS_WRITTEN_KEY`). Linear in the rows, the names and the
+    answers, each held once.
     """
-    if requests and rows is not None and not isinstance(rows, list):
-        rows = [rows]
+    if requests and not isinstance(rows, list):
+        rows = [rows] if reads_as_dns_row(rows) else []
     stripped = without_dns_links(rows)
     if not requests:
         return stripped
@@ -566,7 +606,16 @@ def compose(report: SandboxReport) -> dict[str, Any]:
         if isinstance(network, dict):
             _network_without_links(network)
             if "dns" in network or requests:
-                network["dns"] = dns_rows(network.get("dns", []), requests)
+                held = network.get("dns", [])
+                if (
+                    requests
+                    and held is not None
+                    and not isinstance(held, list)
+                    and not reads_as_dns_row(held)
+                ):
+                    # No row and no fact: kept as written, read by nothing.
+                    network[DNS_AS_WRITTEN_KEY] = held
+                network["dns"] = dns_rows(held, requests)
         elif requests:
             logger.warning(
                 "sandbox report: the source's network block is not an object, so the "

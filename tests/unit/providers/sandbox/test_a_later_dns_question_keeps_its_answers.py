@@ -25,6 +25,7 @@ from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
 from maljan.reporting.renderers.markdown import MarkdownRenderer
 from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
 from maljan.schemas.sandbox_document import (
+    DNS_AS_WRITTEN_KEY,
     DNS_REQUEST_KEY,
     SAME_REQUEST_KEY,
     DnsAnswers,
@@ -651,3 +652,95 @@ class TestAKeptSourceKeepsItsStructuralRequests:
         payload = {"info": {"id": 1}, "network": {"dns": value}}
         document = sandbox_document(_KeepSourceReader().read(payload, provider="upload"))
         assert document["network"]["dns"] == value
+
+    def test_a_dns_value_no_row_reader_reads_is_no_row_and_no_indicator(self) -> None:
+        from maljan.providers.sandbox_tools import sandbox_network
+
+        shapeless = ({"weird": 1}, {"answers": []}, {"request": "  "})
+        for value in ("N/A", "evil-string-c4.net", 0, 7, True, False, *shapeless):
+            payload = {"info": {"id": 1}, "network": {"dns": value}, "message": _two_name_message()}
+            document = sandbox_document(
+                _KeepSourceStructuralReader().read(payload, provider="upload")
+            )
+            network = document["network"]
+            # The structural rows, and nothing else, are the DNS rows.
+            assert [row["request"] for row in network["dns"]] == [
+                "relay-a-s1.net",
+                "relay-b-s2.net",
+            ]
+            # The source's value is kept as written, beside the rows.
+            assert network[DNS_AS_WRITTEN_KEY] == value
+            assert type(network[DNS_AS_WRITTEN_KEY]) is type(value)
+            resolved = _resolved_by(_KeepSourceStructuralReader(), payload)
+            assert set(resolved) == {"relay-a-s1.net", "relay-b-s2.net"}, value
+            # The model-facing text holds the two names' rows and no junk row.
+            view = sandbox_network(document)
+            assert [row["request"] for row in view["dns"]] == ["relay-a-s1.net", "relay-b-s2.net"]
+            text = NetworkParser()._parse_sandbox_network(network)
+            assert "relay-b-s2.net | 45.33.32.50" in text
+            assert "N/A | N/A" not in text
+            if isinstance(value, str):
+                assert value not in text
+
+    def test_a_null_dns_value_beside_requests_is_no_row(self) -> None:
+        payload = {"info": {"id": 1}, "network": {"dns": None}, "message": _two_name_message()}
+        document = sandbox_document(_KeepSourceStructuralReader().read(payload, provider="upload"))
+        assert [row["request"] for row in document["network"]["dns"]] == [
+            "relay-a-s1.net",
+            "relay-b-s2.net",
+        ]
+        assert DNS_AS_WRITTEN_KEY not in document["network"]
+        assert set(_resolved_by(_KeepSourceStructuralReader(), payload)) == {
+            "relay-a-s1.net",
+            "relay-b-s2.net",
+        }
+
+    def test_an_object_naming_a_name_under_any_reader_s_field_is_a_row(self) -> None:
+        for key in ("request", "query", "hostname", "domain", "name"):
+            value = {key: "own-c3.net", "answers": [{"data": "45.33.32.70"}]}
+            payload = {"info": {"id": 1}, "network": {"dns": value}, "message": _two_name_message()}
+            document = sandbox_document(
+                _KeepSourceStructuralReader().read(payload, provider="upload")
+            )
+            assert document["network"]["dns"][0] == value
+            assert DNS_AS_WRITTEN_KEY not in document["network"]
+
+    def test_with_no_request_every_value_stays_as_written(self) -> None:
+        for value in ("N/A", 0, True, None, {"weird": 1}):
+            payload = {"info": {"id": 1}, "network": {"dns": value}}
+            document = sandbox_document(_KeepSourceReader().read(payload, provider="upload"))
+            assert document["network"] == {"dns": value}
+
+
+class TestTheFillsAgreeWithTheDocument:
+    def test_requests_with_no_place_fill_nothing(self) -> None:
+        from maljan.schemas.sandbox_report import report_fills
+
+        for network in ("unavailable", [1, 2], 5):
+            payload = {"info": {"id": 1}, "network": network, "message": _two_name_message()}
+            report = _KeepSourceStructuralReader().read(payload, provider="upload")
+            document = sandbox_document(report)
+            assert document["network"] == network
+            assert "network.dns" not in report_fills(report)
+
+    def test_requests_with_a_place_fill_the_dns_rows(self) -> None:
+        from maljan.schemas.sandbox_report import report_fills
+
+        for payload in (
+            {"info": {"id": 1}, "message": _two_name_message()},
+            {"info": {"id": 1}, "network": {}, "message": _two_name_message()},
+            {"info": {"id": 1}, "network": {"dns": "N/A"}, "message": _two_name_message()},
+        ):
+            report = _KeepSourceStructuralReader().read(payload, provider="upload")
+            assert sandbox_document(report)["network"]["dns"]
+            assert "network.dns" in report_fills(report)
+
+    def test_a_laid_out_report_s_requests_fill_the_dns_rows(self) -> None:
+        from maljan.schemas.sandbox_report import report_fills
+
+        report = SandboxReport(provider="x", source_format="y")
+        report.network.dns_requests.append(
+            SandboxDnsRequest(questions=[{"request": "relay-a-s1.net"}], answers=[])
+        )
+        assert sandbox_document(report)["network"]["dns"]
+        assert "network.dns" in report_fills(report)
