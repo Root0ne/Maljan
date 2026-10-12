@@ -32,6 +32,7 @@ from maljan.core.config import (
     builtin_env_allow,
 )
 from maljan.core.tool_declarations import (
+    changed_declaration_errors,
     check_own_prefix,
     fill_declaration,
     strip_declaration_defaults,
@@ -114,6 +115,23 @@ def validate_server_map(
                 errors[f"{key}.agents"] = (
                     f"{role!r} is not a known agent; expected one of {', '.join(sorted(roles))}"
                 )
+        # The tool declarations this save adds or changes are an operator's
+        # edit and are held to the strict rules; one it leaves as stored or
+        # shipped is read as it always was (leniently, below), so a stored
+        # entry never blocks an unrelated save.
+        facts_in = entry.get("tool_facts")
+        if isinstance(facts_in, dict):
+            stored_entry = (stored or {}).get(key)
+            before: list[Any] = [
+                stored_entry.get("tool_facts") if isinstance(stored_entry, dict) else None
+            ]
+            if key in builtins:
+                before.append(builtins[key].model_dump(mode="json").get("tool_facts"))
+            refused = changed_declaration_errors(facts_in, before)
+            if refused:
+                for path, message in refused.items():
+                    errors[f"{key}.tool_facts.{path}"] = message
+                continue
         try:
             # The token is validated and stored separately (``split_server_secrets``);
             # blanking it here keeps it out of the JSON row under every path.

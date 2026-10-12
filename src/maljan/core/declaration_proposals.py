@@ -53,6 +53,7 @@ from maljan.core.tool_declarations import (
     ToolFacts,
     check_auto_name_prefixes,
     check_tool_name,
+    strict_declarations,
 )
 from maljan.core.undeclared_tools import (
     ADDRESS_ARGUMENTS,
@@ -924,7 +925,9 @@ def _settle(proposal: ToolProposal) -> None:
             proposal.fields.pop(drop, None)
             proposal.notes.append(f"{drop} left out: the declaration would not validate with it")
         try:
-            ToolFacts.model_validate(facts)
+            # A proposal is what an operator will save: held to the edit rules.
+            with strict_declarations():
+                ToolFacts.model_validate(facts)
         except (ValidationError, ValueError):
             continue
         proposal.facts = facts

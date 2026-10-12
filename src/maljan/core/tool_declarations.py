@@ -55,16 +55,25 @@ back-reference, a lookaround) is refused when it is saved.
 
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import json
 import posixpath
 import re
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 if TYPE_CHECKING:
     from maljan.core.config import MCPServerConfig, Settings
@@ -444,6 +453,185 @@ KIND_DEPENDENT_FIELDS: tuple[str, ...] = (
     "report_sections",
 )
 
+# Whether a tool declaration is read as an operator's edit being saved. The
+# rules above (no unknown key, no empty declaration, no field a kind would be
+# needed to read) hold for what an operator types now: a save sets this for
+# the declarations it adds or changes, and the console's box applies the same
+# rules. Everything already accepted -- stored settings, shipped blocks, a
+# runtime provider's declaration, an import -- is read leniently instead: what
+# this version cannot read is left out with one warning, and the rest is kept,
+# so one unknown key never costs a declaration, a settings build or a job.
+STRICT_DECLARATIONS: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "strict_declarations", default=False
+)
+
+
+@contextmanager
+def strict_declarations() -> Iterator[None]:
+    """Read tool declarations inside this block as an operator's new edit (strictly)."""
+    token = STRICT_DECLARATIONS.set(True)
+    try:
+        yield
+    finally:
+        STRICT_DECLARATIONS.reset(token)
+
+
+# One line of a log naming a key an operator typed: line breaks and other
+# control characters written out, each name and the list bounded, so a key
+# can never forge a record or flood a collector.
+_LOG_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_LOG_NAME_CHARS = 64
+_LOG_NAMES = 20
+
+
+def loggable_names(names: Iterable[Any]) -> str:
+    """``names`` as one sanitised, bounded log text."""
+    held = [str(name) for name in names]
+    shown = []
+    for name in held[:_LOG_NAMES]:
+        text = name.replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t")
+        text = _LOG_CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", text)
+        shown.append(text[:_LOG_NAME_CHARS] + ("…" if len(text) > _LOG_NAME_CHARS else ""))
+    more = len(held) - len(shown)
+    return ", ".join(shown) + (f" and {more} more" if more > 0 else "")
+
+
+# What has already been warned about, so a settings object built per request
+# does not repeat the same line; bounded, and cleared when full.
+_WARNED: set[tuple[str, tuple[str, ...]]] = set()
+_WARNED_MAX = 1024
+
+
+def _warn_left_out(where: str, names: Iterable[str]) -> None:
+    held = tuple(sorted(str(name) for name in names))
+    marker = (where, held)
+    if marker in _WARNED:
+        return
+    if len(_WARNED) >= _WARNED_MAX:
+        _WARNED.clear()
+    _WARNED.add(marker)
+    from maljan.core.logger import logger
+
+    logger.warning(
+        "A tool declaration (%s) holds fields this version does not read; they are left "
+        "out and the rest is kept: %s",
+        loggable_names([where]),
+        loggable_names(held),
+    )
+
+
+def _field_default(name: str) -> Any:
+    return ToolFacts.model_fields[name].get_default(call_default_factory=True)
+
+
+def _set_fields(raw: Mapping[str, Any]) -> dict[str, Any]:
+    """The keys of a raw declaration that say something: unknown ones, and known ones set."""
+    fields = ToolFacts.model_fields
+    out: dict[str, Any] = {}
+    for key, value in raw.items():
+        if key in fields and _same(value, _field_default(key)):
+            continue
+        out[str(key)] = value
+    return out
+
+
+def _same(left: Any, right: Any) -> bool:
+    try:
+        return json.dumps(left, sort_keys=True, default=str) == json.dumps(
+            right, sort_keys=True, default=str
+        )
+    except (TypeError, ValueError):
+        return bool(left == right)
+
+
+def lenient_declaration(raw: Mapping[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """``raw`` without what this version cannot read, and the names left out.
+
+    Unknown keys are left out; with no kind (absent, empty or the word that
+    names none) the fields read only through a kind are left out too, so the
+    tool is read as one that declares no kind. Everything else is kept as
+    written, and validated as ever.
+    """
+    fields = ToolFacts.model_fields
+    left_out = [str(key) for key in raw if key not in fields]
+    kept = {key: value for key, value in raw.items() if key in fields}
+    if kept.get("kind") in (None, "", NO_KIND):
+        for name in KIND_DEPENDENT_FIELDS:
+            if name in kept and not _same(kept[name], _field_default(name)):
+                left_out.append(name)
+                kept.pop(name)
+    return kept, left_out
+
+
+def lenient_declarations(
+    value: Mapping[str, Any], where: str = ""
+) -> tuple[dict[str, Any], dict[str, list[str]]]:
+    """A map of tool declarations read leniently: each tool's, and what each left out.
+
+    A declaration that is not a mapping is kept for the model to refuse as
+    ever. Each tool that left something out is warned about once.
+    """
+    out: dict[str, Any] = {}
+    notes: dict[str, list[str]] = {}
+    for tool, raw in value.items():
+        if not isinstance(raw, Mapping):
+            out[tool] = raw
+            continue
+        kept, left_out = lenient_declaration(raw)
+        out[tool] = kept
+        if left_out:
+            notes[str(tool)] = left_out
+            _warn_left_out(f"{where}{tool}", left_out)
+    return out, notes
+
+
+def _normal(raw: Any) -> str | None:
+    """A raw declaration's meaning, as compared between a save and what was there."""
+    if not isinstance(raw, Mapping):
+        return None
+    return json.dumps(_set_fields(raw), sort_keys=True, default=str)
+
+
+def changed_declaration_errors(
+    incoming: Mapping[str, Any], before: Iterable[Mapping[str, Any] | None] = ()
+) -> dict[str, str]:
+    """The strict refusals of the tool declarations in ``incoming`` that a save adds or changes.
+
+    A tool's declaration is unchanged when it says what one of ``before``
+    (the stored map, the shipped one) says for that tool, as written or as
+    it is read leniently (what the console showed); an unchanged one is
+    never refused, so a save that leaves a stored entry alone is never
+    blocked by it. Each other one is validated strictly. Keys are
+    ``<tool>`` or ``<tool>.<field>``.
+    """
+    held = [b for b in before if isinstance(b, Mapping)]
+    errors: dict[str, str] = {}
+    for tool, raw in incoming.items():
+        said = _normal(raw)
+        if said is not None:
+            candidates = []
+            for old in held:
+                previous = old.get(tool)
+                if not isinstance(previous, Mapping):
+                    continue
+                candidates.append(_normal(previous))
+                kept, _left = lenient_declaration(previous)
+                try:
+                    read = ToolFacts.model_validate(kept).model_dump(mode="json")
+                except (ValidationError, ValueError):
+                    continue
+                candidates.append(_normal(read))
+            if said in candidates:
+                continue
+        with strict_declarations():
+            try:
+                ToolFacts.model_validate(raw)
+            except ValidationError as exc:
+                for err in exc.errors():
+                    loc = ".".join(str(part) for part in err["loc"])
+                    errors[f"{tool}.{loc}" if loc else str(tool)] = err["msg"]
+    return errors
+
 
 class TechniqueField(BaseModel):
     """Where an answer names ATT&CK technique ids, and how they are written.
@@ -588,9 +776,10 @@ class ToolFacts(BaseModel):
     description is shown with.
     """
 
-    # A key this model does not know is refused: a misspelt ``kind`` would
-    # otherwise save as a declaration of nothing. Stored records are read for
-    # the fields this version knows (``declared_reading``), never refused.
+    # A key this model does not know is refused in an operator's edit
+    # (``STRICT_DECLARATIONS``): a misspelt ``kind`` would otherwise save as a
+    # declaration of nothing. Anything already accepted is read leniently by
+    # the validator below, which leaves such a key out with a warning.
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     kind: str = ""
@@ -612,6 +801,17 @@ class ToolFacts(BaseModel):
     words: tuple[str, ...] = ()
     display_name: str = ""
     category: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _read_what_this_version_reads(cls, data: Any) -> Any:
+        """Outside an operator's edit, leave out what this version cannot read, with a warning."""
+        if STRICT_DECLARATIONS.get() or not isinstance(data, Mapping):
+            return data
+        kept, left_out = lenient_declaration(data)
+        if left_out:
+            _warn_left_out("a tool", left_out)
+        return kept
 
     @field_validator("kind")
     @classmethod
@@ -665,7 +865,7 @@ class ToolFacts(BaseModel):
             raise ValueError("source names a corroborating tool; set asserts_techniques")
         if (self.places or self.values) and not self.rows:
             raise ValueError("places and values are read inside rows; declare rows")
-        if not self.kind:
+        if not self.kind and STRICT_DECLARATIONS.get():
             held = self.model_dump(exclude_defaults=True)
             held.pop("kind", None)
             if not held:

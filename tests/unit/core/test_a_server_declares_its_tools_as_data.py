@@ -69,13 +69,110 @@ def test_a_declaration_may_name_no_kind_and_state_kind_free_fields(kind: str) ->
         ({"display_name": "Scanner", "report_sections": ["commands"]}, "report_sections"),
     ],
 )
-def test_a_declaration_a_kind_would_be_needed_to_read_is_refused(
+def test_an_edit_a_kind_would_be_needed_to_read_is_refused(
     declared: dict[str, Any], message: str
 ) -> None:
-    with pytest.raises(ValidationError, match=message):
-        ToolFacts.model_validate(declared)
-    with pytest.raises(ValidationError, match=message):
-        MCPServerConfig.model_validate({"command": "x", "tool_facts": {"scan": declared}})
+    """The rules hold for what an operator types now (``strict_declarations``)."""
+    from maljan.core.tool_declarations import strict_declarations
+
+    with strict_declarations():
+        with pytest.raises(ValidationError, match=message):
+            ToolFacts.model_validate(declared)
+        with pytest.raises(ValidationError, match=message):
+            MCPServerConfig.model_validate({"command": "x", "tool_facts": {"scan": declared}})
+
+
+@pytest.mark.parametrize(
+    ("declared", "kept", "left_out"),
+    [
+        ({"kind": "decompile", "note": "a later field"}, {"kind": "decompile"}, ["note"]),
+        ({"knd": "decompile"}, {}, ["knd"]),
+        (
+            {"kind": "unclassified", "rows": "/m/*", "places": {"offset": "/o"}},
+            {"kind": ""},
+            ["rows", "places"],
+        ),
+        (
+            {"display_name": "Scanner", "rows": "/m/*"},
+            {"display_name": "Scanner"},
+            ["rows"],
+        ),
+    ],
+)
+def test_what_was_already_accepted_is_read_with_what_this_version_cannot_read_left_out(
+    declared: dict[str, Any],
+    kept: dict[str, Any],
+    left_out: list[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Stored, shipped, runtime and imported declarations never fail on a key or field."""
+    import logging
+
+    from maljan.core import tool_declarations
+
+    tool_declarations._WARNED.clear()
+    other = {"kind": "strings", "rows": "/strings/*"}
+    with caplog.at_level(logging.WARNING, logger="maljan"):
+        block = MCPServerConfig.model_validate(
+            {"command": "x", "tool_facts": {"scan": declared, "other": other}}
+        )
+        again = MCPServerConfig.model_validate(
+            {"command": "x", "tool_facts": {"scan": declared, "other": other}}
+        )
+    assert block == again
+    # The tool keeps everything this version reads; the other tool is untouched.
+    assert block.tool_facts["scan"].model_dump(exclude_defaults=True) == {
+        k: v for k, v in kept.items() if v not in ("", None)
+    }
+    assert block.tool_facts["other"] == ToolFacts.model_validate(other)
+    warnings = [r.getMessage() for r in caplog.records if "left out" in r.getMessage()]
+    # One warning, naming the fields left out, however often the block is read.
+    assert len(warnings) == 1
+    for name in left_out:
+        assert name in warnings[0]
+
+
+def test_a_key_left_out_is_logged_on_one_line(caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    from maljan.core import tool_declarations
+
+    tool_declarations._WARNED.clear()
+    forged = "note\nFAKE RECORD: everything is fine"
+    with caplog.at_level(logging.WARNING, logger="maljan"):
+        MCPServerConfig.model_validate(
+            {"command": "x", "tool_facts": {"scan\rtool": {"kind": "strings", forged: 1}}}
+        )
+    (message,) = [r.getMessage() for r in caplog.records if "left out" in r.getMessage()]
+    assert "\n" not in message and "\r" not in message
+    assert "note\\nFAKE RECORD" in message
+
+
+def test_a_runtime_provider_block_with_an_unknown_key_keeps_the_rest_of_its_declaration() -> None:
+    from maljan.core import declared_reading
+    from maljan.core.tool_declarations import (
+        forget_provider_declaration,
+        provider_declarations,
+        register_provider_declaration,
+    )
+
+    def _reader(_cfg: Any) -> dict[str, Any]:
+        return {
+            "tool_facts": {
+                "listing": {"kind": "decompile", "a_later_field": {"x": 1}},
+                "strings_of": {"kind": "strings", "rows": "/strings/*"},
+            }
+        }
+
+    register_provider_declaration("provider:invented_runtime_g10b", _reader)
+    try:
+        blocks = provider_declarations(Settings())
+        block = blocks["provider:invented_runtime_g10b"]
+        assert block.tool_facts["listing"].kind == "decompile"
+        assert block.tool_facts["strings_of"].rows == "/strings/*"
+    finally:
+        forget_provider_declaration("provider:invented_runtime_g10b")
+        declared_reading.forget()
 
 
 def test_the_fields_split_once_into_kind_free_and_kind_dependent() -> None:

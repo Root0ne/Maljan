@@ -72,6 +72,7 @@ from app.services.settings_service import (
     SettingsService,
     SettingsValidationError,
     core_settings_cache,
+    lenient_imported_declarations,
 )
 
 EXPORT_FORMAT = "maljan-settings/1"
@@ -524,6 +525,9 @@ async def import_values(
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": errors}
         )
+    # A declaration another version wrote may hold what this one does not
+    # read: it is left out with a warning, never a refusal of the file.
+    values, left_out = lenient_imported_declarations(values)
     try:
         res = await SettingsService(db).save(values, user_id=user.id, ip=_client_ip(request))
     except SettingsValidationError as exc:
@@ -543,7 +547,9 @@ async def import_values(
     # An import can bring in a whole team just as a patch can, so it answers
     # with the same advisory notes.
     return PatchResponse(
-        applied=res.applied, applies=res.applies, warnings=await _agent_warnings(db)
+        applied=res.applied,
+        applies=res.applies,
+        warnings={**left_out, **await _agent_warnings(db)},
     )
 
 

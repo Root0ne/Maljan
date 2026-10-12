@@ -46,6 +46,97 @@ from app.services.settings_catalog_api import (
 logger = logging.getLogger(__name__)
 
 
+# The catalog leaves that hold a provider block's tool declarations
+# (``core.static.ghidra.tool_facts`` …): each is a map of tool name to
+# declaration, stored as typed. The server map's declarations are checked
+# inside it (``server_map``).
+TOOL_FACTS_LEAF_SUFFIX = ".tool_facts"
+
+
+def changed_declaration_refusals(
+    changes: dict[str, Any], current: dict[str, Any]
+) -> dict[str, str]:
+    """The strict refusals of the tool declarations a save adds or changes in a provider block.
+
+    Per tool, against what is stored and what ships for the leaf: one the
+    save leaves as it was is read leniently as ever and never refused, so a
+    stored row with a key this version does not read blocks no unrelated
+    save. Keys are ``<leaf>.<tool>[.<field>]``.
+    """
+    from maljan.core.settings_overrides import flatten_leaves
+    from maljan.core.tool_declarations import changed_declaration_errors
+
+    errors: dict[str, str] = {}
+    shipped: Any = None
+    for key, value in changes.items():
+        if not key.startswith("core.") or not key.endswith(TOOL_FACTS_LEAF_SUFFIX):
+            continue
+        if not isinstance(value, dict):
+            continue
+        if shipped is None:
+            shipped = build_settings({})
+        path = split_key(key)[1]
+        try:
+            default = flatten_leaves(shipped, [path]).get(path)
+        except (KeyError, TypeError):
+            default = None
+        for where, message in changed_declaration_errors(
+            value, [current.get(key), default]
+        ).items():
+            errors[f"{key}.{where}"] = message
+    return errors
+
+
+def lenient_imported_declarations(
+    values: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """An import document's tool declarations, without what this version cannot read.
+
+    An export written by another version may hold a key this one does not
+    read (or a field only a kind makes readable, on a declaration that names
+    none): it is left out, the rest is imported, and each tool's leaving-out
+    is returned as a warning keyed by its dotted path. A declaration left
+    with nothing it says is left out whole. The file is never refused for it.
+    """
+    from maljan.core.tool_declarations import lenient_declarations
+
+    from app.services.server_map import SERVER_MAP_KEY
+
+    warnings: dict[str, str] = {}
+
+    def _clean(declared: Any, prefix: str) -> Any:
+        if not isinstance(declared, dict):
+            return declared
+        kept, notes = lenient_declarations(declared, where=f"{prefix} ")
+        for tool, names in notes.items():
+            warnings[f"{prefix}.{tool}"] = (
+                "left out " + ", ".join(names) + ": this version does not read them"
+            )
+        for tool, held in list(kept.items()):
+            if isinstance(held, dict) and not any(
+                name for name, value in held.items() if value not in ("", None, [], {}, False)
+            ):
+                kept.pop(tool)
+                warnings[f"{prefix}.{tool}"] = "left out: it declares nothing this version reads"
+        return kept
+
+    out = dict(values)
+    for key, value in values.items():
+        if key == SERVER_MAP_KEY and isinstance(value, dict):
+            servers = {}
+            for name, entry in value.items():
+                if isinstance(entry, dict) and isinstance(entry.get("tool_facts"), dict):
+                    entry = {
+                        **entry,
+                        "tool_facts": _clean(entry["tool_facts"], f"{key}.{name}.tool_facts"),
+                    }
+                servers[name] = entry
+            out[key] = servers
+        elif key.startswith("core.") and key.endswith(TOOL_FACTS_LEAF_SUFFIX):
+            out[key] = _clean(value, key)
+    return out, warnings
+
+
 class SettingsValidationError(Exception):
     def __init__(self, errors: dict[str, str]) -> None:
         super().__init__("; ".join(f"{k}: {v}" for k, v in errors.items()))
@@ -502,6 +593,9 @@ class SettingsService:
         core = {split_key(k)[1]: v for k, v in merged.items() if k.startswith("core.")}
         api = {split_key(k)[1]: v for k, v in merged.items() if k.startswith("api.")}
         self.validate(core, api)
+        declaration_refusals = changed_declaration_refusals(changes, current)
+        if declaration_refusals:
+            raise SettingsValidationError(declaration_refusals)
 
         rows = {r.key: r for r in await self._rows()}
         before: dict[str, Any] = {}

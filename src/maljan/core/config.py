@@ -1380,6 +1380,24 @@ class MCPServerConfig(BaseModel):
     def _references_are_templates(cls, value: list[str]) -> list[str]:
         return check_reference_urls(value)
 
+    @field_validator("tool_facts", mode="before")
+    @classmethod
+    def _tool_facts_read_leniently(cls, value: Any) -> Any:
+        """Outside an operator's edit, each tool's declaration keeps what this version reads.
+
+        A stored row, a shipped block, a runtime provider's declaration or an
+        import may carry a key this version does not read: it is left out of
+        that tool's declaration, named in one warning, and the rest is kept
+        (``core.tool_declarations.lenient_declarations``). An operator's new
+        edit is checked strictly where it is saved.
+        """
+        from maljan.core.tool_declarations import STRICT_DECLARATIONS, lenient_declarations
+
+        if STRICT_DECLARATIONS.get() or not isinstance(value, Mapping):
+            return value
+        kept, _left_out = lenient_declarations(value, where="tool ")
+        return kept
+
     @field_validator("tool_facts")
     @classmethod
     def _tool_names_are_names(cls, value: dict[str, ToolFacts]) -> dict[str, ToolFacts]:
