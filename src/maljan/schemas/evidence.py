@@ -40,7 +40,7 @@ from __future__ import annotations
 import json
 import re
 import threading
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -340,6 +340,20 @@ class LedgerEntry(BaseModel):
         ),
     )
 
+    structured_from_server: bool = Field(
+        default=False,
+        # Like ``facts``: an entry without one dumps as it always did.
+        exclude_if=lambda value: value is False,
+        description=(
+            "Whether structured is the structured answer the tool's server returned beside a "
+            "prose text (MCP structuredContent) rather than the text parsed: kept only where "
+            "the text is not JSON, the object is not the text wrapped again, its JSON is no "
+            "longer than the model could be shown of the call, the answer was not cut, and "
+            "the evidence budget had room for it after every text. The text in output is what "
+            "the model read."
+        ),
+    )
+
     def to_captured(self) -> CapturedToolOutput:
         """This entry in the shape readers of the previous capture expect."""
         return CapturedToolOutput(
@@ -399,6 +413,7 @@ def build_entry(
     not_shown: bool = False,
     chars_dropped: int = 0,
     source: str | None = None,
+    structured_content: dict[str, Any] | None = None,
 ) -> LedgerEntry:
     """One entry, with the output trimmed and parsed the same way every time.
 
@@ -440,6 +455,13 @@ def build_entry(
     ``chars_dropped`` is what the tool-output guardrail cut from the answer
     before the model read it: ``output`` is what the model was handed, and
     the entry is marked ``truncated`` because it is not the whole answer.
+
+    ``structured_content`` is the structured answer the tool's server
+    returned beside its text (MCP ``structuredContent``): kept, and read as
+    ``structured``, only where it adds something the text does not carry
+    (the text is not JSON and the object is not the text wrapped again) and
+    the entry holds the whole answer: an answer cut, not shown or repeated
+    keeps no structure the model did not read.
     """
     safe_args = dict(args) if isinstance(args, dict) else {}
     full = str(output or "")
@@ -458,6 +480,13 @@ def build_entry(
     # read from such an output (``_reputation_at_write``).
     cut = bool(not_shown) or len(text) < len(full) or int(chars_dropped) > 0
     structured = None if repeated_of or not_shown else parse_structured(full)
+    content = (
+        _structured_beside(structured_content, full, structured)
+        if not (repeated_of or cut)
+        else None
+    )
+    if content is not None:
+        structured = content
     return LedgerEntry(
         id=entry_id,
         stage=stage,
@@ -482,6 +511,7 @@ def build_entry(
         seq=seq,
         source=source or None,
         facts=facts,
+        structured_from_server=content is not None,
         reputation=_reputation_at_write(
             facts,
             ok=ok and not repeated_of and not cut,
@@ -516,16 +546,34 @@ def _reputation_at_write(
     return record_at_write(facts, ok=ok, output=output, structured=structured, server=server)
 
 
+def _structured_beside(content: Any, text: str, parsed: Any) -> dict[str, Any] | None:
+    """The structured answer a server returned beside ``text``, where it adds something.
+
+    Only a JSON object, and only beside a text that is not JSON itself: a
+    JSON text already is the answer's structure, and the model read it (the
+    MCP SDK's servers return a dict both ways). An object that only wraps the
+    text again (``{"result": <the text>}``, the SDK's form for a text return)
+    adds nothing either. ``None`` in every such case.
+    """
+    if not isinstance(content, dict) or not content or parsed is not None:
+        return None
+    if len(content) == 1 and next(iter(content.values())) == text:
+        return None
+    return dict(content)
+
+
 def stored_bytes(entry: LedgerEntry) -> int:
-    """What the entry keeps: the full parsed result when there is one, else the text.
+    """What the entry's answer costs: the full parsed result when there is one, else the text.
 
     The row persists both columns, so what is written is their sum; what the
     budget charges is the larger of the two, because the text is a prefix of
     the result's JSON and charging it twice would halve the budget for
-    nothing.
+    nothing. A structure the server returned beside a prose text
+    (``structured_from_server``) is not the answer's cost: it is charged on
+    its own (:func:`beside_bytes`), after every text.
     """
     text = len(entry.output.encode("utf-8", errors="ignore"))
-    if entry.structured is None:
+    if entry.structured is None or getattr(entry, "structured_from_server", False):
         return text
     try:
         parsed = len(json.dumps(entry.structured, ensure_ascii=False).encode("utf-8"))
@@ -534,8 +582,101 @@ def stored_bytes(entry: LedgerEntry) -> int:
     return max(text, parsed)
 
 
+def beside_bytes(entry: LedgerEntry) -> int:
+    """What a structure the server returned beside a prose text costs; 0 for every other entry."""
+    if not getattr(entry, "structured_from_server", False) or entry.structured is None:
+        return 0
+    try:
+        return len(json.dumps(entry.structured, ensure_ascii=False).encode("utf-8"))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _drop_beside(entry: LedgerEntry) -> None:
+    entry.structured = None
+    entry.structured_from_server = False
+
+
+def _get(entry: Any, name: str) -> Any:
+    return entry.get(name) if isinstance(entry, Mapping) else getattr(entry, name, None)
+
+
+def _text_cost(entry: Any) -> int:
+    """:func:`stored_bytes` of a ledger entry or of its dump."""
+    if isinstance(entry, LedgerEntry):
+        return stored_bytes(entry)
+    text = len(str(_get(entry, "output") or "").encode("utf-8", errors="ignore"))
+    structured = _get(entry, "structured")
+    if structured is None or _get(entry, "structured_from_server"):
+        return text
+    try:
+        parsed = len(json.dumps(structured, ensure_ascii=False).encode("utf-8"))
+    except (TypeError, ValueError):
+        return text
+    return max(text, parsed)
+
+
+def _beside_cost(entry: Any) -> int:
+    """:func:`beside_bytes` of a ledger entry or of its dump."""
+    if not _get(entry, "structured_from_server") or _get(entry, "structured") is None:
+        return 0
+    try:
+        return len(json.dumps(_get(entry, "structured"), ensure_ascii=False).encode("utf-8"))
+    except (TypeError, ValueError):
+        return 0
+
+
+def fit_structures_to_budget(entries: Sequence[Any], budget_bytes: int) -> int:
+    """Drop kept structures, largest first, until each agent's kept bytes fit its budget.
+
+    The last pass over a run's ledger (ledger entries or their dumps) before
+    it is saved and built into the report. Per agent, the entry's own
+    ``agent``: its texts cost what :func:`apply_budget` charged them, and the
+    structures servers returned beside prose texts (``structured_from_server``)
+    are dropped largest first until texts and structures together are within
+    ``budget_bytes``. A text is never touched. Nothing happens when no entry
+    carries such a structure (every built-in's ledger) or with no budget.
+    Returns how many structures were dropped.
+    """
+    if budget_bytes <= 0:
+        return 0
+    flagged = [entry for entry in entries if _beside_cost(entry)]
+    if not flagged:
+        return 0
+    texts: dict[str, int] = {}
+    for entry in entries:
+        if _get(entry, "repeated_of"):
+            continue
+        agent = str(_get(entry, "agent") or "")
+        texts[agent] = texts.get(agent, 0) + _text_cost(entry)
+    dropped = 0
+    for agent in dict.fromkeys(str(_get(entry, "agent") or "") for entry in flagged):
+        own = sorted(
+            (entry for entry in flagged if str(_get(entry, "agent") or "") == agent),
+            key=lambda entry: (_beside_cost(entry), str(_get(entry, "id") or "")),
+            reverse=True,
+        )
+        total = texts.get(agent, 0) + sum(_beside_cost(entry) for entry in own)
+        for entry in own:
+            if total <= budget_bytes:
+                break
+            total -= _beside_cost(entry)
+            if isinstance(entry, LedgerEntry):
+                _drop_beside(entry)
+            else:
+                entry["structured"] = None
+                entry.pop("structured_from_server", None)
+            dropped += 1
+    return dropped
+
+
 def apply_budget(
-    entries: list[LedgerEntry], budget_bytes: int, *, already_spent: int = 0
+    entries: list[LedgerEntry],
+    budget_bytes: int,
+    *,
+    already_spent: int = 0,
+    already_beside: int = 0,
+    earlier: Sequence[LedgerEntry] = (),
 ) -> tuple[int, int]:
     """Drop the outputs that overrun ``budget_bytes``, in call order.
 
@@ -547,6 +688,18 @@ def apply_budget(
     The entries themselves stay: which tool was called, with what, and whether
     it worked is the cheap half of the record and the half a reader needs in
     order to know something is missing.
+
+    A structure a server returned beside a prose text (``structured_from_server``)
+    never costs an answer anything, and kept structures are the first thing
+    evicted. Every text is decided first, exactly as with no structure at all,
+    and ``spent`` counts texts only, so every loop's texts are decided as they
+    would be with none. Then the structures already kept are held to the room
+    left after every text: ``earlier`` are the entries of earlier loops still in
+    the agent's hands, whose structures are dropped largest first until they
+    fit, and ``already_beside`` the bytes of structures already handed out of
+    those hands, which can no longer be dropped. Last, this call's structures
+    are kept in call order while the room left holds them; one that does not
+    fit is dropped and its text stays.
     """
     if budget_bytes <= 0:
         return 0, already_spent
@@ -564,6 +717,28 @@ def apply_budget(
             continue
         entry.output = ""
         entry.structured = None
+        entry.structured_from_server = False
         entry.truncated = True
         trimmed += 1
+    room = budget_bytes - spent - max(0, already_beside)
+    held = sorted(
+        (entry for entry in earlier if beside_bytes(entry)),
+        key=lambda entry: (beside_bytes(entry), str(getattr(entry, "id", ""))),
+        reverse=True,
+    )
+    total = sum(beside_bytes(entry) for entry in held)
+    for entry in held:
+        if total <= room:
+            break
+        total -= beside_bytes(entry)
+        _drop_beside(entry)
+    room -= total
+    for entry in entries:
+        size = beside_bytes(entry)
+        if not size:
+            continue
+        if size <= room:
+            room -= size
+            continue
+        _drop_beside(entry)
     return trimmed, spent

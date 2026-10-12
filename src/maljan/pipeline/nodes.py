@@ -146,7 +146,12 @@ from maljan.pipeline.validation import (
     validity_check_available,
 )
 from maljan.reporting.ledger_report import section_is_grounded
-from maljan.schemas.evidence import LedgerEntry, apply_budget, is_guard_answer
+from maljan.schemas.evidence import (
+    LedgerEntry,
+    apply_budget,
+    fit_structures_to_budget,
+    is_guard_answer,
+)
 from maljan.schemas.isr_models import ABSENCE_TECHNIQUE_MARKER, AgentISR
 from maljan.schemas.stix_models import Bundle
 from maljan.schemas.tool_evidence import trim_output
@@ -5715,6 +5720,11 @@ def make_report_node(
                 logger.warning("report_node: static provider evidence not recorded (%s).", exc)
         _ledger.extend(_capa_entries)
         _ledger.sort(key=lambda entry: entry.seq)
+        # The last pass before the report is built from it: each agent's kept
+        # bytes within its budget, structures dropped first, texts untouched.
+        fit_structures_to_budget(
+            _ledger, int(getattr(container.config.reporting, "evidence_budget_bytes", 0) or 0)
+        )
 
         try:
             builder = MalwareReportBuilder(

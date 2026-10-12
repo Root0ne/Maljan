@@ -720,7 +720,8 @@ _VIRUSTOTAL_BOOTSTRAP: dict[str, Any] = {
 
 # Each built-in server's declaration. ``roles``: ``reputation`` on the two
 # servers that declare a reputation lookup. ``reads_staged_sample`` on the
-# servers of ``agents.tool_pinning.PINNED_SERVERS``. ``required_env_allow`` as
+# three servers whose path-taking tools read the sample the platform staged
+# (``agents.tool_pinning.reads_staged_sample``). ``required_env_allow`` as
 # ``config.REQUIRED_ENV_ALLOW``. ``platform_owned`` on the servers of
 # ``agents.evidence_recorder._RESOLVING_SERVERS``. VirusTotal's reference URL
 # as ``reporting.builder._build_references`` and

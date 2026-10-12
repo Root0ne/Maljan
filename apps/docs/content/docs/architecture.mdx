@@ -2591,7 +2591,9 @@ come from — a registry server by its key, the team's `ask_<agent>` tools, the
 sandbox report's tools, the tools of the provider the role attaches itself —
 or, for an empty list, that there are none, followed by the workflow text
 each registry server whose tools are in the list declares (its
-`prompt_fragment`). A static provider's fragment has two parts: its guidance
+`prompt_fragment`), or, for a server that declares none and offers a tool it
+declares nothing for, its own served MCP `instructions` and its tools' own
+descriptions, quoted as its data (`prompt_fragments.undeclared_server_text`). A static provider's fragment has two parts: its guidance
 about claims (what a claim cites, the ATT&CK focus, and the verification
 discipline with its confidence caps, which every static provider carries,
 whatever it is, in generic words with no named algorithm or technique id —

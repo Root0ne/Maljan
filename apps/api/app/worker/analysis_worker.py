@@ -306,6 +306,102 @@ def mirror_target_for(provider: Any, *, sha256: str, extension: str) -> tuple[Pa
     return host, path_in_server(spec, host)
 
 
+def servers_this_job_binds(container: Any) -> set[str] | None:
+    """The tool servers some agent of this job can reach, or ``None`` when the job cannot say.
+
+    Every agent the profile's analysts can reach (``composition.reachable_agents``)
+    and every enabled agent that judges or writes the report, each with the
+    servers bound to it by ``agents`` or by a tool reference
+    (``composition.servers_bound_to``). A container with no profile to read
+    answers ``None``.
+    """
+    keys = getattr(container, "analyst_keys", None)
+    if not callable(keys):
+        return None
+    from maljan.agents.composition import reachable_agents, servers_bound_to
+
+    settings = container.config
+    named = list(keys())
+    named += [
+        key
+        for key, definition in settings.agents.definitions.items()
+        if definition.enabled and definition.role in ("judge", "report") and key not in named
+    ]
+    return {
+        server
+        for key in reachable_agents(settings, named)
+        for server in servers_bound_to(settings, key)
+    }
+
+
+def mirror_server_samples(
+    container: Any,
+    *,
+    temp_path: str,
+    sha256: str,
+    extension: str,
+    copy_fn: Callable[[Path, Path], None],
+    job_id: str = "",
+    already: Iterable[Path] = (),
+) -> tuple[list[Path], dict[str, str]]:
+    """Copy the sample once for each tool server of this job that declares a ``sample_mount``.
+
+    Only a server some agent of this job can reach (:func:`servers_this_job_binds`)
+    is copied the sample; a server no agent binds gets nothing.
+
+    A server that sees the samples directory at a mount of its own is handed
+    the sample there, whether a static provider drives it or an agent is bound
+    to it: the copy goes under its declared ``work_dir`` and the path it opens
+    is that copy under its mount (``providers.base.path_in_server``), as a
+    static provider's is. Returns the host copies this call wrote (a copy in
+    ``already``, written for a static provider, is not written twice) and the
+    path each server opens, by server key. A server that declares no mount
+    reads the worker's own filesystem, or is staged to (``agents.sample_staging``),
+    and gets nothing here. A failure is logged per server, and the rest go on.
+    """
+    from maljan.providers.base import MirrorSpec, path_in_server
+    from maljan.tools.roots import add_sample_root
+
+    from app.worker import sample_files
+
+    written: list[Path] = []
+    copied = set(already)
+    paths: dict[str, str] = {}
+    servers = getattr(getattr(container.config, "mcp", None), "servers", None) or {}
+    bound = servers_this_job_binds(container)
+    for key, cfg in servers.items():
+        if not getattr(cfg, "enabled", True) or not str(getattr(cfg, "sample_mount", "") or ""):
+            continue
+        if bound is not None and str(key) not in bound:
+            continue
+        try:
+            spec = MirrorSpec.of(cfg)
+            host = sample_files.work_dir(spec.work_subdir) / f"{sha256}{extension}"
+            # A directory the sidecars may read a path in, named before any
+            # server starts (see ``mirror_static_samples``).
+            add_sample_root(host.parent)
+            if host not in copied:
+                copy_fn(Path(temp_path), host)
+                written.append(host)
+                copied.add(host)
+            paths[str(key)] = path_in_server(spec, host)
+        except Exception as exc:  # noqa: BLE001 - one server never stops the others
+            logger.warning(
+                "Failed to mirror the sample for a tool server's declared mount (%s).",
+                type(exc).__name__,
+                extra={"job_id": job_id, "component": "sample-mirror"},
+            )
+            continue
+        logger.info(
+            "Mirrored sample to %s for tool server '%s' (%s).",
+            host,
+            key,
+            paths[str(key)],
+            extra={"job_id": job_id, "component": "sample-mirror"},
+        )
+    return written, paths
+
+
 def global_mirror_path(paths: dict[str, str], static_settings: Any) -> str | None:
     """``state["static_sample_path"]``: the globally configured provider's mirror.
 
@@ -1740,6 +1836,7 @@ async def keep_the_built_report(
                 run_summary=run_summary,
                 transcript=transcript,
                 incomplete_reason=note,
+                core_settings=core_settings,
             )
             await db.commit()
             report_id = report.id
@@ -1870,6 +1967,7 @@ async def keep_the_stopped_run(
                 run_summary=run_summary,
                 transcript=transcript,
                 incomplete_reason=note,
+                core_settings=core_settings,
             )
             await db.commit()
             report_id = report.id
@@ -2488,6 +2586,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # returns, so the outer finally can always find them)
         static_sample_path: str | None = None
         static_sample_paths: dict[str, str] = {}
+        server_sample_paths: dict[str, str] = {}
         try:
             from minio import Minio
             from pydantic import SecretStr as _SecretStr
@@ -2586,6 +2685,18 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             )
             host_mirrors.extend(new_mirrors)
             static_sample_paths.update(new_sample_paths)
+            # And for each tool server that declares a mount of its own, a
+            # copy under it, whichever agent its tools are bound to.
+            server_mirrors, server_sample_paths = mirror_server_samples(
+                app.container,
+                temp_path=temp_path,
+                sha256=sample_sha256,
+                extension=_orig_ext,
+                copy_fn=sample_files.private_copy,
+                job_id=job_id,
+                already=host_mirrors,
+            )
+            host_mirrors.extend(server_mirrors)
             static_sample_path = global_mirror_path(
                 static_sample_paths, app.container.config.static
             )
@@ -2683,6 +2794,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     sample_path=temp_path,
                     static_sample_path=static_sample_path,
                     static_sample_paths=static_sample_paths,
+                    server_sample_paths=server_sample_paths,
                     # The same instant this job's own duration is measured
                     # from, so the report's elapsed time and the job row
                     # cannot disagree.
@@ -2903,6 +3015,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 stix_bundle=stix_bundle_for_persist,
                 run_summary=_run_summary,
                 transcript=transcript,
+                core_settings=core_settings,
             )
 
             # ── 5. Mark job complete ─────────────────────────────
@@ -3885,6 +3998,25 @@ def _report_inputs(
     return stix_bundle_for_persist, _run_summary
 
 
+def evidence_budget_of(run_summary: Mapping[str, Any] | None, core_settings: Any = None) -> int:
+    """The per-agent evidence budget the run ran with.
+
+    Its settings snapshot in the run summary, else the job's own settings
+    (``core_settings``, the ones the run was built with); with neither, no
+    budget, and the last pass leaves the ledger as it is.
+    """
+    snapshot = (run_summary or {}).get("settings_snapshot")
+    value = (
+        snapshot.get("reporting.evidence_budget_bytes") if isinstance(snapshot, Mapping) else None
+    )
+    if value is None and core_settings is not None:
+        value = getattr(getattr(core_settings, "reporting", None), "evidence_budget_bytes", 0)
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 async def _store_the_report(
     db: Any,
     *,
@@ -3895,6 +4027,7 @@ async def _store_the_report(
     run_summary: dict[str, Any],
     transcript: list[dict[str, Any]],
     incomplete_reason: str | None = None,
+    core_settings: Any = None,
 ) -> Any:
     """Add the report and everything that cites it to ``db``, uncommitted.
 
@@ -4078,6 +4211,15 @@ async def _store_the_report(
     # one transaction: a report whose citations resolve to nothing is
     # worse than one that was never saved.
     _ledger = pipeline_result.get("evidence_ledger") or []
+    from maljan.schemas.evidence import fit_structures_to_budget
+
+    # The last pass before it is saved: each agent's kept bytes within its
+    # budget, structures dropped first, texts untouched (a no-op for a ledger
+    # with no structure kept beside a prose text, every built-in's).
+    fit_structures_to_budget(
+        [_entry for _entry in _ledger if isinstance(_entry, dict)],
+        evidence_budget_of(run_summary, core_settings),
+    )
     for _entry in _ledger:
         if not isinstance(_entry, dict):
             continue

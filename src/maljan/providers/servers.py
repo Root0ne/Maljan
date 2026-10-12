@@ -317,6 +317,12 @@ class ServerHandle:
     def label(self) -> str:
         return self.config.label or self.name
 
+    @property
+    def server_instructions(self) -> str:
+        """What the server said about itself when this attach initialised it (MCP
+        ``instructions``), as served; "" when it said nothing or is not attached."""
+        return str(getattr(self._toolkit, "server_instructions", "") or "")
+
     def _resolve_cwd(self) -> str | None:
         """The child's working directory, refused when it escapes the project.
 
@@ -1146,6 +1152,52 @@ def _declared_fragment(handle: Any) -> str:
     return str(getattr(getattr(handle, "config", None), "prompt_fragment", "") or "")
 
 
+def offered_name(server: str, name: str, seen: dict[str, str]) -> str:
+    """The name ``server``'s tool ``name`` is offered under, given the names ``seen`` claimed.
+
+    The collision rule of :meth:`ServerRegistry.merge_tools`: a name another
+    server claimed is taken as ``<server>__<name>``.
+    """
+    owner = seen.get(name)
+    return name if owner is None or owner == server else f"{server}__{name}"
+
+
+def _own_words(handle: Any, tools: list[BaseTool], seen: dict[str, str] | None = None) -> str:
+    """What a server that declares no workflow text says about itself, for ``tools``.
+
+    Only for a server whose block declares no ``prompt_fragment`` and that
+    offers a tool its block declares nothing for (``tool_facts``): its served
+    MCP ``instructions`` and its offered tools' own descriptions
+    (``prompt_fragments.undeclared_server_text``), each tool named as the
+    request offers it (:func:`offered_name` over ``seen``, before the merge
+    claims anything). A server whose every offered tool is declared says what
+    its declaration says, and nothing more. "" otherwise.
+    """
+    if _declared_fragment(handle).strip():
+        return ""
+    from maljan.agents.prompt_fragments import undeclared_server_text
+    from maljan.agents.tool_pinning import DELIVERY_TOOLS
+
+    declared = getattr(getattr(handle, "config", None), "tool_facts", None) or {}
+    undeclared = [
+        tool
+        for tool in tools
+        for name in (str(getattr(tool, "name", "") or ""),)
+        if name not in DELIVERY_TOOLS and name not in declared
+    ]
+    if not undeclared:
+        return ""
+    server = str(getattr(handle, "name", "") or "")
+    claimed = dict(seen or {})
+    names = {
+        name: offered_name(server, name, claimed)
+        for tool in tools
+        for name in (str(getattr(tool, "name", "") or ""),)
+    }
+    instructions = str(getattr(handle, "server_instructions", "") or "")
+    return undeclared_server_text(server, instructions, tools, names=names)
+
+
 class ServerRegistry:
     """The tool servers one job may attach, built from ``cfg.mcp.servers``."""
 
@@ -1384,6 +1436,7 @@ class ServerRegistry:
         seen: dict[str, str],
         *,
         fragment: str = "",
+        own_words: str = "",
     ) -> int:
         """Append ``incoming`` to ``tools`` under the collision rule.
 
@@ -1404,7 +1457,10 @@ class ServerRegistry:
         ``fragment`` is the workflow text the server declares (its
         ``prompt_fragment``); it rides with each tool
         (``metadata["maljan_server_fragment"]``), so the prompt built from the
-        list shows it only while the server's tools are there.
+        list shows it only while the server's tools are there. ``own_words``
+        is what a server that declares none says about itself
+        (:func:`_own_words`), carried the same way
+        (``metadata["maljan_server_own_words"]``).
 
         Returns how many tools were renamed, so the caller can log it once
         per server instead of per tool.
@@ -1415,12 +1471,15 @@ class ServerRegistry:
             owner = seen.get(name)
             if owner == server:
                 continue
+            offered = offered_name(server, name, seen)
             metadata = {**(getattr(tool, "metadata", None) or {}), "maljan_server": server}
             if fragment.strip():
                 metadata["maljan_server_fragment"] = fragment
+            elif own_words.strip():
+                metadata["maljan_server_own_words"] = own_words
             update: dict[str, Any] = {"metadata": metadata}
-            if owner is not None:
-                name = f"{server}__{name}"
+            if offered != name:
+                name = offered
                 if seen.get(name) == server:
                     continue
                 update["name"] = name
@@ -1436,8 +1495,14 @@ class ServerRegistry:
         # It is reported here instead, where it is withheld, and reaches the
         # degraded block exactly as it did before.
         self._record(handle.withheld_reasons())
+        offered = handle.tools()
         return self.merge_tools(
-            handle.name, handle.tools(), tools, seen, fragment=_declared_fragment(handle)
+            handle.name,
+            offered,
+            tools,
+            seen,
+            fragment=_declared_fragment(handle),
+            own_words=_own_words(handle, offered, seen),
         )
 
     def tools_for(
@@ -1591,12 +1656,14 @@ class ServerRegistry:
         picked, reasons = self._ref_tools(handle, ref)
         self._record(reasons)
         tools: list[BaseTool] = []
+        claimed: dict[str, str] = {} if seen is None else seen
         renamed = self.merge_tools(
             handle.name,
             picked,
             tools,
-            {} if seen is None else seen,
+            claimed,
             fragment=_declared_fragment(handle),
+            own_words=_own_words(handle, picked, claimed),
         )
         if renamed:
             logger.info(
@@ -1631,12 +1698,14 @@ class ServerRegistry:
         picked, reasons = self._ref_tools(handle, ref)
         self._record(reasons)
         tools: list[BaseTool] = []
+        claimed: dict[str, str] = {} if seen is None else seen
         renamed = self.merge_tools(
             handle.name,
             picked,
             tools,
-            {} if seen is None else seen,
+            claimed,
             fragment=_declared_fragment(handle),
+            own_words=_own_words(handle, picked, claimed),
         )
         if renamed:
             logger.info(

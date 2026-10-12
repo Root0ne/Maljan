@@ -59,7 +59,7 @@ import hashlib
 import json
 import posixpath
 import re
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Literal
@@ -946,6 +946,79 @@ def block_at(settings: Any, path: str) -> Any:
     return node
 
 
+# The declarations providers registered at runtime give for their own tools, by
+# the source those tools are recorded under (``provider:<id>``): each a reader
+# of the settings that answers the provider's declaration (an object or mapping
+# with the declaration fields of ``MCPServerConfig``), or ``None`` for none.
+# The built-ins' blocks are ``PROVIDER_BLOCKS``, read the same way; a runtime
+# provider extends the set through ``providers.registry`` (its class's
+# ``declaration`` hook), never by editing that table.
+_RUNTIME_PROVIDER_DECLARATIONS: dict[str, Callable[[Any], Any]] = {}
+# Bumped by every registration, so held declarations are rebuilt after one.
+_DECLARATION_VERSION = [0]
+
+
+def register_provider_declaration(source: str, read: Callable[[Any], Any]) -> None:
+    """Read ``source``'s declaration (``provider:<id>``) with ``read(settings)`` from now on.
+
+    A source of ``PROVIDER_BLOCKS`` keeps its block: the built-ins are
+    declared by their settings blocks.
+    """
+    ref = SourceRef.parse(source)
+    if ref.kind != "provider":
+        raise ValueError(f"{source!r} is not a provider source: provider:<id>")
+    _RUNTIME_PROVIDER_DECLARATIONS[str(ref)] = read
+    _DECLARATION_VERSION[0] += 1
+
+
+def forget_provider_declaration(source: str) -> None:
+    """Stop reading a runtime provider's declaration (the provider was taken out)."""
+    if _RUNTIME_PROVIDER_DECLARATIONS.pop(str(source), None) is not None:
+        _DECLARATION_VERSION[0] += 1
+
+
+def declaration_version() -> int:
+    """How many times the runtime providers' declarations changed in this process."""
+    return _DECLARATION_VERSION[0]
+
+
+def provider_declarations(settings: Any) -> dict[str, Any]:
+    """Every provider's declaration block under ``settings``, by source text.
+
+    The built-ins' blocks (``PROVIDER_BLOCKS``) first, then each runtime
+    provider's own (:func:`register_provider_declaration`) that answers one;
+    a reader that fails declares nothing, and is logged.
+    """
+    from maljan.core.logger import logger
+
+    blocks: dict[str, Any] = {
+        text: block_at(settings, path) for text, path in PROVIDER_BLOCKS.items()
+    }
+    for text, read in list(_RUNTIME_PROVIDER_DECLARATIONS.items()):
+        if text in blocks:
+            continue
+        try:
+            block = read(settings)
+        except Exception as exc:  # noqa: BLE001 — one provider never hides the others
+            logger.warning(
+                "Provider declaration for %s was not read (%s).", text, type(exc).__name__
+            )
+            continue
+        if isinstance(block, Mapping):
+            from maljan.core.config import MCPServerConfig
+
+            try:
+                block = MCPServerConfig.model_validate(dict(block))
+            except ValueError as exc:
+                logger.warning(
+                    "Provider declaration for %s does not read (%s).", text, type(exc).__name__
+                )
+                continue
+        if block is not None:
+            blocks[text] = block
+    return blocks
+
+
 @dataclass(frozen=True)
 class Declared:
     """One source's whole declaration, read from its settings block or built-in data."""
@@ -1019,9 +1092,9 @@ class ToolDeclarations:
         for key, cfg in settings.mcp.servers.items():
             sources.append(Declared.of(SourceRef("mcp", key), cfg, enabled=bool(cfg.enabled)))
         selected.add(str(settings.sandbox.provider))
-        for text, path in PROVIDER_BLOCKS.items():
+        for text, block in provider_declarations(settings).items():
             ref = SourceRef.parse(text)
-            sources.append(Declared.of(ref, block_at(settings, path), enabled=ref.key in selected))
+            sources.append(Declared.of(ref, block, enabled=ref.key in selected))
         for source, cfg in in_process_declarations().items():
             enabled = source.kind != "provider" or source.key in selected
             sources.append(Declared.of(source, cfg, enabled=enabled))

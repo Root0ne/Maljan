@@ -119,6 +119,12 @@ class ServerGuard:
         self.explicit_call_timeout = bool(explicit_call_timeout)
         self._declared: dict[str, float] = {}
         self._long_running: frozenset[str] = frozenset()
+        # The budgets and long-running tools the server's settings block
+        # declares for its tools (``ToolFacts.timeout_seconds`` and
+        # ``long_running``), held beside the manifest's: a server with no
+        # manifest of its own is held to what its declaration says.
+        self._facts_declared: dict[str, float] = {}
+        self._facts_long_running: frozenset[str] = frozenset()
         # The tools the server's settings block declares to open and analyse a
         # sample (``sample_open``), held as long-running like a manifest's.
         self._opening: frozenset[str] = frozenset()
@@ -146,6 +152,26 @@ class ServerGuard:
             self._declared = declared
             self._long_running = frozenset(long_running)
 
+    def declare_tool_facts(self, tool_facts: Any) -> None:
+        """Keep the budgets the server's settings block declares, per tool (``tool_facts``).
+
+        ``ToolFacts.timeout_seconds`` is a budget like a manifest's
+        ``timeout_s`` (the larger of the two is kept), and
+        ``ToolFacts.long_running`` holds a tool long-running like a manifest's
+        own flag. Read for any server, declared by an operator or shipped.
+        """
+        declared: dict[str, float] = {}
+        long_running: set[str] = set()
+        for name, facts in (tool_facts or {}).items():
+            value = getattr(facts, "timeout_seconds", None)
+            if isinstance(value, int | float) and not isinstance(value, bool) and value > 0:
+                declared[str(name)] = float(value)
+            if getattr(facts, "long_running", False) is True:
+                long_running.add(str(name))
+        with self._lock:
+            self._facts_declared = declared
+            self._facts_long_running = frozenset(long_running)
+
     def declare_sample_open(self, spec: Any) -> None:
         """Hold the tools ``spec`` (a block's ``sample_open``) declares to open and analyse a
         sample as long-running, as a manifest's own declaration is held."""
@@ -156,10 +182,15 @@ class ServerGuard:
             self._opening = opening
 
     def long_running(self, tool: str) -> bool:
-        """Whether ``tool`` runs with no wall clock: by the server's manifest, or by the
-        open and analysis tools its settings block declares (``sample_open``)."""
+        """Whether ``tool`` runs with no wall clock: by the server's manifest, by the open
+        and analysis tools its settings block declares (``sample_open``), or by its
+        declared ``long_running``."""
         with self._lock:
-            return tool in self._long_running or tool in self._opening
+            return (
+                tool in self._long_running
+                or tool in self._opening
+                or tool in self._facts_long_running
+            )
 
     def call_timeout(self, tool: str) -> float | None:
         """How long one call of ``tool`` may take before it is a transport failure, or ``None``.
@@ -177,7 +208,7 @@ class ServerGuard:
             # would only abandon a call the server is still working on.
             return None
         with self._lock:
-            declared = self._declared.get(tool, 0.0)
+            declared = max(self._declared.get(tool, 0.0), self._facts_declared.get(tool, 0.0))
         return max(self.call_timeout_seconds, declared) + CALL_TIMEOUT_GRACE_SECONDS
 
     # -- the breaker ---------------------------------------------------------
@@ -318,7 +349,9 @@ def guard_from_settings(
     ``sample_open`` is the server's own block's declaration: its open and
     analysis tools are held long-running. ``block`` is the server's settings
     block, whose ``call_timeout_seconds`` is the budget each of its calls gets
-    (:func:`server_call_budget`); with none given it is ``cfg.mcp.servers[server]``.
+    (:func:`server_call_budget`) and whose ``tool_facts`` declare each tool's
+    own budget and long-running flag (:meth:`ServerGuard.declare_tool_facts`);
+    with none given it is ``cfg.mcp.servers[server]``.
     """
     breaker = getattr(getattr(cfg, "mcp", None), "breaker", None)
     if block is None:
@@ -334,6 +367,7 @@ def guard_from_settings(
         explicit_call_timeout=explicit_call_timeout(cfg) > 0,
     )
     guard.declare_sample_open(sample_open)
+    guard.declare_tool_facts(getattr(block, "tool_facts", None))
     return guard
 
 

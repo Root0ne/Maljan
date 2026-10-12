@@ -342,10 +342,9 @@ def test_the_reputation_servers_are_the_servers_with_the_reputation_role(
 def test_the_pinned_servers_are_the_servers_that_read_the_staged_sample(
     declared: ToolDeclarations,
 ) -> None:
-    from maljan.agents.tool_pinning import PINNED_SERVERS
-
+    # The servers the name list held before the declaration was read.
     reading = {d.source.key for d in declared.sources() if d.reads_staged_sample}
-    assert reading == set(PINNED_SERVERS)
+    assert reading == {"analysis", "knowledge", "network"}
 
 
 def test_the_platforms_own_sources_are_the_resolving_servers(declared: ToolDeclarations) -> None:

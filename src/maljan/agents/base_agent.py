@@ -145,6 +145,7 @@ from maljan.schemas.evidence import (
     LedgerEntry,
     answers_held,
     apply_budget,
+    beside_bytes,
     is_guard_answer,
 )
 from maljan.schemas.isr_models import AgentISR, Artifact, ClaimEvidence, Finding
@@ -3477,6 +3478,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         # per chunk and would otherwise be handed the whole budget again on
         # each of them.
         self._evidence_bytes_spent = 0
+        # The bytes of the structures servers returned beside prose texts
+        # that this agent kept and has already handed over (drained): charged
+        # after every text and no longer evictable (``schemas.evidence``).
+        self._evidence_beside_spent = 0
         # The per-job id source, attached by the container next to the token
         # and truncation ledgers. None outside a job: the recorder then counts
         # within its own loop.
@@ -5990,7 +5995,14 @@ class BaseAnalyst(BudgetMeter, ABC):
             self._live_map_entries = None
             budget = int(getattr(get_settings().reporting, "evidence_budget_bytes", 0) or 0)
             trimmed, self._evidence_bytes_spent = apply_budget(
-                entries, budget, already_spent=self._evidence_bytes_spent
+                entries,
+                budget,
+                already_spent=self._evidence_bytes_spent,
+                already_beside=getattr(self, "_evidence_beside_spent", 0),
+                # This agent's own entries of earlier loops not yet handed
+                # over (a callee's handed-over record is the callee's): their
+                # structures are evicted first when this loop's texts take room.
+                earlier=[e for e in self._evidence_entries if e.agent == self.name],
             )
             if trimmed:
                 self.logger.warning(
@@ -6062,6 +6074,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         """
         entries = self._evidence_entries
         self._evidence_entries = []
+        # The structures handed over with them can no longer be evicted.
+        self._evidence_beside_spent = getattr(self, "_evidence_beside_spent", 0) + sum(
+            beside_bytes(entry) for entry in entries
+        )
         # The ids stay with the agent: the entries are the job's ledger's now,
         # and a later round of this agent may still cite them.
         held = _drained_ids_of(self)
