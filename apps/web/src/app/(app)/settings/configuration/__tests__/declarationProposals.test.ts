@@ -11,7 +11,10 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import type { McpServerEntry, ProbeResult } from "@/types/settings";
+import served from "@/test-fixtures/settings-schema.json";
+import type { McpServerEntry, ProbeResult, SettingsSchema, ToolDeclarationFields } from "@/types/settings";
+import { readToolFacts } from "../declarationFields";
+import { mergeToolFacts } from "../toolFactsChanges";
 import DeclarationProposals from "../DeclarationProposals";
 import {
   acceptField,
@@ -24,6 +27,9 @@ import {
   type Proposals,
   type ToolProposal,
 } from "../declarationProposals";
+
+/* The mark a map of changes carries, as the API stores and serves it. */
+const MARK = { "": "changes" } as const;
 
 const SERVER: McpServerEntry = {
   enabled: true,
@@ -159,9 +165,11 @@ describe("accepting", () => {
   it("stages a field read only through a kind together with that kind, and a kind-free one alone", () => {
     expect(withRequired(SCAN, "places")).toEqual(["kind", "rows", "places"]);
     expect(acceptField(SERVER, "scan", SCAN, "places").tool_facts).toEqual({
+      ...MARK,
       scan: { kind: "signature_rules", rows: "/matches/*", places: { offset: "/strings/*/offset" } },
     });
     expect(acceptField(SERVER, "scan", SCAN, "display_name").tool_facts).toEqual({
+      ...MARK,
       scan: { display_name: "Rule scanner" },
     });
     expect(alsoStaged(SERVER, "scan", SCAN, "places")).toEqual(["kind", "rows"]);
@@ -170,6 +178,7 @@ describe("accepting", () => {
 
   it("stages a kind only when the kind is accepted", () => {
     expect(acceptField(SERVER, "scan", SCAN, "kind").tool_facts).toEqual({
+      ...MARK,
       scan: { kind: "signature_rules" },
     });
   });
@@ -186,13 +195,14 @@ describe("accepting", () => {
 
   it("replaces the field accepted itself", () => {
     const server = { ...SERVER, tool_facts: { scan: { kind: "mine", rows: "/hits/*" } } };
-    expect(acceptField(server, "scan", SCAN, "rows").tool_facts!.scan!.rows).toBe("/matches/*");
+    const staged = acceptField(server, "scan", SCAN, "rows").tool_facts!.scan as { rows: string };
+    expect(staged.rows).toBe("/matches/*");
   });
 
   it("stages a whole tool as proposed, and nothing for a tool proposed nothing", () => {
     const server = { ...SERVER, tool_facts: { other: { kind: "strings" } } };
     const staged = acceptTool(server, "scan", SCAN);
-    expect(staged.tool_facts).toEqual({ other: { kind: "strings" }, scan: SCAN.facts });
+    expect(staged.tool_facts).toEqual({ ...MARK, other: { kind: "strings" }, scan: SCAN.facts });
     expect(isAccepted({ ...server, ...staged }, "scan", "places", SCAN)).toBe(true);
     expect(isAccepted(server, "scan", "places", SCAN)).toBe(false);
     expect(acceptTool(server, "lister", LISTER).tool_facts!.lister).toEqual(LISTER.facts);
@@ -213,6 +223,75 @@ describe("accepting", () => {
       acceptServerField(server, "auto_name_prefixes", { value: ["proc_", "blk_"], evidence: [], confidence: "low" }),
     ).toEqual({ auto_name_prefixes: ["proc_", "blk_"] });
     expect(acceptServerField(server, "other", { value: 1, evidence: [], confidence: "low" })).toEqual({});
+  });
+});
+
+describe("accepting on a server that ships declarations", () => {
+  const FIELDS = (served as unknown as SettingsSchema).tool_declaration_fields as ToolDeclarationFields;
+  /* What the server ships for `scan`, and its declaration as served (a full dump). */
+  const SHIPPED = {
+    scan: { ...FIELDS.kind_free, ...FIELDS.kind_dependent, kind: "strings", rows: "/m/*", display_name: "Scan" },
+  };
+  const DECLARED = { shipped: SHIPPED, fields: FIELDS };
+  const UNCLASSIFIED: ToolProposal = {
+    facts: { kind: "unclassified", display_name: "P" },
+    fields: {
+      kind: { value: "unclassified", evidence: ["description"], confidence: "low" },
+      display_name: { value: "P", evidence: ["title"], confidence: "high" },
+    },
+  };
+  const removed = { ...SERVER, tool_facts: { ...MARK, scan: null } } as McpServerEntry;
+  const inForce = (entry: Partial<McpServerEntry>) =>
+    mergeToolFacts(SHIPPED, entry.tool_facts).scan as Record<string, unknown>;
+  const set = (facts: Record<string, unknown>) =>
+    Object.fromEntries(
+      Object.entries(facts).filter(([name, value]) => {
+        const fallback = name === "kind" ? "" : { ...FIELDS.kind_free, ...FIELDS.kind_dependent }[name];
+        return JSON.stringify(value) !== JSON.stringify(fallback);
+      }),
+    );
+  const saves = (entry: Partial<McpServerEntry>) =>
+    readToolFacts(JSON.stringify(mergeToolFacts(SHIPPED, entry.tool_facts)), "s", FIELDS).error;
+
+  it("stages exactly the proposal for a shipped tool the operator removed, never the old declaration", () => {
+    const staged = acceptTool(removed, "scan", UNCLASSIFIED, DECLARED);
+    expect(set(inForce(staged))).toEqual({ kind: "unclassified", display_name: "P" });
+    expect(staged.tool_facts).toEqual({ ...MARK, scan: { kind: "unclassified", rows: "", display_name: "P" } });
+    expect(saves(staged)).toBeNull();
+    expect(isAccepted({ ...removed, ...staged }, "scan", "kind", UNCLASSIFIED, DECLARED)).toBe(true);
+  });
+
+  it("stages one accepted field of a removed shipped tool with nothing of the old declaration", () => {
+    const staged = acceptField(removed, "scan", UNCLASSIFIED, "kind", DECLARED);
+    expect(set(inForce(staged))).toEqual({ kind: "unclassified" });
+    // The no-kind word alone declares nothing, and is refused as the API refuses it,
+    // rather than saved beside a shipped rows path the operator never typed.
+    expect(saves(staged)).not.toBeNull();
+    // A second field accepted after it keeps the first, and saves.
+    const next = acceptField({ ...removed, ...staged }, "scan", UNCLASSIFIED, "display_name", DECLARED);
+    expect(set(inForce(next))).toEqual({ kind: "unclassified", display_name: "P" });
+    expect(saves(next)).toBeNull();
+    expect(isAccepted(removed, "scan", "kind", UNCLASSIFIED, DECLARED)).toBe(false);
+  });
+
+  it("reads a partly changed shipped tool as it is in force", () => {
+    const changed = { ...SERVER, tool_facts: { ...MARK, scan: { display_name: "Mine" } } } as McpServerEntry;
+    // rows is set in force (shipped), so accepting places keeps it.
+    expect(alsoStaged(changed, "scan", SCAN, "places", DECLARED)).toEqual([]);
+    const staged = acceptField(changed, "scan", SCAN, "places", DECLARED);
+    expect(staged.tool_facts).toEqual({
+      ...MARK,
+      scan: { display_name: "Mine", places: { offset: "/strings/*/offset" } },
+    });
+    expect(isAccepted(changed, "scan", "rows", SCAN, DECLARED)).toBe(false);
+  });
+
+  it("adds a required field the declaration in force holds only at its default", () => {
+    const own = { ...SERVER, tool_facts: { ...MARK, mine: { kind: "signature_rules", rows: "" } } } as McpServerEntry;
+    expect(alsoStaged(own, "mine", SCAN, "places", DECLARED)).toEqual(["rows"]);
+    expect((acceptField(own, "mine", SCAN, "places", DECLARED).tool_facts!.mine as { rows: string }).rows).toBe(
+      "/matches/*",
+    );
   });
 });
 

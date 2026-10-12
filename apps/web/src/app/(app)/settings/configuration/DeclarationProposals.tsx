@@ -1,6 +1,9 @@
 "use client";
 
+import { shippedServerToolFacts } from "@/lib/providerFacts";
 import type { McpServerEntry } from "@/types/settings";
+import { usableFields } from "./declarationFields";
+import { useOptionalSettingsContext } from "./SettingsContext";
 import {
   OPEN_UP_TO,
   acceptField,
@@ -129,6 +132,11 @@ export default function DeclarationProposals({
   onConfirmCalls?: (tools: string[]) => void;
   busy?: boolean;
 }) {
+  const schema = useOptionalSettingsContext()?.schema;
+  const declared = {
+    shipped: shippedServerToolFacts(schema, serverKey),
+    fields: usableFields(schema?.tool_declaration_fields),
+  };
   const tools = Object.entries(proposals.tools);
   const proposing = tools.filter(([, proposal]) => hasProposal(proposal));
   const quiet = tools.filter(([, proposal]) => !hasProposal(proposal)).map(([tool]) => tool);
@@ -163,7 +171,7 @@ export default function DeclarationProposals({
                 type="button"
                 className="text-[11px] text-accent-strong"
                 aria-label={`accept every field of ${tool}`}
-                onClick={() => put(acceptTool(server, tool, proposal))}
+                onClick={() => put(acceptTool(server, tool, proposal, declared))}
               >
                 accept tool
               </button>
@@ -174,9 +182,9 @@ export default function DeclarationProposals({
                   key={field}
                   label={field}
                   field={held}
-                  also={alsoStaged(server, tool, proposal, field)}
-                  accepted={isAccepted(server, tool, field, proposal)}
-                  onAccept={() => put(acceptField(server, tool, proposal, field))}
+                  also={alsoStaged(server, tool, proposal, field, declared)}
+                  accepted={isAccepted(server, tool, field, proposal, declared)}
+                  onAccept={() => put(acceptField(server, tool, proposal, field, declared))}
                 />
               ))}
             </ul>
