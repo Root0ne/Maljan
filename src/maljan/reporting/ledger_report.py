@@ -548,6 +548,11 @@ def _rule_rows(entry: LedgerEntry, data: dict[str, Any], key: str) -> Any:
     return data.get(key)
 
 
+def _or(declared: Any, own: Any) -> Any:
+    """The declared value where the declaration names one, else the row's own field."""
+    return own if declared is None else declared
+
+
 def _declared(entry: LedgerEntry, row: dict[str, Any], name: str) -> Any:
     """The value a rule row holds where its tool's declaration names ``name``, or ``None``."""
     facts = tool_kinds.declared_facts(entry)
@@ -643,8 +648,17 @@ def _capa(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     acc.credit(table, entry)
 
 
+def _declared_place(entry: LedgerEntry, row: dict[str, Any], name: str) -> Any:
+    """The value a row holds where its tool's declaration places ``name``, or ``None``."""
+    facts = tool_kinds.declared_facts(entry)
+    path = facts.places.get(name, "") if facts is not None else ""
+    return first(row, path) if path else None
+
+
 def _sandbox_processes(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
-    rows = data.get("processes")
+    # Where the declaration says, so a live sandbox server whose rows are shaped
+    # otherwise is drawn as the built-in sandbox's processes are.
+    rows = _rule_rows(entry, data, "processes")
     if not isinstance(rows, list) or not rows:
         return
     table = acc.get(
@@ -659,10 +673,10 @@ def _sandbox_processes(acc: _Sections, entry: LedgerEntry, data: dict[str, Any])
         acc.add_row(
             table,
             [
-                _text(row.get("pid")),
+                _text(_or(_declared_place(entry, row, "pid"), row.get("pid"))),
                 _text(row.get("ppid")),
-                _text(row.get("name")),
-                _text(row.get("command_line")),
+                _text(_or(_declared(entry, row, "name"), row.get("name"))),
+                _text(_or(_declared(entry, row, "command_line"), row.get("command_line"))),
             ],
         )
     acc.credit(table, entry)

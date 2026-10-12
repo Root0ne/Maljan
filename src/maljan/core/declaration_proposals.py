@@ -18,7 +18,15 @@ server already said when it listed its tools:
   exist, the digest of empty input, a documentation address), made only when
   the operator asks for it: the row shape of an answer that has no
   ``outputSchema``, the auto-name prefixes a listing writes and the text the
-  server answers a missing file with.
+  server answers a missing file with;
+* the shape test of a sandbox report (``core.report_shapes``): rows whose keys
+  say process id, parent and name propose a sandbox's process kind, with the
+  process id as the place a run root is read from; rows naming a destination
+  and its port, or a DNS question, a sandbox's network kind (read as a flow
+  table where the answer lays its rows out as one); rows naming a digest, a
+  name and a size, a sandbox's dropped-file kind. An accepted sandbox kind
+  gives a live sandbox server's answers what the built-in sandbox tools'
+  answers get: observed steps and ``run`` roots.
 
 This module turns that into a *proposal*: per tool, a ``ToolFacts`` that
 validates, and per field the parts of the schema or answer it was read from
@@ -47,6 +55,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from maljan.core.report_shapes import row_shape
 from maljan.core.tool_declarations import (
     KIND_DEPENDENT_FIELDS,
     ErrorPattern,
@@ -572,6 +581,9 @@ class _AnswerReading:
     reputation: dict[str, Any] = field(default_factory=dict)
     reputation_evidence: list[str] = field(default_factory=list)
     confidence: str = MEDIUM
+    # The first list of objects: its path segments (the list's own) and its row's keys.
+    row_list: tuple[str, ...] = ()
+    row_keys: tuple[str, ...] = ()
 
 
 def _read_answer(root: _Shape, origin: str, confidence: str) -> _AnswerReading:
@@ -583,6 +595,7 @@ def _read_answer(root: _Shape, origin: str, confidence: str) -> _AnswerReading:
     for segments, shape in nodes:
         if shape.kind == "array" and shape.items is not None and shape.items.props:
             row_at, row = (*segments, "*"), shape.items
+            reading.row_list, reading.row_keys = tuple(segments), tuple(shape.items.props)
             reading.rows = Proposed(
                 value=_path(row_at),
                 evidence=[f"{_where(origin, segments)} (a list of objects)"],
@@ -721,6 +734,7 @@ _REQUIRES: dict[str, tuple[str, ...]] = {
 # Dropped in this order until the facts validate (a field read wrongly is
 # never worth the rest of the proposal).
 _DROP_ORDER = (
+    "reader",
     "asserts_techniques",
     "places",
     "values",
@@ -804,6 +818,14 @@ def propose_tool(
             list(reading.techniques), list(reading.techniques_evidence), reading.confidence
         )
 
+    # A sandbox's rows, by the shape test: the kind, and the parts a run reads.
+    sandbox = _sandbox_kind(reading)
+    if sandbox is not None:
+        kind, extra = sandbox
+        for key, held in extra.items():
+            if key != "_kind":
+                proposal.fields[key] = held
+
     # The kind, when something the server said names one.
     found_kind = _kind_of(name, words, word_origin, proposal, reading)
     if found_kind is not None:
@@ -879,6 +901,10 @@ def _kind_of(
 ) -> tuple[str, str, list[str]] | None:
     """The proposed kind, how sure, and what said it; ``None`` when nothing names one."""
     roles = proposal.roles
+    sandbox = _sandbox_kind(reading)
+    if sandbox is not None:
+        kind, extra = sandbox
+        return kind, extra["_kind"].confidence, list(extra["_kind"].evidence)
     counts = f"a malicious count in the answer ({reading.reputation.get('malicious', '')})"
     if reading.reputation and "hash" in roles:
         return "reputation", MEDIUM, [counts, "inputSchema hash argument"]
@@ -912,6 +938,61 @@ def _kind_of(
     if "strings" in words and "text" in reading.values:
         return "strings", LOW, [f"{word_origin} (strings)", "rows with a text value"]
     return None
+
+
+# The top-level keys a flow table lays its rows out under
+# (``analysis.evidence_roots``: reader ``flow_table``).
+_FLOW_TABLE_KEYS = frozenset({"tcp", "udp", "conversations", "dns"})
+_SANDBOX_KIND_OF_SHAPE = {
+    "processes": "sandbox_processes",
+    "flows": "sandbox_network",
+    "dns": "sandbox_network",
+    "dropped_files": "sandbox_dropped_files",
+}
+
+
+def _sandbox_kind(reading: _AnswerReading) -> tuple[str, dict[str, Proposed]] | None:
+    """A sandbox kind for an answer whose rows pass the shape test, with the fields it reads.
+
+    ``("sandbox_processes", {...})`` gives the row's process id as the place
+    a ``run`` root is read from and its name and command line as values; a
+    network answer laid out as a flow table gets that reader. The returned
+    mapping's ``_kind`` entry is the kind's own evidence; every other entry is
+    a field to propose. ``None`` where the rows pass no shape test.
+    """
+    if reading.rows is None or not reading.row_keys:
+        return None
+    list_name = next((s for s in reversed(reading.row_list) if s != "*"), "")
+    shape = row_shape(list_name, reading.row_keys)
+    if shape is None:
+        return None
+    kind = _SANDBOX_KIND_OF_SHAPE[shape.kind]
+    origin = reading.rows.evidence[0] if reading.rows.evidence else "rows"
+    parts = ", ".join(sorted(shape.parts.values()))
+    confidence = LOW if reading.confidence == LOW else MEDIUM
+    extra: dict[str, Proposed] = {
+        "_kind": Proposed(
+            kind, [f"{origin} ({parts})", "the sandbox report shape test"], confidence
+        )
+    }
+    if shape.kind == "processes":
+        extra["places"] = Proposed(
+            {"pid": f"/{shape.parts['pid']}"}, [f"{origin}.{shape.parts['pid']}"], confidence
+        )
+        values = {"name": f"/{shape.parts['name']}"}
+        if "command_line" in shape.parts:
+            values["command_line"] = f"/{shape.parts['command_line']}"
+        extra["values"] = Proposed(values, [f"{origin} ({parts})"], confidence)
+    elif (
+        shape.kind in ("flows", "dns")
+        and len(reading.row_list) == 1
+        and reading.row_list[0] in _FLOW_TABLE_KEYS
+        and all(shape.parts.get(p) == p for p in ("dst", "dport") if p in shape.parts)
+    ):
+        extra["reader"] = Proposed(
+            "flow_table", [f"{origin} (laid out as a flow table)"], confidence
+        )
+    return kind, extra
 
 
 def _settle(proposal: ToolProposal) -> None:
