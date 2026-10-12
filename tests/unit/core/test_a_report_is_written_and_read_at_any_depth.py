@@ -422,6 +422,65 @@ class TestAHostileDeepBody:
         with pytest.raises(json.JSONDecodeError):
             loads(bad)
 
+    def test_a_deep_body_json_loads_reads_is_cut_in_place_at_its_cost(self) -> None:
+        """Ten megabytes of 500-deep chunks: ``json.loads`` reads it, and the guard cuts it.
+
+        The cut is made in the tree ``json.loads`` returned, never in a copy, so
+        the peak resident size a fresh process adds stays that of ``json.loads``
+        on the same body, and the time within a small constant of it; ten times
+        the body costs at most about ten times the time.
+        """
+        size = 10_000_000
+        plain_bytes, plain_seconds = _chunked_read("json", 500, size)
+        held_bytes, held_seconds = _chunked_read("safe", 500, size)
+        assert held_bytes <= 1.2 * plain_bytes + 8 * 2**20, (plain_bytes, held_bytes)
+        assert held_seconds <= 4 * plain_seconds + 0.5, (plain_seconds, held_seconds)
+        _small_bytes, small_seconds = _chunked_read("safe", 500, size // 10)
+        assert held_seconds <= 10 * small_seconds * 1.5 + 0.2, (small_seconds, held_seconds)
+
+    def test_a_cut_body_reads_as_the_marked_copy_would(self) -> None:
+        chunk = "[" * 500 + "]" * 500
+        text = '{"a": [' + ",".join([chunk] * 3) + '], "b": {"c": 1}}'
+        value = loads(text)
+        assert value == within_depth(json.loads(text))
+        assert _depth(value) == DEPTH_GUARD
+
+
+_CHUNK_SCRIPT = """
+import json, resource, sys, time
+from maljan.core.safe_json import loads
+mode, depth, size = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+chunk = "[" * depth + "]" * depth
+text = "[" + ",".join([chunk] * max(1, size // (2 * depth + 1))) + "]"
+read = json.loads if mode == "json" else loads
+base = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+started = time.perf_counter()
+value = read(text)
+seconds = time.perf_counter() - started
+print((resource.getrusage(resource.RUSAGE_SELF).ru_maxrss - base) * 1024, seconds)
+"""
+
+
+def _chunked_read(mode: str, depth: int, size: int) -> tuple[int, float]:
+    """``(peak resident bytes added, seconds)`` a fresh process takes to read the chunked body."""
+    import os
+    import subprocess
+    import sys
+
+    import maljan
+
+    env = {**os.environ, "PYTHONPATH": str(Path(maljan.__file__).resolve().parents[1])}
+    done = subprocess.run(
+        [sys.executable, "-c", _CHUNK_SCRIPT, mode, str(depth), str(size)],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=env,
+        timeout=300,
+    )
+    added, seconds = done.stdout.strip().splitlines()[-1].split()
+    return int(added), float(seconds)
+
 
 _PEAK_SCRIPT = """
 import json, resource, sys

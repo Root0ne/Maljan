@@ -168,35 +168,49 @@ def dumps(value: Any, **kwargs: Any) -> str:
     return json.dumps(within_depth(value), **kwargs)
 
 
-def _tree_deeper_than(value: Any, limit: int) -> bool:
-    """Whether a tree ``value`` (what ``json.loads`` returns) nests deeper than ``limit``.
+def _cut_below(value: Any, limit: int) -> int:
+    """Replace, in place, each container of a tree ``value`` nested below ``limit``; how many.
 
-    A depth-first walk holding one iterator per open level, stopping at the
-    guard: no record per container, so its memory is the guard's depth, and
-    its time linear in the value. Only for a tree (a value read from text):
-    one that shares or holds itself is measured by :func:`exceeds_depth`.
+    ``value`` is what ``json.loads`` returns: a fresh tree nothing else holds.
+    Each container at depth ``limit + 1`` (``value`` itself at depth 1) is
+    replaced in its parent by :data:`DEEPER_MARK`, so the levels below it are
+    released as they are cut, never copied. A depth-first walk holding one
+    iterator per open level and no record per container: its memory is the
+    guard's depth, its time linear in the part of the tree above the guard.
+    The count is of the containers replaced (the outermost of each cut run).
     """
     if not isinstance(value, dict | list):
-        return False
-    stack = [iter(_children(value))]
+        return 0
+    cut = 0
+    stack: list[tuple[Any, Any]] = [(value, _entries(value))]
     while stack:
-        for child in stack[-1]:
+        node, entries = stack[-1]
+        for key, child in entries:
             if isinstance(child, dict | list):
                 if len(stack) >= limit:
-                    return True
-                stack.append(iter(_children(child)))
+                    # Assigning to a key the dict holds, or an index the list
+                    # holds, leaves the iterator over it valid.
+                    node[key] = DEEPER_MARK
+                    cut += 1
+                    continue
+                stack.append((child, _entries(child)))
                 break
         else:
             stack.pop()
-    return False
+    return cut
+
+
+def _entries(node: Any) -> Any:
+    return iter(node.items()) if isinstance(node, dict) else enumerate(node)
 
 
 def loads(text: str | bytes | bytearray) -> Any:
     """``json.loads(text)``, each container below :data:`DEPTH_GUARD` read as :data:`DEEPER_MARK`.
 
-    A body nested too deeply for ``json.loads`` is read by the iterative reader.
-    Where the guard marks anything, a warning says how many containers it
-    marked (once per body).
+    A body nested too deeply for ``json.loads`` is read by the iterative
+    reader; one ``json.loads`` reads is cut at the guard in place, in the tree
+    it returned (:func:`_cut_below`), with no copy. Where the guard marks
+    anything, a warning says how many containers it marked (once per body).
     """
     try:
         value = json.loads(text)
@@ -208,24 +222,8 @@ def loads(text: str | bytes | bytearray) -> Any:
         value = _loads_iteratively(text, marked=marked)
         _say_marked(marked[0])
         return value
-    if not _tree_deeper_than(value, DEPTH_GUARD):
-        return value
-    copy = within_depth(value)
-    _say_marked(_count_marks(copy))
-    return copy
-
-
-def _count_marks(value: Any) -> int:
-    """How many :data:`DEEPER_MARK` values a tree within the guard holds."""
-    count = 0
-    stack = [value]
-    while stack:
-        node = stack.pop()
-        if isinstance(node, dict | list):
-            stack.extend(_children(node))
-        elif node == DEEPER_MARK:
-            count += 1
-    return count
+    _say_marked(_cut_below(value, DEPTH_GUARD))
+    return value
 
 
 def _say_marked(count: int) -> None:
