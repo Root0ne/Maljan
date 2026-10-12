@@ -18,6 +18,7 @@ from maljan.core.settings_overrides import (
     build_settings,
     effective_source,
     flatten_leaves,
+    pack_step_refusals,
     shipped_tool_facts,
     split_key,
 )
@@ -801,6 +802,13 @@ class SettingsService:
         core = {split_key(k)[1]: v for k, v in merged.items() if k.startswith("core.")}
         api = {split_key(k)[1]: v for k, v in merged.items() if k.startswith("api.")}
         self.validate(core, api)
+        # Stored pack steps are read leniently; the steps a save changes are
+        # held to the strict rules here.
+        step_refusals = pack_step_refusals(
+            core, {split_key(k)[1]: v for k, v in current.items() if k.startswith("core.")}
+        )
+        if step_refusals:
+            raise SettingsValidationError(step_refusals)
         declaration_refusals = changed_declaration_refusals(changes, current)
         if declaration_refusals:
             raise SettingsValidationError(declaration_refusals)

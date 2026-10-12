@@ -86,11 +86,105 @@ def build_settings(core_overrides: Mapping[str, Any]) -> Settings:
     only construction path the application (API, worker) may use — see
     ``tests/unit/test_no_bare_settings_in_app.py``.
     """
+    return _built(core_overrides)[0]
+
+
+# The stored leaf of the triage pack's steps (``core.pack_steps``).
+PACK_STEPS_PATH = "triage.steps"
+
+
+def _built(core_overrides: Mapping[str, Any]) -> tuple[Settings, list[str]]:
+    """The settings :func:`build_settings` builds, and the stored pack steps it left out.
+
+    The stored steps are read leniently (``core.pack_steps.lenient_steps``):
+    a step this release cannot run is left out with one warning, the shipped
+    step it changed in force again, so one stale step never costs a job every
+    setting. A save holds the steps it changes to the strict rules
+    (:func:`pack_step_refusals`).
+    """
+    from maljan.core.pack_steps import lenient_steps
+
     token = STORE_ONLY.set(True)
     try:
-        return Settings(**nest(declarations_in_force(core_overrides)))
+        in_force = declarations_in_force(core_overrides)
+        if PACK_STEPS_PATH not in in_force:
+            return Settings(**nest(in_force)), []
+        stored = in_force.pop(PACK_STEPS_PATH)
+        built = Settings(**nest(in_force))
     finally:
         STORE_ONLY.reset(token)
+    kept, left = lenient_steps(stored, built.pack_step_problem)
+    if left:
+        _warn_left_out_steps(left)
+    built.triage = built.triage.model_copy(update={"steps": kept})
+    return built, left
+
+
+_WARNED_STEPS: set[tuple[str, ...]] = set()
+_WARNED_STEPS_MAX = 256
+
+
+def _warn_left_out_steps(left: list[str]) -> None:
+    from maljan.core.logger import logger
+    from maljan.core.tool_declarations import loggable_names
+
+    held = tuple(left)
+    if held in _WARNED_STEPS:
+        return
+    if len(_WARNED_STEPS) >= _WARNED_STEPS_MAX:
+        _WARNED_STEPS.clear()
+    _WARNED_STEPS.add(held)
+    logger.warning(
+        "A stored triage pack step cannot run as declared under this release's settings; "
+        "it is left out, and the shipped step it changed, if any, is in force: %s",
+        loggable_names(held),
+    )
+
+
+def left_out_pack_steps(core_overrides: Mapping[str, Any]) -> list[str]:
+    """The stored pack steps :func:`build_settings` leaves out, by id (else by position)."""
+    return _built(core_overrides)[1]
+
+
+def pack_step_refusals(merged: Mapping[str, Any], current: Mapping[str, Any]) -> dict[str, str]:
+    """The strict refusal of a save that leaves a pack step out it did not leave out before.
+
+    ``merged`` and ``current`` are core overrides (no ``core.`` prefix) after
+    and before the save. A step the stored settings already leave out, sent
+    back exactly as stored, is not this save's edit, so it blocks no
+    unrelated save; any other step left out is refused under
+    ``core.triage.steps``, with the settings model's own message.
+    """
+    left = left_out_pack_steps(merged)
+    if not left:
+        return {}
+    before = set(left_out_pack_steps(current))
+    now, then = _steps_by_id(merged), _steps_by_id(current)
+    if all(step in before and now.get(step) == then.get(step) for step in left):
+        return {}
+    token = STORE_ONLY.set(True)
+    try:
+        Settings(**nest(declarations_in_force(merged)))
+    except ValueError as exc:  # a pydantic ValidationError is one
+        errors = getattr(exc, "errors", None)
+        said = "; ".join(str(e.get("msg", "")) for e in errors()) if callable(errors) else str(exc)
+    else:
+        said = ""
+    finally:
+        STORE_ONLY.reset(token)
+    fallback = f"steps cannot run as declared: {', '.join(left)}"
+    return {f"{CORE_NS}.{PACK_STEPS_PATH}": said or fallback}
+
+
+def _steps_by_id(core_overrides: Mapping[str, Any]) -> dict[str, Any]:
+    held = core_overrides.get(PACK_STEPS_PATH)
+    if not isinstance(held, list):
+        return {}
+    return {
+        str(item.get("id")): item
+        for item in held
+        if isinstance(item, Mapping) and isinstance(item.get("id"), str)
+    }
 
 
 # The stored tool-server map, and the field holding a block's tool declarations.

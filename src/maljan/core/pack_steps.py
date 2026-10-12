@@ -51,7 +51,7 @@ the same kind.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from typing import Any
 
 from pydantic import (
@@ -76,7 +76,9 @@ __all__ = [
     "PackStep",
     "check_steps",
     "effective_steps",
+    "lenient_steps",
     "read_answer_field",
+    "runs_shipped",
     "shipped_step",
     "shipped_tools_of",
     "written_for",
@@ -545,11 +547,16 @@ def effective_steps(declared: Iterable[Any] = ()) -> tuple[PackStep, ...]:
     return tuple(step for step in _effective([_as_step(item) for item in declared]) if step.enabled)
 
 
-def _effective(declared: list[PackStep]) -> list[PackStep]:
+def _effective(
+    declared: list[PackStep], found: dict[str, list[str]] | None = None
+) -> list[PackStep]:
     """The shipped list with ``declared`` laid over it, in one pass over each.
 
     Held as a linked list by id, so placing a step after another, or in its
-    own place, costs the same whatever the list's length.
+    own place, costs the same whatever the list's length. Every problem of
+    the list is refused with one error naming them all, or, given ``found``,
+    recorded there under the id of the step that has it (a step placed after
+    no step stays last), for :func:`lenient_steps`.
     """
     held: dict[str, PackStep] = {}
     after: dict[str, str] = {}
@@ -601,8 +608,12 @@ def _effective(declared: list[PackStep]) -> list[PackStep]:
             anchor = tail
         if step.after:
             if step.after not in held or step.after == step.id:
-                raise ValueError(f"step {step.id!r} comes after {step.after!r}, which no step is")
-            anchor = step.after
+                said = f"step {step.id!r} comes after {step.after!r}, which no step is"
+                if found is None:
+                    raise ValueError(said)
+                found.setdefault(step.id, []).append(said)
+            else:
+                anchor = step.after
         link(step.id, anchor)
     steps: list[PackStep] = []
     cursor = head
@@ -614,19 +625,89 @@ def _effective(declared: list[PackStep]) -> list[PackStep]:
     named_beside = {other for step in steps for other in step.beside}
     set_by = {step.id: step.model_fields_set for step in declared}
     for step in steps:
-        problems.extend(_builtin_problems(step))
-        problems.extend(_renderer_problems(step))
-        problems.extend(_schedule_problems(step, set_by.get(step.id, frozenset()), named_beside))
+        own = [
+            *_builtin_problems(step),
+            *_renderer_problems(step),
+            *_schedule_problems(step, set_by.get(step.id, frozenset()), named_beside),
+        ]
         if step.starts_after and step.starts_after not in ids:
-            problems.append(
-                f"step {step.id!r} starts after {step.starts_after!r}, which no step is"
-            )
-        for other in step.beside:
-            if other not in ids:
-                problems.append(f"step {step.id!r} runs beside {other!r}, which no step is")
-    if problems:
+            own.append(f"step {step.id!r} starts after {step.starts_after!r}, which no step is")
+        own.extend(
+            f"step {step.id!r} runs beside {other!r}, which no step is"
+            for other in step.beside
+            if other not in ids
+        )
+        if own and found is not None:
+            found.setdefault(step.id, []).extend(own)
+        problems.extend(own)
+    if problems and found is None:
         raise ValueError("; ".join(problems))
     return steps
+
+
+def lenient_steps(
+    value: Any, problem: Callable[[PackStep], str] | None = None
+) -> tuple[list[PackStep], list[str]]:
+    """The stored steps the pack can run, and the steps left out (by id, else by position).
+
+    How stored settings are read (``core.settings_overrides.build_settings``):
+    a stored step this release cannot run, as :func:`check_steps` or
+    ``problem`` (the settings' own check of an enabled step, such as the
+    server it calls) refuses it, is left out, so the shipped step it changed
+    is in force again and every other step still runs, where refusing the
+    list would cost the job every setting. A step that names a left-out step
+    (``after``, ``starts_after``, ``beside``) is left out with it. A save is
+    refused instead (:func:`check_steps`). Each round leaves out every step
+    with a problem and the steps naming them, so the rounds stay few
+    whatever the list's length.
+    """
+    if not isinstance(value, list):
+        return [], ["triage.steps"] if value not in (None, "") else []
+    steps: list[PackStep] = []
+    left: list[str] = []
+    seen: set[str] = set()
+    for position, item in enumerate(value):
+        try:
+            step = _as_step(item)
+        except ValueError:  # a pydantic ValidationError is one
+            named = item.get("id") if isinstance(item, Mapping) else None
+            left.append(named if isinstance(named, str) and named else f"#{position}")
+            continue
+        if step.id in seen:
+            left.append(step.id)
+            continue
+        seen.add(step.id)
+        steps.append(step)
+    shipped = _indexes()[0]
+    while steps:
+        found: dict[str, list[str]] = {}
+        effective = _effective(steps, found)
+        if problem is not None:
+            for step in effective:
+                said = problem(step) if step.enabled else ""
+                if said:
+                    found.setdefault(step.id, []).append(said)
+        if not found:
+            break
+        out = {step.id for step in steps if step.id in found}
+        if not out:
+            # A problem no declared step holds: the shipped list runs.
+            left.extend(step.id for step in steps)
+            return [], left
+        naming: dict[str, list[str]] = {}
+        for step in steps:
+            for other in {step.after, step.starts_after, *step.beside} - {""}:
+                naming.setdefault(other, []).append(step.id)
+        gone = [step_id for step_id in out if step_id not in shipped]
+        while gone:
+            for step_id in naming.get(gone.pop(), ()):
+                if step_id not in out:
+                    out.add(step_id)
+                    if step_id not in shipped:
+                        gone.append(step_id)
+        left.extend(step.id for step in steps if step.id in out)
+        steps = [step for step in steps if step.id not in out]
+    return steps, left
 
 
 def _starts_early(step: PackStep) -> bool:
