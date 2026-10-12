@@ -101,6 +101,7 @@ from maljan.core.declared_reading import (
 )
 from maljan.core.undeclared_tools import address_arguments, entry_lists_any_code
 from maljan.schemas.evidence import repeat_holders
+from maljan.schemas.sandbox_document import dns_row_name
 
 WHOLE_FILE = "the whole file"
 EXTERNAL_ASSESSMENT = "an external assessment of the whole file"
@@ -923,7 +924,7 @@ def _item_root(item: str, joins: _Joins) -> tuple[str, str]:
         label = _flow_of({**row, "proto": kind}, joins)
         return (label, "") if label else ("", ITEM_UNPLACED.format(section=section))
     if kind == "dns":
-        name = str(row.get("request") or row.get("query") or row.get("name") or "").rstrip(".")
+        name = dns_row_name(row).rstrip(".")
         return (
             (DNS_ROOT.format(name=_written(name)), "")
             if name
@@ -1359,7 +1360,7 @@ def _read_entry(entry: Any, found: EntryRoots, joins: _Joins) -> EntryRoots:
             if label is not None:
                 found.add(label, values=(row.get("dst"),))
         for row in _rows(data, "dns"):
-            name = str(row.get("request") or row.get("query") or row.get("name") or "")
+            name = dns_row_name(row)
             if name:
                 said = name.rstrip(".")
                 found.add(DNS_ROOT.format(name=_written(said)), values=(said,))

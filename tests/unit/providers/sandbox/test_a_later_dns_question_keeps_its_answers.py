@@ -16,6 +16,8 @@ import json
 import re
 from typing import Any
 
+import pytest
+
 from maljan.parsers.network_parser import NetworkParser
 from maljan.providers.sandbox.readers import ReportReader
 from maljan.reporting.builder import ioc_table
@@ -744,3 +746,145 @@ class TestTheFillsAgreeWithTheDocument:
         )
         assert sandbox_document(report)["network"]["dns"]
         assert "network.dns" in report_fills(report)
+
+
+# -- one reading of a DNS row's name, the reserved written-as key, one place decision ----------
+
+
+_NAME_KEYS = ("request", "query", "hostname", "domain", "name")
+
+
+def _dns_item_root(row: dict[str, Any]) -> str:
+    from maljan.analysis.evidence_roots import SECTION_OF_PREFIX, _item_root, _Joins
+
+    prefix = next(p for p, section in SECTION_OF_PREFIX.items() if section == "network")
+    joins = _Joins()
+    joins.network_items[f"{prefix}:1"] = ("dns", row)
+    return _item_root(f"{prefix}:1", joins)[0]
+
+
+class TestEveryReaderReadsADnsRowSNameAlike:
+    @pytest.mark.parametrize("key", _NAME_KEYS)
+    def test_a_row_naming_its_name_under_any_field_is_read_by_every_reader(self, key: str) -> None:
+        from maljan.parsers.dynamic_parser import DynamicParser
+        from maljan.schemas.sandbox_document import dns_row_name, reads_as_dns_row
+
+        row = {key: " own-z1.net ", "answers": [{"data": "45.33.32.81"}]}
+        assert dns_row_name(row) == "own-z1.net"
+        assert reads_as_dns_row(row)
+        network = {"dns": [row]}
+        text = NetworkParser()._parse_sandbox_network(network)
+        assert "own-z1.net | 45.33.32.81" in text
+        assert "N/A | N/A" not in text
+        assert "own-z1.net" in DynamicParser().parse({"network": network})
+        report = SandboxReport(provider="x", source_format="y", network=SandboxNetwork(dns=[row]))
+        domains = network_from_sandbox_report(sandbox_document(report)).domains
+        assert [d.fqdn for d in domains] == ["own-z1.net"]
+        assert domains[0].resolved_ips == ["45.33.32.81"]
+        assert _dns_item_root(row).endswith("own-z1.net")
+
+    def test_a_kept_object_naming_its_name_only_under_hostname_prints_no_empty_line(self) -> None:
+        for key in ("hostname", "domain", "name"):
+            value = {key: "own-z1.net", "answers": [{"data": "45.33.32.81"}]}
+            payload = {"info": {"id": 1}, "network": {"dns": value}, "message": _two_name_message()}
+            document = sandbox_document(
+                _KeepSourceStructuralReader().read(payload, provider="upload")
+            )
+            text = NetworkParser()._parse_sandbox_network(document["network"])
+            assert "own-z1.net | 45.33.32.81" in text
+            assert "N/A | N/A" not in text
+
+    def test_no_reader_holds_its_own_copy_of_the_name_fields(self) -> None:
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[4] / "src" / "maljan"
+        readers = (
+            "parsers/network_parser.py",
+            "parsers/dynamic_parser.py",
+            "analysis/evidence_roots.py",
+            "reporting/ledger_projection.py",
+        )
+        for relative in readers:
+            text = (root / relative).read_text(encoding="utf-8")
+            assert "dns_row_name" in text, relative
+            assert not re.search(r"get\(\s*\"request\"", text), relative
+
+
+class TestTheWrittenAsKeyIsThePlatformS:
+    @pytest.mark.parametrize(
+        "network",
+        [
+            {"dns": [{"request": "own-z2.net"}]},
+            {},
+            {"dns": {"request": "own-z2.net"}},
+            {"dns": "N/A"},
+            {"dns": [{"request": "evil-z2.net", "answers": [{"data": "203.0.113.9"}]}]},
+        ],
+        ids=repr,
+    )
+    def test_a_source_s_value_under_the_key_is_removed_in_every_case(
+        self, network: dict[str, Any]
+    ) -> None:
+        for reader in (_KeepSourceStructuralReader(), _KeepSourceReader()):
+            payload = {
+                "info": {"id": 1},
+                "network": {**network, DNS_AS_WRITTEN_KEY: "FORGED-Z2"},
+                "message": _two_name_message(),
+            }
+            document = sandbox_document(reader.read(payload, provider="upload"))
+            held = document["network"].get(DNS_AS_WRITTEN_KEY)
+            assert held != "FORGED-Z2"
+            # Only the platform writes the key: a source's non-row value, beside requests.
+            if held is not None:
+                assert isinstance(reader, _KeepSourceStructuralReader)
+                assert held == network["dns"]
+
+    def test_a_laid_out_report_s_extras_never_hold_the_key(self) -> None:
+        report = SandboxReport(
+            provider="x",
+            source_format="y",
+            extras={"network": {DNS_AS_WRITTEN_KEY: "FORGED-Z2", "kept": 1}},
+        )
+        document = sandbox_document(report)
+        assert DNS_AS_WRITTEN_KEY not in document["network"]
+        assert document["network"]["kept"] == 1
+
+
+_ARRANGEMENTS: tuple[Any, ...] = (
+    "absent",
+    {},
+    {"dns": []},
+    {"dns": "N/A"},
+    {"dns": {"request": "own-z4.net"}},
+    "unavailable",
+    [1, 2],
+    5,
+    None,
+    True,
+)
+
+
+class TestOnePlaceDecision:
+    @pytest.mark.parametrize("network", _ARRANGEMENTS, ids=repr)
+    @pytest.mark.parametrize("with_request", [True, False])
+    def test_the_place_decision_is_the_document_s(self, network: Any, with_request: bool) -> None:
+        from maljan.schemas.sandbox_document import dns_requests_have_place
+
+        payload: dict[str, Any] = {"info": {"id": 1}}
+        if network != "absent":
+            payload["network"] = network
+        reader: ReportReader = (
+            _KeepSourceStructuralReader() if with_request else _KeepSourceReader()
+        )
+        if with_request:
+            payload["message"] = _two_name_message()
+        report = reader.read(payload, provider="upload")
+        held = sandbox_document(report).get("network")
+        rows = held.get("dns") if isinstance(held, dict) else None
+        written = isinstance(rows, list) and any(
+            isinstance(row, dict) and row.get("request") == "relay-b-s2.net" for row in rows
+        )
+        if with_request:
+            assert dns_requests_have_place(report) == written
+        else:
+            assert not written

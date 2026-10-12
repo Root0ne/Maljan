@@ -2,7 +2,7 @@ from typing import Any
 
 from maljan.parsers.base_parser import BaseParser
 from maljan.parsers.registry import register_parser
-from maljan.schemas.sandbox_document import DnsAnswers
+from maljan.schemas.sandbox_document import DnsAnswers, dns_row_name
 
 # The column a flow or host table names each destination's ASN and country
 # under, and the heading of the paragraph about reputation permalinks; the
@@ -68,7 +68,7 @@ class NetworkParser(BaseParser):
         for entry in dns_entries:
             if not isinstance(entry, dict):
                 continue
-            query = entry.get("request", entry.get("query", "N/A"))
+            query = dns_row_name(entry) or "N/A"
             answers = resolved.of(entry)
             ans = answers[0] if answers else "N/A"
             if isinstance(ans, dict):

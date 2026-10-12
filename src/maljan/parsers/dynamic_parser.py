@@ -2,7 +2,7 @@ from typing import Any
 
 from maljan.parsers.base_parser import BaseParser
 from maljan.parsers.registry import register_parser
-from maljan.schemas.sandbox_document import place
+from maljan.schemas.sandbox_document import dns_row_name, place
 
 
 @register_parser("dynamic")
@@ -63,7 +63,7 @@ class DynamicParser(BaseParser):
         # Every row: the analyst reads the whole observed network, not its
         # first ten of each kind.
         for dns in place(raw_data, "network.dns", []):
-            req = dns.get("request", dns.get("query", "N/A"))
+            req = dns_row_name(dns) or "N/A"
             net_rows.append(["DNS", str(req), "—"])
         for http in place(raw_data, "network.http", []):
             host = http.get("host", "N/A")
