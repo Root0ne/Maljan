@@ -310,6 +310,17 @@ async def patch_values(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> PatchResponse | JSONResponse:
+    """Save a set of staged values at once.
+
+    A block's tool declarations (an entry's ``tool_facts`` in
+    ``core.mcp.servers``, a ``core.<block>.tool_facts`` leaf) are read by
+    their mark: a map holding ``"": "changes"`` is the block's changes over
+    what it ships, one tool at a time (``null`` removes a shipped tool, and a
+    tool it leaves out stays as shipped); a map without the mark is the whole
+    map, so a shipped tool it leaves out is removed. A map sent back exactly
+    as stored keeps the reading it is stored with. ``GET`` serves every
+    stored map marked.
+    """
     changes = _current_keys(body.changes)
     unprobed = await _unprobed_models_in(db, changes)
     if unprobed:

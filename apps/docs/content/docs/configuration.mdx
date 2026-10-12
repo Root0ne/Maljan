@@ -3586,10 +3586,8 @@ shipped** per tool; a provider block's tool declarations are edited the same
 way under its **Declaration** heading. A field holding a map or a list
 (`arguments`, `places`, `values`, `techniques`, `reputation`, `words`,
 `report_sections`) is one field: changing one key of it stores the whole field,
-which then no longer takes a key a later release adds to it. A map sent
-through the API is read the same way: a tool it leaves out is not removed
-(write `null` to remove one). A server you add has nothing shipped, so its
-stored map is its whole map.
+which then no longer takes a key a later release adds to it. A server you add
+has nothing shipped, so its stored map is its whole map.
 
 A map stored as changes carries a mark, `"": "changes"` (the empty key, which
 no tool can be named by), and `GET /api/v1/settings` and the export serve every
@@ -3598,13 +3596,28 @@ earlier release and is read whole, exactly as that release read it: a shipped
 tool it does not name stays removed. Nothing tells the two forms apart by their
 shape.
 
+**A map sent through the API is read by the same mark.** On every path that
+takes one (a save through `PATCH /api/v1/settings`, a connection test, a
+probe's candidate settings, and an import in either format), a marked map is
+the block's changes, so a tool it leaves out is not removed and `null` removes
+one; a map without the mark is the whole map, as earlier releases read every
+map, so a shipped tool it leaves out is removed. A `maljan-settings/1` import
+is read whole throughout. A map sent back exactly as it is stored keeps the
+reading it is stored with, since it says what the stored one says; the console
+always sends the marked form it was served.
+
 When a later release changes a shipped declaration so that your stored change
 of that tool no longer validates over it (a field you set needs one the release
-no longer ships), the change is left out of what is in force with one warning
-in the log: the tool runs as shipped and the rest of the settings is built. The
-declaration box marks that tool as conflicting with its stored change (the
-settings schema lists it under `tool_facts_conflicts`), so you can reset it or
-edit it.
+no longer ships), or stops shipping a tool you changed (so your change alone
+is now its whole declaration), the change is left out of what is in force with
+one warning in the log: the tool runs as shipped, or not at all where nothing
+ships for it, and the rest of the settings is built. No stored change stops the
+settings from being built. The declaration box marks that tool as conflicting
+with its stored change (the settings schema lists it under
+`tool_facts_conflicts`), with **Reset** (**Reset to shipped** for a shipped
+tool), which removes the stored change, or you can edit it. Until then a save
+that sends the change back as stored, also one that edits another tool of the
+same block, keeps it exactly as stored.
 
 Settings saved by an earlier release stored a built-in's tool declarations
 whole. The database migration (revision `20261012000000`) rewrites each such
@@ -3613,13 +3626,18 @@ a frozen record of what every earlier release shipped), a tool stored as that
 release shipped it is dropped and follows today's declaration, an edited tool
 keeps the fields you changed, and a missing shipped tool stays removed. Where
 the writing release cannot be told apart, the stored map is kept whole as
-yours. Each rewritten map is marked; a marked map, one this release saved also
-before the migration ran, is left alone, so running it again changes nothing.
-It logs one line when it rewrites anything. Run the migration (`make migrate`)
-before starting this release: until it has run, a map an earlier release stored
-reads as that release read it, and the API logs one warning at startup while
-the database is not at its latest migration. A downgrade writes every marked
-map whole again.
+yours. A server you added ships nothing, so its whole map is its changes: it is
+marked and reads as before. A provider block's tool declarations that no
+earlier release shipped any declaration for (the `sandbox.cape2.mcp` block
+today) are left as stored and read whole until a save of this release writes
+them marked. Each rewritten map is marked; a marked map, one this release saved
+also before the migration ran, is left alone, so running it again changes
+nothing. It logs one line when it rewrites anything. Run the migration
+(`make migrate`) before starting this release: until it has run, a map an
+earlier release stored reads as that release read it, and the API logs one
+warning at startup while the database is behind its latest migration (another
+when it is ahead of it, migrated by a later release). A downgrade writes every
+marked map whole again.
 
 **A declaration for a server you add.** `docs/examples/profiles/qu1cksc0pe.declaration.json`
 holds the declaration fields of a Qu1cksc0pe server, its six tools' kinds,
