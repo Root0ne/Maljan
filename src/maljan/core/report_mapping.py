@@ -92,11 +92,32 @@ COSTLY_PATH = (
 )
 
 
+COSTLY_FILTER_PATH = (
+    "this path's filter reads the whole report again ('$' with a '..' segment) for every "
+    "candidate it tests, so reading it costs the report's size times the candidates; test "
+    "the candidate itself ('@') in the filter to read in time linear in the report"
+)
+
+
 def descendant_segments(expression: str) -> int:
     """How many descendant segments (``..``) ``expression`` holds outside its quoted names."""
+    return _segments(expression)[0]
+
+
+def _segments(expression: str) -> tuple[int, bool]:
+    """``(descendant segments, whether a filter reads `$` with a descendant segment)``.
+
+    Outside quoted names. A filter (``[?...]``) runs its query once per
+    candidate: an absolute query in it (``$``) that descends reads the whole
+    report each time.
+    """
     count = 0
     quote = ""
     index = 0
+    # The bracket depth each open filter began at, and whether it has read ``$``.
+    filters: list[list[Any]] = []
+    depth = 0
+    absolute_descent = False
     while index < len(expression):
         char = expression[index]
         if quote:
@@ -109,16 +130,29 @@ def descendant_segments(expression: str) -> int:
             quote = char
         elif expression.startswith("..", index):
             count += 1
+            if filters and filters[-1][1]:
+                absolute_descent = True
             index += 2
             continue
+        elif char == "[":
+            depth += 1
+            if expression.startswith("?", index + 1):
+                filters.append([depth, False])
+        elif char == "]":
+            if filters and filters[-1][0] == depth:
+                filters.pop()
+            depth -= 1
+        elif char == "$" and filters:
+            filters[-1][1] = True
         index += 1
-    return count
+    return count, absolute_descent
 
 
 def costly_paths(mapping: Any) -> dict[str, str]:
     """``{field: warning}`` for each path of ``mapping`` whose reading is not linear in the report.
 
-    A path is costly where it holds more than one descendant segment. The
+    A path is costly where it holds more than one descendant segment, or a
+    filter whose absolute query descends (``[?count($..x) > 0]``). The
     field is the mapping's own: ``places.extracted``, ``channels.<name>``,
     ``processes``. Linear in the paths' text.
     """
@@ -127,9 +161,11 @@ def costly_paths(mapping: Any) -> dict[str, str]:
     named += [(f"channels.{k}", v) for k, v in (getattr(mapping, "channels", None) or {}).items()]
     named += [(f"places.{k}", v) for k, v in (getattr(mapping, "places", None) or {}).items()]
     for name, expression in named:
-        count = descendant_segments(str(expression or ""))
+        count, absolute_descent = _segments(str(expression or ""))
         if count > 1:
             out[name] = COSTLY_PATH.format(count=count)
+        elif absolute_descent:
+            out[name] = COSTLY_FILTER_PATH
     return out
 
 

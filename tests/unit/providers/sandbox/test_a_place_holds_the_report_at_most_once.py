@@ -123,6 +123,25 @@ class TestACostlyPathIsNamed:
         )
         assert set(costly_paths(mapping)) == {"processes", "channels.linux.x", "places.extracted"}
 
+    @pytest.mark.parametrize(
+        ("path", "costly"),
+        [
+            ("$.a[*][?count($..x) > 0]", True),
+            ("$.a[?count(@.b[?$..c]) > 0]", True),
+            ("$.a[*][?@..x]", False),
+            ("$.a[?@.b == '$..x']", False),
+            ("$..a[?@.b]", False),
+            ("$.a[?$.b == 1]", False),
+        ],
+    )
+    def test_a_filter_reading_the_whole_report_again_for_each_candidate_is_costly(
+        self, path: str, costly: bool
+    ) -> None:
+        warned = costly_paths(RestMappingConfig(processes=path))
+        assert ("processes" in warned) is costly
+        if costly:
+            assert "every candidate" in warned["processes"]
+
 
 def test_the_settings_save_warns_beside_a_costly_path_and_saves_it(monkeypatch: Any) -> None:
     import asyncio
