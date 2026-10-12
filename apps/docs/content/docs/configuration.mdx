@@ -3413,8 +3413,18 @@ read only through a kind is refused on save, by the API and the console's box
 alike. A declaration of no kind keeps every reading an undeclared tool gets —
 the composer's citation routing below, the code-listing reading of its name,
 its server's own words, the network line — until a kind is accepted for it;
-`unclassified` is read as no kind. Records stored before always named a kind
-and read as they did.
+`unclassified` is read as no kind; its `display_name` and `words` still name
+the tool (a section built from an operator's tool is titled by its declared
+name, with a kind or without, and a statement may name the entry by its
+words). These rules hold for what an operator types now: a save checks only the
+declarations it adds or changes, against what is stored and what ships, so a
+declaration left as it was never blocks a save. Everything already accepted —
+stored settings, shipped blocks, a runtime provider's declaration, an import —
+is read leniently: a key this version does not read, and on a declaration of no
+kind a field only a kind makes readable, is left out with one warning naming it
+(sanitised, once per process), and the rest is kept; an import says what it
+left out in its `warnings`, and an import of an export from another version is
+never refused for it.
 Schemas are walked once, without recursion, to 16 levels below the answer's
 root, and a name that is not a plain identifier is never made a path or an
 argument. A tool whose schema cannot be read loses only its own proposal
@@ -3439,8 +3449,9 @@ it needs a credential (`credential_bootstrap` or `required_env_allow`) is sent
 it, which the list says (`credential`). The connection test's verdict is the
 configured server's own handshake. `details.proposals.probed` says per tool
 whether it was called and what it was made without; a server that does not
-answer without the withheld values, and a call that answers with an error, say
-so plainly. An answer
+answer without the withheld values (a child that dies at start included), and
+a call that answers with an error, say so plainly; a cancelled probe is still
+cancelled. An answer
 proposes the row shape when the tool has no `outputSchema`, the auto-name
 prefixes it writes twice beyond the defaults, and, for a one-line prose answer
 to the missing path that the platform does not already read as an error and
