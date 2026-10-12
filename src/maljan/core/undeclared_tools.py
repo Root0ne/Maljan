@@ -122,6 +122,16 @@ def _kind(facts: Any) -> str | None:
     return str(kind) if kind else None
 
 
+def declares_a_kind(facts: Any) -> bool:
+    """Whether a tool's facts name a kind: a tool whose facts name none is read as undeclared.
+
+    A declaration may state a tool's other facts (its display name, budget,
+    arguments) with no kind; every reading this module gives an undeclared
+    tool still applies to it.
+    """
+    return _kind(facts) is not None
+
+
 def decompiles(facts: Any, tool: Any) -> bool:
     """Whether a tool lists decompiled code: by its declared kind, else by its name."""
     kind = _kind(facts)

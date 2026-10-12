@@ -288,3 +288,30 @@ describe("what the identity tab decides", () => {
     expect(isCoveredBySection(sections, binarySectionKeys("header"))).toBe(false);
   });
 });
+
+describe("a section the API placed", () => {
+  const custom = section({ key: "tool_read_autoruns", source: "tool:read_autoruns" });
+
+  it("is drawn on the tab the API named for it, not in the footer", () => {
+    const placed = { tool_read_autoruns: "static" };
+    expect(tabOfSection(custom.key, placed)).toBe("static");
+    expect(sectionsForTab([custom], "static", placed)).toEqual([custom]);
+    expect(unrenderedSections([custom], placed)).toEqual([]);
+  });
+
+  it("stays in the footer with no placement, as before", () => {
+    expect(tabOfSection(custom.key)).toBe("other");
+    expect(tabOfSection(custom.key, null)).toBe("other");
+    expect(unrenderedSections([custom], {})).toEqual([custom]);
+  });
+
+  it("never moves a section its key already places", () => {
+    expect(tabOfSection("pe_imports", { pe_imports: "dynamic" })).toBe("static");
+  });
+
+  it("ignores a placement naming a tab that draws no sections", () => {
+    for (const tab of ["other", "evidence", "<script>", ""]) {
+      expect(tabOfSection(custom.key, { tool_read_autoruns: tab })).toBe("other");
+    }
+  });
+});

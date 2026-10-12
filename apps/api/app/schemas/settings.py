@@ -67,6 +67,11 @@ class SchemaResponse(BaseModel):
     # Every tool server in force that declares ``credential_bootstrap``, by
     # key: its label, the family it registers under and its operator note.
     credential_servers: dict[str, dict[str, str]] = Field(default_factory=dict)
+    # How a tool declaration's fields split (``core.tool_declarations.
+    # declaration_fields``): the word naming no kind, and each kind-free and
+    # kind-dependent field with its default, so the console's declaration box
+    # applies the API's rules from the API's own list.
+    tool_declaration_fields: dict[str, Any] = Field(default_factory=dict)
 
 
 class ValueDTO(BaseModel):
@@ -123,6 +128,10 @@ class ImportRequest(BaseModel):
 
 class ProbeRequest(BaseModel):
     values: dict[str, Any] = Field(default_factory=dict)
+    # The MCP probe's harmless calls the admin confirmed, by tool name, after
+    # the previous probe listed them (``details.proposals.planned``). Empty:
+    # nothing is called. Read by ``/test/mcp`` alone.
+    confirmed_calls: list[str] = Field(default_factory=list)
 
 
 class ProbeResponse(BaseModel):

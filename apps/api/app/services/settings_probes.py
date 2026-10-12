@@ -603,8 +603,188 @@ def _probe_config(entry: dict[str, Any], name: str) -> MCPServerConfig:
     return config.model_copy(update=update)
 
 
+def _declared_tools(config: MCPServerConfig, name: str) -> frozenset[str]:
+    """The tools ``name`` already declares: in the entry probed, or as the built-in it is."""
+    from maljan.core.builtin_declarations import builtin_server_names, server_declaration
+
+    declared = set(config.tool_facts)
+    if name in builtin_server_names():
+        declared.update(server_declaration(name).get("tool_facts") or {})
+    return frozenset(declared)
+
+
+async def _inspect(
+    config: MCPServerConfig, name: str, plan: Callable[[list[Any]], list[Any]] | None
+) -> server_probe.Inspection:
+    """Attach ``config`` to read what it says of its tools (``server_probe.inspect``)."""
+    return await server_probe.inspect(
+        config, name, budget=PROBE_BUDGET_SECONDS, handle_factory=ServerHandle, plan=plan
+    )
+
+
+def _proposals(
+    found: server_probe.Inspection, declared: frozenset[str], *, withheld: list[str] | None
+) -> dict[str, Any] | None:
+    """The declaration proposals for the tools ``found`` lists and nothing declares.
+
+    Data for an admin to accept field by field (``core.declaration_proposals``);
+    nothing here is saved and no run reads it. ``None`` when there is no tool
+    to propose for. A proposal that cannot be built is reported as none rather
+    than failing the connection test. ``withheld`` is what a confirmed call
+    is made without (:func:`_withheld`); ``None`` when the server's
+    declaration needs its credential and it is sent.
+    """
+    from maljan.core.declaration_proposals import propose
+    from maljan.tools.capabilities import CAPABILITIES_TOOL
+
+    if not found.definitions:
+        return None
+    try:
+        proposals = propose(
+            found.definitions,
+            capabilities=found.capabilities,
+            answers=found.answers,
+            skip=declared | {CAPABILITIES_TOOL},
+        )
+    except Exception as exc:  # noqa: BLE001 — a proposal is never worth the probe
+        logger.warning("declaration proposals could not be built (%s).", type(exc).__name__)
+        return None
+    if found.probed:
+        proposals["probed"] = dict(found.probed)
+    # What each confirmed call would be made with: this server as configured,
+    # less what ``withheld`` names, or its credential when its declaration
+    # needs one.
+    for call in proposals.get("planned") or []:
+        call["credential"] = withheld is None
+        call["withheld"] = list(withheld or [])
+    held = proposals["tools"] or proposals["server"] or proposals.get("failed")
+    return proposals if held else None
+
+
+def _needs_credential(config: MCPServerConfig) -> bool:
+    """Whether the server's declaration says it needs a credential to answer at all."""
+    return config.credential_bootstrap is not None or bool(config.required_env_allow)
+
+
+def _withheld(config: MCPServerConfig) -> list[str] | None:
+    """What a confirmed harmless call is made without: ``None`` when nothing is withheld by rule.
+
+    The server is used exactly as configured (its URL, arguments and files);
+    only its auth token and the environment values it does not declare
+    non-secret (``variable_names``) are withheld, each named here, the
+    environment by its variable's name. A server whose declaration says it
+    needs a credential is sent it (``None``).
+    """
+    if _needs_credential(config):
+        return None
+    plain = set(config.variable_names)
+    out = ["auth token"] if config.auth_token.get_secret_value() else []
+    out.extend(f"environment {name}" for name in config.env if name not in plain)
+    out.extend(
+        f"environment {name}"
+        for name in config.env_allow
+        if name not in plain and name not in config.env
+    )
+    return out
+
+
+def _without_credentials(config: MCPServerConfig) -> MCPServerConfig:
+    """``config`` as configured, less what :func:`_withheld` names.
+
+    The URL, arguments, command and working directory are kept exactly; the
+    auth token is dropped and the environment keeps only the names the server
+    declares non-secret. A server whose declaration needs a credential is
+    returned unchanged.
+    """
+    if _needs_credential(config):
+        return config
+    from pydantic import SecretStr
+
+    plain = set(config.variable_names)
+    return config.model_copy(
+        update={
+            "auth_token": SecretStr(""),
+            "env": {k: v for k, v in config.env.items() if k in plain},
+            "env_allow": [n for n in config.env_allow if n in plain],
+        }
+    )
+
+
+# What a probe note says when a call was made without withheld values.
+WITHHELD_NOTE = "made without {withheld}"
+
+
+async def _confirmed_calls(
+    config: MCPServerConfig,
+    name: str,
+    plan: Callable[[list[Any]], list[Any]],
+    withheld: list[str] | None,
+) -> server_probe.Inspection | dict[str, str]:
+    """The confirmed calls, on an attach of their own; never fails the connection test.
+
+    Made on ``config`` less what ``withheld`` names. A server that does not
+    start or answer that way is reported per planned tool, saying what was
+    withheld; a call that answered with an error says the same, plainly.
+
+    A stdio child that dies while it starts can end the attach with a bare
+    ``asyncio.CancelledError`` (its transport's task group cancels the
+    scope), or a group of such: that is the server's failure and is reported
+    like any other. The probe's own cancellation is not, and propagates:
+    it is told apart by this task's pending cancellation requests.
+    """
+    from maljan.tools.errors import error_parts
+
+    attached = _without_credentials(config)
+    missing = ", ".join(withheld or [])
+
+    def _not_called(exc: BaseException) -> dict[str, str]:
+        reason = f"not called: the server did not answer ({type(exc).__name__})"
+        if missing:
+            reason += f" when started without {missing}"
+        return {"": reason}
+
+    def _the_probe_is_cancelled() -> bool:
+        task = asyncio.current_task()
+        return task is not None and task.cancelling() > 0
+
+    try:
+        found = await _inspect(attached, name, plan)
+    except asyncio.CancelledError as exc:
+        if _the_probe_is_cancelled():
+            raise
+        return _not_called(exc)
+    except BaseExceptionGroup as group:
+        if _the_probe_is_cancelled() or (
+            group.subgroup((KeyboardInterrupt, SystemExit)) is not None
+        ):
+            raise
+        return _not_called(group)
+    except Exception as exc:  # noqa: BLE001 — the calls are reported, never the test's failure
+        return _not_called(exc)
+    if missing:
+        for tool, said in list(found.probed.items()):
+            note = WITHHELD_NOTE.format(withheld=missing)
+            answered = found.answers.get(tool)
+            if answered is not None and error_parts(answered[1]) is not None:
+                found.probed[tool] = f"{said}; it answered with an error, and was {note}"
+            else:
+                found.probed[tool] = f"{said}; {note}"
+    return found
+
+
 async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
-    """Launch one configured MCP server and list the tools it offers."""
+    """Launch one configured MCP server, list the tools it offers and propose their declarations.
+
+    Nothing is called unless the operator confirmed it: the proposals list
+    the harmless calls a tool its server marks read-only allows
+    (``proposals.planned``), each saying what it would be made without.
+    Only the tools named in ``confirmed_calls`` that are still planned are
+    called, once each, on an attach of their own made with this server as
+    configured less its auth token and secret environment values (unless its
+    declaration needs a credential), so their answers can propose what the
+    schemas do not say (``core.declaration_proposals``). The connection
+    test's verdict is the configured server's handshake alone.
+    """
     t0 = time.perf_counter()
     name = str(v.get("name") or "server")
     try:
@@ -620,14 +800,41 @@ async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
     # trace. A server that declares no bootstrap may legitimately be open.
     if config.credential_bootstrap is not None and not config.auth_token.get_secret_value():
         return ProbeResult(False, _ms(t0), NO_CREDENTIAL_DETAIL)
+    declared = _declared_tools(config, name)
+    raw_confirmed = v.get("confirmed_calls")
+    confirmed = (
+        {str(t) for t in raw_confirmed if isinstance(t, str)}
+        if isinstance(raw_confirmed, list | tuple | set)
+        else set()
+    )
     try:
-        names, capabilities = await handshake(config, name)
+        found = await _inspect(config, name, None)
+        names, capabilities = found.names, found.capabilities
     except TimeoutError:
         return ProbeResult(False, _ms(t0), f"no MCP handshake within {PROBE_BUDGET_SECONDS:.0f} s")
     except FileNotFoundError as exc:
         return ProbeResult(False, _ms(t0), f"{exc} not found on PATH")
     except Exception as exc:  # noqa: BLE001 — reported to the operator, never raised
         return ProbeResult(False, _ms(t0), f"{type(exc).__name__}: {exc}")
+    withheld = _withheld(config)
+    if confirmed:
+        from maljan.core.declaration_proposals import plan_calls
+        from maljan.tools.capabilities import CAPABILITIES_TOOL
+
+        def plan(definitions: list[Any]) -> list[Any]:
+            planned = plan_calls(definitions, skip=declared | {CAPABILITIES_TOOL})
+            return [call for call in planned if call.tool in confirmed]
+
+        called = await _confirmed_calls(config, name, plan, withheld)
+        if isinstance(called, dict):
+            reason = called[""]
+            try:
+                planned_now = {c.tool for c in plan(found.definitions)}
+            except Exception:  # noqa: BLE001 — a plan never costs the connection test
+                planned_now = set()
+            found.probed = {tool: reason for tool in sorted(planned_now)}
+        else:
+            found.answers, found.probed = called.answers, called.probed
     listed = ", ".join(names[:8]) + ("…" if len(names) > 8 else "")
     detail = f"{len(names)} tools: {listed}"
     details: dict[str, Any] | None = None
@@ -638,6 +845,10 @@ async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
         if unavailable:
             detail += f"; {len(unavailable)} unavailable on this host"
         details = {"capabilities": capabilities}
+    proposals = _proposals(found, declared, withheld=withheld)
+    if proposals is not None:
+        details = {**(details or {}), "proposals": proposals}
+        detail += f"; declarations proposed for {len(proposals['tools'])} undeclared tools"
     return ProbeResult(True, _ms(t0), detail, None, names, details)
 
 
@@ -672,7 +883,13 @@ def _merge_server_entry(
     return merged
 
 
-async def run_mcp_probe(server: str, values: dict[str, Any], stored: dict[str, Any]) -> ProbeResult:
+async def run_mcp_probe(
+    server: str,
+    values: dict[str, Any],
+    stored: dict[str, Any],
+    *,
+    confirmed_calls: list[str] | None = None,
+) -> ProbeResult:
     """Probe one entry of the server map, staged fields winning over stored ones.
 
     Separate from ``run_probe`` because this probe is addressed to a *key*
@@ -696,7 +913,11 @@ async def run_mcp_probe(server: str, values: dict[str, Any], stored: dict[str, A
         entry = effective[server].model_dump(mode="json")
     else:
         entry = _merge_server_entry(stored_map.get(server) or {}, staged_map.get(server) or {})
-    return await in_probe_loop(lambda: probe_mcp({"name": server, "entry": entry}))
+    return await in_probe_loop(
+        lambda: probe_mcp(
+            {"name": server, "entry": entry, "confirmed_calls": list(confirmed_calls or [])}
+        )
+    )
 
 
 async def _ask_each_model(

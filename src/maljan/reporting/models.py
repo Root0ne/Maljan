@@ -1245,6 +1245,15 @@ class EvidenceIndexRow(BaseModel):
     # re-render reads what the worker read (``core.declared_reading``). ``None``
     # on a row of an entry that stored none, and then left out of the dump.
     facts: dict[str, Any] | None = Field(default=None, exclude_if=lambda value: value is None)
+    # The role the calling agent's definition declared when the entry was
+    # written (``LedgerEntry.agent_role``), which the console tab of a section
+    # an operator's tool produced is read by (``reporting.section_tabs``).
+    # ``None`` on a row of an entry written without one, and then left out.
+    agent_role: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    # The console tab the calling agent's definition declared
+    # (``LedgerEntry.agent_tab``), which places a section of an operator's
+    # tool when its kind places none. ``None`` where none was, and left out.
+    agent_tab: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class ReputationAnswer(ReputationRecord):

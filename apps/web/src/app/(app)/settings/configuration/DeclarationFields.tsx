@@ -167,6 +167,7 @@ export default function DeclarationFields({
   server: McpServerEntry;
   put: (next: Partial<McpServerEntry>) => void;
 }) {
+  const fields = useOptionalSettingsContext()?.schema?.tool_declaration_fields ?? null;
   const open = server.sample_open ?? EMPTY_OPEN;
   const box = (field: string) => `${serverKey}.${field}`;
   return (
@@ -311,13 +312,13 @@ export default function DeclarationFields({
         <div className="sm:col-span-2">
           <ReadField
             id={box("tool_facts")}
-            label="Tool declarations (JSON object keyed by tool name, each with a kind)"
+            label="Tool declarations (JSON object keyed by tool name, each with its facts; a kind is optional)"
             ariaLabel={`${serverKey} tool_facts`}
             value={server.tool_facts ?? {}}
             show={showJson}
             rows={6}
             mono
-            read={(text) => readToolFacts(text, serverKey)}
+            read={(text) => readToolFacts(text, serverKey, fields)}
             onValue={(tool_facts) => put({ tool_facts })}
           />
         </div>

@@ -56,7 +56,12 @@ from collections.abc import Mapping
 from functools import cache, lru_cache
 from typing import TYPE_CHECKING, Any
 
-from maljan.core.tool_declarations import ToolDeclarations, ToolFacts
+from maljan.core.tool_declarations import (
+    KIND_FREE_FIELDS,
+    STRICT_DECLARATIONS,
+    ToolDeclarations,
+    ToolFacts,
+)
 
 if TYPE_CHECKING:
     from maljan.core.config import Settings
@@ -84,6 +89,14 @@ STORED_FACT_FIELDS: tuple[str, ...] = (
     "arguments",
     "holds_strings",
 )
+
+# The stored fields read without a kind (``tool_declarations.KIND_FREE_FIELDS``),
+# read by :func:`kind_free_facts` whatever the record's kind.
+_KIND_FREE_STORED: tuple[str, ...] = tuple(
+    name for name in STORED_FACT_FIELDS if name in KIND_FREE_FIELDS
+)
+# What a tool that declares nothing read without a kind gives.
+_NO_FACTS = ToolFacts.model_construct()
 
 
 def declarations(settings: Settings | None = None) -> ToolDeclarations:
@@ -267,7 +280,10 @@ def _parsed(text: str) -> ToolFacts | None:
     if not known.get("kind"):
         return None
     try:
-        return ToolFacts.model_validate(known)
+        facts = ToolFacts.model_validate(known)
+        # A record of no kind (``ToolFacts.kind``) is read as a tool that
+        # declares nothing, so every undeclared reading still applies.
+        return facts if facts.kind else None
     except ValueError as exc:
         logger.warning("declared facts: a stored record is read as absent (%s).", exc)
         return None
@@ -291,6 +307,77 @@ def facts_of(entry: Any) -> ToolFacts | None:
     if recorded(entry):
         return None
     return shipped_by_name().get(bare_name(_field(entry, "tool")))
+
+
+def kind_free_facts(entry: Any) -> ToolFacts:
+    """The facts an entry's tool declared that are read without a kind, whatever its kind.
+
+    The one reader of a stored record's kind-free fields
+    (``tool_declarations.KIND_FREE_FIELDS`` that the record stores:
+    ``display_name``, ``words`` and ``arguments``). For a record of a kind it
+    is :func:`facts_of`. A record that names no kind -- a bare
+    ``unclassified``, an empty kind, or a kind the validators refuse -- still
+    gives these fields, each read on its own so one field this version
+    cannot read never costs another; every reader of a kind still reads that
+    record as a tool that declares nothing (:func:`facts_of`), so the tool
+    keeps each reading an undeclared tool gets. Read from the record the
+    entry stored, never from the reading process's settings; a tool with no
+    record and no legacy reading gives an empty declaration.
+    """
+    facts = facts_of(entry)
+    if facts is not None:
+        return facts
+    held = _field(entry, "facts")
+    if not isinstance(held, Mapping):
+        return _NO_FACTS
+    try:
+        text = json.dumps(
+            {key: held[key] for key in ("v", *_KIND_FREE_STORED) if key in held},
+            sort_keys=True,
+            default=str,
+        )
+    except (TypeError, ValueError):
+        return _NO_FACTS
+    return _kind_free_parsed(text)
+
+
+@lru_cache(maxsize=4096)
+def _kind_free_parsed(text: str) -> ToolFacts:
+    held = json.loads(text)
+    version = held.get("v")
+    if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+        return _NO_FACTS
+    words = held.get("words")
+    if "words" in held:
+        held["words"] = (
+            [word for word in words if isinstance(word, str)]
+            if isinstance(words, list | tuple)
+            else []
+        )
+    # A record already accepted is read leniently, whoever asks.
+    token = STRICT_DECLARATIONS.set(False)
+    try:
+        kept: dict[str, Any] = {}
+        for name in _KIND_FREE_STORED:
+            if name not in held:
+                continue
+            try:
+                ToolFacts.model_validate({name: held[name]})
+            except ValueError:
+                continue
+            kept[name] = held[name]
+        return ToolFacts.model_validate(kept)
+    finally:
+        STRICT_DECLARATIONS.reset(token)
+
+
+def named_facts(entry: Any) -> tuple[str, tuple[str, ...]]:
+    """The display name and words an entry's tool declared, whatever its kind.
+
+    Read by :func:`kind_free_facts`.
+    """
+    facts = kind_free_facts(entry)
+    return facts.display_name, tuple(facts.words)
 
 
 def legacy_tool_words(tool: str) -> set[str]:

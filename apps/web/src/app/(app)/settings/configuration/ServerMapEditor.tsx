@@ -8,6 +8,8 @@ import { getErrorMessage } from "@/lib/errors";
 import type { CatalogEntry, McpServerEntry, ProbeResult, SettingValue } from "@/types/settings";
 import { unavailableTools } from "@/types/settings";
 import DeclarationFields from "./DeclarationFields";
+import DeclarationProposals from "./DeclarationProposals";
+import { readProposals } from "./declarationProposals";
 import Dot from "./Dot";
 import {
   addedEnvNames,
@@ -222,7 +224,8 @@ export interface ServerProbeApi {
   result: ProbeResult | "running" | undefined;
   /** The focused server's result was dropped by an edit to what it dialled. */
   stale: boolean;
-  probe: (key: string) => Promise<void>;
+  /** `confirmedCalls`: the planned harmless calls the admin confirmed. */
+  probe: (key: string, confirmedCalls?: string[]) => Promise<void>;
   /** Called before an edit is staged: drops a result the edit invalidates. */
   noteEdit: (key: string, next: Partial<McpServerEntry>) => void;
 }
@@ -249,11 +252,11 @@ export function useServerProbe(
     setStaleProbe((s) => ({ ...s, [key]: true }));
   };
 
-  const probe = async (key: string) => {
+  const probe = async (key: string, confirmedCalls: string[] = []) => {
     setStaleProbe((s) => ({ ...s, [key]: false }));
     setProbes((p) => ({ ...p, [key]: "running" }));
     try {
-      const result = await api.testMcpServer(key, { "core.mcp.servers": value });
+      const result = await api.testMcpServer(key, { "core.mcp.servers": value }, confirmedCalls);
       setProbes((p) => ({ ...p, [key]: result }));
     } catch (e) {
       setProbes((p) => ({
@@ -336,6 +339,7 @@ export function ServerDetail({
   const unavailable =
     result && result !== "running" ? unavailableTools(result) : [];
   const allowed = server.tools;
+  const proposals = has("tools") && result && result !== "running" ? readProposals(result) : null;
   const tableShown = has("tools") && !!manifest && manifest.length > 0;
   const detailError = Object.entries(errors).find(
     ([k]) => k === `${entryKey}.${serverKey}` || k.startsWith(`${entryKey}.${serverKey}.`)
@@ -600,6 +604,18 @@ export function ServerDetail({
             </div>
           )}
         </fieldset>
+      )}
+
+      {has("tools") && manifest && manifest.length > 0 && proposals && (
+        <DeclarationProposals
+          serverKey={serverKey}
+          server={server}
+          proposals={proposals}
+          builtin={builtinServers.has(serverKey)}
+          busy={result === "running"}
+          put={(next) => put(serverKey, next)}
+          onConfirmCalls={(tools) => void probe.probe(serverKey, tools)}
+        />
       )}
 
       {has("agents") && (

@@ -211,8 +211,53 @@ def _filter_claims(claims: list[dict[str, str]], keywords: tuple[str, ...]) -> l
     return picked
 
 
+def cited_entry_ids(claims: list[dict[str, str]]) -> set[str]:
+    """The ledger entry ids the claims cite, in their text or their evidence."""
+    from maljan.schemas.evidence import entry_ids_in
+
+    cited: set[str] = set()
+    for claim in claims:
+        cited |= entry_ids_in(f"{claim.get('claim', '')} {claim.get('evidence_ref', '')}")
+    return cited
+
+
+def cited_undeclared_output(
+    output: dict[str, Any], cited: set[str], index: dict[str, Any] | None
+) -> bool:
+    """Whether a captured output of a tool its source declares nothing for is cited.
+
+    The analysts' citation decides where such an output goes: a section whose
+    claims cite its entry is shown it, as a section is shown a declared kind
+    it reads. Routing only. The output's entry is the job-wide call number
+    the capture carries (``LedgerEntry.to_captured``), and it is held to the
+    report's evidence index: the indexed entry must name the same tool and
+    agent, or the output is not routed. A declared tool, and an output with no
+    recorded source, are routed by :func:`shown_to_section` alone.
+    """
+    if not cited or index is None:
+        return False
+    if tool_kinds.source_of(output) is None or tool_kinds.facts_of(output) is not None:
+        return False
+    from maljan.schemas.evidence import format_entry_id
+
+    seq = output.get("seq")
+    # An output that carries no call number names no entry.
+    if not isinstance(seq, int) or isinstance(seq, bool) or seq < 0:
+        return False
+    entry_id = format_entry_id(seq + 1)
+    row = index.get(entry_id)
+    if entry_id not in cited or row is None:
+        return False
+    return str(getattr(row, "tool", "")) == str(output.get("tool_name") or "") and str(
+        getattr(row, "agent", "")
+    ) == str(output.get("agent_id") or "")
+
+
 def _filter_tool_outputs(
-    technical_evidence: dict[str, list[dict[str, Any]]] | None, section: str
+    technical_evidence: dict[str, list[dict[str, Any]]] | None,
+    section: str,
+    cited: set[str] | None = None,
+    index: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
     if not technical_evidence:
         return []
@@ -220,7 +265,7 @@ def _filter_tool_outputs(
     for outputs in technical_evidence.values():
         for o in outputs or []:
             name = str(o.get("tool_name", ""))
-            if shown_to_section(section, o):
+            if shown_to_section(section, o) or cited_undeclared_output(o, cited or set(), index):
                 picked.append(
                     {
                         "tool": name,
@@ -306,7 +351,9 @@ def bundle_for(
 
     Keys: ``claims`` (relevant ISR claims), ``tool_outputs`` (the captured tool
     outputs of the kinds the section reads, from any server:
-    :func:`shown_to_section`), ``facts`` (deterministic report data for the
+    :func:`shown_to_section`; and the output of a tool its source declares
+    nothing for when a claim of the section cites its entry:
+    :func:`cited_undeclared_output`), ``facts`` (deterministic report data for the
     section), and ``binary`` (what the file demonstrably is — see
     :func:`binary_facts`).
 
@@ -393,9 +440,12 @@ def bundle_for(
         }
     if section in ("communications", "command_and_control"):
         net = report.network
+        claims = _filter_claims(all_claims, _SECTION_CLAIM_KEYWORDS[section])
         return {
-            "claims": _filter_claims(all_claims, _SECTION_CLAIM_KEYWORDS[section]),
-            "tool_outputs": _filter_tool_outputs(tech_ev, section),
+            "claims": claims,
+            "tool_outputs": _filter_tool_outputs(
+                tech_ev, section, cited_entry_ids(claims), _index_of(report)
+            ),
             "binary": base,
             "facts": {
                 "domains": [d.fqdn for d in (net.domains if net else [])],
@@ -411,12 +461,20 @@ def bundle_for(
     # A section describing packing that cannot see ``packer_matches`` has only
     # analyst claims to go on, and that is the same failure mode as the
     # conclusion's.
+    claims = _filter_claims(all_claims, _SECTION_CLAIM_KEYWORDS.get(section, ()))
     return {
-        "claims": _filter_claims(all_claims, _SECTION_CLAIM_KEYWORDS.get(section, ())),
-        "tool_outputs": _filter_tool_outputs(tech_ev, section),
+        "claims": claims,
+        "tool_outputs": _filter_tool_outputs(
+            tech_ev, section, cited_entry_ids(claims), _index_of(report)
+        ),
         "binary": base,
         "facts": _technical_facts(section, report),
     }
+
+
+def _index_of(report: MalwareReport) -> dict[str, Any]:
+    """The report's evidence index by entry id."""
+    return {row.id: row for row in report.evidence_index}
 
 
 def _assessed_persistence(report: MalwareReport) -> list[str]:

@@ -76,7 +76,7 @@ export default function DynamicTab() {
   // guess about the platform, which drew it on every Windows run whether or
   // not anything had ever touched a key.
   const reportSections = report?.malware_report?.sections;
-  const evidenceSections = sectionsForTab(reportSections, "dynamic");
+  const evidenceSections = sectionsForTab(reportSections, "dynamic", report?.section_tabs);
   const showsRegistry =
     Boolean(dyn?.registry_mods.length) || hasSection(reportSections, "sandbox_registry");
   const showsProcessTree = !isCoveredBySection(reportSections, ["sandbox_processes"]);

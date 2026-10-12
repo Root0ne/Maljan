@@ -274,6 +274,10 @@ class ServerHandle:
         # from its ``capabilities`` tool when it offers one; ``None`` for a
         # server that does not, or whose answer could not be read.
         self.capabilities: ServerCapabilities | None = None
+        # Whether the next attach keeps each tool's definition as the server
+        # listed it (``tool_definitions``). Only the settings probe asks, to
+        # propose declarations; a run's handle keeps none.
+        self.keeps_tool_definitions = False
         # The job's breaker and call cap for this server, set by the registry
         # that owns the handle (``maljan.providers.server_guard``). A handle
         # built outside a registry — a probe, a test — has none and sends
@@ -454,6 +458,7 @@ class ServerHandle:
                 context_budget=context_budget,
                 guard=self.guard,
                 categories=categories_of(getattr(self.config, "tool_facts", None)),
+                keep_tool_definitions=self.keeps_tool_definitions,
             )
         # An http/sse transport has no child of ours to reap.
         self._launch_argv = ()
@@ -469,6 +474,7 @@ class ServerHandle:
             context_budget=context_budget,
             guard=self.guard,
             categories=categories_of(getattr(self.config, "tool_facts", None)),
+            keep_tool_definitions=self.keeps_tool_definitions,
         )
 
     def open(
@@ -934,6 +940,22 @@ class ServerHandle:
         """Every tool the server advertises, allow-list ignored."""
         return [str(getattr(t, "name", "")) for t in self._all_tools]
 
+    def tool_definitions(self) -> list[Any]:
+        """Each tool's definition as the server listed it (MCP ``Tool``), allow-list ignored.
+
+        For the settings probe's declaration proposals; empty before an
+        attach and for a handle that did not ask to keep them
+        (``keeps_tool_definitions``).
+        """
+        return list(getattr(self._toolkit, "tool_definitions", None) or [])
+
+    def advertised_tool(self, name: str) -> Any | None:
+        """The tool the server advertises under ``name``, allow-list ignored, or ``None``."""
+        for tool in self._all_tools:
+            if str(getattr(tool, "name", "")) == name:
+                return tool
+        return None
+
     def _capabilities_tool(self) -> Any | None:
         for tool in self._all_tools:
             if str(getattr(tool, "name", "")) == CAPABILITIES_TOOL:
@@ -1177,13 +1199,14 @@ def _own_words(handle: Any, tools: list[BaseTool], seen: dict[str, str] | None =
         return ""
     from maljan.agents.prompt_fragments import undeclared_server_text
     from maljan.agents.tool_pinning import DELIVERY_TOOLS
+    from maljan.core.undeclared_tools import declares_a_kind
 
     declared = getattr(getattr(handle, "config", None), "tool_facts", None) or {}
     undeclared = [
         tool
         for tool in tools
         for name in (str(getattr(tool, "name", "") or ""),)
-        if name not in DELIVERY_TOOLS and name not in declared
+        if name not in DELIVERY_TOOLS and not declares_a_kind(declared.get(name))
     ]
     if not undeclared:
         return ""

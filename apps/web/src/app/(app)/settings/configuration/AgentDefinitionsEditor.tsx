@@ -46,6 +46,9 @@ import type {
   ToolRefEntry,
 } from "@/types/settings";
 
+/** The console tabs an agent may declare (`core.config.AGENT_TABS`). */
+const AGENT_TABS = ["identity", "static", "dynamic", "network", "persistence"] as const;
+
 const input =
   "w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent";
 
@@ -594,6 +597,25 @@ export function AgentDetail({
                 onChange={(e) => put(agentKey, { timeout_seconds: wholeNumber(e.target.value) })}
               />
               <FieldError message={fieldError("timeout_seconds")} />
+            </label>
+            {/* Where a section built from this agent's tool answers is drawn
+                when the tool's kind places none; stored on each entry the
+                agent writes, so a report renders without settings. */}
+            <label className="block">
+              <span className="text-text-muted">Console tab for its tools&apos; sections</span>
+              <select
+                className={input}
+                aria-label={`${agentKey} tab`}
+                disabled={locked}
+                value={agent.tab ?? ""}
+                onChange={(e) => put(agentKey, { tab: e.target.value || null })}
+              >
+                <option value="">none</option>
+                {AGENT_TABS.map((tab) => (
+                  <option key={tab} value={tab}>{tab}</option>
+                ))}
+              </select>
+              <FieldError message={fieldError("tab")} />
             </label>
           </div>
         </fieldset>

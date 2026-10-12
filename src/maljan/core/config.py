@@ -1380,6 +1380,24 @@ class MCPServerConfig(BaseModel):
     def _references_are_templates(cls, value: list[str]) -> list[str]:
         return check_reference_urls(value)
 
+    @field_validator("tool_facts", mode="before")
+    @classmethod
+    def _tool_facts_read_leniently(cls, value: Any) -> Any:
+        """Outside an operator's edit, each tool's declaration keeps what this version reads.
+
+        A stored row, a shipped block, a runtime provider's declaration or an
+        import may carry a key this version does not read: it is left out of
+        that tool's declaration, named in one warning, and the rest is kept
+        (``core.tool_declarations.lenient_declarations``). An operator's new
+        edit is checked strictly where it is saved.
+        """
+        from maljan.core.tool_declarations import STRICT_DECLARATIONS, lenient_declarations
+
+        if STRICT_DECLARATIONS.get() or not isinstance(value, Mapping):
+            return value
+        kept, _left_out = lenient_declarations(value, where="tool ")
+        return kept
+
     @field_validator("tool_facts")
     @classmethod
     def _tool_names_are_names(cls, value: dict[str, ToolFacts]) -> dict[str, ToolFacts]:
@@ -1988,6 +2006,21 @@ def _is_a_budget(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 1
 
 
+# The console tab each built-in role declares for the sections its agents'
+# tool answers produce (``AgentDefinition.tab``): the analysts on their own
+# tabs, the judge, whose calls check what the sample is, on IDENTITY. Roles
+# with no tab of their own (``generic``, ``lead``, ``report``) declare none.
+# A definition written before the field existed reads its role's here.
+ROLE_TABS: dict[str, str] = {
+    "static": "static",
+    "dynamic": "dynamic",
+    "network": "network",
+    "judge": "identity",
+}
+# The console tabs an agent may declare.
+AGENT_TABS: tuple[str, ...] = ("identity", "static", "dynamic", "network", "persistence")
+
+
 class AgentDefinition(BaseModel):
     """One agent, as configuration rather than as a class.
 
@@ -2021,6 +2054,26 @@ class AgentDefinition(BaseModel):
     # one for a single agent sets it here.
     max_steps: Annotated[int, Field(ge=1)] | None = None
     timeout_seconds: Annotated[int, Field(ge=1)] | None = None
+    # The console tab a section built from this agent's tool answers is drawn
+    # on when the tool declares no kind that places it (``reporting.
+    # section_tabs``), stored on each ledger entry the agent writes. ``None``
+    # places nothing. A definition that never wrote the field reads its role's
+    # (``ROLE_TABS``); a clone copies it.
+    tab: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _a_definition_before_tabs_reads_its_role_s(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "tab" not in data:
+            return {**data, "tab": ROLE_TABS.get(str(data.get("role") or ""))}
+        return data
+
+    @field_validator("tab")
+    @classmethod
+    def _tab_is_a_console_tab(cls, value: str | None) -> str | None:
+        if value is not None and value not in AGENT_TABS:
+            raise ValueError(f"tab {value!r} is not one of: {', '.join(AGENT_TABS)}")
+        return value
 
     @model_validator(mode="after")
     def _data_sources_are_known(self) -> "AgentDefinition":

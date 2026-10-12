@@ -143,6 +143,7 @@ DEFAULT_AGENTS = {
             # (pinned in tests/unit/agents/test_delegation.py).
             "max_steps": None,
             "timeout_seconds": None,
+            "tab": "static",
         },
         "dynamic": {
             "role": "dynamic",
@@ -156,6 +157,7 @@ DEFAULT_AGENTS = {
             # (pinned in tests/unit/agents/test_delegation.py).
             "max_steps": None,
             "timeout_seconds": None,
+            "tab": "dynamic",
         },
         "network": {
             "role": "network",
@@ -169,6 +171,7 @@ DEFAULT_AGENTS = {
             # (pinned in tests/unit/agents/test_delegation.py).
             "max_steps": None,
             "timeout_seconds": None,
+            "tab": "network",
         },
         "judge": {
             "role": "judge",
@@ -182,6 +185,7 @@ DEFAULT_AGENTS = {
             # (pinned in tests/unit/agents/test_delegation.py).
             "max_steps": None,
             "timeout_seconds": None,
+            "tab": "identity",
         },
         # The narrative/composer step as a definition: an LLM entry and a
         # prompt of its own instead of borrowing the judge's, and no tools —
@@ -198,6 +202,7 @@ DEFAULT_AGENTS = {
             # (pinned in tests/unit/agents/test_delegation.py).
             "max_steps": None,
             "timeout_seconds": None,
+            "tab": None,
         },
     },
 }

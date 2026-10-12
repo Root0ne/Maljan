@@ -284,12 +284,23 @@ path, a mutex name and a malware or tool name are compared as written.
 ### Settings
 
 `GET /settings/schema` returns the catalog: every entry with its type, bounds,
-choices, group, title, description and when it takes effect. `GET /settings`
+choices, group, title, description and when it takes effect, and
+`tool_declaration_fields`: the word naming no kind and each kind-free and
+kind-dependent tool-declaration field with its default. `GET /settings`
 returns the current values with their source. `PATCH /settings` applies a set
 of changes in one write; `DELETE /settings/{key}` and `DELETE /settings` remove
 one override or a group's. `GET /settings/export` and `POST /settings/import`
 carry configuration between instances, and `POST /settings/test/{probe}` (plus
 `/test/mcp` and `/test/agent`, which take a body) run the connection probes.
+`/test/mcp?server=<key>` answers the server's tools, its `capabilities`
+manifest and, under `details.proposals`, a proposed declaration for each
+undeclared tool with each field's evidence and confidence, and the harmless
+calls it would make (`planned`: only tools their server marks read-only, each
+with its arguments, whether it may reach its own service and what it would be
+made without). A body naming some of them in
+`confirmed_calls` calls those once each, never with a sample (see the
+configuration guide's "A proposed declaration"). Nothing it proposes is
+saved.
 `POST /settings/validate-condition` checks one stage's `when` expression
 against the parser that will run it and answers `{"valid": …, "problems":
 […]}`; it stores nothing, and the console calls it as each condition box loses

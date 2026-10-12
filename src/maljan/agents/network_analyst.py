@@ -111,9 +111,10 @@ def _undeclared_tools_in(tools: Sequence[Any]) -> bool:
     """
     from maljan.agents.prompt_fragments import offered
     from maljan.agents.tool_pinning import declared_facts_of, declared_source_of
+    from maljan.core.undeclared_tools import declares_a_kind
 
     return any(
-        declared_source_of(tool) is not None and declared_facts_of(tool) is None
+        declared_source_of(tool) is not None and not declares_a_kind(declared_facts_of(tool))
         for tool in offered(tools)
     )
 

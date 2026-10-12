@@ -15,6 +15,7 @@
 import type {
   CredentialBootstrapEntry,
   ErrorPatternEntry,
+  ToolDeclarationFields,
   ToolFactsEntry,
 } from "@/types/settings";
 
@@ -134,12 +135,49 @@ export function readErrorPatterns(text: string): Read<ErrorPatternEntry[]> {
   return ok(parsed.value as ErrorPatternEntry[]);
 }
 
-/** Tool declarations: a JSON object keyed by tool name, each with a `kind`; empty is `{}`.
+/* Whether two JSON values are the same, keys in any order: how the API
+ * compares a field with its default (`tool_declarations._same`). */
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (isObject(value)) {
+    const keys = Object.keys(value).sort();
+    return `{${keys.map((k) => `${JSON.stringify(k)}:${canonical(value[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(value === undefined ? null : value);
+}
+
+function sameJson(left: unknown, right: unknown): boolean {
+  return canonical(left) === canonical(right);
+}
+
+/* The fields `facts` sets among `defaults`: present, and not at the default. */
+function setAmong(facts: Record<string, unknown>, defaults: Record<string, unknown>): string[] {
+  return Object.keys(defaults).filter(
+    (key) => Object.prototype.hasOwnProperty.call(facts, key) && !sameJson(facts[key], defaults[key])
+  );
+}
+
+/** Whether the no-kind word in `facts` names no kind: only when no
+ *  kind-dependent field is set, as the API's `reads_no_kind` rules. */
+export function readsNoKind(facts: Record<string, unknown>, fields: ToolDeclarationFields): boolean {
+  return facts.kind === fields.no_kind && setAmong(facts, fields.kind_dependent).length === 0;
+}
+
+/** Tool declarations: a JSON object keyed by tool name, each with its facts; empty is `{}`.
  *  A name may hold `__`; only one spelled as this server's renamed tool
- *  (`<serverKey>__…`) is refused. */
+ *  (`<serverKey>__…`) is refused.
+ *
+ *  `fields` is the split the API serves with the settings schema
+ *  (`tool_declaration_fields`): the field rules are applied from it, exactly
+ *  as the API applies them to an edit -- no unknown field; the no-kind word
+ *  names no kind only when no kind-dependent field is set; a declaration of
+ *  no kind sets at least one field and no kind-dependent one, a field
+ *  counting as set only when it differs from its default. Without it the box
+ *  checks the shape alone and the API answers the rest on save. */
 export function readToolFacts(
   text: string,
-  serverKey = ""
+  serverKey = "",
+  fields: ToolDeclarationFields | null = null
 ): Read<Record<string, ToolFactsEntry>> {
   const parsed = parseJson(text);
   if (parsed.error !== null) return bad(parsed.error);
@@ -152,9 +190,27 @@ export function readToolFacts(
     if (serverKey && tool.startsWith(`${serverKey}__`)) {
       return bad(`${tool}: spelled as this server's renamed tool; use the tool's own name`);
     }
-    if (!isObject(facts)) return bad(`${tool}: expected an object with a kind`);
-    if (typeof facts.kind !== "string" || !WORD.test(facts.kind)) {
+    if (!isObject(facts)) return bad(`${tool}: expected an object of the tool's facts`);
+    const kind = fields !== null && readsNoKind(facts, fields) ? "" : facts.kind;
+    const noKind = kind === undefined || kind === "";
+    if (!noKind && (typeof kind !== "string" || !WORD.test(kind))) {
       return bad(`${tool}: kind is a lowercase word such as strings, rule_match or decompile`);
+    }
+    if (fields === null) continue;
+    const known = new Set(["kind", ...Object.keys(fields.kind_free), ...Object.keys(fields.kind_dependent)]);
+    const unknown = Object.keys(facts).filter((key) => !known.has(key));
+    if (unknown.length) return bad(`${tool}: unknown field ${unknown.join(", ")}`);
+    if (noKind) {
+      // No kind states only the fields read without one.
+      const needing = setAmong(facts, fields.kind_dependent);
+      if (setAmong(facts, fields.kind_free).length === 0 && needing.length === 0) {
+        return bad(
+          `${tool}: name its kind or at least one of ${Object.keys(fields.kind_free).join(", ")}`
+        );
+      }
+      if (needing.length) {
+        return bad(`${tool}: ${needing.join(", ")} are read only through a kind; declare the kind`);
+      }
     }
   }
   return ok(parsed.value as Record<string, ToolFactsEntry>);

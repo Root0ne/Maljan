@@ -24,7 +24,7 @@ export default function EvidencePage() {
   // lands here, next to the calls it was built from — and so does a section
   // routed to a tab that does not draw sections, which is the failure this net
   // exists to catch rather than a case anyone will remember to check for.
-  const unclaimed = unrenderedSections(report?.malware_report?.sections);
+  const unclaimed = unrenderedSections(report?.malware_report?.sections, report?.section_tabs);
 
   return (
     <div className="p-4 space-y-4">

@@ -199,9 +199,11 @@ export interface ErrorPatternEntry {
   message_group?: string;
 }
 
-/** What one tool's answer is and where its facts sit; every key but `kind` optional. */
+/** What one tool's answer is and where its facts sit; every key optional. A
+ *  declaration with no kind states the tool's other facts and leaves it read
+ *  as a tool of no kind. */
 export interface ToolFactsEntry {
-  kind: string;
+  kind?: string;
   [field: string]: unknown;
 }
 
@@ -250,6 +252,10 @@ export interface AgentDefinitionEntry {
    *  budget to use them in. */
   max_steps: number | null;
   timeout_seconds: number | null;
+  /** The console tab a section built from this agent's tool answers is drawn
+   *  on when the tool's kind places none (`AgentDefinition.tab`); `null`
+   *  places nothing. Optional because an API older than the field sends none. */
+  tab?: string | null;
 }
 
 /** How hard one debate stage argues before it hands over, mirroring
@@ -393,6 +399,18 @@ export interface SettingsSchema {
   /** Every tool server in force that declares how its credential is
    *  obtained, by key. */
   credential_servers?: Record<string, CredentialServerFacts>;
+  /** How a tool declaration's fields split, as the API reads them. */
+  tool_declaration_fields?: ToolDeclarationFields;
+}
+
+/** The word naming no kind, and each kind-free and kind-dependent field of a
+ *  tool declaration with its default (`core.tool_declarations.
+ *  declaration_fields`); a field counts as set only when it differs from its
+ *  default. */
+export interface ToolDeclarationFields {
+  no_kind: string;
+  kind_free: Record<string, unknown>;
+  kind_dependent: Record<string, unknown>;
 }
 
 /** What the schema says about one enrichment source; never a credential. */

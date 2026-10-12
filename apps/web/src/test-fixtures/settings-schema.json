@@ -11492,5 +11492,30 @@
   "rest": "Test sandbox API",
   "triage": "Test Triage connection",
   "virustotal": "Test VirusTotal"
+ },
+ "tool_declaration_fields": {
+  "kind_dependent": {
+   "asserts_techniques": false,
+   "holds_strings": false,
+   "places": {},
+   "reader": "",
+   "report_sections": [],
+   "reputation": null,
+   "rows": "",
+   "source": "",
+   "techniques": [],
+   "values": {}
+  },
+  "kind_free": {
+   "arguments": {},
+   "category": "",
+   "discloses_sample": false,
+   "display_name": "",
+   "long_running": false,
+   "memory_peak_mb": null,
+   "timeout_seconds": null,
+   "words": []
+  },
+  "no_kind": "unclassified"
  }
 }

@@ -240,8 +240,15 @@ class EvidenceRecorder:
         sink: EventSink | None = None,
         corpus: Any = None,
         model: str = "",
+        agent_role: str | None = None,
+        agent_tab: str | None = None,
     ) -> None:
         self.agent = agent
+        self.agent_tab = agent_tab or None
+        # The role the agent's definition declares, written on every entry
+        # (``LedgerEntry.agent_role``); ``None`` for the pack and an agent
+        # running outside a container.
+        self.agent_role = agent_role or None
         # The model whose turn the next calls answer: the agent's first model
         # until a turn says otherwise (``note_turn``). A fallback list stamps
         # every answer with the model that gave it, and the calls a turn asks
@@ -385,6 +392,8 @@ class EvidenceRecorder:
             chars_dropped=int(cut or 0) if not_shown is None else 0,
             source=source,
             structured_content=structured_content,
+            agent_role=self.agent_role,
+            agent_tab=self.agent_tab,
         )
         self.entries.append(entry)
         self._by_id[entry.id] = entry

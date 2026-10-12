@@ -92,7 +92,13 @@ from maljan.analysis.sandbox_sections import (
     is_item_id,
     item_index_of,
 )
-from maljan.core.declared_reading import facts_of, kind_of, reads_as, shipped_by_name
+from maljan.core.declared_reading import (
+    facts_of,
+    kind_free_facts,
+    kind_of,
+    reads_as,
+    shipped_by_name,
+)
 from maljan.core.undeclared_tools import address_arguments, entry_lists_any_code
 from maljan.schemas.evidence import repeat_holders
 
@@ -1417,7 +1423,7 @@ def _read_entry(entry: Any, found: EntryRoots, joins: _Joins) -> EntryRoots:
         if facts is not None and facts.rows and facts.places:
             _read_declared_rows(found, facts, data, tool)
         placed = bool(found.roots)
-        for key in () if placed else address_arguments(facts):
+        for key in () if placed else address_arguments(kind_free_facts(entry)):
             if args.get(key) not in (None, "") and _address_root(found, args[key]):
                 placed = True
                 break

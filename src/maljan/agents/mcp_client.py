@@ -168,6 +168,7 @@ class MCPLangChainToolkit:
         context_budget: Any | None = None,
         guard: Any | None = None,
         categories: Mapping[str, str] | None = None,
+        keep_tool_definitions: bool = False,
     ):
         self.server_params = server_params
         self.transport = (transport or "stdio").lower()
@@ -200,6 +201,14 @@ class MCPLangChainToolkit:
         # nothing. Tool-supplied text: shown to a model only as the server's
         # quoted words (``agents.prompt_fragments.undeclared_server_text``).
         self.server_instructions = ""
+        # Each tool's definition exactly as the server listed it (MCP
+        # ``Tool``: its input and output schemas, annotations, title and
+        # description), kept only when asked. Read by the settings probe
+        # alone, which proposes a declaration from it
+        # (``core.declaration_proposals``); a run keeps none, so a server's
+        # listing is held no longer than it was before.
+        self._keep_tool_definitions = keep_tool_definitions
+        self.tool_definitions: list[Any] = []
 
     async def initialize(self) -> None:
         """Initialize the connection to the MCP server and fetch available tools."""
@@ -245,6 +254,8 @@ class MCPLangChainToolkit:
             for tool in response.tools:
                 lc_tool = self._create_langchain_tool(tool)
                 self._tools.append(lc_tool)
+                if self._keep_tool_definitions:
+                    self.tool_definitions.append(tool)
 
             logger.info(f"Successfully loaded {len(self._tools)} tools from MCP server.")
         except BaseException as e:

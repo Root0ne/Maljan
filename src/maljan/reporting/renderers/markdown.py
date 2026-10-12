@@ -194,11 +194,11 @@ def _looked_at_the_file(row: Any) -> bool:
     by_name = tool_kinds.looked_at_the_file_by_name(row)
     if by_name is not None:
         return by_name
-    facts = tool_kinds.facts_of(row)
+    # ``arguments`` is read without a kind: a declaration of no kind keeps it.
     return (
         not tool_kinds.is_of(row, _SANDBOX_TOOLS)
         and not tool_kinds.is_of(row, _REPUTATION_TOOLS)
-        and not (facts is not None and "report" in facts.arguments)
+        and "report" not in tool_kinds.kind_free_facts(row).arguments
     )
 
 

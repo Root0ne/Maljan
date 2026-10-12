@@ -107,7 +107,7 @@ def test_a_patch_to_the_server_map_is_validated_and_reported_per_key(client):
 def test_the_mcp_probe_route_addresses_one_server(client, monkeypatch):
     from app.services.settings_probes import ProbeResult
 
-    async def fake(server, values, stored):
+    async def fake(server, values, stored, *, confirmed_calls=None):
         assert server == "network"
         assert values == {"core.mcp.servers": {"network": {"command": "python"}}}
         return ProbeResult(True, 12, "3 tools: a, b, c", None, ["a", "b", "c"])
@@ -120,6 +120,28 @@ def test_the_mcp_probe_route_addresses_one_server(client, monkeypatch):
         )
     assert response.status_code == 200
     assert response.json()["tools"] == ["a", "b", "c"]
+
+
+def test_the_mcp_probe_route_calls_only_the_tools_the_admin_confirmed(client, monkeypatch):
+    from app.services.settings_probes import ProbeResult
+
+    asked: list[list[str]] = []
+
+    async def fake(server, values, stored, *, confirmed_calls=None):
+        asked.append(list(confirmed_calls or []))
+        return ProbeResult(True, 12, "1 tools: a", None, ["a"])
+
+    monkeypatch.setattr("app.api.v1.settings.run_mcp_probe", fake)
+    with patch("app.api.v1.settings.SettingsService.load_overrides", AsyncMock(return_value={})):
+        for body in ({"values": {}}, {"values": {}, "confirmed_calls": ["lookup"]}):
+            response = client.post("/api/v1/settings/test/mcp?server=network", json=body)
+            assert response.status_code == 200
+        # The query flag an earlier draft read calls nothing.
+        response = client.post(
+            "/api/v1/settings/test/mcp?server=network&call_tools=true", json={"values": {}}
+        )
+        assert response.status_code == 200
+    assert asked == [[], ["lookup"], []]
 
 
 def test_the_mcp_probe_route_needs_a_server(client):
@@ -143,7 +165,7 @@ def test_the_mcp_probe_route_never_echoes_a_staged_token(client, monkeypatch):
 
     token = "-".join(["s3cr3t", "runtime", "built", "token"])
 
-    async def fake(server, values, stored):
+    async def fake(server, values, stored, *, confirmed_calls=None):
         assert values["core.mcp.servers"]["network"]["auth_token"] == token
         return ProbeResult(False, 5, "no MCP handshake within 5 s", None, None)
 

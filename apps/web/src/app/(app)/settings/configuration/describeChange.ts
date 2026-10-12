@@ -260,6 +260,7 @@ export const DEFINITION_FIELDS: [keyof AgentDefinitionEntry, string][] = [
   ["role", "role"],
   ["max_steps", "steps per loop"],
   ["timeout_seconds", "seconds per loop"],
+  ["tab", "console tab"],
 ];
 
 function findCloneSource(

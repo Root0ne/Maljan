@@ -1792,6 +1792,26 @@ class JudgeAgent(BudgetMeter):
         """A per-job identity for the handles' same-job short circuit."""
         return self._job_id or "job"
 
+    def _definition_role(self) -> str | None:
+        """The role the judge's definition declares, or ``None`` when the judge runs bare."""
+        container = getattr(self, "_container", None)
+        if container is None:
+            return None
+        from maljan.agents.composition import role_of
+        from maljan.core.config import JUDGE_AGENT_KEY
+
+        return role_of(container.config, JUDGE_AGENT_KEY)
+
+    def _definition_tab(self) -> str | None:
+        """The console tab the judge's definition declares, or ``None`` when the judge runs bare."""
+        container = getattr(self, "_container", None)
+        if container is None:
+            return None
+        from maljan.agents.composition import tab_of
+        from maljan.core.config import JUDGE_AGENT_KEY
+
+        return tab_of(container.config, JUDGE_AGENT_KEY)
+
     def _definition_tool_refs(self) -> list[Any]:
         """The judge definition's ``ToolRef``s, under the active profile.
 
@@ -1967,6 +1987,8 @@ class JudgeAgent(BudgetMeter):
             stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
             sink=self._event_sink(),
             corpus=getattr(self, "evidence_corpus", None),
+            agent_role=self._definition_role(),
+            agent_tab=self._definition_tab(),
         )
         messages = messages_pre
 

@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import HTMLResponse, PlainTextResponse
+from maljan.core.logger import logger
 from maljan.core.settings_overrides import redact_url
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -74,6 +75,23 @@ def _is_numbered(transcript: list[AgentMessageResponse]) -> bool:
     return max(int(line.seq or 0) for line in transcript) >= len(transcript)
 
 
+def _section_tabs(malware_report: Any) -> dict[str, str]:
+    """The tab each section from an operator's tool is drawn on (``reporting.section_tabs``).
+
+    Read from the stored report alone; a report that cannot be read places
+    nothing, and the console then places every section by its key.
+    """
+    if not isinstance(malware_report, dict):
+        return {}
+    from maljan.reporting.section_tabs import section_tabs
+
+    try:
+        return section_tabs(malware_report)
+    except Exception as exc:  # noqa: BLE001 — a placement is never worth the report
+        logger.warning("section tabs could not be read (%s).", type(exc).__name__)
+        return {}
+
+
 async def _detail(svc: ReportService, report: Any) -> ReportDetailResponse:
     """One report, with the transcript numbered only if this run was numbered.
 
@@ -91,6 +109,9 @@ async def _detail(svc: ReportService, report: Any) -> ReportDetailResponse:
     reading = (report.run_summary or {}).get("verdict_reading")
     if isinstance(reading, str) and reading:
         detail = detail.model_copy(update={"verdict_reading": reading})
+    placed = _section_tabs(report.malware_report)
+    if placed:
+        detail = detail.model_copy(update={"section_tabs": placed})
     if detail.transcript and not _is_numbered(detail.transcript):
         detail = detail.model_copy(
             update={"transcript": [m.model_copy(update={"seq": None}) for m in detail.transcript]}

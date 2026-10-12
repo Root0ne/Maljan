@@ -72,6 +72,7 @@ from app.services.settings_service import (
     SettingsService,
     SettingsValidationError,
     core_settings_cache,
+    lenient_imported_declarations,
 )
 
 EXPORT_FORMAT = "maljan-settings/1"
@@ -155,6 +156,8 @@ def served_schema(
         for g, t in GROUP_ORDER
         if g in by_group
     ]
+    from maljan.core.tool_declarations import declaration_fields
+
     from app.services.provider_facts import probe_labels
 
     if server_configs is None:
@@ -166,6 +169,7 @@ def served_schema(
         probe_labels=probe_labels(enrichment_sources),
         enrichment_sources=source_facts(enrichment_sources, server_configs),
         credential_servers=bootstrap_facts(server_configs),
+        tool_declaration_fields=declaration_fields(),
     )
 
 
@@ -524,6 +528,9 @@ async def import_values(
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": errors}
         )
+    # A declaration another version wrote may hold what this one does not
+    # read: it is left out with a warning, never a refusal of the file.
+    values, left_out = lenient_imported_declarations(values)
     try:
         res = await SettingsService(db).save(values, user_id=user.id, ip=_client_ip(request))
     except SettingsValidationError as exc:
@@ -543,7 +550,9 @@ async def import_values(
     # An import can bring in a whole team just as a patch can, so it answers
     # with the same advisory notes.
     return PatchResponse(
-        applied=res.applied, applies=res.applies, warnings=await _agent_warnings(db)
+        applied=res.applied,
+        applies=res.applies,
+        warnings={**left_out, **await _agent_warnings(db)},
     )
 
 
@@ -636,20 +645,33 @@ async def test_mcp_server(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> ProbeResponse:
-    """Launch one configured MCP server and report the tools it offers.
+    """Launch one configured MCP server, report the tools it offers and propose declarations.
 
     Takes staged values so an operator can test a server they have not saved
     yet — the same contract as every other probe, addressed to one key of one
     setting rather than to a set of settings. Registered ahead of
-    ``/test/{probe}`` so the fixed path wins the match.
+    ``/test/{probe}`` so the fixed path wins the match. The proposals in
+    ``details`` are data for the admin to accept; nothing is saved here. A
+    tool is called only when the body's ``confirmed_calls`` names it after the
+    admin was shown the planned calls (``details.proposals.planned``).
     """
     stored = await SettingsService(db).load_overrides()
     # The staged values are read; what follows launches a server and waits on
     # it. Nothing below needs the transaction that read them, and a probe is
     # the longest await this API makes.
     await end_read_transaction(db)
-    response = await _probe_response(run_mcp_probe(server, body.values, stored))
-    await _record_the_probe(request, user, "mcp", body, response, server=server)
+    response = await _probe_response(
+        run_mcp_probe(server, body.values, stored, confirmed_calls=body.confirmed_calls)
+    )
+    await _record_the_probe(
+        request,
+        user,
+        "mcp",
+        body,
+        response,
+        server=server,
+        confirmed_calls=sorted(body.confirmed_calls),
+    )
     return response
 
 
