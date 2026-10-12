@@ -107,6 +107,7 @@ def _empty_digest(name: str) -> str:
     if "md5" in lowered:
         return hashlib.md5(b"", usedforsecurity=False).hexdigest()
     if "sha1" in lowered:
+        # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1
         return hashlib.sha1(b"", usedforsecurity=False).hexdigest()
     return hashlib.sha256(b"").hexdigest()
 
