@@ -15,8 +15,14 @@ through code written against its name. A declaration says:
   first non-empty string or number a path names wins;
 * ``reader``: the id of the registered report reader
   (``providers.sandbox.readers``) that reads a report of this format into the
-  neutral sandbox report (``cape2``, ``cuckoo`` and ``triage`` ship, and an
-  operator registers more), empty for a format no reader reads yet;
+  neutral sandbox report (``cape2``, ``cuckoo``, ``triage`` and the JSONPath
+  mapping reader ``generic`` ship, and an operator registers more), empty for
+  a format no reader reads yet;
+* ``mapping``: where each part of a report of this format sits, as JSONPaths
+  (``core.report_mapping.RestMappingConfig``), for a reader that reads through
+  a mapping; absent, such a reader reads through ``sandbox.rest.mapping``.
+  The upload route and the REST provider read it alike, so a sandbox nobody
+  wrote a reader for is read per format, each format through its own paths;
 * ``signature_scale``: what a signature's severity number means, as the rung
   of the five-word severity ladder each score from 1 up names; absent where the
   format documents no scale;
@@ -47,10 +53,21 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from maljan.core.report_mapping import RestMappingConfig, check_mapping_paths
 from maljan.core.tool_declarations import parse_path, select
 
 # The name a payload no format recognises is given.
 UNKNOWN_FORMAT = "unknown"
+# The format an upload no format recognises is accepted as, where the operator
+# allows it (``"unread"`` in ``sandbox.upload.allowed_formats``): stored and
+# read as raw blocks only, with a proposed declaration beside it
+# (``core.report_proposals``). Never a declared format's name.
+UNREAD_FORMAT = "unread"
+# What a run that read an upload unread records among its degradations.
+UNREAD_RUN_REASON = (
+    "uploaded sandbox report was read unread: no declared format recognises it, so no "
+    "observed fact was drawn from it"
+)
 
 # A format's name is stored on the upload row (``sandbox_reports.format``,
 # ``String(32)``), so a name is a lowercase word of at most that many characters.
@@ -175,12 +192,17 @@ class ReportFormat(BaseModel):
     reader: str = Field(default="", pattern=READER_ID_PATTERN)
     signature_scale: SignatureScale | None = None
     display_name: str = Field(default="", max_length=64)
+    # Where each part of a report of this format sits, for a reader that reads
+    # through a mapping (the module docstring).
+    mapping: RestMappingConfig | None = None
 
     @field_validator("name")
     @classmethod
     def _not_reserved(cls, value: str) -> str:
         if value == UNKNOWN_FORMAT:
             raise ValueError(f"{UNKNOWN_FORMAT!r} names a payload no format recognises")
+        if value == UNREAD_FORMAT:
+            raise ValueError(f"{UNREAD_FORMAT!r} names an upload accepted unread")
         return value
 
     @field_validator("detect")
@@ -195,6 +217,13 @@ class ReportFormat(BaseModel):
         if "detect" in self.model_fields_set and not self.detect:
             raise ValueError("detect needs at least one group; leave it out to keep a built-in's")
         return self
+
+    @field_validator("mapping")
+    @classmethod
+    def _mapping_paths_compile(cls, value: RestMappingConfig | None) -> RestMappingConfig | None:
+        if value is not None:
+            check_mapping_paths(value)
+        return value
 
     @field_validator("task_id_paths", "target_sha256_paths")
     @classmethod

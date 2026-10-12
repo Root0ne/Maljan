@@ -1063,11 +1063,17 @@ _SECTIONS_ENTRY = (
 def _sandbox_sections_sentences() -> str:
     """What the sandbox sections tell a model: the index, the tool, its answers, the questions."""
     from maljan.analysis import sandbox_sections as ss
+    from maljan.core.report_formats import UNREAD_RUN_REASON
+    from maljan.core.safe_json import CYCLE_MARK, DEEPER_MARK, SHARED_MARK
     from maljan.providers import sandbox_tools as st
-    from maljan.providers.sandbox.readers import TriageReportReader
+    from maljan.providers.sandbox.readers import TriageReportReader, report_reader
     from maljan.schemas.evidence import LedgerEntry
-    from maljan.schemas.sandbox_document import DNS_AS_WRITTEN_KEY
+    from maljan.schemas.sandbox_document import DNS_AS_WRITTEN_KEY, sandbox_document
 
+    # A report accepted unread: its blocks as raw channels, every section unavailable.
+    unread = sandbox_document(
+        report_reader("unread").read({"run": {"procs": [{"pid": 1}]}}, provider="upload")
+    )
     report: dict[str, Any] = {
         "behavior": {
             "processes": [
@@ -1129,6 +1135,14 @@ def _sandbox_sections_sentences() -> str:
             # The key a network section answer may show a source's unread DNS value under.
             DNS_AS_WRITTEN_KEY,
             ITEM_UNREAD.format(item="net:1"),
+            # What a report nested past the guard, holding itself or sharing a
+            # container is written out with where a model reads it.
+            DEEPER_MARK,
+            CYCLE_MARK,
+            SHARED_MARK,
+            json.dumps(ss.section_index(unread, ("upload", "unread", ""))),
+            json.dumps(st.sandbox_items(unread, "processes", normalised_by=("upload", "unread"))),
+            UNREAD_RUN_REASON,
         ]
     )
 

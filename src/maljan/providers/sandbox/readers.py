@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from maljan.core.logger import logger
 from maljan.core.report_formats import (
     BUILTIN_REPORT_FORMATS,
+    UNREAD_FORMAT,
     ReportFormat,
     SignatureScale,
     effective_formats,
@@ -65,6 +66,9 @@ class ReportReader(ABC):
     # The name published text gives the sandbox whose reports this reader
     # reads, where no format declaration names one.
     display_name: ClassVar[str] = ""
+    # Whether the reader reads a report through a JSONPath mapping (``mapping``
+    # in its context): a format declaring a mapping names such a reader.
+    reads_mapping: ClassVar[bool] = False
 
     def builtin_format(self) -> ReportFormat | None:
         """The shipped format declaration under this reader's id, if any."""
@@ -282,6 +286,30 @@ def sandbox_formats(declared: Iterable[ReportFormat] = ()) -> tuple[Any, ...]:
     return (*new, *reader_only, *shipped)
 
 
+def format_mapping(fmt: Any, fallback: Any = None) -> Any:
+    """The mapping a report of format ``fmt`` is read through: its own, else ``fallback``."""
+    own = getattr(fmt, "mapping", None) if fmt is not None else None
+    return own if own is not None else fallback
+
+
+def mapping_refusal(fmt: Any) -> str:
+    """Why format ``fmt`` cannot be read as declared, in words; empty where it can.
+
+    A format that declares a mapping must name a registered reader that reads
+    through one: otherwise its mapping would be read by nothing.
+    """
+    if fmt is None or getattr(fmt, "mapping", None) is None:
+        return ""
+    reader = report_reader(getattr(fmt, "reader", ""))
+    if reader is None or reader.reads_mapping:
+        return ""
+    return (
+        f"The report format {fmt.name!r} declares a mapping, but its reader "
+        f"{fmt.reader!r} reads no mapping; name a reader that does (the mapping "
+        "reader is 'generic') or remove the mapping."
+    )
+
+
 def sandbox_format_named(name: str, formats: Iterable[Any]) -> Any:
     """The format among ``formats`` named ``name``, or ``None``."""
     for fmt in formats:
@@ -422,6 +450,7 @@ class MappedReportReader(ReportReader):
 
     id = "generic"
     sniffs = False
+    reads_mapping = True
 
     def read(
         self,
@@ -456,3 +485,41 @@ class MappedReportReader(ReportReader):
         from maljan.schemas.sandbox_report import Reading
 
         return Reading(REST_MAPPING_FILLS)
+
+
+@register_report_reader
+class UnreadReportReader(ReportReader):
+    """A report no format recognises, accepted where the operator allows it: raw blocks only.
+
+    Every top-level block becomes a ``report.<block>`` channel the dynamic
+    analyst reads (the mapping reader with no path at all), every section is
+    named unavailable, and no observed fact is drawn from it. It is never
+    sniffed and never chosen: an upload is read by it only when its row
+    recorded it as accepted unread.
+    """
+
+    id = UNREAD_FORMAT
+    sniffs = False
+    choosable = False
+
+    def read(
+        self,
+        payload: dict[str, Any],
+        *,
+        provider: str,
+        task_id: str = "",
+        fmt: Any = None,
+        **context: Any,
+    ) -> SandboxReport:
+        from maljan.core.report_mapping import RestMappingConfig
+        from maljan.providers.sandbox.rest_mapping import apply_mapping, compile_mapping
+
+        nothing = compile_mapping(RestMappingConfig(target_sha256=""))
+        report = apply_mapping(nothing, payload, provider=provider, task_id=task_id).report
+        report.source_format = self.id
+        return report
+
+    def reading(self, read_from: str = "", provider: str = "") -> Reading:
+        from maljan.schemas.sandbox_report import Reading
+
+        return Reading(frozenset({"channels"}))

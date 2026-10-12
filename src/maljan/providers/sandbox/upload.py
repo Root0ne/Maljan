@@ -8,7 +8,10 @@ the format the upload row recorded when the route accepted it, so the format
 the console shows for the row is the one the run reads; a blob handed over
 with no recorded format is sniffed against the registry's formats
 (``providers.sandbox.readers.sandbox_formats``), and read by the registered
-reader its format names.
+reader its format names. A format that declares its own JSONPath mapping
+is read through it, else through ``sandbox.rest.mapping``. A row accepted
+unread (``core.report_formats.UNREAD_FORMAT``, where the operator allows it) is
+read as raw blocks alone until a declaration that recognises it is accepted.
 """
 
 from __future__ import annotations
@@ -18,11 +21,18 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from maljan.core.report_formats import ReportFormat, sniff
+from maljan.core.report_formats import UNREAD_FORMAT, ReportFormat, sniff
 from maljan.providers.base import SandboxCapabilities, SandboxProvider
 from maljan.providers.errors import ProviderError
 from maljan.providers.registry import register_sandbox_provider
-from maljan.providers.sandbox.readers import report_reader, sandbox_format_named, sandbox_formats
+from maljan.providers.sandbox.readers import (
+    ReaderFormat,
+    format_mapping,
+    mapping_refusal,
+    report_reader,
+    sandbox_format_named,
+    sandbox_formats,
+)
 
 if TYPE_CHECKING:
     from maljan.core.config import RestMappingConfig, SandboxUploadConfig, Settings
@@ -123,8 +133,24 @@ class UploadSandboxProvider(SandboxProvider):
         self._declared = found
         self._sniffed_format = (found.reader or None) if found is not None else None
 
+    def _unread(self) -> Any:
+        """The unread format, where the operator allows it; ``None`` otherwise."""
+        reader = report_reader(UNREAD_FORMAT)
+        if reader is None or UNREAD_FORMAT not in set(self._cfg.allowed_formats):
+            return None
+        return ReaderFormat(reader)
+
     def _recorded_format(self, name: str) -> Any:
         """The format an upload row recorded, refused in words where unusable."""
+        if name == UNREAD_FORMAT:
+            unread = self._unread()
+            if unread is None:
+                raise ProviderError(
+                    "The attached sandbox report was accepted unread, which "
+                    "sandbox.upload.allowed_formats no longer allows; add 'unread' again "
+                    "to read it, or accept a declaration that recognises it."
+                )
+            return unread
         found = sandbox_format_named(name, self._formats)
         if found is None:
             raise ProviderError(
@@ -143,6 +169,9 @@ class UploadSandboxProvider(SandboxProvider):
                 f"The attached sandbox report's format {name!r} names no registered "
                 "reader; no analysis can read it yet."
             )
+        refusal = mapping_refusal(found)
+        if refusal:
+            raise ProviderError(refusal)
         return found
 
     def submit(self, sample_path: str | Path) -> str:
@@ -186,7 +215,7 @@ class UploadSandboxProvider(SandboxProvider):
         found = (
             self._recorded_format(report_format)
             if report_format is not None
-            else sniff(payload, self._formats)
+            else sniff(payload, self._formats) or self._unread()
         )
         if found is None:
             # Never a legitimate target regardless of ``allowed_formats``: no
@@ -202,6 +231,9 @@ class UploadSandboxProvider(SandboxProvider):
                 f"Uploaded report sniffed as {found.name!r}; accepted formats are "
                 f"{', '.join(sorted(self._cfg.allowed_formats))}."
             )
+        refusal = mapping_refusal(found)
+        if refusal:
+            raise ProviderError(refusal)
         # The format names the registered reader that reads it; the format's
         # own name is never branched on here. An uploaded report is the report
         # alone: whatever a live sandbox fetches beside it (a task report, a
@@ -212,7 +244,9 @@ class UploadSandboxProvider(SandboxProvider):
                 f"Uploaded report sniffed as {found.name!r}, a format that names no "
                 "registered reader; no analysis can read it yet."
             )
-        report = reader.read(payload, provider=self.id, fmt=found, mapping=self._mapping)
+        report = reader.read(
+            payload, provider=self.id, fmt=found, mapping=format_mapping(found, self._mapping)
+        )
         return SandboxRun(
             task_id=report.task_id or "uploaded",
             sample_sha256=report.target.sha256,
