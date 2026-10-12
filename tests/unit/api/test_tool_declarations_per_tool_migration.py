@@ -301,6 +301,7 @@ def test_running_the_revision_again_changes_nothing(caplog) -> None:
     mod = _module()
     _run(mod, conn)
     once = _rows(conn)
+    caplog.clear()
     with caplog.at_level(logging.INFO):
         _run(mod, conn)
     assert _rows(conn) == once
