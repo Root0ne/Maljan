@@ -567,7 +567,9 @@ function starts of every answer that lists them (an answer of kind
 `function_list` or `capability_rules` that declares `function_starts`: capa's,
 as shipped, said as `capa function starts`), and every direct call target the
 decoder reaches in an executable section. Its rules come from every
-`capability_rules` answer, said under the matcher's display name, and its
+`capability_rules` answer, said under the matcher's display name and held in
+each row under `capa` when the shipped capa answered them, else under `rules`
+with `rule_sources` naming each rule entry's tool, and its
 call-site strings from every emulated or decoded strings answer that names its
 call sites; an input no answer fills is stated by the kind it lacks. A disassembler's function list is not read: the pack
 runs before any analyst opens one, and the entry says so as `no:` with that
