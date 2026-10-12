@@ -124,7 +124,7 @@ from maljan.extractors.capability_matrix import (
 from maljan.llm.context_window import no_room_sentence
 from maljan.llm.tool_replies import NO_REPLY_RECORDED, NOT_RUN_REPLY
 from maljan.memory.technique_cards import card_lines, load_cards
-from maljan.pipeline import nodes, triage_pack
+from maljan.pipeline import function_claims, nodes, triage_pack
 from maljan.pipeline.debate_facts import (
     ANALYSTS_FIELD_MISSING_NOTE,
     BLOCK_NOT_READ_NOTE,
@@ -1807,6 +1807,16 @@ PROMPTS: dict[str, str] = {
                 }
             ),
             json.dumps({"rule_sources": {"ev_0001": "Matcher"}}),
+            function_claims._row_words(
+                {
+                    artefact_index.rules_field(False): [
+                        {"rule": "reads a key " + "x" * 300, "sources": ["e1"]}
+                    ]
+                },
+                "ev_0002",
+                artefact_index.row_parts,
+            ),
+            triage_pack._row_named({"ns": "a/b", "count": 2}, ("ns", "count")),
         ]
     ),
     "the pack's resolved hashes and decoded blobs in part": " ".join(

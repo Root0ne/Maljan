@@ -422,6 +422,20 @@ def written_for(renderer: str, tool: Any) -> bool:
     return str(tool or "") in shipped_tools_of(renderer)
 
 
+def runs_shipped(renderer: str, steps: Iterable[PackStep] | None = None) -> bool:
+    """Whether ``steps`` run one of the tools the shipped steps of ``renderer`` call.
+
+    ``steps`` is the effective list (the shipped one for ``None``), the tool
+    as the platform runs it. Where
+    no answer of the kind came back, an answer names what it compared with
+    by that tool only when the list runs it; else neutrally, so an answer
+    never names a tool the operator swapped out.
+    """
+    held = effective_steps() if steps is None else steps
+    tools = shipped_tools_of(renderer)
+    return any(step.builtin and step.called in tools for step in held)
+
+
 def _historic_word(renderer: str) -> str:
     """The one tool the shipped steps of ``renderer`` call; ``""`` for none or several."""
     tools = shipped_tools_of(renderer)

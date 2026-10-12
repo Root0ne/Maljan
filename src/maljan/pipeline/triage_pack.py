@@ -138,6 +138,7 @@ from maljan.core.pack_steps import (
     effective_steps,
     placeholder_values,
     read_answer_field,
+    runs_shipped,
     shipped_label,
     shipped_renderer,
     shipped_step,
@@ -1378,7 +1379,9 @@ class _Pack:
             whole = self._whole_rows.get(entry.id)
             held = whole() if whole is not None else []
             rows.extend(held or given)
-        shipped = _from_shipped((entry for _tool, entry, _rows in sources), DECODER_RENDERER)
+        shipped = _from_shipped(
+            (entry for _tool, entry, _rows in sources), DECODER_RENDERER, self.steps
+        )
         return rows, string_blobs.decoder_word(shipped)
 
     def _resolved_api_capability(self, step: PackStep) -> None:
@@ -1408,7 +1411,7 @@ class _Pack:
         path = self.inputs.sample_path
         args, label, starts = self._starts_args()
         rows = _rule_rows(self.recorder.entries)
-        mark = _rules_mark(_rule_sources(self.recorder.entries))
+        mark = _rules_mark(_rule_sources(self.recorder.entries), self.steps)
         self.record(
             crypto_constants.TOOL,
             args,
@@ -1441,7 +1444,7 @@ class _Pack:
         path = self.inputs.sample_path
         starts = self._function_starts()[1]
         rows = _rule_rows(self.recorder.entries)
-        mark = _rules_mark(_rule_sources(self.recorder.entries))
+        mark = _rules_mark(_rule_sources(self.recorder.entries), self.steps)
         self.record(
             SCAN_TOOL,
             args,
@@ -1464,7 +1467,7 @@ class _Pack:
         name the entries it read.
         """
         path = self.inputs.sample_path
-        joined = index_inputs(self.recorder.entries)
+        joined = index_inputs(self.recorder.entries, self.steps)
         args: dict[str, Any] = {"path": path}
         if joined.named:
             args["joined"] = list(joined.named)
@@ -1845,7 +1848,9 @@ def _absence(entry: LedgerEntry) -> str:
     return f"no: [{entry.id}] failed: {_one_line(entry.error or entry.output)}"
 
 
-def index_inputs(entries: Iterable[LedgerEntry]) -> IndexInputs:
+def index_inputs(
+    entries: Iterable[LedgerEntry], steps: Iterable[PackStep] | None = None
+) -> IndexInputs:
     """The pack's answers the function index joins, each by its declared kind or reader.
 
     In order: the PE header, the rule matches (every answer of declared kind
@@ -1854,7 +1859,8 @@ def index_inputs(entries: Iterable[LedgerEntry]) -> IndexInputs:
     input no answer fills is stated under ``absent`` by the kind it lacks;
     an answer that failed, was not made or holds nothing readable, by its
     tool, with why. The function starts are joined from every answer that
-    lists them.
+    lists them. ``steps`` is the effective step list (the shipped one for
+    ``None``); with no rule answer it decides the name rows give rules under.
     """
     out = IndexInputs()
     pack = [entry for entry in entries if entry.agent == PIPELINE]
@@ -1904,7 +1910,7 @@ def index_inputs(entries: Iterable[LedgerEntry]) -> IndexInputs:
     out.hashes = single("hashes", "api_hash_resolution")
     out.blobs = single("blobs", "decoded_strings")
     rule_entries = [entry for entry in every["rules"] if entry.id in named]
-    shipped = _from_shipped(rule_entries, RULES_RENDERER)
+    shipped = _from_shipped(rule_entries, RULES_RENDERER, steps)
     out.rules_under = artefact_index.rules_field(shipped)
     if not shipped:
         out.rule_sources = {entry.id: display_name(entry) for entry in rule_entries}
@@ -3734,12 +3740,22 @@ def _rule_sources(entries: Iterable[LedgerEntry]) -> list[LedgerEntry]:
     ]
 
 
-def _from_shipped(entries: Iterable[LedgerEntry], renderer: str) -> bool:
-    """Whether every one of ``entries`` is the answer of the tool ``renderer`` was shipped for."""
-    return all(_written_for(entry, renderer) for entry in entries)
+def _from_shipped(
+    entries: Iterable[LedgerEntry], renderer: str, steps: Iterable[PackStep] | None = None
+) -> bool:
+    """Whether every one of ``entries`` is the answer of the tool ``renderer`` was shipped for.
+
+    With no entry, whether ``steps`` (the shipped list for ``None``) run that
+    tool (``core.pack_steps.runs_shipped``): an operator who swapped it out
+    gets the neutral names even when the tool of their own failed.
+    """
+    held = list(entries)
+    if not held:
+        return runs_shipped(renderer, steps)
+    return all(_written_for(entry, renderer) for entry in held)
 
 
-def _rules_mark(sources: Iterable[LedgerEntry]) -> str:
+def _rules_mark(sources: Iterable[LedgerEntry], steps: Iterable[PackStep] | None = None) -> str:
     """The field a pass's row holds the rules that agree with it under.
 
     The shipped rule matcher's name, as it has always been stored, where every
@@ -3747,7 +3763,10 @@ def _rules_mark(sources: Iterable[LedgerEntry]) -> str:
     any came from another tool (``core.pack_steps.answer_field``).
     """
     return answer_field(
-        "{}", RULES_RENDERER, RULES_MARK_NEUTRAL, shipped=_from_shipped(sources, RULES_RENDERER)
+        "{}",
+        RULES_RENDERER,
+        RULES_MARK_NEUTRAL,
+        shipped=_from_shipped(sources, RULES_RENDERER, steps),
     )
 
 
@@ -4156,30 +4175,66 @@ def _flat(values: list[Any]) -> list[str]:
     return out
 
 
+def _scalar_text(value: Any) -> str:
+    """``value`` as one line of text when it is a scalar; ``""`` for an object, a list, nothing."""
+    if value is None or value == "" or isinstance(value, dict | list):
+        return ""
+    return " ".join(str(value).split())
+
+
+def _row_named(read: Mapping[str, Any], values: Sequence[str]) -> str:
+    """What names a row read through its declaration (``read``: value name to its first value).
+
+    Its declared ``rule``, else ``text``, ``name``, ``value``; a declaration
+    that names none of these gives the row's other declared values as
+    ``name=value``, so no other value stands where a row's name belongs.
+    Values that are not scalars are left out.
+    """
+    naming = next((name for name in _NAMING_VALUES if name in values), "")
+    if naming:
+        return _scalar_text(read.get(naming))
+    said = ((name, _scalar_text(read.get(name))) for name in values)
+    return " ".join(f"{name}={text}" for name, text in said if text)
+
+
+def _object_rows(data: Any, path: str) -> list[dict[str, Any]] | None:
+    """The rows ``path`` names in ``data`` that are objects; ``None`` if it names only others.
+
+    A row that is not an object holds no declared value or place, so it is
+    neither counted nor shown; an answer of only such rows is no answer the
+    declaration reads.
+    """
+    found = select(data, path)
+    rows = [row for row in found if isinstance(row, dict)]
+    return rows if rows or not found else None
+
+
 def _declared_rules(entry: LedgerEntry) -> dict[str, Any] | None:
     """A rule matcher's answer read through its declaration, in the shape ``_capa`` reads.
 
-    Each declared row is one rule: named by its declared ``rule`` (else
-    ``text``, ``name``, ``value``, else its first declared value), placed at
-    its declared ``addresses`` (else ``address``, ``offset``, ``rva``, else its
-    first declared place), with the technique ids the declaration says the row
-    names when the tool declares that its techniques are asserted. ``None``
-    for an answer whose declaration names no rows.
+    Each declared row that is an object is one rule: named by
+    :func:`_row_named`, placed at its declared ``addresses`` (else
+    ``address``, ``offset``, ``rva``, else its first declared place), with the
+    technique ids the declaration says the row names when the tool declares
+    that its techniques are asserted. ``None`` for an answer whose
+    declaration names no rows, or whose rows are none of them objects.
     """
     from maljan.reporting.tool_kinds import row_technique_ids
 
     facts = facts_of(entry)
     if facts is None or not facts.rows or entry.structured is None:
         return None
-    name = _declared_key(facts.values, _NAMING_VALUES)
+    raws = _object_rows(entry.structured, facts.rows)
+    if raws is None:
+        return None
+    values = tuple(facts.values)
     place = _declared_key(facts.places, _ROW_PLACES)
     rows: list[dict[str, Any]] = []
-    for raw in select(entry.structured, facts.rows):
-        row = raw if isinstance(raw, dict) else {}
-        said = first(row, facts.values[name]) if name else None
+    for row in raws:
+        read = {name: first(row, path) for name, path in facts.values.items()}
         rows.append(
             {
-                "rule": " ".join(str(said).split()) if said not in (None, "") else "",
+                "rule": _row_named(read, values),
                 "addresses": _flat(select(row, facts.places[place])) if place else [],
                 "attck": row_technique_ids(row, facts) if facts.asserts_techniques else [],
             }
@@ -4242,29 +4297,30 @@ def _is_pass(entry: LedgerEntry) -> bool:
 def _declared_rows(entry: LedgerEntry) -> str:
     """The generic line of an answer whose declaration names its rows: how many, and each one.
 
-    Each row by the value that names it (its declared ``rule``, else ``text``,
-    ``name``, ``value``, else its first declared value), at its first declared place, as many
-    as the pack's detail shows; ``""`` for an answer whose declaration names no rows.
+    Each row that is an object, named by :func:`_row_named`, at its first
+    declared place, as many as the pack's detail shows; ``""`` for an answer
+    whose declaration names no rows, or whose rows are none of them objects.
     """
     facts = facts_of(entry)
     data = entry.structured
     if facts is None or not facts.rows or data is None or not entry.ok:
         return ""
-    value = _declared_key(facts.values, _NAMING_VALUES)
+    rows = _object_rows(data, facts.rows)
+    if rows is None:
+        return ""
+    values = tuple(facts.values)
     place = next(iter(facts.places), "")
     items: list[str] = []
-    rows = facts.row_values(data)
-    for read in rows:
-        said = _first(read.get(value)) if value else None
-        where = _first(read.get(place)) if place else None
-        if isinstance(where, list):
-            where = " ".join(str(w) for w in where)
-        text = " ".join(str(said).split()) if said not in (None, "") else ""
-        if text and where not in (None, ""):
+    for row in rows:
+        read = {name: first(row, path) for name, path in facts.values.items()}
+        text = _row_named(read, values)
+        held = first(row, facts.places[place]) if place else None
+        where = " ".join(_flat([held])) if held is not None else ""
+        if text and where:
             items.append(f"{_short(text)} @ {where}")
         elif text:
             items.append(_short(text))
-        elif where not in (None, ""):
+        elif where:
             items.append(f"@ {where}")
     kind = f" of kind {facts.kind}" if facts.kind else ""
     noun = "row" if len(rows) == 1 else "rows"
