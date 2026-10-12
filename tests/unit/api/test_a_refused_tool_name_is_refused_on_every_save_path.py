@@ -171,3 +171,116 @@ def test_an_empty_refused_name_is_shown_visibly() -> None:
     from maljan.core.tool_declarations import loggable_names
 
     assert loggable_names(["", "a"]) == '"", a'
+
+
+# A refused name sent as ``null``: reading the map over what ships drops a
+# ``null`` entry, so the names of the map as sent are checked first, on the
+# server map as on a provider leaf.
+CUSTOM = "own_tools"
+SAVE_PATHS = ["patch", "maljan-settings/2", "maljan-settings/1"]
+
+
+def _full_entry(server: str, tool_facts: Any) -> dict[str, Any]:
+    from app.services.server_map import validate_server_map
+
+    shipped = validate_server_map({}).get(server) or {
+        "transport": "http",
+        "url": "http://127.0.0.1:9/mcp",
+    }
+    return {**{k: v for k, v in shipped.items() if k != "tool_facts"}, "tool_facts": tool_facts}
+
+
+def _save(path: str, values: dict[str, Any], rows: list[Any] | None = None) -> Any:
+    db = _db(list(rows or []))
+    with (
+        patch("app.api.v1.settings.audit_record", AsyncMock()),
+        patch("app.api.v1.settings._agent_warnings", AsyncMock(return_value={})),
+    ):
+        if path == "patch":
+            answer = _client(db).patch("/api/v1/settings", json={"changes": values})
+        else:
+            answer = _client(db).post(
+                "/api/v1/settings/import", json={"format": path, "values": values}
+            )
+    return answer.status_code, answer.json(), db
+
+
+NULL_SPELLINGS = [
+    pytest.param({CHANGES_MARK: None}, [CHANGES_MARK], id="empty-unmarked"),
+    pytest.param({CHANGES_MARK: None, "zz": DECLARED}, [CHANGES_MARK], id="empty-beside-a-tool"),
+    pytest.param({" pad": None}, [" pad"], id="padded-unmarked"),
+    pytest.param({"t\n": None}, ["t\n"], id="newline-unmarked"),
+    pytest.param({CHANGES_MARK: CHANGES_FORM, " pad": None}, [" pad"], id="padded-marked"),
+    pytest.param({CHANGES_MARK: CHANGES_FORM, "t\n": None}, ["t\n"], id="newline-marked"),
+]
+
+
+@pytest.mark.parametrize("server", ["analysis", CUSTOM])
+@pytest.mark.parametrize("path", SAVE_PATHS)
+@pytest.mark.parametrize(("tool_facts", "names"), NULL_SPELLINGS)
+def test_a_server_map_entry_with_a_refused_name_sent_as_null_is_a_422_naming_the_entry(
+    server: str, path: str, tool_facts: dict[str, Any], names: list[str]
+) -> None:
+    status, body, db = _save(path, {SERVER_MAP: {server: _full_entry(server, tool_facts)}})
+    assert status == 422, body
+    assert body["errors"] == {f"{SERVER_MAP}.{server}.tool_facts": refused_names_message(names)}
+    db.add.assert_not_called()
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.parametrize("server", ["analysis", CUSTOM])
+@pytest.mark.parametrize("path", SAVE_PATHS)
+@pytest.mark.parametrize("marked", [False, True])
+def test_a_server_map_entry_with_its_renamed_spelling_sent_as_null_is_a_422_naming_the_entry(
+    server: str, path: str, marked: bool
+) -> None:
+    tool_facts: dict[str, Any] = {f"{server}__x": None}
+    if marked:
+        tool_facts = {CHANGES_MARK: CHANGES_FORM, **tool_facts}
+    status, body, db = _save(path, {SERVER_MAP: {server: _full_entry(server, tool_facts)}})
+    assert status == 422, body
+    assert list(body["errors"]) == [f"{SERVER_MAP}.{server}.tool_facts"]
+    assert f"{server}__x" in body["errors"][f"{SERVER_MAP}.{server}.tool_facts"]
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.parametrize("path", SAVE_PATHS)
+def test_an_empty_name_sent_as_null_never_removes_what_a_server_ships(path: str) -> None:
+    status, body, db = _save(path, {SERVER_MAP: {"analysis": _full_entry("analysis", {"": None})}})
+    assert status == 422, body
+    db.add.assert_not_called()
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.parametrize("path", SAVE_PATHS)
+@pytest.mark.parametrize(("value", "names"), NULL_SPELLINGS)
+def test_a_provider_leaf_with_a_refused_name_sent_as_null_is_a_422_naming_the_leaf(
+    path: str, value: dict[str, Any], names: list[str]
+) -> None:
+    status, body, db = _save(path, {LEAF: value})
+    _refused_on_the_leaf(status, body, names, db)
+
+
+def test_a_non_null_empty_name_on_a_server_map_is_refused_in_the_leaf_paths_words() -> None:
+    status, body, _ = _save(
+        "patch", {SERVER_MAP: {"analysis": _full_entry("analysis", {"": DECLARED})}}
+    )
+    assert status == 422, body
+    assert body["errors"] == {
+        f"{SERVER_MAP}.analysis.tool_facts": refused_names_message([CHANGES_MARK])
+    }
+
+
+@pytest.mark.parametrize("server", ["analysis", CUSTOM])
+def test_a_refused_name_stored_as_null_and_sent_back_as_stored_never_blocks_a_save(
+    server: str,
+) -> None:
+    from app.models import RuntimeSetting
+
+    stored_facts = {CHANGES_MARK: CHANGES_FORM, " pad": None}
+    stored = {server: _full_entry(server, stored_facts)}
+    rows = [RuntimeSetting(key=SERVER_MAP, value=stored, is_secret=False)]
+    sent = {server: {**_full_entry(server, stored_facts), "call_timeout_seconds": 77}}
+    status, body, db = _save("patch", {SERVER_MAP: sent}, rows)
+    assert status == 200, body
+    db.commit.assert_awaited_once()

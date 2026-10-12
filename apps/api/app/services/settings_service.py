@@ -128,8 +128,7 @@ def changed_declaration_refusals(
     from maljan.core.tool_declarations import (
         changed_declaration_errors,
         merge_tool_facts,
-        refused_names_message,
-        refused_tool_names,
+        sent_names_refusal,
         stored_in_force,
     )
 
@@ -144,9 +143,9 @@ def changed_declaration_refusals(
             continue
         held = current.get(key)
         shipped, edited, kept = _leaf_changes(key, value, held)
-        names = [name for name in refused_tool_names(value) if name not in kept]
-        if names:
-            errors[key] = refused_names_message(names)
+        refusal = sent_names_refusal(value, kept)
+        if refusal:
+            errors[key] = refusal
             continue
         before = stored_in_force(shipped, held)[0] if isinstance(held, dict) else None
         for where, message in changed_declaration_errors(
@@ -242,7 +241,9 @@ def lenient_imported_declarations(
         lenient_declarations,
         loggable_names,
         merge_tool_facts,
+        own_prefixed_names,
         reads_no_kind,
+        refused_tool_names,
         tool_facts_changes,
         unreadable_map,
         whole_as_changes,
@@ -259,11 +260,21 @@ def lenient_imported_declarations(
         held = warnings.get(key)
         warnings[key] = f"{held}; then {text}" if held else text
 
-    def _clean(declared: Any, prefix: str, shipped: dict[str, Any]) -> Any:
+    def _clean(declared: Any, prefix: str, shipped: dict[str, Any], server: str = "") -> Any:
         if not isinstance(declared, dict) or unreadable_map(declared):
             # Passed on as written (reading it would drop the mark's key), for
             # the save to refuse with the key named.
             return declared
+        # A name no tool can have is carried through as written, whatever its
+        # value (``null`` included, which reading the map would drop), for the
+        # save to refuse with the key named, or keep where it is sent back
+        # exactly as stored.
+        carried = {
+            tool: declared[tool]
+            for tool in [*refused_tool_names(declared), *own_prefixed_names(declared, server)]
+            if tool in declared
+        }
+        declared = {tool: held for tool, held in declared.items() if tool not in carried}
         # A map marked as changes is read as changes; one without the mark
         # (every map of a ``/1`` document, or of a ``/2`` one exported from a
         # store a release before the mark wrote) is read whole, as it was
@@ -295,7 +306,7 @@ def lenient_imported_declarations(
             for tool, facts in in_force.items()
             if tool not in named or tool in kept
         }
-        return with_mark(tool_facts_changes(held_in_force, shipped))
+        return {**with_mark(tool_facts_changes(held_in_force, shipped)), **carried}
 
     out = dict(values)
     for key, value in values.items():
@@ -309,6 +320,7 @@ def lenient_imported_declarations(
                             entry["tool_facts"],
                             f"{key}.{name}.tool_facts",
                             shipped_tool_facts(f"{SERVER_MAP_PATH}.{name}"),
+                            str(name),
                         ),
                     }
                 servers[name] = entry

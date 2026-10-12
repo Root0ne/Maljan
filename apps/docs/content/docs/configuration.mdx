@@ -3626,8 +3626,11 @@ hand edit of the database makes one) is read as absent: what ships is in
 force, one warning in the log says so, the settings schema lists the `""` key
 under `tool_facts_conflicts`, and the settings serve the block as no change,
 so saving it writes a marked map anew. A save or an import that names a tool
-by an empty or padded name, or sends a value that is not a map, is refused
-with the key named.
+by an empty or padded name (also with the value `null`), names a server's tool
+as that server's renamed tool, or sends a value that is not a map, is refused
+with the key named. Declaration data nested at any depth is read without
+failing: the settings build, and a save of such data is refused with the key
+named.
 
 Settings saved by an earlier release stored a built-in's tool declarations
 whole. The database migration (revision `20261012000000`) rewrites each such

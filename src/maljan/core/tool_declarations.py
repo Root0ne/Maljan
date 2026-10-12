@@ -1178,14 +1178,39 @@ def check_tool_facts_keys(value: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _copy(value: Any) -> Any:
+def _copy_node(value: Any, pending: list[tuple[Any, Any]]) -> Any:
+    """One node of :func:`_copy`: a leaf as it is, a container empty and queued to fill."""
     if isinstance(value, BaseModel):
         return value.model_copy(deep=True)
     if isinstance(value, dict):
-        return {k: _copy(v) for k, v in value.items()}
+        out: dict[Any, Any] = {}
+        pending.append((value, out))
+        return out
     if isinstance(value, list):
-        return [_copy(v) for v in value]
+        items: list[Any] = []
+        pending.append((value, items))
+        return items
     return value
+
+
+def _copy(value: Any) -> Any:
+    """A copy of ``value``'s dicts and lists, at any depth.
+
+    Walked with an explicit stack rather than by recursion, so stored
+    declaration data nested however deep is copied, never refused with a
+    ``RecursionError``. Time linear in the value.
+    """
+    pending: list[tuple[Any, Any]] = []
+    root = _copy_node(value, pending)
+    while pending:
+        source, target = pending.pop()
+        if isinstance(source, dict):
+            for key, item in source.items():
+                target[key] = _copy_node(item, pending)
+        else:
+            for item in source:
+                target.append(_copy_node(item, pending))
+    return root
 
 
 def fill_declaration(stored: MCPServerConfig, default: MCPServerConfig) -> MCPServerConfig:
@@ -1281,6 +1306,51 @@ def refused_names_message(names: Iterable[str]) -> str:
     return f"tool_facts key {shown} must be a tool's name, not empty or padded"
 
 
+def own_prefixed_names(sent: Mapping[str, Any], server: str) -> list[str]:
+    """The names a sent map of tool server ``server`` spells as its renamed tools, in order.
+
+    The mark of a marked map (:func:`holds_changes`) is no tool and is
+    skipped; ``server`` empty (a block that is no tool server) names none.
+    Time linear in the map.
+    """
+    if not server:
+        return []
+    marked = holds_changes(sent)
+    out: list[str] = []
+    for tool in sent:
+        if not isinstance(tool, str) or (marked and tool == CHANGES_MARK):
+            continue
+        try:
+            check_own_prefix(server, [tool])
+        except ValueError:
+            out.append(tool)
+    return out
+
+
+def sent_names_refusal(sent: Mapping[str, Any], kept: Iterable[str] = (), server: str = "") -> str:
+    """The refusal of the tool names a sent map holds that no tool can have, or ``""``.
+
+    Every key of the map as sent is read, whatever its value (``null``
+    included), before the map is merged over what ships: a name no tool can
+    have (:func:`refused_tool_names`) and, for the map of tool server
+    ``server``, a name spelled as its renamed tool (:func:`own_prefixed_names`).
+    A name in ``kept`` is sent back with its stored change exactly as stored
+    (:func:`kept_stored_changes`), is not this save's edit, and is not
+    refused. Time linear in the map.
+    """
+    held = set(kept)
+    names = [name for name in refused_tool_names(sent) if name not in held]
+    if names:
+        return refused_names_message(names)
+    prefixed = [name for name in own_prefixed_names(sent, server) if name not in held]
+    if prefixed:
+        try:
+            check_own_prefix(server, prefixed)
+        except ValueError as exc:
+            return str(exc)
+    return ""
+
+
 def whole_as_changes(whole: Mapping[str, Any], shipped: Mapping[str, Any]) -> dict[str, Any]:
     """A map stored whole, as the changes over ``shipped`` that put the same in force.
 
@@ -1326,6 +1396,11 @@ def _refused_tool(tool: Any, held: Any, server: str = "") -> bool:
     one: a name spelled as that server's renamed tool is refused there
     (:func:`check_own_prefix`).
     """
+    return _refused_name(tool, server) or _refused_leniently(held)
+
+
+def _refused_name(tool: Any, server: str = "") -> bool:
+    """Whether no tool (of tool server ``server``, if given) can be named ``tool``."""
     if not isinstance(tool, str):
         return True
     try:
@@ -1334,7 +1409,7 @@ def _refused_tool(tool: Any, held: Any, server: str = "") -> bool:
             check_own_prefix(server, [tool])
     except ValueError:
         return True
-    return _refused_leniently(held)
+    return False
 
 
 def _warn_refused_changes(where: str, tools: Iterable[str]) -> None:
@@ -1432,12 +1507,18 @@ def kept_stored_changes(
     if unreadable_map(stored):
         return {}
     refused = stored_in_force(shipped, stored, server=server)[1]
-    if not refused:
-        return {}
     held = stored_changes(stored, shipped)
+    # A refused name stored as ``null`` removes nothing and is never in force,
+    # so it is not among the refused changes above; sent back as stored, it
+    # is not this save's edit either, and is kept as stored like them.
+    removed = [
+        tool
+        for tool, change in held.items()
+        if change is None and tool not in shipped and _refused_name(tool, server)
+    ]
     return {
         tool: _copy(held[tool])
-        for tool in refused
+        for tool in [*refused, *removed]
         if tool in incoming and tool in held and _same(incoming[tool], held[tool])
     }
 

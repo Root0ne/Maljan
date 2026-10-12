@@ -43,6 +43,7 @@ from maljan.core.tool_declarations import (
     holds_changes,
     kept_stored_changes,
     merge_tool_facts,
+    sent_names_refusal,
     stored_changes,
     strip_declaration_defaults,
     with_mark,
@@ -158,6 +159,13 @@ def validate_server_map(
             # as stored and left out of every check (``kept_stored_changes``).
             incoming = stored_changes(facts_in, shipped)
             kept = kept_stored_changes(incoming, stored_facts, shipped, server=key)
+            # Every name of the map as sent is checked before it is merged,
+            # which drops a ``null`` entry: a refused name sent as ``null`` is
+            # refused here, naming the entry, as on a provider leaf.
+            refusal = sent_names_refusal(facts_in, kept, server=key)
+            if refusal:
+                errors[f"{key}.tool_facts"] = refusal
+                continue
             in_force = merge_tool_facts(
                 shipped, {tool: change for tool, change in incoming.items() if tool not in kept}
             )
