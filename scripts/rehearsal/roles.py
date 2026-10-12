@@ -308,6 +308,7 @@ class Brain:
         loop_steps: int | None = None,
         slow_seconds: float | None = None,
         deadline_in: str | None = None,
+        fill_from_results: bool = False,
     ) -> None:
         if scenario not in SCENARIOS:
             raise ValueError(f"unknown scenario {scenario!r}; one of {sorted(SCENARIOS)}")
@@ -317,6 +318,9 @@ class Brain:
             )
         self.scenario = scenario
         self.deadline_in = deadline_in or ""
+        # Required arguments with no rule of their own are filled from the
+        # earlier tool answers of the same request (``_fillable``).
+        self.fill_from_results = fill_from_results
         self.slow_roles = STAGE_ROLES[deadline_in] if deadline_in else frozenset()
         self.loop_steps = (
             loop_steps if loop_steps is not None else (12 if scenario == "long_loop" else 2)
@@ -493,7 +497,7 @@ class Brain:
         wants_tools = bool(request.tools) and calls_made < self.loop_steps and not tools_withheld
         nudged = markers().no_tool_nudge in last.text and not tools_withheld
         if wants_tools or (request.tools and nudged):
-            call = _next_call(request, facts, calls_made)
+            call = _next_call(request, facts, calls_made, self.fill_from_results)
             if call is not None:
                 return wire.Reply(
                     thinking=f"Step {calls_made + 1}: reading {call.name}.",
@@ -910,8 +914,95 @@ def _reports_part(request: wire.Request) -> str:
     return request.last_user_text
 
 
-def _fillable(tool: dict[str, Any], facts: _Facts) -> dict[str, Any] | None:
-    """Arguments for ``tool`` this run can give it, or ``None`` when one cannot be given."""
+# An argument naming a place in the code: an address, a location or a function.
+_PLACE_WORDS = re.compile(r"addr|location|func", re.IGNORECASE)
+# A place as a tool's answer spells it: a hex address, or a name a disassembler
+# gives a function or label it found no name for.
+_PLACE_VALUE = re.compile(r"\b0x[0-9A-Fa-f]{3,16}\b|\b(?:FUN_|fcn\.|sub_)[0-9A-Fa-f]{4,16}\b")
+# The evidence id the product writes before a tool's answer, and the run-state
+# block it may append after one; neither is the tool's own text.
+_RESULT_HEAD = re.compile(r"^\s*\[ev_\d{4,}\]\s*")
+_RESULT_TAIL = "\n\n=== "
+
+
+def _answer_text(result: str) -> str:
+    """A tool answer as the tool wrote it: the product's id and run state taken off."""
+    return _RESULT_HEAD.sub("", result, count=1).split(_RESULT_TAIL, 1)[0]
+
+
+def _answer_json(text: str) -> Any:
+    """The JSON value a tool answer starts with, or ``None``."""
+    start = min((i for i in (text.find("{"), text.find("[")) if i >= 0), default=-1)
+    if start < 0:
+        return None
+    try:
+        value, _end = json.JSONDecoder().raw_decode(text[start:])
+    except ValueError:
+        return None
+    return value
+
+
+def _value_under(value: Any, keys: tuple[str, ...]) -> str:
+    """The first non-empty scalar held under one of ``keys`` in ``value``, shallowest first."""
+    pending = [value]
+    while pending:
+        item = pending.pop(0)
+        if isinstance(item, dict):
+            for key in keys:
+                found = item.get(key)
+                if isinstance(found, (str, int, float)) and not isinstance(found, bool):
+                    if str(found).strip():
+                        return str(found)
+            pending.extend(item.values())
+        elif isinstance(item, list):
+            pending.extend(item)
+    return ""
+
+
+def _from_answers(name: str, prop: dict[str, Any], answers: list[str]) -> str:
+    """A value for a required string argument, read from the earlier answers, or empty.
+
+    An argument whose name says it is a place in the code takes the first such
+    place of the latest answer that holds one; any other takes the value under
+    the same key in the latest answer that holds it, else under its last word;
+    an argument only its description calls a place takes a place last. Read
+    from the request's own tool answers, newest first, never from a tool's name.
+    """
+    lowered = name.lower()
+    words = tuple(dict.fromkeys((name, lowered, re.split(r"[_\W]+", lowered)[-1])))
+
+    def place() -> str:
+        for text in answers:
+            found = _PLACE_VALUE.search(text)
+            if found:
+                return found.group(0)
+        return ""
+
+    if _PLACE_WORDS.search(lowered):
+        return place()
+    for word in words:
+        for text in answers:
+            held = _value_under(_answer_json(text), (word,))
+            if held:
+                return held
+            line = re.search(rf'(?im)^\s*"?{re.escape(word)}"?\s*[:=]\s*"?([^\s",]+)', text)
+            if line:
+                return line.group(1)
+    if _PLACE_WORDS.search(str(prop.get("description") or "")):
+        return place()
+    return ""
+
+
+def _fillable(
+    tool: dict[str, Any], facts: _Facts, answers: list[str] | None = None
+) -> dict[str, Any] | None:
+    """Arguments for ``tool`` this run can give it, or ``None`` when one cannot be given.
+
+    ``answers`` (newest first) are the earlier tool answers of the request: a
+    required argument no rule below covers is read from them
+    (``_from_answers``) when they are given, and makes the tool uncallable
+    when they are not or hold nothing for it.
+    """
     schema = tool.get("schema") or {}
     properties = schema.get("properties") or {}
     required = list(schema.get("required") or [])
@@ -939,7 +1030,9 @@ def _fillable(tool: dict[str, Any], facts: _Facts) -> dict[str, Any] | None:
         elif kind == "integer":
             value = 0
         else:
-            return None
+            value = _from_answers(name, properties.get(name) or {}, answers) if answers else ""
+            if not value:
+                return None
         args[name] = [value] if kind == "array" else value
     return args
 
@@ -955,15 +1048,22 @@ def _varied(args: dict[str, Any], tool: dict[str, Any], step: int) -> dict[str, 
     return args
 
 
-def _next_call(request: wire.Request, facts: _Facts, step: int) -> wire.ToolCall | None:
+def _next_call(
+    request: wire.Request, facts: _Facts, step: int, fill_from_results: bool = False
+) -> wire.ToolCall | None:
     tools = {str(tool.get("name") or ""): tool for tool in request.tools}
+    answers = (
+        [_answer_text(r.text) for r in reversed(request.tool_results)]
+        if fill_from_results
+        else None
+    )
     order = [name for name in _TOOL_PREFERENCE if name in tools]
     order += sorted(name for name in tools if name not in order)
     candidates: list[wire.ToolCall] = []
     for name in order:
         if _NEVER_CALL.match(name):
             continue
-        args = _fillable(tools[name], facts)
+        args = _fillable(tools[name], facts, answers)
         if args is not None:
             candidates.append(wire.ToolCall(name=name, args=args))
     if not candidates:
