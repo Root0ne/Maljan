@@ -8,8 +8,9 @@ minted from it. Beside it, the upload answers with a *proposal*: a format
 declaration (``core.report_formats.ReportFormat``) that would read it through
 the JSONPath mapping reader, built from the report's shape alone:
 
-* ``detect``: one group testing each top-level block the report holds, by its
-  type, so the declaration recognises reports shaped as this one;
+* ``detect``: one group testing, by type, the blocks the proposed paths start
+  in (each path's first two named blocks), so the declaration recognises
+  reports shaped as this one where it reads them;
 * ``task_id_paths`` and ``target_sha256_paths``: a near-top field whose name
   says task (or analysis, job, submission) id, and a 64-hex value under a name
   holding ``sha256``;
@@ -25,10 +26,19 @@ the proposal, the operator accepts or edits it, and only then is it saved as an
 ordinary declaration; until then the report stays unread. No run reads a
 proposal.
 
+Each top-level block a proposed path starts in is also kept whole, as the
+raw ``report.<block>`` channel the unread read gave it, so nothing the
+analyst read unread is lost once the declaration is accepted.
+
 The report is untrusted: it is walked once with a stack (no recursion), each
 node visited once, to :data:`READ_DEPTH` path segments below the top; a key
 that cannot be written plainly in a path is never put into one; no report text
-is copied into the proposal except the key names its paths are made of.
+is copied into the proposal except the key names its paths are made of. The
+two are the proposer's reading horizons, not limits on what a run reads (an
+accepted declaration's paths are read at any depth): where either leaves
+something unread, the proposal's ``notes`` say how much. The proposal's size
+follows the declaration's own fields, never the report's block count: blocks
+no path reads are counted in one evidence entry, never listed.
 """
 
 from __future__ import annotations
@@ -40,16 +50,25 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from maljan.core.report_shapes import RowShape, protocol_spelling, row_shape
+from maljan.core.report_shapes import (
+    DNS_TYPE_KEYS,
+    RowShape,
+    is_record_type,
+    protocol_spelling,
+    row_shape,
+)
 
 PROPOSAL_VERSION = 1
 
 HIGH, MEDIUM, LOW = "high", "medium", "low"
 
-# How deep below the report's top a proposal reads, in path segments: a
-# sandbox puts its processes and connections within a few levels, and a fixed
-# horizon keeps the walk linear however deeply a hostile report nests.
+# How deep below the report's top a proposal looks for lists, in path segments:
+# a sandbox puts its processes and connections within a few levels. A reading
+# horizon of the proposer, announced in the proposal's notes where it leaves
+# something unread; an accepted declaration's paths are read at any depth.
 READ_DEPTH = 16
+# The longest key a proposal writes into a path, likewise a reading horizon.
+KEY_HORIZON = 128
 
 # How deep the task id and the target hash are looked for: near the top, outside
 # any list.
@@ -57,7 +76,7 @@ _ID_DEPTH = 5
 
 # A key a proposal writes into a path: no quote, backslash, slash, star or
 # control character, so it reads the same in a JSONPath and a field path.
-_SAFE_KEY = re.compile(r"^[A-Za-z0-9_@$][A-Za-z0-9_@$.\- ]{0,127}$")
+_SAFE_KEY = re.compile(r"^[A-Za-z0-9_@$][A-Za-z0-9_@$.\- ]*$")
 _SHA256 = re.compile(r"^[0-9a-fA-F]{64}$")
 _ID_KEYS = frozenset(
     {"task_id", "taskid", "analysis_id", "analysisid", "job_id", "jobid", "submission_id"}
@@ -97,14 +116,29 @@ def _where(segments: tuple[str, ...]) -> str:
     return out
 
 
+def _plain_key(key: Any) -> bool:
+    return isinstance(key, str) and len(key) <= KEY_HORIZON and bool(_SAFE_KEY.match(key))
+
+
 class _Walk:
     """What one pass over the report finds: the lists of objects by path, and near-top scalars."""
 
     def __init__(self) -> None:
         # Each list of objects, by the path segments of the list: its rows' keys,
-        # its row count and, per protocol key seen, the spellings of tcp and udp.
+        # its row count, per protocol key seen the spellings of tcp and udp, and
+        # per question-type key whether every value is a DNS record type.
         self.lists: dict[tuple[str, ...], dict[str, Any]] = {}
         self.scalars: list[tuple[tuple[str, ...], Any]] = []
+        # What the reading horizons left unread: containers below READ_DEPTH,
+        # and keys no path can be written with (too long, or not plain).
+        self.too_deep = 0
+        self.unwritable_keys = 0
+
+    def _key(self, key: Any) -> bool:
+        if _plain_key(key):
+            return True
+        self.unwritable_keys += 1
+        return False
 
     def run(self, payload: Mapping[str, Any]) -> None:
         stack: list[tuple[Any, tuple[str, ...]]] = [(payload, ())]
@@ -116,10 +150,11 @@ class _Walk:
                     continue
                 seen.add(id(node))
             if len(path) >= READ_DEPTH:
+                self.too_deep += 1
                 continue
             if isinstance(node, dict):
                 for key, value in node.items():
-                    if not isinstance(key, str) or not _SAFE_KEY.match(key):
+                    if not self._key(key):
                         continue
                     at = (*path, key)
                     if isinstance(value, dict | list):
@@ -129,49 +164,73 @@ class _Walk:
             elif isinstance(node, list):
                 rows = [item for item in node if isinstance(item, dict)]
                 if rows:
-                    held = self.lists.setdefault(path, {"keys": {}, "rows": 0, "protocols": {}})
+                    held = self.lists.setdefault(
+                        path, {"keys": {}, "rows": 0, "protocols": {}, "record_types": {}}
+                    )
                     held["rows"] += len(rows)
                     keys: dict[str, None] = held["keys"]
+                    record_types: dict[str, bool] = held["record_types"]
                     for row in rows:
                         for key, value in row.items():
-                            if isinstance(key, str) and _SAFE_KEY.match(key):
-                                keys.setdefault(key, None)
-                                spelled = protocol_spelling(value)
-                                if spelled is not None:
-                                    held["protocols"].setdefault(key, {}).setdefault(*spelled)
+                            if not self._key(key):
+                                continue
+                            keys.setdefault(key, None)
+                            spelled = protocol_spelling(value)
+                            if spelled is not None:
+                                held["protocols"].setdefault(key, {}).setdefault(*spelled)
+                            if key.lower() in DNS_TYPE_KEYS:
+                                held_type = record_types.get(key, True)
+                                record_types[key] = held_type and is_record_type(value)
                 at = (*path, "*")
                 stack.extend((item, at) for item in node if isinstance(item, dict | list))
 
+    def notes(self) -> list[str]:
+        """What the reading horizons left unread, in words; empty where they left nothing."""
+        out: list[str] = []
+        if self.too_deep:
+            out.append(
+                f"{self.too_deep} containers nested more than {READ_DEPTH} path segments "
+                "below the top were not looked into for lists (the proposer's reading horizon; "
+                "a declaration's paths are read at any depth)"
+            )
+        if self.unwritable_keys:
+            out.append(
+                f"{self.unwritable_keys} keys longer than {KEY_HORIZON} characters or holding "
+                "a quote, slash, star or control character were not put into a path "
+                "(the proposer's reading horizon; a declaration may name them)"
+            )
+        return out
 
-def _containers(node: Mapping[str, Any], prefix: str) -> list[tuple[str, str]]:
-    return [
-        (f"{prefix}/{key}", _type_name(value))
-        for key, value in node.items()
-        if isinstance(key, str) and _SAFE_KEY.match(key) and isinstance(value, dict | list)
-    ]
+
+def _named_prefix(expression: str) -> tuple[str, ...]:
+    """The named blocks a proposed JSONPath starts with, before its first list or filter."""
+    return tuple(re.findall(r"\['([^']*)'\]", expression.split("[*]", 1)[0].split("[?", 1)[0]))
 
 
-def _detect(payload: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
-    """One detect group: each plainly named top-level block, by its type.
+def _detect(
+    payload: Mapping[str, Any], starts: list[tuple[str, ...]]
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """One detect group: by type, the first two named blocks of each place the proposal reads.
 
-    A report of one block is recognised by that block's own blocks too, so the
-    test is no looser than the report's shape. With no block at all, its
-    plainly named top-level values by type.
+    ``starts`` are the named segments each proposed path (and the task id and
+    target hash) starts with. The group is as large as the declaration's own
+    fields, never the report's block count.
     """
-    blocks = _containers(payload, "")
-    if len(blocks) == 1:
-        only = payload[blocks[0][0][1:]]
-        if isinstance(only, dict):
-            blocks += _containers(only, blocks[0][0])
-    if not blocks:
-        blocks = [
-            (f"/{key}", _type_name(value))
-            for key, value in payload.items()
-            if isinstance(key, str) and _SAFE_KEY.match(key) and _type_name(value)
-        ]
-    ordered = sorted(blocks)
-    tests = [{"path": path, "types": [kind]} for path, kind in ordered]
-    return tests, [f"report{path.replace('/', '.')} ({kind})" for path, kind in ordered]
+    tests: dict[str, str] = {}
+    for start in starts:
+        node: Any = payload
+        for depth, segment in enumerate(start[:2]):
+            if not isinstance(node, Mapping) or segment not in node:
+                break
+            node = node[segment]
+            if not isinstance(node, dict | list):
+                break
+            tests.setdefault("/" + "/".join(start[: depth + 1]), _type_name(node))
+    ordered = sorted(tests.items())
+    return (
+        [{"path": path, "types": [kind]} for path, kind in ordered],
+        [f"report{path.replace('/', '.')} ({kind})" for path, kind in ordered],
+    )
 
 
 def _words(name: str) -> set[str]:
@@ -237,8 +296,9 @@ def _channels(walk: _Walk) -> tuple[dict[str, dict[str, Any]], dict[str, dict[st
     renames: dict[str, dict[str, Any]] = {}
     for path in sorted(walk.lists, key=lambda p: (len(p), p)):
         held = walk.lists[path]
-        name = next((s for s in reversed(path) if s != "*"), "")
-        shape = row_shape(name, held["keys"])
+        names = [s for s in reversed(path) if s != "*"][:2]
+        record_types = any(held["record_types"].values())
+        shape = row_shape(names, held["keys"], record_types=record_types)
         if shape is None:
             continue
         where = _where((*path, "*"))
@@ -277,39 +337,44 @@ def _channel_paths(
 
 
 def _kept_blocks(
-    payload: Mapping[str, Any], walk: _Walk, paths: list[str], mapping: Mapping[str, Any]
+    payload: Mapping[str, Any], starts: list[tuple[str, ...]]
 ) -> dict[str, dict[str, Any]]:
-    """An operator channel for each block a mapped path's top-level block holds that no path reads.
+    """The raw ``report.<block>`` channel for each top-level block a proposed path starts in.
 
     The mapping reader keeps a top-level block no path starts in whole, as a
     raw ``report.<block>`` channel; a block a path starts in is read only
-    through its paths. So each direct child of such a block that no path
-    reaches is proposed as a channel of its own, kept for the analyst to read
-    raw: no fact is drawn from it.
+    through its paths. So each such block is proposed kept whole as the same
+    channel the unread read gave it, for the analyst to read raw beside the
+    facts read from it: nothing the unread read showed is lost, and no fact is
+    drawn from the channel. One entry per block, whatever the block holds; its
+    evidence counts the blocks it holds that no proposed path starts in.
     """
-    starts = [*paths, str(mapping.get("target_sha256") or "")]
-    named: dict[str, list[str]] = {}
-    for path in starts:
-        found = re.match(r"^\$\['([^']*)'\](?:\['([^']*)'\])?", path)
-        if found:
-            named.setdefault(found.group(1), []).append(found.group(2) or "")
+    named: dict[str, set[str]] = {}
+    for start in starts:
+        if start:
+            named.setdefault(start[0], set()).update(start[1:2])
     out: dict[str, dict[str, Any]] = {}
     for block, children in sorted(named.items()):
         held = payload.get(block)
-        if not isinstance(held, dict) or "" in children:
+        if not isinstance(held, dict) or not held:
             continue
-        for key, value in held.items():
-            if key in children or not isinstance(key, str) or not _SAFE_KEY.match(key):
-                continue
-            if value in (None, "", [], {}):
-                continue
-            segments = (block, key, "*") if isinstance(value, list) else (block, key)
-            out[f"{block}.{key}"] = _field(
-                _jsonpath(segments),
-                [f"{_where((block, key))} (read by no proposed path)"],
-                MEDIUM,
-            )
+        unread = sum(
+            1 for key, value in held.items() if key not in children and value not in _EMPTY
+        )
+        if not unread:
+            continue
+        out[f"report.{block}"] = _field(
+            _jsonpath((block,)),
+            [
+                f"report.{block} kept whole, as the unread read kept it: it holds {unread} "
+                "blocks no proposed path reads"
+            ],
+            MEDIUM,
+        )
     return out
+
+
+_EMPTY: tuple[Any, ...] = (None, "", [], {})
 
 
 def _name_for(payload: Mapping[str, Any]) -> str:
@@ -330,9 +395,6 @@ def propose_format(payload: Mapping[str, Any]) -> dict[str, Any]:
     fields: dict[str, dict[str, Any]] = {}
     walk = _Walk()
     walk.run(payload)
-    tests, detect_evidence = _detect(payload)
-    if tests:
-        fields["detect"] = _field([tests], detect_evidence, MEDIUM)
     fields["reader"] = _field(
         "generic", ["no declared format and no registered reader recognises the report"], HIGH
     )
@@ -351,7 +413,11 @@ def propose_format(payload: Mapping[str, Any]) -> dict[str, Any]:
     for channel, proposed in channels.items():
         fields[f"mapping.{channel}"] = proposed
         mapping[channel] = proposed["value"]
-    kept = _kept_blocks(payload, walk, [p["value"] for p in channels.values()], mapping)
+    starts = [_named_prefix(str(p["value"])) for p in channels.values()]
+    starts += [_named_prefix(mapping["target_sha256"])] if mapping["target_sha256"] else []
+    if task is not None:
+        starts += [tuple(task["value"][0].strip("/").split("/"))]
+    kept = _kept_blocks(payload, starts)
     if kept:
         mapping["channels"] = {name: proposed["value"] for name, proposed in kept.items()}
         for name, proposed in kept.items():
@@ -361,8 +427,22 @@ def propose_format(payload: Mapping[str, Any]) -> dict[str, Any]:
         for key, proposed in renames.items():
             fields[f"mapping.field_names.{key}"] = proposed
     out: dict[str, Any] = {"v": PROPOSAL_VERSION, "fields": fields}
+    notes = walk.notes()
+    if notes:
+        out["notes"] = notes
+    read = {p for p in fields if p.startswith("mapping.") and p.count(".") == 1}
+    read -= {"mapping.target_sha256"}
+    tests, detect_evidence = _detect(payload, starts)
+    if tests:
+        fields["detect"] = _field([tests], detect_evidence, MEDIUM)
+    if not read:
+        out["failed"] = (
+            "no list in the report reads as processes, connections, DNS questions or dropped "
+            "files, so a declaration would read nothing the unread read does not"
+        )
+        return out
     if not tests:
-        out["failed"] = "no top-level block is named plainly enough to recognise the report by"
+        out["failed"] = "no block a proposed path starts in can be tested to recognise the report"
         return out
     declaration: dict[str, Any] = {
         "name": _name_for(payload),

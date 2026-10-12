@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 
 from maljan.core.report_formats import ReportFormat
-from maljan.core.report_proposals import READ_DEPTH, propose_format
+from maljan.core.report_proposals import KEY_HORIZON, READ_DEPTH, propose_format
 from maljan.core.report_shapes import row_shape
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "sandbox"
@@ -43,7 +43,8 @@ class TestTheShapeTest:
         ],
     )
     def test_a_list_reads_as_its_kind_by_its_keys(self, keys: list[str], kind: str) -> None:
-        shape = row_shape("rows", keys)
+        # A digest, a name and a size read as dropped files under a name saying so.
+        shape = row_shape("dropped" if kind == "dropped_files" else "rows", keys)
         assert shape is not None
         assert shape.kind == kind
 
@@ -186,6 +187,69 @@ class TestHostileShapes:
         payload = {f"block{i}": {"procs": rows} for i in range(2_000)}
         proposal = propose_format(payload)
         assert sum(1 for key in proposal["fields"] if key == "mapping.processes") == 1
+
+
+class TestTheProposalFollowsTheDeclarationNotTheBlockCount:
+    @staticmethod
+    def _size(payload: dict[str, Any]) -> tuple[int, int]:
+        return len(json.dumps(propose_format(payload))), len(json.dumps(payload))
+
+    @staticmethod
+    def _with(blocks: dict[str, Any]) -> dict[str, Any]:
+        return {"run": {"procs": [{"pid": 1, "ppid": 0, "name": "a"}]}, **blocks}
+
+    @pytest.mark.parametrize(
+        "block",
+        [{}, [], [{"a": 1}], {"a": 1}],
+        ids=["empty-object", "empty-list", "list-of-objects", "object"],
+    )
+    def test_many_blocks_never_make_the_proposal_larger(self, block: Any) -> None:
+        small, _ = self._size(self._with({f"k{i}": block for i in range(10_000)}))
+        large, body = self._size(self._with({f"k{i}": block for i in range(100_000)}))
+        assert large == small
+        assert large < body
+
+    def test_a_hundred_thousand_empty_blocks_alone_give_a_small_proposal(self) -> None:
+        payload = {f"k{i}": {} for i in range(100_000)}
+        proposal = propose_format(payload)
+        assert "declaration" not in proposal
+        assert len(json.dumps(proposal)) < 2_000 < len(json.dumps(payload))
+
+    def test_a_read_block_s_many_other_blocks_are_counted_in_one_entry(self) -> None:
+        run: dict[str, Any] = {"procs": [{"pid": 1, "ppid": 0, "name": "a"}]}
+        run |= {f"k{i}": [i] for i in range(100_000)}
+        payload = {"run": run}
+        proposal = propose_format(payload)
+        kept = [key for key in proposal["fields"] if key.startswith("mapping.channels.")]
+        assert kept == ["mapping.channels.report.run"]
+        assert "100000 blocks" in proposal["fields"][kept[0]]["evidence"][0]
+        assert proposal["declaration"]["mapping"]["channels"] == {"report.run": "$['run']"}
+        assert len(json.dumps(proposal)) < 5_000
+
+    def test_detect_tests_only_the_blocks_the_proposal_reads(self) -> None:
+        payload = self._with({f"k{i}": {"x": 1} for i in range(1_000)})
+        detect = propose_format(payload)["declaration"]["detect"]
+        assert detect == [
+            [{"path": "/run", "types": ["object"]}, {"path": "/run/procs", "types": ["array"]}]
+        ]
+
+
+class TestTheReadingHorizonsSayWhatTheyLeft:
+    def test_a_list_below_the_horizon_is_announced(self) -> None:
+        proposal = propose_format(
+            {"run": {"procs": [{"pid": 1, "ppid": 0, "name": "a"}]}, "deep": _nested(READ_DEPTH)}
+        )
+        assert any(f"{READ_DEPTH} path segments" in note for note in proposal["notes"])
+
+    def test_a_long_key_is_announced(self) -> None:
+        proposal = propose_format(
+            {"run": {"procs": [{"pid": 1, "ppid": 0, "name": "a"}]}, "k" * (KEY_HORIZON + 1): [1]}
+        )
+        assert any(f"{KEY_HORIZON} characters" in note for note in proposal["notes"])
+
+    def test_nothing_cut_says_nothing(self) -> None:
+        proposal = propose_format({"run": {"procs": [{"pid": 1, "ppid": 0, "name": "a"}]}})
+        assert "notes" not in proposal
 
 
 def _seconds(make: Callable[[int], Any], n: int) -> float:

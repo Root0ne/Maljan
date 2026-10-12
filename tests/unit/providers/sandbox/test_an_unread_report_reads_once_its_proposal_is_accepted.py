@@ -44,7 +44,7 @@ CASES: dict[str, dict[str, Any]] = {
         "udp": ("198.51.100.7", 53),
         "dns": ("relay-q1.example", "203.0.113.10"),
         "dropped": "helper.dll",
-        "kept_channel": "analysis_report.detections",
+        "kept_channel": "report.analysis_report",
         "raw_block": "report.analysis_report",
     },
     "unread_flat_report.json": {
