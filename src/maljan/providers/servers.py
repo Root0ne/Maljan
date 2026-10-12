@@ -1199,13 +1199,14 @@ def _own_words(handle: Any, tools: list[BaseTool], seen: dict[str, str] | None =
         return ""
     from maljan.agents.prompt_fragments import undeclared_server_text
     from maljan.agents.tool_pinning import DELIVERY_TOOLS
+    from maljan.core.undeclared_tools import declares_a_kind
 
     declared = getattr(getattr(handle, "config", None), "tool_facts", None) or {}
     undeclared = [
         tool
         for tool in tools
         for name in (str(getattr(tool, "name", "") or ""),)
-        if name not in DELIVERY_TOOLS and name not in declared
+        if name not in DELIVERY_TOOLS and not declares_a_kind(declared.get(name))
     ]
     if not undeclared:
         return ""

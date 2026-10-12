@@ -409,6 +409,10 @@ class ErrorPattern(BaseModel):
         return self.remediation
 
 
+# The word that names no kind, read as an empty kind (``ToolFacts.kind``).
+NO_KIND = "unclassified"
+
+
 class TechniqueField(BaseModel):
     """Where an answer names ATT&CK technique ids, and how they are written.
 
@@ -554,7 +558,7 @@ class ToolFacts(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    kind: str
+    kind: str = ""
     asserts_techniques: bool = False
     source: str = ""
     long_running: bool = False
@@ -577,6 +581,11 @@ class ToolFacts(BaseModel):
     @field_validator("kind")
     @classmethod
     def _kind_is_a_word(cls, value: str) -> str:
+        # No kind (empty, or the word ``unclassified`` a proposal once offered
+        # for it) declares the tool's other facts and leaves it read as a tool
+        # of no kind: every reading of an undeclared tool still applies to it.
+        if value in ("", NO_KIND):
+            return ""
         return _word(value, "tool kind")
 
     @field_validator("source", "reader", "category")

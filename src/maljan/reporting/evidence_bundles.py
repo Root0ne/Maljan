@@ -240,10 +240,11 @@ def cited_undeclared_output(
         return False
     from maljan.schemas.evidence import format_entry_id
 
-    try:
-        entry_id = format_entry_id(int(output.get("seq") or 0) + 1)
-    except (TypeError, ValueError):
+    seq = output.get("seq")
+    # An output that carries no call number names no entry.
+    if not isinstance(seq, int) or isinstance(seq, bool) or seq < 0:
         return False
+    entry_id = format_entry_id(seq + 1)
     row = index.get(entry_id)
     if entry_id not in cited or row is None:
         return False

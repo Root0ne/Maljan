@@ -41,10 +41,17 @@ def test_a_kind_nobody_wrote_down_is_accepted_by_its_shape() -> None:
     assert facts.kind == "pseudo_code"
 
 
-@pytest.mark.parametrize("kind", ["", "Strings", "rule-match", "1st", "a" * 65])
+@pytest.mark.parametrize("kind", ["Strings", "rule-match", "1st", "a" * 65])
 def test_a_kind_that_is_not_a_lowercase_word_is_refused(kind: str) -> None:
     with pytest.raises(ValidationError, match="vocabulary word"):
         ToolFacts(kind=kind)
+
+
+@pytest.mark.parametrize("kind", ["", "unclassified"])
+def test_a_declaration_may_name_no_kind(kind: str) -> None:
+    facts = ToolFacts(kind=kind, display_name="Sections")
+    assert facts.kind == ""
+    assert ToolFacts(display_name="Sections").kind == ""
 
 
 @pytest.mark.parametrize(

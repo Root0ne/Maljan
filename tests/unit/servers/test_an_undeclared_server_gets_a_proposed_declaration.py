@@ -117,6 +117,17 @@ _LISTER_TOOL = types.Tool(
         "properties": {"path": {"type": "string"}},
         "required": ["path"],
     },
+    annotations=types.ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+)
+# Says nothing about what it does: it may write, so it is never called.
+_UNANNOTATED_TOOL = types.Tool(
+    name="submit_url",
+    description="Sends a URL on.",
+    inputSchema={
+        "type": "object",
+        "properties": {"url": {"type": "string"}},
+        "required": ["url"],
+    },
 )
 _WRITER_TOOL = types.Tool(
     name="write_note",
@@ -159,7 +170,14 @@ def _structured(answer: dict[str, Any]) -> types.CallToolResult:
 
 def _server(tools: list[types.Tool] | None = None) -> Server:
     server: Server = Server(SERVER)
-    listed = tools or [_RULE_TOOL, _LOOKUP_TOOL, _LISTER_TOOL, _WRITER_TOOL, _CAPABILITIES_TOOL]
+    listed = tools or [
+        _RULE_TOOL,
+        _LOOKUP_TOOL,
+        _LISTER_TOOL,
+        _WRITER_TOOL,
+        _UNANNOTATED_TOOL,
+        _CAPABILITIES_TOOL,
+    ]
 
     @server.list_tools()
     async def _list() -> list[types.Tool]:
@@ -224,11 +242,13 @@ def installed() -> Iterator[Any]:
     declared_reading.forget()
 
 
-def _probe(*, call_tools: bool) -> Any:
+def _probe(*, confirmed: list[str] | None = None, **entry_over: Any) -> Any:
     from app.services.settings_probes import probe_mcp
 
-    entry = {"enabled": True, "command": "invented-server"}
-    return asyncio.run(probe_mcp({"name": SERVER, "entry": entry, "call_tools": call_tools}))
+    entry = {"enabled": True, "command": "invented-server", **entry_over}
+    return asyncio.run(
+        probe_mcp({"name": SERVER, "entry": entry, "confirmed_calls": list(confirmed or [])})
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -237,11 +257,17 @@ def _probe(*, call_tools: bool) -> Any:
 
 
 def test_the_probe_proposes_the_kinds_and_fields_with_their_evidence() -> None:
-    result = _probe(call_tools=False)
+    result = _probe()
     assert result.ok is True
     proposals = result.details["proposals"]
-    assert set(proposals["tools"]) == {"scan_rules", "query_hash", "section_list", "write_note"}
-    # Nothing is called unless the operator asks.
+    assert set(proposals["tools"]) == {
+        "scan_rules",
+        "query_hash",
+        "section_list",
+        "write_note",
+        "submit_url",
+    }
+    # Nothing is called unless the operator confirms.
     assert [name for name, _args in CALLS] == ["capabilities"]
     assert "probed" not in proposals
 
@@ -269,11 +295,12 @@ def test_the_probe_proposes_the_kinds_and_fields_with_their_evidence() -> None:
         "value": 120.0,
         "evidence": ["capabilities manifest timeout_s"],
         "confidence": "high",
-        "requires": ["kind"],
     }
     assert fields["long_running"]["evidence"] == ["capabilities manifest long_running"]
-    assert fields["places"]["requires"] == ["kind", "rows"]
-    assert fields["asserts_techniques"]["requires"] == ["kind", "techniques"]
+    # A field brings only what makes it validate; never a kind.
+    assert fields["places"]["requires"] == ["rows"]
+    assert fields["asserts_techniques"]["requires"] == ["techniques"]
+    assert "requires" not in fields["display_name"]
     # A guess about what a technique id means is the operator's to confirm.
     assert fields["asserts_techniques"]["confidence"] == "low"
     for held in fields.values():
@@ -289,19 +316,35 @@ def test_the_probe_proposes_the_kinds_and_fields_with_their_evidence() -> None:
         "total": "/stats/total",
         "link": ["/permalink"],
     }
-    assert proposals["tools"]["section_list"]["facts"]["arguments"] == {"path": "path"}
+    # Nothing names a kind for the lister: it is proposed none.
+    assert proposals["tools"]["section_list"]["facts"] == {"arguments": {"path": "path"}}
     assert "error_patterns" not in proposals["server"]
 
 
 def test_each_proposed_declaration_validates_as_a_saved_one() -> None:
-    proposals = _probe(call_tools=False).details["proposals"]
+    proposals = _probe().details["proposals"]
     tool_facts = {name: held["facts"] for name, held in proposals["tools"].items()}
     saved = MCPServerConfig.model_validate({"command": "invented-server", "tool_facts": tool_facts})
     assert set(saved.tool_facts) == set(tool_facts)
 
 
-def test_the_harmless_calls_never_name_a_sample_and_read_the_missing_file_answer() -> None:
-    result = _probe(call_tools=True)
+def test_the_probe_lists_the_calls_it_would_make_and_makes_none() -> None:
+    proposals = _probe().details["proposals"]
+    planned = {call["tool"]: call for call in proposals["planned"]}
+    # Only the tools their own server marks read-only; never the destructive
+    # writer, never the unannotated submitter.
+    assert set(planned) == {"scan_rules", "query_hash", "section_list"}
+    assert planned["query_hash"]["arguments"] == {"hash": hashlib.sha256(b"").hexdigest()}
+    assert planned["query_hash"]["remote"] is True
+    assert planned["section_list"]["remote"] is False
+    assert all(call["credential"] is False for call in planned.values())
+    assert [name for name, _args in CALLS] == ["capabilities"]
+
+
+def test_only_the_confirmed_calls_are_made_and_never_name_a_sample() -> None:
+    result = _probe(
+        confirmed=["scan_rules", "query_hash", "section_list", "write_note", "submit_url"]
+    )
     proposals = result.details["proposals"]
     assert proposals["probed"] == {
         "scan_rules": "called",
@@ -309,7 +352,7 @@ def test_the_harmless_calls_never_name_a_sample_and_read_the_missing_file_answer
         "section_list": "called",
     }
     called = {name: args for name, args in CALLS if name != "capabilities"}
-    # The destructive writer is never called.
+    # A confirmation does not make an unplanned tool callable.
     assert set(called) == {"scan_rules", "query_hash", "section_list"}
     for name in ("scan_rules", "section_list"):
         (path,) = called[name].values()
@@ -329,17 +372,56 @@ def test_the_harmless_calls_never_name_a_sample_and_read_the_missing_file_answer
     )
 
 
-def test_a_declared_tool_gets_no_proposal_and_no_call() -> None:
-    from app.services.settings_probes import probe_mcp
+def test_a_confirmed_subset_calls_that_subset() -> None:
+    _probe(confirmed=["section_list"])
+    assert [name for name, _args in CALLS if name != "capabilities"] == ["section_list"]
 
-    entry = {
-        "enabled": True,
-        "command": "invented-server",
-        "tool_facts": {"scan_rules": {"kind": "signature_rules_of_mine"}},
-    }
-    result = asyncio.run(probe_mcp({"name": SERVER, "entry": entry, "call_tools": True}))
+
+def test_confirmed_calls_go_without_the_server_s_credentials_unless_it_needs_one() -> None:
+    from pydantic import SecretStr
+
+    from app.services.settings_probes import _needs_credential, _without_credentials
+
+    token = "-".join(["runtime", "built", "value"])
+    config = MCPServerConfig(
+        command="invented-server",
+        auth_token=SecretStr(token),
+        env={"PLAIN": "1", "HIDDEN": "2"},
+        env_allow=["PLAIN_TOO", "HIDDEN_TOO"],
+        variable_names=["PLAIN", "PLAIN_TOO"],
+    )
+    stripped = _without_credentials(config)
+    assert stripped.auth_token.get_secret_value() == ""
+    assert stripped.env == {"PLAIN": "1"}
+    assert stripped.env_allow == ["PLAIN_TOO"]
+    needing = config.model_copy(update={"required_env_allow": ["HIDDEN_TOO"]})
+    assert _needs_credential(needing) and _without_credentials(needing) is needing
+
+    proposals = _probe(required_env_allow=["HIDDEN_TOO"]).details["proposals"]
+    assert all(call["credential"] is True for call in proposals["planned"])
+
+
+def test_a_declared_tool_gets_no_proposal_and_no_call() -> None:
+    result = _probe(
+        confirmed=["scan_rules"],
+        tool_facts={"scan_rules": {"kind": "signature_rules_of_mine"}},
+    )
     assert "scan_rules" not in result.details["proposals"]["tools"]
     assert "scan_rules" not in {name for name, _args in CALLS}
+
+
+def test_a_proposal_that_cannot_be_built_never_fails_the_connection_test(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _broken(*_args: Any, **_kw: Any) -> Any:
+        raise RuntimeError("no proposals")
+
+    monkeypatch.setattr("maljan.core.declaration_proposals.propose", _broken)
+    monkeypatch.setattr("maljan.core.declaration_proposals.plan_calls", _broken)
+    result = _probe(confirmed=["section_list"])
+    assert result.ok is True
+    assert "proposals" not in (result.details or {})
+    assert [name for name, _args in CALLS] == ["capabilities"]
 
 
 # ---------------------------------------------------------------------------
@@ -385,7 +467,7 @@ def _scan_entry(settings: Settings) -> Any:
 
 
 def test_accepting_the_proposal_runs_as_a_hand_written_declaration(installed: Any) -> None:
-    proposals = _probe(call_tools=False).details["proposals"]
+    proposals = _probe().details["proposals"]
     # The console sends the accepted facts as JSON, through the settings path.
     accepted = json.loads(json.dumps(proposals["tools"]["scan_rules"]["facts"]))
     assert ToolFacts.model_validate(accepted) == ToolFacts.model_validate(HAND_WRITTEN)
@@ -406,11 +488,105 @@ def test_accepting_the_proposal_runs_as_a_hand_written_declaration(installed: An
 def test_without_acceptance_the_tool_stays_undeclared(installed: Any) -> None:
     settings = installed(_settings(None))
     before = _scan_entry(settings)
-    _probe(call_tools=True)
+    _probe(confirmed=["scan_rules", "query_hash", "section_list"])
     after = _scan_entry(settings)
     assert before.facts == after.facts == {"v": 1}
     assert asserted_techniques(after) == set()
     assert settings.mcp.servers[SERVER].tool_facts == {}
+
+
+def _lister_call(settings: Settings) -> tuple[Any, list[Any]]:
+    """One ``section_list`` call recorded through the registry, and the tools offered."""
+
+    async def _run() -> tuple[Any, list[Any]]:
+        registry = ServerRegistry(settings)
+        tools, _reasons = await registry.atools_for("static", "job-1")
+        try:
+            recorder = EvidenceRecorder("static")
+            recorded = {tool.name: tool for tool in record_tools(tools, recorder)}
+            await recorded["section_list"].ainvoke({"path": "sample.bin"})
+            return recorder.entries[0], list(tools)
+        finally:
+            for handle in registry.still_open():
+                await handle.aclose()
+
+    return asyncio.run(_run())
+
+
+def _what_an_undeclared_tool_gets(entry: Any, tools: list[Any]) -> dict[str, Any]:
+    """The readings an undeclared tool gets, and the composer section its cited output reaches."""
+    from types import SimpleNamespace
+
+    from maljan.agents.network_analyst import _undeclared_tools_in
+    from maljan.core.undeclared_tools import entry_code_kind, entry_is_strings_source
+    from maljan.reporting import tool_kinds
+    from maljan.reporting.evidence_bundles import bundle_for
+    from maljan.reporting.models import (
+        EvidenceIndexRow,
+        FileHashes,
+        MalwareReport,
+        SampleIdentity,
+    )
+
+    report = MalwareReport(
+        identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
+        technical_evidence={"static": [entry.to_captured().model_dump()]},
+        evidence_index=[
+            EvidenceIndexRow(
+                id=entry.id,
+                agent=entry.agent,
+                tool=entry.tool,
+                source=entry.source,
+                facts=entry.facts,
+            )
+        ],
+    )
+    isr = {
+        "static": SimpleNamespace(
+            agent_id="static",
+            claims=[
+                SimpleNamespace(
+                    claim="The sample persists through a scheduled task.",
+                    evidence_ref=entry.id,
+                    confidence=0.8,
+                )
+            ],
+        )
+    }
+    return {
+        "read_as_undeclared": tool_kinds.facts_of(entry) is None,
+        "code_kind": entry_code_kind(entry),
+        "strings": entry_is_strings_source(entry),
+        "undeclared_offered": _undeclared_tools_in(tools),
+        "reaches": [
+            o["tool"] for o in bundle_for("persistence_detail", report, None, isr)["tool_outputs"]
+        ],
+    }
+
+
+@pytest.mark.parametrize(
+    "accepted",
+    [
+        # What accepting only the proposed display name stages.
+        {"section_list": {"display_name": "Sections"}},
+        # An operator who typed the word a proposal once offered for no kind.
+        {"section_list": {"kind": "unclassified"}},
+        {"section_list": {"kind": "unclassified", "timeout_seconds": 30}},
+    ],
+)
+def test_accepting_a_field_without_a_kind_keeps_what_an_undeclared_tool_gets(
+    installed: Any, accepted: dict[str, Any]
+) -> None:
+    from maljan.core.undeclared_tools import declares_a_kind
+
+    undeclared_entry, undeclared_tools = _lister_call(installed(_settings(None)))
+    before = _what_an_undeclared_tool_gets(undeclared_entry, undeclared_tools)
+    assert before["reaches"] == ["section_list"] and before["read_as_undeclared"]
+
+    settings = installed(_settings(accepted))
+    assert not declares_a_kind(settings.mcp.servers[SERVER].tool_facts["section_list"])
+    entry, tools = _lister_call(settings)
+    assert _what_an_undeclared_tool_gets(entry, tools) == before
 
 
 def test_a_run_s_handle_keeps_no_tool_definitions() -> None:
@@ -449,3 +625,26 @@ def test_no_run_module_reads_a_proposal() -> None:
         if imports.search(path.read_text(encoding="utf-8"))
     )
     assert api_readers == ["services/settings_probes.py"]
+
+
+def test_a_tool_declared_without_a_kind_is_still_introduced_by_the_server_s_own_words() -> None:
+    from langchain_core.tools import StructuredTool
+
+    from maljan.providers.servers import _own_words
+
+    tools = [
+        StructuredTool.from_function(
+            func=lambda: "", name="section_list", description="Lists sections.", args_schema=None
+        )
+    ]
+
+    class _Handle:
+        name = SERVER
+        server_instructions = "served words"
+
+        def __init__(self, tool_facts: dict[str, Any]) -> None:
+            self.config = MCPServerConfig(command="invented-server", tool_facts=tool_facts)
+
+    assert _own_words(_Handle({}), tools)
+    assert _own_words(_Handle({"section_list": {"display_name": "Sections"}}), tools)
+    assert _own_words(_Handle({"section_list": {"kind": "listing_strings"}}), tools) == ""

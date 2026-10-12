@@ -1578,7 +1578,8 @@ DECLARATION_LEAVES: tuple[tuple[str, str, str], ...] = (
     (
         "tool_facts",
         "tool declarations",
-        "Per tool name: what kind of fact its answer is (kind) and where its facts sit "
+        "Per tool name: what kind of fact its answer is (kind; none keeps every reading an "
+        "undeclared tool gets) and where its facts sit "
         "(rows, places, values, techniques, reputation), as JSON. See the configuration "
         "guide's tool declarations section for every field.",
     ),

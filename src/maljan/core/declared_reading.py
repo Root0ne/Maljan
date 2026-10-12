@@ -267,7 +267,10 @@ def _parsed(text: str) -> ToolFacts | None:
     if not known.get("kind"):
         return None
     try:
-        return ToolFacts.model_validate(known)
+        facts = ToolFacts.model_validate(known)
+        # A record of no kind (``ToolFacts.kind``) is read as a tool that
+        # declares nothing, so every undeclared reading still applies.
+        return facts if facts.kind else None
     except ValueError as exc:
         logger.warning("declared facts: a stored record is read as absent (%s).", exc)
         return None
