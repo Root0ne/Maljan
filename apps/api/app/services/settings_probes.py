@@ -623,14 +623,16 @@ async def _inspect(
 
 
 def _proposals(
-    found: server_probe.Inspection, declared: frozenset[str], *, needs_credential: bool
+    found: server_probe.Inspection, declared: frozenset[str], *, withheld: list[str] | None
 ) -> dict[str, Any] | None:
     """The declaration proposals for the tools ``found`` lists and nothing declares.
 
     Data for an admin to accept field by field (``core.declaration_proposals``);
     nothing here is saved and no run reads it. ``None`` when there is no tool
     to propose for. A proposal that cannot be built is reported as none rather
-    than failing the connection test.
+    than failing the connection test. ``withheld`` is what a confirmed call
+    is made without (:func:`_withheld`); ``None`` when the server's
+    declaration needs its credential and it is sent.
     """
     from maljan.core.declaration_proposals import propose
     from maljan.tools.capabilities import CAPABILITIES_TOOL
@@ -649,13 +651,14 @@ def _proposals(
         return None
     if found.probed:
         proposals["probed"] = dict(found.probed)
-    # Whether a confirmed call would carry this server's credential: only
-    # where its declaration says it needs one (see ``_without_credentials``).
+    # What each confirmed call would be made with: this server as configured,
+    # less what ``withheld`` names, or its credential when its declaration
+    # needs one.
     for call in proposals.get("planned") or []:
-        call["credential"] = needs_credential
-    return (
-        proposals if proposals["tools"] or proposals["server"] or proposals.get("failed") else None
-    )
+        call["credential"] = withheld is None
+        call["withheld"] = list(withheld or [])
+    held = proposals["tools"] or proposals["server"] or proposals.get("failed")
+    return proposals if held else None
 
 
 def _needs_credential(config: MCPServerConfig) -> bool:
@@ -663,13 +666,35 @@ def _needs_credential(config: MCPServerConfig) -> bool:
     return config.credential_bootstrap is not None or bool(config.required_env_allow)
 
 
-def _without_credentials(config: MCPServerConfig) -> MCPServerConfig:
-    """``config`` without what could be a credential, for the confirmed harmless calls.
+def _withheld(config: MCPServerConfig) -> list[str] | None:
+    """What a confirmed harmless call is made without: ``None`` when nothing is withheld by rule.
 
-    The auth token is dropped, and the environment keeps only the names the
-    server declares non-secret (``variable_names``). A server whose
-    declaration says it needs a credential keeps its own (the planned list
-    says so before anything is called).
+    The server is used exactly as configured (its URL, arguments and files);
+    only its auth token and the environment values it does not declare
+    non-secret (``variable_names``) are withheld, each named here, the
+    environment by its variable's name. A server whose declaration says it
+    needs a credential is sent it (``None``).
+    """
+    if _needs_credential(config):
+        return None
+    plain = set(config.variable_names)
+    out = ["auth token"] if config.auth_token.get_secret_value() else []
+    out.extend(f"environment {name}" for name in config.env if name not in plain)
+    out.extend(
+        f"environment {name}"
+        for name in config.env_allow
+        if name not in plain and name not in config.env
+    )
+    return out
+
+
+def _without_credentials(config: MCPServerConfig) -> MCPServerConfig:
+    """``config`` as configured, less what :func:`_withheld` names.
+
+    The URL, arguments, command and working directory are kept exactly; the
+    auth token is dropped and the environment keeps only the names the server
+    declares non-secret. A server whose declaration needs a credential is
+    returned unchanged.
     """
     if _needs_credential(config):
         return config
@@ -685,15 +710,56 @@ def _without_credentials(config: MCPServerConfig) -> MCPServerConfig:
     )
 
 
+# What a probe note says when a call was made without withheld values.
+WITHHELD_NOTE = "made without {withheld}"
+
+
+async def _confirmed_calls(
+    config: MCPServerConfig,
+    name: str,
+    plan: Callable[[list[Any]], list[Any]],
+    withheld: list[str] | None,
+) -> server_probe.Inspection | dict[str, str]:
+    """The confirmed calls, on an attach of their own; never fails the connection test.
+
+    Made on ``config`` less what ``withheld`` names. A server that does not
+    start or answer that way is reported per planned tool, saying what was
+    withheld; a call that answered with an error says the same, plainly.
+    """
+    from maljan.tools.errors import error_parts
+
+    attached = _without_credentials(config)
+    missing = ", ".join(withheld or [])
+    try:
+        found = await _inspect(attached, name, plan)
+    except Exception as exc:  # noqa: BLE001 — the calls are reported, never the test's failure
+        reason = f"not called: the server did not answer ({type(exc).__name__})"
+        if missing:
+            reason += f" when started without {missing}"
+        return {"": reason}
+    if missing:
+        for tool, said in list(found.probed.items()):
+            note = WITHHELD_NOTE.format(withheld=missing)
+            answered = found.answers.get(tool)
+            if answered is not None and error_parts(answered[1]) is not None:
+                found.probed[tool] = f"{said}; it answered with an error, and was {note}"
+            else:
+                found.probed[tool] = f"{said}; {note}"
+    return found
+
+
 async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
     """Launch one configured MCP server, list the tools it offers and propose their declarations.
 
     Nothing is called unless the operator confirmed it: the proposals list
     the harmless calls a tool its server marks read-only allows
-    (``proposals.planned``), and only the tools named in ``confirmed_calls``
-    that are still planned are called, once each, without this server's
-    credentials unless its declaration says it needs one, so their answers can
-    propose what the schemas do not say (``core.declaration_proposals``).
+    (``proposals.planned``), each saying what it would be made without.
+    Only the tools named in ``confirmed_calls`` that are still planned are
+    called, once each, on an attach of their own made with this server as
+    configured less its auth token and secret environment values (unless its
+    declaration needs a credential), so their answers can propose what the
+    schemas do not say (``core.declaration_proposals``). The connection
+    test's verdict is the configured server's handshake alone.
     """
     t0 = time.perf_counter()
     name = str(v.get("name") or "server")
@@ -711,14 +777,22 @@ async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
     if config.credential_bootstrap is not None and not config.auth_token.get_secret_value():
         return ProbeResult(False, _ms(t0), NO_CREDENTIAL_DETAIL)
     declared = _declared_tools(config, name)
-    plan: Callable[[list[Any]], list[Any]] | None = None
     raw_confirmed = v.get("confirmed_calls")
     confirmed = (
         {str(t) for t in raw_confirmed if isinstance(t, str)}
         if isinstance(raw_confirmed, list | tuple | set)
         else set()
     )
-    attached = config
+    try:
+        found = await _inspect(config, name, None)
+        names, capabilities = found.names, found.capabilities
+    except TimeoutError:
+        return ProbeResult(False, _ms(t0), f"no MCP handshake within {PROBE_BUDGET_SECONDS:.0f} s")
+    except FileNotFoundError as exc:
+        return ProbeResult(False, _ms(t0), f"{exc} not found on PATH")
+    except Exception as exc:  # noqa: BLE001 — reported to the operator, never raised
+        return ProbeResult(False, _ms(t0), f"{type(exc).__name__}: {exc}")
+    withheld = _withheld(config)
     if confirmed:
         from maljan.core.declaration_proposals import plan_calls
         from maljan.tools.capabilities import CAPABILITIES_TOOL
@@ -727,17 +801,16 @@ async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
             planned = plan_calls(definitions, skip=declared | {CAPABILITIES_TOOL})
             return [call for call in planned if call.tool in confirmed]
 
-        attached = _without_credentials(config)
-
-    try:
-        found = await _inspect(attached, name, plan)
-        names, capabilities = found.names, found.capabilities
-    except TimeoutError:
-        return ProbeResult(False, _ms(t0), f"no MCP handshake within {PROBE_BUDGET_SECONDS:.0f} s")
-    except FileNotFoundError as exc:
-        return ProbeResult(False, _ms(t0), f"{exc} not found on PATH")
-    except Exception as exc:  # noqa: BLE001 — reported to the operator, never raised
-        return ProbeResult(False, _ms(t0), f"{type(exc).__name__}: {exc}")
+        called = await _confirmed_calls(config, name, plan, withheld)
+        if isinstance(called, dict):
+            reason = called[""]
+            try:
+                planned_now = {c.tool for c in plan(found.definitions)}
+            except Exception:  # noqa: BLE001 — a plan never costs the connection test
+                planned_now = set()
+            found.probed = {tool: reason for tool in sorted(planned_now)}
+        else:
+            found.answers, found.probed = called.answers, called.probed
     listed = ", ".join(names[:8]) + ("…" if len(names) > 8 else "")
     detail = f"{len(names)} tools: {listed}"
     details: dict[str, Any] | None = None
@@ -748,7 +821,7 @@ async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
         if unavailable:
             detail += f"; {len(unavailable)} unavailable on this host"
         details = {"capabilities": capabilities}
-    proposals = _proposals(found, declared, needs_credential=_needs_credential(config))
+    proposals = _proposals(found, declared, withheld=withheld)
     if proposals is not None:
         details = {**(details or {}), "proposals": proposals}
         detail += f"; declarations proposed for {len(proposals['tools'])} undeclared tools"

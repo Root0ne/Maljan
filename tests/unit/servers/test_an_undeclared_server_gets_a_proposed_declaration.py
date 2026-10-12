@@ -297,10 +297,11 @@ def test_the_probe_proposes_the_kinds_and_fields_with_their_evidence() -> None:
         "confidence": "high",
     }
     assert fields["long_running"]["evidence"] == ["capabilities manifest long_running"]
-    # A field brings only what makes it validate; never a kind.
-    assert fields["places"]["requires"] == ["rows"]
-    assert fields["asserts_techniques"]["requires"] == ["techniques"]
+    # A field read only through a kind is offered with it; a kind-free one alone.
+    assert fields["places"]["requires"] == ["kind", "rows"]
+    assert fields["asserts_techniques"]["requires"] == ["kind", "techniques"]
     assert "requires" not in fields["display_name"]
+    assert "requires" not in fields["timeout_seconds"]
     # A guess about what a technique id means is the operator's to confirm.
     assert fields["asserts_techniques"]["confidence"] == "low"
     for held in fields.values():
@@ -401,6 +402,54 @@ def test_confirmed_calls_go_without_the_server_s_credentials_unless_it_needs_one
     assert all(call["credential"] is True for call in proposals["planned"])
 
 
+def test_the_plan_names_what_each_call_is_made_without() -> None:
+    proposals = _probe(env={"HIDDEN": "x", "PLAIN": "1"}, variable_names=["PLAIN"]).details[
+        "proposals"
+    ]
+    assert {tuple(call["withheld"]) for call in proposals["planned"]} == {("environment HIDDEN",)}
+    plain = _probe().details["proposals"]
+    assert all(call["withheld"] == [] for call in plain["planned"])
+
+
+def test_a_confirmed_call_says_what_it_was_made_without() -> None:
+    result = _probe(
+        confirmed=["section_list"], env={"HIDDEN": "x", "PLAIN": "1"}, variable_names=["PLAIN"]
+    )
+    assert result.details["proposals"]["probed"] == {
+        "section_list": "called; made without environment HIDDEN"
+    }
+
+
+def test_a_server_that_does_not_answer_without_a_withheld_value_says_so(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import settings_probes
+
+    real = settings_probes._inspect
+    attaches: list[Any] = []
+
+    async def _second_fails(config: Any, name: str, plan: Any) -> Any:
+        attaches.append(config)
+        if len(attaches) > 1:
+            raise RuntimeError("refused")
+        return await real(config, name, plan)
+
+    monkeypatch.setattr(settings_probes, "_inspect", _second_fails)
+    result = _probe(
+        confirmed=["section_list"], env={"HIDDEN": "x", "PLAIN": "1"}, variable_names=["PLAIN"]
+    )
+    # The connection test is the configured server's handshake: it passed.
+    assert result.ok is True
+    assert result.details["proposals"]["probed"] == {
+        "section_list": "not called: the server did not answer (RuntimeError) when started "
+        "without environment HIDDEN"
+    }
+    # The calls' attach is the server as configured, less the secret value only.
+    configured, called = attaches
+    assert called.command == configured.command and called.args == configured.args
+    assert called.env == {"PLAIN": "1"} and configured.env == {"HIDDEN": "x", "PLAIN": "1"}
+
+
 def test_a_declared_tool_gets_no_proposal_and_no_call() -> None:
     result = _probe(
         confirmed=["scan_rules"],
@@ -421,7 +470,9 @@ def test_a_proposal_that_cannot_be_built_never_fails_the_connection_test(
     result = _probe(confirmed=["section_list"])
     assert result.ok is True
     assert "proposals" not in (result.details or {})
-    assert [name for name, _args in CALLS] == ["capabilities"]
+    # The confirmed request attaches again for its calls; a plan that cannot
+    # be built calls nothing.
+    assert {name for name, _args in CALLS} == {"capabilities"}
 
 
 # ---------------------------------------------------------------------------
@@ -570,7 +621,7 @@ def _what_an_undeclared_tool_gets(entry: Any, tools: list[Any]) -> dict[str, Any
         # What accepting only the proposed display name stages.
         {"section_list": {"display_name": "Sections"}},
         # An operator who typed the word a proposal once offered for no kind.
-        {"section_list": {"kind": "unclassified"}},
+        {"section_list": {"kind": "unclassified", "display_name": "Sections"}},
         {"section_list": {"kind": "unclassified", "timeout_seconds": 30}},
     ],
 )
