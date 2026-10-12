@@ -252,6 +252,10 @@ export interface AgentDefinitionEntry {
    *  budget to use them in. */
   max_steps: number | null;
   timeout_seconds: number | null;
+  /** The console tab a section built from this agent's tool answers is drawn
+   *  on when the tool's kind places none (`AgentDefinition.tab`); `null`
+   *  places nothing. Optional because an API older than the field sends none. */
+  tab?: string | null;
 }
 
 /** How hard one debate stage argues before it hands over, mirroring

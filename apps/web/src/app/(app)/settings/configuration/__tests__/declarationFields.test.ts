@@ -48,8 +48,15 @@ describe("the server editor's declaration readers", () => {
     const ok = readToolFacts('{"scan": {"kind": "rule_match", "rows": "/hits/*"}}');
     expect(ok.value).toEqual({ scan: { kind: "rule_match", rows: "/hits/*" } });
     expect(readToolFacts("[]").error).toMatch(/keyed by tool name/);
-    // A declaration may name no kind.
-    expect(readToolFacts('{"scan": {}}').error).toBeNull();
+    // An empty declaration, a misspelt key and a kind-dependent field with
+    // no kind are refused, as the API refuses them.
+    expect(readToolFacts('{"scan": {}}').error).toMatch(/scan: name its kind/);
+    expect(readToolFacts('{"scan": {"knd": "decompile"}}').error).toMatch(/scan: unknown field knd/);
+    expect(
+      readToolFacts('{"scan": {"rows": "/m/*", "places": {"offset": "/o"}}}').error,
+    ).toMatch(/scan: rows, places are read only through a kind/);
+    // A declaration of no kind states only kind-free fields.
+    expect(readToolFacts('{"scan": {"display_name": "Scanner"}}').error).toBeNull();
     expect(readToolFacts('{"scan": {"kind": 3}}').error).toMatch(/scan: kind is a lowercase word/);
     expect(readToolFacts('{"scan": {"kind": "Rule Match"}}').error).toMatch(/scan: kind/);
   });

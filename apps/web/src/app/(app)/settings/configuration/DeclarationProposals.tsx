@@ -73,8 +73,10 @@ function PlannedCalls({
       <legend className="px-1 text-text-muted">One harmless call per tool</legend>
       <p className="text-[11px] text-text-secondary">
         Only tools their server marks read-only are listed. These tools are called once each
-        with the values shown, never a sample; a tool that reaches its own service is asked
-        about these values. Nothing is called until you confirm.
+        with the values shown, never a sample, on this server exactly as it is configured (its
+        URL, arguments and files); only what each line says is withheld is withheld, and a call
+        that fails without it says so. A tool that reaches its own service is asked about these
+        values. Nothing is called until you confirm.
       </p>
       <ul className="space-y-1 mt-1">
         {planned.map((call) => (
@@ -84,7 +86,9 @@ function PlannedCalls({
               {call.remote ? " · may reach its own service" : " · stays on this server"}
               {call.credential
                 ? " · with this server's credential (its declaration needs one)"
-                : " · without this server's credentials"}
+                : call.withheld.length
+                  ? ` · withheld: ${call.withheld.join(", ")}`
+                  : " · nothing withheld"}
             </span>
           </li>
         ))}

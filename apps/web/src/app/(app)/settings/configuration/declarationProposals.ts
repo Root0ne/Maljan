@@ -37,6 +37,9 @@ export interface PlannedCall {
   remote: boolean;
   /** The call would carry this server's credential (its declaration needs one). */
   credential: boolean;
+  /** What the call is made without: the auth token and the environment
+   *  variables the server does not declare non-secret, each named. */
+  withheld: string[];
 }
 
 export interface Proposals {
@@ -110,6 +113,7 @@ export function readProposals(result: ProbeResult | null | undefined): Proposals
       arguments: call.arguments,
       remote: call.remote !== false,
       credential: call.credential === true,
+      withheld: strings(call.withheld),
     });
   }
   const probed = readStringMap(raw.probed);

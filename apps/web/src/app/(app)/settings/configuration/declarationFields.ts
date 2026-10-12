@@ -137,6 +137,34 @@ export function readErrorPatterns(text: string): Read<ErrorPatternEntry[]> {
 /** Tool declarations: a JSON object keyed by tool name, each with a `kind`; empty is `{}`.
  *  A name may hold `__`; only one spelled as this server's renamed tool
  *  (`<serverKey>__…`) is refused. */
+/* The fields of a tool declaration, split as `maljan.core.tool_declarations`
+ * splits them (KIND_FREE_FIELDS, KIND_DEPENDENT_FIELDS; a test holds the two
+ * equal): the ones read without a kind, and the ones read only through one. */
+export const KIND_FREE_FIELDS = [
+  "display_name",
+  "category",
+  "words",
+  "timeout_seconds",
+  "long_running",
+  "memory_peak_mb",
+  "discloses_sample",
+  "arguments",
+] as const;
+export const KIND_DEPENDENT_FIELDS = [
+  "asserts_techniques",
+  "source",
+  "holds_strings",
+  "rows",
+  "places",
+  "values",
+  "techniques",
+  "reputation",
+  "reader",
+  "report_sections",
+] as const;
+const KNOWN_FACT_KEYS = new Set<string>(["kind", ...KIND_FREE_FIELDS, ...KIND_DEPENDENT_FIELDS]);
+const DEPENDENT = new Set<string>(KIND_DEPENDENT_FIELDS);
+
 export function readToolFacts(
   text: string,
   serverKey = ""
@@ -153,11 +181,22 @@ export function readToolFacts(
       return bad(`${tool}: spelled as this server's renamed tool; use the tool's own name`);
     }
     if (!isObject(facts)) return bad(`${tool}: expected an object of the tool's facts`);
-    // No kind (absent or empty) states the other facts and keeps the tool
-    // read as one of no kind.
-    if (facts.kind !== undefined && facts.kind !== "" &&
-        (typeof facts.kind !== "string" || !WORD.test(facts.kind))) {
+    const unknown = Object.keys(facts).filter((key) => !KNOWN_FACT_KEYS.has(key));
+    if (unknown.length) return bad(`${tool}: unknown field ${unknown.join(", ")}`);
+    const noKind = facts.kind === undefined || facts.kind === "" || facts.kind === "unclassified";
+    if (!noKind && (typeof facts.kind !== "string" || !WORD.test(facts.kind))) {
       return bad(`${tool}: kind is a lowercase word such as strings, rule_match or decompile`);
+    }
+    if (noKind) {
+      // No kind states only the fields read without one.
+      const set = Object.keys(facts).filter((key) => key !== "kind");
+      if (set.length === 0) {
+        return bad(`${tool}: name its kind or at least one of ${KIND_FREE_FIELDS.join(", ")}`);
+      }
+      const needing = set.filter((key) => DEPENDENT.has(key));
+      if (needing.length) {
+        return bad(`${tool}: ${needing.join(", ")} are read only through a kind; declare the kind`);
+      }
     }
   }
   return ok(parsed.value as Record<string, ToolFactsEntry>);

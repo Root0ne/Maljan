@@ -52,23 +52,29 @@ const SCAN: ToolProposal = {
   },
   fields: {
     kind: { value: "signature_rules", evidence: ["description (rule match)"], confidence: "low" },
-    rows: { value: "/matches/*", evidence: ["outputSchema.matches (a list of objects)"], confidence: "medium" },
+    rows: {
+      value: "/matches/*",
+      evidence: ["outputSchema.matches (a list of objects)"],
+      confidence: "medium",
+      requires: ["kind"],
+    },
     places: {
       value: { offset: "/strings/*/offset" },
       evidence: ["outputSchema.matches[].strings[].offset"],
       confidence: "medium",
-      requires: ["rows"],
+      requires: ["kind", "rows"],
     },
     techniques: {
       value: [{ path: "/**2/tags", format: "sigma_tag" }],
       evidence: ["outputSchema.matches[].tags"],
       confidence: "medium",
+      requires: ["kind"],
     },
     asserts_techniques: {
       value: true,
       evidence: ["rows with techniques"],
       confidence: "low",
-      requires: ["techniques"],
+      requires: ["kind", "techniques"],
     },
     display_name: { value: "Rule scanner", evidence: ["title"], confidence: "high" },
   },
@@ -113,7 +119,13 @@ describe("readProposals", () => {
         server: { error_patterns: { value: [{ match: "x" }], evidence: ["e"], confidence: "medium" } },
         probed: { scan: "called", other: 4 },
         planned: [
-          { tool: "lister", arguments: { path: "/nonexistent-maljan-probe/x" }, remote: false, credential: false },
+          {
+            tool: "lister",
+            arguments: { path: "/nonexistent-maljan-probe/x" },
+            remote: false,
+            credential: false,
+            withheld: ["auth token"],
+          },
           { tool: 5, arguments: {} },
         ],
         failed: { deep: "no proposal: reading its schema raised RecursionError", odd: 1 },
@@ -125,7 +137,13 @@ describe("readProposals", () => {
     expect(read!.server.error_patterns.confidence).toBe("medium");
     expect(read!.probed).toEqual({ scan: "called" });
     expect(read!.planned).toEqual([
-      { tool: "lister", arguments: { path: "/nonexistent-maljan-probe/x" }, remote: false, credential: false },
+      {
+        tool: "lister",
+        arguments: { path: "/nonexistent-maljan-probe/x" },
+        remote: false,
+        credential: false,
+        withheld: ["auth token"],
+      },
     ]);
     expect(read!.failed).toEqual({ deep: "no proposal: reading its schema raised RecursionError" });
   });
@@ -138,15 +156,15 @@ describe("readProposals", () => {
 });
 
 describe("accepting", () => {
-  it("stages a field with only the fields it needs, never a kind", () => {
-    expect(withRequired(SCAN, "places")).toEqual(["rows", "places"]);
+  it("stages a field read only through a kind together with that kind, and a kind-free one alone", () => {
+    expect(withRequired(SCAN, "places")).toEqual(["kind", "rows", "places"]);
     expect(acceptField(SERVER, "scan", SCAN, "places").tool_facts).toEqual({
-      scan: { rows: "/matches/*", places: { offset: "/strings/*/offset" } },
+      scan: { kind: "signature_rules", rows: "/matches/*", places: { offset: "/strings/*/offset" } },
     });
     expect(acceptField(SERVER, "scan", SCAN, "display_name").tool_facts).toEqual({
       scan: { display_name: "Rule scanner" },
     });
-    expect(alsoStaged(SERVER, "scan", SCAN, "places")).toEqual(["rows"]);
+    expect(alsoStaged(SERVER, "scan", SCAN, "places")).toEqual(["kind", "rows"]);
     expect(alsoStaged(SERVER, "scan", SCAN, "display_name")).toEqual([]);
   });
 
@@ -226,7 +244,7 @@ describe("DeclarationProposals", () => {
     const html = render(proposals);
     expect(html).toContain('aria-label="accept every field of scan"');
     for (const field of Object.keys(SCAN.fields)) expect(html).toContain(`aria-label="accept ${field}"`);
-    expect(html).toContain("also stages rows");
+    expect(html).toContain("also stages kind, rows");
     expect(render(readProposals(result({ v: 1, tools: {}, server: {} }))!)).toBe("");
   });
 
@@ -248,8 +266,15 @@ describe("DeclarationProposals", () => {
 
   it("lists every planned call before any is made, and calls only on a confirm", () => {
     const planned = [
-      { tool: "lookup", arguments: { hash: "e3" }, remote: true, credential: true },
-      { tool: "lister", arguments: { path: "/nonexistent-maljan-probe/x" }, remote: false, credential: false },
+      { tool: "lookup", arguments: { hash: "e3" }, remote: true, credential: true, withheld: [] },
+      {
+        tool: "lister",
+        arguments: { path: "/nonexistent-maljan-probe/x" },
+        remote: false,
+        credential: false,
+        withheld: ["auth token", "environment HIDDEN"],
+      },
+      { tool: "open_one", arguments: {}, remote: false, credential: false, withheld: [] },
     ];
     const proposals = readProposals(result({ v: 1, tools: { lister: LISTER }, server: {}, planned }))!;
     const confirmed: string[][] = [];
@@ -257,8 +282,10 @@ describe("DeclarationProposals", () => {
     expect(html).toContain('data-planned-call="lookup"');
     expect(html).toContain("may reach its own service");
     expect(html).toContain("with this server&#x27;s credential");
-    expect(html).toContain("without this server&#x27;s credentials");
-    expect(html).toContain("Call these 2 tools once each");
+    expect(html).toContain("withheld: auth token, environment HIDDEN");
+    expect(html).toContain("nothing withheld");
+    expect(html).toContain("exactly as it is configured");
+    expect(html).toContain("Call these 3 tools once each");
     // Rendering calls nothing.
     expect(confirmed).toEqual([]);
     // No confirm control without a handler, and none once the calls were made.
