@@ -463,9 +463,11 @@ class TestASwappedRuleMatcher:
         assert f"{match.id} match" in index.args["joined"]
         assert data["function_sources"]["RuleMatch function starts"] == 3
         rows = {row["offset"]: row for row in data["rows"]}
-        assert rows[hex(ROUTINE)]["capa"] == [
+        assert rows[hex(ROUTINE)]["rules"] == [
             {"rule": "hash data with CRC32", "sources": [match.id]}
         ]
+        assert data["rule_sources"] == {match.id: "RuleMatch"}
+        assert '"capa"' not in json.dumps(data)
         text = pack_block(pack_entries(result.entries), 0)
         assert f"RuleMatch: hash data with CRC32 ({match.id})" in text
         assert "capa" not in json.dumps(data.get("absent") or {})

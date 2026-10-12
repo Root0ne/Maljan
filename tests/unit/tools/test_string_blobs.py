@@ -248,6 +248,27 @@ class TestFloss:
         assert row["floss"] == {"function_rva": "0x1100", "called_at_rva": "0x1180"}
         assert answer["also_recovered_by_floss"] == 1
 
+    def test_rows_of_another_decoder_are_named_by_no_emulator(self, tmp_path: Path) -> None:
+        recovered = [
+            {
+                "kind": "decoded",
+                "string": "open the settings file",
+                "function_rva": "0x1100",
+                "called_at_rva": "0x1180",
+            }
+        ]
+        target = tmp_path / "s.exe"
+        target.write_bytes(_with_blob(_xor8(b"open the settings file\0", 0x9C)).build())
+        answer = decode_string_blobs(
+            str(target), recovered=recovered, decoder=string_blobs.decoder_word(shipped=False)
+        )
+        row = _only(answer)
+        assert row["decoder"] == {"function_rva": "0x1100", "called_at_rva": "0x1180"}
+        assert (answer["decoder_rows_compared"], answer["also_recovered_by_decoder"]) == (1, 1)
+        assert not any("floss" in key for key in (*answer, *row))
+        assert string_blobs.decoder_row(row) == row["decoder"]
+        assert string_blobs.also_recovered(answer) == 1
+
     def test_the_rows_of_a_remembered_run_are_read_without_running_floss(
         self, tmp_path: Path
     ) -> None:

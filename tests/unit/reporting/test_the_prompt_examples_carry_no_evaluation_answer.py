@@ -1752,6 +1752,63 @@ PROMPTS: dict[str, str] = {
             triage_pack._around({"after_function_start": "0x1000"}),
         ]
     ),
+    "a swapped matcher's and decoder's answers, named by no tool that did not run": " ".join(
+        [
+            triage_pack.render_pack(
+                [
+                    LedgerEntry(
+                        id="ev_0001",
+                        agent=triage_pack.PIPELINE,
+                        server="scanner",
+                        tool="match",
+                        output="{}",
+                        structured={"hits": [{"name": "reads a key", "at": ["0x1200"]}]},
+                        facts={
+                            "v": 1,
+                            "kind": "capability_rules",
+                            "rows": "/hits/*",
+                            "values": {"rule": "/name"},
+                            "places": {"addresses": "/at"},
+                            "display_name": "Matcher",
+                        },
+                        pack_step={"v": 1, "id": "capa"},
+                    )
+                ],
+                0,
+            ),
+            artefact_index.row_parts(
+                {artefact_index.rules_field(False): [{"rule": "reads a key", "sources": ["e1"]}]},
+                "ev_0002",
+                {"e1": "Matcher"},
+            ),
+            triage_pack._decoded_blobs(
+                {
+                    "results": [
+                        {
+                            "text": "a word",
+                            "rva": "0x3000",
+                            "scheme": "rot",
+                            string_blobs.decoder_word(False): {
+                                "function_rva": "0x1100",
+                                "called_at_rva": "0x1180",
+                            },
+                        }
+                    ],
+                    "total": 1,
+                    f"also_recovered_by_{string_blobs.decoder_word(False)}": 1,
+                    f"{string_blobs.decoder_word(False)}_rows_compared": 1,
+                }
+            ),
+            triage_pack._constant_item(
+                {
+                    "algorithm": "a cipher",
+                    "what": "table",
+                    triage_pack.RULES_MARK_NEUTRAL: [{"rule": "reads a key", "at": "0x1200"}],
+                }
+            ),
+            json.dumps({"rule_sources": {"ev_0001": "Matcher"}}),
+        ]
+    ),
     "the pack's resolved hashes and decoded blobs in part": " ".join(
         [
             triage_pack.RESOLVED_HASHES_ROOM_SENTENCE.format(shown=10, total=90, offset=10),

@@ -853,8 +853,10 @@ def _joins(entries: Iterable[Any], files: _Files) -> _Joins:
             file = files.of(entry)
             if file is None:
                 continue
+            from maljan.tools.string_blobs import decoder_row
+
             for row in _rows(data, "results"):
-                link = row.get("floss")
+                link = decoder_row(row)
                 call = _hex(link.get("called_at_rva")) if isinstance(link, Mapping) else None
                 blob = _hex(row.get("rva"))
                 if call is not None and blob is not None:

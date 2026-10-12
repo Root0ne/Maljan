@@ -134,14 +134,17 @@ from maljan.core.declared_reading import (
 from maljan.core.logger import logger
 from maljan.core.pack_steps import (
     PackStep,
+    answer_field,
     effective_steps,
     placeholder_values,
+    read_answer_field,
     shipped_label,
     shipped_renderer,
     shipped_step,
+    written_for,
 )
 from maljan.core.reputation import ReputationRecord, is_lookup_entry, reputation_of
-from maljan.core.tool_declarations import PACK, ToolFacts, select
+from maljan.core.tool_declarations import PACK, ToolFacts, first, select
 from maljan.pipeline.conditions import TriageFacts, rule_match_hits
 from maljan.pipeline.sandbox_status import (
     OBSERVED,
@@ -840,7 +843,15 @@ class _Pack:
             except Exception as exc:  # noqa: BLE001 — handed to the recording like any failure
                 return None, exc, time.monotonic() - began
 
-        self._early[step.id] = (pool.submit(timed), time.monotonic())
+        future = pool.submit(timed)
+
+        # The thread is let go as soon as its work is done, so a long list of
+        # steps started beside the pack holds only the threads still working.
+        def release(_done: Any, held: ThreadPoolExecutor = pool) -> None:
+            held.shutdown(wait=False)
+
+        future.add_done_callback(release)
+        self._early[step.id] = (future, time.monotonic())
         beside = _joined(self._tool_name(other) for other in self._beside(step))
         self.result.schedules[step.id] = f"beside {beside}" if beside else "beside the pack"
         logger.info("triage pack: %s started beside %s.", name, beside or "the pack")
@@ -1342,23 +1353,33 @@ class _Pack:
         """
         path = self.inputs.sample_path
         args, label, starts = self._starts_args()
-        recovered = self._recovered_rows()
+        recovered, decoder = self._recovered_rows()
         self.record(
             "decode_string_blobs",
             args,
             lambda: string_blobs.decode_string_blobs(
-                path, function_starts=starts, function_source=label, recovered=recovered
+                path,
+                function_starts=starts,
+                function_source=label,
+                recovered=recovered,
+                decoder=decoder,
             ),
         )
 
-    def _recovered_rows(self) -> list[Mapping[str, Any]]:
-        """The rows of every ok call-site strings answer, whole where its step keeps them whole."""
+    def _recovered_rows(self) -> tuple[list[Mapping[str, Any]], str]:
+        """The rows of every ok call-site strings answer, whole where its step keeps them whole.
+
+        And the word the decoder's answer names their source by: the shipped
+        emulator's name where every row came from it (``string_blobs.decoder_word``).
+        """
         rows: list[Mapping[str, Any]] = []
-        for _tool, entry, given in site_sources(self.recorder.entries):
+        sources = site_sources(self.recorder.entries)
+        for _tool, entry, given in sources:
             whole = self._whole_rows.get(entry.id)
             held = whole() if whole is not None else []
             rows.extend(held or given)
-        return rows
+        shipped = _from_shipped((entry for _tool, entry, _rows in sources), DECODER_RENDERER)
+        return rows, string_blobs.decoder_word(shipped)
 
     def _resolved_api_capability(self, step: PackStep) -> None:
         """The catalogue asked about the names the resolution read that the import table lacks.
@@ -1387,6 +1408,7 @@ class _Pack:
         path = self.inputs.sample_path
         args, label, starts = self._starts_args()
         rows = _rule_rows(self.recorder.entries)
+        mark = _rules_mark(_rule_sources(self.recorder.entries))
         self.record(
             crypto_constants.TOOL,
             args,
@@ -1395,6 +1417,7 @@ class _Pack:
                     path, function_starts=starts, function_source=label
                 ),
                 rows,
+                mark,
             ),
         )
 
@@ -1418,6 +1441,7 @@ class _Pack:
         path = self.inputs.sample_path
         starts = self._function_starts()[1]
         rows = _rule_rows(self.recorder.entries)
+        mark = _rules_mark(_rule_sources(self.recorder.entries))
         self.record(
             SCAN_TOOL,
             args,
@@ -1425,6 +1449,7 @@ class _Pack:
                 run_pass(lambda: scan.anti_analysis(path, starts), SCAN_TOOL),
                 rows,
                 starts,
+                mark,
             ),
         )
 
@@ -1462,6 +1487,8 @@ class _Pack:
                 blobs=joined.blobs,
                 absent=joined.absent,
                 ranges_into=ranges,
+                rules_under=joined.rules_under,
+                rule_sources=joined.rule_sources or None,
             ),
         )
         made = self.recorder.entries[held:]
@@ -1801,6 +1828,11 @@ class IndexInputs:
     absent: dict[str, str] = field(default_factory=dict)
     # ``<entry id> <tool>`` of each answer joined, in the order of the inputs.
     named: list[str] = field(default_factory=list)
+    # The field each row holds its rules under (``artefact_index.rules_field``),
+    # and, where any rule came from a tool other than the shipped matcher, the
+    # display name of each rule entry's tool by entry id.
+    rules_under: str = ""
+    rule_sources: dict[str, str] = field(default_factory=dict)
 
 
 def _absence(entry: LedgerEntry) -> str:
@@ -1871,6 +1903,11 @@ def index_inputs(entries: Iterable[LedgerEntry]) -> IndexInputs:
             named.add(entry.id)
     out.hashes = single("hashes", "api_hash_resolution")
     out.blobs = single("blobs", "decoded_strings")
+    rule_entries = [entry for entry in every["rules"] if entry.id in named]
+    shipped = _from_shipped(rule_entries, RULES_RENDERER)
+    out.rules_under = artefact_index.rules_field(shipped)
+    if not shipped:
+        out.rule_sources = {entry.id: display_name(entry) for entry in rule_entries}
     return out
 
 
@@ -2481,7 +2518,7 @@ def _without_rule_addresses_for(
     entries: list[LedgerEntry], kept: list[str], max_chars: int, need: int
 ) -> list[str] | None:
     """``kept`` with the rule line showing fewer addresses, ``need`` characters shorter."""
-    capa = next((entry for entry in entries if renderer_of(entry) == RULES_RENDERER), None)
+    capa = next((entry for entry in entries if _shown(entry)[0] == RULES_RENDERER), None)
     if capa is None:
         return None
     index = next((i for i, line in enumerate(kept) if line.startswith(f"[{capa.id}] ")), None)
@@ -2495,7 +2532,7 @@ def _without_rule_addresses_for(
     token = _DETAIL.set(detail)
     try:
         target = len(kept[index]) - need
-        data = capa.structured if isinstance(capa.structured, dict) else {}
+        data = _shown(capa)[1] or {}
         rows = [r for r in data.get("capabilities") or [] if isinstance(r, dict)]
         low, high = 0, max((len(r.get("addresses") or []) for r in rows), default=0)
         best: str | None = None
@@ -2552,19 +2589,18 @@ def _novel_view(entry: LedgerEntry) -> LedgerEntry | None:
     pack's leftover room before the other pass entries; it never takes room
     from a line that is not a pass.
     """
-    data = entry.structured if isinstance(entry.structured, dict) else None
+    renderer, data = _shown(entry)
     if not entry.ok or data is None:
         return None
-    renderer = renderer_of(entry)
     if renderer == "crypto_constants":
         rows = [r for r in data.get("found") or [] if isinstance(r, dict)]
-        new = [r for r in rows if not r.get("capa")]
+        new = [r for r in rows if not _rule_marks(r)]
         if not new:
             return None
         view = {**data, "found": new, "agreeing": len(rows) - len(new)}
     elif renderer == "anti_analysis_scan":
         rows = [r for r in data.get("stated") or [] if isinstance(r, dict)]
-        new = [r for r in rows if not r.get("capa")]
+        new = [r for r in rows if not _rule_marks(r)]
         if not new:
             return None
         view = {**data, "stated": new, "also_stated": len(rows) - len(new)}
@@ -2608,9 +2644,12 @@ def _with_rule_addresses(entries: list[LedgerEntry], max_chars: int) -> list[str
     lines = [_rule_line(entry, 0) for entry in entries]
     room = max_chars - _joined_len(lines)
     for index, entry in enumerate(entries):
-        if renderer_of(entry) != RULES_RENDERER or room <= 0:
+        if room <= 0:
             continue
-        data = entry.structured if isinstance(entry.structured, dict) else {}
+        shown, shaped = _shown(entry)
+        if shown != RULES_RENDERER:
+            continue
+        data = shaped or {}
         rows = [r for r in data.get("capabilities") or [] if isinstance(r, dict)]
         most = max((len(r.get("addresses") or []) for r in rows), default=0)
         low, high, best = 1, most, lines[index]
@@ -2700,12 +2739,13 @@ def _fit_lines(entries: list[LedgerEntry], lines: list[str], max_chars: int) -> 
 
 def _within_room(entry: LedgerEntry, room: int) -> str | None:
     """``entry``'s line in ``room`` characters, when it can say less and still say something."""
-    shorter = _SHORTER_RENDERERS.get(renderer_of(entry))
-    if shorter is None or not entry.ok or not isinstance(entry.structured, dict):
+    shown, data = _shown(entry)
+    shorter = _SHORTER_RENDERERS.get(shown)
+    if shorter is None or not entry.ok or data is None:
         return None
     head = f"[{entry.id}] {_label_of(entry)}: "
     try:
-        body = shorter(entry.structured, room - len(head))
+        body = shorter(data, room - len(head))
     except Exception:  # noqa: BLE001 — a renderer must never cost the block
         return None
     line = head + body
@@ -2748,8 +2788,8 @@ def _line_of(entry: LedgerEntry) -> str:
         # a call that was made and broke is.
         verb = "not done" if _was_not_made(entry) else "failed"
         return f"[{entry.id}] {label}: {verb} ({_short(entry.error or entry.output)})"
-    data = entry.structured if isinstance(entry.structured, dict) else None
-    render = _RENDERERS.get(renderer_of(entry))
+    shown, data = _shown(entry)
+    render = _RENDERERS.get(shown)
     answer = reputation_of(entry) if lookup else None
     if answer is not None:
         return f"[{entry.id}] {REPUTATION_STEP}: {_reputation_facts(entry, answer)}"
@@ -3526,7 +3566,7 @@ def _blob_item(row: dict[str, Any]) -> str:
     if refs:
         item += f" referred to at {refs}"
     # The decoder's own row, under the answer's field for it.
-    floss = row.get("floss")
+    floss = string_blobs.decoder_row(row)
     if isinstance(floss, dict):
         item += (
             f" ({_decoders_in_view() or _shipped_kind_name(('emulated_strings',))} too: "
@@ -3560,7 +3600,7 @@ def _decoded_blobs(data: dict[str, Any], max_chars: int | None = None) -> str:
     total = max(int(data.get("total") or 0), len(rows))
     unreferenced = int(data.get("unreferenced") or 0)
     # Under the answer's field for it, whichever decoder's strings it compared.
-    also = int(data.get("also_recovered_by_floss") or 0)
+    also = int(string_blobs.also_recovered(data) or 0)
     decoders = _decoders_in_view()
     counts = (
         f"{f'{_n(also)} also recovered by {decoders}; ' if decoders else ''}"
@@ -3603,13 +3643,21 @@ def _decoded_blobs(data: dict[str, Any], max_chars: int | None = None) -> str:
 PASS_RENDERERS = frozenset({"crypto_constants", "anti_analysis_scan", "unpacked_image"})
 # The renderer of a rule matcher's answer, whose addresses take what room is left.
 RULES_RENDERER = "capability_rules"
+# What a pass's row calls the rules that agree with it where any came from a
+# tool other than the shipped rule matcher (``_rules_mark``).
+RULES_MARK_NEUTRAL = "rules"
+# The renderer of an emulator's recovered strings: the decoder the static
+# decoder's answer compares with.
+DECODER_RENDERER = "emulated_strings"
 
 # What a pass line says when the room cut its list: how many it shows, and
 # where the rest are.
 PASS_ROOM_SENTENCE = "{shown} of {total} shown; the rest are in this entry's full output"
 
 
-def _with_rules(answer: dict[str, Any], capa_rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _with_rules(
+    answer: dict[str, Any], capa_rows: list[dict[str, Any]], mark: str = ""
+) -> dict[str, Any]:
     """The constant scan's answer, each found set marked where a rule names the same algorithm.
 
     ``capa_rows`` are the rule rows of the pack's answers of declared kind
@@ -3618,7 +3666,8 @@ def _with_rules(answer: dict[str, Any], capa_rows: list[dict[str, Any]]) -> dict
     (``ConstantSet.capa``) and that matched at the start of a function one of
     the set's places stands in (``function``, or ``after_function_start`` for
     an image with no table of its own). The mark is each rule and the
-    address, under the field name ``capa`` it has always been stored under.
+    address, under ``mark`` (empty: the shipped rule matcher's name, which it
+    has always been stored under; ``_rules_mark``).
     """
     if not isinstance(answer, dict) or not capa_rows or "found" not in answer:
         return answer
@@ -3645,7 +3694,7 @@ def _with_rules(answer: dict[str, Any], capa_rows: list[dict[str, Any]]) -> dict
                     agree.append({"rule": str(capa.get("rule") or ""), "at": str(address)})
         row = dict(row)
         if agree:
-            row["capa"] = agree
+            row[mark or _rules_mark(())] = agree
         rows.append(row)
     marked["found"] = rows
     return marked
@@ -3658,14 +3707,9 @@ def _rule_rows(entries: Iterable[LedgerEntry]) -> list[dict[str, Any]]:
     ``rule``, its ``namespace`` and the ``addresses`` it matched at.
     """
     rows: list[dict[str, Any]] = []
-    for entry in entries:
-        if not entry.ok or kind_of(entry) != RULE_KIND:
-            continue
-        facts = facts_of(entry)
-        data = entry.structured
-        if facts is None or not isinstance(data, dict):
-            continue
-        for read in facts.row_values(data):
+    for entry in _rule_sources(entries):
+        facts = cast("ToolFacts", facts_of(entry))
+        for read in facts.row_values(entry.structured):
             addresses = read.get("addresses") or []
             first = addresses[0] if addresses else []
             rows.append(
@@ -3678,8 +3722,43 @@ def _rule_rows(entries: Iterable[LedgerEntry]) -> list[dict[str, Any]]:
     return rows
 
 
+def _rule_sources(entries: Iterable[LedgerEntry]) -> list[LedgerEntry]:
+    """The ok answers of declared kind ``capability_rules`` whose rules can be read."""
+    return [
+        entry
+        for entry in entries
+        if entry.ok
+        and kind_of(entry) == RULE_KIND
+        and facts_of(entry) is not None
+        and isinstance(entry.structured, dict)
+    ]
+
+
+def _from_shipped(entries: Iterable[LedgerEntry], renderer: str) -> bool:
+    """Whether every one of ``entries`` is the answer of the tool ``renderer`` was shipped for."""
+    return all(_written_for(entry, renderer) for entry in entries)
+
+
+def _rules_mark(sources: Iterable[LedgerEntry]) -> str:
+    """The field a pass's row holds the rules that agree with it under.
+
+    The shipped rule matcher's name, as it has always been stored, where every
+    rule came from that matcher as the platform runs it; a neutral name where
+    any came from another tool (``core.pack_steps.answer_field``).
+    """
+    return answer_field(
+        "{}", RULES_RENDERER, RULES_MARK_NEUTRAL, shipped=_from_shipped(sources, RULES_RENDERER)
+    )
+
+
+def _rule_marks(row: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """The rules a pass's row is marked as agreeing with, under either name of ``_rules_mark``."""
+    held = read_answer_field(row, "{}", RULES_RENDERER, RULES_MARK_NEUTRAL)
+    return [mark for mark in held or [] if isinstance(mark, dict)]
+
+
 def _anti_analysis_with_capa(
-    answer: dict[str, Any], capa_rows: list[dict[str, Any]], starts: list[str]
+    answer: dict[str, Any], capa_rows: list[dict[str, Any]], starts: list[str], mark: str = ""
 ) -> dict[str, Any]:
     """The anti-analysis answer, each match marked where a capability rule agrees.
 
@@ -3690,8 +3769,9 @@ def _anti_analysis_with_capa(
     of no kind, or ``PEB access`` for a TEB/PEB read): the nearest function
     start at or before the match is the nearest one at or before a rule
     address. An exact TEB/PEB read (``beside_capa``) is stated only with such
-    a rule in its function; without one it is counted. The mark keeps the
-    field name ``capa`` it has always been stored under.
+    a rule in its function; without one it is counted. The mark is under
+    ``mark`` (empty: the shipped rule matcher's name, which it has always
+    been stored under; ``_rules_mark``).
     """
     if not isinstance(answer, dict) or ("stated" not in answer and "beside_capa" not in answer):
         return answer
@@ -3734,18 +3814,19 @@ def _anti_analysis_with_capa(
         ]
 
     marked = dict(answer)
+    field_name = mark or _rules_mark(())
     rows = []
     for row in answer.get("stated") or []:
         row = dict(row)
         agree = agreeing(row)
         if agree:
-            row["capa"] = agree
+            row[field_name] = agree
         rows.append(row)
     counted = 0
     for row in marked.pop("beside_capa", None) or []:
         agree = agreeing(row)
         if agree:
-            rows.append({**row, "capa": agree})
+            rows.append({**row, field_name: agree})
         else:
             counted += 1
     marked["stated"] = rows
@@ -3771,7 +3852,7 @@ def _places(places: list[dict[str, Any]]) -> str:
 def _constant_item(row: dict[str, Any]) -> str:
     """``AES forward substitution box [table] @ 0x3100``; a set a rule names too, in one clause."""
     name = f"{row.get('algorithm')} {row.get('what')}"
-    capa = [c for c in row.get("capa") or [] if isinstance(c, dict)]
+    capa = _rule_marks(row)
     if capa:
         said = ", ".join(f"{c.get('at')} ({c.get('rule')})" for c in capa)
         return f"{name}: agrees with {_rules_named()} at {said}"
@@ -3838,11 +3919,7 @@ def _anti_analysis_item(group: tuple[tuple[str, str], list[dict[str, Any]]]) -> 
     said = " ".join(shown)
     if len(shown) < len(places):
         said += f" (+{len(places) - len(shown)} more places)"
-    rules = list(
-        dict.fromkeys(
-            str(c.get("rule")) for row in rows for c in row.get("capa") or [] if isinstance(c, dict)
-        )
-    )
+    rules = list(dict.fromkeys(str(c.get("rule")) for row in rows for c in _rule_marks(row)))
     agrees = f" (agrees with {_rules_named()}: {', '.join(rules)})" if rules else ""
     return f"{category}: {what} @ {said}{agrees}"
 
@@ -4052,6 +4129,93 @@ _ESTABLISHED: dict[str, Callable[[dict[str, Any]], bool]] = {
 }
 
 
+def _written_for(entry: LedgerEntry, renderer: str) -> bool:
+    """Whether ``entry`` is the answer of a tool the shipped steps of ``renderer`` call.
+
+    As the platform runs it: recorded by the pack itself, under that tool.
+    """
+    return entry.server in (None, "", PIPELINE) and written_for(renderer, entry.tool)
+
+
+def _declared_key(names: Mapping[str, str], preferred: Sequence[str]) -> str:
+    """The first of ``preferred`` a declaration names, else the first it names; ``""``."""
+    return next((name for name in preferred if name in names), next(iter(names), ""))
+
+
+# Which declared value names a row, and which place says where it stands.
+_NAMING_VALUES = ("rule", "text", "name", "value")
+_ROW_PLACES = ("addresses", "address", "offset", "rva")
+
+
+def _flat(values: list[Any]) -> list[str]:
+    out: list[str] = []
+    for value in values:
+        for item in value if isinstance(value, list) else [value]:
+            if item not in (None, "") and not isinstance(item, dict | list):
+                out.append(str(item))
+    return out
+
+
+def _declared_rules(entry: LedgerEntry) -> dict[str, Any] | None:
+    """A rule matcher's answer read through its declaration, in the shape ``_capa`` reads.
+
+    Each declared row is one rule: named by its declared ``rule`` (else
+    ``text``, ``name``, ``value``, else its first declared value), placed at
+    its declared ``addresses`` (else ``address``, ``offset``, ``rva``, else its
+    first declared place), with the technique ids the declaration says the row
+    names when the tool declares that its techniques are asserted. ``None``
+    for an answer whose declaration names no rows.
+    """
+    from maljan.reporting.tool_kinds import row_technique_ids
+
+    facts = facts_of(entry)
+    if facts is None or not facts.rows or entry.structured is None:
+        return None
+    name = _declared_key(facts.values, _NAMING_VALUES)
+    place = _declared_key(facts.places, _ROW_PLACES)
+    rows: list[dict[str, Any]] = []
+    for raw in select(entry.structured, facts.rows):
+        row = raw if isinstance(raw, dict) else {}
+        said = first(row, facts.values[name]) if name else None
+        rows.append(
+            {
+                "rule": " ".join(str(said).split()) if said not in (None, "") else "",
+                "addresses": _flat(select(row, facts.places[place])) if place else [],
+                "attck": row_technique_ids(row, facts) if facts.asserts_techniques else [],
+            }
+        )
+    return {"capabilities": rows}
+
+
+# The renderers that also read an answer through its declared facts
+# (``core.pack_steps.DECLARED_FACT_RENDERERS``): each gives the answer in the
+# shape the renderer reads, or ``None`` where the declaration names too little.
+_DECLARED_SHAPES: dict[str, Callable[[LedgerEntry], dict[str, Any] | None]] = {
+    RULES_RENDERER: _declared_rules,
+}
+
+
+def _shown(entry: LedgerEntry) -> tuple[str, dict[str, Any] | None]:
+    """The renderer ``entry``'s line is shown by, and its answer in the shape that renderer reads.
+
+    The answer as it is for the tool the renderer was shipped for. Any other
+    tool's answer is read through its declared facts, by a renderer of
+    ``_DECLARED_SHAPES``: the one its step declared, else the one of its
+    declared kind. Otherwise ``("", None)``, the generic line: a renderer is
+    never handed an answer it would read as something it does not say.
+    """
+    data = entry.structured if isinstance(entry.structured, dict) else None
+    renderer = renderer_of(entry)
+    if renderer and _written_for(entry, renderer):
+        return renderer, data
+    key = renderer or kind_of(entry)
+    reader = _DECLARED_SHAPES.get(key)
+    if reader is None or data is None or not entry.ok:
+        return "", None
+    shaped = reader(entry)
+    return (key, shaped) if shaped is not None else ("", None)
+
+
 def renderer_of(entry: LedgerEntry) -> str:
     """How the pack's line shows ``entry``'s answer: one of ``core.pack_steps.PACK_RENDERERS``.
 
@@ -4078,14 +4242,15 @@ def _is_pass(entry: LedgerEntry) -> bool:
 def _declared_rows(entry: LedgerEntry) -> str:
     """The generic line of an answer whose declaration names its rows: how many, and each one.
 
-    Each row by its first declared value, at its first declared place, as many
+    Each row by the value that names it (its declared ``rule``, else ``text``,
+    ``name``, ``value``, else its first declared value), at its first declared place, as many
     as the pack's detail shows; ``""`` for an answer whose declaration names no rows.
     """
     facts = facts_of(entry)
     data = entry.structured
     if facts is None or not facts.rows or data is None or not entry.ok:
         return ""
-    value = next(iter(facts.values), "")
+    value = _declared_key(facts.values, _NAMING_VALUES)
     place = next(iter(facts.places), "")
     items: list[str] = []
     rows = facts.row_values(data)

@@ -1317,9 +1317,31 @@ _GROUP = {
     "rule": "rule",
 }
 
-# The field of a row that holds the rules matched in a function: the name the
-# answer has always used for it, whichever rule engine's answer they come from.
-RULES_FIELD = "capa"
+# The field of a row that holds the rules matched in a function, where any
+# rule came from a tool other than the shipped rule matcher (``rules_field``).
+RULES_FIELD_NEUTRAL = "rules"
+
+
+def rules_field(shipped: bool = True) -> str:
+    """The field of a row that holds the rules matched in a function.
+
+    The name rows have always used for it (the shipped rule matcher's) where
+    every rule came from that matcher as the platform runs it, or none came;
+    :data:`RULES_FIELD_NEUTRAL` where any came from another tool, so a row
+    never names a matcher that did not run (``core.pack_steps.answer_field``).
+    """
+    from maljan.core.pack_steps import answer_field
+
+    return answer_field("{}", RULES_KIND, RULES_FIELD_NEUTRAL, shipped=shipped)
+
+
+def rule_cells(row: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """The rule cells of an index row, under whichever name :func:`rules_field` gave them."""
+    from maljan.core.pack_steps import read_answer_field
+
+    held = read_answer_field(row, "{}", RULES_KIND, RULES_FIELD_NEUTRAL)
+    return [cell for cell in held or [] if isinstance(cell, Mapping)]
+
 
 # A function start list from an answer that lists starts: ``(the source's
 # name, the entry's id, the starts as offsets from the image base)``.
@@ -1424,11 +1446,16 @@ def index_image(
     addresses: Sequence[tuple[str, int]] = (),
     function_lists: str = FUNCTION_LISTS_ABSENT,
     ranges_into: dict[str, list[list[str]]] | None = None,
+    rules_under: str = "",
+    rule_sources: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """The index of ``image`` joined with the run's answers, each given as ``(entry id, data)``.
 
     ``ranges_into``, when given, is filled with :func:`function_ranges`: a
-    fact the caller keeps beside the answer, never in it.
+    fact the caller keeps beside the answer, never in it. ``rules_under`` is
+    the field each row holds its rules under (empty: :func:`rules_field`'s
+    shipped name), and ``rule_sources`` names, by entry id, the tool each
+    rule's entry is from; stated under ``rule_sources`` when given.
 
     The run's answers come in by what they are, never by the tool that gave
     them: ``function_starts`` from any answer that lists function starts,
@@ -1565,7 +1592,12 @@ def index_image(
                 where = placer.stated(hex(address)) or placer.holders(address)
                 place(where, "rule", str(rule), entry_id, tool)
 
-    data = _answer(image, graph, rows, names, unplaced, entry_points, order=order)
+    field_name = rules_under or rules_field()
+    data = _answer(
+        image, graph, rows, names, unplaced, entry_points, order=order, rules_under=field_name
+    )
+    if rule_sources:
+        data["rule_sources"] = dict(rule_sources)
     # Only the slots some code calls or jumps through are stated.
     data["resolved_slots"] = {
         hex(base + slot): name for slot, (name, _w) in sorted(filled.items()) if slot in called
@@ -1601,7 +1633,9 @@ def index_image(
     data["function_lists"] = function_lists
     data["absent"] = dict(absent or {})
     if addresses:
-        data.update(_asked(image, graph, placer, rows, names, entry_points, addresses, order))
+        data.update(
+            _asked(image, graph, placer, rows, names, entry_points, addresses, order, field_name)
+        )
     return data
 
 
@@ -1683,6 +1717,7 @@ def _asked(
     entry_points: Iterable[int],
     addresses: Sequence[tuple[str, int]],
     order: Sequence[str] = (),
+    rules_under: str = "",
 ) -> dict[str, Any]:
     """The function an asked address names, by the first reading that names one."""
     base = image.image_base
@@ -1694,9 +1729,17 @@ def _asked(
             if not holders:
                 continue
             start, where = holders[0], "inside"
-        row = _answer(image, graph, rows, names, {}, entry_points, only=start, order=order)[
-            "function"
-        ]
+        row = _answer(
+            image,
+            graph,
+            rows,
+            names,
+            {},
+            entry_points,
+            only=start,
+            order=order,
+            rules_under=rules_under,
+        )["function"]
         asked = hex(base + offset) if how == _AS_VIRTUAL else hex(offset)
         said = f"{asked} read as {how}: {where} the function at {hex(base + start)}"
         return {"function": row, "address_read": said}
@@ -1721,8 +1764,10 @@ def _answer(
     entry_points: Iterable[int] = (),
     only: int | None = None,
     order: Sequence[str] = (),
+    rules_under: str = "",
 ) -> dict[str, Any]:
     base = image.image_base
+    rules_key = rules_under or rules_field()
     entries = set(entry_points)
     callers: dict[int, set[int]] = {}
     for start, function in graph.functions.items():
@@ -1774,7 +1819,7 @@ def _answer(
             "resolved": [_cell(c, base) for c in listed if c.kind == "name"],
             "decoded_strings": [_cell(c, base) for c in listed if c.kind == "decoded"],
             "plain_strings": [_cell(c, base) for c in listed if c.kind == "plain"],
-            RULES_FIELD: [_cell(c, base) for c in listed if c.kind == "rule"],
+            rules_key: [_cell(c, base) for c in listed if c.kind == "rule"],
             "callers": [va(c) for c in sorted(callers.get(start, ()))],
             "callees": [va(c) for c in sorted(held.callees if held else ())],
             "indirect": {"artefacts": reached, "through": through},
@@ -1866,10 +1911,13 @@ def function_index(
     blobs: tuple[str, Mapping[str, Any]] | None = None,
     absent: Mapping[str, str] | None = None,
     ranges_into: dict[str, list[list[str]]] | None = None,
+    rules_under: str = "",
+    rule_sources: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """The function index of the PE at ``path`` (see the module docstring).
 
-    ``ranges_into`` is filled as :func:`index_image` says.
+    ``ranges_into``, ``rules_under`` and ``rule_sources`` are as
+    :func:`index_image` says.
     """
     try:
         image = pe_image.load(path)
@@ -1887,6 +1935,8 @@ def function_index(
         blobs=blobs,
         absent=absent,
         ranges_into=ranges_into,
+        rules_under=rules_under,
+        rule_sources=rule_sources,
     )
 
 
@@ -2012,7 +2062,7 @@ def row_parts(
         parts.append("refers to " + ", ".join(texts))
     named_by = dict(labels or {})
     grouped: dict[str, list[Mapping[str, Any]]] = {}
-    for cell in (c for c in row.get(RULES_FIELD) or [] if isinstance(c, Mapping)):
+    for cell in rule_cells(row):
         cited = [str(source) for source in cell.get("sources") or []]
         label = next((named_by[s] for s in cited if s in named_by), RULES_UNLABELLED)
         grouped.setdefault(label, []).append(cell)

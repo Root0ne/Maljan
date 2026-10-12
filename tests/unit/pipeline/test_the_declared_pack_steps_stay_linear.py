@@ -1,7 +1,8 @@
 """The declared step list and the readings by kind grow linearly with what they read.
 
 Ten times the steps an operator declares, ten times the function starts and
-rules an answer lists, and ten times the rows a generic line counts each take
+rules an answer lists, ten times the rows a generic line counts and ten times
+the rules a rule line read through its declaration shows each take
 about ten times as long: a quadratic step would take a hundred.
 """
 
@@ -50,7 +51,7 @@ def _declared(n: int) -> Callable[[], Any]:
     return lambda: effective_steps(steps)
 
 
-def _matcher(n: int) -> LedgerEntry:
+def _matcher(n: int, kind: str = "capability_rules") -> LedgerEntry:
     data = {
         "functions": [hex(0x1000 + 16 * i) for i in range(n)],
         "hits": [{"name": f"rule {i}", "at": [hex(0x1000 + 16 * i)]} for i in range(n)],
@@ -64,7 +65,7 @@ def _matcher(n: int) -> LedgerEntry:
         structured=data,
         facts={
             "v": 1,
-            "kind": "capability_rules",
+            "kind": kind,
             "rows": "/hits/*",
             "places": {"addresses": "/at"},
             "values": {"rule": "/name"},
@@ -80,6 +81,12 @@ def _joined(n: int) -> Callable[[], Any]:
 
 def _listed(n: int) -> Callable[[], Any]:
     """A generic line counting ``n`` rows, each with its value and place."""
+    entry = _matcher(n, "rule_table").model_copy(update={"pack_step": {"v": 1, "id": "match"}})
+    return lambda: render_pack([entry], 0)
+
+
+def _ruled(n: int) -> Callable[[], Any]:
+    """A rule matcher's line read through its declaration: ``n`` rules, each where it matched."""
     entry = _matcher(n).model_copy(update={"pack_step": {"v": 1, "id": "match"}})
     return lambda: render_pack([entry], 0)
 
@@ -105,8 +112,19 @@ class TestTenTimesTheInput:
         print("generic line rows:", round(low, 4), round(high, 4))
         assert high < low * 20
         assert render_pack(
+            [_matcher(3, "rule_table").model_copy(update={"pack_step": {"v": 1, "id": "m"}})], 0
+        ) == (
+            "[ev_0001] match: 3 rows of kind rule_table "
+            "(rule 0 @ 0x1000, rule 1 @ 0x1010, rule 2 @ 0x1020)"
+        )
+
+    def test_the_rules_a_declared_rule_line_shows(self) -> None:
+        low, high = _ratio(_ruled, 5_000)
+        print("declared rule line:", round(low, 4), round(high, 4))
+        assert high < low * 20
+        assert render_pack(
             [_matcher(3).model_copy(update={"pack_step": {"v": 1, "id": "m"}})], 0
         ) == (
-            "[ev_0001] match: 3 rows of kind capability_rules "
-            "(rule 0 @ 0x1000, rule 1 @ 0x1010, rule 2 @ 0x1020)"
+            "[ev_0001] match: 3 capabilities (rule 0 @ 0x1000, rule 1 @ 0x1010, rule 2 @ "
+            "0x1020); each rule @ the offsets from the image base where it matched"
         )

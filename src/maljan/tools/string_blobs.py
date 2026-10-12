@@ -87,9 +87,9 @@ places a scan for relative and absolute references to the blob's first byte or
 its text's first byte finds (``maljan.tools.pe_image``), each with the function
 around it when the file's function table says, and the row of a decoder that
 recovered the same text at a call site (its decoding routine and call site,
-said under the answer's ``floss`` field): the rows the caller hands in from
-whichever answer of that kind it holds, else this process's emulated strings
-for the file. No reference is stated that the bytes do not hold.
+said under the field :func:`decoder_fields` names): the rows the caller hands
+in from whichever answer of that kind it holds, else this process's emulated
+strings for the file. No reference is stated that the bytes do not hold.
 
 Which decodings are results. The test above still passes on some tables of
 numbers under some key, and a file with large tables yields many of them; a
@@ -742,6 +742,45 @@ def decode(
     )
 
 
+# The word the answer's fields name a decoder by where its rows came from any
+# tool other than the shipped emulator (``decoder_fields``).
+DECODER_NEUTRAL = "decoder"
+# The kind of answer whose rows this tool compares with.
+_DECODER_KIND = "emulated_strings"
+
+
+def decoder_word(shipped: bool = True) -> str:
+    """The word the answer's fields name the decoder it compared with by.
+
+    The shipped emulator's name, which these fields have always carried, where
+    every row came from it as the platform runs it, or none came;
+    :data:`DECODER_NEUTRAL` where any came from another tool, so the answer
+    never names a decoder that did not run (``core.pack_steps.answer_field``).
+    """
+    from maljan.core.pack_steps import answer_field
+
+    return answer_field("{}", _DECODER_KIND, DECODER_NEUTRAL, shipped=shipped)
+
+
+def decoder_fields(word: str) -> tuple[str, str, str]:
+    """The row's field, the compared count's and the agreeing count's, for ``word``."""
+    return word, f"{word}_rows_compared", f"also_recovered_by_{word}"
+
+
+def decoder_row(row: Mapping[str, Any]) -> Any:
+    """A result row's decoder row, under whichever word :func:`decoder_word` gave it."""
+    from maljan.core.pack_steps import read_answer_field
+
+    return read_answer_field(row, "{}", _DECODER_KIND, DECODER_NEUTRAL)
+
+
+def also_recovered(answer: Mapping[str, Any]) -> Any:
+    """How many results a decoder recovered too, under whichever word the answer used."""
+    from maljan.core.pack_steps import read_answer_field
+
+    return read_answer_field(answer, "also_recovered_by_{}", _DECODER_KIND, DECODER_NEUTRAL)
+
+
 def decode_string_blobs(
     path: str,
     min_len: int = DEFAULT_MIN_LENGTH,
@@ -752,6 +791,7 @@ def decode_string_blobs(
     function_starts: Sequence[Any] | None = None,
     function_source: str = "",
     recovered: Sequence[Mapping[str, Any]] | None = None,
+    decoder: str = "",
 ) -> dict[str, Any]:
     """Decode the text a PE keeps encoded in its data sections (see the module docstring).
 
@@ -766,7 +806,8 @@ def decode_string_blobs(
     ``called_at_rva``), from whichever answer of that kind the caller holds;
     ``None`` reads this process's emulated strings for the file, when that
     tool ran here. A decoding one of them recovered too is marked and counted
-    under the answer's fields for it.
+    under the answer's fields for it, named by ``decoder`` (empty: the
+    shipped emulator's name, :func:`decoder_word`).
     """
     wanted = tuple(SCHEMES) if not schemes else tuple(str(s).strip() for s in schemes)
     unknown = [scheme for scheme in wanted if scheme not in SCHEMES]
@@ -783,17 +824,15 @@ def decode_string_blobs(
     decoded = decode(image, minimum, wanted)
     items = decoded.items
 
-    # Under the answer's own field names for them (``floss``,
-    # ``floss_rows_compared``, ``also_recovered_by_floss``), whichever decoder
-    # the rows come from.
-    floss: dict[str, Mapping[str, Any]] = {}
+    row_field, compared_field, also_field = decoder_fields(decoder or decoder_word())
+    recovered_by: dict[str, Mapping[str, Any]] = {}
     for recovered_row in _remembered_rows(path) if recovered is None else recovered:
         if (
             isinstance(recovered_row, Mapping)
             and recovered_row.get("kind") == "decoded"
             and recovered_row.get("string")
         ):
-            floss.setdefault(str(recovered_row["string"]), recovered_row)
+            recovered_by.setdefault(str(recovered_row["string"]), recovered_row)
 
     targets: set[int] = set()
     for item in items:
@@ -805,7 +844,7 @@ def decode_string_blobs(
 
     results: list[dict[str, Any]] = []
     unreferenced: list[dict[str, Any]] = []
-    also_floss = 0
+    also = 0
     for item in items:
         text = item.text.rstrip(b"\0").decode("latin-1")
         blob_rva = image.rva_of_offset(item.blob_offset)
@@ -855,16 +894,17 @@ def decode_string_blobs(
         }
         if item.layers:
             row["layers"] = item.layers
-        same = floss.get(text) or next(
-            (floss[layer["text"]] for layer in item.layers if layer["text"] in floss), None
+        same = recovered_by.get(text) or next(
+            (recovered_by[layer["text"]] for layer in item.layers if layer["text"] in recovered_by),
+            None,
         )
         if same is not None:
-            also_floss += 1
-            row["floss"] = {
+            also += 1
+            row[row_field] = {
                 "function_rva": same.get("function_rva"),
                 "called_at_rva": same.get("called_at_rva"),
             }
-        if row["references"] or "floss" in row:
+        if row["references"] or row_field in row:
             results.append(row)
         else:
             unreferenced.append(row)
@@ -881,8 +921,8 @@ def decode_string_blobs(
         "readable_test": READABLE_TEST,
         "min_len": minimum,
         "longest_key": LONGEST_KEY,
-        "floss_rows_compared": len(floss),
-        "also_recovered_by_floss": also_floss,
+        compared_field: len(recovered_by),
+        also_field: also,
         "results": page,
         "total": len(results),
         "page_offset": start,
