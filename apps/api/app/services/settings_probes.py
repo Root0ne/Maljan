@@ -19,7 +19,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
-from maljan.core import virustotal
 from maljan.core.config import BUILTIN_SERVER_KEYS, MCPServerConfig, builtin_env_allow
 from maljan.core.logger import logger
 from maljan.core.model_assignments import endpoint_for, endpoint_label
@@ -38,6 +37,13 @@ from app.services.server_map import TOKEN_MASK as _TOKEN_MASK
 from app.services.settings_catalog_api import API_DEFAULTS
 
 TIMEOUT = 10.0
+
+# What the MCP probe says about a server that declares how its credential is
+# obtained (``credential_bootstrap``) and holds none yet.
+NO_CREDENTIAL_DETAIL = (
+    "no credential: obtain one with this server's step in the tool-server setup "
+    "guide, or paste a token into this server's token field"
+)
 
 # A connection test is a person waiting at a button
 # (``server_probe.PROBE_BUDGET_SECONDS``).
@@ -606,14 +612,14 @@ async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
     except ValidationError as exc:
         fields = _validation_detail(exc)
         return ProbeResult(False, _ms(t0), f"invalid server settings: {fields}")
-    # VirusTotal's endpoint answers an unauthenticated handshake with a
-    # transport error whose text says nothing about credentials, so the one
-    # state an operator actually lands in -- the built-in is there, nobody has
-    # registered yet -- is named here instead of being read out of a stack
-    # trace. Only this server: every other token-less server may legitimately
-    # be open.
-    if name == virustotal.SERVER_KEY and not config.auth_token.get_secret_value():
-        return ProbeResult(False, _ms(t0), virustotal.NO_TOKEN_DETAIL)
+    # A server that declares how its credential is obtained needs one: its
+    # endpoint may answer an unauthenticated handshake with a transport error
+    # whose text says nothing about credentials, so the state an operator
+    # actually lands in -- the server is there, nobody has obtained its
+    # credential yet -- is named here instead of being read out of a stack
+    # trace. A server that declares no bootstrap may legitimately be open.
+    if config.credential_bootstrap is not None and not config.auth_token.get_secret_value():
+        return ProbeResult(False, _ms(t0), NO_CREDENTIAL_DETAIL)
     try:
         names, capabilities = await handshake(config, name)
     except TimeoutError:
@@ -981,14 +987,27 @@ async def probe_redis(v: dict[str, Any] | None = None) -> ProbeResult:
 OWN_PROBES = ("llm", "mcp", "agent", "redis")
 
 
-def _provider_probe_kinds() -> dict[str, str]:
-    """Every registered provider's probe id, and which registry holds it."""
-    from maljan.enrichment.sources import reputation_sources
+def _probed_sources(stored: dict[str, Any] | None) -> dict[str, Any]:
+    """The enrichment sources in force that declare a connection test, by key."""
+    from maljan.enrichment.declared import effective_sources
+
+    from app.services.enrichment_sources import ENRICHMENT_SOURCES_KEY, stored_map
+
+    held = stored_map((stored or {}).get(ENRICHMENT_SOURCES_KEY))
+    return {key: s for key, s in effective_sources(held).items() if s.probe is not None}
+
+
+def _provider_probe_kinds(stored: dict[str, Any] | None = None) -> dict[str, str]:
+    """Every registered provider's probe id, and which registry holds it.
+
+    An enrichment source is tested under its key; ``stored`` adds the ones an
+    operator declared to the ones the platform ships.
+    """
     from maljan.memory.store_factory import memory_backends
     from maljan.providers.registry import sandbox_provider_ids, static_provider_ids
 
     kinds: dict[str, str] = {}
-    for source in reputation_sources():
+    for source in _probed_sources(stored):
         kinds.setdefault(source, "reputation")
     for backend in memory_backends():
         kinds.setdefault(backend, "memory")
@@ -1004,9 +1023,16 @@ def probe_names() -> list[str]:
     return [*OWN_PROBES, *(k for k in _provider_probe_kinds() if k not in OWN_PROBES)]
 
 
-def known_probe(name: str) -> bool:
-    """Whether ``name`` is a probe the settings route answers."""
-    return name in OWN_PROBES or name in _provider_probe_kinds()
+def with_staged_sources(stored: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
+    """``stored`` with its enrichment source map as the staged entries leave it."""
+    from app.services.enrichment_sources import ENRICHMENT_SOURCES_KEY, staged_over_stored
+
+    return {**stored, ENRICHMENT_SOURCES_KEY: staged_over_stored(stored, values)}
+
+
+def known_probe(name: str, stored: dict[str, Any] | None = None) -> bool:
+    """Whether ``name`` is a probe the settings route answers, with these stored settings."""
+    return name in OWN_PROBES or name in _provider_probe_kinds(stored)
 
 
 def _from_provider(result: Any, t0: float) -> ProbeResult:
@@ -1081,14 +1107,34 @@ def _api_value(key: str, values: dict[str, Any], stored: dict[str, Any]) -> Any:
 async def _probe_reputation_source(
     name: str, values: dict[str, Any], stored: dict[str, Any]
 ) -> ProbeResult:
-    """Ask reputation source ``name``'s own test, with the key it reads."""
-    from maljan.enrichment.sources import credential_of, reputation_sources
+    """Ask enrichment source ``name``'s declared test, with the credential it reads.
+
+    The declaration is the staged one where the map is staged, laid over the
+    stored one; a staged own key that is the mask means the stored key.
+    """
+    from maljan.enrichment.declared import effective_sources, probe_source
+
+    from app.services.enrichment_sources import credential_settings, staged_over_stored
 
     t0 = time.perf_counter()
-    source: Any = reputation_sources()[name]
-    setting = credential_of(source)
-    key = _api_value(setting, values, stored) if setting else ""
-    return _from_provider(await source.probe(str(key or "")), t0)
+    source = effective_sources(staged_over_stored(stored, values)).get(name)
+    if source is None:
+        return ProbeResult(False, _ms(t0), f"no enrichment source {name!r} is in force")
+    if source.credential and source.credential not in credential_settings():
+        # The test would send that secret to the declaration's own host.
+        return ProbeResult(
+            False, _ms(t0), f"credential {source.credential!r} is not an enrichment secret setting"
+        )
+    if source.credential.startswith("api."):
+        credential = _api_value(source.credential, values, stored)
+    elif source.credential:
+        node: Any = candidate_settings(values, stored)
+        for part in source.credential.split(".")[1:]:
+            node = getattr(node, part, None)
+        credential = node
+    else:
+        credential = source.api_key
+    return _from_provider(await probe_source(source, str(_unwrap(credential) or "")), t0)
 
 
 def _unwrap(value: Any) -> Any:
@@ -1113,13 +1159,13 @@ async def run_probe(name: str, values: dict[str, Any], stored: dict[str, Any]) -
     """Run probe ``name`` against the staged values layered over the stored ones.
 
     A provider's probe is that provider's own (``probe()``, a memory backend's
-    ``readiness()``, a reputation source's ``probe()``), built from the
+    ``readiness()``, an enrichment source's declared test), built from the
     candidate settings; the model probe asks the selected LLM provider's
     adapter. Deliberately no context-window block on the result: the window
     is a fact about the endpoint rather than about whether a model answered,
     and the settings page reads it from its own route.
     """
-    kinds = _provider_probe_kinds()
+    kinds = _provider_probe_kinds(with_staged_sources(stored, values))
     if name not in OWN_PROBES and name not in kinds:
         return ProbeResult(False, 0, f"unknown probe: {name!r}")
     if kinds.get(name) == "reputation":

@@ -105,7 +105,13 @@ function withServedDeclarations<T extends { groups: { entries: unknown[] }[] }>(
       };
     }),
   }));
-  return { ...schema, groups, probe_labels: SERVED.probe_labels ?? {} };
+  return {
+    ...schema,
+    groups,
+    probe_labels: SERVED.probe_labels ?? {},
+    enrichment_sources: SERVED.enrichment_sources ?? [],
+    credential_servers: SERVED.credential_servers ?? {},
+  };
 }
 
 function json(route: Route, body: unknown, status = 200) {
@@ -272,8 +278,11 @@ export const MOCK_SYSTEM_STATUS = {
   // What a single-process install answers: the enrichment is queued beside the
   // analyses, so there is no second worker to be missing.
   enrichment_worker: "not_required",
-  has_virustotal_key: true,
-  has_abuseipdb_key: false,
+  enrichment_configured: 1,
+  enrichment_sources: [
+    { key: "virustotal", label: "VirusTotal", configured: true },
+    { key: "abuseipdb", label: "AbuseIPDB", configured: false },
+  ],
 };
 
 export const MOCK_SAMPLE = {

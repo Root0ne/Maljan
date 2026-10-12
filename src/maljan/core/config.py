@@ -55,6 +55,7 @@ from maljan.core.report_formats import (
 )
 from maljan.core.tool_declarations import (
     VOCABULARY_PATTERN,
+    CredentialBootstrap,
     ErrorPattern,
     ToolFacts,
     check_auto_name_prefixes,
@@ -1340,6 +1341,9 @@ class MCPServerConfig(BaseModel):
     reference_urls: list[str] = Field(default_factory=list)
     # Per tool: what kind of fact its answer is and where the facts sit in it.
     tool_facts: dict[str, ToolFacts] = Field(default_factory=dict)
+    # How the server's credential is obtained by one request, when it can be
+    # (``CredentialBootstrap``); ``None`` for a server whose token is typed in.
+    credential_bootstrap: CredentialBootstrap | None = None
 
     @field_validator("roles")
     @classmethod
@@ -4355,6 +4359,26 @@ class Settings(BaseSettings):
 
         renamed, _ = rename_colliding_agent_keys(data)
         return renamed
+
+    @model_validator(mode="after")
+    def _a_bootstrap_only_where_a_route_performs_it(self) -> "Settings":
+        """``credential_bootstrap`` on a provider's own block is refused.
+
+        Only a tool server of ``mcp.servers`` has the route that performs one
+        (``POST /settings/servers/{key}/credential``); on a provider's block the
+        field would be a setting that does nothing.
+        """
+        from maljan.core.tool_declarations import PROVIDER_BLOCKS, block_at
+
+        for path in PROVIDER_BLOCKS.values():
+            block = block_at(self, path)
+            if getattr(block, "credential_bootstrap", None) is not None:
+                raise ValueError(
+                    f"{path}.credential_bootstrap: a credential bootstrap is declared on a "
+                    "tool server of mcp.servers, whose route performs it; a provider's own "
+                    "block takes none"
+                )
+        return self
 
     @model_validator(mode="after")
     def _validate_agent_composition(self) -> "Settings":

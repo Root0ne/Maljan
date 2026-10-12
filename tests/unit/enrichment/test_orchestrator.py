@@ -1,4 +1,4 @@
-"""Unit tests for :func:`enrich_malware_report`."""
+"""Unit tests for :func:`enrich_malware_report`, driven by declared sources."""
 
 from __future__ import annotations
 
@@ -9,35 +9,27 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
+from maljan.enrichment.declared import (
+    EnrichmentSource,
+    ReadySource,
+    annotate_age,
+    effective_sources,
+    is_malicious,
+)
 from maljan.enrichment.orchestrator import (
-    _annotate_reputation_age,
     _has_successful_rep,
     _is_public_ip,
-    _reputation_is_malicious,
     enrich_malware_report,
 )
 
 
+def _key(*parts: str) -> str:
+    """A credential-shaped value built at run time."""
+    return "-".join(parts)
+
+
 def _mr(domains: list[dict] | None = None, ips: list[dict] | None = None) -> dict:
-    return {
-        "network": {
-            "domains": domains or [],
-            "ips": ips or [],
-        }
-    }
-
-
-def _vt_mock(domain_rep: dict | None = None, ip_rep: dict | None = None) -> MagicMock:
-    mock = MagicMock()
-    mock.domain_reputation = AsyncMock(return_value=domain_rep)
-    mock.ip_reputation = AsyncMock(return_value=ip_rep)
-    return mock
-
-
-def _abuse_mock(rep: dict | None = None) -> MagicMock:
-    mock = MagicMock()
-    mock.ip_check = AsyncMock(return_value=rep)
-    return mock
+    return {"network": {"domains": domains or [], "ips": ips or []}}
 
 
 def _whois_mock(asn: str | None = None, geo: str | None = None) -> MagicMock:
@@ -47,131 +39,151 @@ def _whois_mock(asn: str | None = None, geo: str | None = None) -> MagicMock:
     return mock
 
 
+def _shipped(key: str, credential: str = "", **changes: Any) -> ReadySource:
+    """A shipped source, unpaced so a test does not sleep, with ``credential``."""
+    source = effective_sources({key: {"rate_limit_seconds": 0.0, **changes}})[key]
+    return ReadySource(key=key, source=source, credential=credential)
+
+
+def _vt_answer(malicious: int = 0, suspicious: int = 0, **attrs: Any) -> dict[str, Any]:
+    return {
+        "data": {
+            "attributes": {
+                "last_analysis_stats": {"malicious": malicious, "suspicious": suspicious},
+                **attrs,
+            }
+        }
+    }
+
+
+class _Wire:
+    """A mock transport that answers by host and records every request."""
+
+    def __init__(self, answers: dict[str, Any]) -> None:
+        self.answers = answers
+        self.requests: list[httpx.Request] = []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        answer = self.answers.get(request.url.host)
+        if isinstance(answer, httpx.Response):
+            return answer
+        if answer is None:
+            return httpx.Response(404)
+        return httpx.Response(200, json=answer)
+
+    def client(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(transport=httpx.MockTransport(self))
+
+
+VT_HOST = "www.virustotal.com"
+ABUSE_HOST = "api.abuseipdb.com"
+
+
 class TestNoNetwork:
     @pytest.mark.asyncio
     async def test_empty_report_skipped(self) -> None:
         mr = {"network": {}}
-        out = await enrich_malware_report(mr, vt_api_key="x", abuseipdb_api_key="y")
+        out = await enrich_malware_report(mr, sources=[_shipped("virustotal", _key("k"))])
         assert out == mr  # unchanged
 
     @pytest.mark.asyncio
     async def test_missing_network_key(self) -> None:
         mr: dict[str, Any] = {}
-        out = await enrich_malware_report(mr, vt_api_key="x", abuseipdb_api_key="y")
+        out = await enrich_malware_report(mr, sources=[_shipped("virustotal", _key("k"))])
         assert out is mr
 
 
 class TestDomainEnrichment:
     @pytest.mark.asyncio
-    async def test_vt_populates_reputation(self) -> None:
+    async def test_a_source_populates_reputation(self) -> None:
         mr = _mr(domains=[{"fqdn": "evil.com"}])
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={}))
-        ) as http:
-            with patch(
-                "maljan.enrichment.orchestrator.VirusTotalClient",
-                return_value=_vt_mock(domain_rep={"source": "virustotal", "malicious": 7}),
-            ):
-                out = await enrich_malware_report(
-                    mr,
-                    vt_api_key="key",
-                    abuseipdb_api_key=None,
-                    http_client=http,
-                )
+        wire = _Wire({VT_HOST: _vt_answer(malicious=7)})
+        async with wire.client() as http:
+            out = await enrich_malware_report(
+                mr, sources=[_shipped("virustotal", _key("vt", "k"))], http_client=http
+            )
         assert out["network"]["domains"][0]["reputation"]["malicious"] == 7
 
     @pytest.mark.asyncio
     async def test_skips_already_populated(self) -> None:
         mr = _mr(domains=[{"fqdn": "evil.com", "reputation": {"source": "preset"}}])
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={}))
-        ) as http:
-            vt = _vt_mock(domain_rep={"source": "virustotal", "malicious": 99})
-            with patch("maljan.enrichment.orchestrator.VirusTotalClient", return_value=vt):
-                await enrich_malware_report(
-                    mr,
-                    vt_api_key="key",
-                    abuseipdb_api_key=None,
-                    http_client=http,
-                )
+        wire = _Wire({VT_HOST: _vt_answer(malicious=99)})
+        async with wire.client() as http:
+            await enrich_malware_report(
+                mr, sources=[_shipped("virustotal", _key("vt", "k"))], http_client=http
+            )
         assert mr["network"]["domains"][0]["reputation"]["source"] == "preset"
-        vt.domain_reputation.assert_not_awaited()
+        assert wire.requests == []
 
     @pytest.mark.asyncio
-    async def test_no_vt_key_leaves_reputation_null(self) -> None:
+    async def test_no_credential_leaves_reputation_null(self) -> None:
         mr = _mr(domains=[{"fqdn": "evil.com"}])
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={}))
-        ) as http:
+        wire = _Wire({VT_HOST: _vt_answer(malicious=7)})
+        async with wire.client() as http:
             out = await enrich_malware_report(
-                mr,
-                vt_api_key=None,
-                abuseipdb_api_key=None,
-                http_client=http,
+                mr, sources=[_shipped("virustotal", "")], http_client=http
             )
         assert out["network"]["domains"][0].get("reputation") is None
+        assert wire.requests == []
+
+    @pytest.mark.asyncio
+    async def test_a_disabled_source_is_not_asked(self) -> None:
+        mr = _mr(domains=[{"fqdn": "evil.com"}])
+        wire = _Wire({VT_HOST: _vt_answer(malicious=7)})
+        async with wire.client() as http:
+            await enrich_malware_report(
+                mr,
+                sources=[_shipped("virustotal", _key("vt", "k"), enabled=False)],
+                http_client=http,
+            )
+        assert wire.requests == []
 
     @pytest.mark.asyncio
     async def test_cap_limits_lookups(self) -> None:
         mr = _mr(domains=[{"fqdn": f"d{i}.com"} for i in range(50)])
-        vt = _vt_mock(domain_rep={"source": "virustotal"})
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={}))
-        ) as http:
-            with patch("maljan.enrichment.orchestrator.VirusTotalClient", return_value=vt):
-                await enrich_malware_report(
-                    mr,
-                    vt_api_key="key",
-                    abuseipdb_api_key=None,
-                    http_client=http,
-                    max_lookups_per_kind=5,
-                )
-        assert vt.domain_reputation.await_count == 5
+        wire = _Wire({VT_HOST: _vt_answer()})
+        async with wire.client() as http:
+            await enrich_malware_report(
+                mr,
+                sources=[_shipped("virustotal", _key("vt", "k"))],
+                http_client=http,
+                max_lookups_per_kind=5,
+            )
+        assert len(wire.requests) == 5
 
 
 class TestIPEnrichment:
     @pytest.mark.asyncio
-    async def test_falls_back_to_abuse_when_vt_returns_none(self) -> None:
+    async def test_falls_back_to_the_next_source_when_the_first_has_nothing(self) -> None:
         mr = _mr(ips=[{"address": "1.2.3.4"}])
-        vt = _vt_mock(ip_rep=None)
-        abuse = _abuse_mock(rep={"source": "abuseipdb", "abuse_confidence": 65})
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={}))
-        ) as http:
-            with (
-                patch("maljan.enrichment.orchestrator.VirusTotalClient", return_value=vt),
-                patch("maljan.enrichment.orchestrator.AbuseIPDBClient", return_value=abuse),
-                patch(
-                    "maljan.enrichment.orchestrator.WhoisClient",
-                    return_value=_whois_mock(),
-                ),
-            ):
+        wire = _Wire({VT_HOST: None, ABUSE_HOST: {"data": {"abuseConfidenceScore": 65}}})
+        async with wire.client() as http:
+            with patch("maljan.enrichment.orchestrator.WhoisClient", return_value=_whois_mock()):
                 out = await enrich_malware_report(
                     mr,
-                    vt_api_key="k1",
-                    abuseipdb_api_key="k2",
+                    sources=[
+                        _shipped("abuseipdb", _key("ab", "k")),
+                        _shipped("virustotal", _key("vt", "k")),
+                    ],
                     http_client=http,
                 )
         rep = out["network"]["ips"][0].get("reputation")
         assert rep is not None
         assert rep["source"] == "abuseipdb"
+        # Asked in the declared order, whatever order the list came in.
+        assert [r.url.host for r in wire.requests] == [VT_HOST, ABUSE_HOST]
 
     @pytest.mark.asyncio
     async def test_asn_and_geo_populated(self) -> None:
         mr = _mr(ips=[{"address": "8.8.8.8"}])
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={}))
-        ) as http:
+        wire = _Wire({})
+        async with wire.client() as http:
             with patch(
                 "maljan.enrichment.orchestrator.WhoisClient",
                 return_value=_whois_mock(asn="AS15169 GOOGLE", geo="US"),
             ):
-                await enrich_malware_report(
-                    mr,
-                    vt_api_key=None,
-                    abuseipdb_api_key=None,
-                    http_client=http,
-                )
+                await enrich_malware_report(mr, http_client=http)
         ip = mr["network"]["ips"][0]
         assert ip["asn"] == "AS15169 GOOGLE"
         assert ip["geo"] == "US"
@@ -191,25 +203,26 @@ class TestReputationHelpers:
         assert _is_public_ip("169.254.1.1") is False
         assert _is_public_ip("not-an-ip") is False
 
-    def test_reputation_is_malicious(self) -> None:
-        assert _reputation_is_malicious({"source": "virustotal", "malicious": 3}) is True
-        assert _reputation_is_malicious({"source": "virustotal", "malicious": 0}) is False
-        assert _reputation_is_malicious({"source": "abuseipdb", "abuse_confidence": 80}) is True
-        assert _reputation_is_malicious({"source": "abuseipdb", "abuse_confidence": 10}) is False
+    def test_a_record_is_malicious_by_its_source_s_thresholds(self) -> None:
+        vt = effective_sources({})["virustotal"]
+        abuse = effective_sources({})["abuseipdb"]
+        assert is_malicious({"source": "virustotal", "malicious": 3}, vt) is True
+        assert is_malicious({"source": "virustotal", "malicious": 0}, vt) is False
+        assert is_malicious({"source": "virustotal", "suspicious": 3}, vt) is True
+        assert is_malicious({"source": "abuseipdb", "abuse_confidence": 80}, abuse) is True
+        assert is_malicious({"source": "abuseipdb", "abuse_confidence": 10}, abuse) is False
         # Stale reputation never drives a verdict.
-        assert (
-            _reputation_is_malicious({"source": "virustotal", "malicious": 9, "stale": True})
-            is False
-        )
+        assert is_malicious({"source": "virustotal", "malicious": 9, "stale": True}, vt) is False
 
     def test_annotate_age_marks_stale(self) -> None:
+        vt = effective_sources({})["virustotal"]
         old = {"source": "virustotal", "last_analysis_date_unix": 1_000_000_000}  # 2001
-        _annotate_reputation_age(old)
+        annotate_age(old, vt)
         assert old.get("stale") is True
         assert old["age_days"] > 90
 
         fresh = {"source": "virustotal", "last_analysis_date_unix": int(time.time()) - 100}
-        _annotate_reputation_age(fresh)
+        annotate_age(fresh, vt)
         assert fresh.get("stale") is None
         assert fresh["age_days"] >= 0
 
@@ -218,73 +231,56 @@ class TestSignalQualityFeedback:
     @pytest.mark.asyncio
     async def test_private_ip_skipped_no_lookup(self) -> None:
         mr = _mr(ips=[{"address": "10.0.0.5"}])
-        vt = _vt_mock(ip_rep={"source": "virustotal", "malicious": 5})
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={}))
-        ) as http:
-            with (
-                patch("maljan.enrichment.orchestrator.VirusTotalClient", return_value=vt),
-                patch("maljan.enrichment.orchestrator.WhoisClient", return_value=_whois_mock()),
-            ):
+        wire = _Wire({VT_HOST: _vt_answer(malicious=5)})
+        async with wire.client() as http:
+            with patch("maljan.enrichment.orchestrator.WhoisClient", return_value=_whois_mock()):
                 await enrich_malware_report(
-                    mr, vt_api_key="k", abuseipdb_api_key=None, http_client=http
+                    mr, sources=[_shipped("virustotal", _key("k"))], http_client=http
                 )
-        vt.ip_reputation.assert_not_awaited()
+        assert wire.requests == []
         assert mr["network"]["ips"][0].get("reputation") is None
 
     @pytest.mark.asyncio
     async def test_private_fqdn_skipped_no_lookup(self) -> None:
         mr = _mr(domains=[{"fqdn": "build.corp.internal"}])
-        vt = _vt_mock(domain_rep={"source": "virustotal", "malicious": 5})
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={}))
-        ) as http:
-            with patch("maljan.enrichment.orchestrator.VirusTotalClient", return_value=vt):
-                await enrich_malware_report(
-                    mr, vt_api_key="k", abuseipdb_api_key=None, http_client=http
-                )
-        vt.domain_reputation.assert_not_awaited()
+        wire = _Wire({VT_HOST: _vt_answer(malicious=5)})
+        async with wire.client() as http:
+            await enrich_malware_report(
+                mr, sources=[_shipped("virustotal", _key("k"))], http_client=http
+            )
+        assert wire.requests == []
         assert mr["network"]["domains"][0].get("reputation") is None
 
     @pytest.mark.asyncio
     async def test_a_name_found_only_in_the_byte_image_is_not_looked_up(self) -> None:
         """One PE's string sweep spent 452 s of reputation budget on fragments."""
         mr = _mr(domains=[{"fqdn": "rosoft.com", "source": "strings"}])
-        vt = _vt_mock(domain_rep={"source": "virustotal", "malicious": 5})
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={}))
-        ) as http:
-            with patch("maljan.enrichment.orchestrator.VirusTotalClient", return_value=vt):
-                await enrich_malware_report(
-                    mr, vt_api_key="k", abuseipdb_api_key=None, http_client=http
-                )
-        vt.domain_reputation.assert_not_awaited()
+        wire = _Wire({VT_HOST: _vt_answer(malicious=5)})
+        async with wire.client() as http:
+            await enrich_malware_report(
+                mr, sources=[_shipped("virustotal", _key("k"))], http_client=http
+            )
+        assert wire.requests == []
         assert mr["network"]["domains"][0].get("reputation") is None
 
     @pytest.mark.asyncio
     async def test_a_name_the_sandbox_resolved_is_looked_up(self) -> None:
         mr = _mr(domains=[{"fqdn": "evil.com", "source": "sandbox"}])
-        vt = _vt_mock(domain_rep={"source": "virustotal", "malicious": 5})
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={}))
-        ) as http:
-            with patch("maljan.enrichment.orchestrator.VirusTotalClient", return_value=vt):
-                await enrich_malware_report(
-                    mr, vt_api_key="k", abuseipdb_api_key=None, http_client=http
-                )
-        vt.domain_reputation.assert_awaited_once()
+        wire = _Wire({VT_HOST: _vt_answer(malicious=5)})
+        async with wire.client() as http:
+            await enrich_malware_report(
+                mr, sources=[_shipped("virustotal", _key("k"))], http_client=http
+            )
+        assert len(wire.requests) == 1
 
     @pytest.mark.asyncio
     async def test_malicious_reputation_sets_is_suspicious(self) -> None:
         mr = _mr(domains=[{"fqdn": "evil.com", "is_suspicious": False}])
-        vt = _vt_mock(domain_rep={"source": "virustotal", "malicious": 8})
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={}))
-        ) as http:
-            with patch("maljan.enrichment.orchestrator.VirusTotalClient", return_value=vt):
-                await enrich_malware_report(
-                    mr, vt_api_key="k", abuseipdb_api_key=None, http_client=http
-                )
+        wire = _Wire({VT_HOST: _vt_answer(malicious=8)})
+        async with wire.client() as http:
+            await enrich_malware_report(
+                mr, sources=[_shipped("virustotal", _key("k"))], http_client=http
+            )
         assert mr["network"]["domains"][0]["is_suspicious"] is True
 
 
@@ -303,21 +299,12 @@ class _AttribStore:
 class TestAttribution:
     @pytest.mark.asyncio
     async def test_memory_store_none_is_default_and_noop(self) -> None:
-        """Backward-compat: callers that don't pass memory_store still work."""
+        """Callers that don't pass memory_store still work."""
         mr = _mr(ips=[{"address": "1.2.3.4"}])
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={}))
-        ) as http:
-            with patch(
-                "maljan.enrichment.orchestrator.WhoisClient",
-                return_value=_whois_mock(),
-            ):
-                out = await enrich_malware_report(
-                    mr,
-                    vt_api_key=None,
-                    abuseipdb_api_key=None,
-                    http_client=http,
-                )
+        wire = _Wire({})
+        async with wire.client() as http:
+            with patch("maljan.enrichment.orchestrator.WhoisClient", return_value=_whois_mock()):
+                out = await enrich_malware_report(mr, http_client=http)
         # No attribution block injected when no store was provided.
         assert "attribution" not in out or not out.get("attribution", {}).get("similar_samples")
 
@@ -349,8 +336,6 @@ class TestAttribution:
         }
         out = await enrich_malware_report(
             mr,
-            vt_api_key=None,
-            abuseipdb_api_key=None,
             memory_store=store,  # type: ignore[arg-type]
             similar_top_k=2,
         )
@@ -382,10 +367,9 @@ class TestAttribution:
             # No network block → orchestrator short-circuits BEFORE reputation
             # lookups, but attribution must still run.
         }
-        out = await enrich_malware_report(
-            mr,
-            vt_api_key=None,
-            abuseipdb_api_key=None,
-            memory_store=store,  # type: ignore[arg-type]
-        )
+        out = await enrich_malware_report(mr, memory_store=store)  # type: ignore[arg-type]
         assert len(out["attribution"]["similar_samples"]) == 1
+
+
+def test_a_source_validates_as_its_own_model() -> None:
+    assert isinstance(effective_sources({})["virustotal"], EnrichmentSource)

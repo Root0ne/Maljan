@@ -160,6 +160,7 @@ const SERVER_FIELDS = [
   "auto_name_prefixes",
   "reference_urls",
   "tool_facts",
+  "credential_bootstrap",
 ] as const;
 
 function hasToken(v: unknown): boolean {

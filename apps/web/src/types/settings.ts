@@ -160,6 +160,20 @@ export interface McpServerEntry {
   auto_name_prefixes?: string[];
   reference_urls?: string[];
   tool_facts?: Record<string, ToolFactsEntry>;
+  /** How the server's credential is obtained by one request, or null when its
+   *  token is typed in (`core.tool_declarations.CredentialBootstrap`). */
+  credential_bootstrap?: CredentialBootstrapEntry | null;
+}
+
+/** A server's declared credential bootstrap, as the API stores it. */
+export interface CredentialBootstrapEntry {
+  url: string;
+  body?: Record<string, unknown>;
+  token_json_path: string;
+  token_prefix?: string;
+  family?: string;
+  facts?: Record<string, string>;
+  note?: string;
 }
 
 /** Which of a server's tools opens a sample, and which select and analyse it. */
@@ -374,6 +388,35 @@ export interface SettingsSchema {
   groups: SettingsGroup[];
   /** The label of every connection test the API answers, by probe id. */
   probe_labels?: Record<string, string>;
+  /** Every post-verdict enrichment source in force, in its declared order. */
+  enrichment_sources?: EnrichmentSourceFacts[];
+  /** Every tool server in force that declares how its credential is
+   *  obtained, by key. */
+  credential_servers?: Record<string, CredentialServerFacts>;
+}
+
+/** What the schema says about one enrichment source; never a credential. */
+export interface EnrichmentSourceFacts {
+  key: string;
+  label: string;
+  kinds: string[];
+  enabled: boolean;
+  /** The catalog key holding its credential, or null when it holds its own
+   *  (`own_credential`) or needs none. */
+  credential_key: string | null;
+  own_credential: boolean;
+  server: string | null;
+  /** For a server source, whether its server is enabled; null otherwise. */
+  server_enabled?: boolean | null;
+  /** Whether it declares a connection test, run under its key. */
+  probe: boolean;
+}
+
+/** What the schema says about a server whose credential can be obtained. */
+export interface CredentialServerFacts {
+  label: string;
+  family: string;
+  note: string;
 }
 
 export interface SettingValue {
@@ -512,18 +555,17 @@ export function unavailableTools(result: ProbeResult | null | undefined): Capabi
   return cells.filter((cell) => cell && cell.available === false);
 }
 
-/** What `POST /settings/virustotal/register` answers with. The token never
- *  appears: `auth_token` is the same mask a stored server credential shows,
- *  and the agent id and public handle are VirusTotal's own names for this
- *  deployment. */
-export interface VirustotalRegistration {
+/** What `POST /settings/servers/{key}/credential` answers with. The token
+ *  never appears: `auth_token` is the same mask a stored server credential
+ *  shows, and `facts` are the answer's values the server's declaration names
+ *  (the service's own names for this deployment). */
+export interface CredentialBootstrapResult {
   server: string;
   enabled: boolean;
   transport: string;
   url: string;
   auth_token: string;
-  agent_id: string;
-  public_handle: string;
+  facts: Record<string, string>;
   tools: string[] | null;
 }
 

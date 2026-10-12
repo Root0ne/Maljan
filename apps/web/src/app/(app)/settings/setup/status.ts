@@ -114,12 +114,41 @@ function memoryStatus(effective: EffectiveValue, choiceLabel?: ChoiceLabel): str
   return `${name} · ${text(url) || "no URL set"}`;
 }
 
-function enrichmentStatus(effective: EffectiveValue, isSet: IsSet): string {
+/** The mask the API shows in place of a stored credential. */
+const STORED_MASK = "**********";
+
+/** The labels of the enabled enrichment sources that hold what they need to
+ *  be asked: their server enabled for a server source, the credential setting
+ *  they name stored, their own key stored
+ *  in the source map, or no key needed at all. */
+export function readyEnrichmentSources(
+  effective: EffectiveValue,
+  isSet: IsSet,
+  schema?: SettingsSchema | null
+): string[] {
+  const own = record(effective("api.enrichment_sources")) as Record<string, { api_key?: unknown }>;
+  return (schema?.enrichment_sources ?? [])
+    .filter((source) => source.enabled)
+    .filter((source) =>
+      source.server
+        ? source.server_enabled === true
+        : source.credential_key
+          ? isSet(source.credential_key)
+          : source.own_credential
+            ? own[source.key]?.api_key === STORED_MASK
+            : true
+    )
+    .map((source) => source.label || source.key);
+}
+
+function enrichmentStatus(
+  effective: EffectiveValue,
+  isSet: IsSet,
+  schema?: SettingsSchema | null
+): string {
   if (effective("api.enrichment_enabled") !== true) return "Off";
-  const keys: string[] = [];
-  if (isSet("api.virustotal_api_key")) keys.push("VirusTotal");
-  if (isSet("api.abuseipdb_api_key")) keys.push("AbuseIPDB");
-  return `On · ${keys.length > 0 ? keys.join(", ") : "no keys set"}`;
+  const ready = readyEnrichmentSources(effective, isSet, schema);
+  return `On · ${ready.length > 0 ? ready.join(", ") : "no keys set"}`;
 }
 
 /** The hub's one-line summary of what a guide's settings currently say. */
@@ -148,6 +177,6 @@ export function guideStatus(
     case "memory":
       return memoryStatus(effective, choiceLabel);
     case "enrichment":
-      return enrichmentStatus(effective, isSet);
+      return enrichmentStatus(effective, isSet, schema);
   }
 }

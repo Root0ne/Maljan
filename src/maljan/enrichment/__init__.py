@@ -2,33 +2,38 @@
 
 The pipeline emits a ``MalwareReport`` whose ``network.domains`` and
 ``network.ips`` carry ``reputation=None``. The enrichment package fills
-those slots by querying external CTI providers (VirusTotal, AbuseIPDB)
-and WHOIS/GeoIP. It runs as an ARQ background task so the verdict
-latency stays unaffected.
+those slots by asking the declared enrichment sources
+(:mod:`maljan.enrichment.declared`; the shipped ones in
+:mod:`maljan.enrichment.builtin_sources`) and WHOIS/GeoIP. It runs as an ARQ
+background task so the verdict latency stays unaffected.
 
 Public surface:
   - :func:`enrich_malware_report` — orchestrator, accepts dict, returns dict.
-  - :class:`VirusTotalClient`, :class:`AbuseIPDBClient`, :class:`WhoisClient` —
-    provider clients. Each one returns ``None`` on error so the caller
-    can degrade gracefully.
+  - :class:`EnrichmentSource`, :class:`ReadySource`, :func:`effective_sources` —
+    the declarations and the sources in force.
+  - :class:`WhoisClient` — the ASN/GeoIP client.
 
-Every provider is **fail-safe by design**: missing API keys, HTTP errors,
-rate-limit responses and SSRF attempts all degrade to ``None`` with a
-single warning log.
+Every source is **fail-safe by design**: a missing credential, HTTP errors,
+rate-limit responses and requests leaving the declared host all degrade to
+no record with a single warning log.
 """
 
 from __future__ import annotations
 
-from maljan.enrichment.abuseipdb_client import AbuseIPDBClient
+from maljan.enrichment.declared import (
+    EnrichmentSource,
+    ReadySource,
+    effective_sources,
+)
 from maljan.enrichment.orchestrator import enrich_malware_report
-from maljan.enrichment.virustotal_client import VirusTotalClient
 from maljan.enrichment.whois_client import WhoisClient
 from maljan.extractors.attribution import populate_similar_samples
 
 __all__ = [
-    "AbuseIPDBClient",
-    "VirusTotalClient",
+    "EnrichmentSource",
+    "ReadySource",
     "WhoisClient",
+    "effective_sources",
     "enrich_malware_report",
     "populate_similar_samples",
 ]

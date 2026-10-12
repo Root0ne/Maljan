@@ -11,6 +11,7 @@ import { ApiError } from "@/lib/errors";
 import { SettingsValidationError } from "@/types/settings";
 import type {
   ContextWindow,
+  CredentialBootstrapResult,
   EffortOptions,
   ImportRequest,
   MappingPreview,
@@ -19,7 +20,6 @@ import type {
   SettingsSchema,
   SettingsValues,
   TeamLintResult,
-  VirustotalRegistration,
 } from "@/types/settings";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -193,8 +193,18 @@ export interface SystemStatusDTO {
    *  absent, `unknown` when the queue could not be read. Absent from an API
    *  older than the field. */
   enrichment_worker?: string;
-  has_virustotal_key: boolean;
-  has_abuseipdb_key: boolean;
+  /** How many enrichment sources are configured; absent when unknown. */
+  enrichment_configured?: number;
+  /** Every enrichment source in force, in the order they are asked, and
+   *  whether each is configured. Signed-in callers only; absent otherwise, or
+   *  when the sources could not be read. */
+  enrichment_sources?: EnrichmentSourceStatusDTO[];
+}
+
+export interface EnrichmentSourceStatusDTO {
+  key: string;
+  label: string;
+  configured: boolean;
 }
 
 export interface AuditLogDTO {
@@ -359,8 +369,8 @@ const _SYSTEM_STATUS_SCHEMA: Record<string, ExpectedShape> = {
   // Optional: an API older than the field answers without it, and the console
   // draws nothing rather than warning about a shape nobody broke.
   enrichment_worker: "string?",
-  has_virustotal_key: "boolean",
-  has_abuseipdb_key: "boolean",
+  enrichment_configured: "number?",
+  enrichment_sources: "array?",
 };
 
 /* ── API Client ───────────────────────────────────────── */
@@ -673,16 +683,19 @@ class ApiClient {
   }
 
   /**
-   * Register this deployment with VirusTotal and store the agent token.
+   * Obtain tool server `server`'s credential by the request it declares, and
+   * store it.
    *
-   * Takes nothing: the agent family and version are constants of the build,
-   * and the token the call returns is stored server-side, encrypted, and
-   * never sent to the browser. What comes back is the server's new state.
+   * Takes nothing but the server's key: the address and the body are the
+   * server's declaration, and the credential the call returns is stored
+   * server-side, encrypted, and never sent to the browser. What comes back is
+   * the server's new state.
    */
-  registerVirustotal() {
-    return this.request<VirustotalRegistration>("/api/v1/settings/virustotal/register", {
-      method: "POST",
-    });
+  obtainServerCredential(server: string) {
+    return this.request<CredentialBootstrapResult>(
+      `/api/v1/settings/servers/${encodeURIComponent(server)}/credential`,
+      { method: "POST" }
+    );
   }
 
   /** Resolve one agent definition, staged values included. Spends no tokens. */

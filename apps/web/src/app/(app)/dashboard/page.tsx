@@ -182,7 +182,10 @@ export default function DashboardPage() {
 
   const verdictColors = verdictData.map((d) => verdictTone(d.name).fill);
 
-  const enrichment = enrichmentWorkerNotice(systemStatus?.enrichment_worker);
+  const enrichment = enrichmentWorkerNotice(
+    systemStatus?.enrichment_worker,
+    systemStatus?.enrichment_sources ?? [],
+  );
   const bars = toolBars(toolUsage);
 
   return (

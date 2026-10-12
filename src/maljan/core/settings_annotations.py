@@ -1579,6 +1579,14 @@ DECLARATION_LEAVES: tuple[tuple[str, str, str], ...] = (
         "(rows, places, values, techniques, reputation), as JSON. See the configuration "
         "guide's tool declarations section for every field.",
     ),
+    (
+        "credential_bootstrap",
+        "credential bootstrap",
+        "How the server's credential is obtained by one request, as JSON: an https url, "
+        "the JSON body posted (every {family} replaced by family), token_json_path (where "
+        "the token sits in the answer), token_prefix, facts (the answer's other values "
+        "shown to the operator, by path) and note. Empty when the token is typed in.",
+    ),
 )
 
 
@@ -1591,12 +1599,12 @@ def mcp_server_annotations(
     order: int = 0,
     provider_owned: bool = False,
 ) -> dict[str, Annotation]:
-    """The thirty-four leaves of an ``MCPServerConfig`` block, described for ``label``.
+    """The thirty-five leaves of an ``MCPServerConfig`` block, described for ``label``.
 
     Every MCP server in the settings has the same nine transport/tool-selection
     knobs, plus six tool-server fields (``cwd``, ``env_allow``, ``tools``,
     ``agents``, ``label``, ``call_timeout_seconds``), the seven of
-    ``sample_open`` and the twelve other declaration fields
+    ``sample_open`` and the thirteen other declaration fields
     (``DECLARATION_LEAVES``); writing them out six times invites drift between
     blocks that must behave identically. The per-field wording is fixed, the
     server's name is the only variable.
@@ -1757,6 +1765,13 @@ def mcp_server_annotations(
         )
 
     if provider_owned:
+        # Only a tool server of ``mcp.servers`` has the route that performs a
+        # bootstrap; on a provider's block the field is refused on save.
+        entries[f"{prefix}.credential_bootstrap"] = owned_ann(
+            f"{label} credential bootstrap",
+            f"Refused: {label} is a provider-owned server; a credential bootstrap is "
+            "declared on a tool server of mcp.servers, whose route performs it.",
+        )
         entries[f"{prefix}.tools"] = owned_ann(
             f"{label} tool allow-list",
             f"Ignored: {label} is a provider-owned server and computes its own tool exposure.",

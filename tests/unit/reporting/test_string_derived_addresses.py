@@ -283,18 +283,18 @@ class TestWhatIsSentToAProvider:
         import asyncio
         from unittest.mock import AsyncMock, MagicMock
 
+        from maljan.enrichment.declared import ReadySource, effective_sources
         from maljan.enrichment.orchestrator import _enrich_ips
 
-        vt = MagicMock()
-        vt.ip_reputation = AsyncMock(return_value=None)
-        abuse = MagicMock()
-        abuse.ip_check = AsyncMock(return_value=None)
+        asker = MagicMock()
+        asker.ask = AsyncMock(return_value=None)
         whois = MagicMock()
         whois.asn_lookup = AsyncMock(return_value=None)
         whois.geoip = MagicMock(return_value=None)
+        source = ReadySource(key="virustotal", source=effective_sources({})["virustotal"])
 
-        asyncio.run(_enrich_ips(ips, vt=vt, abuse=abuse, whois=whois, cap=25))
-        return [call.args[0] for call in vt.ip_reputation.await_args_list]
+        asyncio.run(_enrich_ips(ips, sources=[source], asker=asker, whois=whois, cap=25))
+        return [call.args[2] for call in asker.ask.await_args_list]
 
     def test_a_string_derived_address_costs_no_lookup(self) -> None:
         asked = self._asked(

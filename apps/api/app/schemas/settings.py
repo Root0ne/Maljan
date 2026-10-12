@@ -59,6 +59,14 @@ class SchemaResponse(BaseModel):
     # The label of every connection test the API answers, by probe id: the
     # providers' own declarations and the API's own probes.
     probe_labels: dict[str, str] = Field(default_factory=dict)
+    # Every post-verdict enrichment source in force, in its declared order:
+    # key, label, the indicator kinds it answers, whether it is enabled, the
+    # catalog key holding its credential (or whether it holds its own), its
+    # server for a server source, and whether it declares a connection test.
+    enrichment_sources: list[dict[str, Any]] = Field(default_factory=list)
+    # Every tool server in force that declares ``credential_bootstrap``, by
+    # key: its label, the family it registers under and its operator note.
+    credential_servers: dict[str, dict[str, str]] = Field(default_factory=dict)
 
 
 class ValueDTO(BaseModel):
@@ -180,14 +188,14 @@ class EffortOptionsResponse(BaseModel):
     global_value: str | None = None
 
 
-class VirustotalRegisterResponse(BaseModel):
-    """The VirusTotal server as it stands after a registration.
+class CredentialBootstrapResponse(BaseModel):
+    """A tool server as it stands after its credential was obtained.
 
     The token is never part of it: ``auth_token`` carries the same mask the
     server map shows for a stored credential, so the console can render "set
-    from the UI" without the value ever reaching a browser. The agent id and
-    the public handle are VirusTotal's own names for this deployment, which is
-    what an operator matches against their VirusTotal account.
+    from the UI" without the value ever reaching a browser. ``facts`` are the
+    answer's values the server's declaration names (an id, a handle): what an
+    operator matches against the service's own listing of this deployment.
     """
 
     server: str
@@ -195,8 +203,7 @@ class VirustotalRegisterResponse(BaseModel):
     transport: str
     url: str
     auth_token: str
-    agent_id: str
-    public_handle: str
+    facts: dict[str, str] = Field(default_factory=dict)
     tools: list[str] | None = None
 
 

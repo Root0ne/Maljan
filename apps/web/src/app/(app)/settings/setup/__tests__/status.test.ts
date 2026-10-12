@@ -189,8 +189,63 @@ describe("guideStatus", () => {
       "api.virustotal_api_key",
       "api.abuseipdb_api_key",
     ]);
-    expect(guideStatus("enrichment", onKeys.effective, onKeys.isSet)).toBe(
-      "On · VirusTotal, AbuseIPDB"
+    expect(
+      guideStatus("enrichment", onKeys.effective, onKeys.isSet, undefined, SCHEMA)
+    ).toBe("On · VirusTotal, AbuseIPDB");
+  });
+
+  it("names a server source only while its server is enabled", () => {
+    const serverSource = (enabled: boolean): SettingsSchema => ({
+      ...SCHEMA,
+      enrichment_sources: [
+        {
+          key: "intel",
+          label: "Intel server",
+          kinds: ["ip"],
+          enabled: true,
+          credential_key: null,
+          own_credential: false,
+          server: "intelsrv",
+          server_enabled: enabled,
+          probe: false,
+        },
+      ],
+    });
+    const on = ctx({ "api.enrichment_enabled": true });
+    expect(guideStatus("enrichment", on.effective, on.isSet, undefined, serverSource(true))).toBe(
+      "On · Intel server"
+    );
+    expect(guideStatus("enrichment", on.effective, on.isSet, undefined, serverSource(false))).toBe(
+      "On · no keys set"
+    );
+  });
+
+  it("names a source declared only as data once its own key is stored", () => {
+    const schema: SettingsSchema = {
+      ...SCHEMA,
+      enrichment_sources: [
+        ...(SCHEMA.enrichment_sources ?? []),
+        {
+          key: "domainrep",
+          label: "Domain reputation",
+          kinds: ["domain"],
+          enabled: true,
+          credential_key: null,
+          own_credential: true,
+          server: null,
+          probe: true,
+        },
+      ],
+    };
+    const stored = ctx(
+      {
+        "api.enrichment_enabled": true,
+        "api.enrichment_sources": { domainrep: { api_key: "**********" } },
+      },
+      ["api.virustotal_api_key"]
+    );
+    expect(guideStatus("enrichment", stored.effective, stored.isSet, undefined, schema)).toBe(
+      "On · VirusTotal, Domain reputation"
     );
   });
 });

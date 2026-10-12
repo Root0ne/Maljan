@@ -1,4 +1,40 @@
 {
+ "credential_servers": {
+  "virustotal": {
+   "family": "vt-mcp-maljan",
+   "label": "VirusTotal MCP",
+   "note": "The agent token is free and is issued to this deployment without an account. VirusTotal enforces its own published quotas on it; a lookup over quota comes back as a 429 with a retry delay, and the analyst carries on without that answer. Only the read-only lookups are ticked. The submit tools upload the sample itself to VirusTotal, where it is shared with their customers, so they stay off until you tick them in the Tools step."
+  }
+ },
+ "enrichment_sources": [
+  {
+   "credential_key": "api.virustotal_api_key",
+   "enabled": true,
+   "key": "virustotal",
+   "kinds": [
+    "domain",
+    "ip"
+   ],
+   "label": "VirusTotal",
+   "own_credential": false,
+   "probe": true,
+   "server": null,
+   "server_enabled": null
+  },
+  {
+   "credential_key": "api.abuseipdb_api_key",
+   "enabled": true,
+   "key": "abuseipdb",
+   "kinds": [
+    "ip"
+   ],
+   "label": "AbuseIPDB",
+   "own_credential": false,
+   "probe": true,
+   "server": null,
+   "server_enabled": null
+  }
+ ],
  "groups": [
   {
    "entries": [
@@ -2422,6 +2458,39 @@
      "advanced": false,
      "applies": "next_job",
      "applies_when": {
+      "core.static.provider": []
+     },
+     "builtin_servers": null,
+     "capability_servers": null,
+     "choice_descriptions": null,
+     "choice_facts": null,
+     "choice_labels": null,
+     "choice_titles": null,
+     "choices": null,
+     "choices_from": null,
+     "editable": true,
+     "editor": null,
+     "group": "static",
+     "key": "core.static.ghidra.credential_bootstrap",
+     "maximum": null,
+     "minimum": null,
+     "namespace": "core",
+     "nullable": true,
+     "order": 0,
+     "path": "static.ghidra.credential_bootstrap",
+     "probe": null,
+     "reason": null,
+     "required_env": null,
+     "reserved_servers": null,
+     "secret": false,
+     "subgroup": null,
+     "title": "Ghidra MCP credential bootstrap",
+     "type": "json"
+    },
+    {
+     "advanced": false,
+     "applies": "next_job",
+     "applies_when": {
       "core.static.provider": [
        "ghidra"
       ]
@@ -3576,6 +3645,39 @@
      "advanced": false,
      "applies": "next_job",
      "applies_when": {
+      "core.static.provider": []
+     },
+     "builtin_servers": null,
+     "capability_servers": null,
+     "choice_descriptions": null,
+     "choice_facts": null,
+     "choice_labels": null,
+     "choice_titles": null,
+     "choices": null,
+     "choices_from": null,
+     "editable": true,
+     "editor": null,
+     "group": "static",
+     "key": "core.static.r2.credential_bootstrap",
+     "maximum": null,
+     "minimum": null,
+     "namespace": "core",
+     "nullable": true,
+     "order": 0,
+     "path": "static.r2.credential_bootstrap",
+     "probe": null,
+     "reason": null,
+     "required_env": null,
+     "reserved_servers": null,
+     "secret": false,
+     "subgroup": null,
+     "title": "radare2 MCP credential bootstrap",
+     "type": "json"
+    },
+    {
+     "advanced": false,
+     "applies": "next_job",
+     "applies_when": {
       "core.static.provider": [
        "r2"
       ]
@@ -4616,6 +4718,7 @@
         "core.sandbox.cape2.mcp.auto_name_prefixes",
         "core.sandbox.cape2.mcp.call_timeout_seconds",
         "core.sandbox.cape2.mcp.command",
+        "core.sandbox.cape2.mcp.credential_bootstrap",
         "core.sandbox.cape2.mcp.cwd",
         "core.sandbox.cape2.mcp.enabled",
         "core.sandbox.cape2.mcp.env",
@@ -5001,6 +5104,39 @@
      "subgroup": "Connection",
      "title": "CAPE MCP command",
      "type": "str"
+    },
+    {
+     "advanced": false,
+     "applies": "next_job",
+     "applies_when": {
+      "core.sandbox.provider": []
+     },
+     "builtin_servers": null,
+     "capability_servers": null,
+     "choice_descriptions": null,
+     "choice_facts": null,
+     "choice_labels": null,
+     "choice_titles": null,
+     "choices": null,
+     "choices_from": null,
+     "editable": true,
+     "editor": null,
+     "group": "sandbox",
+     "key": "core.sandbox.cape2.mcp.credential_bootstrap",
+     "maximum": null,
+     "minimum": null,
+     "namespace": "core",
+     "nullable": true,
+     "order": 0,
+     "path": "sandbox.cape2.mcp.credential_bootstrap",
+     "probe": null,
+     "reason": null,
+     "required_env": null,
+     "reserved_servers": null,
+     "secret": false,
+     "subgroup": null,
+     "title": "CAPE MCP credential bootstrap",
+     "type": "json"
     },
     {
      "advanced": false,
@@ -10611,6 +10747,37 @@
      "subgroup": null,
      "title": "Max lookups per kind",
      "type": "int"
+    },
+    {
+     "advanced": false,
+     "applies": "live",
+     "applies_when": null,
+     "builtin_servers": null,
+     "capability_servers": null,
+     "choice_descriptions": null,
+     "choice_facts": null,
+     "choice_labels": null,
+     "choice_titles": null,
+     "choices": null,
+     "choices_from": null,
+     "editable": true,
+     "editor": null,
+     "group": "enrichment",
+     "key": "api.enrichment_sources",
+     "maximum": null,
+     "minimum": null,
+     "namespace": "api",
+     "nullable": false,
+     "order": 0,
+     "path": "enrichment_sources",
+     "probe": null,
+     "reason": null,
+     "required_env": null,
+     "reserved_servers": null,
+     "secret": false,
+     "subgroup": null,
+     "title": "Enrichment sources",
+     "type": "dict"
     },
     {
      "advanced": false,

@@ -634,6 +634,87 @@ class ToolFacts(BaseModel):
         return out
 
 
+# The placeholder a bootstrap body names the deployment's family by.
+FAMILY_PLACEHOLDER = "{family}"
+
+
+def _with_family(value: Any, family: str) -> Any:
+    if isinstance(value, str):
+        return value.replace(FAMILY_PLACEHOLDER, family)
+    if isinstance(value, Mapping):
+        return {k: _with_family(v, family) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_with_family(v, family) for v in value]
+    return value
+
+
+class CredentialBootstrap(BaseModel):
+    """How a server's credential is obtained by one request, with no person in between.
+
+    One ``POST`` of ``body`` (JSON, every ``{family}`` replaced by ``family``,
+    the name this deployment registers under) to ``url``, an https URL; the
+    credential is the text at ``token_json_path`` in the JSON answer and must
+    start with ``token_prefix``. ``facts`` name the answer's other values the
+    console shows the operator (an id, a handle), by path; ``note`` is what the
+    operator is told before pressing the button. The URL is the declaration's
+    alone: the route that performs it takes no URL from its caller.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    url: str
+    body: dict[str, Any] = Field(default_factory=dict)
+    token_json_path: str
+    token_prefix: str = ""
+    family: str = ""
+    facts: dict[str, str] = Field(default_factory=dict)
+    note: str = ""
+
+    @field_validator("url")
+    @classmethod
+    def _https_only(cls, value: str) -> str:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(value)
+        if parsed.scheme != "https" or not parsed.hostname:
+            raise ValueError("credential_bootstrap.url must be an https URL naming its host")
+        if "@" in parsed.netloc:
+            raise ValueError("credential_bootstrap.url may not hold a user name or password")
+        return value
+
+    @field_validator("token_json_path")
+    @classmethod
+    def _a_path(cls, value: str) -> str:
+        if not value:
+            raise ValueError("credential_bootstrap.token_json_path names where the token sits")
+        parse_path(value)
+        return value
+
+    @field_validator("facts")
+    @classmethod
+    def _fact_paths(cls, value: dict[str, str]) -> dict[str, str]:
+        for name, path in value.items():
+            _word(name, "credential_bootstrap fact")
+            parse_path(path)
+        return value
+
+    @model_validator(mode="after")
+    def _no_fact_reads_the_token(self) -> CredentialBootstrap:
+        """A fact is shown to the operator and audited, so none may name the token's path."""
+        token = parse_path(self.token_json_path)
+        for name, path in self.facts.items():
+            if parse_path(path) == token:
+                raise ValueError(
+                    f"credential_bootstrap.facts.{name} reads token_json_path; a fact is shown "
+                    "and audited, the token never is"
+                )
+        return self
+
+    def request_body(self) -> dict[str, Any]:
+        """The JSON body sent: ``body`` with the family written in."""
+        return dict(_with_family(self.body, self.family))
+
+
 # The fields of ``MCPServerConfig`` that are its declaration, in the order the
 # docs list them. ``sample_open`` came first (its own model in ``config``).
 DECLARATION_FIELDS: tuple[str, ...] = (
@@ -650,6 +731,7 @@ DECLARATION_FIELDS: tuple[str, ...] = (
     "auto_name_prefixes",
     "reference_urls",
     "tool_facts",
+    "credential_bootstrap",
 )
 # The declaration fields a settings snapshot records only where an operator
 # set them (the shipped values are named by a digest instead).
@@ -808,7 +890,9 @@ def strip_declaration_defaults(dumped: dict[str, Any], default: MCPServerConfig)
 def declaration_digest(cfg: Any) -> str:
     """A short digest of one block's whole declaration, as it is in force."""
     dumped = cfg.model_dump(mode="json") if isinstance(cfg, BaseModel) else dict(cfg)
-    body = {name: dumped.get(name) for name in DECLARATION_FIELDS}
+    # A field a block leaves unset (``None``) is left out, so a field added to
+    # the declaration later moves no digest of a block that does not set it.
+    body = {name: dumped.get(name) for name in DECLARATION_FIELDS if dumped.get(name) is not None}
     text = json.dumps(body, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 

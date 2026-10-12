@@ -12,7 +12,11 @@
  * here, as by the API. Nothing in this file names a tool or a server.
  */
 
-import type { ErrorPatternEntry, ToolFactsEntry } from "@/types/settings";
+import type {
+  CredentialBootstrapEntry,
+  ErrorPatternEntry,
+  ToolFactsEntry,
+} from "@/types/settings";
 
 /** A vocabulary word, as the API checks one: lowercase, a letter first. */
 export const WORD = /^[a-z][a-z0-9_]{0,63}$/;
@@ -154,6 +158,24 @@ export function readToolFacts(
     }
   }
   return ok(parsed.value as Record<string, ToolFactsEntry>);
+}
+
+/** How the server's credential is obtained: a JSON object with an https `url`
+ *  and a `token_json_path`; empty declares none (`null`). The API checks the
+ *  rest of it on save. */
+export function readCredentialBootstrap(text: string): Read<CredentialBootstrapEntry | null> {
+  const parsed = parseJson(text);
+  if (parsed.error !== null) return bad(parsed.error);
+  if (parsed.value === undefined) return ok(null);
+  if (!isObject(parsed.value)) return bad("expected an object with url and token_json_path");
+  const { url, token_json_path: path } = parsed.value;
+  if (typeof url !== "string" || !url.startsWith("https://")) {
+    return bad("url is the https address the request is sent to");
+  }
+  if (typeof path !== "string" || !path.startsWith("/")) {
+    return bad("token_json_path is the path of the token in the answer, starting with '/'");
+  }
+  return ok(parsed.value as unknown as CredentialBootstrapEntry);
 }
 
 /** A JSON value as the box shows it: pretty, or empty for nothing declared. */

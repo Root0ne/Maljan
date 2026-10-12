@@ -113,7 +113,10 @@ def test_reset_group_unknown_is_404(client):
 
 
 def test_probe_unknown_is_404(client):
-    r = client.post("/api/v1/settings/test/bogus", json={"values": {}})
+    # An enrichment source an operator declared is a probe too, so the stored
+    # settings are read before a name is refused.
+    with patch("app.api.v1.settings.SettingsService.load_overrides", AsyncMock(return_value={})):
+        r = client.post("/api/v1/settings/test/bogus", json={"values": {}})
     assert r.status_code == 404
 
 

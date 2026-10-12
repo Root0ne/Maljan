@@ -132,10 +132,12 @@ def _is_model(tp: Any) -> bool:
 def _walk(model: type[BaseModel], prefix: str, defaults: Any) -> list[Leaf]:
     out: list[Leaf] = []
     for name, field in model.model_fields.items():
-        tp, _ = _unwrap_optional(field.annotation)
+        tp, nullable = _unwrap_optional(field.annotation)
         path = f"{prefix}{name}"
         default = getattr(defaults, name) if defaults is not None else None
-        if _is_model(tp):
+        # A model that may be absent is one value: its fields are valid only
+        # together, so it is one leaf rather than a key per field.
+        if _is_model(tp) and not nullable:
             out.extend(_walk(tp, path + ".", default))
         else:
             out.append(Leaf(path=path, annotation=field.annotation, default=default, field=field))
