@@ -36,7 +36,9 @@ from pydantic import (
 
 from maljan.core.report_formats import SignatureScale, reader_display_name
 from maljan.schemas.sandbox_document import (
+    DNS_REQUEST_KEY,
     GROUP_ROWS_KEY,
+    SAME_REQUEST_KEY,
     decompose,
     renamed,
 )
@@ -960,9 +962,6 @@ _TRIAGE_REQUEST_READ: frozenset[str] = frozenset(
 # under the document's grouped-rows key (``schemas.sandbox_document``).
 TASK_KEY = "task_report"
 TASK_ROWS_KEY = GROUP_ROWS_KEY
-# On a DNS row of a request's later question: the first question of the same
-# request, whose row carries the request's answers and other fields.
-SAME_REQUEST_KEY = "same_request_as"
 
 
 def _keep_task_block(channels: dict[str, Any], name: str, task: str, value: Any) -> None:
@@ -1050,6 +1049,8 @@ def triage_overview_to_sandbox_report(
     tasks_read = 0
     extracted = _rows(overview.get("extracted"))
     channels: dict[str, Any] = {}
+    # The id the next DNS request with several questions is written under.
+    dns_requests = 0
     for task_name, task in (task_reports or {}).items():
         if not isinstance(task, dict):
             continue
@@ -1141,25 +1142,30 @@ def triage_overview_to_sandbox_report(
                 ]
                 # The request's answers and its other fields belong to the
                 # request, so they are written once, on its first question's
-                # row; each later question's row names that first question
-                # (``SAME_REQUEST_KEY``) rather than repeating them, so any
-                # writing-out of the report stays linear in its size.
-                first = ""
-                for question in _rows(domain_req.get("questions")):
+                # row. With more than one question, that row carries the
+                # request's id and each later question's row names it
+                # (``schemas.sandbox_document.dns_answers`` reads them back),
+                # so any writing-out of the report stays linear in its size.
+                questions = [
+                    q for q in _rows(domain_req.get("questions")) if str(q.get("name") or "")
+                ]
+                request_id = dns_requests if len(questions) > 1 else None
+                if request_id is not None:
+                    dns_requests += 1
+                for position, question in enumerate(questions):
                     name = str(question.get("name") or "")
-                    if not name:
-                        continue
                     dns_row: dict[str, Any] = {
                         "request": name,
                         "type": str(question.get("type") or ""),
                     }
-                    if not first:
-                        first = name
+                    if position == 0:
                         dns_row["answers"] = answers
                         if req_extra:
                             dns_row["extra"] = req_extra
+                        if request_id is not None:
+                            dns_row[DNS_REQUEST_KEY] = request_id
                     else:
-                        dns_row[SAME_REQUEST_KEY] = first
+                        dns_row[SAME_REQUEST_KEY] = request_id
                     network.dns.append(dns_row)
                     network.domains.append(name)
 

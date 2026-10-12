@@ -309,4 +309,4 @@ class TestTheDocumentWritesOutLinearly:
         # The first question's row carries the answers; each later one names it.
         first, second = report.network.dns[0], report.network.dns[1]
         assert len(first["answers"]) == n
-        assert "answers" not in second and second["same_request_as"] == "q0.example"
+        assert "answers" not in second and second["same_request_as"] == first["dns_request"]

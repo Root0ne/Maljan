@@ -205,6 +205,41 @@ def channel_rows(held: Any) -> Sequence[Any] | None:
     return held
 
 
+# A DNS request with several questions is written once: its first question's
+# row carries the request's answers and other fields and the request's id
+# (``DNS_REQUEST_KEY``), and each later question's row names that id
+# (``SAME_REQUEST_KEY``). Every reader resolves a row's answers through
+# :func:`dns_answers`, in memory, so the written report stays linear in its size.
+DNS_REQUEST_KEY = "dns_request"
+SAME_REQUEST_KEY = "same_request_as"
+
+
+def dns_answers_by_request(rows: Any) -> dict[Any, list[Any]]:
+    """Each multi-question request's answers, by its id: one pass over the DNS rows."""
+    found: dict[Any, list[Any]] = {}
+    for row in rows if isinstance(rows, list) else []:
+        if isinstance(row, Mapping) and DNS_REQUEST_KEY in row:
+            answers = row.get("answers")
+            found[row[DNS_REQUEST_KEY]] = answers if isinstance(answers, list) else []
+    return found
+
+
+def dns_answers(row: Any, by_request: Mapping[Any, list[Any]]) -> list[Any]:
+    """The answers a DNS row's name resolved to: its own, else its request's.
+
+    ``by_request`` is :func:`dns_answers_by_request` over the same rows.
+    """
+    if not isinstance(row, Mapping):
+        return []
+    own = row.get("answers")
+    if isinstance(own, list):
+        return own
+    request = row.get(SAME_REQUEST_KEY)
+    if request is None or isinstance(request, dict | list):
+        return []
+    return by_request.get(request, [])
+
+
 def place(document: Any, name: str, default: Any = None) -> Any:
     """The part ``name`` of ``document``, or ``default`` where the document holds none."""
     found, value = _at(document, PLACES[name])

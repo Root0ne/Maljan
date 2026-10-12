@@ -905,7 +905,11 @@ def network_from_ledger(
     resolved: set[str] = set()
     tls_names: set[str] = set()
 
+    from maljan.schemas.sandbox_document import dns_answers, dns_answers_by_request
+
     for data, whole in _sandbox_views(ledger, sandbox_report):
+        # A later question of a request reads the request's answers.
+        by_request = dns_answers_by_request(data.get("dns"))
         for key in ("dns", "domains"):
             for row in data.get(key) or []:
                 name = _first_str(row, "request", "hostname", "domain", "name")
@@ -913,8 +917,7 @@ def network_from_ledger(
                 resolved.add(value_key("domain", name))
                 # The addresses the answer gave for it, as the record states them.
                 known_name = domains.get(value_key("domain", name)) if name else None
-                answers = row.get("answers") if isinstance(row, dict) else None
-                for answer in answers if isinstance(answers, list) else []:
+                for answer in dns_answers(row, by_request):
                     address = address_key(_first_str(answer, "data", "ip", "address"))
                     if (
                         known_name is not None
