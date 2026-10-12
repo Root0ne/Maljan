@@ -809,6 +809,81 @@ class TestEveryReaderReadsADnsRowSNameAlike:
             assert "dns_row_name" in text, relative
             assert not re.search(r"get\(\s*\"request\"", text), relative
 
+    def test_no_module_holds_a_tuple_of_the_name_fields_of_its_own(self) -> None:
+        """A tuple naming ``request`` beside another DNS name key is a second copy of the fields.
+
+        Only the one reader's own tuple (``DNS_NAME_KEYS``) holds them, and the
+        Markdown table's keys of a row that is no DNS row, read past the DNS
+        row reader for a DNS row.
+        """
+        import ast
+        from pathlib import Path
+
+        from maljan.schemas.sandbox_document import DNS_NAME_KEYS
+
+        root = Path(__file__).resolve().parents[4] / "src" / "maljan"
+        others = set(DNS_NAME_KEYS) - {"request"}
+        allowed = {("schemas/sandbox_document.py", "DNS_NAME_KEYS")}
+        allowed |= {("reporting/ledger_report.py", "_NON_DNS_ENDPOINT_KEYS")}
+        found: list[str] = []
+        for path in sorted(root.rglob("*.py")):
+            relative = path.relative_to(root).as_posix()
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            assigned = {
+                id(node.value): target.id
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Assign | ast.AnnAssign)
+                for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+                if isinstance(target, ast.Name) and node.value is not None
+            }
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Tuple | ast.List):
+                    continue
+                words = {
+                    e.value
+                    for e in node.elts
+                    if isinstance(e, ast.Constant) and isinstance(e.value, str)
+                }
+                if "request" in words and words & others:
+                    if (relative, assigned.get(id(node), "")) not in allowed:
+                        found.append(f"{relative}:{node.lineno}")
+            if relative != "schemas/sandbox_document.py":
+                text = path.read_text(encoding="utf-8")
+                if re.search(r"get\(\s*\"request\"", text) and "dns" in relative:
+                    found.append(f'{relative}: get("request")')
+        assert found == []
+
+    @pytest.mark.parametrize("key", ["request", "query", "hostname", "domain", "name"])
+    def test_the_markdown_network_table_prints_a_row_named_under_any_name_key(
+        self, key: str
+    ) -> None:
+        from maljan.reporting.ledger_report import build_sections
+        from maljan.schemas.evidence import LedgerEntry
+        from maljan.schemas.sandbox_document import DNS_NAME_KEYS
+
+        assert key in DNS_NAME_KEYS
+        row = {key: "own-z1.net", "type": "A", "answers": [{"data": "45.33.32.81"}]}
+        entry = LedgerEntry(
+            id="ev_0001",
+            agent="dynamic",
+            tool="sandbox_network",
+            structured={"dns": [row]},
+            output=json.dumps({"dns": [row]}),
+        )
+        [table] = [s for s in build_sections([entry]) if s.title == "Network activity observed"]
+        assert [r[:2] for r in table.rows] == [["dns", "own-z1.net"]]
+
+    def test_a_query_row_with_an_interface_name_prints_the_query(self) -> None:
+        from maljan.reporting.ledger_report import build_sections
+        from maljan.schemas.evidence import LedgerEntry
+
+        row = {"query": "own-z1.net", "type": "A", "name": "eth0"}
+        entry = LedgerEntry(
+            id="ev_0001", agent="dynamic", tool="sandbox_network", structured={"dns": [row]}
+        )
+        [table] = [s for s in build_sections([entry]) if s.title == "Network activity observed"]
+        assert [r[:2] for r in table.rows] == [["dns", "own-z1.net"]]
+
 
 class TestTheWrittenAsKeyIsThePlatformS:
     @pytest.mark.parametrize(
@@ -888,3 +963,26 @@ class TestOnePlaceDecision:
             assert dns_requests_have_place(report) == written
         else:
             assert not written
+
+
+def test_a_bare_string_domains_row_is_projected_as_dev_projected_it() -> None:
+    """``domains`` may hold bare names: dev projected each as a sandbox domain, and so does this.
+
+    The expected rows were captured with dev's ``network_from_ledger``.
+    """
+    from maljan.reporting.ledger_projection import network_from_ledger
+    from maljan.schemas.evidence import LedgerEntry
+
+    data = {
+        "domains": ["own-m6.example", " spaced-m6.example ", {"domain": "row-m6.example"}],
+        "dns": [{"request": "dns-m6.example", "answers": [{"type": "A", "data": "45.33.32.9"}]}],
+    }
+    entry = LedgerEntry(id="ev_0001", agent="dynamic", tool="sandbox_network", structured=data)
+    network = network_from_ledger([entry])
+    assert network is not None
+    assert sorted((d.fqdn, tuple(d.resolved_ips), d.source) for d in network.domains) == [
+        ("dns-m6.example", ("45.33.32.9",), "sandbox"),
+        ("own-m6.example", (), "sandbox"),
+        ("row-m6.example", (), "sandbox"),
+        ("spaced-m6.example", (), "sandbox"),
+    ]

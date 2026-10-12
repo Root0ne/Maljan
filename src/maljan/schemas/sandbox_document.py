@@ -287,19 +287,25 @@ def _network_without_links(network: dict[str, Any]) -> None:
         network.pop(key, None)
 
 
+def dns_name_key(row: Any) -> str:
+    """The key a DNS row names its name under (:func:`dns_row_name`); empty where it names none."""
+    if not isinstance(row, Mapping):
+        return ""
+    for key in DNS_NAME_KEYS:
+        name = row.get(key)
+        if isinstance(name, str) and name.strip():
+            return key
+    return ""
+
+
 def dns_row_name(row: Any) -> str:
     """The name a DNS row names: the first non-blank string under :data:`DNS_NAME_KEYS`.
 
     Stripped of surrounding whitespace; empty for a row naming none, or for
     anything that is not an object. The one reading of a DNS row's name.
     """
-    if not isinstance(row, Mapping):
-        return ""
-    for key in DNS_NAME_KEYS:
-        name = row.get(key)
-        if isinstance(name, str) and name.strip():
-            return name.strip()
-    return ""
+    key = dns_name_key(row)
+    return str(row[key]).strip() if key else ""
 
 
 def reads_as_dns_row(value: Any) -> bool:

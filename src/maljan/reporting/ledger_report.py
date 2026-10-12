@@ -44,6 +44,7 @@ from maljan.reporting.dedupe import (
 )
 from maljan.reporting.models import EvidenceSection
 from maljan.schemas.evidence import answer_not_shown
+from maljan.schemas.sandbox_document import DNS_NAME_KEYS, dns_name_key
 from maljan.utils.marked_cut import marked_cut
 
 if TYPE_CHECKING:
@@ -704,17 +705,44 @@ def _sandbox_network(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -
         acc.credit(table, entry)
 
 
+# The keys a network row other than a DNS row names what it is about under,
+# in the order read. A DNS row's name is read by the one DNS row reader
+# (``schemas.sandbox_document.dns_row_name``), then these past its name keys.
+_NON_DNS_ENDPOINT_KEYS = (
+    "request",
+    "hostname",
+    "domain",
+    "host",
+    "uri",
+    "ip",
+    "dst",
+    "name",
+    "ja3",
+    "sni",
+)
+
+
 def _endpoint_of(kind: str, row: Any) -> tuple[str, str]:
     """The address a network row is about, and whatever else it carries."""
     if isinstance(row, str):
         return row, ""
     if not isinstance(row, dict):
         return "", ""
-    for key in ("request", "hostname", "domain", "host", "uri", "ip", "dst", "name", "ja3", "sni"):
+    if kind == "dns":
+        key = dns_name_key(row)
+        keys: tuple[str, ...] = (
+            (key,) if key else tuple(k for k in _NON_DNS_ENDPOINT_KEYS if k not in DNS_NAME_KEYS)
+        )
+    else:
+        keys = _NON_DNS_ENDPOINT_KEYS
+    for key in keys:
         value = row.get(key)
-        if isinstance(value, str) and value:
+        if not isinstance(value, str):
+            continue
+        written = value.strip() if kind == "dns" else value
+        if written:
             detail = {k: v for k, v in row.items() if k != key and v not in (None, "", [], {})}
-            return value, _text(detail)
+            return written, _text(detail)
     return "", ""
 
 
