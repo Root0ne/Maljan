@@ -14,9 +14,11 @@ from typing import Any
 from maljan.core import settings_secrets as box
 from maljan.core.config import BUILTIN_SERVER_KEYS, Settings, builtin_env_allow
 from maljan.core.settings_overrides import (
+    SERVER_MAP_PATH,
     build_settings,
     effective_source,
     flatten_leaves,
+    shipped_tool_facts,
     split_key,
 )
 from pydantic import ValidationError
@@ -53,6 +55,37 @@ logger = logging.getLogger(__name__)
 TOOL_FACTS_LEAF_SUFFIX = ".tool_facts"
 
 
+def _is_declaration_leaf(key: str, value: Any) -> bool:
+    return (
+        key.startswith("core.") and key.endswith(TOOL_FACTS_LEAF_SUFFIX) and isinstance(value, dict)
+    )
+
+
+def incoming_declaration_leaves(changes: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+    """``changes`` with each provider block's tool declarations marked as changes over what ships.
+
+    A ``core.<block>.tool_facts`` value sent back exactly as stored says what
+    the stored one says, in whichever form it was stored: one an earlier
+    release stored whole is turned into the changes that put the same in
+    force. Any other value is the block's changes over what it ships, marked
+    or not (``tool_declarations.with_mark``): a shipped tool it leaves out
+    stays as shipped, and only ``null`` removes one. Every other key is
+    unchanged.
+    """
+    from maljan.core.tool_declarations import holds_changes, whole_as_changes, with_mark
+
+    out = dict(changes)
+    for key, value in changes.items():
+        if not _is_declaration_leaf(key, value):
+            continue
+        held = current.get(key)
+        if value == held and not holds_changes(held):
+            out[key] = with_mark(whole_as_changes(held, _shipped_leaf(key)))
+        elif value != held:
+            out[key] = with_mark(value)
+    return out
+
+
 def changed_declaration_refusals(
     changes: dict[str, Any], current: dict[str, Any]
 ) -> dict[str, str]:
@@ -63,17 +96,19 @@ def changed_declaration_refusals(
     stored row with a key this version does not read blocks no unrelated
     save. Keys are ``<leaf>.<tool>[.<field>]``.
     """
-    from maljan.core.tool_declarations import changed_declaration_errors, merge_tool_facts
+    from maljan.core.tool_declarations import (
+        changed_declaration_errors,
+        merge_tool_facts,
+        stored_in_force,
+    )
 
     errors: dict[str, str] = {}
     for key, value in changes.items():
-        if not key.startswith("core.") or not key.endswith(TOOL_FACTS_LEAF_SUFFIX):
-            continue
-        if not isinstance(value, dict):
+        if not _is_declaration_leaf(key, value):
             continue
         shipped = _shipped_leaf(key)
         held = current.get(key)
-        before = merge_tool_facts(shipped, held) if isinstance(held, dict) else None
+        before = stored_in_force(shipped, held)[0] if isinstance(held, dict) else None
         for where, message in changed_declaration_errors(
             merge_tool_facts(shipped, value), [before, shipped]
         ).items():
@@ -83,36 +118,50 @@ def changed_declaration_refusals(
 
 def _shipped_leaf(key: str) -> dict[str, Any]:
     """What the provider block of a ``core.<block>.tool_facts`` leaf ships for it."""
-    from maljan.core.settings_overrides import shipped_tool_facts
-
     return shipped_tool_facts(split_key(key)[1].removesuffix(TOOL_FACTS_LEAF_SUFFIX))
 
 
-def stored_declaration_leaves(changes: dict[str, Any]) -> dict[str, Any]:
+def stored_declaration_leaves(
+    changes: dict[str, Any], current: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """``changes`` with each provider block's tool declarations in the form they are stored.
 
-    A ``core.<block>.tool_facts`` value is read as its changes over what the
-    block ships (a whole map from an older client reads the same way: a tool
-    it declares as shipped is not stored), validated as it is in force, and
-    stored as its changes one tool at a time
-    (``tool_declarations.tool_facts_changes``), so a tool an operator never
-    changed keeps following later releases. Every other key is unchanged.
+    A ``core.<block>.tool_facts`` value (:func:`incoming_declaration_leaves`)
+    is validated as it is in force and stored as its changes one tool at a
+    time (``tool_declarations.tool_facts_changes``), marked as such, so a
+    tool an operator never changed keeps following later releases. A value
+    sent back exactly as stored is stored as it was, a change this release
+    leaves out of what is in force included. Every other key is unchanged.
     """
     from maljan.core.config import MCPServerConfig
-    from maljan.core.tool_declarations import merge_tool_facts, tool_facts_changes
+    from maljan.core.tool_declarations import merge_tool_facts, tool_facts_changes, with_mark
 
     out = dict(changes)
     for key, value in changes.items():
-        if not key.startswith("core.") or not key.endswith(TOOL_FACTS_LEAF_SUFFIX):
+        if not _is_declaration_leaf(key, value):
             continue
-        if not isinstance(value, dict):
+        if current is not None and value == current.get(key):
             continue
         shipped = _shipped_leaf(key)
         in_force = MCPServerConfig.model_validate(
             {"tool_facts": merge_tool_facts(shipped, value)}
         ).model_dump(mode="json")["tool_facts"]
-        out[key] = tool_facts_changes(in_force, shipped)
+        out[key] = with_mark(tool_facts_changes(in_force, shipped))
     return out
+
+
+def served_tool_facts(stored: dict[str, Any], shipped: dict[str, Any]) -> dict[str, Any]:
+    """A stored map of a block's tool declarations as the API serves and exports it.
+
+    Its changes over what the block ships, marked as such
+    (``tool_declarations.with_mark``), whichever form it was stored in: one
+    an earlier release stored whole is served as the changes that put the
+    same in force, so what the console shows and sends back, and what an
+    export carries, reads the same as what is in force.
+    """
+    from maljan.core.tool_declarations import stored_changes, with_mark
+
+    return with_mark(stored_changes(stored, shipped))
 
 
 def lenient_imported_declarations(
@@ -126,27 +175,29 @@ def lenient_imported_declarations(
     is returned as a warning keyed by its dotted path. A declaration left
     with nothing it says is left out whole. The file is never refused for it.
 
-    A block's tool declarations are its changes over what the block ships,
-    one tool at a time; each tool the document names is read as it is in
-    force, and kept as its changes again. ``whole_maps`` reads a document
-    written before declarations were stored that way, where a block's map is
-    its whole map: a shipped tool it does not name was removed, and stays
-    removed.
+    A block's tool declarations marked as changes
+    (``tool_declarations.holds_changes``) are its changes over what the block
+    ships, one tool at a time; each tool the document names is read as it is
+    in force, and kept as its changes again, marked. A map without the mark,
+    and every map when ``whole_maps`` says the document was written before
+    declarations were stored that way, is its whole map: a shipped tool it
+    does not name was removed, and stays removed.
     """
-    from maljan.core.settings_overrides import SERVER_MAP_PATH, shipped_tool_facts
     from maljan.core.tool_declarations import (
-        ToolFacts,
+        holds_changes,
         lenient_declarations,
         loggable_names,
         merge_tool_facts,
         reads_no_kind,
         tool_facts_changes,
+        whole_as_changes,
+        with_mark,
+        without_mark,
     )
 
     from app.services.server_map import SERVER_MAP_KEY
 
     warnings: dict[str, str] = {}
-    unset = ToolFacts.model_construct().model_dump(mode="json")
 
     def _warn(key: str, text: str) -> None:
         # Every warning about one tool is kept, in the order it was found.
@@ -156,16 +207,16 @@ def lenient_imported_declarations(
     def _clean(declared: Any, prefix: str, shipped: dict[str, Any]) -> Any:
         if not isinstance(declared, dict):
             return declared
-        if whole_maps:
-            # Each shipped tool's declaration was read whole too: a field it
-            # leaves out was at its default, not the shipped value.
-            declared = {
-                **{
-                    tool: {**unset, **held} if tool in shipped and isinstance(held, dict) else held
-                    for tool, held in declared.items()
-                },
-                **{tool: None for tool in shipped if tool not in declared},
-            }
+        # A map marked as changes is read as changes; one without the mark
+        # (every map of a ``/1`` document, or of a ``/2`` one exported from a
+        # store a release before the mark wrote) is read whole, as it was
+        # written: a shipped tool it does not name was removed, and a field a
+        # shipped tool's declaration leaves out is at its default.
+        declared = (
+            without_mark(declared)
+            if holds_changes(declared) and not whole_maps
+            else whole_as_changes(declared, shipped)
+        )
         in_force = merge_tool_facts(shipped, declared)
         named = {tool: in_force[tool] for tool in declared if tool in in_force}
         kept, notes = lenient_declarations(named, where=f"{prefix} ")
@@ -187,7 +238,7 @@ def lenient_imported_declarations(
             for tool, facts in in_force.items()
             if tool not in named or tool in kept
         }
-        return tool_facts_changes(held_in_force, shipped)
+        return with_mark(tool_facts_changes(held_in_force, shipped))
 
     out = dict(values)
     for key, value in values.items():
@@ -392,7 +443,13 @@ class SettingsService:
                     )
                 continue
             if row is not None:
-                out[key] = ValueInfo(row.value, None, None, "ui", row.updated_at, row.updated_by)
+                held = row.value
+                shown_value = (
+                    served_tool_facts(held, _shipped_leaf(key))
+                    if isinstance(held, dict) and _is_declaration_leaf(key, held)
+                    else held
+                )
+                out[key] = ValueInfo(shown_value, None, None, "ui", row.updated_at, row.updated_by)
             else:
                 # A read-only (API_READONLY) entry shows what is actually in
                 # effect: for a core leaf, the model default resolved through
@@ -425,6 +482,10 @@ class SettingsService:
         them existed still holds. A shipped default an admin has taken out
         stays out, and is shown as taken out.
 
+        An entry's tool declarations are shown as its changes over what the
+        server ships, marked as such (:func:`served_tool_facts`), whichever
+        form they were stored in.
+
         The map shown is the stored one: a built-in key a row predates is
         re-seeded for the run and written back by the next save
         (``validate_server_map``), but it is not conjured into this view.
@@ -432,6 +493,10 @@ class SettingsService:
         out: dict[str, Any] = {}
         for name, entry in stored_map.items():
             shown = dict(entry)
+            if isinstance(shown.get("tool_facts"), dict):
+                shown["tool_facts"] = served_tool_facts(
+                    shown["tool_facts"], shipped_tool_facts(f"{SERVER_MAP_PATH}.{name}")
+                )
             if name in BUILTIN_SERVER_KEYS:
                 shown["env_allow"] = builtin_env_allow(name, shown.get("env_allow") or [])
             if server_token_key(name) in rows:
@@ -564,6 +629,7 @@ class SettingsService:
         # a composite editor -- never a credential whose literal characters
         # are ten asterisks.
         changes = {k: v for k, v in changes.items() if not (index[k].secret and v == TOKEN_MASK)}
+        changes = incoming_declaration_leaves(changes, current)
         tokens: dict[str, str | None] = {}
         server_map_kept: set[str] | None = None
         if SERVER_MAP_KEY in changes:
@@ -669,7 +735,7 @@ class SettingsService:
         declaration_refusals = changed_declaration_refusals(changes, current)
         if declaration_refusals:
             raise SettingsValidationError(declaration_refusals)
-        changes = stored_declaration_leaves(changes)
+        changes = stored_declaration_leaves(changes, current)
 
         rows = {r.key: r for r in await self._rows()}
         before: dict[str, Any] = {}

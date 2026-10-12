@@ -21,7 +21,7 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from maljan.core.config import STORE_ONLY, Settings
-from maljan.core.tool_declarations import merge_tool_facts
+from maljan.core.tool_declarations import stored_in_force
 
 CORE_NS = "core"
 API_NS = "api"
@@ -120,29 +120,52 @@ def shipped_tool_facts(block: str) -> dict[str, Any]:
     return dict(held) if isinstance(held, Mapping) else {}
 
 
+def _block_in_force(block: str, stored: Mapping[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """What one block's stored tool declarations put in force, and the changes refused."""
+    return stored_in_force(shipped_tool_facts(block), stored, where=block)
+
+
 def server_entry_in_force(name: str, entry: Any) -> Any:
     """One stored server entry with its tool declarations as they are in force.
 
-    A stored entry's ``tool_facts`` holds its changes over what the server
-    ships (``tool_declarations.tool_facts_changes``); in force they are the
-    shipped ones with those changes over them. An entry that sets no tool
-    declarations is returned as it is, and takes the shipped ones on load.
+    A stored entry's ``tool_facts`` marked as changes hold its changes over
+    what the server ships (``tool_declarations.stored_in_force``): in force
+    they are the shipped ones with those changes over them. One without the
+    mark was stored whole by an earlier release and is in force as stored.
+    An entry that sets no tool declarations is returned as it is, and takes
+    the shipped ones on load.
     """
     if not isinstance(entry, Mapping) or not isinstance(entry.get(TOOL_FACTS_FIELD), Mapping):
         return entry
-    shipped = shipped_tool_facts(f"{SERVER_MAP_PATH}.{name}")
-    return {**entry, TOOL_FACTS_FIELD: merge_tool_facts(shipped, entry[TOOL_FACTS_FIELD])}
+    in_force, _refused = _block_in_force(f"{SERVER_MAP_PATH}.{name}", entry[TOOL_FACTS_FIELD])
+    return {**entry, TOOL_FACTS_FIELD: in_force}
+
+
+def _stored_blocks(core_overrides: Mapping[str, Any]) -> Iterable[tuple[str, Any]]:
+    """Each stored map of a block's tool declarations, with the block's dotted path."""
+    for key, value in core_overrides.items():
+        if not isinstance(value, Mapping):
+            continue
+        if key == SERVER_MAP_PATH:
+            for name, entry in value.items():
+                if isinstance(entry, Mapping) and isinstance(entry.get(TOOL_FACTS_FIELD), Mapping):
+                    yield f"{SERVER_MAP_PATH}.{name}", entry[TOOL_FACTS_FIELD]
+        elif key.endswith(_TOOL_FACTS_SUFFIX):
+            yield key.removesuffix(_TOOL_FACTS_SUFFIX), value
 
 
 def declarations_in_force(core_overrides: Mapping[str, Any]) -> dict[str, Any]:
     """``core_overrides`` with every stored block's tool declarations read as they are in force.
 
     What a store holds for a block's tool declarations (a server's entry in
-    the tool-server map, a provider block's ``tool_facts`` leaf) is its
-    changes over the shipped ones, one tool at a time; the settings model
-    holds the declarations in force. This is the one place the first is read
-    as the second, for every construction from stored overrides
-    (:func:`build_settings`). Every other key is passed through unchanged.
+    the tool-server map, a provider block's ``tool_facts`` leaf) is, marked
+    as such, its changes over the shipped ones, one tool at a time, or,
+    without the mark, the whole map an earlier release stored; the settings
+    model holds the declarations in force. This is the one place the first
+    is read as the second, for every construction from stored overrides
+    (:func:`build_settings`). A stored change the model refuses over this
+    release's declaration is left out with a warning, never a refusal of the
+    settings. Every other key is passed through unchanged.
     """
     out = dict(core_overrides)
     for key, value in core_overrides.items():
@@ -151,8 +174,22 @@ def declarations_in_force(core_overrides: Mapping[str, Any]) -> dict[str, Any]:
         if key == SERVER_MAP_PATH:
             out[key] = {name: server_entry_in_force(name, entry) for name, entry in value.items()}
         elif key.endswith(_TOOL_FACTS_SUFFIX):
-            shipped = shipped_tool_facts(key.removesuffix(_TOOL_FACTS_SUFFIX))
-            out[key] = merge_tool_facts(shipped, value)
+            out[key] = _block_in_force(key.removesuffix(_TOOL_FACTS_SUFFIX), value)[0]
+    return out
+
+
+def refused_tool_changes(core_overrides: Mapping[str, Any]) -> dict[str, list[str]]:
+    """Per block path, the tools whose stored change the model refuses over what ships now.
+
+    The tools :func:`declarations_in_force` puts in force as shipped instead,
+    so the console can mark each one for the operator to reset or edit. A
+    block with none is not named.
+    """
+    out: dict[str, list[str]] = {}
+    for block, stored in _stored_blocks(core_overrides):
+        refused = _block_in_force(block, stored)[1]
+        if refused:
+            out[block] = refused
     return out
 
 

@@ -6,8 +6,12 @@ whole: the server's entry in ``core.mcp.servers``, or a provider block's
 shipped for any tool of that block reached a run. They are now stored one tool
 at a time, as what the operator changed: only the fields that differ from the
 shipped declaration of that tool, ``null`` for a shipped tool the operator
-removed, the whole declaration of a tool the block does not ship. This revision
-rewrites each map stored whole into that form, once.
+removed, the whole declaration of a tool the block does not ship, and the map
+says so under a key no tool can be named by (``"": "changes"``). A map without
+that mark is read whole, as the release that wrote it read it. This revision
+rewrites each map without the mark into the marked form; a marked map (one a
+save of this release wrote, also before this revision ran) is left alone, so
+running it again changes nothing.
 
 Each map is read against the declarations of the release that wrote it. That
 release is not recorded, so it is inferred from the frozen record of what
@@ -28,9 +32,9 @@ A block nothing ever shipped tool declarations for (a server an operator
 added) keeps its map as it is: its whole map is its changes over nothing. A
 secret row is left alone. One line is logged when anything was rewritten.
 
-Downgrade writes each block's map whole again, with the declarations the
-release before this revision shipped (the last state in the record) under the
-changes.
+Downgrade writes each marked map whole again, without the mark, with the
+declarations the release before this revision shipped (the last state in the
+record) under the changes; a map without the mark is left as it is.
 
 Revision ID: 20261012000000
 Revises: 20261011000000
@@ -62,6 +66,13 @@ REWRITTEN = (
     "runtime_settings: stored tool declarations of the built-in blocks were rewritten "
     "as per-tool changes over the shipped declarations"
 )
+
+# The mark a map of tool declarations stored as changes carries (the
+# application's ``tool_declarations.CHANGES_MARK`` and ``CHANGES_FORM``, copied
+# here because a revision imports no application code): a key no tool can be
+# named by, since a tool's name is never empty.
+CHANGES_MARK = ""
+CHANGES_FORM = "changes"
 
 _UPDATE_PG = sa.text("UPDATE runtime_settings SET value = CAST(:v AS JSONB) WHERE key = :k")
 _UPDATE_OTHER = sa.text("UPDATE runtime_settings SET value = :v WHERE key = :k")
@@ -188,8 +199,27 @@ def _store(conn: sa.engine.Connection, key: str, value: Any) -> None:
     conn.execute(statement, {"k": key, "v": json.dumps(value)})
 
 
+def holds_changes(value: Any) -> bool:
+    """Whether a stored map is marked as its changes over what its block ships."""
+    return isinstance(value, dict) and value.get(CHANGES_MARK) == CHANGES_FORM
+
+
+def without_mark(value: dict[str, Any]) -> dict[str, Any]:
+    return {tool: held for tool, held in value.items() if tool != CHANGES_MARK}
+
+
+def with_mark(changes: dict[str, Any]) -> dict[str, Any]:
+    return {CHANGES_MARK: CHANGES_FORM, **without_mark(changes)}
+
+
 def _rewrite(convert: Any) -> bool:
-    """Every stored block map passed through ``convert(map, block)``; whether any changed."""
+    """Every stored block map passed through ``convert(map, block)``; whether any changed.
+
+    ``block`` is the block's record, ``None`` for a block nothing ever
+    shipped tool declarations for (a server an operator added). ``convert``
+    returns the map to store; an empty one leaves a server entry without
+    tool declarations, which reads as the shipped ones.
+    """
     conn = op.get_bind()
     record = _record()
     blocks = record["blocks"]
@@ -200,28 +230,26 @@ def _rewrite(convert: Any) -> bool:
                 continue
             servers = dict(value)
             for name, entry in value.items():
-                block = blocks.get(f"{SERVER_BLOCK_PREFIX}{name}")
-                if block is None or not isinstance(entry, dict):
+                if not isinstance(entry, dict):
                     continue
                 facts = entry.get("tool_facts")
                 if not isinstance(facts, dict):
                     continue
-                converted = convert(facts, block)
-                # No change of any tool reads as the shipped declarations, as
-                # an entry that never set them does.
+                converted = convert(facts, blocks.get(f"{SERVER_BLOCK_PREFIX}{name}"))
+                if converted == facts:
+                    continue
                 servers[name] = (
                     {**entry, "tool_facts": converted}
-                    if converted
+                    if without_mark(converted)
                     else {k: v for k, v in entry.items() if k != "tool_facts"}
                 )
             if servers != value:
                 _store(conn, key, servers)
                 changed = True
             continue
-        block = blocks.get(key[len(CORE_PREFIX) : -len(TOOL_FACTS_SUFFIX)])
-        if block is None or not isinstance(value, dict):
+        if not isinstance(value, dict):
             continue
-        converted = convert(value, block)
+        converted = convert(value, blocks.get(key[len(CORE_PREFIX) : -len(TOOL_FACTS_SUFFIX)]))
         if converted != value:
             _store(conn, key, converted)
             changed = True
@@ -231,16 +259,27 @@ def _rewrite(convert: Any) -> bool:
 def upgrade() -> None:
     defaults = _record()["defaults"]
 
-    def convert(whole: dict[str, Any], block: dict[str, Any]) -> dict[str, Any]:
-        # A map naming a removed tool (``null``) was written in the new form
-        # already, by a process that ran before this revision: it is kept.
-        if any(entry is None for entry in whole.values()):
-            return whole
-        return per_tool_changes(whole, block, defaults)[0]
+    def convert(stored: dict[str, Any], block: dict[str, Any] | None) -> dict[str, Any]:
+        # A map marked as changes was written by this release (a save that
+        # ran before this revision did) and is left alone, so running the
+        # revision again changes nothing; so is the map of a block nothing
+        # ever shipped declarations for, whose whole map is its changes.
+        if holds_changes(stored) or block is None:
+            return stored
+        return with_mark(per_tool_changes(stored, block, defaults)[0])
 
     if _rewrite(convert):
         logger.info(REWRITTEN)
 
 
 def downgrade() -> None:
-    _rewrite(whole_map)
+    def convert(stored: dict[str, Any], block: dict[str, Any] | None) -> dict[str, Any]:
+        # A map without the mark is in the form the release before this
+        # revision reads already.
+        if not holds_changes(stored):
+            return stored
+        if block is None:
+            return without_mark(stored)
+        return whole_map(without_mark(stored), block)
+
+    _rewrite(convert)

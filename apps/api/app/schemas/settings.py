@@ -72,6 +72,11 @@ class SchemaResponse(BaseModel):
     # kind-dependent field with its default, so the console's declaration box
     # applies the API's rules from the API's own list.
     tool_declaration_fields: dict[str, Any] = Field(default_factory=dict)
+    # Per block (``mcp.servers.<key>`` or a provider block's path), the tools
+    # whose stored change the model refuses over what this release ships
+    # (``core.settings_overrides.refused_tool_changes``): each is in force as
+    # shipped, and the console marks it for the operator to reset or edit.
+    tool_facts_conflicts: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class ValueDTO(BaseModel):

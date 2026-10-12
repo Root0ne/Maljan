@@ -290,6 +290,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "Run `alembic upgrade head` from your deploy pipeline instead."
         )
 
+    try:
+        from app.services.migration_state import warn_when_behind_head
+
+        async with async_engine.connect() as conn:
+            await conn.run_sync(warn_when_behind_head)
+    except Exception:
+        # Best effort: the check only says something; it never stops a start.
+        logger.exception("Checking the database's migration revision failed")
+
     from app.database import async_session_factory
     from app.services.composite_secrets import (
         repair_frontier_arm_keys,

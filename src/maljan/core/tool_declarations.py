@@ -1201,6 +1201,119 @@ def fill_declaration(stored: MCPServerConfig, default: MCPServerConfig) -> MCPSe
     return stored
 
 
+# A stored map of a block's tool declarations that holds its changes over what
+# the block ships (:func:`tool_facts_changes`) says so under this key. No tool
+# can be named by it (a tool's name is never empty, :func:`check_tool_name`), so
+# the mark never stands for a tool. A map without it was written whole by an
+# earlier release and is read whole, exactly as that release read it: a shipped
+# tool it does not name was removed. Nothing guesses the form from the shape.
+CHANGES_MARK = ""
+CHANGES_FORM = "changes"
+
+
+def holds_changes(stored: Any) -> bool:
+    """Whether a stored map of tool declarations is marked as its changes over what ships."""
+    return isinstance(stored, Mapping) and stored.get(CHANGES_MARK) == CHANGES_FORM
+
+
+def without_mark(stored: Mapping[str, Any]) -> dict[str, Any]:
+    """``stored`` without its mark: the tools it names and what it says of each."""
+    if holds_changes(stored):
+        return {tool: held for tool, held in stored.items() if tool != CHANGES_MARK}
+    return dict(stored)
+
+
+def with_mark(changes: Mapping[str, Any]) -> dict[str, Any]:
+    """``changes`` marked as a block's changes over what it ships, the form a save stores."""
+    return {CHANGES_MARK: CHANGES_FORM, **without_mark(changes)}
+
+
+def whole_as_changes(whole: Mapping[str, Any], shipped: Mapping[str, Any]) -> dict[str, Any]:
+    """A map stored whole, as the changes over ``shipped`` that put the same in force.
+
+    Read whole, a shipped tool the map does not name was removed (``None``),
+    and a field a shipped tool's declaration leaves out is at its default,
+    not at the shipped value. Time linear in the two maps.
+    """
+    unset = ToolFacts.model_construct().model_dump(mode="json")
+    filled = {
+        tool: {**unset, **held} if tool in shipped and isinstance(held, Mapping) else held
+        for tool, held in without_mark(whole).items()
+    }
+    return tool_facts_changes(filled, shipped)
+
+
+def stored_changes(stored: Mapping[str, Any], shipped: Mapping[str, Any]) -> dict[str, Any]:
+    """What a stored map changes of ``shipped``, per tool, whichever form it was stored in."""
+    if holds_changes(stored):
+        return without_mark(stored)
+    return whole_as_changes(stored, shipped)
+
+
+def _refused_leniently(raw: Any) -> bool:
+    """Whether the model refuses ``raw`` as a stored declaration is read (leniently)."""
+    token = STRICT_DECLARATIONS.set(False)
+    try:
+        ToolFacts.model_validate(raw)
+    except (ValidationError, ValueError):
+        return True
+    finally:
+        STRICT_DECLARATIONS.reset(token)
+    return False
+
+
+def _warn_refused_changes(where: str, tools: Iterable[str]) -> None:
+    held = tuple(sorted(str(tool) for tool in tools))
+    marker = (f"refused:{where}", held)
+    if marker in _WARNED:
+        return
+    if len(_WARNED) >= _WARNED_MAX:
+        _WARNED.clear()
+    _WARNED.add(marker)
+    from maljan.core.logger import logger
+
+    logger.warning(
+        "A stored change of a tool declaration (%s) does not validate over the declaration "
+        "this release ships; the change is left out and the shipped declaration stays in "
+        "force: %s",
+        loggable_names([where]),
+        loggable_names(held),
+    )
+
+
+def stored_in_force(
+    shipped: Mapping[str, Any], stored: Mapping[str, Any], where: str = ""
+) -> tuple[dict[str, Any], list[str]]:
+    """What a stored map of a block's tool declarations puts in force, and the changes refused.
+
+    A map marked as changes (:func:`holds_changes`) is merged over
+    ``shipped`` one tool at a time (:func:`merge_tool_facts`). A shipped
+    tool's change that the model refuses over the declaration this release
+    ships (a field the change sets needs one a later release no longer
+    ships) is left out: that tool is in force as shipped, its name is
+    returned, and one warning names it, so one stored change never stops
+    the settings from being built. A map without the mark was stored whole
+    by an earlier release and is in force exactly as stored, as it was then.
+    Time linear in the two maps.
+    """
+    if not holds_changes(stored):
+        return _copy(dict(stored)), []
+    changes = without_mark(stored)
+    merged = merge_tool_facts(shipped, changes)
+    refused = [
+        str(tool)
+        for tool, change in changes.items()
+        if isinstance(change, Mapping)
+        and isinstance(shipped.get(tool), Mapping)
+        and _refused_leniently(merged[tool])
+    ]
+    for tool in refused:
+        merged[tool] = _copy(shipped[tool])
+    if refused:
+        _warn_refused_changes(where, refused)
+    return merged, refused
+
+
 def merge_tool_facts(shipped: Mapping[str, Any], stored: Mapping[str, Any]) -> dict[str, Any]:
     """The tool declarations in force: ``shipped`` with the ``stored`` changes over it, per tool.
 
@@ -1213,8 +1326,10 @@ def merge_tool_facts(shipped: Mapping[str, Any], stored: Mapping[str, Any]) -> d
     release ships reaches it, and so does a tool shipped after the save. With
     nothing shipped (a server that is not a built-in) the stored map is the
     whole map. A change that is not a mapping is kept for the model to read
-    or refuse as ever. Time linear in the two maps.
+    or refuse as ever. The mark of a stored map (:data:`CHANGES_MARK`) is
+    not a tool and is not read as one. Time linear in the two maps.
     """
+    stored = without_mark(stored)
     out: dict[str, Any] = {}
     for tool, facts in shipped.items():
         if tool not in stored:
@@ -1275,8 +1390,8 @@ def strip_declaration_defaults(dumped: dict[str, Any], default: MCPServerConfig)
     from the default, an empty one included, is the operator's and is stored;
     a value equal to the shipped one at the time of the save is not recorded,
     and follows later releases. The tool declarations are stored one tool at
-    a time, as their changes over the shipped ones (:func:`tool_facts_changes`),
-    and not at all when no tool differs.
+    a time, as their changes over the shipped ones (:func:`tool_facts_changes`)
+    marked as such (:func:`with_mark`), and not at all when no tool differs.
     """
     reference = default.model_dump(mode="json")
     out: dict[str, Any] = {}
@@ -1284,7 +1399,7 @@ def strip_declaration_defaults(dumped: dict[str, Any], default: MCPServerConfig)
         if key == "tool_facts" and isinstance(value, Mapping):
             changes = tool_facts_changes(value, reference.get(key) or {})
             if changes:
-                out[key] = changes
+                out[key] = with_mark(changes)
         elif key not in DECLARATION_FIELDS or value != reference.get(key):
             out[key] = value
     return out

@@ -115,15 +115,16 @@ async def _effective_agents(db: AsyncSession) -> tuple[list[str], list[str]]:
 async def get_schema(
     _: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
 ) -> SchemaResponse:
-    from maljan.core.settings_overrides import build_settings
+    from maljan.core.settings_overrides import build_settings, refused_tool_changes
 
     from app.services.enrichment_sources import ENRICHMENT_SOURCES_KEY
     from app.services.settings_service import load_core_overrides
 
     profiles, agents = await _effective_agents(db)
     stored = await SettingsService(db).load_overrides()
+    core = await load_core_overrides(db)
     try:
-        configs = build_settings(await load_core_overrides(db)).mcp.servers
+        configs = build_settings(core).mcp.servers
     except (ValueError, ValidationError):
         configs = build_settings({}).mcp.servers
     return served_schema(
@@ -132,6 +133,7 @@ async def get_schema(
         agents=agents,
         enrichment_sources=stored.get(ENRICHMENT_SOURCES_KEY),
         server_configs=configs,
+        tool_facts_conflicts=refused_tool_changes(core),
     )
 
 
@@ -142,6 +144,7 @@ def served_schema(
     agents: list[str],
     enrichment_sources: Any = None,
     server_configs: dict[str, Any] | None = None,
+    tool_facts_conflicts: dict[str, list[str]] | None = None,
 ) -> SchemaResponse:
     """The settings schema as ``GET /settings/schema`` serves it for these choices.
 
@@ -150,6 +153,8 @@ def served_schema(
     ``enrichment_sources`` is the stored ``api.enrichment_sources`` map and
     ``server_configs`` the tool servers in force; the schema says what the
     console's guides offer for each, never a credential.
+    ``tool_facts_conflicts`` names, per block, the tools whose stored change
+    is refused over what ships now (``refused_tool_changes``).
     """
     from app.services.credential_bootstrap import bootstrap_facts
     from app.services.enrichment_sources import source_facts
@@ -176,6 +181,7 @@ def served_schema(
         enrichment_sources=source_facts(enrichment_sources, server_configs),
         credential_servers=bootstrap_facts(server_configs),
         tool_declaration_fields=declaration_fields(),
+        tool_facts_conflicts=tool_facts_conflicts or {},
     )
 
 

@@ -87,6 +87,16 @@ def _dev_row(*, analysis_facts: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
+def _marked(changes: dict[str, Any]) -> dict[str, Any]:
+    """A map stored as changes, with the mark a save of this release writes."""
+    return {"": "changes", **changes}
+
+
+def _one_change(server: str) -> dict[str, Any]:
+    tool = next(iter(_shipped_dump()["mcp"]["servers"][server]["tool_facts"]))
+    return {tool: {"display_name": "Mine"}}
+
+
 def _full(entry: dict[str, Any]) -> dict[str, Any]:
     from maljan.core.tool_declarations import ToolFacts
 
@@ -108,7 +118,7 @@ def test_a_dev_row_with_one_accepted_proposal_keeps_only_that_tool() -> None:
     _insert(conn, SERVERS, _dev_row(analysis_facts=whole))
     _run(_module(), conn)
     after_rows = _rows(conn)
-    assert after_rows[SERVERS]["analysis"]["tool_facts"] == {"pack_scan": proposed}
+    assert after_rows[SERVERS]["analysis"]["tool_facts"] == _marked({"pack_scan": proposed})
     assert _in_force(after_rows)["mcp"]["servers"]["analysis"]["tool_facts"] == whole
 
 
@@ -143,7 +153,7 @@ def test_an_operator_change_keeps_its_fields_and_a_removal_stays() -> None:
     _insert(conn, SERVERS, _dev_row(analysis_facts=whole))
     _run(_module(), conn)
     stored = _rows(conn)[SERVERS]["analysis"]["tool_facts"]
-    assert stored == {first: None, second: {"timeout_seconds": 1234.0}}
+    assert stored == _marked({first: None, second: {"timeout_seconds": 1234.0}})
     # What dev read from the whole map is what is in force now.
     assert _in_force(_rows(conn))["mcp"]["servers"]["analysis"]["tool_facts"] == whole
 
@@ -157,7 +167,9 @@ def test_a_provider_leaf_typed_whole_is_rewritten_the_same_way() -> None:
     conn = _connect()
     _insert(conn, GHIDRA, typed)
     _run(_module(), conn)
-    assert _rows(conn)[GHIDRA] == {tool: {"long_running": True}, "my_script": {"kind": "strings"}}
+    assert _rows(conn)[GHIDRA] == _marked(
+        {tool: {"long_running": True}, "my_script": {"kind": "strings"}}
+    )
     held = _in_force(_rows(conn))["static"]["ghidra"]["tool_facts"]
     assert held[tool]["long_running"] is True
     assert held["my_script"]["kind"] == "strings"
@@ -179,7 +191,7 @@ def test_a_map_whose_release_cannot_be_known_is_kept_whole_as_the_operators() ->
     assert changes == whole
 
 
-def test_a_custom_server_a_secret_row_and_a_new_form_map_are_left_alone(caplog) -> None:
+def test_a_custom_server_a_secret_row_and_a_marked_map_are_left_alone(caplog) -> None:
     from app.services.server_map import validate_server_map
 
     row = validate_server_map({})
@@ -190,7 +202,11 @@ def test_a_custom_server_a_secret_row_and_a_new_form_map_are_left_alone(caplog) 
         "tool_facts": {"scan": {"kind": "strings"}},
     }
     shipped = _shipped_dump()["mcp"]["servers"]["analysis"]["tool_facts"]
-    row["analysis"] = {**row["analysis"], "tool_facts": {next(iter(shipped)): None}}
+    first, second, *_ = list(shipped)
+    row["analysis"] = {**row["analysis"], "tool_facts": _marked({first: None})}
+    # A marked map with no removal in it (one tool's change alone) is the
+    # operator's change of that tool, never a whole map missing the others.
+    row["network"] = {**row["network"], "tool_facts": _marked({}) | _one_change("network")}
     conn = _connect()
     _insert(conn, SERVERS, row)
     _insert(conn, "core.mcp.servers.mine.auth_token", "ciphertext", secret=True)
@@ -220,3 +236,104 @@ def test_one_fixed_info_line_is_logged_and_a_downgrade_reads_the_same(caplog) ->
 
     for tool, entry in whole.items():
         assert ToolFacts.model_validate(restored[tool]) == ToolFacts.model_validate(entry)
+
+
+def test_the_revision_s_mark_is_the_application_s() -> None:
+    from maljan.core.tool_declarations import CHANGES_FORM, CHANGES_MARK
+
+    mod = _module()
+    assert (mod.CHANGES_MARK, mod.CHANGES_FORM) == (CHANGES_MARK, CHANGES_FORM)
+
+
+def test_a_save_before_the_migration_keeps_every_tool_after_it() -> None:
+    """The new code saves first (a hand-run deploy, a worker restart before
+    ``make migrate``): its one-tool change of a built-in, and of a provider
+    leaf, are marked, so the migration leaves them alone and no other shipped
+    tool is dropped."""
+    from app.services import settings_service as svc
+    from app.services.server_map import validate_server_map
+
+    shipped = _shipped_dump()["mcp"]["servers"]["analysis"]["tool_facts"]
+    tool = sorted(shipped)[0]
+    dev = _dev_row(analysis_facts=dict(shipped))
+    sent = {**dev, "analysis": {**dev["analysis"], "tool_facts": {tool: {"display_name": "Mine"}}}}
+    saved = validate_server_map(sent, stored=dev)
+    ghidra = _shipped_dump()["static"]["ghidra"]["tool_facts"]
+    leaf_tool = sorted(ghidra)[0]
+    leaf = svc.stored_declaration_leaves({GHIDRA: {leaf_tool: {"timeout_seconds": 5}}})[GHIDRA]
+    conn = _connect()
+    _insert(conn, SERVERS, saved)
+    _insert(conn, GHIDRA, leaf)
+    before = _rows(conn)
+    _run(_module(), conn)
+    assert _rows(conn) == before
+    held = _in_force(_rows(conn))
+    analysis = held["mcp"]["servers"]["analysis"]["tool_facts"]
+    assert set(analysis) == set(shipped)
+    assert analysis[tool]["display_name"] == "Mine"
+    assert analysis[tool]["kind"] == shipped[tool]["kind"]
+    assert set(held["static"]["ghidra"]["tool_facts"]) == set(ghidra)
+
+
+def test_an_unmigrated_whole_map_is_read_as_dev_read_it() -> None:
+    shipped = _shipped_dump()["mcp"]["servers"]["analysis"]["tool_facts"]
+    first, second, *_ = list(shipped)
+    whole = dict(shipped)
+    whole.pop(first)
+    whole[second] = _full({"display_name": "Only this"})
+    held = _in_force({SERVERS: _dev_row(analysis_facts=whole)})
+    analysis = held["mcp"]["servers"]["analysis"]["tool_facts"]
+    # The removed tool stays removed, and a field the whole entry leaves at its
+    # default is not filled from what ships.
+    assert analysis == whole
+    ghidra = _shipped_dump()["static"]["ghidra"]["tool_facts"]
+    tool = next(iter(ghidra))
+    leaf = _in_force({GHIDRA: {tool: {"kind": "strings"}}})["static"]["ghidra"]["tool_facts"]
+    assert set(leaf) == {tool}
+
+
+def test_running_the_revision_again_changes_nothing(caplog) -> None:
+    shipped = _shipped_dump()["mcp"]["servers"]["analysis"]["tool_facts"]
+    whole = {**shipped, "pack_scan": _full({"display_name": "Pack scanner"})}
+    conn = _connect()
+    _insert(conn, SERVERS, _dev_row(analysis_facts=whole))
+    _insert(conn, GHIDRA, {"my_script": {"kind": "strings"}})
+    mod = _module()
+    _run(mod, conn)
+    once = _rows(conn)
+    with caplog.at_level(logging.INFO):
+        _run(mod, conn)
+    assert _rows(conn) == once
+    assert not [r for r in caplog.records if r.name == mod.logger.name]
+
+
+def test_a_downgrade_reads_as_dev_and_leaves_an_unmarked_map_alone() -> None:
+    from app.services.server_map import validate_server_map
+
+    shipped = _shipped_dump()["mcp"]["servers"]["analysis"]["tool_facts"]
+    first, second, *_ = list(shipped)
+    row = validate_server_map({})
+    row["analysis"] = {
+        **row["analysis"],
+        "tool_facts": _marked({first: None, second: {"timeout_seconds": 77.0}}),
+    }
+    row["mine"] = {
+        "transport": "http",
+        "url": "http://127.0.0.1:9/mcp",
+        "enabled": True,
+        "tool_facts": _marked({"scan": {"kind": "strings"}}),
+    }
+    whole_leaf = {"my_script": {"kind": "strings"}}
+    conn = _connect()
+    _insert(conn, SERVERS, row)
+    _insert(conn, GHIDRA, whole_leaf)
+    in_force_before = _in_force(_rows(conn))
+    _run(_module(), conn, "downgrade")
+    after = _rows(conn)
+    assert after[GHIDRA] == whole_leaf
+    assert after[SERVERS]["mine"]["tool_facts"] == {"scan": {"kind": "strings"}}
+    restored = after[SERVERS]["analysis"]["tool_facts"]
+    assert "" not in restored and first not in restored
+    assert restored[second]["timeout_seconds"] == 77.0
+    # What dev reads from the downgraded rows (whole maps) is what was in force.
+    assert _in_force(after) == in_force_before
