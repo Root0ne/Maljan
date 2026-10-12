@@ -2099,20 +2099,75 @@ deterministic tools over the sample and writing each result to the evidence
 ledger before any analyst starts (see *The triage pack* in
 [architecture.md](/architecture/)). Every team but `measurement` ships with
 it first, a team written by hand may leave it out, and a stored team gains it
-on upgrade (`make migrate`). Its five settings sit in the Analysis layers
+on upgrade (`make migrate`). Its six settings sit in the Analysis layers
 group: `triage.enabled` (off leaves the stage in place and makes it decline
 with that reason), `triage.strings_head` (how many printable runs the strings
 entry keeps; 300), `triage.reputation` (`auto` asks the enabled reputation
 server once for the sample hash — VirusTotal's own server when enabled, else
 the threat-intel sidecar, never one the team lists in `exclude_servers` — and
 `off` records a skipped entry instead), `triage.budget_seconds` (1200; a
-step that would start after the budget is spent is recorded as not run) and
+step that would start after the budget is spent is recorded as not run),
 `triage.memory_floor_mb` (10,240: what the host must still have available
-after capa's measured peak and FLOSS's 4 GiB bound for the two to run together;
-0 checks only that both fit, and the worker's cgroup limit is always checked). The
+after the peaks of a step that starts beside the others and of the steps it
+runs beside — as shipped, capa's measured peak and FLOSS's 4 GiB bound — for
+them to run together; 0 checks only that they fit, and the worker's cgroup
+limit is always checked) and `triage.steps` (below). The
 pack runs the real tools in mock mode too, so a local observation run with a
 reputation server enabled makes that one outbound call; a team that withholds
 the server, or `triage.reputation = off`, keeps such a run offline.
+
+### The pack's steps
+
+The pack is a list of steps (`maljan.core.pack_steps`), each declared as
+data. The shipped list is the pack described in
+[architecture.md](/architecture/), in that order; `triage.steps` holds your
+own, as JSON, laid over it:
+
+| field | meaning |
+| :-- | :-- |
+| `id` | the step's name, unique in the list (lowercase letters, digits, `_`) |
+| `tool`, `server` | what the step calls. No `server`: one of the platform's own steps, named by its shipped id. A `server`: that tool server's tool, called through the tool server registry as an agent's call is, to the path that server opens the sample at, and recorded under that server |
+| `arguments` | a server step's argument template; a string may hold `{sample_path}`, `{sha256}` and `{file_type}`. None: the argument the tool declares for the `path` role takes the sample's path and the one for `hash` its sha256. The platform's own steps compute their own and refuse one |
+| `formats` | the routed formats the step runs for; empty is every format |
+| `budget_seconds` | the step's wall clock; none takes the tool's declared `timeout_seconds`, else what is left of `triage.budget_seconds`. Of the platform's own steps only `capa` (else `static.capa.timeout_seconds`), `floss` and `yara_scan` take one |
+| `peak_mb` | the memory the step takes at its peak, where this worker does not measure it |
+| `starts_after`, `beside` | a step that starts on a thread of its own right after `starts_after`, when the host has room for it beside the steps `beside` names (their peaks and its own against `triage.memory_floor_mb`); its entry keeps its place in the list, and `triage_facts.<id>` and the run summary's `triage.<id>` say `beside …` or `in turn: <why>` |
+| `renderer` | how its pack line shows the answer: one of the pack's renderers (`core.pack_steps.PACK_RENDERERS`); none: the generic line, the count of the rows the tool declares, each by its first declared value at its first declared place |
+| `kind` | the kind of answer the step records, laid over the tool's declared kind on its entry |
+| `display_name` | what the pack's line calls the step (and, for a server's tool, what other lines name its answer by) |
+| `enabled` | `false` drops the step |
+| `after` | where a new step goes: after the step it names, else after every shipped step |
+
+A declaration under a shipped id changes that step in its place; one that
+names another `tool` or `server` replaces it there, keeping only the id; a new
+id adds a step. A list that cannot run (an id twice, a placeholder no
+template may name, a step with no server that is not one of the platform's
+own, an `after`, `starts_after` or `beside` naming no step) is refused when it
+is saved. A server step whose server the team withholds or that is not
+configured is a `not run:` entry, not a failure; a call that fails is a
+failure of its tool. Every entry an operator's step writes carries the step
+(`pack_step`), so the pack reads it back without the settings.
+
+A later step reads an earlier answer by its declared kind, never by its tool:
+the function starts the hash resolution, the string decoder, the constant
+scan, the anti-analysis pass and the function index are handed come from any
+`function_list` or `capability_rules` answer that declares `function_starts`
+(or a `function_list` answer's `start` place); the index's rules from any
+`capability_rules` answer and its call-site strings from any
+`emulated_strings` answer or `decoded_strings` answer that names a
+`call_site`; an input no answer fills is stated by its kind
+(`capability_rules: no: the pack holds no entry of it`). So swapping capa for
+your own matcher means declaring its tool `capability_rules` with `rows`,
+`places.addresses`, `values.rule` and `function_starts`, and naming it under
+the `capa` id:
+
+```json
+[{"id": "capa", "server": "acmescan", "tool": "match_rules", "renderer": "capability_rules"}]
+```
+
+(a `renderer` only where its answer has the shipped renderer's shape), and the
+index, the constant scan's agreements and the pack's text name it by its
+declared `display_name`.
 
 The technique check's one heuristic part has five settings in the same
 group: `validation.alignment_gate` (`auto` runs the alignment gate only on a
@@ -3105,6 +3160,7 @@ it:
 | `memory_peak_mb` | the tool's measured memory peak, where known |
 | `discloses_sample` | the tool sends the sample, or its bytes, out of the deployment |
 | `holds_strings` | the answer holds the sample's strings as data though its kind is not a strings kind (Ghidra's `batch_string_anchor_report` and `find_undocumented_by_string`); a function claim's quoted value is looked for in it |
+| `function_starts` | the path of the answer's list of function start addresses (offsets from the image base), read for a `function_list` or `capability_rules` answer by the triage pack's function index and the readings of an image with no function table of its own |
 | `rows` | the path of the answer's rows |
 | `places` | per kind of place (`offset`, `rva`, `address`, `addresses`, `call_site`, `function`, `pid`, `command_line` …), the path inside a row that holds one |
 | `values` | per kind of value (`text`, `rule`, `namespace`, `value` …), the path inside a row that holds one |
@@ -3282,7 +3338,10 @@ shape:
   tool's name and `words`;
 - the function map and the triage pack's function index take
   `api_hash_resolution`, `decoded_strings`, `emulated_strings` and
-  `function_index` answers by kind, and the report step does not run an
+  `function_index` answers by kind, the index and the pack's readings of the
+  bytes their function starts from any `function_list` or `capability_rules`
+  answer's `function_starts` and their rules from any `capability_rules`
+  answer (*The pack's steps*), and the report step does not run an
   evidence-only static provider when the pack already recorded an answer of a
   kind that provider declares;
 - a tool's role is its kind: `decompile`, `decompile_batch` and
@@ -3402,7 +3461,8 @@ manifest's own budget), `medium` when a property's name or the schema's shape
 says it, `low` for a reading an operator should check (`asserts_techniques`
 always is). `requires` names the fields it needs: a field read only through a
 kind (`rows`, `places`, `values`, `techniques`, `reputation`, `reader`,
-`report_sections`, `asserts_techniques`, `source`, `holds_strings`) requires
+`report_sections`, `asserts_techniques`, `source`, `holds_strings`,
+`function_starts`) requires
 the kind and is offered only with one, accepting it stages both or neither,
 and a row field also needs `rows`. A tool declaration names a kind or states
 only the fields read without one (`display_name`, `category`, `words`,
