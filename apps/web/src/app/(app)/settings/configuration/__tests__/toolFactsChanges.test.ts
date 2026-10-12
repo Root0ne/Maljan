@@ -118,7 +118,7 @@ describe("the tool declarations box", () => {
     );
 
   it("shows what is in force and names each changed tool with a reset", () => {
-    const html = render(SHIPPED, { scan: { long_running: true }, list: null });
+    const html = render(SHIPPED, { ...MARK, scan: { long_running: true }, list: null });
     expect(html).toContain("in force");
     expect(html).toContain('data-tool-change="changed"');
     expect(html).toContain('data-tool-change="removed"');
@@ -126,6 +126,13 @@ describe("the tool declarations box", () => {
     expect(html).toContain("reset list to shipped");
     expect(html).toContain("&quot;peek&quot;");
     expect(html).not.toContain("&quot;list&quot;");
+  });
+
+  it("reads a map without the mark whole, as the API does", () => {
+    const html = render(SHIPPED, { scan: { long_running: true } });
+    expect(html).toContain('data-tool-change="removed"');
+    expect(html).toContain("reset peek to shipped");
+    expect(html).not.toContain("&quot;peek&quot;");
   });
 
   it("says every tool is as shipped when nothing is changed", () => {
@@ -166,7 +173,7 @@ describe("the tool declarations box", () => {
     const html = renderToStaticMarkup(
       createElement(ToolFactsLeafEditor, {
         entry,
-        current: { value: { peek: null }, source: "ui" } as never,
+        current: { value: { ...MARK, peek: null }, source: "ui" } as never,
         staged: undefined,
         onChange: () => {},
       })

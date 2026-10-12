@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { ChangeLine } from "./describeChange";
 import { comparableSaved } from "./agentStaging";
 import { describeChange } from "./describeChange";
+import { usableFields } from "./declarationFields";
 import { groupsBySection, pathForKey } from "./sections";
 import { countLabel } from "@/lib/report-utils";
 import { APPLIES_SENTENCE } from "./vocabulary";
@@ -71,6 +72,7 @@ export function buildReviewItems(ctx: ReviewSource): ReviewItem[] {
       // built-ins as changed.
       comparableSaved(key, values[key]?.value),
       pending[key],
+      usableFields(schema.tool_declaration_fields),
     );
     const href = pathForKey(schema, key);
     const titles = titlesByPath.get(href) ?? { sectionTitle: "", groupTitle: "" };

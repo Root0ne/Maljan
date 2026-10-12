@@ -163,3 +163,89 @@ export function resetTool(changes: ToolFactsChanges | undefined, tool: string): 
   if (tool !== CHANGES_MARK) delete out[tool];
   return out;
 }
+
+/** Whether `value` is a map marked as a block's changes over what it ships. */
+export function holdsChanges(value: unknown): boolean {
+  return isObject(value) && value[CHANGES_MARK] === CHANGES_FORM;
+}
+
+/** A value of a block's `tool_facts` as its marked changes over `shipped`, read as the API
+ *  reads it: a marked map as it is, one without the mark as the whole map
+ *  (`inForceOf`), no value as none. */
+export function asChanges(
+  shipped: Declarations,
+  value: unknown,
+  fields: ToolDeclarationFields | null = null
+): ToolFactsChanges | undefined {
+  if (!isObject(value)) return undefined;
+  if (holdsChanges(value)) return value as ToolFactsChanges;
+  return toolFactsChanges(value, shipped, fields);
+}
+
+/** The declarations a value of a block's `tool_facts` puts in force, as the API reads it.
+ *
+ *  Marked, its changes over `shipped`; a map without the mark, whole (a
+ *  shipped tool it does not name is removed, and a field a shipped tool's
+ *  declaration leaves out is at its default when the served split says what
+ *  that is); anything else (no value) is what ships. */
+export function inForceOf(
+  shipped: Declarations,
+  value: unknown,
+  fields: ToolDeclarationFields | null = null
+): Record<string, ToolFactsEntry> {
+  return mergeToolFacts(shipped, asChanges(shipped, value, fields));
+}
+
+/** One tool a change of a block's `tool_facts` makes a difference to. */
+export interface ToolFactsDiff {
+  tool: string;
+  state: "changed" | "removed" | "added" | "reset";
+  /** For a changed tool: each field that differs, with its value before and after. */
+  fields?: { name: string; before: unknown; after: unknown }[];
+}
+
+/** What a change of a block's `tool_facts` from `before` to `after` does, per tool.
+ *
+ *  Both sides are read as the API reads them (`inForceOf`) and compared one
+ *  tool at a time, so only the tools whose declaration in force changes are
+ *  named: never the mark, never a tool both sides hold as shipped. A tool
+ *  brought back to what ships is a reset. Time linear in the maps. */
+export function toolFactsDiff(
+  shipped: Declarations,
+  before: unknown,
+  after: unknown,
+  fields: ToolDeclarationFields | null = null
+): ToolFactsDiff[] {
+  const was = inForceOf(shipped, before, fields);
+  const now = inForceOf(shipped, after, fields);
+  const has = (map: object, key: string) => Object.prototype.hasOwnProperty.call(map, key);
+  const tools = [...Object.keys(was), ...Object.keys(now).filter((tool) => !has(was, tool))];
+  const out: ToolFactsDiff[] = [];
+  for (const tool of tools) {
+    if (!has(now, tool)) {
+      out.push({ tool, state: "removed" });
+      continue;
+    }
+    const asShipped = has(shipped, tool) && sameJson(now[tool], shipped[tool]);
+    if (!has(was, tool)) {
+      out.push({ tool, state: asShipped ? "reset" : "added" });
+      continue;
+    }
+    if (sameJson(was[tool], now[tool])) continue;
+    if (asShipped) {
+      out.push({ tool, state: "reset" });
+      continue;
+    }
+    const left = (isObject(was[tool]) ? was[tool] : {}) as Record<string, unknown>;
+    const right = (isObject(now[tool]) ? now[tool] : {}) as Record<string, unknown>;
+    const names = [...Object.keys(left), ...Object.keys(right).filter((name) => !has(left, name))];
+    out.push({
+      tool,
+      state: "changed",
+      fields: names
+        .filter((name) => !sameJson(left[name], right[name]))
+        .map((name) => ({ name, before: left[name], after: right[name] })),
+    });
+  }
+  return out;
+}

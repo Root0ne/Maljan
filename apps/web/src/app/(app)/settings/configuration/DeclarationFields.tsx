@@ -25,6 +25,7 @@ import {
   type Read,
 } from "./declarationFields";
 import {
+  asChanges,
   changedTools,
   mergeToolFacts,
   namesAnyTool,
@@ -164,6 +165,14 @@ function ReadField<T>({
   );
 }
 
+/** The word on a tool's reset button. A tool the block does not ship is the
+ *  operator's own and is removed; one whose stored change conflicts with this
+ *  release is reset (its stored change removed), shipped or not. */
+function resetWord(state: ToolChange["state"], conflicting: boolean): string {
+  if (state !== "added") return "Reset to shipped";
+  return conflicting ? "Reset" : "Remove";
+}
+
 const CHANGE_LABEL: Record<ToolChange["state"], string> = {
   changed: "changed",
   removed: "removed",
@@ -211,12 +220,14 @@ export function ToolFactsBox({
     changes: ToolFactsChanges;
     inForce: Record<string, ToolFactsEntry>;
   } | null>(null);
+  // Read as the API reads it: a map without the mark is the whole map.
+  const read = asChanges(shipped, changes, fields);
   const inForce =
     held !== null && deepEqual(held.changes, changes ?? {})
       ? held.inForce
-      : mergeToolFacts(shipped, changes);
+      : mergeToolFacts(shipped, read);
   const ships = Object.keys(shipped).length > 0;
-  const changed = ships ? changedTools(shipped, changes) : [];
+  const changed = ships ? changedTools(shipped, read) : [];
   return (
     <>
       <ReadField
@@ -262,10 +273,10 @@ export function ToolFactsBox({
                       aria-label={`reset ${tool} to shipped`}
                       onClick={() => {
                         setHeld(null);
-                        onChanges(resetTool(changes, tool));
+                        onChanges(resetTool(read, tool));
                       }}
                     >
-                      {state === "added" ? "Remove" : "Reset to shipped"}
+                      {resetWord(state, conflicts.includes(tool))}
                     </button>
                   </li>
                 ))}

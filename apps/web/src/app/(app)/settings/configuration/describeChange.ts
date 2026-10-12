@@ -12,9 +12,11 @@ import type {
   CatalogEntry,
   ProfileEntry,
   StageEntry,
+  ToolDeclarationFields,
 } from "@/types/settings";
 import type { AgentLLMOverride } from "./AgentDefinitionsEditor";
 import { deepEqual } from "./deepEqual";
+import { toolFactsDiff, type ToolFactsDiff } from "./toolFactsChanges";
 
 export interface ChangeLine {
   key: string;
@@ -502,11 +504,69 @@ function describeChannelMapping(entry: CatalogEntry, before: unknown, after: unk
 }
 
 // ---------------------------------------------------------------------------
+// A block's tool declarations (editor "tool_facts")
+// ---------------------------------------------------------------------------
+
+const TOOL_STATE_WORDS: Record<ToolFactsDiff["state"], string> = {
+  changed: "changed",
+  reset: "reset to shipped",
+  removed: "removed",
+  added: "added",
+};
+
+const isStructured = (v: unknown) => v !== null && typeof v === "object";
+
+/** One tool's line: its state, and for a changed tool each field that differs
+ *  (a scalar one with its value before and after, a structured one by name). */
+function describeToolLine({ tool, state, fields }: ToolFactsDiff): string {
+  if (state !== "changed" || !fields?.length) return `${tool}: ${TOOL_STATE_WORDS[state]}`;
+  const parts = fields.map(({ name, before, after }) =>
+    isStructured(before) || isStructured(after)
+      ? name
+      : `${name} ${formatScalar(before)} → ${formatScalar(after)}`
+  );
+  return `${tool}: changed: ${parts.join(", ")}`;
+}
+
+/** A block's tool declarations, compared per tool as they are in force: the
+ *  catalog default is what the block ships, and the stored and staged values
+ *  are read as the API reads them (`toolFactsDiff`). Never names the mark or
+ *  a tool both sides hold as shipped. */
+export function describeToolFacts(
+  entry: CatalogEntry,
+  before: unknown,
+  after: unknown,
+  fields: ToolDeclarationFields | null = null
+): { summary: string; detail?: string[] } {
+  const shipped = (
+    entry.default && typeof entry.default === "object" && !Array.isArray(entry.default)
+      ? entry.default
+      : {}
+  ) as Record<string, Record<string, unknown>>;
+  const diff = toolFactsDiff(shipped, before, after, fields);
+  if (diff.length === 0) return { summary: "no tool changes" };
+  const counts = (["changed", "reset", "removed", "added"] as const)
+    .map((state) => [state, diff.filter((d) => d.state === state).length] as const)
+    .filter(([, n]) => n > 0)
+    .map(([state, n]) => `${countLabel(n, "tool")} ${TOOL_STATE_WORDS[state]}`);
+  return { summary: counts.join(", "), detail: diff.map(describeToolLine) };
+}
+
+// ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
-export function describeChange(entry: CatalogEntry, before: unknown, after: unknown): ChangeLine {
+export function describeChange(
+  entry: CatalogEntry,
+  before: unknown,
+  after: unknown,
+  fields: ToolDeclarationFields | null = null
+): ChangeLine {
   const base = { key: entry.key, title: entry.title, applies: entry.applies };
+
+  if (entry.editor === "tool_facts") {
+    return { ...base, ...describeToolFacts(entry, before, after, fields) };
+  }
 
   if (entry.key === "core.mcp.servers") {
     return { ...base, ...describeServerMap(before, after) };
