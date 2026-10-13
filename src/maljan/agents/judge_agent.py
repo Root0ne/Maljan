@@ -2095,8 +2095,12 @@ class JudgeAgent(BudgetMeter):
             # the request alone, never the loop's own messages.
             if conversation:
                 last = conversation[-1]
-                noted = {**(getattr(last, "response_metadata", None) or {}), TOOL_LOOP_TURN: True}
-                return [*conversation[:-1], last.model_copy(update={"response_metadata": noted})]
+                sent = last.model_copy()
+                sent.response_metadata = {
+                    **(getattr(last, "response_metadata", None) or {}),
+                    TOOL_LOOP_TURN: True,
+                }
+                return [*conversation[:-1], sent]
             return conversation
 
         # The key this loop's turns are counted and reserved under.

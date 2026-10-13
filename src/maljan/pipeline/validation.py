@@ -7188,12 +7188,13 @@ def ledger_absence_contradictions(payload: Any, entries: EntryTexts | None) -> l
         Violation(
             code=ABSENCE_CONTRADICTS_LEDGER_CODE,
             message=(
-                f"The text says {_named_ids(whats)} {said[kind][len(whats) > 1]} "
+                f"The text says {safe_finding_value(_named_ids(whats))} "
+                f"{safe_finding_value(said[kind][len(whats) > 1])} "
                 f"({safe_finding_value(marked_cut(sentence, 200))!r}); "
-                f"{_named_ids(entries.named(i) for i in holders)} "
-                f"{'holds' if len(holders) == 1 else 'hold'} "
-                f"{'it' if len(whats) == 1 else 'them'} in this run. State what that entry "
-                "shows, or say exactly what is absent."
+                f"{safe_finding_value(_named_ids(entries.named(i) for i in holders))} "
+                f"{safe_finding_value('holds' if len(holders) == 1 else 'hold')} "
+                f"{safe_finding_value('it' if len(whats) == 1 else 'them')} in this run. State "
+                "what that entry shows, or say exactly what is absent."
             ),
             path="prose",
         )
