@@ -17,8 +17,10 @@ than fabricate — see other/docs/report-reference/ ("state absence explicitly")
 from __future__ import annotations
 
 import ipaddress
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Iterable, Iterator
 from typing import Any
+from urllib.parse import urlsplit
 
 from maljan.analysis.sandbox_sections import ItemIndex
 from maljan.reporting import tool_kinds
@@ -510,6 +512,7 @@ def bundle_for(
                 "ips": [f"{i.address}:{i.port}" for i in (net.ips if net else [])],
                 "urls": [u.url for u in (net.urls if net else [])],
                 "user_agents": (net.user_agents if net else []),
+                "entries_holding": _network_holders(report),
             },
         }
 
@@ -767,6 +770,107 @@ _STRING_TOOLS = "evidence_bundles._STRING_TOOLS"
 _HOST_STRING_KINDS = frozenset({"path", "registry", "mutex", "command"})
 
 
+# What ends a token when an answer's text is read for the values it holds.
+_TOKEN_BREAK = re.compile(r"[\s\"'`<>()\[\]{},;|]+")
+
+
+def _token_forms(token: str) -> Iterator[str]:
+    """The values one token of an answer names: itself, trimmed, its host, its address."""
+    trimmed = token.rstrip(".:/")
+    yield token
+    if trimmed != token:
+        yield trimmed
+    if "://" in trimmed:
+        host = urlsplit(trimmed).hostname
+        if host:
+            yield host
+    address, sep, port = trimmed.rpartition(":")
+    if sep and port.isdigit() and address.count(".") == 3:
+        yield address
+
+
+def _value_holders(report: MalwareReport) -> dict[str, dict[str, None]]:
+    """Every value the report's answered entries hold, each with the entries holding it.
+
+    Read from two places, each naming the entry exactly: a captured tool
+    output (its call number names its entry, held to the evidence index by
+    tool, as :func:`cited_undeclared_output` holds it), and a report section
+    built from one entry, or a table row that names its own entry. A section
+    built from several entries whose rows name none is not read: which entry
+    holds a value there is not known. Only entries the index files as
+    answered count. One pass over the texts.
+    """
+    from maljan.schemas.evidence import entry_ids_in, format_entry_id
+
+    index = _index_of(report)
+    held: dict[str, dict[str, None]] = {}
+
+    def add(text: str, entry_ids: Iterable[str]) -> None:
+        ids = [i for i in entry_ids if (row := index.get(i)) is not None and row.ok]
+        if not ids:
+            return
+        for token in _TOKEN_BREAK.split(text):
+            for form in _token_forms(token) if token else ():
+                holders = held.setdefault(form, {})
+                holders.update(dict.fromkeys(ids))
+
+    for outputs in (report.technical_evidence or {}).values():
+        for output in outputs:
+            seq = output.get("seq")
+            if not isinstance(seq, int) or isinstance(seq, bool) or seq < 0:
+                continue
+            entry_id = format_entry_id(seq + 1)
+            row = index.get(entry_id)
+            tool = str(output.get("tool_name") or output.get("tool") or "")
+            if row is not None and str(getattr(row, "tool", "")) == tool:
+                add(str(output.get("output") or ""), (entry_id,))
+    for section in report.sections:
+        if len(section.evidence_ids) == 1:
+            cells = [cell for row in section.rows for cell in row]
+            add("\n".join([*cells, *section.items, section.text]), section.evidence_ids)
+            continue
+        for row in section.rows:
+            named = sorted(entry_ids_in(" ".join(row)) & set(section.evidence_ids))
+            if named:
+                add("\n".join(row), named)
+    return held
+
+
+def value_entries(report: MalwareReport, values: Iterable[str]) -> list[str]:
+    """``<value>: ev_0006, ev_0030`` for each of ``values`` an answered entry holds, in order.
+
+    A value no entry is known to hold is left out rather than given an entry
+    that may not hold it. An ``address:port`` value is looked up by its
+    address too.
+    """
+    values = [v for v in dict.fromkeys(values) if v]
+    if not values:
+        return []
+    held = _value_holders(report)
+    out: list[str] = []
+    for value in values:
+        address, _sep, port = value.rpartition(":")
+        ids = held.get(value) or (held.get(address) if port.isdigit() or port == "None" else None)
+        if ids:
+            out.append(f"{value}: {', '.join(sorted(ids))}")
+    return out
+
+
+def _network_holders(report: MalwareReport) -> list[str]:
+    """The entries holding each url, domain and ip of the report's network block."""
+    net = report.network
+    if net is None:
+        return []
+    return value_entries(
+        report,
+        [
+            *(u.url for u in net.urls),
+            *(d.fqdn for d in net.domains),
+            *(f"{i.address}:{i.port}" for i in net.ips),
+        ],
+    )
+
+
 def _string_entries(report: MalwareReport) -> list[str]:
     """``ev_0012 (floss)`` for every answered entry whose output is the sample's strings."""
     return [
@@ -802,6 +906,7 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
             "domains": [d.fqdn for d in (net.domains if net else [])],
             "user_agents": (net.user_agents if net else []),
             "string_entries": _string_entries(report),
+            "entries_holding": _network_holders(report),
         }
     if section == "host_identifiers":
         static = report.static
