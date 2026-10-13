@@ -178,11 +178,11 @@ class ClaimEvidence(BaseModel):
         """Record the ordinal of the block this claim was read from."""
         self._block = int(ordinal)
 
-    # The number the claim's heading wrote (``CLAIM 7:`` is ``"7"``), as
-    # digits, or ``None`` for a heading that wrote none and a claim built any
-    # other way (``claim_headings.heading_number``). Recorded where the claim
-    # is read, never serialised: a validation retry names the claims it
-    # changes by it (``pipeline.retry_merge``).
+    # The number the claim's heading wrote (``CLAIM 7:`` is ``"7"``, ``CLAIM
+    # R7:`` is ``"R7"``), as written, or ``None`` for a heading that wrote
+    # none and a claim built any other way (``claim_headings.heading_number``).
+    # Recorded where the claim is read, never serialised: a validation retry
+    # names the claims it changes by it (``pipeline.retry_merge``).
     _number: str | None = PrivateAttr(default=None)
 
     @property

@@ -18,7 +18,8 @@ import re
 LINE_PREFIX = r"[ \t>*_#]*(?:(?:[-+]|\d+[.)])[ \t]+)?[ \t>*_#]*"
 
 # A claim's heading at the start of a line, as models number and mark it:
-# ``CLAIM:``, ``CLAIM 3:``, ``CLAIM 3 —``, ``**CLAIM 4 (REVISED):**``,
+# ``CLAIM:``, ``CLAIM 3:``, ``CLAIM R3:`` (a label of letters before its
+# number, after a space or ``#``), ``CLAIM 3 —``, ``**CLAIM 4 (REVISED):**``,
 # ``CLAIM 2 [REVISED — retracts claim 5]:``, ``- CLAIM:``, ``1. CLAIM:``, and a
 # heading whose note is all its line holds (``CLAIM 1 (REVISED — not
 # observed)``, fields on the lines after it). Each one opens a block of its
@@ -30,7 +31,7 @@ LINE_PREFIX = r"[ \t>*_#]*(?:(?:[-+]|\d+[.)])[ \t]+)?[ \t>*_#]*"
 # bracket is closed on its own line or the line is no heading, and a bracket
 # that never closes is given up once, so a line costs time linear in its length.
 CLAIM_HEAD_RE = re.compile(
-    r"^" + LINE_PREFIX + r"CLAIM(?:[ \t]*#?(?P<number>\d+))?"
+    r"^" + LINE_PREFIX + r"CLAIM(?:(?:[ \t]+#?(?P<label>[A-Za-z]++)|[ \t]*#?)(?P<number>\d+))?"
     r"(?:[ \t]*(?P<note>\([^)\n]*\)|\[[^\]\n]*\]))?[ \t]*(?:\*\*)?[ \t]*"
     r"(?:(?P<delim>:|—|–|-(?=\s))[ \t]*(?:\*\*)?[ \t]*|(?(note)$|(?!)))"
 )
@@ -47,12 +48,15 @@ def heading_number(heading: re.Match[str]) -> str | None:
     """The number a heading writes after ``CLAIM`` (``CLAIM 7:``), leading zeros aside, or ``None``.
 
     Kept as the digits written, never converted: the number names a claim, it
-    is not a quantity, and digits of any length compare as written.
+    is not a quantity, and digits of any length compare as written. A label
+    written before the digits stays in front of them (``CLAIM R7:`` is
+    ``"R7"``): it is part of the name, so ``R7`` is never read as claim 7.
     """
-    digits = heading.groupdict().get("number")
+    groups = heading.groupdict()
+    digits = groups.get("number")
     if digits is None:
         return None
-    return digits.lstrip("0") or "0"
+    return f"{groups.get('label') or ''}{digits.lstrip('0') or '0'}"
 
 
 def heading_note(heading: re.Match[str]) -> str | None:

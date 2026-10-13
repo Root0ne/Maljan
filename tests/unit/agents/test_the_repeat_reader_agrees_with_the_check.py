@@ -59,6 +59,11 @@ HEADINGS = [
     "\xa0CLAIM: ",
     "> CLAIM #7: ",
     "claim: ",
+    "CLAIM R3: ",
+    "**CLAIM N1 (was claim 1):** ",
+    "CLAIM #U14 — ",
+    "CLAIM R: ",
+    "CLAIM Routine: ",
 ]
 PROSE = [
     "Summary: the sample is a loader.",
@@ -382,7 +387,7 @@ def test_the_automata_are_built_from_the_patterns_the_check_reads() -> None:
     prefix = "[ \\t>*_#]*(?:(?:[-+]|\\d+[.)])[ \\t]+)?[ \\t>*_#]*"
     assert claim_headings.LINE_PREFIX == prefix
     assert claim_headings.CLAIM_HEAD_RE.pattern == (
-        "^" + prefix + "CLAIM(?:[ \\t]*#?(?P<number>\\d+))?"
+        "^" + prefix + "CLAIM(?:(?:[ \\t]+#?(?P<label>[A-Za-z]++)|[ \\t]*#?)(?P<number>\\d+))?"
         "(?:[ \\t]*(?P<note>\\([^)\\n]*\\)|\\[[^\\]\\n]*\\]))?[ \\t]*(?:\\*\\*)?[ \\t]*"
         "(?:(?P<delim>:|\u2014|\u2013|-(?=\\s))[ \\t]*(?:\\*\\*)?[ \\t]*|(?(note)$|(?!)))"
     )
