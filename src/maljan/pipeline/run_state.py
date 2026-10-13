@@ -27,7 +27,8 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from maljan.core.declared_reading import reads_as
+from maljan.core.declared_reading import kind_of, reads_as, recorded
+from maljan.core.reputation import is_lookup_entry
 from maljan.pipeline.triage_pack import (
     NOT_RUN_PREFIX,
     PIPELINE,
@@ -35,7 +36,7 @@ from maljan.pipeline.triage_pack import (
     render_pack,
     renderer_of,
 )
-from maljan.schemas.evidence import is_guard_answer
+from maljan.schemas.evidence import LedgerEntry, is_guard_answer
 from maljan.tools.artefact_index import SERVED_BY
 from maljan.utils.written_forms import pack_escaped
 
@@ -245,7 +246,13 @@ def _lines(
     # the block wants that too, because why there is no reputation answer is
     # worth as much to a model as the answer.
     reputation = [e for e in pack if reads_as(e, "run_state.reputation")]
-    if reputation:
+    # An agent that looked the sample up itself, where the pack holds no
+    # answered lookup: the block shows that call, never a "not done" line for
+    # a lookup the run did make.
+    own = _agents_lookup(rows, sha256) if not any(_answered_lookup(e) for e in pack) else None
+    if own is not None:
+        lines.append(_cut(render_pack([own], 0)))
+    elif reputation:
         lines.append(_cut(render_pack([reputation[-1]], 0)))
 
     stages = state.get("stage_results") or {}
@@ -309,6 +316,41 @@ def index_sentence(entry_id: str, data: Any, *, dropped: bool = False) -> str:
         "own, each with its imports called, resolved names, strings, capa rules, callers and "
         f"callees; {SERVED_BY}."
     )
+
+
+def _answered_lookup(entry: Any) -> bool:
+    """Whether ``entry`` is a reputation lookup that answered."""
+    return bool(getattr(entry, "ok", False)) and is_lookup_entry(entry)
+
+
+def _agents_lookup(rows: list[Any], sha256: str) -> LedgerEntry | None:
+    """The latest lookup of the sample an agent made itself, or ``None``.
+
+    A call to a declared reputation lookup that answered, or a call to a tool
+    its source declares nothing for that answered and was given the sample's
+    own SHA-256 as an argument: the fact the block states is that the call was
+    made and what it answered, read from the entry alone. A tool declared of
+    any other kind is never one, whatever its arguments.
+    """
+    wanted = sha256.strip().lower()
+    found: LedgerEntry | None = None
+    for row in rows:
+        if _get(row, "agent") == PIPELINE or _get(row, "ok") is not True:
+            continue
+        if is_guard_answer(row) or _get(row, "repeated_of"):
+            continue
+        args = _get(row, "args")
+        given = isinstance(args, Mapping) and any(
+            isinstance(value, str) and value.strip().lower() == wanted for value in args.values()
+        )
+        lookup = is_lookup_entry(row)
+        if not lookup and not (wanted and given and recorded(row) and not kind_of(row)):
+            continue
+        try:
+            found = row if isinstance(row, LedgerEntry) else LedgerEntry.model_validate(row)
+        except Exception:  # noqa: BLE001 — one unreadable row is not a lost block
+            continue
+    return found
 
 
 def _cut(line: str) -> str:
