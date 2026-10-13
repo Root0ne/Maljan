@@ -1352,7 +1352,7 @@ def builtin_sources(extra: dict[str, Any], newcomer: str) -> dict[str, set[str]]
     provider by its id: read as settings data (``tool_facts``), never by name.
     """
     from maljan.core.settings_overrides import build_settings
-    from maljan.core.tool_declarations import PROVIDER_BLOCKS, block_at
+    from maljan.core.tool_declarations import block_at, provider_blocks
 
     settings = build_settings(extra)
     out = {
@@ -1361,7 +1361,7 @@ def builtin_sources(extra: dict[str, Any], newcomer: str) -> dict[str, set[str]]
         if key != newcomer and entry.enabled
     }
     provider = str(settings.static.provider or "")
-    block = PROVIDER_BLOCKS.get(f"provider:{provider}")
+    block = provider_blocks().get(f"provider:{provider}")
     if block:
         out[provider] = set(block_at(settings, block).tool_facts or {})
     return out
