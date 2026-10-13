@@ -476,7 +476,8 @@ class TestSafeAnalyzeISRChunked:
         from maljan.agents import base_agent
 
         source = inspect.getsource(base_agent.BaseAnalyst._run_tool_loop)
-        assert 'seeded_repeat_guard(getattr(self, "_prior_chunk_calls", None))' in source
+        assert 'getattr(self, "_prior_chunk_calls", None),' in source
+        assert "earlier_rounds=own_earlier_entries(self)" in source
 
 
 # ---------------------------------------------------------------------------
