@@ -4216,8 +4216,9 @@ def _declared_rules(entry: LedgerEntry) -> dict[str, Any] | None:
     :func:`_row_named`, placed at its declared ``addresses`` (else
     ``address``, ``offset``, ``rva``, else its first declared place), with the
     technique ids the declaration says the row names when the tool declares
-    that its techniques are asserted. ``None`` for an answer whose
-    declaration names no rows, or whose rows are none of them objects.
+    that its techniques are asserted. A row with no readable name is left
+    out. ``None`` for an answer whose declaration names no rows, or whose rows
+    are none of them named objects (the generic line then shows it).
     """
     from maljan.reporting.tool_kinds import row_technique_ids
 
@@ -4232,14 +4233,19 @@ def _declared_rules(entry: LedgerEntry) -> dict[str, Any] | None:
     rows: list[dict[str, Any]] = []
     for row in raws:
         read = {name: first(row, path) for name, path in facts.values.items()}
+        rule = _row_named(read, values)
+        if not rule:
+            # A row the declaration gives no readable name is no rule it
+            # matched: neither counted nor shown as an empty one.
+            continue
         rows.append(
             {
-                "rule": _row_named(read, values),
+                "rule": rule,
                 "addresses": _flat(select(row, facts.places[place])) if place else [],
                 "attck": row_technique_ids(row, facts) if facts.asserts_techniques else [],
             }
         )
-    return {"capabilities": rows}
+    return {"capabilities": rows} if rows or not raws else None
 
 
 # The renderers that also read an answer through its declared facts

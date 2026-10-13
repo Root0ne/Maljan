@@ -4,8 +4,9 @@
   swapped or mixed matcher's rule grounds a claim as the shipped matcher's
   does, and a long row counts them without naming a matcher that did not run.
 * The declared-fact reader and the generic line show only rows that are
-  objects, name a row only by a naming value (else ``name=value``), and never
-  print a value that is not a scalar.
+  objects, name a row only by a naming value (else ``name=value``), never
+  print a value that is not a scalar, and count no row with no readable name
+  as a capability.
 * With no answer of the kind, the answers keep the shipped tool's names only
   where the effective list still runs that tool.
 """
@@ -148,7 +149,18 @@ class TestDeclaredRowsAreReadSafely:
         answer = {"hits": [{"name": {"nested": 1}, "at": 7}]}
         line = triage_pack.render_pack([_entry(answer, RULES)], 0)
         assert "{" not in line and "nested" not in line
-        assert "@ 7" in line
+        assert line == "[ev_0001] match: 1 row of kind capability_rules (@ 7)"
+
+    def test_a_row_with_no_readable_name_is_no_empty_capability(self) -> None:
+        line = triage_pack.render_pack([_entry({"hits": [{"name": "", "at": []}]}, RULES)], 0)
+        assert line == "[ev_0001] match: 1 row of kind capability_rules"
+        assert "()" not in line and "capabilities" not in line
+
+    def test_only_named_rows_are_counted_as_capabilities(self) -> None:
+        answer = {"hits": [{"name": "", "at": ["0x30"]}, {"name": "real", "at": ["0x10"]}]}
+        line = triage_pack.render_pack([_entry(answer, RULES)], 0)
+        assert "1 capabilities (real @ 0x10)" in line
+        assert "0x30" not in line and "( @" not in line
 
     def test_a_declaration_with_no_naming_value_says_what_each_value_is(self) -> None:
         answer = {"hits": [{"ns": "data-manipulation/checksum/crc32", "at": ["0x1200"]}]}
