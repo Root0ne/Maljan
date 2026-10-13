@@ -1209,6 +1209,33 @@ def _lead(
     return None
 
 
+def _with_twins(order: list[str]) -> list[str]:
+    """``order`` with each ``<server>__<name>`` right after the ``<name>`` it was renamed beside.
+
+    A server whose tool name another server's tool already holds offers it as
+    ``<server>__<name>``; a model shown two tools of one name reads them as two
+    of a kind and weighs both, so the renamed one is ranked beside its twin
+    rather than wherever its prefix sorts. Without a renamed tool the order is
+    unchanged.
+    """
+    names = set(order)
+    twins: dict[str, list[str]] = {}
+    for name in order:
+        _server, sep, base = name.partition("__")
+        if sep and base in names:
+            twins.setdefault(base, []).append(name)
+    if not twins:
+        return order
+    placed = {name for held in twins.values() for name in held}
+    out: list[str] = []
+    for name in order:
+        if name in placed:
+            continue
+        out.append(name)
+        out.extend(twins.get(name, ()))
+    return out
+
+
 def _next_call(
     request: wire.Request, facts: _Facts, step: int, fill_from_results: bool = False
 ) -> wire.ToolCall | None:
@@ -1220,6 +1247,7 @@ def _next_call(
     )
     order = [name for name in _TOOL_PREFERENCE if name in tools]
     order += sorted(name for name in tools if name not in order)
+    order = _with_twins(order)
     spent: frozenset[Any] = frozenset()
     starts: tuple[str, ...] = ()
     if answers is not None:

@@ -357,7 +357,7 @@ def _rehearsal(wire: str, scenario: str = "normal", **kwargs: Any) -> Rehearsal:
         scenario=scenario,
         provider=wire,
         job_timeout_s=JOB_DEADLINE_S,
-        loop_steps=8 if scenario == "long_loop" else None,
+        loop_steps=kwargs.pop("loop_steps", 8 if scenario == "long_loop" else None),
         **kwargs,
     )
 
@@ -1449,7 +1449,7 @@ def _kit_run(
         ctx,
         name.split("-", 1)[0],
         name,
-        _rehearsal(ctx.wires[0], extra=extra, fill_from_results=True, **kw),
+        _rehearsal(ctx.wires[0], extra=extra, **{"fill_from_results": True, **kw}),
         servers={"kit": ALL_E},
         gates=_kit_gates(extra, declared),
     )
@@ -1470,7 +1470,20 @@ def scenario_f1(ctx: Context) -> list[RunResult]:
             "static.r2.binary_path": ctx.r2mcp,
             "static.r2.enabled": True,
         }
-        results.append(_kit_run(ctx, "f1-with-r2", extra, {}, static_sample_paths={"r2": ""}))
+        # Every kit tool shares its name with one of the static analyst's own
+        # (r2's decompiler, the built-in servers'), so each is offered as
+        # ``kit__<name>``. The loop turns through its tools rather than
+        # following r2's answers, which would spend every step on r2.
+        results.append(
+            _kit_run(
+                ctx,
+                "f1-with-r2",
+                extra,
+                {},
+                static_sample_paths={"r2": ""},
+                fill_from_results=False,
+            )
+        )
     return results
 
 
