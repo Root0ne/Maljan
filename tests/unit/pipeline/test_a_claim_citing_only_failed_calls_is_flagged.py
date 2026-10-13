@@ -54,6 +54,18 @@ def test_only_a_claim_whose_every_cited_entry_failed_is_flagged() -> None:
     assert isr.claims[0].claim == "The list_exports answer records what it read"
 
 
+def test_a_claim_citing_a_sandbox_item_or_another_reference_is_not_flagged() -> None:
+    isr = _isr(
+        _claim("Beacons to the host", "ev_0068, net:3"),
+        _claim("Spawns a child [proc:84]", "ev_0068"),
+        _claim("Reads its strings", "ev_0068; the strings listing"),
+        _claim("Two failed reads, bracketed", "[ev_0068], [ev_0069]."),
+    )
+    flagged = mark_claims_citing_only_failed_calls({"reverser": isr}, LEDGER)
+    assert flagged == ["reverser claim 4"]
+    assert [c.cites_only_failed_calls for c in isr.claims] == [False, False, False, True]
+
+
 def test_the_flag_is_said_beside_the_claim_and_absent_from_an_unflagged_dump() -> None:
     claim = _claim("Reads the exports", "ev_0068", "T1106")
     plain = claim_summary_line(1, claim)

@@ -1634,8 +1634,11 @@ decides.
    merged. A benign control run had published thirteen techniques from such
    claims. **A claim citing only failed calls** is flagged the same way once
    the run's ledger is known (the judge node,
-   `validation.mark_claims_citing_only_failed_calls`): every entry it cites is
-   a call the ledger files as failed, so it rests on nothing the sample showed
+   `validation.mark_claims_citing_only_failed_calls`): every reference its
+   evidence names is an entry id and every entry it cites is a call the
+   ledger files as failed, so it rests on nothing the sample showed; a claim
+   that also names a sandbox item (`net:3`) or any other reference is not
+   flagged
    (a tool's name is in its own error text, and grounding reads token
    overlap). It is kept as written and logged; the judge's summary, the
    upstream-findings block and, when every claim naming a technique is

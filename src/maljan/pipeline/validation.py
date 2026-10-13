@@ -39,7 +39,7 @@ from maljan.agents.run_evidence_corpus import CorpusState, both_searched
 # re-exported here, where every reader of a run's validation looks for them.
 from maljan.analysis.corroboration import corroboration_row as corroboration_row
 from maljan.analysis.corroboration import corroboration_sources as corroboration_sources
-from maljan.analysis.sandbox_sections import ItemIndex, is_item_id, item_ids_in
+from maljan.analysis.sandbox_sections import ItemIndex, cited_item_ids, is_item_id, item_ids_in
 from maljan.analysis.technique_ids import MITRE_ATTACK_SOURCES, TECHNIQUE_ID_EXACT_RE
 from maljan.core.declared_reading import (
     bare_name,
@@ -68,7 +68,7 @@ from maljan.pipeline.events import (
     unparsed_answer_kept_sentence,
 )
 from maljan.pipeline.retry_merge import folded_title
-from maljan.schemas.evidence import answer_not_shown, entry_ids_in
+from maljan.schemas.evidence import ENTRY_ID_RE, answer_not_shown, entry_ids_in
 from maljan.schemas.judgement import BENIGN_VERDICT, SEVERITY_RATINGS, VERDICT_VALUES
 from maljan.schemas.stix_pattern import read_comparisons
 from maljan.utils.marked_cut import marked_cut
@@ -2497,6 +2497,24 @@ def _suggest_techniques(claim_text: str, attck: Any) -> list[str]:
     return out
 
 
+# What separates the references an evidence field names.
+_REFERENCE_SPLIT = re.compile(r"[\s,;\[\]()]+")
+
+
+def _only_entry_references(ref: str) -> bool:
+    """Whether every reference an evidence field names is written as an entry id.
+
+    A sandbox item, a file, a section or any other word is a reference that
+    is not an entry, so a claim naming one rests on more than its entries.
+    Linear in the field.
+    """
+    return all(
+        ENTRY_ID_RE.fullmatch(token.strip(".:"))
+        for token in _REFERENCE_SPLIT.split(ref)
+        if token.strip(".:")
+    )
+
+
 def mark_claims_citing_only_failed_calls(
     isr_reports: Mapping[str, Any] | None, ledger: Iterable[Any]
 ) -> list[str]:
@@ -2506,8 +2524,11 @@ def mark_claims_citing_only_failed_calls(
     the ledger files as failed, rests on nothing the sample showed: the
     grounding check reads token overlap, and a tool's own name is in its
     error text. The claim is flagged (``cites_only_failed_calls``) and kept
-    exactly as written. A claim citing no entry, or one entry the ledger does
-    not hold, or any answered entry, is not flagged. Returns the label of
+    exactly as written. Flagged only when every reference its evidence names
+    is a ledger entry and every one of them failed: a claim citing no entry,
+    one entry the ledger does not hold, any answered entry, a sandbox item
+    (``net:3``, in its evidence or bracketed in its words) or any other
+    reference that is not an entry id is not flagged. Returns the label of
     each claim flagged (``<agent> claim <n>``), for the log line. Linear in
     the claims and the ledger.
     """
@@ -2524,8 +2545,11 @@ def mark_claims_citing_only_failed_calls(
     for name, isr in (isr_reports or {}).items():
         agent = str(getattr(isr, "agent_id", "") or name)
         for number, claim in enumerate(getattr(isr, "claims", None) or [], start=1):
-            said = f"{getattr(claim, 'claim', '') or ''} {getattr(claim, 'evidence_ref', '') or ''}"
-            cited = entry_ids_in(said)
+            text = str(getattr(claim, "claim", "") or "")
+            ref = str(getattr(claim, "evidence_ref", "") or "")
+            if not _only_entry_references(ref) or cited_item_ids(text):
+                continue
+            cited = entry_ids_in(f"{text} {ref}")
             if cited and cited <= failed and hasattr(claim, "cites_only_failed_calls"):
                 claim.cites_only_failed_calls = True
                 flagged.append(f"{agent} claim {number}")
