@@ -18,7 +18,6 @@ this morning.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -35,6 +34,7 @@ from maljan.agents.prompt_fragments import (
     tool_families,
 )
 from maljan.core.exceptions import SampleNotOpened
+from maljan.loaders.binary_chunker import head_object
 from maljan.pipeline.events import describe_exception
 from maljan.schemas.isr_models import AgentISR
 
@@ -73,18 +73,15 @@ _PATH_HEADER = (
 def _analysis_path_in(data: str) -> str | None:
     """The ``analysis_file_path`` spliced into a head chunk, when there is one.
 
-    Mirrors the static analyst's own extraction rather than importing it: the
-    static module pulls in its RAG and sink-reachability machinery a custom
-    agent has no business loading.
+    Read from the object the chunk opens with (``loaders.binary_chunker.
+    head_object``): a reverser's head chunk is the sample context followed by
+    the sandbox slice joined after it, and the path is the head's whatever is
+    joined behind it. Mirrors the static analyst's own extraction rather than
+    importing it: the static module pulls in its RAG and sink-reachability
+    machinery a custom agent has no business loading.
     """
-    stripped = data.strip()
-    if not stripped.startswith("{"):
-        return None
-    try:
-        parsed = json.loads(stripped)
-    except (json.JSONDecodeError, ValueError):
-        return None
-    if not isinstance(parsed, dict):
+    parsed = head_object(data)
+    if parsed is None:
         return None
     path = parsed.get("analysis_file_path")
     return path if isinstance(path, str) and path else None

@@ -271,3 +271,102 @@ def test_the_pre_pass_waits_what_one_tool_call_may_take(
     settings.mcp.breaker.call_timeout_seconds = 0.0
     prepare_sample(_ghidra(settings), "/data/samples/x.exe")
     assert client.timeouts[-2:] == [120.0, 120.0]
+
+
+# A reverser's head chunk: the sample context, then the sandbox slice joined
+# after it (``loaders.binary_chunker.joined_when_it_fits``). Not one JSON
+# document, and the head object is still the one the path is read from.
+SANDBOX_SLICE = json.dumps({"target": {"file": {"name": "x.exe"}}, "behavior": {"processes": []}})
+JOINED_HEAD = HEAD_CHUNK + "\n\n" + SANDBOX_SLICE
+
+
+def _r2_with_recorded_open(monkeypatch: pytest.MonkeyPatch) -> tuple[Any, list[str]]:
+    """The shipped r2 provider, its session's open tool answered by a stub that records it."""
+    from maljan.providers.static import r2 as r2_module
+
+    opened: list[str] = []
+
+    async def _open(file_path: str) -> str:
+        opened.append(file_path)
+        return "opened"
+
+    tool = StructuredTool.from_function(
+        coroutine=_open, name=r2_module._R2_OPEN_TOOL, description="open a file"
+    )
+    provider = _shipped("r2")
+    monkeypatch.setattr(provider, "get_tools", lambda: [tool])
+    return provider, opened
+
+
+class TestAJoinedHeadChunk:
+    def test_the_reverser_on_a_graph_provider_is_handed_the_hint(self) -> None:
+        provider = _GraphProvider()
+        analyst = _generic(provider, provider_tools=True)
+        hint = analyst._priority_hint(JOINED_HEAD)
+        assert hint.startswith("PRIORITY FUNCTIONS")
+        assert provider.opened == ["/data/samples/.work/x.exe"]
+
+    def test_the_reverser_on_r2_has_its_sample_opened(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        provider, opened = _r2_with_recorded_open(monkeypatch)
+        analyst = _generic(provider, provider_tools=True)
+        assert analyst._priority_hint(JOINED_HEAD) == ""
+        assert opened == ["/data/samples/.work/x.exe"]
+
+    def test_the_reverser_on_ghidra_loads_and_reads_the_graph(self, client: _Client) -> None:
+        analyst = _generic(_ghidra(_settings("r2")), provider_tools=True)
+        analyst._priority_hint(JOINED_HEAD)
+        assert client.paths[0] == "load_program", client.paths
+        assert client.paths[-1] == "get_full_call_graph", client.paths
+
+    def test_the_hint_reaches_the_human_turn(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        analyst = _generic(_GraphProvider(), provider_tools=True)
+        sent: list[Any] = []
+        monkeypatch.setattr(analyst, "execute_tool_loop", lambda messages: sent.append(messages))
+        analyst.analyze_isr(JOINED_HEAD)
+        human = sent[0][1][1]
+        assert "PRIORITY FUNCTIONS" in human
+        assert SANDBOX_SLICE in human
+
+    def test_a_chunk_opening_with_the_sandbox_slice_is_not_a_head(self) -> None:
+        provider = _GraphProvider()
+        analyst = _generic(provider, provider_tools=True)
+        assert analyst._priority_hint(SANDBOX_SLICE + "\n\n" + HEAD_CHUNK) == ""
+        assert provider.opened == []
+
+    def test_the_static_role_reads_the_joined_head(self) -> None:
+        from maljan.agents.static_analyst import (
+            _extract_analysis_path,
+            _extract_load_hint,
+            _extract_sample_hash,
+        )
+
+        head = json.dumps({"analysis_file_path": "/s/x.exe", "sha256": "b" * 64})
+        joined = head + "\n\n" + SANDBOX_SLICE
+        assert _extract_analysis_path(joined) == "/s/x.exe"
+        assert _extract_sample_hash(joined) == "b" * 64
+        assert "/s/x.exe" in _extract_load_hint(joined, frozenset())
+        # A single document reads as it did.
+        assert _extract_analysis_path(head) == "/s/x.exe"
+        assert _extract_load_hint("not json", frozenset()) == ""
+
+
+def test_the_head_is_read_in_one_pass_over_its_first_value() -> None:
+    import time
+
+    from maljan.loaders.binary_chunker import head_object
+
+    def _timed(n: int) -> float:
+        tail = json.dumps({"rows": ["x" * 40] * n})
+        joined = HEAD_CHUNK + "\n\n" + tail
+        start = time.perf_counter()
+        for _ in range(20):
+            assert head_object(joined) == json.loads(HEAD_CHUNK)
+        return time.perf_counter() - start
+
+    small, large = _timed(2_000), _timed(20_000)
+    # The joined tail is never decoded: ten times the tail costs about the same.
+    assert large < max(small * 5, 0.05)
+    assert head_object("[1, 2]") is None
+    assert head_object("{" * 100_000) is None
