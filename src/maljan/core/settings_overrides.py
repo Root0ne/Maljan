@@ -14,7 +14,9 @@ behaviour, relied on by the legacy one-shot environment import.
 from __future__ import annotations
 
 import copy
+import json
 import re
+from collections import Counter
 from collections.abc import Iterable, Mapping
 from functools import cache
 from typing import Any, Literal
@@ -22,6 +24,7 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from maljan.core.config import STORE_ONLY, Settings
+from maljan.core.pack_steps import LeftOutStep, steps_left_out
 from maljan.core.tool_declarations import stored_in_force
 
 CORE_NS = "core"
@@ -93,17 +96,16 @@ def build_settings(core_overrides: Mapping[str, Any]) -> Settings:
 PACK_STEPS_PATH = "triage.steps"
 
 
-def _built(core_overrides: Mapping[str, Any]) -> tuple[Settings, list[str]]:
+def _built(core_overrides: Mapping[str, Any]) -> tuple[Settings, list[LeftOutStep]]:
     """The settings :func:`build_settings` builds, and the stored pack steps it left out.
 
-    The stored steps are read leniently (``core.pack_steps.lenient_steps``):
+    The stored steps are read leniently (``core.pack_steps.steps_left_out``):
     a step this release cannot run is left out with one warning, the shipped
     step it changed in force again, so one stale step never costs a job every
     setting. A save holds the steps it changes to the strict rules
-    (:func:`pack_step_refusals`).
+    (:func:`pack_step_refusals`); the console names each step left out and
+    why (:func:`pack_steps_left_out`).
     """
-    from maljan.core.pack_steps import lenient_steps
-
     token = STORE_ONLY.set(True)
     try:
         in_force = declarations_in_force(core_overrides)
@@ -113,11 +115,15 @@ def _built(core_overrides: Mapping[str, Any]) -> tuple[Settings, list[str]]:
         built = Settings(**nest(in_force))
     finally:
         STORE_ONLY.reset(token)
-    kept, left = lenient_steps(stored, built.pack_step_problem)
+    kept, left = steps_left_out(stored, built.pack_step_problem)
     if left:
-        _warn_left_out_steps(left)
+        _warn_left_out_steps(_names_once(left))
     built.triage = built.triage.model_copy(update={"steps": kept})
     return built, left
+
+
+def _names_once(left: Iterable[LeftOutStep]) -> list[str]:
+    return list(dict.fromkeys(entry.name for entry in left))
 
 
 _WARNED_STEPS: set[tuple[str, ...]] = set()
@@ -142,49 +148,111 @@ def _warn_left_out_steps(left: list[str]) -> None:
 
 
 def left_out_pack_steps(core_overrides: Mapping[str, Any]) -> list[str]:
-    """The stored pack steps :func:`build_settings` leaves out, by id (else by position)."""
-    return _built(core_overrides)[1]
+    """The stored pack steps :func:`build_settings` leaves out, by id (else position), once each."""
+    return _names_once(_built(core_overrides)[1])
+
+
+def pack_steps_left_out(core_overrides: Mapping[str, Any]) -> dict[str, str]:
+    """Each stored pack step :func:`build_settings` leaves out, by name, with why, sanitised.
+
+    Whatever leaves it out: a stored step this release cannot run, a reset
+    of the server it calls, a shipped declaration that changed its tool's
+    kind. The shipped step it changed, if any, is in force instead; the
+    console marks each one for the operator to edit or remove. A name stored
+    twice carries both reasons.
+    """
+    from maljan.core.tool_declarations import loggable_text
+
+    out: dict[str, list[str]] = {}
+    for entry in _built(core_overrides)[1]:
+        reasons = out.setdefault(loggable_text(entry.name), [])
+        reason = loggable_text(entry.reason)
+        if reason not in reasons:
+            reasons.append(reason)
+    return {name: "; ".join(reasons) for name, reasons in out.items()}
 
 
 def pack_step_refusals(merged: Mapping[str, Any], current: Mapping[str, Any]) -> dict[str, str]:
-    """The strict refusal of a save that leaves a pack step out it did not leave out before.
+    """The strict refusal of a save that leaves out a stored pack step it did not leave out before.
 
     ``merged`` and ``current`` are core overrides (no ``core.`` prefix) after
     and before the save. A step the stored settings already leave out, sent
-    back exactly as stored, is not this save's edit, so it blocks no
-    unrelated save; any other step left out is refused under
-    ``core.triage.steps``, with the settings model's own message.
+    back exactly as stored (matched by the whole item, wherever it stands and
+    whatever its id), is not this save's edit, so it blocks no unrelated
+    save; any other item left out, new, changed, a further copy of an id or
+    left out for a reason this save brings, is refused under
+    ``core.triage.steps``, each with the settings model's own words. Where
+    other settings of ``merged`` do not build (the model refuses those
+    itself), the steps are still checked (:func:`_left_out_checked`), so one
+    answer names every problem.
     """
-    left = left_out_pack_steps(merged)
+    left = _left_out_checked(merged)
     if not left:
         return {}
-    before = set(left_out_pack_steps(current))
-    now, then = _steps_by_id(merged), _steps_by_id(current)
-    if all(step in before and now.get(step) == then.get(step) for step in left):
-        return {}
-    token = STORE_ONLY.set(True)
-    try:
-        Settings(**nest(declarations_in_force(merged)))
-    except ValueError as exc:  # a pydantic ValidationError is one
-        errors = getattr(exc, "errors", None)
-        said = "; ".join(str(e.get("msg", "")) for e in errors()) if callable(errors) else str(exc)
-    else:
-        said = ""
-    finally:
-        STORE_ONLY.reset(token)
-    fallback = f"steps cannot run as declared: {', '.join(left)}"
-    return {f"{CORE_NS}.{PACK_STEPS_PATH}": said or fallback}
-
-
-def _steps_by_id(core_overrides: Mapping[str, Any]) -> dict[str, Any]:
-    held = core_overrides.get(PACK_STEPS_PATH)
-    if not isinstance(held, list):
+    kept = Counter(_left_out_items(current, _left_out_checked(current)))
+    refused: list[LeftOutStep] = []
+    for entry, item in zip(left, _left_out_items(merged, left), strict=True):
+        if kept[item]:
+            kept[item] -= 1
+        else:
+            refused.append(entry)
+    if not refused:
         return {}
     return {
-        str(item.get("id")): item
-        for item in held
-        if isinstance(item, Mapping) and isinstance(item.get("id"), str)
+        f"{CORE_NS}.{PACK_STEPS_PATH}": "; ".join(
+            f"{entry.name}: {entry.reason}" for entry in refused
+        )
     }
+
+
+def _left_out_checked(core_overrides: Mapping[str, Any]) -> list[LeftOutStep]:
+    """The stored steps left out of ``core_overrides``, also where other settings do not build.
+
+    Those settings are set aside (the model refuses them itself) and the
+    steps checked against the rest; where even that does not build, the
+    steps are checked on their own, without the checks that need the built
+    settings.
+    """
+    try:
+        return _built(core_overrides)[1]
+    except ValueError as exc:  # a pydantic ValidationError is one
+        errors = getattr(exc, "errors", None)
+        failing = (
+            {".".join(str(part) for part in e.get("loc", ())) for e in errors()}
+            if callable(errors)
+            else set()
+        )
+    failing.discard("")
+    rest = {
+        key: value
+        for key, value in core_overrides.items()
+        if not any(
+            where == key or where.startswith(f"{key}.") or key.startswith(f"{where}.")
+            for where in failing
+        )
+    }
+    if len(rest) < len(core_overrides):
+        try:
+            return _built(rest)[1]
+        except ValueError:
+            pass
+    return steps_left_out(core_overrides.get(PACK_STEPS_PATH))[1]
+
+
+def _left_out_items(core_overrides: Mapping[str, Any], left: Iterable[LeftOutStep]) -> list[str]:
+    """Each left-out stored item, whole, as one canonical text to match by identity."""
+    held = core_overrides.get(PACK_STEPS_PATH)
+    out: list[str] = []
+    for entry in left:
+        item = held
+        if isinstance(held, list) and entry.position is not None:
+            item = held[entry.position]
+        try:
+            out.append(json.dumps(item, sort_keys=True, default=repr))
+        except (TypeError, ValueError, RecursionError):
+            # Too deep to write out: the same stored object, else no match.
+            out.append(f"\x00{id(item)}")
+    return out
 
 
 # The stored tool-server map, and the field holding a block's tool declarations.

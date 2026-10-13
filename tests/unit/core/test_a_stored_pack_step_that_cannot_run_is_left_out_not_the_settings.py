@@ -6,8 +6,10 @@
   settings are kept, and one warning names it.
 * A step that names a left-out step goes with it, in time linear in the list.
 * The worker's job settings build the same way.
+* Each step left out is listed once, with why, sanitised, for the console.
 * A save that changes the steps is still refused, with the model's words; a
-  stale stored step sent back as stored blocks no unrelated save.
+  stale stored step sent back as stored, matched by the whole item wherever it
+  stands, blocks no unrelated save, and no other bad item rides on it.
 * The renderer that reads declared facts is refused on a step whose tool is
   declared another kind, or none, unless the step declares the kind.
 """
@@ -28,6 +30,7 @@ from maljan.core.settings_overrides import (
     build_settings,
     left_out_pack_steps,
     pack_step_refusals,
+    pack_steps_left_out,
 )
 
 RULES = {
@@ -141,6 +144,46 @@ class TestAStoredStepThatCannotRunIsLeftOut:
         assert large < max(small, 0.01) * 40, (small, large)
 
 
+class TestEachLeftOutStepSaysWhy:
+    def test_a_step_on_a_server_gone_names_the_server(self) -> None:
+        said = pack_steps_left_out(_stored(GONE, GOOD))
+        assert list(said) == ["lost"]
+        assert "references unknown mcp server 'nowhere'" in said["lost"]
+
+    def test_a_step_naming_a_left_out_step_names_it(self) -> None:
+        after = {"id": "next", "server": "rules", "tool": "match", "after": "lost"}
+        said = pack_steps_left_out(_stored(GONE, after))
+        assert said["next"] == "step 'next' names step 'lost', which is left out"
+
+    def test_a_field_that_does_not_validate_is_named(self) -> None:
+        said = pack_steps_left_out(_stored({"id": "odd", "enabled": "maybe"}, "text"))
+        assert said["odd"].startswith("enabled: ")
+        assert "#1" in said
+
+    def test_a_step_declared_twice_is_listed_once(self) -> None:
+        stored = _stored(GOOD, GOOD)
+        assert left_out_pack_steps(stored) == ["extra"]
+        assert pack_steps_left_out(stored) == {
+            "extra": "step 'extra' is declared more than once; the first is read"
+        }
+
+    def test_a_stored_value_that_is_no_list_is_named(self) -> None:
+        said = pack_steps_left_out({"triage.steps": "text"})
+        assert said == {"triage.steps": "the stored steps are not a list"}
+
+    def test_what_an_operator_wrote_is_sanitised(self) -> None:
+        said = pack_steps_left_out(_stored({"id": "a\nb\x1b", "x": 1}))
+        assert list(said) == ["a\\nb\\x1b"]
+        assert all("\n" not in text and "\x1b" not in text for text in said.values())
+
+    def test_a_reset_of_the_server_a_step_calls_is_listed(self) -> None:
+        stored = _stored(GOOD)
+        assert pack_steps_left_out(stored) == {}
+        reset = {key: value for key, value in stored.items() if key != "mcp.servers"}
+        said = pack_steps_left_out(reset)
+        assert "references unknown mcp server 'rules'" in said["extra"]
+
+
 class TestASaveIsStillStrict:
     def test_a_save_that_adds_a_step_that_cannot_run_is_refused(self) -> None:
         refused = pack_step_refusals(_stored(GONE, GOOD), _stored(GOOD))
@@ -158,6 +201,24 @@ class TestASaveIsStillStrict:
         current = _stored(GONE, GOOD)
         merged = _stored({**GONE, "tool": "other"}, GOOD)
         assert "core.triage.steps" in pack_step_refusals(merged, current)
+
+    def test_a_different_bad_item_in_a_stale_item_s_place_is_refused(self) -> None:
+        current = _stored({"x": 1}, GOOD)
+        assert left_out_pack_steps(current) == ["#0"]
+        assert pack_step_refusals(_stored({"y": 2}, GOOD), current)
+        assert pack_step_refusals({**current, "triage.budget_seconds": 90}, current) == {}
+
+    def test_a_stale_item_moved_elsewhere_is_still_the_stored_one(self) -> None:
+        current = _stored({"x": 1}, GOOD)
+        assert pack_step_refusals(_stored(GOOD, {"x": 1}), current) == {}
+
+    def test_a_bad_copy_of_a_step_stored_twice_is_refused(self) -> None:
+        current = _stored(GOOD, GOOD)
+        assert left_out_pack_steps(current) == ["extra"]
+        assert pack_step_refusals(_stored({**GOOD, "enabled": "maybe"}, GOOD), current)
+        assert pack_step_refusals(_stored(GOOD, {**GOOD, "tool": "sig"}), current)
+        assert pack_step_refusals(_stored(GOOD, GOOD, GOOD), current)
+        assert pack_step_refusals(_stored(GOOD, GOOD), current) == {}
 
     def test_a_save_that_can_run_its_steps_passes(self) -> None:
         assert pack_step_refusals(_stored(GOOD), {}) == {}

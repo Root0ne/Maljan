@@ -52,7 +52,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Iterable, Iterator, Mapping
-from typing import Any
+from typing import Any, NamedTuple
 
 from pydantic import (
     BaseModel,
@@ -77,6 +77,8 @@ __all__ = [
     "check_steps",
     "effective_steps",
     "lenient_steps",
+    "LeftOutStep",
+    "steps_left_out",
     "read_answer_field",
     "runs_shipped",
     "shipped_step",
@@ -645,10 +647,44 @@ def _effective(
     return steps
 
 
+class LeftOutStep(NamedTuple):
+    """A stored pack step :func:`steps_left_out` leaves out, and why."""
+
+    # The step's id, else ``#<position>``, else ``triage.steps`` for a stored
+    # value that is no list at all.
+    name: str
+    # Where the stored list holds it; ``None`` for a value that is no list.
+    position: int | None
+    reason: str
+
+
 def lenient_steps(
     value: Any, problem: Callable[[PackStep], str] | None = None
 ) -> tuple[list[PackStep], list[str]]:
-    """The stored steps the pack can run, and the steps left out (by id, else by position).
+    """The stored steps the pack can run, and the names of those left out.
+
+    As :func:`steps_left_out` reads them.
+    """
+    kept, left = steps_left_out(value, problem)
+    return kept, [entry.name for entry in left]
+
+
+def _validation_said(exc: ValueError) -> str:
+    errors = getattr(exc, "errors", None)
+    if not callable(errors):
+        return str(exc)
+    said = []
+    for error in errors():
+        where = ".".join(str(part) for part in error.get("loc", ()))
+        message = str(error.get("msg", ""))
+        said.append(f"{where}: {message}" if where else message)
+    return "; ".join(said) or str(exc)
+
+
+def steps_left_out(
+    value: Any, problem: Callable[[PackStep], str] | None = None
+) -> tuple[list[PackStep], list[LeftOutStep]]:
+    """The stored steps the pack can run, and each step left out, where it is stored and why.
 
     How stored settings are read (``core.settings_overrides.build_settings``):
     a stored step this release cannot run, as :func:`check_steps` or
@@ -662,21 +698,25 @@ def lenient_steps(
     whatever the list's length.
     """
     if not isinstance(value, list):
-        return [], ["triage.steps"] if value not in (None, "") else []
+        if value in (None, ""):
+            return [], []
+        return [], [LeftOutStep("triage.steps", None, "the stored steps are not a list")]
     steps: list[PackStep] = []
-    left: list[str] = []
-    seen: set[str] = set()
+    left: list[LeftOutStep] = []
+    stored_at: dict[str, int] = {}
     for position, item in enumerate(value):
         try:
             step = _as_step(item)
-        except ValueError:  # a pydantic ValidationError is one
+        except ValueError as exc:  # a pydantic ValidationError is one
             named = item.get("id") if isinstance(item, Mapping) else None
-            left.append(named if isinstance(named, str) and named else f"#{position}")
+            name = named if isinstance(named, str) and named else f"#{position}"
+            left.append(LeftOutStep(name, position, _validation_said(exc)))
             continue
-        if step.id in seen:
-            left.append(step.id)
+        if step.id in stored_at:
+            said = f"step {step.id!r} is declared more than once; the first is read"
+            left.append(LeftOutStep(step.id, position, said))
             continue
-        seen.add(step.id)
+        stored_at[step.id] = position
         steps.append(step)
     shipped = _indexes()[0]
     while steps:
@@ -689,10 +729,13 @@ def lenient_steps(
                     found.setdefault(step.id, []).append(said)
         if not found:
             break
-        out = {step.id for step in steps if step.id in found}
+        out = {step.id: "; ".join(found[step.id]) for step in steps if step.id in found}
         if not out:
             # A problem no declared step holds: the shipped list runs.
-            left.extend(step.id for step in steps)
+            said = "the steps cannot run together: " + "; ".join(
+                message for messages in found.values() for message in messages
+            )
+            left.extend(LeftOutStep(step.id, stored_at[step.id], said) for step in steps)
             return [], left
         naming: dict[str, list[str]] = {}
         for step in steps:
@@ -700,12 +743,17 @@ def lenient_steps(
                 naming.setdefault(other, []).append(step.id)
         gone = [step_id for step_id in out if step_id not in shipped]
         while gone:
-            for step_id in naming.get(gone.pop(), ()):
+            cause = gone.pop()
+            for step_id in naming.get(cause, ()):
                 if step_id not in out:
-                    out.add(step_id)
+                    out[step_id] = f"step {step_id!r} names step {cause!r}, which is left out"
                     if step_id not in shipped:
                         gone.append(step_id)
-        left.extend(step.id for step in steps if step.id in out)
+        left.extend(
+            LeftOutStep(step.id, stored_at[step.id], out[step.id])
+            for step in steps
+            if step.id in out
+        )
         steps = [step for step in steps if step.id not in out]
     return steps, left
 

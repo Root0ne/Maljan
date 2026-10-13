@@ -115,7 +115,11 @@ async def _effective_agents(db: AsyncSession) -> tuple[list[str], list[str]]:
 async def get_schema(
     _: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
 ) -> SchemaResponse:
-    from maljan.core.settings_overrides import build_settings, refused_tool_changes
+    from maljan.core.settings_overrides import (
+        build_settings,
+        pack_steps_left_out,
+        refused_tool_changes,
+    )
 
     from app.services.enrichment_sources import ENRICHMENT_SOURCES_KEY
     from app.services.settings_service import load_core_overrides
@@ -134,6 +138,7 @@ async def get_schema(
         enrichment_sources=stored.get(ENRICHMENT_SOURCES_KEY),
         server_configs=configs,
         tool_facts_conflicts=refused_tool_changes(core),
+        pack_steps_left_out=pack_steps_left_out(core),
     )
 
 
@@ -145,6 +150,7 @@ def served_schema(
     enrichment_sources: Any = None,
     server_configs: dict[str, Any] | None = None,
     tool_facts_conflicts: dict[str, list[str]] | None = None,
+    pack_steps_left_out: dict[str, str] | None = None,
 ) -> SchemaResponse:
     """The settings schema as ``GET /settings/schema`` serves it for these choices.
 
@@ -154,7 +160,9 @@ def served_schema(
     ``server_configs`` the tool servers in force; the schema says what the
     console's guides offer for each, never a credential.
     ``tool_facts_conflicts`` names, per block, the tools whose stored change
-    is refused over what ships now (``refused_tool_changes``).
+    is refused over what ships now (``refused_tool_changes``), and
+    ``pack_steps_left_out`` each stored triage pack step left out, with why
+    (``pack_steps_left_out``).
     """
     from app.services.credential_bootstrap import bootstrap_facts
     from app.services.enrichment_sources import source_facts
@@ -182,6 +190,7 @@ def served_schema(
         credential_servers=bootstrap_facts(server_configs),
         tool_declaration_fields=declaration_fields(),
         tool_facts_conflicts=tool_facts_conflicts or {},
+        pack_steps_left_out=pack_steps_left_out or {},
     )
 
 

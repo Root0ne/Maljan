@@ -495,6 +495,12 @@ _LOG_NAME_CHARS = 64
 _LOG_NAMES = 20
 
 
+def loggable_text(text: str) -> str:
+    """``text`` with every control character written out, so it shows as one line."""
+    text = text.replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t")
+    return _LOG_CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", text)
+
+
 def loggable_names(names: Iterable[Any]) -> str:
     """``names`` as one sanitised, bounded log text."""
     held = [str(name) for name in names]
@@ -504,8 +510,7 @@ def loggable_names(names: Iterable[Any]) -> str:
             # An empty name, shown as such rather than as nothing at all.
             shown.append('""')
             continue
-        text = name.replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t")
-        text = _LOG_CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", text)
+        text = loggable_text(name)
         shown.append(text[:_LOG_NAME_CHARS] + ("…" if len(text) > _LOG_NAME_CHARS else ""))
     more = len(held) - len(shown)
     return ", ".join(shown) + (f" and {more} more" if more > 0 else "")
