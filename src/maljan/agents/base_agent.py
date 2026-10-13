@@ -1424,7 +1424,9 @@ _BLOCK_EVIDENCE_LABEL_RE = re.compile(_INLINE + r"EVIDENCE:[ \t]*", re.MULTILINE
 _EVIDENCE_ENDS_AT_LINE_START_RE = re.compile(
     r"\n" + LINE_PREFIX + r"(?:CONFIDENCE|(?i:TECHNIQUE)):"
 )
-_EVIDENCE_ENDS_INLINE_RE = re.compile(r"\s+" + LINE_PREFIX + r"(?:CONFIDENCE|TECHNIQUE):")
+# A run of whitespace is read from its start and possessively, so a long run
+# is read once, not once per character of it.
+_EVIDENCE_ENDS_INLINE_RE = re.compile(r"(?<!\s)\s++" + LINE_PREFIX + r"(?:CONFIDENCE|TECHNIQUE):")
 # The CONFIDENCE value as written: what follows the label on its line, read
 # by ``_stated_confidence``. A label present with nothing readable after it is
 # a confidence the reader could not read, not one the analyst left out.
@@ -1521,12 +1523,15 @@ _ANY_TECHNIQUE_ID_RE = re.compile(r"(?<![\w.])T\d{4}(?:\.\d{3})?(?!\w)", re.IGNO
 # ("T1027, T1140, and T1106"), or a slash ("T1027 / T1140"). Every part must be
 # an id and nothing else; "or", "and/or", a doubled or trailing slash, or any
 # word beside an id leaves the line whole and asked about.
-_TECHNIQUE_LIST_SEPARATOR_RE = re.compile(r"\s*,\s*(?:and\s+)?|\s+and\s+|\s*/\s*", re.IGNORECASE)
+# Each run of whitespace is read from its start and possessively (linear time).
+_TECHNIQUE_LIST_SEPARATOR_RE = re.compile(
+    r"(?<!\s)\s*+,\s*+(?:and\s++)?|(?<!\s)\s++and\s++|(?<!\s)\s*+/\s*+", re.IGNORECASE
+)
 # The claim format's own block separator, "---", written at the end of a
 # TECHNIQUE line with a dot or bar before it ("TECHNIQUE: T1027 · ---", the
 # next claim on the line after). It is no part of what the line claims. A
 # next claim written on the same line after it is not read by this.
-_TRAILING_BLOCK_SEPARATOR_RE = re.compile(r"[\s·•|]*-{3,}\s*$")
+_TRAILING_BLOCK_SEPARATOR_RE = re.compile(r"(?<![\s·•|])[\s·•|]*+-{3,}+\s*+$")
 
 
 def _bare_technique(text: str) -> str:
@@ -1760,7 +1765,7 @@ def evidence_ref_width() -> int:
 # The start of an id the cut sliced through, at the end of the kept text: any
 # prefix of ``[ev_NNNN``, from the bare bracket up to a whole id whose closing
 # bracket was cut, and the space before it. The whole id is written back.
-_PARTIAL_ID_AT_END_RE = re.compile(r"\s*(?:\[(?:e(?:v(?:_\d{0,4})?)?)?)?$", re.IGNORECASE)
+_PARTIAL_ID_AT_END_RE = re.compile(r"(?<!\s)\s*+(?:\[(?:e(?:v(?:_\d{0,4})?)?)?)?$", re.IGNORECASE)
 
 
 def evidence_ref_text(evidence_text: str) -> str:
