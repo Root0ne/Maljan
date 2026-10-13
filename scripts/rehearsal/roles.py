@@ -29,7 +29,9 @@ import hashlib
 import json
 import os
 import re
+import sys
 import threading
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
@@ -927,8 +929,38 @@ _PLACE_VALUE = re.compile(r"\b0x[0-9A-Fa-f]{3,16}\b|\b(?:FUN_|fcn\.|sub_)[0-9A-F
 # block it may append after one; neither is the tool's own text.
 _RESULT_HEAD = re.compile(r"^\s*\[ev_\d{4,}\]\s*")
 _RESULT_TAIL = "\n\n=== "
-# The product's own envelope for a tool call that failed.
-_FAILED = re.compile(r'^\s*\{\s*"error"\s*:')
+# The product's own envelopes for a tool call that failed: a provider's
+# refusal (``{"error": ...}``) and an MCP call's failure marker
+# (``{"tool_error": ...}``, written by ``agents.mcp_client``).
+_FAILED = re.compile(r'^\s*\{\s*"(?:error|tool_error)"\s*:')
+# A tool that lists what a program exports: the places it names are where
+# exported code starts, read as function starts only where the server offers
+# no tool listing its functions.
+_LISTS_EXPORTS = re.compile(r"\bexport(?:s|ed)?\b", re.IGNORECASE)
+# A tool's first sentence that says it lists, shows or enumerates something.
+_LISTS_SOMETHING = re.compile(
+    r"^\s*(?:\[[A-Z]+\]\s*)?(?:lists?|shows?|enumerates?|returns?)\b", re.IGNORECASE
+)
+# A tool whose name or first verb says it opens, loads or imports what it is given.
+_OPENS = re.compile(r"\b(?:open|load|import)", re.IGNORECASE)
+# A key whose boolean says whether the work on a listed item is done.
+_DONE_KEY = re.compile(
+    r"(?:^|_)(?:complete|completed|ready|done|finished|analy[sz]ed|loaded|indexed)$",
+    re.IGNORECASE,
+)
+# A key naming whether an item's analysis is done (``analysis_complete``,
+# ``analyzed``), read before any other completion flag of the item.
+_ANALYSIS_KEY = re.compile(r"analy", re.IGNORECASE)
+# A hex place a JSON listing writes without its ``0x`` under an address key.
+_BARE_HEX = re.compile(r"[0-9A-Fa-f]{4,16}")
+# An answer saying the work it started goes on after it returned.
+_GOES_ON = re.compile(
+    r"\b(?:queued|background|pending|in progress|scheduled|started)\b", re.IGNORECASE
+)
+# How many times one listing is asked again while what was opened is not yet
+# listed as done, and the pause before each ask. Hitting the bound is logged.
+POLL_ROUNDS = 12
+POLL_PAUSE_S = 15.0
 # A tool whose description says it changes what the server holds (closes,
 # renames, sets, writes): a model reading a sample leaves it alone.
 _CHANGES_STATE = re.compile(
@@ -1022,12 +1054,15 @@ def _listed_places(text: str) -> list[str]:
 
     A JSON answer gives the places held under any key but one naming a base
     or a bound (an image base is no function); a text answer gives every
-    place it spells.
+    place it spells. A JSON answer that spells no ``0x`` place gives the hex
+    values its address keys hold bare (``"address": "140001000"``), as a
+    model reads a listing's address column as an address.
     """
     value = _answer_json(text)
     if value is None:
         return [m.group(0) for m in _PLACE_VALUE.finditer(text)]
     out: list[str] = []
+    bare: list[str] = []
     pending: list[tuple[str, Any]] = [("", value)]
     while pending:
         key, item = pending.pop(0)
@@ -1037,7 +1072,31 @@ def _listed_places(text: str) -> list[str]:
             pending.extend((key, v) for v in item)
         elif isinstance(item, str) and not _NOT_A_START.search(key):
             out.extend(m.group(0) for m in _PLACE_VALUE.finditer(item))
-    return out
+            if _PLACE_WORDS.search(key) and _BARE_HEX.fullmatch(item.strip()):
+                bare.append(item.strip())
+    return out or bare
+
+
+def _listing_value(value: Any, key: str) -> str:
+    """The value under ``key`` of the first item of a list of objects in ``value``, or empty.
+
+    A listing answer is one holding a list whose items are objects; the first
+    item carrying ``key`` with a non-empty scalar gives it.
+    """
+    pending = [value]
+    while pending:
+        item = pending.pop(0)
+        if isinstance(item, dict):
+            pending.extend(item.values())
+        elif isinstance(item, list):
+            for entry in item:
+                if isinstance(entry, dict):
+                    found = entry.get(key)
+                    if isinstance(found, (str, int, float)) and not isinstance(found, bool):
+                        if str(found).strip():
+                            return str(found)
+            pending.extend(item)
+    return ""
 
 
 def _from_answers(
@@ -1046,6 +1105,7 @@ def _from_answers(
     answers: list[str],
     spent: frozenset[str] = frozenset(),
     starts: tuple[str, ...] = (),
+    asked: tuple[frozenset[str], ...] = (),
 ) -> str:
     """A value for a required string argument, read from the earlier answers, or empty.
 
@@ -1058,6 +1118,13 @@ def _from_answers(
     ``starts`` are the answers of calls that listed the program's functions or
     entry points: a place is taken from them before any other answer, as a
     model reads a function where its server says one starts.
+
+    An argument naming something by its name (``<thing>_name``) takes its
+    last word (``name``) only from a listing answer (a list of objects
+    carrying it), and only from a call that did not itself take that
+    argument (``asked``, the argument names of each answer's call, aligned
+    with ``answers``): a tool scoped to one thing lists what is inside it, and
+    a record such as a technique entry names no thing a tool was given.
     """
     lowered = name.lower()
     words = tuple(dict.fromkeys((name, lowered, re.split(r"[_\W]+", lowered)[-1])))
@@ -1075,7 +1142,16 @@ def _from_answers(
 
     if _PLACE_WORDS.search(lowered):
         return place()
+    by_name = lowered.endswith("_name")
     for word in words:
+        if by_name and word == words[-1] and word != lowered:
+            for index, text in enumerate(answers):
+                if index < len(asked) and name in asked[index]:
+                    continue
+                held = _listing_value(_answer_json(text), word)
+                if held:
+                    return held
+            continue
         for text in answers:
             held = _value_under(_answer_json(text), (word,))
             if held:
@@ -1094,6 +1170,7 @@ def _fillable(
     answers: list[str] | None = None,
     spent: frozenset[Any] = frozenset(),
     starts: tuple[str, ...] = (),
+    asked: tuple[frozenset[str], ...] = (),
 ) -> dict[str, Any] | None:
     """Arguments for ``tool`` this run can give it, or ``None`` when one cannot be given.
 
@@ -1139,7 +1216,7 @@ def _fillable(
             value = 0
         else:
             value = (
-                _from_answers(name, properties.get(name) or {}, answers, spent, starts)
+                _from_answers(name, properties.get(name) or {}, answers, spent, starts, asked)
                 if answers
                 else ""
             )
@@ -1168,12 +1245,14 @@ def _lead(
     order: list[str],
     spent: frozenset[Any] = frozenset(),
     starts: tuple[str, ...] = (),
+    asked: tuple[frozenset[str], ...] = (),
 ) -> wire.ToolCall | None:
     """The call the earlier answers lead to, as a model following them would make it.
 
     First the tool the latest answer's remediation names, when it is offered;
     then, while a tool needing a place waits and no answer has listed the
-    program's functions yet, a tool that lists them; then the first tool only
+    program's functions yet, a tool that lists them (one listing what the
+    program exports where no tool lists its functions); then the first tool only
     the answers make callable (an argument read from them), each with
     arguments it was not yet called with. ``None`` leaves the choice to the
     rotation.
@@ -1188,7 +1267,7 @@ def _lead(
     remedy = _value_under(_answer_json(answers[0]), ("remediation",))
     for name in order:
         if remedy and not _NEVER_CALL.match(name) and re.search(rf"\b{re.escape(name)}\b", remedy):
-            call = fresh(name, _fillable(tools[name], facts, answers, spent, starts))
+            call = fresh(name, _fillable(tools[name], facts, answers, spent, starts, asked))
             if call is not None:
                 return call
     usable = [name for name in order if not _NEVER_CALL.match(name)]
@@ -1200,13 +1279,166 @@ def _lead(
                 call = fresh(name, _fillable(tools[name], facts))
                 if call is not None:
                     return call
+        if not any(_lists_functions(tools[name]) for name in usable):
+            for name in usable:
+                if name not in called and _lists_exports(tools[name]):
+                    args = _fillable(tools[name], facts, answers, spent, starts, asked)
+                    call = fresh(name, args)
+                    if call is not None:
+                        return call
     for name in usable:
         if _fillable(tools[name], facts) is not None:
             continue
-        call = fresh(name, _fillable(tools[name], facts, answers, spent, starts))
+        call = fresh(name, _fillable(tools[name], facts, answers, spent, starts, asked))
         if call is not None:
             return call
     return None
+
+
+def _lists_exports(tool: dict[str, Any]) -> bool:
+    """Whether ``tool`` lists what the program exports, needing no place."""
+    name = str(tool.get("name") or "").replace("_", " ")
+    description = str(tool.get("description") or "")
+    says = _LISTS_EXPORTS.search(name) or (
+        _LISTS_SOMETHING.match(description) and _LISTS_EXPORTS.search(description.split(".")[0])
+    )
+    return bool(says) and not _takes_place(tool)
+
+
+def _path_only(tool: dict[str, Any]) -> str:
+    """The one required argument of ``tool`` when it is the sample's path, else empty."""
+    required = list((tool.get("schema") or {}).get("required") or [])
+    if len(required) != 1:
+        return ""
+    lowered = str(required[0]).lower()
+    if "pcap" in lowered:
+        return ""
+    if "path" in lowered or lowered in ("file", "filename", "sample"):
+        return str(required[0])
+    return ""
+
+
+def _lists_items(tool: dict[str, Any]) -> bool:
+    """Whether ``tool`` takes no argument and its name or first sentence says it lists."""
+    if (tool.get("schema") or {}).get("required"):
+        return False
+    name = str(tool.get("name") or "").replace("_", " ")
+    description = str(tool.get("description") or "")
+    return bool(re.match(r"^\s*(?:list|show|enumerate)", name, re.IGNORECASE)) or bool(
+        _LISTS_SOMETHING.match(description)
+    )
+
+
+def _listing_state(value: Any) -> str:
+    """What a listing answer says of its items: ``"pending"``, ``"empty"`` or ``""``.
+
+    ``"pending"`` when an item's completion flag (``analysis_complete``,
+    ``ready``, ``done``, ...; an analysis flag read before the others) is
+    false; ``"empty"`` when the answer holds lists and every one is empty;
+    ``""`` otherwise (items listed as done, or saying nothing of it).
+    """
+    lists = 0
+    filled = 0
+    pending = [value]
+    while pending:
+        item = pending.pop(0)
+        if isinstance(item, dict):
+            flags = [(k, v) for k, v in item.items() if isinstance(v, bool) and _DONE_KEY.search(k)]
+            analysis = [v for k, v in flags if _ANALYSIS_KEY.search(k)]
+            if (analysis and not analysis[0]) or (not analysis and flags and not flags[0][1]):
+                return "pending"
+            pending.extend(item.values())
+        elif isinstance(item, list):
+            lists += 1
+            filled += bool(item)
+            pending.extend(item)
+    return "empty" if lists and not filled else ""
+
+
+def _opening(
+    request: wire.Request,
+    tools: dict[str, dict[str, Any]],
+    facts: _Facts,
+    answers: list[str],
+    order: list[str],
+    asked: tuple[frozenset[str], ...] = (),
+) -> wire.ToolCall | None:
+    """The call that opens the sample, or waits for it to be listed, before reading from it.
+
+    While an offered tool still waits on a value only an answer can give (a
+    name of what was opened, a place), and no call yet passed the sample's
+    path, a model opens the sample first: the first read-only tool whose only
+    required argument is the path (one whose name or description says it
+    opens, loads or imports ahead of others). After an open, a no-argument
+    listing is asked, and asked again after a pause while its newest answer
+    shows what was opened as not yet listed or not yet done, at most
+    ``POLL_ROUNDS`` times; hitting the bound is logged and the choice goes on
+    as before. ``None`` leaves the choice to ``_lead`` and the rotation.
+    """
+    if not facts.sample_path:
+        return None
+    usable = [name for name in order if not _NEVER_CALL.match(name)]
+    waits = any(
+        _fillable(tools[n], facts) is None
+        and _fillable(tools[n], facts, answers, frozenset(), (), asked) is None
+        for n in usable
+    )
+    made = request.tool_calls_made
+    said = {r.id: _answer_text(r.text) for r in request.tool_results}
+    opened = [
+        i
+        for i, call in enumerate(made)
+        if (arg := _path_only(tools.get(call.name) or {"name": call.name}))
+        and call.args.get(arg) == facts.sample_path
+    ]
+    if not opened:
+        if not waits:
+            return None
+
+        def says_open(name: str) -> bool:
+            description = str(tools[name].get("description") or "")
+            description = re.sub(r"^\s*\[[A-Z]+\]\s*", "", description)
+            return bool(_OPENS.search(name) or _OPENS.match(description))
+
+        openers = [n for n in usable if _path_only(tools[n])]
+        openers.sort(key=lambda n: not says_open(n))
+        for name in openers:
+            return wire.ToolCall(name=name, args={_path_only(tools[name]): facts.sample_path})
+        return None
+    last_open = opened[-1]
+    opened_answer = said.get(made[last_open].id, "")
+    if _FAILED.match(opened_answer):
+        return None
+    since = [
+        call
+        for call in made[last_open + 1 :]
+        if not call.args and _lists_items(tools.get(call.name) or {"name": call.name})
+    ]
+    if not since:
+        if not waits:
+            return None
+        for name in usable:
+            if _lists_items(tools[name]):
+                return wire.ToolCall(name=name, args={})
+        return None
+    newest = since[-1]
+    answer = said.get(newest.id, "")
+    state = "" if _FAILED.match(answer) else _listing_state(_answer_json(answer))
+    # An empty listing waits only on an open whose answer says its work goes on.
+    if not state or (state == "empty" and not _GOES_ON.search(opened_answer)):
+        return None
+    asks = sum(1 for call in since if call.name == newest.name)
+    if asks > POLL_ROUNDS:
+        return None
+    if asks == POLL_ROUNDS:
+        print(
+            f"stub: {newest.name} still lists what was opened as not done after "
+            f"{POLL_ROUNDS} asks; the choice goes on",
+            file=sys.stderr,
+        )
+        return None
+    time.sleep(POLL_PAUSE_S)
+    return wire.ToolCall(name=newest.name, args={})
 
 
 def _with_twins(order: list[str]) -> list[str]:
@@ -1250,6 +1482,7 @@ def _next_call(
     order = _with_twins(order)
     spent: frozenset[Any] = frozenset()
     starts: tuple[str, ...] = ()
+    asked: tuple[frozenset[str], ...] = ()
     if answers is not None:
         # Following its answers, a model reads and leaves the server's state
         # alone, and does not go back to a place a call already failed at.
@@ -1262,23 +1495,35 @@ def _next_call(
             for value in call.args.values()
             if isinstance(value, str)
         )
-        # The answers that listed the program's functions, newest first.
+        # The answers that listed the program's functions, newest first; a
+        # listing of its exports stands in where no tool lists its functions.
+        offered = [tools[n] for n in order if not _NEVER_CALL.match(n)]
+        lister = _lists_functions if any(map(_lists_functions, offered)) else _lists_exports
         starts = tuple(
             said[call.id]
             for call in reversed(request.tool_calls_made)
             if call.id in said
             and not _FAILED.match(said[call.id])
-            and _lists_functions(tools.get(call.name) or {"name": call.name})
+            and lister(tools.get(call.name) or {"name": call.name})
         )
+        # The argument names each answer's call took, aligned with ``answers``.
+        calls = {call.id: call for call in request.tool_calls_made}
+        asked = tuple(
+            frozenset(calls[r.id].args) if r.id in calls else frozenset()
+            for r in reversed(request.tool_results)
+        )
+        opening = _opening(request, tools, facts, answers, order, asked)
+        if opening is not None:
+            return opening
     if answers:
-        lead = _lead(request, tools, facts, answers, order, spent, starts)
+        lead = _lead(request, tools, facts, answers, order, spent, starts, asked)
         if lead is not None:
             return lead
     candidates: list[wire.ToolCall] = []
     for name in order:
         if _NEVER_CALL.match(name):
             continue
-        args = _fillable(tools[name], facts, answers, spent, starts)
+        args = _fillable(tools[name], facts, answers, spent, starts, asked)
         if args is not None:
             candidates.append(wire.ToolCall(name=name, args=args))
     if not candidates:

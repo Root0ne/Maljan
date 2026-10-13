@@ -604,6 +604,142 @@ def a_new_run_clears_only_the_named_scenarios_earlier_outputs() -> None:
         assert sorted(p.name for p in out.iterdir()) == ["d", "notes.txt"]
 
 
+def _program_tools() -> list[dict[str, Any]]:
+    """A server whose readers take the name of a program it opened from a path."""
+    name = {"binary_name": {"type": "string"}}
+    return [
+        {**_tool("attck_lookup", {"technique_id": {"type": "string"}}), "description": "Look up"},
+        {**_tool("import_it", {"binary_path": {"type": "string"}}), "description": "[IMPORT] It"},
+        {**_tool("list_programs", {}), "description": "[LIST] List all programs."},
+        {**_tool("list_exports", name), "description": "[LIST] List exported symbols."},
+        {**_tool("list_imports", name), "description": "[LIST] List imported symbols."},
+        {
+            **_tool("decompile_it", {**name, "name_or_address": {"type": "string"}}),
+            "description": "[ANALYZE] Decompile a function.",
+        },
+    ]
+
+
+ATTCK = json.dumps({"valid": True, "technique_id": "T1071.001", "name": "Web Protocols"})
+QUEUED = json.dumps({"queued_count": 1, "message": "Queued 1 import(s) in the background."})
+PROGRAM = {"name": "/sample_1.exe-1a2b3c", "file_path": "/s/sample_1.exe"}
+
+
+def _programs(*items: dict[str, Any]) -> str:
+    return json.dumps({"programs": list(items)})
+
+
+@check
+def the_products_tool_error_marker_reads_as_failed() -> None:
+    from scripts.rehearsal.roles import _FAILED
+
+    assert _FAILED.match('{"tool_error": "tool_returned_error", "tool": "x", "detail": "no"}')
+    assert _FAILED.match('{"error": {"code": "tool_failed"}}')
+    assert not _FAILED.match('{"name": "entry", "code": "void entry(void) {}"}')
+
+
+@check
+def the_sample_is_opened_before_a_tool_needing_what_it_opened() -> None:
+    from scripts.rehearsal.roles import _next_call
+
+    tools = _program_tools()
+    first = _next_call(_request(tools), _facts(), 0, fill_from_results=True)
+    assert first is not None and first.name == "import_it", first
+    assert first.args == {"binary_path": "/s/sample_1.exe"}, first
+    # Off, the rotation is what it always was.
+    plain = _next_call(_request(tools), _facts(), 0)
+    assert plain is not None and plain.name == "attck_lookup", plain
+    # Once opened, it is not opened again: the listing says what was opened.
+    opened = _request(tools, ("import_it", QUEUED, {"binary_path": "/s/sample_1.exe"}))
+    call = _next_call(opened, _facts(), 1, fill_from_results=True)
+    assert call is not None and call.name == "list_programs" and call.args == {}, call
+
+
+@check
+def a_name_is_read_from_a_listing_never_from_an_unrelated_record() -> None:
+    from scripts.rehearsal.roles import _fillable
+
+    reader = _tool("list_exports", {"binary_name": {"type": "string"}})
+    assert _fillable(reader, _facts(), [ATTCK]) is None
+    listed = _programs({**PROGRAM, "analysis_complete": True})
+    assert _fillable(reader, _facts(), [ATTCK, listed]) == {"binary_name": PROGRAM["name"]}
+    # A listing from a call that took the argument lists what is inside the thing.
+    exports = json.dumps({"exports": [{"name": "entry", "address": "140001000"}]})
+    asked = (frozenset({"binary_name"}), frozenset())
+    args = _fillable(reader, _facts(), [exports, listed], asked=asked)
+    assert args == {"binary_name": PROGRAM["name"]}, args
+    # The argument's own key is still read wherever it stands.
+    assert _fillable(reader, _facts(), [IMPORTED]) == {"binary_name": "sample_1.exe-1a2b3c"}
+
+
+@check
+def a_listing_is_asked_again_while_what_was_opened_is_not_done() -> None:
+    import contextlib
+    import io
+
+    from scripts.rehearsal import roles
+
+    tools = _program_tools()
+    opened = ("import_it", QUEUED, {"binary_path": "/s/sample_1.exe"})
+    pause, roles.POLL_PAUSE_S = roles.POLL_PAUSE_S, 0.0
+
+    def opening(request: Any) -> Any:
+        offered = {str(t["name"]): t for t in tools}
+        answers = [roles._answer_text(r.text) for r in reversed(request.tool_results)]
+        return roles._opening(request, offered, _facts(), answers, sorted(offered))
+
+    try:
+        for listing in (_programs(), _programs({**PROGRAM, "analysis_complete": False})):
+            request = _request(tools, opened, ("list_programs", listing, {}))
+            call = roles._next_call(request, _facts(), 2, fill_from_results=True)
+            assert call is not None and call.name == "list_programs", (listing, call)
+        # An empty listing after an open that said nothing goes on is not waited for.
+        done_open = ("import_it", json.dumps({"imported": 1}), opened[2])
+        request = _request(tools, done_open, ("list_programs", _programs(), {}))
+        assert opening(request) is None
+        # The bound is explicit and logged when it is hit.
+        waiting = ("list_programs", _programs(), {})
+        bounded = _request(tools, opened, *([waiting] * roles.POLL_ROUNDS))
+        log = io.StringIO()
+        with contextlib.redirect_stderr(log):
+            assert opening(bounded) is None
+        assert "still lists what was opened as not done" in log.getvalue(), log.getvalue()
+    finally:
+        roles.POLL_PAUSE_S = pause
+
+
+@check
+def an_opened_program_is_listed_then_decompiled_at_an_exported_start() -> None:
+    from scripts.rehearsal.roles import _next_call
+
+    tools = _program_tools()
+    opened = ("import_it", QUEUED, {"binary_path": "/s/sample_1.exe"})
+    listed = ("list_programs", _programs({**PROGRAM, "analysis_complete": True}), {})
+    looked_up = ("attck_lookup", ATTCK, {"technique_id": "T1071.001"})
+    request = _request(tools, looked_up, opened, listed)
+    call = _next_call(request, _facts(), 3, fill_from_results=True)
+    assert call is not None and call.name == "list_exports", call
+    assert call.args == {"binary_name": PROGRAM["name"]}, call
+    exports = json.dumps({"exports": [{"name": "entry", "address": "140001000"}]})
+    request = _request(
+        tools, opened, listed, ("list_exports", exports, {"binary_name": PROGRAM["name"]})
+    )
+    call = _next_call(request, _facts(), 3, fill_from_results=True)
+    assert call is not None and call.name == "decompile_it", call
+    assert call.args == {"binary_name": PROGRAM["name"], "name_or_address": "140001000"}, call
+    # A decompile answer names the function, not a program: the name stays the listed one.
+    code = json.dumps({"name": "entry-140001000", "code": "\nvoid entry(void)\n{\n}\n"})
+    request = _request(
+        tools,
+        opened,
+        listed,
+        ("list_exports", exports, {"binary_name": PROGRAM["name"]}),
+        ("decompile_it", code, {"binary_name": PROGRAM["name"], "name_or_address": "140001000"}),
+    )
+    call = _next_call(request, _facts(), 4, fill_from_results=True)
+    assert call is None or call.args.get("binary_name", PROGRAM["name"]) == PROGRAM["name"], call
+
+
 def run_self_checks() -> int:
     failed = 0
     for name, fn in CHECKS:
