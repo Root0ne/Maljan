@@ -313,8 +313,10 @@ def invalid_technique_ids(ledger: Sequence[Any] | None) -> set[str]:
 
 
 def catalogue_associations(ledger: Sequence[Any] | None) -> dict[str, list[str]]:
-    """``{technique_id: ["api_capability"]}`` for the rules the import set cleared.
+    """``{technique_id: [tool]}`` for the rules the import set cleared.
 
+    ``tool`` is the catalogue tool's own name, as the entry that associated
+    the technique first recorded it (the pack's ``api_capability``).
     Reference, not evidence: the table says these APIs are listed under the
     technique, and a reader may weigh that; nothing counts it as a source.
     """
@@ -322,8 +324,9 @@ def catalogue_associations(ledger: Sequence[Any] | None) -> dict[str, list[str]]
     for entry in ledger or []:
         if not reads_as(entry, _API_CATALOGUE):
             continue
+        tool = bare_name(getattr(entry, "tool", ""))
         for hit in api_capability_hits(getattr(entry, "structured", None)):
-            out.setdefault(hit["technique_id"], ["api_capability"])
+            out.setdefault(hit["technique_id"], [tool])
     return out
 
 

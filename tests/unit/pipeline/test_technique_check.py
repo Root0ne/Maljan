@@ -925,6 +925,17 @@ class TestACatalogueAssociationIsNeverASource:
         }
         assert corroboration_sources(rows["T1113"]) == []
 
+    def test_an_operator_catalogue_is_named_by_its_own_name(self) -> None:
+        """Any tool declared a catalogue is named as it is, never as the shipped catalogue."""
+        from maljan.pipeline.evidence_summary import catalogue_associations
+        from maljan.tools.knowledge import api_capability
+
+        payload = api_capability(["GetDIBits", "PrintWindow", "GetDC", "BitBlt"])
+        entry = _entry("refs__lookup_apis", payload, 1).model_copy(
+            update={"source": "mcp:refs", "facts": {"v": 1, "kind": "api_catalogue"}}
+        )
+        assert catalogue_associations([entry])["T1113"] == ["lookup_apis"]
+
 
 class TestEverySurfaceSaysWhatHappenedToARetiredId:
     def test_the_validity_tool_gives_the_reason_and_the_successor(self) -> None:
