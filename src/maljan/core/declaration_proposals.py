@@ -799,19 +799,48 @@ def _wrapped_answer(schema: Any, answer: Any) -> Any:
     ``answer`` is the probe answer as :func:`_parsed` gives it: the wrapper
     object the server returned (``{field: <text>}``), the text, or the text's
     JSON already. ``None`` when the schema says something of its own
-    (:func:`_wrapping_field`), there is no answer, or the text is not a JSON
-    object or list: the schema is then read as before.
+    (:func:`_wrapping_field`), there is no answer, the text is not a JSON
+    object or list, or the answer reports a failure (:func:`_an_error_answer`):
+    the schema is then read as before.
     """
     from maljan.schemas.evidence import parse_structured
 
     field_name = _wrapping_field(schema)
-    if field_name is None or answer is None:
+    if field_name is None or answer is None or _an_error_answer(answer):
         return None
     if isinstance(answer, Mapping) and set(answer) == {field_name}:
         answer = answer[field_name]
     if isinstance(answer, str):
-        return parse_structured(answer)
-    return answer if isinstance(answer, Mapping | list) else None
+        answer = parse_structured(answer)
+    if not isinstance(answer, Mapping | list) or _an_error_answer(answer):
+        return None
+    return answer
+
+
+# The fields an answer that only reports a failure is made of.
+_ERROR_ONLY_FIELDS = frozenset({"error", "message", "detail", "code", "status"})
+
+
+def _an_error_answer(answer: Any) -> bool:
+    """Whether a probe answer reports a failure rather than the tool's data.
+
+    An MCP ``isError`` reply, any shape the platform reads as a failure
+    (``tools.errors.error_parts``: ``{"error": …}``, the client's
+    ``tool_error`` marker), or an object holding only an error or a message
+    and the fields such a report carries (``{"message": "…"}``). Its shape is
+    the failure's, never the tool's answer's, so a wrapping schema is read as
+    before.
+    """
+    from maljan.tools.errors import error_parts
+
+    if not isinstance(answer, Mapping):
+        return False
+    if answer.get("isError") is True or answer.get("is_error") is True:
+        return True
+    if error_parts(dict(answer)) is not None:
+        return True
+    keys = {str(key) for key in answer}
+    return bool(keys) and keys <= _ERROR_ONLY_FIELDS and bool(keys & {"error", "message"})
 
 
 def propose_tool(

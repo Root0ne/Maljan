@@ -131,6 +131,23 @@ class TestEverythingElseIsReadAsBefore:
     def test_a_schema_that_says_more(self, schema: dict[str, Any]) -> None:
         self._before(schema, {"result": json.dumps(RECORD)})
 
+    @pytest.mark.parametrize(
+        "answer",
+        [
+            {"result": json.dumps({"error": "binary not loaded"})},
+            {"result": json.dumps({"message": "no such hash"})},
+            {"result": json.dumps({"error": {"code": "not_found", "message": "no record"}})},
+            {"result": json.dumps({"message": "rate limited", "code": 429})},
+            json.dumps({"tool_error": "mcp_tool_error", "tool": "lookup_hash", "detail": "x"}),
+            {"isError": True, "content": [{"type": "text", "text": json.dumps(RECORD)}]},
+        ],
+        ids=["error", "message-only", "structured-error", "message-and-code", "marker", "isError"],
+    )
+    def test_an_error_answer_is_never_read_as_the_tool_s(self, answer: Any) -> None:
+        held = self._before(_wrapper(), answer)
+        assert "rows" not in held["fields"]
+        assert all("wraps" not in " ".join(f.get("evidence", [])) for f in held["fields"].values())
+
     def test_no_answer_reads_the_wrapper_as_before(self) -> None:
         proposal = propose_tool(_definition(_wrapper()))
         assert proposal is not None and "reputation" not in proposal.facts

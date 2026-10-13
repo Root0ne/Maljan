@@ -3569,7 +3569,8 @@ a call that answers with an error, say so plainly; a cancelled probe is still
 cancelled. An answer
 proposes the row shape when the tool has no `outputSchema` or one that only
 wraps a text (a single string field, the form an MCP server writes for a tool
-that returns a string) and the answer's text is JSON, the auto-name
+that returns a string) and the answer's text is JSON that is not an error
+report (an `isError` reply, `{"error": …}`, an object of only a message), the auto-name
 prefixes it writes twice beyond the defaults, and, for a one-line prose answer
 to the missing path that the platform does not already read as an error and
 that is no longer than a captured output is kept (6,000 characters), an
