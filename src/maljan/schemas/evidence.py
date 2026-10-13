@@ -400,6 +400,7 @@ class LedgerEntry(BaseModel):
             seq=max(0, self.seq - 1),
             source=self.source,
             facts=self.facts,
+            ok=self.ok,
         )
 
     @classmethod
@@ -416,7 +417,7 @@ class LedgerEntry(BaseModel):
             tool=captured.tool_name,
             args=dict(captured.args),
             symbol=captured.symbol,
-            ok=True,
+            ok=captured.ok,
             output=captured.output,
             structured=parse_structured(captured.output),
             seq=seq,

@@ -70,6 +70,17 @@ class CapturedToolOutput(BaseModel):
             "report reads the output's kind and report sections by; None where none was stored."
         ),
     )
+    ok: bool = Field(
+        True,
+        # Left out of the dump when the call answered, so every capture of a
+        # call that answered dumps as it did before the field existed, and a
+        # stored capture without it reads as answered.
+        exclude_if=lambda value: value is True,
+        description=(
+            "The entry's outcome (LedgerEntry.ok): False where the call failed, so a reader "
+            "drawing what a tool answered never draws a failed answer as one."
+        ),
+    )
 
 
 def _symbol_from_args(args: dict) -> str | None:

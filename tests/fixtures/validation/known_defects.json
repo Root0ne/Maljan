@@ -2,15 +2,6 @@
  "about": "Product gaps the validation runs are known to show, each excusing one miss of one run whose detail matches exactly. Every row names its gap; see the validation harness report.",
  "pins": [
   {
-   "scenario": "a",
-   "run": "long_loop-openai",
-   "wire": "openai",
-   "check": "reach:r2:E6",
-   "detail": "a figure draws an answer filed as failed",
-   "gap": "G1",
-   "note": "a failed decompile is drawn as a code-listing figure (reporting/figures.py build_code_listings takes outputs whatever the entry's ok)"
-  },
-  {
    "scenario": "e",
    "run": "e2p-proposed-openai",
    "wire": "openai",
