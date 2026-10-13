@@ -4805,8 +4805,13 @@ is assembled from what the run gathered rather than recomputed beside it:
   analyst claims are picked by its keywords (`evidence_bundles.mentions`): a
   keyword shorter than six letters matches a whole word or a word's prefix,
   words split at camel case (`rsa` in `RSA1` and `rsaenh`, `encrypt` in
-  `CryptEncrypt`), never inside another word (`rsa` in `rehearsal`, `c2` in
-  `0xc2c4`); a longer stem matches anywhere (`obfuscat` in `deobfuscation`).
+  `CryptEncrypt`), or a word's end with a plural, verb, agent or API suffix
+  after it (`rc4` in `ARC4`, `key` in `pubkey`, `http` in `winhttp`, `task` in
+  `schtasks`, `hash` in `apihashing`, `mutex` in `createmutexw`), never inside
+  another word (`rsa` in `rehearsal`), never in an ordinary word that ends
+  with it by chance (`key` in `monkey`, `rsa` in `versa`) and never starting
+  or ending inside a number written in hex (`c2` in `0xC2C4`); a longer stem
+  matches anywhere (`obfuscat` in `deobfuscation`).
   The communications, command-and-control and configuration sections are shown
   `entries_holding` beside the run's urls, domains and ips: each value with the
   answered entries whose captured output, one-entry section or self-naming

@@ -240,18 +240,67 @@ def _word_starts(text: str) -> Iterator[int]:
 # A keyword this long is a stem that names its subject inside a compound
 # word too (``obfuscat`` in ``deobfuscation``, ``string`` in ``stackstrings``);
 # a shorter one turns up inside unrelated words by chance (``rsa`` in
-# ``rehearsal``, ``c2`` in ``0xc2c4``) and matches only where a word begins.
+# ``rehearsal``, ``c2`` in ``0xc2c4``) and matches only where a word begins or
+# ends.
 _STEM_LENGTH = 6
+
+# A run of letters and digits (no underscore): the unit a word end is read in.
+_RUN = re.compile(r"[^\W_]+")
+# A run that is a number written in hex: ``0xc2c4``, ``0C2C4h``, or a bare run
+# of eight or more hex digits holding both a digit and a letter. No keyword
+# starts or ends inside one.
+_HEX_RUN = re.compile(
+    r"0x[0-9a-f]+|[0-9][0-9a-f]*h|(?=[0-9a-f]*[0-9])(?=[0-9a-f]*[a-f])[0-9a-f]{8,}",
+    re.IGNORECASE,
+)
+# What may follow a short keyword that ends a word: a plural, a verb's
+# ending, an agent noun, or an API name's character-set or extended suffix
+# (``schtasks``, ``apihashing``, ``repacked``, ``createmutexw``).
+_END_SUFFIXES = ("", "s", "es", "d", "ed", "ing", "er", "ers", "w", "a", "ex", "exw", "exa")
+# Ordinary words that end with a short keyword by chance: a keyword at their
+# end names nothing (``key`` in ``monkey``, ``rsa`` in ``versa``).
+_NOT_COMPOUNDS = frozenset(
+    {
+        "monkey",
+        "donkey",
+        "turkey",
+        "hockey",
+        "jockey",
+        "whiskey",
+        "lackey",
+        "versa",
+        "footnote",
+    }
+)
+
+
+def _ends_with_keyword(run: str, keywords: tuple[str, ...]) -> bool:
+    """Whether a lowered run ends with one of ``keywords`` and one of ``_END_SUFFIXES``."""
+    for suffix in _END_SUFFIXES:
+        if suffix and not run.endswith(suffix):
+            continue
+        stem = run[: len(run) - len(suffix)] if suffix else run
+        if stem in _NOT_COMPOUNDS:
+            continue
+        if any(stem.endswith(k) for k in keywords):
+            return True
+    return False
 
 
 def mentions(text: str, keywords: tuple[str, ...]) -> bool:
-    """Whether ``text`` holds one of ``keywords`` as a word or a word's prefix.
+    """Whether ``text`` holds one of ``keywords`` as a word, a word's prefix or a word's end.
 
     A keyword shorter than ``_STEM_LENGTH`` matches where a word begins, as a
     whole word or its prefix (``rsa`` in ``RSA1`` and ``rsaenh``, ``key`` in
-    ``KeyBlob``), never inside a word (``rsa`` in ``rehearsal``, ``key`` in
-    ``monkey``, ``aes`` in ``caesar``); a longer one matches anywhere, as it
-    always did. Case is ignored. Linear in the text for a given keyword list.
+    ``KeyBlob``), or where a word ends, a plural, verb, agent or API suffix
+    allowed after it (``rc4`` in ``ARC4``, ``key`` in ``pubkey``, ``http`` in
+    ``winhttp``, ``task`` in ``schtasks``, ``hash`` in ``apihashing``,
+    ``mutex`` in ``createmutexw``); never inside a word (``rsa`` in
+    ``rehearsal``, ``aes`` in ``caesar``), never in an ordinary word that
+    ends with it by chance (``key`` in ``monkey``), and never starting or
+    ending inside a number written in hex (``c2`` in ``0xC2C4``). A longer
+    one matches anywhere, as it always did. Case is ignored. Linear in the
+    text for a given keyword list.
     """
     if not keywords:
         return False
@@ -262,7 +311,20 @@ def mentions(text: str, keywords: tuple[str, ...]) -> bool:
     if any(k in lowered for k in stems):
         return True
     short = tuple(k for k in keywords if len(k) < _STEM_LENGTH)
-    return bool(short) and any(lowered.startswith(short, at) for at in _word_starts(text))
+    if not short:
+        return False
+    # A keyword written with a space or a dash spans runs: read where a word starts.
+    words = tuple(k for k in short if k.isalnum())
+    for found in _RUN.finditer(text):
+        run = found.group(0)
+        if _HEX_RUN.fullmatch(run):
+            continue
+        at = found.start()
+        if any(lowered.startswith(short, at + offset) for offset in _word_starts(run)):
+            return True
+        if words and _ends_with_keyword(lowered[at : found.end()], words):
+            return True
+    return False
 
 
 def _filter_claims(claims: list[dict[str, str]], keywords: tuple[str, ...]) -> list[dict[str, str]]:

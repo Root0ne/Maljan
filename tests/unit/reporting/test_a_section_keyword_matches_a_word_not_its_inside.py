@@ -3,7 +3,9 @@
 ``rsa`` used to match inside ``rehearsal`` and ``conversation``, ``c2`` inside a
 hex address such as ``0xc2c4``: the encryption section was asked for a claim
 about an HTTP beacon. A short keyword now matches a whole word or a word's
-prefix (``RSA1``, ``rsaenh``, ``KeyBlob``); a stem of six or more letters
+prefix (``RSA1``, ``rsaenh``, ``KeyBlob``) or a word's end (``ARC4``,
+``pubkey``, ``schtasks``, ``createmutexw``), never in an ordinary word that
+ends with it by chance (``monkey``) nor inside a hex number; a stem of six or more letters
 still matches inside a compound word (``deobfuscation``, ``stackstrings``).
 """
 
@@ -57,6 +59,40 @@ def test_a_hex_address_is_no_command_and_control() -> None:
     assert not mentions("fcn.0xc2c4 dispatches through 0x3c2c", C2)
     assert mentions("the C2 server answers", C2)
     assert mentions("an HTTP POST to the panel", C2)
+
+
+@pytest.mark.parametrize(
+    ("text", "section"),
+    [
+        ("an ARC4 key schedule", "encryption_scheme"),
+        ("a pxor loop over the blob", "encryption_scheme"),
+        ("the embedded pubkey", "encryption_scheme"),
+        ("loads winhttp.dll", "communications"),
+        ("an xmlhttp object", "communications"),
+        ("runs schtasks /create", "host_identifiers"),
+        ("calls createmutexw", "host_identifiers"),
+        ("opens a namedpipe", "host_identifiers"),
+        ("apihashing over the export table", "string_resolution"),
+        ("a djb2hash of each name", "string_resolution"),
+        ("a multistage loader", "payloads"),
+        ("the image is repacked", "packing_obfuscation"),
+    ],
+)
+def test_a_short_keyword_where_a_word_ends_is_picked(text: str, section: str) -> None:
+    assert mentions(text, _SECTION_CLAIM_KEYWORDS[section])
+
+
+@pytest.mark.parametrize(
+    "text", ["a monkey patch", "two monkeys", "and vice versa", "see the footnote"]
+)
+def test_an_ordinary_word_ending_with_a_keyword_picks_nothing(text: str) -> None:
+    assert not mentions(text, ENCRYPTION + _SECTION_CLAIM_KEYWORDS["ransom_note"])
+
+
+def test_no_keyword_starts_or_ends_inside_a_hex_number() -> None:
+    for text in ("0xC2C4", "0xc2c4", "at 0C2C4h", "digest 1360bc03c2c2"):
+        assert not mentions(text, C2), text
+    assert mentions("the C2 at 0x140001000", C2)
 
 
 def test_a_stem_still_matches_inside_a_compound_word() -> None:
