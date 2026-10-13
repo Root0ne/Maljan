@@ -829,7 +829,7 @@ class TestEveryReaderReadsADnsRowSNameAlike:
         allowed = {
             ("schemas/sandbox_document.py", "DNS_NAME_KEYS"),
             ("reporting/ledger_report.py", "_NON_DNS_ENDPOINT_KEYS"),
-            ("core/report_shapes.py", "_DNS_REQUEST_KEYS"),
+            ("core/report_shapes.py", "_GENERIC_QUESTION_KEYS"),
             ("core/declaration_proposals.py", "_DESCRIPTION_WORDS"),
             ("core/declaration_proposals.py", "_argument_role"),
             ("memory/technique_cards.py", "SOURCE_FIELDS"),

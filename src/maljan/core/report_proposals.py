@@ -53,7 +53,9 @@ from pydantic import ValidationError
 from maljan.core.report_shapes import (
     DNS_TYPE_KEYS,
     RowShape,
+    host_names,
     is_record_type,
+    note_question_value,
     protocol_spelling,
     row_shape,
 )
@@ -165,7 +167,8 @@ class _Walk:
                 rows = [item for item in node if isinstance(item, dict)]
                 if rows:
                     held = self.lists.setdefault(
-                        path, {"keys": {}, "rows": 0, "protocols": {}, "record_types": {}}
+                        path,
+                        {"keys": {}, "rows": 0, "protocols": {}, "record_types": {}, "hosts": {}},
                     )
                     held["rows"] += len(rows)
                     keys: dict[str, None] = held["keys"]
@@ -181,6 +184,7 @@ class _Walk:
                             if key.lower() in DNS_TYPE_KEYS:
                                 held_type = record_types.get(key, True)
                                 record_types[key] = held_type and is_record_type(value)
+                            note_question_value(held["hosts"], key, value)
                 at = (*path, "*")
                 stack.extend((item, at) for item in node if isinstance(item, dict | list))
 
@@ -286,8 +290,12 @@ def _filtered(segments: tuple[str, ...], key: str, value: str) -> str:
     return _jsonpath(segments) + f"[?@['{key}']=='{escaped}']"
 
 
-def _channels(walk: _Walk) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
-    """``(channel paths, field renames)``, each a proposed field, for each kind's strongest list.
+def _channels(
+    walk: _Walk,
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]], list[str]]:
+    """``(channel paths, field renames, notes)`` for each kind's strongest list.
+
+    The paths and renames are proposed fields; the notes name the lists left out.
 
     Every list is read; per channel the list whose reading is strongest
     (:attr:`core.report_shapes.RowShape.strength`: its confidence, the
@@ -295,23 +303,33 @@ def _channels(walk: _Walk) -> tuple[dict[str, dict[str, Any]], dict[str, dict[st
     the channel's, so a decoy list that only resembles a kind never takes it
     from a list that is plainly of it. Equal readings go to the shallowest,
     then the first in path order, so the proposal is the same for the same
-    report.
+    report. A mapping holds one path per channel, so every other list read
+    as the same channel is named in a note, for the admin to map instead:
+    none is left out silently.
     """
     best: dict[str, tuple[tuple[int, int, int], RowShape, tuple[str, ...], str, str]] = {}
+    also: dict[str, list[tuple[str, str]]] = {}
     for path in sorted(walk.lists, key=lambda p: (len(p), p)):
         held = walk.lists[path]
         names = [s for s in reversed(path) if s != "*"][:2]
         seen = held["record_types"]
         record_types = any(seen.values()) if seen else None
-        shape = row_shape(names, held["keys"], record_types=record_types)
+        shape = row_shape(
+            names, held["keys"], record_types=record_types, host_names=host_names(held["hosts"])
+        )
         if shape is None:
             continue
         for channel, expression, confidence in _channel_paths(shape, path, held):
             strength = (_RANK[confidence], *shape.strength[1:])
             if channel not in best or strength > best[channel][0]:
+                if channel in best:
+                    also.setdefault(channel, []).append((best[channel][3], best[channel][4]))
                 best[channel] = (strength, shape, path, expression, confidence)
+            else:
+                also.setdefault(channel, []).append((expression, confidence))
     channels: dict[str, dict[str, Any]] = {}
     renames: dict[str, dict[str, Any]] = {}
+    notes: list[str] = []
     chosen = sorted(best.items(), key=lambda item: (len(item[1][2]), item[1][2], item[0]))
     for channel, (_strength, shape, path, expression, confidence) in chosen:
         where = _where((*path, "*"))
@@ -322,7 +340,15 @@ def _channels(walk: _Walk) -> tuple[dict[str, dict[str, Any]], dict[str, dict[st
                 renames[f"{channel}.{part}"] = _field(
                     key, [f"{where}.{key}"], confidence, f"mapping.{channel}"
                 )
-    return channels, renames
+        others = also.get(channel)
+        if others:
+            listed = ", ".join(f"{other} ({held})" for other, held in others)
+            notes.append(
+                f"mapping.{channel} reads {expression}; also read as the same channel and "
+                f"left out, since a mapping holds one path per channel: {listed}. Map one of "
+                "them instead if it is the run's"
+            )
+    return channels, renames, notes
 
 
 _RANK = {LOW: 0, MEDIUM: 1, HIGH: 2}
@@ -422,7 +448,7 @@ def propose_format(payload: Mapping[str, Any]) -> dict[str, Any]:
         fields["mapping.target_sha256"] = _field(
             mapping["target_sha256"], fields["target_sha256_paths"]["evidence"], MEDIUM
         )
-    channels, renames = _channels(walk)
+    channels, renames, channel_notes = _channels(walk)
     for channel, proposed in channels.items():
         fields[f"mapping.{channel}"] = proposed
         mapping[channel] = proposed["value"]
@@ -440,7 +466,7 @@ def propose_format(payload: Mapping[str, Any]) -> dict[str, Any]:
         for key, proposed in renames.items():
             fields[f"mapping.field_names.{key}"] = proposed
     out: dict[str, Any] = {"v": PROPOSAL_VERSION, "fields": fields}
-    notes = walk.notes()
+    notes = walk.notes() + channel_notes
     if notes:
         out["notes"] = notes
     read = {p for p in fields if p.startswith("mapping.") and p.count(".") == 1}

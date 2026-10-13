@@ -17,7 +17,7 @@ returned as the rows write it. Constant work per key.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
 from maljan.schemas.sandbox_document import DNS_NAME_KEYS
@@ -98,22 +98,91 @@ _WORD = re.compile(r"[a-z0-9]+")
 # name servers and embedded configurations hold, and a digest, a name and a
 # size what every archive or resource listing holds. Such rows read as DNS
 # questions, or as files a run dropped, only with evidence of their own. For
-# DNS that is DNS-specific evidence: the question named as a request or a
-# query, its answers named as answers, a key only DNS rows write, or (where
-# the values are seen) a question type that is a DNS record type; failing
-# those, the words of a name the list sits under (its own, the block holding
-# it, the tool answering it), read with low confidence. A name with
+# DNS that is DNS-specific evidence: a key only DNS rows write, (where the
+# values are seen) a question type that is a DNS record type, or the DNS
+# row's structure (a question, its type and its answers named as answers);
+# failing those, the words of a name the list sits under (its own, the block
+# holding it, the tool answering it), read with low confidence. A name with
 # addresses (``addresses``, ``ips``, ``resolved``) is no DNS evidence.
 _DNS_WORDS = frozenset({"dns", "lookups", "resolutions", "queries"})
+# The words of those that say DNS on their own: ``queries`` is also what a
+# database, a WMI or an LDAP log holds.
+_DNS_ONLY_WORDS = frozenset({"dns", "lookups", "resolutions"})
 _DNS_KEYS = frozenset({"qname", "qtype", "query_type", "record_type", "rrtype", "rrname", "rdata"})
-# The question's spellings that say request or query, and the answers'
-# spellings that say answer: the DNS-specific ones among each part's.
-_DNS_REQUEST_KEYS = frozenset({"request", "query", "qname", "rrname"})
+# The question's generic spellings: a request or a query is also what an HTTP
+# log, a WMI, LDAP, registry or database log writes. A list whose question is
+# spelled so reads as DNS only beside a second DNS signal: one of the above,
+# a name it sits under that says DNS on its own, a key saying ``dns``, or
+# (where the values are seen) question values shaped like host names.
+_GENERIC_QUESTION_KEYS = frozenset({"request", "query"})
 _DNS_ANSWER_KEYS = frozenset({"answers", "answer"})
 _DNS_RECORD_TYPES = frozenset(
     {"a", "aaaa", "cname", "mx", "ns", "ptr", "soa", "srv", "txt", "caa", "any", "https", "svcb"}
 )
+# The keys a request of another protocol, or an endpoint, is written with: a
+# row holding one is no DNS question unless it carries a key only DNS rows
+# write or record types (``port``: a configured server, a connection).
+_NOT_A_QUESTION_KEYS = frozenset(
+    {
+        "method",
+        "http_method",
+        "verb",
+        "url",
+        "uri",
+        "path",
+        "status",
+        "status_code",
+        "response_code",
+        "user_agent",
+        "useragent",
+        "port",
+    }
+)
+# What a host name holds none of: white space, a path or a query's
+# punctuation, brackets or quotes.
+_NOT_IN_A_HOST_NAME = re.compile(r"[\s/\\()=?&;,'\"<>{}\[\]|*%@!#$^`~+]")
 _DROPPED_WORDS = frozenset({"dropped", "drop", "drops", "droppedfiles", "written", "created"})
+# The keys a DNS row's question is written under (lower case).
+_QUESTION_KEYS = frozenset(_DNS_PARTS["request"])
+
+
+def host_name_shape(value: object) -> tuple[bool, bool] | None:
+    """``(shaped like a host name, holds a dot)`` for a question value, ``None`` for none.
+
+    An empty value or ``None`` says nothing; any other value that is no text,
+    or a text holding white space, a slash, a backslash, brackets, quotes or a
+    query's punctuation, is no host name. Linear in the value's length.
+    """
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        return False, False
+    text = value.strip()
+    if not text:
+        return None
+    return _NOT_IN_A_HOST_NAME.search(text) is None, "." in text.strip(".")
+
+
+def note_question_value(held: dict[str, list[bool]], key: str, value: object) -> None:
+    """Fold one row value into ``held[key]`` where ``key`` spells a DNS question.
+
+    ``held[key]`` is ``[every value shaped like a host name, one holding a
+    dot]``; :func:`host_names` reads it. Constant work per value beside the
+    value's length.
+    """
+    if key.lower() not in _QUESTION_KEYS:
+        return
+    seen = host_name_shape(value)
+    if seen is None:
+        return
+    entry = held.setdefault(key, [True, False])
+    entry[0] = entry[0] and seen[0]
+    entry[1] = entry[1] or seen[1]
+
+
+def host_names(held: Mapping[str, list[bool]]) -> dict[str, bool]:
+    """``row_shape``'s ``host_names`` from what :func:`note_question_value` folded."""
+    return {key: shaped and dotted for key, (shaped, dotted) in held.items()}
 
 
 @dataclass
@@ -159,6 +228,7 @@ def row_shape(
     keys: Iterable[str],
     *,
     record_types: bool | None = None,
+    host_names: Mapping[str, bool] | None = None,
 ) -> RowShape | None:
     """The kind a list whose rows carry ``keys`` reads as, or ``None``.
 
@@ -167,12 +237,19 @@ def row_shape(
     ``record_types`` says every value seen under the rows' question-type key is
     a DNS record type (``True``), that the values seen are not (``False``, which
     no name the list sits under outweighs), or that none was seen (``None``).
+    ``host_names`` maps a key, as the rows write it, to whether the values
+    seen under it read as host names (every one shaped like a host name, at
+    least one holding a dot); a key absent had no value seen. A question whose
+    values are no host names is no DNS question unless a key only DNS rows
+    write says it is.
     ``high`` where every part is under the consumer's own field name,
-    ``medium`` where some part is under another spelling, ``low`` for a DNS
-    list recognised by its name alone. A list whose evidence fits another
-    kind better reads as none: a name and a type, or a name and its
-    addresses, are not a DNS question, a digest, a name and a size not a
-    dropped file, without evidence of their own (see :data:`_DNS_WORDS`).
+    ``medium`` where some part is under another spelling or where the
+    question is spelled generically (``request``, ``query``) with only one
+    more DNS signal, ``low`` for a DNS list recognised by its name alone. A
+    list whose evidence fits another kind better reads as none: a name and a
+    type, or a name and its addresses, are not a DNS question, a digest, a
+    name and a size not a dropped file, without evidence of their own (see
+    :data:`_DNS_WORDS`).
     """
     names = (list_name,) if isinstance(list_name, str) else tuple(list_name)
     by_lower: dict[str, str] = {}
@@ -190,19 +267,30 @@ def row_shape(
         confidence = "high" if all(parts[part] == part for part in parts) else "medium"
         evidence = 0
         if kind == "dns":
-            signals = (
-                parts["request"].lower() in _DNS_REQUEST_KEYS,
-                parts.get("answers", "").lower() in _DNS_ANSWER_KEYS,
-                bool(_DNS_KEYS & set(by_lower)),
-                bool(record_types) and "type" in parts,
-            )
-            # A key or a name saying "dns" adds to the evidence, never makes
-            # it: an interface lists its DNS servers.
+            keyset = set(by_lower)
+            dns_only = bool(_DNS_KEYS & keyset)
+            typed = bool(record_types) and "type" in parts
+            structure = "type" in parts and parts.get("answers", "").lower() in _DNS_ANSWER_KEYS
+            hosts = None if host_names is None else host_names.get(parts["request"])
+            if hosts is False and not dns_only:
+                continue
+            if _NOT_A_QUESTION_KEYS & keyset and not (dns_only or typed):
+                continue
+            # A key or a name saying "dns" adds to the evidence; it makes it
+            # only for a question spelled as a request or a query.
             said = any("dns" in _words(k) for k in by_lower)
-            evidence = sum(signals) + said + _named(names, _DNS_WORDS)
-            if any(signals):
+            named = _named(names, _DNS_WORDS)
+            specific = (dns_only, typed, structure)
+            evidence = sum(specific) + bool(hosts) + said + named
+            if parts["request"].lower() in _GENERIC_QUESTION_KEYS:
+                second = (*specific, bool(hosts), said, _named(names, _DNS_ONLY_WORDS))
+                if not any(second):
+                    continue
+                if sum((*specific, bool(hosts))) < 2:
+                    confidence = "medium"
+            elif any(specific):
                 pass
-            elif _named(names, _DNS_WORDS) and record_types is not False:
+            elif named and record_types is not False:
                 confidence = "low"
             else:
                 continue
