@@ -3232,6 +3232,7 @@ it:
 | `timeout_seconds` | the budget the tool itself keeps, where it has one |
 | `memory_peak_mb` | the tool's measured memory peak, where known |
 | `discloses_sample` | the tool sends the sample, or its bytes, out of the deployment |
+| `read_only` | the tool changes nothing and answers an identical call the same (read-only or idempotent): a revision that repeats an identical call of an earlier round is answered from that round's entry, as a tool its server marks `readOnlyHint` is; any other tool runs again |
 | `holds_strings` | the answer holds the sample's strings as data though its kind is not a strings kind (Ghidra's `batch_string_anchor_report` and `find_undocumented_by_string`); a function claim's quoted value is looked for in it |
 | `function_starts` | the path of the answer's list of function start addresses (offsets from the image base), read for a `function_list` or `capability_rules` answer by the triage pack's function index and the readings of an image with no function table of its own |
 | `rows` | the path of the answer's rows |
@@ -3559,7 +3560,7 @@ the kind and is offered only with one, accepting it stages both or neither,
 and a row field also needs `rows`. A tool declaration names a kind or states
 only the fields read without one (`display_name`, `category`, `words`,
 `timeout_seconds`, `long_running`, `memory_peak_mb`, `discloses_sample`,
-`arguments`; `core.tool_declarations.KIND_FREE_FIELDS`): a declaration with an
+`read_only`, `arguments`; `core.tool_declarations.KIND_FREE_FIELDS`): a declaration with an
 unknown key (`{"knd": …}`), an empty one, or one of no kind that sets a field
 read only through a kind is refused on save, by the API and the console's box
 alike: the box reads the field split, each field's default and the no-kind word

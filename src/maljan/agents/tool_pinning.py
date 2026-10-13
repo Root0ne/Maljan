@@ -50,6 +50,8 @@ SERVER_FRAGMENT_METADATA_KEY = "maljan_server_fragment"
 # only while the server's tools are in the request, and never read as a
 # template, being the server's words and not a declaration.
 SERVER_OWN_WORDS_METADATA_KEY = "maljan_server_own_words"
+# Set on a tool its own server marks read-only (MCP ``readOnlyHint`` true).
+READ_ONLY_METADATA_KEY = "maljan_read_only"
 
 # An argument whose *name* looks like it takes a file. Substring matches cover
 # ``file``, ``file_path``, ``filepath``, ``filename``, ``path``, ``target_file``;
@@ -496,3 +498,19 @@ def _pin_tool(
     except Exception as exc:  # noqa: BLE001 — a guardrail never costs a tool
         logger.warning("%s: path guard skipped for tool '%s': %s", agent_name or "agent", name, exc)
         return tool
+
+
+def answers_again(tool: Any) -> bool:
+    """Whether an identical call of ``tool`` answers the same: it changes nothing.
+
+    True for a tool its own server marks read-only (MCP ``readOnlyHint``,
+    carried as ``metadata["maljan_read_only"]``) or whose declaration marks it
+    read-only or idempotent (``ToolFacts.read_only``). Any other tool, and one
+    nothing says anything about, may change state or answer differently later
+    (a rename, a status poll), so it is not.
+    """
+    metadata = getattr(tool, "metadata", None) or {}
+    if metadata.get(READ_ONLY_METADATA_KEY) is True:
+        return True
+    facts = declared_facts_of(tool)
+    return bool(facts is not None and getattr(facts, "read_only", False) is True)

@@ -2923,6 +2923,29 @@ def own_earlier_entries(agent: Any) -> list[LedgerEntry]:
     return found
 
 
+def repeatable_earlier_entries(agent: Any) -> list[LedgerEntry]:
+    """The agent's own earlier-round entries whose tool answers an identical call the same.
+
+    Of :func:`own_earlier_entries`, those of a tool the agent holds that its
+    server marks read-only or its declaration marks read-only or idempotent
+    (``tool_pinning.answers_again``). A call of any other tool (a rename, a
+    status poll, a submission) runs again in a revision. Never raises.
+    """
+    from maljan.agents.tool_pinning import answers_again
+
+    try:
+        repeatable = {
+            str(getattr(tool, "name", "") or "")
+            for tool in getattr(agent, "tools", None) or ()
+            if answers_again(tool)
+        }
+    except Exception:  # noqa: BLE001 — no tool read is no tool seeded
+        return []
+    if not repeatable:
+        return []
+    return [entry for entry in own_earlier_entries(agent) if entry.tool in repeatable]
+
+
 def _row_id(row: Any) -> str:
     """A ledger row's id, whether the row is an entry or its stored mapping."""
     value = row.get("id") if isinstance(row, Mapping) else getattr(row, "id", None)
@@ -4795,10 +4818,12 @@ class BaseAnalyst(BudgetMeter, ABC):
         # an identical one is answered with the entry that holds it, as the
         # chunk's prompt lists them (``earlier_chunks_block``). A revision's
         # starts with the calls this agent made in the run's earlier rounds,
-        # answered the same way (``own_earlier_entries``).
+        # answered the same way (``own_earlier_entries``), for the tools that
+        # change nothing and answer an identical call the same
+        # (``repeatable_earlier_entries``): any other tool runs again.
         repeats = seeded_repeat_guard(
             getattr(self, "_prior_chunk_calls", None),
-            earlier_rounds=own_earlier_entries(self),
+            earlier_rounds=repeatable_earlier_entries(self),
         )
         # The function map reads this loop's calls as they are made.
         self._live_map_entries = recorder.entries

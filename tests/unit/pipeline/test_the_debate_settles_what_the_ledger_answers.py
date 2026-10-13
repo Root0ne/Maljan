@@ -28,7 +28,7 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.base_agent import own_earlier_entries
+from maljan.agents.base_agent import own_earlier_entries, repeatable_earlier_entries
 from maljan.agents.evidence_recorder import (
     EARLIER_CHUNK,
     EARLIER_ROUND,
@@ -380,6 +380,90 @@ class TestARepeatOfAnEarlierRound:
         agent = SimpleNamespace(name="beta", run_state_source={"evidence_ledger": rows})
         assert [e.id for e in own_earlier_entries(agent)] == ["ev_0002"]
         assert own_earlier_entries(SimpleNamespace(name="beta")) == []
+
+
+def _tool(name: str, *, server_read_only: bool = False) -> Any:
+    from langchain_core.tools import StructuredTool
+
+    from maljan.agents.tool_pinning import READ_ONLY_METADATA_KEY
+
+    async def _run(**_kwargs: Any) -> str:
+        return ""
+
+    return StructuredTool.from_function(
+        func=None,
+        coroutine=_run,
+        name=name,
+        description=name,
+        **({"metadata": {READ_ONLY_METADATA_KEY: True}} if server_read_only else {}),
+    )
+
+
+class TestOnlyAToolThatAnswersTheSameIsSeeded:
+    @staticmethod
+    def _agent(*tools: Any) -> Any:
+        rows = [
+            _entry(2, "beta", "decompile_function", "0x1400", "x").model_dump(mode="json"),
+            _entry(3, "beta", "rename_function", "0x1400", "renamed").model_dump(mode="json"),
+            _entry(4, "beta", "task_status", "", "pending").model_dump(mode="json"),
+        ]
+        return SimpleNamespace(
+            name="beta", tools=list(tools), run_state_source={"evidence_ledger": rows}
+        )
+
+    def test_a_read_only_decompile_is_seeded_and_a_rename_and_a_poll_are_not(self) -> None:
+        agent = self._agent(
+            _tool("decompile_function", server_read_only=True),
+            _tool("rename_function"),
+            _tool("task_status"),
+        )
+        assert [e.tool for e in repeatable_earlier_entries(agent)] == ["decompile_function"]
+        guard = seeded_repeat_guard(None, earlier_rounds=repeatable_earlier_entries(agent))
+        assert guard.answered_by("decompile_function", {"address": "0x1400"}) == "ev_0002"
+        assert guard.answered_by("rename_function", {"address": "0x1400"}) is None
+        assert guard.answered_by("task_status", {"address": ""}) is None
+
+    def test_a_tool_its_declaration_marks_read_only_is_seeded(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.core.tool_declarations import ToolFacts
+
+        monkeypatch.setattr(
+            "maljan.agents.tool_pinning.declared_facts_of",
+            lambda tool: ToolFacts(read_only=True) if tool.name == "task_status" else None,
+        )
+        agent = self._agent(_tool("rename_function"), _tool("task_status"))
+        assert [e.tool for e in repeatable_earlier_entries(agent)] == ["task_status"]
+
+    def test_an_agent_with_no_such_tool_seeds_nothing(self) -> None:
+        agent = self._agent(_tool("decompile_function"), _tool("rename_function"))
+        assert repeatable_earlier_entries(agent) == []
+
+    def test_the_server_s_read_only_mark_rides_on_its_tool(self) -> None:
+        from maljan.agents.mcp_client import MCPLangChainToolkit
+        from maljan.agents.tool_pinning import READ_ONLY_METADATA_KEY, answers_again
+
+        def listed(name: str, annotations: Any) -> Any:
+            return SimpleNamespace(
+                name=name,
+                description=name,
+                inputSchema={"properties": {}, "required": []},
+                annotations=annotations,
+            )
+
+        client = MCPLangChainToolkit.__new__(MCPLangChainToolkit)
+        client._categories = {}
+        reader = client._create_langchain_tool(
+            listed("read_thing", SimpleNamespace(readOnlyHint=True))
+        )
+        writer = client._create_langchain_tool(
+            listed("set_thing", SimpleNamespace(readOnlyHint=False))
+        )
+        bare = client._create_langchain_tool(listed("poll_thing", None))
+        assert (reader.metadata or {}).get(READ_ONLY_METADATA_KEY) is True
+        assert answers_again(reader)
+        assert not answers_again(writer)
+        assert not answers_again(bare)
 
 
 class TestLinearTime:

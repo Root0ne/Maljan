@@ -11584,6 +11584,7 @@
    "display_name": "",
    "long_running": false,
    "memory_peak_mb": null,
+   "read_only": false,
    "timeout_seconds": null,
    "words": []
   },

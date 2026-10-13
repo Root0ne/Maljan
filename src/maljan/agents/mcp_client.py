@@ -430,12 +430,23 @@ class MCPLangChainToolkit:
         raw_desc = mcp_tool.description or f"Executes {mcp_tool.name} on the MCP server."
         description = self._tag_description(mcp_tool.name, raw_desc)
 
+        # Whether the server marks the tool read-only (MCP ``readOnlyHint``):
+        # an identical call answers the same, so a revision that repeats one
+        # of an earlier round is answered from its entry
+        # (``tool_pinning.answers_again``).
+        from maljan.agents.tool_pinning import READ_ONLY_METADATA_KEY
+
+        hints = getattr(mcp_tool, "annotations", None)
+        read_only = getattr(hints, "readOnlyHint", None)
+        if read_only is None and isinstance(hints, Mapping):
+            read_only = hints.get("readOnlyHint")
         return StructuredTool.from_function(
             func=None,  # Not supporting sync execution since MCP client is async
             coroutine=arun_tool,
             name=mcp_tool.name,
             description=description,
             args_schema=args_schema,
+            metadata={READ_ONLY_METADATA_KEY: True} if read_only is True else None,
         )
 
     async def _call(
