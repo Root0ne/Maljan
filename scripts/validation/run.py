@@ -460,6 +460,10 @@ def preflight_r2(ctx: Context, times: int = 3) -> dict[str, Any]:
     return {"ok": all(n >= 30 for n in counts), "tool_counts": counts}
 
 
+# The tool calls a long-loop run gives each analyst (scenarios a and b).
+LONG_LOOP_STEPS = 16
+
+
 def scenario_a(ctx: Context) -> list[RunResult]:
     if not ctx.r2mcp or not Path(ctx.r2mcp).is_file():
         return [_skipped("a", f"r2mcp not found ({ctx.r2mcp_searched})")]
@@ -516,7 +520,7 @@ def scenario_a(ctx: Context) -> list[RunResult]:
     # the preferred tools: its r2 reach is recorded there and held in the long
     # loop, whose sixteen calls follow the answers into the code.
     results = []
-    runs = [(w, "normal", 2) for w in ctx.wires] + [(ctx.wires[0], "long_loop", 16)]
+    runs = [(w, "normal", 2) for w in ctx.wires] + [(ctx.wires[0], "long_loop", LONG_LOOP_STEPS)]
     for wire, scenario, steps in runs:
         rehearsal = replace(
             _rehearsal(
@@ -832,7 +836,14 @@ def scenario_b(ctx: Context) -> list[RunResult]:
             ctx,
             "b",
             name,
-            _rehearsal(wire, extra=extra, fill_from_results=True),
+            # The long loop scenario a holds its code gates with: a normal
+            # run's two calls are spent before the reverser reaches its
+            # decompiler, so the loop follows the answers through import,
+            # listing and decompile instead.
+            replace(
+                _rehearsal(wire, "long_loop", extra=extra, fill_from_results=True),
+                loop_steps=LONG_LOOP_STEPS,
+            ),
             servers={"pyghidra": required},
             gates=gates,
             notes=proposal_notes if name.startswith("b2p") else None,
