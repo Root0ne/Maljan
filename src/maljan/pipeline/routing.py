@@ -18,6 +18,11 @@ Decision priority (highest to lowest), in ``debate_route``:
      mediation's (``debate_facts.same_points``: none resolved, none new):
      another round would argue the same points. Judge
      (``contested_points_unchanged``); no consensus is claimed.
+     Ledger stated — every blocking line of this mediation states only counts
+     the ledger states, and an earlier mediation told the analysts those
+     counts (``debate_facts.ledger_stated``): another round would argue
+     counts already told. Judge (``ledger_stated``); no consensus is claimed,
+     and the lines stay standing disagreements for the judge and the report.
   4. Sycophancy is a fact told to the mediator, never a route of its own.
   5. Genuine LLM consensus (no listed line the mediator marked blocking, or
      left unmarked) — judge.
@@ -141,6 +146,9 @@ POINTS_UNCHANGED = "contested_points_unchanged"
 # Every revision of the round before this mediation states the claims in
 # force again, wording aside: the round changed no value, entry id or technique.
 REWORDED = "reworded"
+# Every blocking line of this mediation states only counts the ledger states,
+# and the analysts were told them by an earlier mediation.
+LEDGER_STATED = "ledger_stated"
 # Why a revision round opens.
 NO_CONSENSUS = "no_consensus"
 
@@ -213,6 +221,24 @@ def points_unchanged(state: Any) -> bool:
         list(getattr(before, "contradictions", None) or []),
         list(getattr(after, "contradictions", None) or []),
     )
+
+
+def only_ledger_stated(state: Any) -> bool:
+    """Whether every blocking line of the last mediation is one the ledger states, told before.
+
+    Read from the mediation's own record (``AgentArgument.ledger_stated``,
+    one sentence per distinct blocking line it holds), and only where the
+    mediation was made (``status`` complete) and lists a blocking line.
+    """
+    history = state.get("discussion_history") or []
+    last = history[-1] if history else None
+    if last is None or getattr(last, "agent_name", "") != "Mediator":
+        return False
+    if getattr(last, "status", "complete") != "complete":
+        return False
+    lines = {str(line) for line in getattr(last, "contradictions", None) or []}
+    stated = list(getattr(last, "ledger_stated", None) or [])
+    return bool(lines) and len(stated) == len(lines)
 
 
 def route_within_limit(
@@ -309,6 +335,18 @@ def route_within_limit(
             iteration,
         )
         return "judge", POINTS_UNCHANGED
+
+    # Every blocking line of this mediation states only counts the ledger
+    # states, and the analysts it names were told them by an earlier
+    # mediation: another round would argue counts already told. The lines
+    # stand as disagreements; no agreement is claimed.
+    if only_ledger_stated(state):
+        say(
+            "Every blocking line of round %d states only counts the ledger states and the "
+            "analysts were told; routing to judge with the answers in force.",
+            iteration,
+        )
+        return "judge", LEDGER_STATED
 
     # Sycophancy is a fact told to the mediator (``sycophancy_detector``); it
     # never overrides the mediator's consensus or a block with no contested

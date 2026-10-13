@@ -75,11 +75,11 @@ from maljan.pipeline.debate_facts import (
     contested_input,
     facts_naming,
     ledger_count_facts,
+    ledger_stated,
+    ledger_stated_sentence,
     names_an_unlisted_place,
     place_facts,
     place_facts_for,
-    settled_by_ledger,
-    settled_sentence,
     tools_taking_an_address,
     with_ledger_facts,
     with_place_facts,
@@ -3887,10 +3887,10 @@ def _ledger_counts(state: AnalysisState, agent_names: Sequence[str], argument: A
         return []
 
 
-def _settled_lines(
+def _ledger_stated_lines(
     state: AnalysisState, agent_names: Sequence[str], argument: Any
 ) -> list[tuple[str, tuple[str, ...]]]:
-    """The blocking lines the ledger answers, with facts stated before. Never raises."""
+    """The blocking lines the ledger states, with facts told before. Never raises."""
     lines = list(getattr(argument, "contradictions", None) or [])
     told = [
         str(fact)
@@ -3901,15 +3901,15 @@ def _settled_lines(
     if not lines or not told:
         return []
     try:
-        return settled_by_ledger(
+        return ledger_stated(
             lines,
             dict(state.get("isr_reports") or {}),
             list(state.get("evidence_ledger") or []),
             list(agent_names),
             told,
         )
-    except Exception as exc:  # noqa: BLE001 — no line is set aside
-        logger.debug("negotiation: the settled lines were not read (%s).", exc)
+    except Exception as exc:  # noqa: BLE001 — no line is read as stated
+        logger.debug("negotiation: the stated lines were not read (%s).", exc)
         return []
 
 
@@ -4186,26 +4186,25 @@ def make_negotiation_node(
             # analysts each line names and on the next mediation's prompt, and
             # a debate that ends here spends nothing on them.
             platform_said = _ledger_counts(state, agent_names, argument)
-            # A blocking line the ledger answers, whose facts the analysts were
-            # told by an earlier mediation, is not argued again: it no longer
-            # blocks, and the room and the run record it with its facts.
+            # A blocking line every count of which the ledger states, whose
+            # facts an earlier mediation told the analysts, is recorded with
+            # them. The line stays among the blocking lines: the next mediation
+            # is shown it was told and decides whether it still blocks, and
+            # the router ends the debate when every blocking line is such a
+            # line (``routing.LEDGER_STATED``).
             if measured and argument.status == "complete":
-                settled = _settled_lines(state, agent_names, argument)
-                if settled:
-                    aside = {line for line, _facts in settled}
-                    argument.contradictions = [
-                        line for line in argument.contradictions or [] if line not in aside
+                stated = _ledger_stated_lines(state, agent_names, argument)
+                if stated:
+                    argument.ledger_stated = [
+                        ledger_stated_sentence(line, facts) for line, facts in stated
                     ]
-                    argument.settled_by_ledger = [
-                        settled_sentence(line, facts) for line, facts in settled
-                    ]
-                    for sentence in argument.settled_by_ledger:
+                    for sentence in argument.ledger_stated:
                         logger.info("negotiation: %s", sentence)
                     emit_agent_message(
                         container.event_sink,
                         speaker=ROOM_SPEAKER,
                         role="system",
-                        text="\n".join(argument.settled_by_ledger),
+                        text="\n".join(argument.ledger_stated),
                         round_index=iteration + 1,
                         status="complete",
                         stage=stage_key_of(stage, "debate"),

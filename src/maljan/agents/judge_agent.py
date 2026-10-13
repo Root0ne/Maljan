@@ -90,7 +90,7 @@ from maljan.llm.transient import as_call
 from maljan.memory.attck_loader import technique_label
 from maljan.memory.long_term_memory import a_past_case_technique
 from maljan.memory.technique_cards import technique_card_lines
-from maljan.pipeline.debate_facts import read_marks, with_ledger_facts
+from maljan.pipeline.debate_facts import read_marks, with_ledger_facts, with_ledger_stated
 from maljan.pipeline.events import emit_judge_question, safe_finding_value, scrub
 from maljan.pipeline.mediation_models import (
     CONTRADICTIONS_BLOCK_MISSING_NOTE,
@@ -1548,11 +1548,16 @@ def _seconds_or_none(value: Any) -> float | None:
     return None if value is None else float(value)
 
 
-def _last_ledger_facts(history: Sequence[Any]) -> list[str]:
-    """The ledger counts the platform stated for the last mediation's lines, or none."""
+def _last_ledger_facts(history: Sequence[Any], field: str = "ledger_facts") -> list[str]:
+    """What the platform recorded in ``field`` for the last mediation's lines, or none.
+
+    ``ledger_facts`` are the ledger counts it stated; ``ledger_stated`` the
+    blocking lines every count of which the ledger states and the analysts
+    were told before.
+    """
     for argument in reversed(list(history or [])):
         if getattr(argument, "agent_name", "") == "Mediator":
-            return [str(f) for f in getattr(argument, "ledger_facts", None) or []]
+            return [str(f) for f in getattr(argument, field, None) or []]
     return []
 
 
@@ -2542,7 +2547,13 @@ class JudgeAgent(BudgetMeter):
         # benign even when YARA had a hit.
         # The counts the ledger states for the lines the last mediation listed,
         # carried on this call rather than asked in one of their own.
-        last_counts = with_ledger_facts("", _last_ledger_facts(history))
+        # And the blocking lines of it every count of which the ledger states
+        # and the analysts were told: the mediator decides whether each still
+        # blocks.
+        last_counts = with_ledger_stated(
+            with_ledger_facts("", _last_ledger_facts(history)),
+            _last_ledger_facts(history, "ledger_stated"),
+        )
         carried_facts = f"{last_counts}\n\n" if last_counts else ""
         prompt_messages = [
             (

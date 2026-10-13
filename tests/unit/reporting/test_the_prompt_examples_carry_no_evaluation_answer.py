@@ -135,8 +135,10 @@ from maljan.pipeline.debate_facts import (
     BLOCK_NOT_READ_NOTE,
     analysts_field_unknown_note,
     ledger_count_facts,
+    ledger_stated_sentence,
     place_facts,
     with_ledger_facts,
+    with_ledger_stated,
     with_place_facts,
 )
 from maljan.pipeline.evidence_summary import summarise
@@ -2077,6 +2079,17 @@ PROMPTS: dict[str, str] = {
     ),
     "a revision's answer from an earlier round's recorded result": earlier_chunk_answer(
         "a", "ev_0001", "a recorded result", origin=EARLIER_ROUND
+    ),
+    "blocking lines the ledger states, told before, shown to the next mediation": (
+        with_ledger_stated(
+            "",
+            [
+                ledger_stated_sentence(
+                    "[analysts: A] A claim 2 reports 0 hits of 9 rules [ev_0001]. [blocking: x]",
+                    ("entry ev_0001 (scan) states matches = 0 items, rule_count = 9",),
+                )
+            ],
+        )
     ),
     "a decompile answered with a function an earlier entry holds": same_function_notice(
         "FUN_00401000", "ev_0001"

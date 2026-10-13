@@ -68,14 +68,15 @@ class AgentArgument(BaseModel):
             "platform put them to the analysts the line names."
         ),
     )
-    settled_by_ledger: list[str] = Field(
+    ledger_stated: list[str] = Field(
         default_factory=list,
         repr=False,
         description=(
-            "For the mediator: the blocking lines the evidence ledger answered and the "
-            "analysts had been told before (``debate_facts.settled_by_ledger``), each with "
-            "its facts. They no longer block; the mediator wrote them, the platform set them "
-            "aside, and the run records each one."
+            "For the mediator: the blocking lines every count of which the evidence ledger "
+            "states and whose facts an earlier mediation told the analysts "
+            "(``debate_facts.ledger_stated``), each with its facts. They stay blocking lines; "
+            "the next mediation is shown them, and when every blocking line is one the debate "
+            "ends as ``ledger_stated``."
         ),
     )
     converged: list[dict[str, Any]] = Field(

@@ -2,11 +2,15 @@
 
 A debate ran to its round limit on a rule-match count: one analyst's tool
 listed two matches, a rule scan listed none of its 31 rules, and the mediator
-kept the line blocking every round. The ledger answers such a line: its cited
-entries state each count it states ("0 hits", "31 rules"), including the length
-of a match list. Once an earlier mediation stated those facts to the analysts,
-the line is not argued again: it no longer blocks, and the run records it with
-its facts. A line with a count no entry states is never settled.
+kept the line blocking every round. The ledger states such a line: its cited
+entries state each count it states ("0 hits", "31 rules") in keys naming its
+nouns, including the length of a match list, as one record that agrees with
+itself. Once an earlier mediation told the analysts those facts, the line is
+recorded as stated and told. It stays a blocking line, the next mediation is
+shown it, and when every blocking line of a mediation is one, the debate ends
+as ``ledger_stated``, never as consensus. A line setting one entry's count
+against another's count of something else, or citing entries that disagree,
+is never stated.
 
 A round whose every revision states the claims in force again, wording aside
 (the same values, entry ids and techniques), ends the debate: another round
@@ -32,16 +36,19 @@ from maljan.agents.evidence_recorder import (
     earlier_chunk_sentence,
     seeded_repeat_guard,
 )
+from maljan.agents.judge_agent import _last_ledger_facts
 from maljan.analysis.run_summary import RunSummaryBuilder
 from maljan.pipeline.claim_drops import unchanged_in_substance
 from maljan.pipeline.debate_facts import (
+    LEDGER_STATED_HEAD,
     fact_atoms,
     ledger_count_facts,
-    settled_by_ledger,
-    settled_sentence,
+    ledger_stated,
+    ledger_stated_sentence,
+    with_ledger_stated,
 )
-from maljan.pipeline.nodes import _settled_lines
-from maljan.pipeline.routing import NO_CONSENSUS, REWORDED, debate_route
+from maljan.pipeline.nodes import _ledger_stated_lines
+from maljan.pipeline.routing import LEDGER_STATED, NO_CONSENSUS, REWORDED, debate_route
 from maljan.pipeline.state import AgentArgument
 from maljan.schemas.evidence import build_entry
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
@@ -79,30 +86,68 @@ class TestAListFieldIsACount:
             ("ev_0007", "rule_count = 31"),
         }
 
+    def test_a_list_whose_key_names_another_noun_is_not_stated(self) -> None:
+        parsed = {"id": "ev_0011", "tool": "parse", "structured": {"imports": ["a", "b", "c"]}}
+        line = "[analysts: BETA] BETA claim 2 counts 3 sections in ev_0011. [blocking: x]"
+        assert ledger_count_facts([line], {}, [parsed], AGENTS) == []
 
-class TestALineTheLedgerAnswers:
-    def test_it_is_settled_once_the_facts_were_told(self) -> None:
+    def test_a_count_key_is_stated_as_before(self) -> None:
+        listed = {"id": "ev_0011", "tool": "parse", "structured": {"total": 3}}
+        line = "[analysts: BETA] BETA claim 2 counts 3 sections in ev_0011. [blocking: x]"
+        [fact] = ledger_count_facts([line], {}, [listed], AGENTS)
+        assert "states total = 3" in fact
+
+
+CONNECTIONS = {"id": "ev_0012", "tool": "sandbox", "structured": {"connections": []}}
+DOMAINS = {"id": "ev_0020", "tool": "dns", "structured": {"domains": ["a.test", "b.test"]}}
+C2_CONTACT = (
+    "[analysts: BETA, GAMMA] The BETA analyst sees 0 connections [ev_0012] while the GAMMA "
+    "analyst claims 2 C2 domains contacted [ev_0020]; whether C2 contact happened is "
+    "disputed [blocking: the contact is not established]"
+)
+SCANNER_A = {"id": "ev_0030", "tool": "scan_a", "structured": {"matches": []}}
+SCANNER_B = {"id": "ev_0031", "tool": "scan_b", "structured": {"matches": ["r1", "r2"]}}
+SCANNERS = (
+    "[analysts: ALPHA, BETA] ALPHA finds 0 matches [ev_0030] while BETA finds 2 matches "
+    "[ev_0031]. [blocking: the scanners disagree]"
+)
+
+
+class TestALineTheLedgerStates:
+    def test_it_is_stated_once_the_facts_were_told(self) -> None:
         told = ledger_count_facts([LINE], {}, [SCAN], AGENTS)
-        [(line, facts)] = settled_by_ledger([REWORDED_LINE], {}, [SCAN], AGENTS, told)
+        [(line, facts)] = ledger_stated([REWORDED_LINE], {}, [SCAN], AGENTS, told)
         assert line == REWORDED_LINE
         assert facts == ("entry ev_0007 (rule_scan) states matches = 0 items, rule_count = 31",)
-        assert "Settled by the ledger" in settled_sentence(line, facts)
+        assert "Stated by the ledger and told" in ledger_stated_sentence(line, facts)
 
-    def test_it_is_not_settled_before_the_facts_were_told(self) -> None:
-        assert settled_by_ledger([LINE], {}, [SCAN], AGENTS, []) == []
+    def test_it_is_not_stated_before_the_facts_were_told(self) -> None:
+        assert ledger_stated([LINE], {}, [SCAN], AGENTS, []) == []
 
-    def test_a_fact_not_told_before_keeps_it_blocking_one_round(self) -> None:
+    def test_a_fact_not_told_before_keeps_it_out_one_round(self) -> None:
         told = ledger_count_facts([LINE], {}, [SCAN], AGENTS)
-        assert settled_by_ledger([WITH_RESCAN], {}, [SCAN, RESCAN], AGENTS, told) == []
+        assert ledger_stated([WITH_RESCAN], {}, [SCAN, RESCAN], AGENTS, told) == []
         told += ledger_count_facts([WITH_RESCAN], {}, [SCAN, RESCAN], AGENTS)
-        assert settled_by_ledger([WITH_RESCAN], {}, [SCAN, RESCAN], AGENTS, told)
+        assert ledger_stated([WITH_RESCAN], {}, [SCAN, RESCAN], AGENTS, told)
 
     @pytest.mark.parametrize("line", [UNANSWERED, NO_COUNT])
-    def test_a_line_the_ledger_cannot_answer_is_never_settled(self, line: str) -> None:
+    def test_a_line_the_ledger_cannot_answer_is_never_stated(self, line: str) -> None:
         told = ledger_count_facts([LINE, line], {}, [SCAN], AGENTS)
-        assert settled_by_ledger([line], {}, [SCAN], AGENTS, told) == []
+        assert ledger_stated([line], {}, [SCAN], AGENTS, told) == []
 
-    def test_the_node_sets_a_settled_line_aside_and_keeps_the_rest(self) -> None:
+    def test_a_dispute_about_contact_is_not_stated_by_two_counts(self) -> None:
+        ledger = [CONNECTIONS, DOMAINS]
+        told = ledger_count_facts([C2_CONTACT], {}, ledger, AGENTS)
+        assert told, "each count is still stated to the analysts"
+        assert ledger_stated([C2_CONTACT], {}, ledger, AGENTS, told) == []
+
+    def test_scanners_that_disagree_are_not_stated(self) -> None:
+        ledger = [SCANNER_A, SCANNER_B]
+        told = ledger_count_facts([SCANNERS], {}, ledger, AGENTS)
+        assert told
+        assert ledger_stated([SCANNERS], {}, ledger, AGENTS, told) == []
+
+    def test_the_node_keeps_the_line_and_records_it(self) -> None:
         told = ledger_count_facts([LINE], {}, [SCAN], AGENTS)
         earlier = AgentArgument(agent_name="Mediator", finding="x", ledger_facts=told)
         now = AgentArgument(
@@ -113,24 +158,90 @@ class TestALineTheLedgerAnswers:
             "evidence_ledger": [SCAN],
             "isr_reports": {},
         }
-        settled = _settled_lines(state, AGENTS, now)  # type: ignore[arg-type]
-        assert [line for line, _facts in settled] == [REWORDED_LINE]
+        stated = _ledger_stated_lines(state, AGENTS, now)  # type: ignore[arg-type]
+        assert [line for line, _facts in stated] == [REWORDED_LINE]
+        assert now.contradictions == [REWORDED_LINE, UNANSWERED]
 
     def test_the_run_summary_records_it(self) -> None:
-        sentence = settled_sentence(REWORDED_LINE, ("entry ev_0007 states matches = 0 items",))
-        mediator = AgentArgument(agent_name="Mediator", finding="x", settled_by_ledger=[sentence])
+        sentence = ledger_stated_sentence(REWORDED_LINE, ("entry ev_0007 states matches = 0",))
+        mediator = AgentArgument(agent_name="Mediator", finding="x", ledger_stated=[sentence])
         state: dict[str, Any] = {
             "iteration_count": 2,
             "discussion_history": [mediator],
             "confidence_history": [0.6],
         }
         summary = RunSummaryBuilder(start_time=0.0).set_negotiation(state, max_iterations=5).build()
-        assert summary.negotiation.settled_by_ledger == [sentence]
-        assert summary.to_dict()["negotiation"]["settled_by_ledger"] == [sentence]
+        assert summary.negotiation.ledger_stated == [sentence]
+        assert summary.to_dict()["negotiation"]["ledger_stated"] == [sentence]
 
-    def test_the_mediator_s_prompt_does_not_carry_the_field(self) -> None:
-        mediator = AgentArgument(agent_name="Mediator", finding="x", settled_by_ledger=["s"])
-        assert "settled_by_ledger" not in repr(mediator)
+    def test_the_next_mediation_is_shown_the_stated_lines(self) -> None:
+        sentence = ledger_stated_sentence(REWORDED_LINE, ("entry ev_0007 states matches = 0",))
+        mediator = AgentArgument(agent_name="Mediator", finding="x", ledger_stated=[sentence])
+        shown = with_ledger_stated("", _last_ledger_facts([mediator], "ledger_stated"))
+        assert shown.startswith(LEDGER_STATED_HEAD)
+        assert sentence in shown
+        assert with_ledger_stated("", []) == ""
+        assert "ledger_stated" not in repr(mediator)
+
+
+def _mediations(*blocking: list[str], stated: int = 0) -> dict[str, Any]:
+    """A debate whose last mediation lists ``blocking[-1]``, the first ``stated`` of it stated."""
+    history = []
+    for k, lines in enumerate(blocking):
+        last = k == len(blocking) - 1
+        history.append(
+            AgentArgument(
+                agent_name="Mediator",
+                finding=f"m{k}",
+                contradictions=list(lines),
+                ledger_stated=[ledger_stated_sentence(line, ("f",)) for line in lines[:stated]]
+                if last
+                else [],
+            )
+        )
+    return {
+        "iteration_count": len(blocking),
+        "is_consensus": False,
+        "consensus_applicable": True,
+        "confidence_history": [0.6] * len(blocking),
+        "discussion_history": history,
+        "revision_rounds": [],
+    }
+
+
+class TestTheDebateEndsWhenTheLedgerStatedEveryBlockingLine:
+    def test_a_scan_line_told_before_ends_the_debate_without_consensus(self) -> None:
+        state = _mediations([LINE], [REWORDED_LINE], stated=1)
+        assert debate_route(state, max_rounds=5) == ("judge", LEDGER_STATED)
+        assert state["is_consensus"] is False
+        assert state["discussion_history"][-1].contradictions == [REWORDED_LINE]
+
+    def test_one_line_the_ledger_does_not_state_goes_on(self) -> None:
+        state = _mediations([LINE], [REWORDED_LINE, UNANSWERED], stated=1)
+        assert debate_route(state, max_rounds=5) == ("revision", NO_CONSENSUS)
+
+    def test_the_whole_path_ends_after_the_line_was_told(self) -> None:
+        told = ledger_count_facts([LINE], {}, [SCAN], AGENTS)
+        first = AgentArgument(
+            agent_name="Mediator", finding="x", contradictions=[LINE], ledger_facts=told
+        )
+        second = AgentArgument(agent_name="Mediator", finding="y", contradictions=[REWORDED_LINE])
+        state: dict[str, Any] = {
+            "iteration_count": 2,
+            "is_consensus": False,
+            "consensus_applicable": True,
+            "confidence_history": [0.6, 0.6],
+            "discussion_history": [first, second],
+            "evidence_ledger": [SCAN],
+            "isr_reports": {},
+            "revision_rounds": [],
+        }
+        assert debate_route(state, max_rounds=5) == ("revision", NO_CONSENSUS)
+        second.ledger_stated = [
+            ledger_stated_sentence(line, facts)
+            for line, facts in _ledger_stated_lines(state, AGENTS, second)  # type: ignore[arg-type]
+        ]
+        assert debate_route(state, max_rounds=5) == ("judge", LEDGER_STATED)
 
 
 def _claim(text: str, ref: str = "[ev_0004]", technique: str | None = "T1027") -> ClaimEvidence:
@@ -257,7 +368,7 @@ class TestLinearTime:
             ]
             told = ledger_count_facts(lines, {}, ledger, AGENTS)
             start = time.perf_counter()
-            settled_by_ledger(lines, {}, ledger, AGENTS, told)
+            ledger_stated(lines, {}, ledger, AGENTS, told)
             return time.perf_counter() - start
 
         cost(10)

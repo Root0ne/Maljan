@@ -17,7 +17,7 @@ import pytest
 from maljan.agents.base_agent import read_technique_line
 from maljan.agents.claim_headings import CLAIM_HEAD_RE, claim_heading_counts
 from maljan.agents.repeat_watch import ClaimRepeatReader
-from maljan.pipeline.debate_facts import ledger_count_facts, settled_by_ledger
+from maljan.pipeline.debate_facts import ledger_count_facts, ledger_stated
 from maljan.pipeline.validation import EntryTexts, ledger_absence_contradictions
 from maljan.schemas.evidence import build_entry
 
@@ -74,14 +74,14 @@ LEDGER = [{"id": "ev_0001", "tool": "t", "structured": {"matches": [], "total": 
             id="ledger counts",
         ),
         pytest.param(
-            lambda t: settled_by_ledger(
+            lambda t: ledger_stated(
                 ["[analysts: A] ev_0001 " + t],
                 {},
                 LEDGER,
                 ["a"],
                 ["entry ev_0001 states total = 12."],
             ),
-            id="settled lines",
+            id="stated lines",
         ),
     ],
 )

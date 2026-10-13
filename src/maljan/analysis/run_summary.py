@@ -71,7 +71,8 @@ class NegotiationMetrics:
         termination_reason:  Why the loop stopped (consensus / hard_limit /
                              converged / convergence / not_applicable /
                              mediation_failed / not_mediated / not_revised /
-                             no_contested_point / contested_points_unchanged),
+                             no_contested_point / contested_points_unchanged /
+                             ledger_stated / reworded),
                              read
                              from the router's own rules
                              (``pipeline.routing.debate_route``).
@@ -115,9 +116,10 @@ class NegotiationMetrics:
     unread_marks: list[str] = field(default_factory=list)
     # How many lines the last mediation marked not blocking.
     not_blocking_at_end: int = 0
-    # The blocking lines the ledger answered after the analysts were told its
-    # facts, each with them (``debate_facts.settled_by_ledger``): set aside.
-    settled_by_ledger: list[str] = field(default_factory=list)
+    # The blocking lines every count of which the ledger states, after the
+    # analysts were told those facts, each with them (``debate_facts.ledger_stated``).
+    # They stayed blocking lines.
+    ledger_stated: list[str] = field(default_factory=list)
 
     @property
     def consensus_applicable(self) -> bool:
@@ -1258,9 +1260,9 @@ class RunSummary:
             lines += ["**Ledger counts put to the mediator:**", ""]
             lines += [f"- {sentence}" for sentence in n.ledger_facts]
             lines.append("")
-        if n.settled_by_ledger:
-            lines += ["**Blocking lines the ledger settled:**", ""]
-            lines += [f"- {sentence}" for sentence in n.settled_by_ledger]
+        if n.ledger_stated:
+            lines += ["**Blocking lines the ledger states, told before:**", ""]
+            lines += [f"- {sentence}" for sentence in n.ledger_stated]
             lines.append("")
         if n.mediation_notes:
             lines += [f"- {sentence}" for sentence in n.mediation_notes]
@@ -1583,7 +1585,7 @@ class RunSummary:
                 ),
                 **({"unread_marks": list(n.unread_marks)} if n.unread_marks else {}),
                 **({"not_blocking_at_end": n.not_blocking_at_end} if n.not_blocking_at_end else {}),
-                **({"settled_by_ledger": list(n.settled_by_ledger)} if n.settled_by_ledger else {}),
+                **({"ledger_stated": list(n.ledger_stated)} if n.ledger_stated else {}),
             },
             "agent_stats": [
                 {
@@ -2255,11 +2257,11 @@ class RunSummaryBuilder:
                 ),
                 0,
             ),
-            settled_by_ledger=[
+            ledger_stated=[
                 defanged(str(sentence))
                 for arg in discussion_history
                 if getattr(arg, "agent_name", "") == "Mediator"
-                for sentence in getattr(arg, "settled_by_ledger", None) or []
+                for sentence in getattr(arg, "ledger_stated", None) or []
             ],
         )
         return self
