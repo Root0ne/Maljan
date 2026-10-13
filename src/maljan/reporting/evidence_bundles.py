@@ -935,6 +935,28 @@ def _string_entries(report: MalwareReport) -> list[str]:
     ]
 
 
+# The kinds whose answered entry is a crypto finding in the file itself,
+# whichever server or pack step wrote it: the encryption section is shown the
+# entries, so a run that measured a published constant set asks the section
+# on that measurement.
+_CRYPTO_FINDING_KINDS = frozenset({"crypto_constants"})
+
+
+def is_crypto_finding(row: Any) -> bool:
+    """Whether an evidence index row is an answered entry of a crypto-finding kind."""
+    return bool(getattr(row, "ok", False)) and tool_kinds.kind_of(row) in _CRYPTO_FINDING_KINDS
+
+
+def crypto_finding_entries(report: MalwareReport) -> list[str]:
+    """``ev_0021 (find_crypto_constants)`` for every answered entry of a crypto-finding kind."""
+    return [f"{row.id} ({row.tool})" for row in report.evidence_index if is_crypto_finding(row)]
+
+
+def section_keywords(section: str) -> tuple[str, ...]:
+    """The keywords that pick a section's claims (empty for a section that reads every claim)."""
+    return _SECTION_CLAIM_KEYWORDS.get(section, ())
+
+
 # The catalogue categories of the sandbox-called APIs each section is shown,
 # beside the import profile's count of the same category.
 _SANDBOX_CALLED_CATEGORIES: dict[str, tuple[str, ...]] = {
@@ -998,12 +1020,17 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
     called = (report.dynamic.api_capabilities if report.dynamic else None) or {}
     # Only a category the sandbox saw called is named: a section's facts are
     # what they were on every run whose sandbox called none.
-    observed = {
+    observed: dict[str, dict[str, Any]] = {
         section_key: {
             f"sandbox_called_{c}_api_count": called[c] for c in categories if called.get(c)
         }
         for section_key, categories in _SANDBOX_CALLED_CATEGORIES.items()
     }
+    # The crypto findings' entries, named only where there are some: the
+    # section's facts are what they were on every run that found none.
+    crypto_entries = crypto_finding_entries(report) if section == "encryption_scheme" else []
+    if crypto_entries:
+        observed["encryption_scheme"]["crypto_finding_entries"] = crypto_entries
 
     static = report.static
     if static is None:

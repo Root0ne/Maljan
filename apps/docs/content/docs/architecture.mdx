@@ -4813,7 +4813,11 @@ is assembled from what the run gathered rather than recomputed beside it:
   `sandbox_api_calls`) recorded called, by the category an API catalogue
   answer of the run (kind `api_catalogue`) gave each name
   (`DynamicBehavior.api_capabilities`), so a sandbox-only crypto call asks the
-  encryption section. A zero count is not shown and asks nothing.
+  encryption section. A zero count is not shown and asks nothing. The
+  encryption section is also shown `crypto_finding_entries`: every answered
+  entry of a crypto-finding kind (`crypto_constants`), whichever server or
+  pack step wrote it, so a published constant set found in the file asks the
+  section; a run with none is shown what it always was.
 * **A decompile figure draws code.** A code-listing figure draws a JSON
   answer's code field, read at the declared `values.code` path (inside the
   declared `rows`) or as its one string field that reads as code, with its own

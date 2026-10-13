@@ -311,6 +311,33 @@ class TestTheHolesAGreenRunCouldHide:
         record.malware_report["static"] = {"api_capabilities": {"crypto": 2}}
         assert section_statuses(record)["encryption_scheme"].startswith("LOST")
 
+    def test_a_crypto_finding_entry_or_a_claim_keeps_the_encryption_section_owed(self) -> None:
+        record = _record()
+        record.malware_report["technical_analysis"].pop("encryption_scheme", None)
+        record.stub_log = [e for e in record.stub_log if e.get("section") != "encryption_scheme"]
+        record.empty_evidence_sections = ["encryption_scheme"]
+        record.malware_report["static"] = {"api_capabilities": {}}
+        record.malware_report["dynamic"] = {"api_capabilities": {}}
+        record.claims_in_force = {"static": ["The sample beacons over HTTPS."]}
+        record.malware_report["evidence_index"] = []
+        assert section_statuses(record)["encryption_scheme"].startswith("not asked")
+        # An answered entry of a crypto-finding kind is crypto evidence.
+        record.malware_report["evidence_index"] = [
+            {
+                "id": "ev_0021",
+                "tool": "any_constant_finder",
+                "ok": True,
+                "source": "pack",
+                "facts": {"v": 1, "kind": "crypto_constants"},
+            }
+        ]
+        assert section_statuses(record)["encryption_scheme"].startswith("LOST")
+        record.malware_report["evidence_index"][0]["ok"] = False
+        assert section_statuses(record)["encryption_scheme"].startswith("not asked")
+        # A claim holding a keyword inside a word is read by the wider substring rule.
+        record.claims_in_force = {"static": ["Its payload is pre-encrypted with ARC4."]}
+        assert section_statuses(record)["encryption_scheme"].startswith("LOST")
+
     def test_a_section_the_report_should_write_cannot_be_excused_as_evidence_empty(self) -> None:
         record = _record()
         record.malware_report["technical_analysis"].pop("payloads")

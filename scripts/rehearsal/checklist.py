@@ -223,19 +223,41 @@ def _answered(record: RunRecord) -> list[dict[str, Any]]:
 def _measured_empty(record: RunRecord, section: str) -> bool:
     """Whether the run's own measurements hold nothing for a section asked only on evidence.
 
-    The encryption section is asked on the crypto counts the report carries
-    (the import profile's and the sandbox-called APIs') or on a claim about
-    it: with both counts zero and no claim, the product's finding that its
-    evidence is empty is the sample's, not a loss. Any other section is read
-    by :data:`EVIDENCE_EMPTY` alone.
+    The encryption section is evidence-empty only when the report holds no
+    crypto evidence of any kind and no claim speaks of it: no crypto API in
+    the import profile or among the sandbox-called APIs, no answered entry of
+    a crypto-finding kind (``evidence_bundles.is_crypto_finding``), and no
+    claim in force holding one of the section's keywords anywhere in its
+    words (the substring rule, wider than the product's word rule, so a
+    claim the product's matcher misses is never excused). Any other section
+    is read by :data:`EVIDENCE_EMPTY` alone.
     """
     if section != "encryption_scheme":
         return False
+    from maljan.reporting.evidence_bundles import is_crypto_finding, section_keywords
+    from maljan.reporting.models import EvidenceIndexRow
+
     report = record.malware_report
     profiles = [
         ((report.get(block) or {}).get("api_capabilities") or {}) for block in ("static", "dynamic")
     ]
-    return not any(profile.get("crypto") for profile in profiles)
+    if any(profile.get("crypto") for profile in profiles):
+        return False
+    for raw in report.get("evidence_index") or []:
+        try:
+            row = EvidenceIndexRow.model_validate(raw)
+        except ValueError:
+            # A row the report model cannot read is not known to hold nothing.
+            return False
+        if is_crypto_finding(row):
+            return False
+    keywords = section_keywords(section)
+    for claims in record.claims_in_force.values():
+        for claim in claims:
+            lowered = str(claim).lower()
+            if any(keyword in lowered for keyword in keywords):
+                return False
+    return True
 
 
 def section_statuses(record: RunRecord) -> dict[str, str]:
