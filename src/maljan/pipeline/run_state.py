@@ -296,8 +296,10 @@ def _lines(
     # A call that was never made — a skipped lookup, a step after the budget,
     # a call a guard answered with no tool run — is not a failed tool; the
     # pack line says "not done" for it, and so does this one by leaving it out.
+    # Tool and agent names are written as the pack writes a value, on one line.
     failed = [
-        f"{_get(row, 'tool')} ({_get(row, 'agent') or PIPELINE})"
+        f"{pack_escaped(str(_get(row, 'tool')))} "
+        f"({pack_escaped(str(_get(row, 'agent') or PIPELINE))})"
         for row in rows
         if _get(row, "ok") is False and not _was_not_made(row) and not is_guard_answer(row)
     ]
