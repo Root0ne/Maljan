@@ -42,3 +42,25 @@ async def test_a_stale_stored_step_blocks_no_unrelated_save() -> None:
         with pytest.raises(AssertionError) as caught:
             await service.save({"core.triage.budget_seconds": 90}, user_id=None, ip=None)
     assert caught.value is reached
+
+
+async def test_a_refused_save_names_its_step_problems_beside_every_other() -> None:
+    service = _service({})
+    changes = {"core.triage.steps": [GONE], "core.triage.budget_seconds": 0}
+    with patch.object(SettingsService, "_rows", AsyncMock(side_effect=AssertionError)):
+        with pytest.raises(SettingsValidationError) as caught:
+            await service.save(changes, user_id=None, ip=None)
+    errors = caught.value.errors
+    assert "core.triage.budget_seconds" in errors
+    assert "references unknown mcp server 'nowhere'" in errors["core.triage.steps"]
+
+
+async def test_a_save_with_an_unknown_key_names_its_step_problems_too() -> None:
+    service = _service({})
+    changes = {"core.triage.steps": [GONE], "core.no_such_setting": 1}
+    with patch.object(SettingsService, "_rows", AsyncMock(side_effect=AssertionError)):
+        with pytest.raises(SettingsValidationError) as caught:
+            await service.save(changes, user_id=None, ip=None)
+    errors = caught.value.errors
+    assert errors["core.no_such_setting"] == "unknown setting"
+    assert "references unknown mcp server 'nowhere'" in errors["core.triage.steps"]
