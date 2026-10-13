@@ -1213,7 +1213,19 @@ Two producers use it:
   the entry's text holds a value (or more than one), counted through its JSON
   with a zero, an empty string and an empty list holding nothing; the model is
   asked once, a partial entry is never judged, and the sentence is never
-  rewritten. **A technique written with another technique's name**
+  rewritten. **A sentence saying the ledger lacks what it holds**
+  (`report.absence_contradicts_ledger`, composer and narrative): a routine
+  said to be "not read" (or decompiled) whose decompile answered; an address,
+  an entry id or a value said to be "not in the ledger" that an answered entry
+  holds (for an address, an entry given it whose answer names another address,
+  or a decompile of it); a value said to be "not confirmed by", "not shown
+  in" or "not listed in" the entry the sentence cites, which that entry holds.
+  The subject is read from the statement's own clause (a relative clause's is
+  the last thing named before it; a pronoun's is the one address the sentence
+  before it names), an offset and its virtual address are one routine, and a
+  statement whose subject cannot be read is not judged. The model is asked
+  once with the entry named; the sentence is never rewritten.
+  **A technique written with another technique's name**
   (`report.technique_name`): an id followed by a name in brackets whose name
   the vendored ATT&CK table does not give that id — its own name, or its
   parent's name before a sub-technique's, stands — is asked about with the

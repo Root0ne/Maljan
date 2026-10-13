@@ -4941,6 +4941,11 @@ STATED_VALUE_UNHELD_CODE = "report.value_not_in_cited_entry"
 # sentence kept after it is marked where it stands with the state.
 UNPUBLISHED_VALUE_CODE = "report.unpublished_value"
 TECHNIQUE_NAME_CODE = "report.technique_name"
+# A report sentence that says a routine was not read, or that something is not
+# in the ledger, or that a cited entry does not confirm a value, while an
+# answered entry of this run holds it (``ledger_absence_contradictions``).
+# Asked once, naming the entry; a sentence kept after it is recorded.
+ABSENCE_CONTRADICTS_LEDGER_CODE = "report.absence_contradicts_ledger"
 
 # The codes a report round's answer is kept with. A broken shape leaves nothing
 # to print; each of these leaves a printable answer with a finding beside it.
@@ -4958,6 +4963,7 @@ KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
         CITATION_NOT_EVIDENCE_CODE,
         CITATION_WRONG_ENTRY_CODE,
         ENTRY_CONTENTS_MISSTATED_CODE,
+        ABSENCE_CONTRADICTS_LEDGER_CODE,
         UNCITED_IDENTIFIER_CODE,
         STATED_VALUE_UNHELD_CODE,
         UNPUBLISHED_VALUE_CODE,
@@ -6825,6 +6831,334 @@ def misstated_entry_contents(
             )
         )
     return violations
+
+
+# ---------------------------------------------------------------------------
+# A sentence that says the ledger lacks what an answered entry holds
+# ---------------------------------------------------------------------------
+
+# The three statements of absence read, each by what makes it false: a routine
+# "not read" is false when a decompile of it answered; a thing "not in the
+# ledger" when an answered entry holds it; a value "not confirmed by" (or "not
+# shown in", "not listed in") the entry a sentence cites when that entry
+# holds the value.
+_NOT_READ = "read"
+_NOT_IN_LEDGER = "ledger"
+_NOT_CONFIRMED = "confirmed"
+_ABSENCE_RE = re.compile(
+    r"\b(?:is|are|was|were|be|been)\s++(?:not|never)\s++(?:yet\s++)?(?:been\s++)?"
+    r"(?P<read>read|decompiled|disassembled)\b"
+    r"|\b(?:has|have|had)\s++(?:not|never)\s++(?:yet\s++)?been\s++"
+    r"(?P<read_perfect>read|decompiled|disassembled)\b"
+    r"|\b(?:is|are|was|were)\s++(?:not\s++(?:in|on|among|found\s++in)|absent\s++from|"
+    r"missing\s++from)\s++(?:the\s++)?(?P<ledger>ledger|evidence)\b"
+    r"|\b(?:is|are|was|were)\s++not\s++(?P<confirmed>confirmed|shown|listed|named)\s++(?:by|in)\b",
+    re.IGNORECASE,
+)
+# Where the clause a statement belongs to begins, so its subject is the
+# clause's own words: a semicolon, a colon, a dash, or a comma before a word
+# that joins two clauses. Commas inside brackets are not read: a bracketed
+# list is one part of the subject.
+_CLAUSE_START_RE = re.compile(
+    r"[;:]|\s[—–]\s|,\s*(?:and|but|so|while|whereas|although|though|because|since|yet)\b",
+    re.IGNORECASE,
+)
+# A relative clause's word just before the statement: its subject is the last
+# thing the clause before it names.
+_RELATIVE_TAIL_RE = re.compile(r"(?:,\s*)?\b(?:which|that)\s*$", re.IGNORECASE)
+# A subject that is a pronoun: it names what the sentence before it named.
+_PRONOUN_SUBJECT_RE = re.compile(r"^\W*(?:its|it|their|they|this|these|that)\b", re.IGNORECASE)
+# A value a subject writes: in quotes or backticks, or an identifier of three
+# characters or more with a capital after its first letter, a digit or an
+# underscore in it (``CreateMutexW``, ``update_data``), never a plain word.
+_QUOTED_VALUE_RE = re.compile(r"`([^`\n]{2,})`|\"([^\"\n]{2,})\"|“([^”\n]{2,})”")
+_IDENTIFIER_VALUE_RE = re.compile(
+    r"(?<![\w.$])(?=[A-Za-z_]\w*(?:[a-z][A-Z]|\d|_))[A-Za-z_]\w{2,}(?![\w$])"
+)
+# Addresses below this are offsets, flags and counts in prose, not routines.
+_LEAST_ROUTINE_ADDRESS = 0x100
+
+
+def _outside_brackets(text: str) -> str:
+    """``text`` with every character inside round or square brackets turned to a space."""
+    out: list[str] = []
+    depth = 0
+    for ch in text:
+        if ch in "([":
+            depth += 1
+        elif ch in ")]" and depth:
+            depth -= 1
+            out.append(" ")
+            continue
+        out.append(" " if depth else ch)
+    return "".join(out)
+
+
+def _prose_addresses(text: str) -> list[int]:
+    """The routine addresses ``text`` writes: ``0x…`` or inside a decompiler's generic name."""
+    found = [
+        int(match.group(1), 16)
+        for pattern in (_HEX_ADDRESS, generic_function_name())
+        for match in pattern.finditer(text)
+    ]
+    return [address for address in found if address >= _LEAST_ROUTINE_ADDRESS]
+
+
+class _AddressIndex:
+    """Ledger entries by the routine address they hold, folded by the image bases the run read.
+
+    An offset and its virtual address are one routine (:func:`_one_function`):
+    they differ by an image base the run read, or, with none read, by a multiple
+    of 64 KiB, which is a shared low half-word. Each address is filed under every
+    form it is one routine with, so a lookup is one dictionary read.
+    """
+
+    def __init__(self, bases: Sequence[int]) -> None:
+        self.bases = tuple(bases)
+        self.by_form: dict[int, list[str]] = {}
+
+    def _forms(self, address: int) -> list[int]:
+        if not self.bases:
+            return [address % _IMAGE_BASE_ALIGNMENT]
+        return [
+            address,
+            *(address + base for base in self.bases),
+            *(address - base for base in self.bases if address > base),
+        ]
+
+    def add(self, address: int, entry_id: str) -> None:
+        for form in self._forms(address):
+            held = self.by_form.setdefault(form, [])
+            if entry_id not in held:
+                held.append(entry_id)
+
+    def holders(self, address: int) -> list[str]:
+        key = address % _IMAGE_BASE_ALIGNMENT if not self.bases else address
+        return list(self.by_form.get(key, ()))
+
+
+@dataclass
+class _LedgerHolds:
+    """What this run's answered entries hold, read once per report when a statement needs it."""
+
+    read: _AddressIndex
+    named: _AddressIndex
+    answered: frozenset[str]
+
+    @classmethod
+    def of(cls, entries: EntryTexts) -> _LedgerHolds:
+        values = list(entries.entries.values())
+        bases = image_bases_in(values)
+        read = _AddressIndex(bases)
+        for function in decompiled_functions(values):
+            if function.address is not None:
+                for entry_id in function.entries:
+                    read.add(function.address, entry_id.lower())
+        named = _AddressIndex(bases)
+        answered: set[str] = set()
+        for key, entry in entries.entries.items():
+            if not getattr(entry, "ok", True) or getattr(entry, "repeated_of", None):
+                continue
+            answered.add(key)
+            for address in _argument_addresses(entry):
+                # An answer about an address holds something of it only when
+                # it names another one (a caller, a callee, a listing's own
+                # calls): "no callers found" holds nothing to contradict.
+                text = entries.texts.get(key, "")
+                if any(other != address for other in _prose_addresses(text)):
+                    named.add(address, key)
+        for form, ids in read.by_form.items():
+            for entry_id in ids:
+                held = named.by_form.setdefault(form, [])
+                if entry_id not in held:
+                    held.append(entry_id)
+        return cls(read=read, named=named, answered=frozenset(answered))
+
+
+def _argument_addresses(entry: Any) -> list[int]:
+    """The addresses a call was given: its declared address arguments and any ``0x…`` argument."""
+    args = getattr(entry, "args", None) or {}
+    if not isinstance(args, Mapping):
+        return []
+    found: list[int] = []
+    declared = set(entry_address_arguments(entry))
+    for name, value in args.items():
+        if name in declared:
+            address = _address_value(value)
+            if address is not None and address >= _LEAST_ROUTINE_ADDRESS:
+                found.append(address)
+        elif isinstance(value, str) and value.strip().lower().startswith("0x"):
+            found.extend(_prose_addresses(value))
+    return list(dict.fromkeys(found))
+
+
+def _absence_subject(text: str, start: int) -> str:
+    """The words a statement at ``start`` is about: its clause's text before it."""
+    head = text[:start]
+    if _RELATIVE_TAIL_RE.search(head):
+        return head
+    flat = _outside_brackets(head)
+    begins = 0
+    for match in _CLAUSE_START_RE.finditer(flat):
+        begins = match.end()
+    return head[begins:]
+
+
+def _subject_addresses(subject: str, relative: bool) -> list[int]:
+    found = _prose_addresses(subject)
+    return found[-1:] if relative else found
+
+
+def _subject_values(subject: str) -> list[str]:
+    """The values a subject writes: quoted, backticked, or identifier-shaped."""
+    values: list[str] = []
+    for match in _QUOTED_VALUE_RE.finditer(subject):
+        values.append(next(group for group in match.groups() if group))
+    for match in _IDENTIFIER_VALUE_RE.finditer(_QUOTED_VALUE_RE.sub(" ", subject)):
+        if generic_function_name().fullmatch(match.group(0)) is None:
+            values.append(match.group(0))
+    return [value for value in dict.fromkeys(values) if not _EVIDENCE_ID_RE.fullmatch(value)]
+
+
+def ledger_absence_contradictions(payload: Any, entries: EntryTexts | None) -> list[Violation]:
+    """Sentences that say the ledger lacks what an answered entry of this run holds.
+
+    Read in every string of the answer, sentence by sentence. Three statements
+    are read, each with its subject taken from its own clause (a relative
+    clause's subject is the last thing named before it; a pronoun's, the one
+    address the sentence before it names):
+
+    * a routine "not read" (or decompiled): false when a decompile of that
+      address answered;
+    * an address, an entry id or a value "not in the ledger": false when an
+      answered entry holds it (for an address, an entry given it whose answer
+      names another address, or a decompile of it);
+    * a value "not confirmed by", "not shown in" or "not listed in" the entry
+      the sentence cites: false when that entry holds the value.
+
+    The model is asked once, with the entry named; the sentence is never
+    rewritten, and a statement whose subject this cannot read is not judged.
+    """
+    if payload is None or entries is None or not entries.entries:
+        return []
+    found: list[tuple[str, list[str], list[str], str]] = []
+    holds: list[_LedgerHolds] = []
+    asked: set[tuple[str, str]] = set()
+
+    def _holds() -> _LedgerHolds:
+        if not holds:
+            holds.append(_LedgerHolds.of(entries))
+        return holds[0]
+
+    def _read(text: str) -> None:
+        sentences = _SENTENCE_END_RE.split(text)
+        for index, sentence in enumerate(sentences):
+            for match in _ABSENCE_RE.finditer(sentence):
+                kind = (
+                    _NOT_READ
+                    if match.group("read") or match.group("read_perfect")
+                    else _NOT_IN_LEDGER
+                    if match.group("ledger")
+                    else _NOT_CONFIRMED
+                )
+                subject = _absence_subject(sentence, match.start())
+                relative = bool(_RELATIVE_TAIL_RE.search(subject))
+                if relative:
+                    subject = _RELATIVE_TAIL_RE.sub("", subject)
+                addresses = _subject_addresses(subject, relative)
+                if not addresses and index and _PRONOUN_SUBJECT_RE.match(subject):
+                    before = list(dict.fromkeys(_prose_addresses(sentences[index - 1])))
+                    addresses = before if len(before) == 1 else []
+                whats: list[str] = []
+                held: list[str] = []
+                for what, holders in _contradicted(kind, subject, addresses, sentence):
+                    if holders and (kind, what) not in asked:
+                        asked.add((kind, what))
+                        whats.append(what)
+                        held.extend(i for i in holders if i not in held)
+                if whats:
+                    found.append((kind, whats, held, sentence.strip()))
+
+    def _contradicted(
+        kind: str, subject: str, addresses: list[int], sentence: str
+    ) -> list[tuple[str, list[str]]]:
+        out: list[tuple[str, list[str]]] = []
+        if kind == _NOT_READ:
+            for address in addresses:
+                out.append((hex(address), _holds().read.holders(address)))
+            return out
+        if kind == _NOT_IN_LEDGER:
+            ledger = _holds()
+            for address in addresses:
+                out.append((hex(address), ledger.named.holders(address)))
+            for written in _EVIDENCE_ID_RE.findall(_CODE_SPAN_RE.sub(" ", subject)):
+                key = written.lower()
+                out.append((key, [key] if key in ledger.answered else []))
+            for value in _subject_values(subject):
+                if not decidable(value):
+                    continue
+                candidates = entries.may_hold(value) & ledger.answered
+                out.append(
+                    (
+                        value,
+                        [i for i in entries.texts if i in candidates and entries.holds(i, value)],
+                    )
+                )
+            return out
+        cited = [entry_id for line, ids in _sentences_with_citations(sentence) for entry_id in ids]
+        for value in _subject_values(subject):
+            if not decidable(value):
+                continue
+            out.append(
+                (
+                    value,
+                    [
+                        entry_id
+                        for entry_id in dict.fromkeys(cited)
+                        if entry_id not in entries.partial and entries.holds(entry_id, value)
+                    ],
+                )
+            )
+        return out
+
+    def _walk(node: Any, depth: int = 0) -> None:
+        if depth > 4:
+            return
+        if isinstance(node, str):
+            if _ABSENCE_RE.search(node):
+                _read(node)
+        elif isinstance(node, list | tuple):
+            for item in node:
+                _walk(item, depth + 1)
+        elif isinstance(node, dict):
+            for value in node.values():
+                _walk(value, depth + 1)
+
+    data = payload if isinstance(payload, dict) else getattr(payload, "__dict__", {}) or {}
+    _walk(data)
+    said = {
+        _NOT_READ: ("was not read", "were not read"),
+        _NOT_IN_LEDGER: ("is not in the ledger", "are not in the ledger"),
+        _NOT_CONFIRMED: (
+            "is not confirmed by the entry it cites",
+            "are not confirmed by the entry they cite",
+        ),
+    }
+    return [
+        Violation(
+            code=ABSENCE_CONTRADICTS_LEDGER_CODE,
+            message=(
+                f"The text says {_named_ids(whats)} {said[kind][len(whats) > 1]} "
+                f"({safe_finding_value(marked_cut(sentence, 200))!r}); "
+                f"{_named_ids(entries.named(i) for i in holders)} "
+                f"{'holds' if len(holders) == 1 else 'hold'} "
+                f"{'it' if len(whats) == 1 else 'them'} in this run. State what that entry "
+                "shows, or say exactly what is absent."
+            ),
+            path="prose",
+        )
+        for kind, whats, holders, sentence in found
+    ]
 
 
 # ---------------------------------------------------------------------------

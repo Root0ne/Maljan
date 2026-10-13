@@ -185,6 +185,7 @@ from maljan.pipeline.validation import (
     flow_voice_violations,
     gate_removed_note,
     kept_after_the_sandbox_fact,
+    ledger_absence_contradictions,
     library_only_claims_violation,
     malware_object_violations,
     misstated_entry_contents,
@@ -2221,6 +2222,38 @@ PROMPTS: dict[str, str] = {
             EntryTexts(
                 texts={"ev_0001": '{"summary": "a\\nb", "packets_read": 3}'},
                 tools={"ev_0001": "pcap_summary"},
+            ),
+        )
+    ),
+    "question for a sentence saying the ledger lacks what an entry holds": " ".join(
+        v.message
+        for v in ledger_absence_contradictions(
+            {
+                "body": "Routine 0x1400, which is not read, calls 0x1800. "
+                "Its callers are not in the ledger. The names (OpenThing, CloseThing) "
+                "are not confirmed by the parser output [ev_0003]."
+            },
+            EntryTexts.from_ledger(
+                [
+                    build_entry(
+                        entry_id="ev_0001",
+                        seq=1,
+                        agent="a",
+                        server="a",
+                        tool="decompile_function",
+                        args={"address": "0x1400"},
+                        output="undefined8 FUN_00001400(void)\n{ FUN_00001800(); }",
+                    ),
+                    build_entry(
+                        entry_id="ev_0003",
+                        seq=3,
+                        agent="a",
+                        server="a",
+                        tool="pe_info",
+                        args={},
+                        output='{"imports": ["OpenThing", "CloseThing"]}',
+                    ),
+                ]
             ),
         )
     ),
