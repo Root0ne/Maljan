@@ -3,8 +3,8 @@
 A stored step can stop running without any save: a reset of the server it
 calls takes no validation. Whatever left it out, ``GET /settings/schema``
 lists it under ``pack_steps_left_out`` with the reason, so the console never
-shows a stored step as in force when the shipped one runs. Through the real
-router, over a fake database.
+shows a stored step as in force when the shipped one runs, also where other
+stored settings do not build. Through the real router, over a fake database.
 """
 
 from __future__ import annotations
@@ -81,3 +81,23 @@ def test_a_reset_of_the_server_a_stored_step_calls_lists_the_step() -> None:
         said = _left_out(client)
     assert list(said) == ["extra"]
     assert "references unknown mcp server 'rules'" in said["extra"]
+
+
+def test_stored_settings_that_do_not_build_still_serve_the_schema() -> None:
+    rows = [
+        RuntimeSetting(key="core.triage.budget_seconds", value=0, is_secret=False),
+        RuntimeSetting(
+            key="core.triage.steps",
+            value=[{"id": "lost", "server": "nowhere", "tool": "t"}],
+            is_secret=False,
+        ),
+    ]
+    with patch("app.api.v1.settings.audit_record", AsyncMock()):
+        said = _left_out(_client(_db(rows)))
+    assert said == {"lost": "triage step 'lost' references unknown mcp server 'nowhere'"}
+
+
+def test_a_stored_value_alone_that_does_not_build_serves_an_empty_listing() -> None:
+    rows = [RuntimeSetting(key="core.triage.budget_seconds", value=0, is_secret=False)]
+    with patch("app.api.v1.settings.audit_record", AsyncMock()):
+        assert _left_out(_client(_db(rows))) == {}

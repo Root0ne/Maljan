@@ -9,7 +9,9 @@
 * Each step left out is listed once, with why, sanitised, for the console.
 * A save that changes the steps is still refused, with the model's words; a
   stale stored step sent back as stored, matched by the whole item wherever it
-  stands, blocks no unrelated save, and no other bad item rides on it.
+  stands, blocks no unrelated save, and no other bad item rides on it; a step
+  on a server of a refused map is not called unknown, the map's refusal
+  standing for it.
 * The renderer that reads declared facts is refused on a step whose tool is
   declared another kind, or none, unless the step declares the kind.
 """
@@ -219,6 +221,21 @@ class TestASaveIsStillStrict:
         assert pack_step_refusals(_stored(GOOD, {**GOOD, "tool": "sig"}), current)
         assert pack_step_refusals(_stored(GOOD, GOOD, GOOD), current)
         assert pack_step_refusals(_stored(GOOD, GOOD), current) == {}
+
+    def test_a_step_on_a_server_of_a_refused_map_is_not_called_unknown(self) -> None:
+        on_refused = {"id": "on_refused", "server": "refused", "tool": "t"}
+        servers = {"rules": RULES, "refused": {"command": "x", "enabled": "maybe"}}
+        merged = {"mcp.servers": servers, "triage.steps": [GOOD, on_refused]}
+        assert pack_step_refusals(merged, {}) == {}
+        said = pack_step_refusals({**merged, "triage.steps": [GOOD, on_refused, GONE]}, {})
+        assert said == {
+            "core.triage.steps": "lost: triage step 'lost' references unknown mcp server 'nowhere'"
+        }
+
+    def test_steps_are_listed_where_another_stored_setting_does_not_build(self) -> None:
+        stored = _stored(GONE, GOOD, **{"triage.budget_seconds": 0})
+        assert list(pack_steps_left_out(stored)) == ["lost"]
+        assert left_out_pack_steps(stored) == ["lost"]
 
     def test_a_save_that_can_run_its_steps_passes(self) -> None:
         assert pack_step_refusals(_stored(GOOD), {}) == {}

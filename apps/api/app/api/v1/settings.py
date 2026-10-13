@@ -131,6 +131,12 @@ async def get_schema(
         configs = build_settings(core).mcp.servers
     except (ValueError, ValidationError):
         configs = build_settings({}).mcp.servers
+    try:
+        # Listed also where the stored settings do not build (the steps are
+        # then checked against what does), never a failed schema.
+        left_out = pack_steps_left_out(core)
+    except (ValueError, ValidationError):
+        left_out = {}
     return served_schema(
         await _effective_servers(db),
         profiles=profiles,
@@ -138,7 +144,7 @@ async def get_schema(
         enrichment_sources=stored.get(ENRICHMENT_SOURCES_KEY),
         server_configs=configs,
         tool_facts_conflicts=refused_tool_changes(core),
-        pack_steps_left_out=pack_steps_left_out(core),
+        pack_steps_left_out=left_out,
     )
 
 
