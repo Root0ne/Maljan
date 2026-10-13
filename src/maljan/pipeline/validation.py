@@ -2497,6 +2497,47 @@ def _suggest_techniques(claim_text: str, attck: Any) -> list[str]:
     return out
 
 
+def mark_claims_citing_only_failed_calls(
+    isr_reports: Mapping[str, Any] | None, ledger: Iterable[Any]
+) -> list[str]:
+    """Flag every claim whose cited entries are all tool calls that failed.
+
+    A claim citing ``ev_0068`` and nothing else, where ``ev_0068`` is a call
+    the ledger files as failed, rests on nothing the sample showed: the
+    grounding check reads token overlap, and a tool's own name is in its
+    error text. The claim is flagged (``cites_only_failed_calls``) and kept
+    exactly as written. A claim citing no entry, or one entry the ledger does
+    not hold, or any answered entry, is not flagged. Returns the label of
+    each claim flagged (``<agent> claim <n>``), for the log line. Linear in
+    the claims and the ledger.
+    """
+    failed: set[str] = set()
+    answered: set[str] = set()
+    for entry in ledger or ():
+        ident = str(getattr(entry, "id", "") or "").lower()
+        if ident:
+            (answered if getattr(entry, "ok", True) else failed).add(ident)
+    failed -= answered
+    flagged: list[str] = []
+    if not failed:
+        return flagged
+    for name, isr in (isr_reports or {}).items():
+        agent = str(getattr(isr, "agent_id", "") or name)
+        for number, claim in enumerate(getattr(isr, "claims", None) or [], start=1):
+            said = f"{getattr(claim, 'claim', '') or ''} {getattr(claim, 'evidence_ref', '') or ''}"
+            cited = entry_ids_in(said)
+            if cited and cited <= failed and hasattr(claim, "cites_only_failed_calls"):
+                claim.cites_only_failed_calls = True
+                flagged.append(f"{agent} claim {number}")
+    if flagged:
+        logger.info(
+            "validation: %d claim(s) cite only tool calls that failed, flagged: %s",
+            len(flagged),
+            ", ".join(flagged),
+        )
+    return flagged
+
+
 def mark_invalid_technique_ids(isr: Any, violations: Iterable[Violation]) -> None:
     """Flag the claims whose technique id survived the retry unresolved.
 

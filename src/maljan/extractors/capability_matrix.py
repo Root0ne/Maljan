@@ -54,6 +54,7 @@ from maljan.reporting.models import CapabilityCell, TTPMapping
 from maljan.schemas.evidence import ENTRY_ID_RE, entry_ids_in
 from maljan.schemas.isr_models import (
     ABSENCE_TECHNIQUE_MARKER,
+    FAILED_CALLS_MARKER,
     JUDGE_ONLY_TECHNIQUE_MARKER,
     JUDGE_UNCONFIRMED_TECHNIQUE_MARKER,
     judge_and_findings_note,
@@ -226,6 +227,10 @@ def build_capability_matrix(
             notes.append(
                 judge_and_findings_note(on_findings) if on_findings else JUDGE_ONLY_TECHNIQUE_MARKER
             )
+        if info.get("failed_only") and all(info["failed_only"]):
+            # Every analyst claim naming it cites only calls that failed.
+            # Published all the same: the analyst decided; the row says so.
+            notes.append(FAILED_CALLS_MARKER)
         if undescribed and not not_published:
             notes.append(undescribed)
         if decided is not None and decided.decision == "keep":
@@ -591,6 +596,11 @@ def _collect_techniques(
                 # when asked: a note on the row, and nothing else.
                 row.setdefault("noted", []).append(
                     bool(getattr(claim, "kept_after_absence_question", False))
+                )
+                # Whether each claim naming it cites only tool calls that
+                # failed: a note on the row, and nothing else.
+                row.setdefault("failed_only", []).append(
+                    bool(getattr(claim, "cites_only_failed_calls", False))
                 )
                 # An id the catalogue does not have stays in the matrix and is
                 # marked. Dropping it deleted the analyst's answer from the one

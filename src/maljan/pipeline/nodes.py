@@ -152,7 +152,7 @@ from maljan.schemas.evidence import (
     fit_structures_to_budget,
     is_guard_answer,
 )
-from maljan.schemas.isr_models import ABSENCE_TECHNIQUE_MARKER, AgentISR
+from maljan.schemas.isr_models import ABSENCE_TECHNIQUE_MARKER, FAILED_CALLS_MARKER, AgentISR
 from maljan.schemas.stix_models import Bundle
 from maljan.schemas.tool_evidence import trim_output
 
@@ -2318,6 +2318,8 @@ def upstream_findings(stage: Any, state: AnalysisState, container: ServiceContai
             ):
                 technique = f"{technique} — {ABSENCE_TECHNIQUE_MARKER}"
             reference = getattr(claim, "evidence_ref", "") or "—"
+            if getattr(claim, "cites_only_failed_calls", False):
+                reference = f"{reference}, {FAILED_CALLS_MARKER}"
             confidence = float(getattr(claim, "confidence", 0.0) or 0.0)
             text = " ".join(str(getattr(claim, "claim", "") or "").split())
             lines.append(f"- {text} [{technique}, confidence {confidence:.2f}, {reference}]")
@@ -4951,6 +4953,12 @@ def make_judge_node(
                     _ledger.append(LedgerEntry.model_validate(_row))
                 except Exception as exc:  # noqa: BLE001 — one bad row is not a lost verdict
                     logger.debug("judge_node: unreadable ledger row skipped (%s).", exc)
+
+            # A claim resting only on calls that failed is flagged before the
+            # judge reads the claims, and kept as written.
+            from maljan.pipeline.validation import mark_claims_citing_only_failed_calls
+
+            mark_claims_citing_only_failed_calls(isr_reports, _ledger)
 
             # Who named which technique, and how sure each of them was. This is
             # what the judge weighs; nothing here combines the numbers.

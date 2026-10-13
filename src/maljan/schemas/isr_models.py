@@ -26,6 +26,12 @@ UNVERIFIED_TECHNIQUE_MARKER = "technique id not in the ATT&CK catalog"
 ABSENCE_TECHNIQUE_MARKER = (
     "the claim naming it reads as absence; the analyst kept the technique when asked"
 )
+# The note on a claim whose every cited entry is a tool call that failed, and
+# on a technique every claim naming it is such a claim. A failed call read
+# nothing from the sample; the claim and the technique are published as the
+# analyst stated them, and the note travels with them to the judge's summary
+# and the report's ATT&CK table.
+FAILED_CALLS_MARKER = "the claim cites only tool calls that failed"
 # The note on a technique the judge named in its bundle and no analyst claimed.
 # The rule it is published by: a technique the judge states is the judge's own
 # claim, asked the catalogue and platform questions every claim is asked, and
@@ -135,6 +141,16 @@ class ClaimEvidence(BaseModel):
         description=(
             "True when the claim reads as absence and the analyst kept its id when asked."
         ),
+    )
+    # Whether every entry the claim cites is a tool call that failed
+    # (``pipeline.validation.mark_claims_citing_only_failed_calls``), set once
+    # the run's ledger is known. A note, never a drop: the claim, its id and
+    # its publication are unchanged. Left out of the serialised claim when
+    # false, so a claim stored before it was read reads the same.
+    cites_only_failed_calls: bool = Field(
+        default=False,
+        description="True when every entry the claim cites is a tool call that failed.",
+        exclude_if=lambda value: not value,
     )
     # What the ATT&CK index made of the claim text against the id the analyst
     # chose: the id's own gate score and the index's top candidates with
@@ -248,9 +264,10 @@ def claim_summary_line(number: int, claim: ClaimEvidence) -> str:
     elif claim.technique_id and claim.kept_after_absence_question:
         tech = f" ({claim.technique_id} — {ABSENCE_TECHNIQUE_MARKER})"
     noted = f" {claim.heading_note}" if claim.heading_note else ""
+    failed = f" ({FAILED_CALLS_MARKER})" if claim.cites_only_failed_calls else ""
     return (
         f"Claim {number}{noted}: {claim.claim}{tech}"
-        f" | Evidence: {claim.evidence_ref}"
+        f" | Evidence: {claim.evidence_ref}{failed}"
         f" | Confidence: {claim.confidence:.2f}"
     )
 

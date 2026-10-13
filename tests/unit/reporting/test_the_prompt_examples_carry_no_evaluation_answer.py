@@ -286,6 +286,7 @@ from maljan.reporting.renderers.stix_renderer import (
 from maljan.schemas.evidence import LedgerEntry, build_entry, not_shown_record
 from maljan.schemas.isr_models import (
     ABSENCE_TECHNIQUE_MARKER,
+    FAILED_CALLS_MARKER,
     JUDGE_ONLY_TECHNIQUE_MARKER,
     JUDGE_UNCONFIRMED_TECHNIQUE_MARKER,
     AgentISR,
@@ -1442,6 +1443,7 @@ PROMPTS: dict[str, str] = {
         8192, '{"type": "bundle", "objects": [{"type": "attack-pattern", "id": "a"}'
     ).message,
     "absence marker": ABSENCE_TECHNIQUE_MARKER,
+    "failed-calls marker": FAILED_CALLS_MARKER,
     "capability questions for the anti-analysis and anti-forensics terms": " ".join(
         v.message
         for v in ungrounded_capabilities(
