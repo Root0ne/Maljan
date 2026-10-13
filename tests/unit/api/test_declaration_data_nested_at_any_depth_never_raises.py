@@ -10,10 +10,12 @@ Through the real router, over a fake database.
 
 from __future__ import annotations
 
+import gc
 import logging
+import statistics
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -183,24 +185,49 @@ def test_the_copy_of_declaration_data_keeps_order_and_is_independent() -> None:
     assert value["b"][1]["c"] == [2, 3]
 
 
-def test_copying_deep_declaration_data_is_linear() -> None:
-    def timed(depth: int) -> float:
-        value = _nested(depth)
-        start = time.perf_counter()
-        tool_declarations._copy(value)
-        return time.perf_counter() - start
+def _seconds(work: Callable[[], Any]) -> float:
+    """``work``'s wall time with the collector held, so its passes over the
+    input built beforehand are not counted as the walk's own time."""
+    gc.collect()
+    gc.disable()
+    try:
+        began = time.perf_counter()
+        work()
+        return time.perf_counter() - began
+    finally:
+        gc.enable()
 
-    small, large = timed(5_000), timed(50_000)
-    assert large < max(small, 0.001) * 40
+
+def _ratio(make: Callable[[int], Callable[[], Any]], small: int) -> float:
+    """The median seconds at ten times ``small`` over the median at ``small``.
+
+    Five runs each after a warm-up, at sizes where the walk, not the call,
+    dominates: a linear walk gives about 10, a quadratic one about 100.
+    """
+    _seconds(make(small))
+    low = statistics.median(_seconds(make(small)) for _ in range(5))
+    high = statistics.median(_seconds(make(small * 10)) for _ in range(5))
+    return high / max(low, 1e-6)
+
+
+def _copying(depth: int) -> Callable[[], Any]:
+    value = _nested(depth)
+    return lambda: tool_declarations._copy(value)
+
+
+def test_copying_deep_declaration_data_is_linear() -> None:
+    assert _ratio(_copying, 10_000) < 25
+
+
+def _refusing(n: int) -> Callable[[], Any]:
+    sent = {f" t{i}": None for i in range(n)} | {f"own__t{i}": None for i in range(n)}
+
+    def work() -> None:
+        tool_declarations.sent_names_refusal(sent, (), server="own")
+        tool_declarations.own_prefixed_names(sent, "own")
+
+    return work
 
 
 def test_the_names_a_sent_map_refuses_are_read_in_linear_time() -> None:
-    def timed(n: int) -> float:
-        sent = {f" t{i}": None for i in range(n)} | {f"own__t{i}": None for i in range(n)}
-        start = time.perf_counter()
-        tool_declarations.sent_names_refusal(sent, (), server="own")
-        tool_declarations.own_prefixed_names(sent, "own")
-        return time.perf_counter() - start
-
-    small, large = timed(2_000), timed(20_000)
-    assert large < max(small, 0.001) * 40
+    assert _ratio(_refusing, 5_000) < 25
