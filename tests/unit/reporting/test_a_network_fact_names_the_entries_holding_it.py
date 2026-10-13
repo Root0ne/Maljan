@@ -180,3 +180,20 @@ def test_the_sections_of_one_report_read_its_answers_once() -> None:
     with mock.patch.object(evidence_bundles, "_value_holders", wraps=wraps) as read:
         bundle_for("communications", report)
     assert read.call_count == 1
+
+
+def test_a_change_in_place_is_read_again_never_answered_from_the_cache() -> None:
+    report = _report(
+        evidence_index=[_row("ev_0030", "strings")],
+        technical_evidence={"static": [_output("strings", 29, json.dumps({"text": URL}))]},
+    )
+    assert value_entries(report, [URL]) == [f"{URL}: ev_0030"]
+    # The entry's outcome flipped in place: it no longer holds the value.
+    report.evidence_index[0].ok = False
+    assert value_entries(report, [URL]) == []
+    report.evidence_index[0].ok = True
+    assert value_entries(report, [URL]) == [f"{URL}: ev_0030"]
+    # The answer's text replaced in place with one of the same length.
+    output = report.technical_evidence["static"][0]
+    output["output"] = output["output"].replace("beacon", "nobody")
+    assert value_entries(report, [URL]) == []

@@ -943,24 +943,58 @@ def _holders_read(report: MalwareReport) -> dict[tuple[str, ...], list[str]]:
     return _HOLDERS_READ[key][1]
 
 
+def _read_fingerprint(report: MalwareReport) -> int:
+    """A fingerprint of everything :func:`_value_holders` reads of ``report``.
+
+    Each index row's id and outcome, each captured output's call number, tool
+    and text, and each section's entries, text, rows and items, by their
+    hashes. A string caches its own hash, so after the first reading this
+    costs one step per item, never a pass over the answers' text: the
+    answers are scanned once per report while they stay as they were, and
+    again as soon as any of them changes.
+    """
+    parts: list[int] = [hash(tuple((row.id, row.ok, row.tool) for row in report.evidence_index))]
+    for outputs in (report.technical_evidence or {}).values():
+        for output in outputs:
+            parts.append(
+                hash(
+                    (
+                        repr(output.get("seq")),
+                        str(output.get("tool_name") or output.get("tool") or ""),
+                        str(output.get("output") or ""),
+                    )
+                )
+            )
+    for section in report.sections:
+        parts.append(
+            hash(
+                (
+                    tuple(section.evidence_ids),
+                    section.text,
+                    tuple(tuple(row) for row in section.rows),
+                    tuple(section.items),
+                )
+            )
+        )
+    return hash(tuple(parts))
+
+
 def value_entries(report: MalwareReport, values: Iterable[str]) -> list[str]:
     """``<value>: ev_0006, ev_0030`` for each of ``values`` an answered entry holds, in order.
 
     A value no entry is known to hold is left out rather than given an entry
     that may not hold it. An ``address:port`` value is looked up by its
-    address too. Read once per report and value list (``_HOLDERS_READ``).
+    address too. Read once per report and value list while what is read stays
+    as it was (``_HOLDERS_READ``, keyed by :func:`_read_fingerprint`).
     """
     asked = tuple(v for v in dict.fromkeys(values) if v)
     if not asked:
         return []
     cached = _holders_read(report)
-    # What was read changes the key: a report given another section, entry or
-    # captured output since is read again.
-    key = (
-        *asked,
-        f"\0{len(report.sections)}/{len(report.evidence_index)}/"
-        f"{sum(len(o) for o in (report.technical_evidence or {}).values())}",
-    )
+    # What was read changes the key: a report whose entries, outcomes,
+    # captured outputs or sections changed since, in place or not, is read
+    # again (``_read_fingerprint``).
+    key = (*asked, f"\0{_read_fingerprint(report)}")
     if key in cached:
         return list(cached[key])
     held = _value_holders(report, frozenset(f for v in asked for f in _lookups(v)))
