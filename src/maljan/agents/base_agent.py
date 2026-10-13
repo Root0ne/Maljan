@@ -2797,6 +2797,54 @@ def prompt_to_messages(prompt_messages: list[tuple[str, str]]) -> list[BaseMessa
     return built
 
 
+def current_run_state(agent: Any) -> str:
+    """``agent``'s run-state lines as of now, its budget aside; never raises.
+
+    The node renders the block once from the run's state when it briefs the
+    agent (``pipeline.nodes.brief_agent``), and the agent's own calls of this
+    node are filed after that: in its tool loop, and before every turn sent
+    after it (the nudge, the forced synthesis, a validation retry, a drops
+    question). So the block is rendered again from that state with the
+    entries the agent has filed since appended, and every turn reads the
+    ledger as it stands at that turn: a claim citing an entry the agent filed
+    is never told the ledger ends before it. An agent briefed without the
+    state (``run_state_source``), or with no entry of its own yet, reads the
+    block it was briefed with.
+    """
+    body = str(getattr(agent, "run_state_block", "") or "")
+    source = getattr(agent, "run_state_source", None)
+    if not body or not isinstance(source, Mapping):
+        return body
+    try:
+        own = [
+            *(getattr(agent, "_evidence_entries", None) or ()),
+            *(getattr(agent, "_live_map_entries", None) or ()),
+        ]
+        if not own:
+            return body
+        rows = list(source.get("evidence_ledger") or [])
+        held = {_row_id(row) for row in rows}
+        added: list[Any] = []
+        for entry in own:
+            entry_id = _row_id(entry)
+            if entry_id and entry_id not in held:
+                held.add(entry_id)
+                added.append(entry)
+        if not added:
+            return body
+        from maljan.pipeline.run_state import render_run_state
+
+        return render_run_state({**source, "evidence_ledger": [*rows, *added]}) or body
+    except Exception:  # noqa: BLE001 — the block the agent was briefed with still holds
+        return body
+
+
+def _row_id(row: Any) -> str:
+    """A ledger row's id, whether the row is an entry or its stored mapping."""
+    value = row.get("id") if isinstance(row, Mapping) else getattr(row, "id", None)
+    return str(value or "")
+
+
 def frame_messages(
     messages: list[BaseMessage], *, facts_block: str = "", run_state: str = ""
 ) -> list[BaseMessage]:
@@ -3433,6 +3481,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         # The run-state block's body, derived from the state by the node and
         # regenerated with the remaining budget on every turn of a tool loop.
         self.run_state_block: str = ""
+        # The state the node rendered that block from, so each turn renders it
+        # again with this agent's own new entries (:func:`current_run_state`).
+        self.run_state_source: Mapping[str, Any] | None = None
         # Per-run token ledger (findings-log §4 Item 1). The container attaches
         # the shared ledger in get_agent(); None when an agent runs standalone.
         self.token_ledger: TokenLedger | None = None
@@ -4084,14 +4135,14 @@ class BaseAnalyst(BudgetMeter, ABC):
     def _run_state_body(
         self, steps_left: int | NoLimit | None, seconds_left: float | NoLimit | None
     ) -> str:
-        """The node's run-state lines plus this loop's remaining budget.
+        """The run-state lines as of this turn (:func:`current_run_state`) plus this loop's budget.
 
         Once the conversation has no room left for a tool answer the block
         says so. Regenerated rather than appended, like the rest of it, so the
         fact costs the same whether the loop reads it once or forty times —
         which is what makes telling the model cheaper than refusing its calls.
         """
-        body = str(getattr(self, "run_state_block", "") or "").rstrip()
+        body = current_run_state(self).rstrip()
         if not body:
             return ""
         line = budget_line(steps_left, seconds_left)
@@ -7495,7 +7546,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         messages = frame_messages(
             messages,
             facts_block=str(getattr(self, "facts_block", "") or ""),
-            run_state=str(getattr(self, "run_state_block", "") or ""),
+            run_state=current_run_state(self),
         )
 
         # An answer that repeated its claims is sent back as written up to the
@@ -7595,7 +7646,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             # The block moves to the retry's own question, the last message,
             # and the turn that carried it before is sent as it was written.
             return self._invoke_llm_with_timeout(
-                frame_messages(turns, run_state=str(getattr(self, "run_state_block", "") or "")),
+                frame_messages(turns, run_state=current_run_state(self)),
                 left,
                 what="validation retry",
             )
@@ -7720,9 +7771,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             self.validation_retries += 1
             try:
                 answer = self._invoke_llm_with_timeout(
-                    frame_messages(
-                        turns, run_state=str(getattr(self, "run_state_block", "") or "")
-                    ),
+                    frame_messages(turns, run_state=current_run_state(self)),
                     left,
                     what="whole answer after an unmerged retry",
                 )
@@ -8388,7 +8437,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 HumanMessage(content=question),
             ]
             reply = self._invoke_llm_with_timeout(
-                frame_messages(turns, run_state=str(getattr(self, "run_state_block", "") or "")),
+                frame_messages(turns, run_state=current_run_state(self)),
                 left,
                 what="kept-retry drops question",
             )
@@ -8989,7 +9038,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         except Exception:  # noqa: BLE001 — a prompt that cannot be built weighs nothing here
             framing = 0
         framing += len(str(getattr(self, "facts_block", "") or ""))
-        framing += len(str(getattr(self, "run_state_block", "") or ""))
+        framing += len(current_run_state(self))
         framing += self._definitions_sent() or tool_definition_chars(list(self.tools or []))
         room = int(budget.tool_budget_chars())
         answers = int(room * ANSWER_SHARE)

@@ -2081,6 +2081,10 @@ def brief_agent(agent: Any, state: AnalysisState, container: ServiceContainer) -
     agent.pack_ledger_ids = pack_ledger_ids(state)
     agent.pack_image_bases = pack_image_bases(state)
     agent.run_state_block = render_run_state(state)
+    # And the state it was rendered from: every turn the agent sends renders
+    # it again with the entries the agent files after this (the tool loop's,
+    # and those a turn after the loop cites), never the block of this moment.
+    agent.run_state_source = state
     # What the analysis server tied to each function, read once from the pack:
     # the function map joins it to the functions the agent reads.
     agent.pack_function_artefacts = pack_function_artefacts(state)

@@ -1009,7 +1009,12 @@ and puts them at the end of a request's last message, between
 `=== RUN STATE … ===` markers: the task on a loop's first turn, the latest tool
 answer after a tool call, the question a nudge, a forced synthesis, a revision
 or a validation retry asks. It is regenerated on every model turn of a tool
-loop (the executor's prompt hook writes the current budget line) and comes off
+loop (the executor's prompt hook writes the current budget line) and on every
+turn after it: the node briefs the agent with the state it rendered the block
+from, and each turn renders it again with the entries the agent filed since
+appended (`base_agent.current_run_state`), so the ledger line and the failed
+tools are those of that turn, and a retry is never told the ledger ends before
+the entries its answer cites. It comes off
 a message again, leaving its bytes exactly as they were, once that message is
 no longer last, so a prompt carries exactly one block. It goes at the end
 because it changes every turn: anywhere earlier, the changed line would change
