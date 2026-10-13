@@ -839,7 +839,10 @@ its own section table.
 **A sandbox report is sections of items, each with an id a claim cites.**
 Where a sandbox produced a report, the pack's last entry is
 `sandbox_sections` (`analysis.sandbox_sections`), after every other step so
-every earlier id keeps its value; it is read in memory in time linear in the
+every earlier id keeps its value, save one: where the report records API
+calls, the step `sandbox_api_capability` follows it and asks the API catalogue
+about the APIs called, recorded under the kind `called_api_catalogue` so the
+import profile never reads it (`DynamicBehavior.api_capabilities` does); it is read in memory in time linear in the
 report, so neither the pack's time budget nor its evidence byte budget stops or blanks it. It reads the report the
 run holds into fixed sections: processes, API calls, file operations,
 registry operations, network rows (DNS, hosts, HTTP, TCP, UDP, domains, ICMP,

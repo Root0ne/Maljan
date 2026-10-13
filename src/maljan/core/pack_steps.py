@@ -99,6 +99,11 @@ ARGUMENT_PLACEHOLDERS: dict[str, str] = {
     "file_type": "the format the run routed the sample as",
 }
 
+# The kind of the catalogue's answer about the APIs a sandbox recorded the
+# sample calling (the pack's ``sandbox_api_capability`` step): an
+# ``api_catalogue`` answer whose names are calls, not imports.
+CALLED_API_CATALOGUE = "called_api_catalogue"
+
 # How a pack line can show an answer: each a shape of answer, never a tool.
 PACK_RENDERERS: dict[str, str] = {
     "identity": "a file identification: format, platform, size, mime type, category",
@@ -397,6 +402,15 @@ def _shipped() -> tuple[PackStep, ...]:
             display_name="UPX unpacking",
         ),
         _o(id="sandbox_sections", renderer="sandbox_sections", display_name="sandbox sections"),
+        # The catalogue's categories of the APIs the sandbox saw called, under
+        # a kind of its own: never read as the import profile.
+        _o(
+            id="sandbox_api_capability",
+            tool="api_capability",
+            renderer="api_catalogue",
+            kind=CALLED_API_CATALOGUE,
+            display_name="called-API catalogue",
+        ),
     )
 
 

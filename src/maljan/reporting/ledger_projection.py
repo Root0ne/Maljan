@@ -602,14 +602,25 @@ def _called_api_categories(
     A name's category is what an API catalogue answer of the run (declared
     kind ``api_catalogue``, from any server) said of it, compared by the
     A/W-folded key; the first answer naming a category for a name gives it.
-    A called name no answer covers is not counted. Linear in the rows.
+    A called name no answer covers is not counted. An answer of kind
+    ``called_api_catalogue`` (the pack's ask about the sandbox's own API
+    reading) names called APIs by what it is, so its names are wanted too.
+    Linear in the rows.
     """
+    from maljan.core.pack_steps import CALLED_API_CATALOGUE
+
     wanted = {_canonical(str(row.get("api") or "")) for row in called if row.get("api")}
+    for _entry, data in _payloads(ledger, CALLED_API_CATALOGUE):
+        wanted.update(
+            _canonical(str(row.get("api") or ""))
+            for row in data.get("capabilities") or []
+            if isinstance(row, dict)
+        )
     wanted.discard("")
     if not wanted:
         return {}
     category_of: dict[str, str] = {}
-    for _entry, data in _payloads(ledger, "api_catalogue"):
+    for _entry, data in _payloads(ledger, CALLED_API_CATALOGUE, "api_catalogue"):
         for row in data.get("capabilities") or []:
             if not isinstance(row, dict):
                 continue
@@ -694,6 +705,7 @@ def dynamic_from_ledger(ledger: list[LedgerEntry]) -> DynamicBehavior | None:
             )
 
     dynamic.api_capabilities = _called_api_categories(ledger, dynamic.notable_apis)
+    seen = seen or bool(dynamic.api_capabilities)
 
     for _entry, data in _payloads(ledger, "sandbox_mutexes"):
         names = [str(name) for name in data.get("mutexes") or [] if name]

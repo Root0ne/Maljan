@@ -103,3 +103,34 @@ def test_counting_stays_linear() -> None:
 
     small, large = took(1_000), took(10_000)
     assert large < small * 30, (small, large)
+
+
+def _kind(entry: Any) -> str:
+    return str((entry.facts or {}).get("kind") or "")
+
+
+def test_the_pack_asks_the_catalogue_about_the_sandbox_s_calls(tmp_path: Any) -> None:
+    from maljan.reporting.ledger_projection import static_from_ledger
+    from tests.unit.pipeline.test_triage_pack import SANDBOX_REPORT, _pack, _pe, _write
+
+    behaviour = {
+        **SANDBOX_REPORT["behavior"],
+        "apistats": {"4": {"CryptAcquireContextW": 2, "HttpSendRequestW": 9}},
+    }
+    report = {**SANDBOX_REPORT, "behavior": behaviour}
+    result = _pack(_write(tmp_path, "s.exe", _pe()), "pe", sandbox_report=report)
+    (asked,) = [e for e in result.entries if _kind(e) == "called_api_catalogue"]
+    assert asked.tool == "api_capability" and asked.ok
+    assert asked.args == {
+        "api_names": ["HttpSendRequestW", "CryptAcquireContextW"],
+        "platform": "windows",
+    }
+    assert result.entries[-1] is asked
+    dynamic = dynamic_from_ledger(result.entries)
+    assert dynamic is not None and dynamic.api_capabilities.get("crypto") == 1
+    # The import profile never reads the calls' catalogue answer.
+    static = static_from_ledger(result.entries)
+    assert static is None or "crypto" not in static.api_capabilities
+    # No API calls in the report: nothing is asked.
+    plain = _pack(_write(tmp_path, "t.exe", _pe()), "pe", sandbox_report=SANDBOX_REPORT)
+    assert not [e for e in plain.entries if _kind(e) == "called_api_catalogue"]
