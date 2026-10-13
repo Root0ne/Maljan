@@ -9,6 +9,7 @@ list that never distinguished a rule from an agent meant.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from functools import cache
 from typing import Any
 
 
@@ -86,6 +87,33 @@ def corroborated(row: Mapping[str, Any] | Sequence[str] | None) -> bool:
     )
 
 
+@cache
+def _stored_signature_layers() -> frozenset[str]:
+    """The names a corroboration row gives the shipped signature-rule tools.
+
+    A rule-strings row stored before rows recorded the layer that matched
+    them was written only by a shipped signature-rule tool, so it is read as
+    that tool's: the label its shipped declaration gives (``source`` of a
+    ``signature_rules`` declaration that asserts techniques).
+    """
+    from maljan.core.declared_reading import shipped_by_name
+
+    return frozenset(
+        facts.source
+        for facts in shipped_by_name().values()
+        if facts.kind == "signature_rules" and facts.asserts_techniques and facts.source
+    )
+
+
+def _rule_row_layers(row: Mapping[str, Any]) -> frozenset[str]:
+    """The asserting layer a rule-strings row was matched by (``source``), as a set.
+
+    A row stored without one is read as the shipped signature-rule tool's.
+    """
+    layer = str(row.get("source") or "")
+    return frozenset({layer}) if layer else _stored_signature_layers()
+
+
 def rule_match_only(report: Any) -> dict[str, str]:
     """The published techniques only a rule match stands behind, each with its note.
 
@@ -106,9 +134,11 @@ def rule_match_only(report: Any) -> dict[str, str]:
             continue
         parts: list[str] = []
         for source in dict.fromkeys(row["asserted_by"]):
-            rules = (
-                [r for r in strings.get(tid, []) if isinstance(r, dict)] if source == "yara" else []
-            )
+            rules = [
+                r
+                for r in strings.get(tid, [])
+                if isinstance(r, dict) and source in _rule_row_layers(r)
+            ]
             if rules:
                 parts.extend(
                     f"{source} `{r.get('rule')}`, {int(r.get('strings') or 0)} "

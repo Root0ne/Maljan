@@ -82,7 +82,56 @@ SUMMARY = {"executive_summary": "The sample is built for credential theft."}
 
 class TestTheCount:
     def test_distinct_strings_are_counted_not_offsets(self) -> None:
-        assert yara_rule_strings([_yara_entry()]) == {"T1003": [{"rule": RULE, "strings": 1}]}
+        assert yara_rule_strings([_yara_entry()]) == {
+            "T1003": [{"rule": RULE, "strings": 1, "source": "yara"}]
+        }
+
+
+class TestEachRowIsReadWithTheLayerThatMatchedIt:
+    """A row is shown under the layer that matched it, by its declared label, never by a name."""
+
+    def test_an_operator_signature_tool_names_its_own_rules(self) -> None:
+        from maljan.core.declared_reading import shipped_by_name, stored_record
+
+        # Declared as the shipped signature-rule tool is, under a label of its own.
+        facts = shipped_by_name()["yara_scan"].model_copy(update={"source": "sigs"})
+        entry = SimpleNamespace(
+            id="ev_0003",
+            tool="sigscan__match",
+            source="mcp:sigscan",
+            facts=stored_record(facts),
+            structured=_yara_entry().structured,
+        )
+        strings = yara_rule_strings([entry])
+        assert strings == {"T1003": [{"rule": RULE, "strings": 1, "source": "sigs"}]}
+        report = _report([]).model_copy(
+            update={
+                "rule_match_strings": strings,
+                "run_summary": {
+                    "corroboration": {"T1003": {"asserted_by": ["sigs"], "claimed_by": []}}
+                },
+            }
+        )
+        assert rule_match_only(report) == {
+            "T1003": f"rule match only (sigs `{RULE}`, 1 string), no analyst claim"
+        }
+
+    def test_a_row_of_one_layer_is_never_shown_under_another(self) -> None:
+        report = _report([]).model_copy(
+            update={
+                "run_summary": {
+                    "corroboration": {"T1003": {"asserted_by": ["sigs"], "claimed_by": []}}
+                }
+            }
+        )
+        assert rule_match_only(report) == {"T1003": "rule match only (sigs), no analyst claim"}
+
+    def test_a_stored_row_without_its_layer_is_the_shipped_signature_tools(self) -> None:
+        stored = {"T1003": [{"rule": RULE, "strings": 1}]}
+        report = _report([]).model_copy(update={"rule_match_strings": stored})
+        assert rule_match_only(report) == {
+            "T1003": f"rule match only (yara `{RULE}`, 1 string), no analyst claim"
+        }
 
 
 class TestTheNote:

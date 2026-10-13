@@ -1424,10 +1424,12 @@ class MalwareReport(BaseModel):
     # after the body is composed (``reporting.claim_coverage``) and printed in
     # a section of their own; empty on a report stored before the field existed.
     claims_not_discussed: list[ClaimNotDiscussed] = Field(default_factory=list)
-    # For each technique a YARA rule of this run asserted, the rules and how
-    # many of each rule's own strings matched (``{"rule", "strings"}``), as the
-    # scan answered. Read by the ATT&CK table's "rule match only" note and by
-    # the capability grounding; empty on a report stored before it existed.
+    # For each technique a signature rule of this run asserted, the rules, how
+    # many of each rule's own strings matched and the asserting layer that
+    # matched it (``{"rule", "strings", "source"}``; a row stored before
+    # ``source`` is the shipped signature tool's), as the scan answered. Read by
+    # the ATT&CK table's "rule match only" note and by the capability
+    # grounding; empty on a report stored before it existed.
     rule_match_strings: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     # What emulation alone recovered, built from the ledger's FLOSS and strings
     # entries at build time; ``None`` on a report stored before it existed,

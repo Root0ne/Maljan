@@ -195,18 +195,22 @@ _API_CATALOGUE = "evidence_summary.catalogue_associations"
 
 
 def yara_rule_strings(ledger: Sequence[Any] | None) -> dict[str, list[dict[str, Any]]]:
-    """``{technique_id: [{"rule": name, "strings": n}, ...]}`` for the YARA rules that assert one.
+    """``{technique_id: [{"rule": name, "strings": n, "source": layer}, ...]}`` for the
+    signature rules that assert one.
 
     ``strings`` is how many of the rule's own strings matched — distinct
     identifiers, not offsets — which is what a reader needs to weigh a
     technique a rule alone put in the report: one string in a large file is a
-    different finding from a rule whose whole condition matched. Read from the
-    scan's structured answer as the tool wrote it.
+    different finding from a rule whose whole condition matched. ``source`` is
+    the name the corroboration row gives the asserting tool
+    (:func:`asserting_source`), so each row is read with the layer that matched
+    it. Read from the scan's structured answer as the tool wrote it.
     """
     found: dict[str, list[dict[str, Any]]] = {}
     for entry in ledger or []:
         if not reads_as(entry, _SIGNATURE_RULES):
             continue
+        layer = asserting_source(entry) or bare_name(getattr(entry, "tool", ""))
         structured = getattr(entry, "structured", None)
         matches = structured.get("matches") if isinstance(structured, dict) else None
         for match in matches or []:
@@ -221,7 +225,11 @@ def yara_rule_strings(ledger: Sequence[Any] | None) -> dict[str, list[dict[str, 
             } - {""}
             for tid in technique_ids_in(meta.get("technique_id")):
                 rows = found.setdefault(tid, [])
-                row = {"rule": str(match.get("rule") or ""), "strings": len(identifiers)}
+                row = {
+                    "rule": str(match.get("rule") or ""),
+                    "strings": len(identifiers),
+                    "source": layer,
+                }
                 if row not in rows:
                     rows.append(row)
     return found
