@@ -88,8 +88,7 @@ def test_a_tool_declared_of_another_kind_is_never_stated() -> None:
     assert "[ev_0002]" not in body
 
 
-def test_a_declared_lookup_an_agent_made_is_shown_beside_the_pack_s_line() -> None:
-    row = _agent_call(2)
+def _declared(row: dict[str, Any]) -> dict[str, Any]:
     # The facts the entry stored when it was written: a declared lookup.
     row["facts"] = {
         "v": 1,
@@ -99,10 +98,27 @@ def test_a_declared_lookup_an_agent_made_is_shown_beside_the_pack_s_line() -> No
             "total": "/data/attributes/stats/total",
         },
     }
-    body = _block([_not_asked(1), row])
+    return row
+
+
+def test_a_declared_lookup_an_agent_made_is_shown_beside_the_pack_s_line() -> None:
+    body = _block([_not_asked(1), _declared(_agent_call(2))])
     assert "[ev_0001] reputation: not done" in body
     assert "[ev_0002] reputation:" in body
     assert "sample sha256 given to" not in body
+
+
+def test_a_declared_lookup_of_a_dropped_file_s_hash_is_not_the_sample_s() -> None:
+    body = _block([_not_asked(1), _declared(_agent_call(2, args={"sha256": "cd" * 32}))])
+    assert "[ev_0001] reputation: not done" in body
+    assert "[ev_0002]" not in body
+    assert "malicious" not in body
+
+
+def test_a_declared_lookup_of_an_address_is_not_the_sample_s() -> None:
+    body = _block([_not_asked(1), _declared(_agent_call(2, args={"ip": "192.0.2.1"}))])
+    assert "[ev_0002]" not in body
+    assert "malicious" not in body
 
 
 def test_many_rows_are_read_in_one_pass() -> None:

@@ -338,14 +338,28 @@ def _answered_lookup(entry: Any) -> bool:
     return bool(getattr(entry, "ok", False)) and is_lookup_entry(entry)
 
 
-def _agents_lookups(rows: list[Any], sha256: str) -> tuple[LedgerEntry | None, LedgerEntry | None]:
-    """The latest declared lookup an agent made, and its latest undeclared call given the hash.
+def _given_the_sample(row: Any, wanted: str) -> bool:
+    """Whether one of the call's own top-level arguments is the sample's SHA-256."""
+    args = _get(row, "args")
+    return (
+        bool(wanted)
+        and isinstance(args, Mapping)
+        and any(
+            isinstance(value, str) and value.strip().lower() == wanted for value in args.values()
+        )
+    )
 
-    The first is a call to a tool declared a reputation lookup
-    (``core.reputation.is_lookup_entry``) that answered. The second is a call
-    to a tool its source declares nothing for that answered and was given the
-    sample's own SHA-256 as an argument: only the platform's facts about it
-    are ever stated. A tool declared of any other kind is neither.
+
+def _agents_lookups(rows: list[Any], sha256: str) -> tuple[LedgerEntry | None, LedgerEntry | None]:
+    """An agent's latest declared lookup of the sample, and its latest undeclared call given it.
+
+    Both were given the sample's own SHA-256 as an argument (``_given_the_sample``):
+    a lookup of a dropped file, an address or a domain is about another subject
+    and is never shown as the sample's. The first is a call to a tool declared a
+    reputation lookup (``core.reputation.is_lookup_entry``) that answered. The
+    second is a call to a tool its source declares nothing for that answered:
+    only the platform's facts about it are ever stated. A tool declared of any
+    other kind is neither.
     """
     wanted = sha256.strip().lower()
     declared: LedgerEntry | None = None
@@ -355,19 +369,11 @@ def _agents_lookups(rows: list[Any], sha256: str) -> tuple[LedgerEntry | None, L
             continue
         if is_guard_answer(row) or _get(row, "repeated_of"):
             continue
+        if not _given_the_sample(row, wanted):
+            continue
         lookup = is_lookup_entry(row)
-        if not lookup:
-            args = _get(row, "args")
-            given = (
-                bool(wanted)
-                and isinstance(args, Mapping)
-                and any(
-                    isinstance(value, str) and value.strip().lower() == wanted
-                    for value in args.values()
-                )
-            )
-            if not (given and recorded(row) and not kind_of(row)):
-                continue
+        if not lookup and not (recorded(row) and not kind_of(row)):
+            continue
         try:
             entry = row if isinstance(row, LedgerEntry) else LedgerEntry.model_validate(row)
         except Exception:  # noqa: BLE001 — one unreadable row is not a lost block
