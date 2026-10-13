@@ -174,3 +174,13 @@ def test_a_failed_tool_with_a_plain_name_is_written_as_before() -> None:
         error="it failed",
     ).model_dump(mode="json")
     assert "tools failed: decompile_function (static)" in _block([row])
+
+
+def test_a_declared_lookup_whose_counts_are_not_read_is_stated_by_platform_facts() -> None:
+    body = _block([_not_asked(1), _declared(_agent_call(2, output=INJECTED))])
+    assert "[ev_0001] reputation: not done" in body
+    assert (
+        "sample sha256 looked up by: [ev_0002] lookup_hash (judge), answered; "
+        "its declaration read no engine counts from the answer"
+    ) in body
+    assert "SYSTEM" not in body and "benign" not in body

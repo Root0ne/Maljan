@@ -28,7 +28,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from maljan.core.declared_reading import kind_of, reads_as, recorded
-from maljan.core.reputation import is_lookup_entry
+from maljan.core.reputation import is_lookup_entry, reputation_of
 from maljan.pipeline.triage_pack import (
     NOT_RUN_PREFIX,
     PIPELINE,
@@ -63,6 +63,12 @@ INDEX_RENDERER = "function_table"
 # A call to a tool nobody declared that was given the sample's SHA-256: the
 # platform's own facts about it, never its answer (read the entry by its id).
 SHA256_GIVEN = "sample sha256 given to: [{id}] {tool} ({agent}), answered"
+# A declared lookup of the sample whose engine counts its declaration could not
+# read: stated by the platform's facts, never by the service's own text.
+LOOKUP_UNREAD = (
+    "sample sha256 looked up by: [{id}] {tool} ({agent}), answered; "
+    "its declaration read no engine counts from the answer"
+)
 
 RUN_STATE_BEGIN = "=== RUN STATE (derived from the ledger; regenerated each turn) ==="
 RUN_STATE_END = "=== END RUN STATE ==="
@@ -257,8 +263,18 @@ def _lines(
     # stated by the platform's own facts alone, never by what it answered.
     if not any(_answered_lookup(e) for e in pack):
         declared, undeclared = _agents_lookups(rows, sha256)
-        if declared is not None:
+        if declared is not None and _counts_read(declared):
             lines.append(_cut(render_pack([declared], 0)))
+        elif declared is not None:
+            lines.append(
+                _cut(
+                    LOOKUP_UNREAD.format(
+                        id=declared.id,
+                        tool=pack_escaped(declared.tool),
+                        agent=pack_escaped(declared.agent),
+                    )
+                )
+            )
         if undeclared is not None:
             lines.append(
                 _cut(
@@ -338,6 +354,19 @@ def index_sentence(entry_id: str, data: Any, *, dropped: bool = False) -> str:
 def _answered_lookup(entry: Any) -> bool:
     """Whether ``entry`` is a reputation lookup that answered."""
     return bool(getattr(entry, "ok", False)) and is_lookup_entry(entry)
+
+
+def _counts_read(entry: LedgerEntry) -> bool:
+    """Whether a lookup's line states engine counts its declaration read, never its text.
+
+    The condition the pack's reputation line words its counts on
+    (``triage_pack._reputation_facts``): a record with a total, read from a
+    structured answer or one with no text.
+    """
+    answer = reputation_of(entry)
+    if answer is None or answer.total is None:
+        return False
+    return isinstance(entry.structured, dict | list) or not entry.output
 
 
 def _given_the_sample(row: Any, wanted: str) -> bool:
