@@ -4413,10 +4413,15 @@ class Settings(BaseSettings):
         (``POST /settings/servers/{key}/credential``); on a provider's block the
         field would be a setting that does nothing.
         """
-        from maljan.core.tool_declarations import PROVIDER_BLOCKS, block_at
+        from maljan.core.tool_declarations import block_at, provider_blocks
 
-        for path in PROVIDER_BLOCKS.values():
-            block = block_at(self, path)
+        for path in provider_blocks().values():
+            try:
+                block = block_at(self, path)
+            except AttributeError:
+                # A registered block these settings do not hold takes nothing
+                # here; reading its declaration says so (``provider_block_at``).
+                continue
             if getattr(block, "credential_bootstrap", None) is not None:
                 raise ValueError(
                     f"{path}.credential_bootstrap: a credential bootstrap is declared on a "

@@ -443,10 +443,10 @@ def public_snapshot(settings: Settings, secret_keys: Iterable[str]) -> dict[str,
 
 def declaration_blocks(settings: Settings) -> dict[str, str]:
     """Each server block's dotted path, by the source its declaration is read under."""
-    from maljan.core.tool_declarations import PROVIDER_BLOCKS
+    from maljan.core.tool_declarations import provider_blocks
 
     blocks = {f"mcp:{key}": f"mcp.servers.{key}" for key in settings.mcp.servers}
-    blocks.update(PROVIDER_BLOCKS)
+    blocks.update(provider_blocks())
     return blocks
 
 

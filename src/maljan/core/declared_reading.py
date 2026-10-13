@@ -266,13 +266,13 @@ def _shipped_tools_by_source() -> Mapping[str, frozenset[str]]:
     data alone.
     """
     from maljan.core import builtin_declarations as shipped
-    from maljan.core.tool_declarations import PROVIDER_BLOCKS
+    from maljan.core.tool_declarations import shipped_provider_blocks
 
     out: dict[str, frozenset[str]] = {
         f"mcp:{key}": frozenset(shipped.server_declaration(key).get("tool_facts") or {})
         for key in shipped.builtin_server_names()
     }
-    for source, path in PROVIDER_BLOCKS.items():
+    for source, path in shipped_provider_blocks().items():
         block = "_".join(path.split(".")[1:])
         out[source] = frozenset(shipped.provider_declaration(block).get("tool_facts") or {})
     for source, tools in _in_process_blocks().items():

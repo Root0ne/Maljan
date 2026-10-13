@@ -71,7 +71,7 @@ import re
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from functools import lru_cache
+from functools import lru_cache, partial
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import (
@@ -1683,14 +1683,57 @@ class SourceRef:
 SANDBOX = SourceRef("sandbox")
 PACK = SourceRef("pack")
 
-# The provider-owned server blocks, by the source their declarations are read
-# under, at their dotted path in the settings. The one table of them: the read
-# API, the run snapshot and anything else that walks the blocks use it.
-PROVIDER_BLOCKS: dict[str, str] = {
-    "provider:ghidra": "static.ghidra",
-    "provider:r2": "static.r2",
-    "provider:cape2": "sandbox.cape2.mcp",
-}
+# The provider-owned server blocks registered at runtime, by the source their
+# declarations are read under, at their dotted path in the settings
+# (:func:`register_provider_block`). The shipped ones are declaration data
+# (``builtin_declarations.provider_block_paths``); :func:`provider_blocks` is
+# the one list of both that the read API, the run snapshot and anything else
+# that walks the blocks use.
+_REGISTERED_PROVIDER_BLOCKS: dict[str, str] = {}
+_BLOCK_PATH_RE = re.compile(r"[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)*")
+
+
+def shipped_provider_blocks() -> dict[str, str]:
+    """The shipped provider-owned blocks' dotted paths, by source text: built-in data alone."""
+    from maljan.core.builtin_declarations import provider_block_paths
+
+    return provider_block_paths()
+
+
+def provider_blocks() -> dict[str, str]:
+    """Every provider-owned block's dotted path, by source text: the shipped ones, then
+    each one a provider registered (:func:`register_provider_block`)."""
+    blocks = shipped_provider_blocks()
+    for source, path in _REGISTERED_PROVIDER_BLOCKS.items():
+        blocks.setdefault(source, path)
+    return blocks
+
+
+def register_provider_block(source: str, path: str) -> None:
+    """Read ``source``'s declaration (``provider:<id>``) from the settings block at ``path``.
+
+    How a provider whose settings hold a server block of its own declares its
+    tools the way the built-ins do (its class's ``declaration_block``,
+    ``providers.registry``). A shipped source keeps its shipped block: naming
+    another path for it is refused, as is a path that is not dotted words.
+    """
+    ref = SourceRef.parse(source)
+    if ref.kind != "provider":
+        raise ValueError(f"{source!r} is not a provider source: provider:<id>")
+    if not _BLOCK_PATH_RE.fullmatch(str(path or "")):
+        raise ValueError(f"{path!r} is not a settings path: dotted lowercase words")
+    shipped = shipped_provider_blocks().get(str(ref))
+    if shipped is not None and shipped != path:
+        raise ValueError(f"{source!r} is declared by its shipped block {shipped!r}")
+    if shipped is None and _REGISTERED_PROVIDER_BLOCKS.get(str(ref)) != path:
+        _REGISTERED_PROVIDER_BLOCKS[str(ref)] = path
+        _DECLARATION_VERSION[0] += 1
+
+
+def forget_provider_block(source: str) -> None:
+    """Stop reading a registered provider's block (the provider was taken out)."""
+    if _REGISTERED_PROVIDER_BLOCKS.pop(str(source), None) is not None:
+        _DECLARATION_VERSION[0] += 1
 
 
 def block_at(settings: Any, path: str) -> Any:
@@ -1701,13 +1744,28 @@ def block_at(settings: Any, path: str) -> Any:
     return node
 
 
+def provider_block_at(settings: Any, source: str, path: str) -> Any:
+    """The block ``source`` declares its tools in, or ``None`` where the settings hold none.
+
+    A shipped block is always there; a registered one whose path the settings
+    do not hold declares nothing, and is logged.
+    """
+    try:
+        return block_at(settings, path)
+    except AttributeError:
+        from maljan.core.logger import logger
+
+        logger.warning("Provider block for %s is not in the settings (%s).", source, path)
+        return None
+
+
 # The declarations providers registered at runtime give for their own tools, by
 # the source those tools are recorded under (``provider:<id>``): each a reader
 # of the settings that answers the provider's declaration (an object or mapping
 # with the declaration fields of ``MCPServerConfig``), or ``None`` for none.
-# The built-ins' blocks are ``PROVIDER_BLOCKS``, read the same way; a runtime
-# provider extends the set through ``providers.registry`` (its class's
-# ``declaration`` hook), never by editing that table.
+# The provider blocks (:func:`provider_blocks`) are read the same way; a runtime
+# provider extends either set through ``providers.registry`` (its class's
+# ``declaration`` hook or ``declaration_block``), never by editing a table.
 _RUNTIME_PROVIDER_DECLARATIONS: dict[str, Callable[[Any], Any]] = {}
 # Bumped by every registration, so held declarations are rebuilt after one.
 _DECLARATION_VERSION = [0]
@@ -1716,7 +1774,7 @@ _DECLARATION_VERSION = [0]
 def register_provider_declaration(source: str, read: Callable[[Any], Any]) -> None:
     """Read ``source``'s declaration (``provider:<id>``) with ``read(settings)`` from now on.
 
-    A source of ``PROVIDER_BLOCKS`` keeps its block: the built-ins are
+    A source of :func:`provider_blocks` keeps its block: those providers are
     declared by their settings blocks.
     """
     ref = SourceRef.parse(source)
@@ -1740,16 +1798,24 @@ def declaration_version() -> int:
 def provider_declarations(settings: Any) -> dict[str, Any]:
     """Every provider's declaration block under ``settings``, by source text.
 
-    The built-ins' blocks (``PROVIDER_BLOCKS``) first, then each runtime
-    provider's own (:func:`register_provider_declaration`) that answers one;
-    a reader that fails declares nothing, and is logged.
+    The provider blocks (:func:`provider_blocks`: the shipped ones, then each
+    registered one the settings hold) first, then each runtime provider's own
+    (:func:`register_provider_declaration`) that answers one; a reader that
+    fails declares nothing, and is logged.
     """
     from maljan.core.logger import logger
 
-    blocks: dict[str, Any] = {
-        text: block_at(settings, path) for text, path in PROVIDER_BLOCKS.items()
-    }
+    shipped = shipped_provider_blocks()
+    blocks: dict[str, Any] = {}
+    readers: dict[str, Callable[[Any], Any]] = {}
+    for text, path in provider_blocks().items():
+        if text in shipped:
+            blocks[text] = block_at(settings, path)
+        else:
+            readers[text] = partial(provider_block_at, source=text, path=path)
     for text, read in list(_RUNTIME_PROVIDER_DECLARATIONS.items()):
+        readers.setdefault(text, read)
+    for text, read in readers.items():
         if text in blocks:
             continue
         try:
