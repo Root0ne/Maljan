@@ -14,11 +14,11 @@ Three rules make that safe to run against a report nobody has seen:
 * A channel with no path goes into ``SandboxReport.unavailable``. An empty
   ``network.dns`` and a sandbox that publishes no DNS at all look identical in
   a rendered report, and only one of them means the sample was quiet.
-* Every channel is capped at ``MAX_ROWS_PER_CHANNEL``. A JSONPath over a
-  200 MB report can select a million rows, and a report nobody can render is
-  not more evidence than one that stops at five thousand and says so; a
-  truncated channel says so too (``ChannelStats.truncated``), rather than
-  quietly looking like a sandbox with exactly five thousand rows of data.
+* Every channel is read whole, as a built-in reader reads its lists: no row
+  count cuts it. A path is bounded only by the report's own size (the values
+  it holds): a path that names each value at most once never reaches it, and
+  one that does repeats values and is cut there, saying so
+  (``ChannelStats.truncated``, and a warning), never quietly.
 
 Three channels are not settings the operator can point anywhere:
 
@@ -98,8 +98,6 @@ REST_MAPPING_FILLS: frozenset[str] = frozenset(
         "ids_alerts",
     }
 )
-
-MAX_ROWS_PER_CHANNEL = 5000
 
 # The field each channel's consumer indexes on. A row without it is not a
 # thinner row, it is a row the consumer will skip or crash on.
@@ -251,7 +249,11 @@ def _normalize_sha256(value: Any) -> tuple[str, str]:
 
 
 def _select_open_channels(
-    compiled: CompiledMapping, payload: dict[str, Any], *, places: bool = False
+    compiled: CompiledMapping,
+    payload: dict[str, Any],
+    sizes: dict[int, int],
+    *,
+    places: bool = False,
 ) -> tuple[dict[str, list[Any]], dict[str, ChannelStats]]:
     """Run the operator's own ``channels.<name>`` paths, or its ``places.<place>`` ones.
 
@@ -259,46 +261,44 @@ def _select_open_channels(
     the point of an open channel is that this module does not know what a
     sandbox publishes there. A mapping is kept as it is, anything else is
     wrapped so every row is still a mapping (a name the resolved API names
-    place holds is kept as the text it is). A channel is capped as every other
-    channel is. A place is read whole, bounded by the report's own size, in
-    what it holds as well as in its rows: each match is kept by reference, and
-    a document writes each match out whole, so a descendant path whose matches
-    nest (``$..x`` where an ``x`` holds an ``x``) would write the inner ones
-    again inside the outer ones. The values a place's kept matches hold, each
-    match counted with everything nested in it, never exceed the values the
-    report holds: a place reaching that is cut there and says so
-    (``truncated``, and a warning). A path whose matches do not nest holds at
-    most the report once and is never cut. Each match's size is looked up in
-    one measure of the report taken before (:func:`subtree_sizes`), so the
-    bound costs time linear in the report.
+    place holds is kept as the text it is). A channel or a place is read
+    whole, as a built-in reader reads its lists, bounded only by the report's
+    own size, in what it holds as well as in its rows: each match is kept by
+    reference, and a document writes each match out whole, so a descendant
+    path whose matches nest (``$..x`` where an ``x`` holds an ``x``) would
+    write the inner ones again inside the outer ones. The values the kept
+    matches hold, each match counted with everything nested in it, never
+    exceed the values the report holds: one reaching that is cut there and
+    says so (``truncated``, and a warning). A path whose matches do not nest
+    holds at most the report once and is never cut. Each match's size is
+    looked up in ``sizes``, one measure of the report taken before
+    (:func:`subtree_sizes`), so the bound costs time linear in the report.
     """
     rows: dict[str, list[Any]] = {}
     stats: dict[str, ChannelStats] = {}
     paths = compiled.place_paths if places else compiled.channel_paths
-    sizes = subtree_sizes(payload) if places and paths else {}
-    bound = sizes.get(id(payload), 1) if places and paths else MAX_ROWS_PER_CHANNEL
+    bound = sizes.get(id(payload), 1)
     for name, path in paths.items():
         label = f"places.{name}" if places else f"channels.{name}"
         try:
             values = (node.value for node in path.finditer(payload))
-            peeked = list(islice(values, (bound if places else MAX_ROWS_PER_CHANNEL) + 1))
+            peeked = list(islice(values, bound + 1))
         except Exception as exc:  # noqa: BLE001 — a path valid in isolation can still fail on data
             stats[label] = ChannelStats(error=f"{type(exc).__name__}: {exc}")
             continue
-        limit = bound if places else MAX_ROWS_PER_CHANNEL
-        truncated = len(peeked) > limit
-        matches = peeked[:limit]
-        if places:
-            held = 0
-            for kept_count, match in enumerate(matches):
-                held += sizes.get(id(match), 1)
-                if held > bound:
-                    matches, truncated = matches[:kept_count], True
-                    break
-        if truncated and places:
+        truncated = len(peeked) > bound
+        matches = peeked[:bound]
+        held = 0
+        for kept_count, match in enumerate(matches):
+            held += sizes.get(id(match), 1)
+            if held > bound:
+                matches, truncated = matches[:kept_count], True
+                break
+        if truncated:
             logger.warning(
-                "rest mapping: a place path matched more than the report holds (%d values); "
+                "rest mapping: a %s path matched more than the report holds (%d values); "
                 "its matches repeat or nest, and it was cut there.",
+                "place" if places else "channel",
                 bound,
             )
         converted = (_open_row(name if places else "", m) for m in matches)
@@ -419,14 +419,16 @@ def _open_row(place: str, match: Any) -> Any:
 
 
 def _select(
-    compiled: CompiledMapping, channel: str, payload: dict[str, Any]
+    compiled: CompiledMapping, channel: str, payload: dict[str, Any], bound: int
 ) -> tuple[ChannelStats, list[Any]]:
     """Run one channel's path and coerce what it selected.
 
-    ``finditer`` is only ever pulled through ``islice(..., MAX_ROWS_PER_CHANNEL
-    + 1)`` — one past the cap, never the whole thing — so a path that selects
-    a million rows never materialises more than 5001 of them before this
-    function knows to stop and say ``truncated``.
+    The channel is read whole, as a built-in reader reads its lists: no row
+    count cuts it. ``bound`` is how many values the report holds; a path that
+    names each value at most once matches no more, so ``finditer`` is pulled
+    through ``islice(..., bound + 1)`` and a path that matches more repeats
+    values (a descendant segment over nested matches) and is cut there,
+    saying so (``truncated``, and a warning).
 
     Returns ``(stats, kept_rows)`` rather than smuggling the rows onto the
     frozen ``ChannelStats`` through ``object.__setattr__`` (F15): that hid a
@@ -439,14 +441,17 @@ def _select(
         return ChannelStats(), []
     try:
         values = (node.value for node in path.finditer(payload))
-        peeked = list(islice(values, MAX_ROWS_PER_CHANNEL + 1))
+        peeked = list(islice(values, bound + 1))
     except Exception as exc:  # noqa: BLE001 — a path valid in isolation can still fail on data
         return ChannelStats(error=f"{type(exc).__name__}: {exc}"), []
-    truncated = len(peeked) > MAX_ROWS_PER_CHANNEL
-    matches = peeked[:MAX_ROWS_PER_CHANNEL]
+    truncated = len(peeked) > bound
+    matches = peeked[:bound]
     if truncated:
         logger.warning(
-            "rest mapping: %s: more than %d rows, truncated", channel, MAX_ROWS_PER_CHANNEL
+            "rest mapping: %s: the path matched more than the report holds (%d values); its "
+            "matches repeat, and it was cut there.",
+            channel,
+            bound,
         )
     names = compiled.config.field_names
     kept: list[Any] = []
@@ -479,17 +484,25 @@ def apply_mapping(
         SandboxTarget,
     )
 
-    selected = {channel: _select(compiled, channel, payload) for channel in CHANNELS}
+    # One measure of the report bounds every path (the values it holds, and
+    # per container what it holds where a path keeps matches by reference),
+    # taken only where a path needs it.
+    open_paths = bool(compiled.channel_paths or compiled.place_paths)
+    sizes = subtree_sizes(payload) if open_paths else {}
+    bound = sizes.get(id(payload), 1) if open_paths else 0
+    if not bound and compiled.paths:
+        bound = node_count(payload)
+    selected = {channel: _select(compiled, channel, payload, bound) for channel in CHANNELS}
     stats: dict[str, ChannelStats] = {c: s for c, (s, _rows) in selected.items()}
     rows: dict[str, list[Any]] = {c: list(r) for c, (_s, r) in selected.items()}
-    open_channels, open_stats = _select_open_channels(compiled, payload)
+    open_channels, open_stats = _select_open_channels(compiled, payload, sizes)
     stats.update(open_stats)
     # Every top-level block of the payload no path names, kept whole as a raw
     # section the analyst reads: the model decides what it means, and no fact
     # is drawn from it here. An operator's channel of the same name wins.
     for name, block_rows in unnamed_blocks(compiled.config, payload).items():
         open_channels.setdefault(name, block_rows)
-    open_places, place_stats = _select_open_channels(compiled, payload, places=True)
+    open_places, place_stats = _select_open_channels(compiled, payload, sizes, places=True)
     stats.update(place_stats)
 
     processes = [

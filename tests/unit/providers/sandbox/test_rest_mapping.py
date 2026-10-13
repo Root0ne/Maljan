@@ -11,9 +11,9 @@ from maljan.core.config import RestMappingConfig
 from maljan.providers.errors import ProviderConfigurationError
 from maljan.providers.sandbox.rest_mapping import (
     CHANNELS,
-    MAX_ROWS_PER_CHANNEL,
     apply_mapping,
     compile_mapping,
+    node_count,
 )
 from maljan.reporting.ledger_projection import network_from_sandbox_report
 from maljan.schemas.sandbox_document import sandbox_document
@@ -76,17 +76,38 @@ def test_rows_missing_a_required_field_are_dropped_and_counted():
     assert [p.pid for p in result.report.processes] == [4]
 
 
-def test_a_channel_is_capped_and_the_cap_is_visible_in_the_stats():
-    compiled = compile_mapping(RestMappingConfig(registry="$.r[*]"))
-    payload = {"r": [f"HKLM\\k{i}" for i in range(MAX_ROWS_PER_CHANNEL + 1)]}
+def test_a_channel_is_read_whole_as_a_built_in_reader_reads_its_lists():
+    """No row count cuts a channel: an accepted mapping reads as many rows as a built-in does."""
+    many = 5_000 * 3 + 1
+    compiled = compile_mapping(
+        RestMappingConfig(registry="$.r[*]", processes="$.p[*]", channels={"x.rows": "$.p[*]"})
+    )
+    payload = {
+        "r": [f"HKLM\\k{i}" for i in range(many)],
+        "p": [{"pid": i + 1, "ppid": 0, "name": "a.exe"} for i in range(many)],
+    }
     result = apply_mapping(compiled, payload, provider="rest", task_id="t")
-    assert len(result.report.registry) == MAX_ROWS_PER_CHANNEL
-    stats = result.stats["registry"]
-    assert stats.matched == MAX_ROWS_PER_CHANNEL
+    assert len(result.report.registry) == many
+    assert len(result.report.processes) == many
+    assert len(result.report.channels["x.rows"]) == many
+    for name in ("registry", "processes", "channels.x.rows"):
+        assert result.stats[name].matched == many
+        assert result.stats[name].truncated is False
+
+
+def test_a_channel_path_that_repeats_values_is_cut_at_the_report_s_size_and_says_so():
+    node: dict = {"name": "leaf"}
+    for _ in range(40):
+        node = {"name": "n", "kids": [node, {"name": "x"}]}
+    payload = {"tree": node}
+    compiled = compile_mapping(RestMappingConfig(domains="$..*..name"))
+    result = apply_mapping(compiled, payload, provider="rest", task_id="t")
+    stats = result.stats["domains"]
     assert stats.truncated is True
+    assert stats.matched <= node_count(payload)
 
 
-def test_a_channel_under_the_cap_is_not_marked_truncated():
+def test_a_short_channel_is_not_marked_truncated():
     compiled = compile_mapping(RestMappingConfig(registry="$.r[*]"))
     result = apply_mapping(compiled, {"r": ["a", "b"]}, provider="rest", task_id="t")
     assert result.stats["registry"].truncated is False
@@ -133,7 +154,8 @@ def test_select_returns_rows_alongside_stats_without_smuggling_them_in():
     from maljan.providers.sandbox.rest_mapping import ChannelStats, _select
 
     compiled = compile_mapping(RestMappingConfig(processes="$.p[*]"))
-    stats, rows = _select(compiled, "processes", {"p": [{"pid": 1}, {"pid": 2}]})
+    payload = {"p": [{"pid": 1}, {"pid": 2}]}
+    stats, rows = _select(compiled, "processes", payload, node_count(payload))
     assert isinstance(stats, ChannelStats)
     assert stats.kept == 2
     assert [r["pid"] for r in rows] == [1, 2]
@@ -253,3 +275,34 @@ def test_the_xyz_golden_renders_through_the_tools_an_agent_calls():
     assert network is not None
     assert network.domains, "the golden must carry at least one real DNS row"
     assert network.ips, "the golden must carry at least one real TCP/IP row"
+
+
+def test_an_accepted_format_s_mapping_reads_every_row_as_a_built_in_does():
+    """An upload read through a declared format's own mapping keeps every process and DNS row."""
+    from maljan.core.report_formats import ReportFormat
+    from maljan.providers.sandbox.readers import format_mapping, report_reader
+
+    fmt = ReportFormat.model_validate(
+        {
+            "name": "acme_box",
+            "detect": [[{"path": "/acme", "types": ["object"]}]],
+            "reader": "generic",
+            "mapping": {
+                "target_sha256": "",
+                "processes": "$.acme.procs[*]",
+                "dns": "$.acme.dns[*]",
+            },
+        }
+    )
+    many = 12_000
+    payload = {
+        "acme": {
+            "procs": [{"pid": i + 1, "ppid": 0, "name": "a.exe"} for i in range(many)],
+            "dns": [{"request": f"h{i}.example", "type": "A"} for i in range(many)],
+        }
+    }
+    reader = report_reader(fmt.reader)
+    assert reader is not None
+    report = reader.read(payload, provider="upload", fmt=fmt, mapping=format_mapping(fmt))
+    assert len(report.processes) == many
+    assert len(report.network.dns) == many
