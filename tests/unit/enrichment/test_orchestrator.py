@@ -229,13 +229,31 @@ class TestReputationHelpers:
 
 
 class TestTheEarlierRecordsContextIsKept:
-    """A new record keeps the earlier record's link and sandbox context, by neutral fields."""
+    """A new record keeps the earlier record's sandbox context, and its link with its source."""
 
-    def test_the_neutral_link_and_the_sandbox_context_are_kept(self) -> None:
-        prev = {"link": "https://lookup.example/x", "hostname": "h", "contacted_ports": [443]}
+    def test_the_sandbox_context_is_kept(self) -> None:
+        prev = {"hostname": "h", "contacted_ports": [443]}
         rep: dict[str, Any] = {"source": "anylookup", "malicious": 0}
         _carry_seeded_context(prev, rep)
         assert rep == {"source": "anylookup", "malicious": 0, **prev}
+
+    def test_a_link_moves_together_with_its_source(self) -> None:
+        prev = {"source": "firstlookup", "link": "https://lookup.example/x"}
+        rep: dict[str, Any] = {"source": "anylookup", "malicious": 0}
+        _carry_seeded_context(prev, rep)
+        assert rep["link"] == "https://lookup.example/x"
+        assert rep["link_source"] == "firstlookup"
+        assert rep["source"] == "anylookup"
+        # Carried again, it keeps the source that gave it, not the record's.
+        later: dict[str, Any] = {"source": "thirdlookup"}
+        _carry_seeded_context(rep, later)
+        assert later["link_source"] == "firstlookup"
+
+    def test_a_link_with_no_source_is_not_carried(self) -> None:
+        rep: dict[str, Any] = {"source": "anylookup"}
+        _carry_seeded_context({"link": "https://lookup.example/x", "hostname": "h"}, rep)
+        assert "link" not in rep and "link_source" not in rep
+        assert rep["hostname"] == "h"
 
     def test_a_stored_rows_legacy_permalink_key_is_still_kept(self) -> None:
         from maljan.core.legacy_reputation import STORED_REPUTATION_LINK_KEYS
