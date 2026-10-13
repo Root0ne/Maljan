@@ -1164,6 +1164,24 @@ def _from_answers(
     return ""
 
 
+def _listed_apis(answers: list[str]) -> list[str]:
+    """The API names the newest answer listing them gives, in its order (``api`` of each item)."""
+    for text in answers:
+        value = _answer_json(text)
+        pending = [value]
+        while pending:
+            item = pending.pop(0)
+            if isinstance(item, dict):
+                pending.extend(item.values())
+            elif isinstance(item, list):
+                held = [entry.get("api") for entry in item if isinstance(entry, dict)]
+                names = [name for name in held if isinstance(name, str) and name]
+                if names:
+                    return list(dict.fromkeys(names))
+                pending.extend(item)
+    return []
+
+
 def _fillable(
     tool: dict[str, Any],
     facts: _Facts,
@@ -1206,6 +1224,10 @@ def _fillable(
             value = "events"
         elif "technique" in lowered or lowered in ("query", "tid", "id", "ids"):
             value = "T1071.001"
+        elif "api" in lowered and kind == "array" and answers and _listed_apis(answers):
+            # A model asks about the APIs an answer listed, every one of them.
+            args[name] = _listed_apis(answers)
+            continue
         elif "api" in lowered or lowered == "name":
             value = "InternetOpenW"
         elif "hash" in lowered or "sha" in lowered:

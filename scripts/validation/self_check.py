@@ -740,6 +740,19 @@ def an_opened_program_is_listed_then_decompiled_at_an_exported_start() -> None:
     assert call is None or call.args.get("binary_name", PROGRAM["name"]) == PROGRAM["name"], call
 
 
+@check
+def an_api_list_argument_asks_about_every_api_an_answer_listed() -> None:
+    from scripts.rehearsal.roles import _fillable
+
+    tool = _tool("catalogue", {"api_names": {"type": "array"}})
+    called = json.dumps({"apis": [{"api": "HttpSendRequestW"}, {"api": "CryptAcquireContextW"}]})
+    args = _fillable(tool, _facts(), [called])
+    assert args == {"api_names": ["HttpSendRequestW", "CryptAcquireContextW"]}, args
+    # Without such an answer, the fixed name it always took.
+    assert _fillable(tool, _facts(), [LISTING]) == {"api_names": ["InternetOpenW"]}
+    assert _fillable(tool, _facts()) == {"api_names": ["InternetOpenW"]}
+
+
 def run_self_checks() -> int:
     failed = 0
     for name, fn in CHECKS:
