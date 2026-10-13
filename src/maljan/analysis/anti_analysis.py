@@ -29,9 +29,25 @@ from typing import Any, Protocol
 
 from maljan.core.logger import logger
 
-# The pack's step name for the pass, the name its entries are recorded under
-# and its declaration (``builtin_declarations._PACK_TOOLS``) names.
-SCAN_TOOL = "find_anti_analysis_techniques"
+# The renderer of the pack's step for the pass (``core.pack_steps``).
+SCAN_RENDERER = "anti_analysis_scan"
+
+
+def _scan_tool() -> str:
+    """The tool the pack's shipped step of :data:`SCAN_RENDERER` calls: the one name.
+
+    The name the pass's entries are recorded under, and that its declaration
+    (``builtin_declarations._PACK_TOOLS``) names, read from the shipped step
+    list rather than written down a second time.
+    """
+    from maljan.core.pack_steps import shipped_tools_of
+
+    (tool,) = shipped_tools_of(SCAN_RENDERER)
+    return tool
+
+
+# The pack's step name for the pass, the name its entries are recorded under.
+SCAN_TOOL = _scan_tool()
 # The kind its entries are declared under.
 SCAN_KIND = "anti_analysis_scan"
 

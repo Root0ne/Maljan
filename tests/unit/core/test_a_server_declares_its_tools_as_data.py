@@ -690,16 +690,16 @@ def test_radare2_and_ghidra_record_their_own_blocks() -> None:
 
 def test_the_provider_blocks_are_one_table() -> None:
     from maljan.core.settings_overrides import declaration_blocks
-    from maljan.core.tool_declarations import PROVIDER_BLOCKS, block_at
+    from maljan.core.tool_declarations import block_at, provider_blocks
 
     settings = Settings()
     blocks = declaration_blocks(settings)
-    for source, path in PROVIDER_BLOCKS.items():
+    for source, path in provider_blocks().items():
         assert blocks[source] == path
         assert isinstance(block_at(settings, path), MCPServerConfig)
     d = ToolDeclarations.from_settings(settings)
     assert {str(x.source) for x in d.sources() if x.source.kind == "provider"} >= set(
-        PROVIDER_BLOCKS
+        provider_blocks()
     )
 
 

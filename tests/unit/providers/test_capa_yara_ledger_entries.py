@@ -96,3 +96,22 @@ class TestReachesTheReport:
     def test_no_evidence_leaves_the_static_block_empty(self):
         report = _builder([]).build_deterministic()
         assert report.static is None
+
+
+class TestALegacyBundleIsReadUnderItsProvidersOwnSource:
+    """The legacy rule fields name the tools of the source that built the bundle, not a default."""
+
+    def test_the_built_in_provider_gets_its_declared_tool_names(self) -> None:
+        bundle = _bundle(capa_rules=[_CAPA_ROW], yara_matches=[_YARA_HIT])
+        tools = {answer.kind: answer.tool for answer in bundle.answers("provider:capa_yara")}
+        assert tools == {"capability_rules": "capa", "signature_rules": "yara_scan"}
+
+    def test_a_source_that_declares_no_tool_of_the_kind_gets_no_answer_of_it(self) -> None:
+        bundle = _bundle(capa_rules=[_CAPA_ROW], yara_matches=[_YARA_HIT])
+        assert bundle.answers("provider:invented") == ()
+
+    def test_the_source_is_required(self) -> None:
+        import inspect
+
+        parameter = inspect.signature(StaticEvidenceBundle.answers).parameters["source"]
+        assert parameter.default is inspect.Parameter.empty

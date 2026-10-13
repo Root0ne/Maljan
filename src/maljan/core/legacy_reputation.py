@@ -3,7 +3,7 @@
 LEGACY MODULE. Nothing new reads an answer here: a reputation answer is read
 once, through its tool's declared paths, into the record of
 ``core.reputation`` when its entry is written, and every consumer reads that
-record. Two things written before then are read here, and only they:
+record. Three things written before then are read here, and only they:
 
 * a facts record stored on an entry while the built-in lookups declared the
   kinds ``file_reputation`` and ``hash_reputation`` (one kind, ``reputation``,
@@ -11,7 +11,11 @@ record. Two things written before then are read here, and only they:
 * a report stored before reports carried the reputation records
   (``MalwareReport.reputation`` absent): its reputation line is read from the
   rows of the section its lookups were drawn in, as the Markdown renderer
-  always read it, so a stored run re-renders byte for byte.
+  always read it, so a stored run re-renders byte for byte;
+* a stored report whose network rows the network extractor seeded with a
+  reputation permalink under the one lookup service's own key: post-verdict
+  enrichment still keeps that key when it replaces the record
+  (``enrichment.orchestrator``), as it always did.
 
 The console keeps its own legacy reader for the same stored reports
 (``apps/web/src/components/analysis/reputationLegacy.ts``).
@@ -24,6 +28,10 @@ from collections.abc import Mapping
 
 # The kinds the built-in reputation lookups declared before ``reputation``.
 STORED_REPUTATION_KINDS: tuple[str, ...] = ("file_reputation", "hash_reputation")
+
+# The permalink key the network extractor seeded a stored row's reputation
+# with, before a record's link was the neutral ``link`` field.
+STORED_REPUTATION_LINK_KEYS: tuple[str, ...] = ("virustotal_url",)
 
 
 def _first_match(pattern: str, text: str) -> str:

@@ -538,6 +538,28 @@ def _strings(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
 # The rule tables' titles: ``{tool}`` is the rule tool's declared display name.
 RULE_MATCHES_TITLE = "{tool} rule matches"
 CAPABILITIES_TITLE = "{tool} capabilities"
+# The rule-match tables' section keys, by the declared kind whose rows each
+# holds (stored keys, kept for stored-run byte identity).
+RULE_TABLE_OF_KIND: dict[str, str] = {
+    "event_rules": "sigma_matches",
+    "signature_rules": "yara_matches",
+}
+
+
+def titled_tool(title: Any, template: str) -> str:
+    """The tool name a rule table's ``title`` gives in ``template``, ``""`` for another title.
+
+    A rule table is titled by the declared display name of the tool whose
+    rows it holds, whichever tool of the kind that is; every label printed
+    for the table's rows is read back from its title, so a tool swapped in
+    for a shipped one is named as itself (a stored report's title is read the
+    same way).
+    """
+    text = str(title or "")
+    prefix, _, suffix = template.partition("{tool}")
+    if len(text) > len(prefix) + len(suffix) and text.startswith(prefix) and text.endswith(suffix):
+        return text[len(prefix) : len(text) - len(suffix)]
+    return ""
 
 
 def _rule_rows(entry: LedgerEntry, data: dict[str, Any], key: str) -> Any:
@@ -572,7 +594,7 @@ def _yara(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     if not isinstance(matches, list) or not matches:
         return
     table = acc.get(
-        "yara_matches",
+        RULE_TABLE_OF_KIND["signature_rules"],
         RULE_MATCHES_TITLE.format(tool=tool_kinds.display_name(entry)),
         "table",
         columns=["Rule", "Tags", "Where"],
@@ -596,7 +618,7 @@ def _sigma(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     if not isinstance(matches, list) or not matches:
         return
     table = acc.get(
-        "sigma_matches",
+        RULE_TABLE_OF_KIND["event_rules"],
         RULE_MATCHES_TITLE.format(tool=tool_kinds.display_name(entry)),
         "table",
         columns=["Rule", "Level", "Technique", "Matched fields"],

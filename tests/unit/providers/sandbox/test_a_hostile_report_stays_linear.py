@@ -77,7 +77,9 @@ class TestTheTriageReader:
 
         def run(subject: tuple[dict[str, Any], dict[str, Any]]) -> Any:
             overview, task = subject
-            return triage_overview_to_sandbox_report(overview, task_reports={"t": task})
+            return triage_overview_to_sandbox_report(
+                overview, provider="triage", source_format="triage", task_reports={"t": task}
+            )
 
         _linear(make, run, 2_000)
 
@@ -87,7 +89,9 @@ class TestTheTriageReader:
             return {f"t{i}": {"extracted": rows, "signatures": rows} for i in range(10)}
 
         def run(tasks: dict[str, dict[str, Any]]) -> Any:
-            return triage_overview_to_sandbox_report({"extracted": []}, task_reports=tasks)
+            return triage_overview_to_sandbox_report(
+                {"extracted": []}, provider="triage", source_format="triage", task_reports=tasks
+            )
 
         _linear(make, run, 2_000)
 
@@ -105,13 +109,17 @@ class TestTheDocument:
             }
 
         def run(raw: dict[str, Any]) -> Any:
-            return sandbox_document(cape_report_to_sandbox_report(raw, provider="x"))
+            return sandbox_document(
+                cape_report_to_sandbox_report(raw, provider="x", source_format="cape2")
+            )
 
         _linear(make, run, 5_000)
 
     def test_deep_nesting_costs_no_stack(self) -> None:
         raw = {"behavior": {"processes": [], "enhanced": _deep(200_000)}, "CAPE": _deep(200_000)}
-        document = sandbox_document(cape_report_to_sandbox_report(raw, provider="x"))
+        document = sandbox_document(
+            cape_report_to_sandbox_report(raw, provider="x", source_format="cape2")
+        )
         assert document["extracted"] is raw["CAPE"]
         assert stored_place(raw, "extracted") is raw["CAPE"]
 
@@ -120,7 +128,9 @@ class TestTheDocument:
             return {"blob": "A" * (n * 1_000), "behavior": {"processes": []}}
 
         def run(raw: dict[str, Any]) -> Any:
-            return sandbox_document(cape_report_to_sandbox_report(raw, provider="x"))
+            return sandbox_document(
+                cape_report_to_sandbox_report(raw, provider="x", source_format="cape2")
+            )
 
         _linear(make, run, 1_000)
 
@@ -232,7 +242,9 @@ class TestEachRequestSFieldsAreHeldOnce:
     def test_many_questions_times_many_keys_costs_linear_time(self) -> None:
         _linear(
             _questions_and_keys,
-            lambda task: triage_overview_to_sandbox_report({}, task_reports={"t": task}),
+            lambda task: triage_overview_to_sandbox_report(
+                {}, provider="triage", source_format="triage", task_reports={"t": task}
+            ),
             200,
         )
 
@@ -242,7 +254,9 @@ class TestEachRequestSFieldsAreHeldOnce:
         body = json.dumps(_questions_and_keys(1_500))
         parsed_bytes, task = _held(lambda: json.loads(body))
         held, report = _held(
-            lambda: triage_overview_to_sandbox_report({}, task_reports={"t": task})
+            lambda: triage_overview_to_sandbox_report(
+                {}, provider="triage", source_format="triage", task_reports={"t": task}
+            )
         )
         assert len(sandbox_document(report)["network"]["dns"]) == 1_500
         assert held <= 2 * parsed_bytes, (held, parsed_bytes)
@@ -277,7 +291,9 @@ class TestABlockIsHeldOnceByReference:
         self._check(
             {"foo": list(range(self.N))},
             lambda task: sandbox_document(
-                triage_overview_to_sandbox_report({}, task_reports={"t": task})
+                triage_overview_to_sandbox_report(
+                    {}, provider="triage", source_format="triage", task_reports={"t": task}
+                )
             ),
         )
 
@@ -290,7 +306,11 @@ class TestTheDocumentWritesOutLinearly:
 
         task = _questions_and_keys(3_000)
         body = json.dumps(task)
-        document = sandbox_document(triage_overview_to_sandbox_report({}, task_reports={"t": task}))
+        document = sandbox_document(
+            triage_overview_to_sandbox_report(
+                {}, provider="triage", source_format="triage", task_reports={"t": task}
+            )
+        )
         assert len(json.dumps(document)) <= 3 * len(body)
 
     def test_many_answers_times_many_questions(self) -> None:
@@ -303,7 +323,9 @@ class TestTheDocumentWritesOutLinearly:
         }
         task = {"network": {"requests": [request]}}
         body = json.dumps(task)
-        report = triage_overview_to_sandbox_report({}, task_reports={"t": task})
+        report = triage_overview_to_sandbox_report(
+            {}, provider="triage", source_format="triage", task_reports={"t": task}
+        )
         document = sandbox_document(report)
         assert len(json.dumps(document)) <= 3 * len(body)
         # The first question's row carries the answers; each later one names it.
@@ -340,7 +362,9 @@ class TestManyQuestionsTimesManyAnswers:
         body = json.dumps(task)
         parsed_bytes, parsed = _held(lambda: json.loads(body))
         document = sandbox_document(
-            triage_overview_to_sandbox_report({}, task_reports={"t": parsed})
+            triage_overview_to_sandbox_report(
+                {}, provider="triage", source_format="triage", task_reports={"t": parsed}
+            )
         )
         held, network = _held(lambda: network_from_sandbox_report(document))
         assert network is not None
@@ -373,7 +397,7 @@ class TestEveryKindLosesItsLinkKeysLinearly:
         _linear(
             self._rows,
             lambda payload: sandbox_document(
-                cape_report_to_sandbox_report(payload, provider="upload")
+                cape_report_to_sandbox_report(payload, provider="upload", source_format="cape2")
             ),
             2_000,
         )

@@ -17,6 +17,7 @@ from maljan.enrichment.declared import (
     is_malicious,
 )
 from maljan.enrichment.orchestrator import (
+    _carry_seeded_context,
     _has_successful_rep,
     _is_public_ip,
     enrich_malware_report,
@@ -225,6 +226,47 @@ class TestReputationHelpers:
         annotate_age(fresh, vt)
         assert fresh.get("stale") is None
         assert fresh["age_days"] >= 0
+
+
+class TestTheEarlierRecordsContextIsKept:
+    """A new record keeps the earlier record's sandbox context, and its link with its source."""
+
+    def test_the_sandbox_context_is_kept(self) -> None:
+        prev = {"hostname": "h", "contacted_ports": [443]}
+        rep: dict[str, Any] = {"source": "anylookup", "malicious": 0}
+        _carry_seeded_context(prev, rep)
+        assert rep == {"source": "anylookup", "malicious": 0, **prev}
+
+    def test_a_link_moves_together_with_its_source(self) -> None:
+        prev = {"source": "firstlookup", "link": "https://lookup.example/x"}
+        rep: dict[str, Any] = {"source": "anylookup", "malicious": 0}
+        _carry_seeded_context(prev, rep)
+        assert rep["link"] == "https://lookup.example/x"
+        assert rep["link_source"] == "firstlookup"
+        assert rep["source"] == "anylookup"
+        # Carried again, it keeps the source that gave it, not the record's.
+        later: dict[str, Any] = {"source": "thirdlookup"}
+        _carry_seeded_context(rep, later)
+        assert later["link_source"] == "firstlookup"
+
+    def test_a_link_with_no_source_is_not_carried(self) -> None:
+        rep: dict[str, Any] = {"source": "anylookup"}
+        _carry_seeded_context({"link": "https://lookup.example/x", "hostname": "h"}, rep)
+        assert "link" not in rep and "link_source" not in rep
+        assert rep["hostname"] == "h"
+
+    def test_a_stored_rows_legacy_permalink_key_is_still_kept(self) -> None:
+        from maljan.core.legacy_reputation import STORED_REPUTATION_LINK_KEYS
+
+        prev = {key: f"https://stored.example/{key}" for key in STORED_REPUTATION_LINK_KEYS}
+        rep: dict[str, Any] = {"source": "anylookup"}
+        _carry_seeded_context(prev, rep)
+        assert all(rep[key] == prev[key] for key in STORED_REPUTATION_LINK_KEYS)
+
+    def test_a_field_of_the_new_record_is_never_overwritten(self) -> None:
+        rep: dict[str, Any] = {"source": "anylookup", "link": "https://new.example/"}
+        _carry_seeded_context({"link": "https://old.example/"}, rep)
+        assert rep["link"] == "https://new.example/"
 
 
 class TestSignalQualityFeedback:

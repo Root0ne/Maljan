@@ -29,14 +29,25 @@ _NAMES_HELD: list[object] = [None, frozenset()]
 
 
 def _declare(name: str, cls: type) -> None:
-    """Read the provider's own declaration of its tools (its class's ``declaration`` hook).
+    """Read the provider's own declaration of its tools: its settings block, else its hook.
 
     Under ``provider:<name>``, the source its tools are recorded under. A
-    class whose hook answers ``None`` declares nothing, and a built-in whose
-    block is ``core.tool_declarations.PROVIDER_BLOCKS`` keeps that block.
+    class that names a ``declaration_block`` (a dotted settings path holding a
+    server block) joins the provider blocks and is read there as the built-ins
+    are (``core.tool_declarations.provider_blocks``); a class whose
+    ``declaration`` hook answers ``None`` declares nothing, and a provider
+    whose block is one of the provider blocks keeps that block. A block
+    path registration refuses (no server block in the settings, or another
+    source's block) raises here, with the reason.
     """
-    from maljan.core.tool_declarations import register_provider_declaration
+    from maljan.core.tool_declarations import (
+        register_provider_block,
+        register_provider_declaration,
+    )
 
+    block = str(getattr(cls, "declaration_block", "") or "")
+    if block:
+        register_provider_block(f"provider:{name}", block)
     hook = getattr(cls, "declaration", None)
     if callable(hook):
         register_provider_declaration(f"provider:{name}", hook)
@@ -48,9 +59,11 @@ def register_static_provider(name: str):  # type: ignore[no-untyped-def]
             if name in _STATIC_REGISTRY:
                 logger.debug("Static provider '%s' re-registered (overwriting).", name)
             cls.id = name  # type: ignore[attr-defined]
+            # Declared first: a block registration refuses is raised before
+            # the provider is registered, so none is half there.
+            _declare(name, cls)
             _STATIC_REGISTRY[name] = cls
             _VERSION[0] += 1
-            _declare(name, cls)
         return cls
 
     return decorator
@@ -62,9 +75,11 @@ def register_sandbox_provider(name: str):  # type: ignore[no-untyped-def]
             if name in _SANDBOX_REGISTRY:
                 logger.debug("Sandbox provider '%s' re-registered (overwriting).", name)
             cls.id = name  # type: ignore[attr-defined]
+            # Declared first: a block registration refuses is raised before
+            # the provider is registered, so none is half there.
+            _declare(name, cls)
             _SANDBOX_REGISTRY[name] = cls
             _VERSION[0] += 1
-            _declare(name, cls)
         return cls
 
     return decorator
@@ -112,13 +127,14 @@ def _build(registry: dict[str, type], name: str, cfg: Any, kind: str) -> Any:
 
 def forget_static_provider(name: str) -> None:
     """Take the static provider registered as ``name`` out of the registry (a runtime one)."""
-    from maljan.core.tool_declarations import forget_provider_declaration
+    from maljan.core.tool_declarations import forget_provider_block, forget_provider_declaration
 
     with _LOCK:
         if _STATIC_REGISTRY.pop(name, None) is not None:
             _VERSION[0] += 1
             if name not in _SANDBOX_REGISTRY:
                 forget_provider_declaration(f"provider:{name}")
+                forget_provider_block(f"provider:{name}")
 
 
 def registered_variable_names() -> frozenset[str]:
@@ -166,13 +182,14 @@ def sandbox_provider_class(name: str) -> type[SandboxProvider]:
 
 def _block_enabled(cfg: Settings, source: str) -> bool:
     """Whether the server block a provider's declaration names is switched on."""
-    from maljan.core.tool_declarations import PROVIDER_BLOCKS, block_at
+    from maljan.core.tool_declarations import provider_block_at, provider_blocks
 
     kind, _, key = source.partition(":")
+    blocks = provider_blocks()
     if kind == "mcp":
         block: Any = cfg.mcp.servers.get(key)
-    elif source in PROVIDER_BLOCKS:
-        block = block_at(cfg, PROVIDER_BLOCKS[source])
+    elif source in blocks:
+        block = provider_block_at(cfg, source, blocks[source])
     else:
         return True
     return block is None or bool(getattr(block, "enabled", True))

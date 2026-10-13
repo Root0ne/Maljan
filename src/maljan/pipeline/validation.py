@@ -10062,6 +10062,16 @@ def _retired_release(technique_id: str) -> str | None:
 
 
 UNSUPPORTED_MALWARE_CODE = "verdict.unsupported_malware"
+# The judge's question for it; ``{listed}`` is the first entries the run
+# recorded. The kinds of entry it names are the kinds of tool, whichever tools
+# of them the run attached.
+UNSUPPORTED_MALWARE_QUESTION = (
+    "This verdict is Malware and no analyst made a single claim about the "
+    "sample, so nothing examined it. Malware is a finding and needs evidence: "
+    "cite the ledger entries that establish it — a reputation entry, a signature or "
+    "capability rule hit, an event rule match — or return Suspicious and say in the rationale "
+    "that the run was inconclusive. The entries this run recorded include {listed}."
+)
 
 
 def unsupported_malware_violations(
@@ -10095,13 +10105,7 @@ def unsupported_malware_violations(
     return [
         Violation(
             code=UNSUPPORTED_MALWARE_CODE,
-            message=(
-                "This verdict is Malware and no analyst made a single claim about the "
-                "sample, so nothing examined it. Malware is a finding and needs evidence: "
-                "cite the ledger entries that establish it — a reputation entry, a YARA or "
-                "capa hit, a Sigma match — or return Suspicious and say in the rationale "
-                f"that the run was inconclusive. The entries this run recorded include {listed}."
-            ),
+            message=UNSUPPORTED_MALWARE_QUESTION.format(listed=listed),
             path="objects",
         )
     ]

@@ -1603,24 +1603,147 @@ def _pack_left_out(entries: list[Any], container: ServiceContainer) -> dict[str,
     }
 
 
-def _analysis_server_environ(container: ServiceContainer) -> dict[str, str]:
-    """This process's environment with the analysis server's own ``env`` map over it.
+# The renderers of the pack's decoded-strings step and of its UPX carve. The
+# in-process decoder reads the environment of the server declaring the
+# decoder's tool (``FlossSettings.environ``); the carve writes where the
+# server declaring the unpack tool's kind reads (``PackInputs.carve_environ``).
+_DECODER_RENDERER = "emulated_strings"
+_CARVE_RENDERER = "unpacked_image"
 
-    What the pack's FLOSS step reads ``MALJAN_FLOSS_PATH`` and the staging base
-    from, so an operator who named the build or the base in the server's
-    settings gets the same build and the same directory from the pack as from
-    the tool. Never raises: a server entry that cannot be read leaves this
-    process's environment.
+
+def _pack_step_of(renderer: str, steps: Sequence[Any]) -> Any:
+    """The step of ``renderer`` in ``steps``, else its shipped declaration, else ``None``."""
+    from maljan.core.pack_steps import default_steps
+
+    def _of(held: Sequence[Any]) -> Any:
+        return next((s for s in held if getattr(s, "renderer", "") == renderer), None)
+
+    return _of(steps) or _of(default_steps())
+
+
+def _declared_kind(called: str) -> str:
+    """The kind the platform ships for a step's ``called`` tool, ``""`` for none."""
+    from maljan.core.declared_reading import shipped_by_name
+
+    facts = shipped_by_name().get(called)
+    return str(getattr(facts, "kind", "") or "")
+
+
+def _declaring_server_key(servers: Mapping[str, Any], called: str, *, purpose: str) -> str:
+    """The key of the server declaring a step's ``called`` tool or its kind, ``""`` for none.
+
+    The in-process step stands in for that server's tool whether the server
+    is switched on or not, so a switched-off server still lends its ``env``.
+    Among several, enabled servers come first: those declaring ``called`` by
+    name, then those declaring a tool of the same declared kind, each in
+    ``mcp.servers`` order; switched-off servers follow in the same order, a
+    last resort. When more than one qualifies, or the one read is switched
+    off, the choice is logged at info (the node resolves each purpose once
+    per run).
+    """
+    kind = _declared_kind(called)
+    by_name: dict[bool, list[str]] = {True: [], False: []}
+    by_kind: dict[bool, list[str]] = {True: [], False: []}
+    for key, server in servers.items():
+        enabled = bool(getattr(server, "enabled", True))
+        facts = getattr(server, "tool_facts", None) or {}
+        if called in facts:
+            by_name[enabled].append(str(key))
+        elif kind and any(getattr(f, "kind", None) == kind for f in facts.values()):
+            by_kind[enabled].append(str(key))
+    qualified = by_name[True] + by_kind[True] + by_name[False] + by_kind[False]
+    if not qualified:
+        return ""
+    chosen = qualified[0]
+    switched_off = chosen in by_name[False] or chosen in by_kind[False]
+    if len(qualified) > 1 or switched_off:
+        declared = repr(called)
+        if by_kind[True] or by_kind[False]:
+            declared = f"{called!r} or its kind {kind!r}"
+        also = ""
+        if len(qualified) > 1:
+            also = f"; {', '.join(repr(k) for k in qualified[1:])} also declare {declared}"
+        off = " (switched off; its env is still read)" if switched_off else ""
+        logger.info("triage pack: %s reads server %r%s%s.", purpose, chosen, off, also)
+    return chosen
+
+
+def _decoder_server_key(servers: Mapping[str, Any], steps: Sequence[Any]) -> str:
+    """The key of the server the pack's decoded-strings step declares, ``""`` for none.
+
+    The step's own ``server`` when it is enabled, else the server declaring
+    the tool the step calls (:func:`_declaring_server_key`): the
+    server whose tool the in-process step stands in for. With the step left
+    out of ``steps`` (switched off), its shipped declaration is read.
+    """
+    step = _pack_step_of(_DECODER_RENDERER, steps)
+    if step is None:
+        return ""
+    if step.server:
+        named = servers.get(step.server)
+        if named is not None and getattr(named, "enabled", True):
+            return str(step.server)
+    return _declaring_server_key(servers, step.called, purpose="the decoder")
+
+
+def _carve_server_key(servers: Mapping[str, Any]) -> str:
+    """The key of the server whose file tools read what the pack's UPX carve writes.
+
+    The carve is the platform's own step, so its shipped declaration names
+    the tool it stands in for; the server declaring that tool or its kind
+    (:func:`_declaring_server_key`) is the one whose staging base the
+    carve writes under. Independent of the decoded-strings step: an operator
+    who moves that step to another server leaves the carve where it was.
+    """
+    step = _pack_step_of(_CARVE_RENDERER, ())
+    if step is None:
+        return ""
+    return _declaring_server_key(servers, step.called, purpose="the unpack carve")
+
+
+def _server_environ(
+    container: ServiceContainer, pick: Callable[[Mapping[str, Any]], str], what: str
+) -> dict[str, str]:
+    """This process's environment with the picked server's own ``env`` map over it.
+
+    Never raises: a server entry that cannot be read, or no server picked,
+    leaves this process's environment, and is logged.
     """
     environ = dict(os.environ)
     try:
-        server = container.config.mcp.servers.get("analysis")
+        servers = container.config.mcp.servers
+        key = pick(servers)
+        server = servers.get(key) if key else None
         extra = dict(getattr(server, "env", None) or {})
     except Exception as exc:  # noqa: BLE001 — an unreadable entry adds nothing
-        logger.debug("triage pack: the analysis server's env could not be read (%s).", exc)
+        logger.debug("triage pack: the %s server's env could not be read (%s).", what, exc)
         return environ
+    if not key:
+        logger.debug("triage pack: no server declares the %s's tool; own env read.", what)
     environ.update({str(k): str(v) for k, v in extra.items()})
     return environ
+
+
+def _decoder_server_environ(container: ServiceContainer, steps: Sequence[Any]) -> dict[str, str]:
+    """The environment the pack's decoded-strings step reads its build path from.
+
+    The decoder step's server's own ``env`` over this process's
+    (:func:`_decoder_server_key`), so an operator who named the build in the
+    server's settings gets the same build from the pack as from the tool.
+    """
+    return _server_environ(
+        container, lambda servers: _decoder_server_key(servers, steps), "decoder"
+    )
+
+
+def _carve_server_environ(container: ServiceContainer) -> dict[str, str]:
+    """The environment the pack's UPX carve reads its staging base from.
+
+    The unpack-declaring server's own ``env`` over this process's
+    (:func:`_carve_server_key`), so the ``carved_path`` the entry gives is
+    one that server's file tools open.
+    """
+    return _server_environ(container, _carve_server_key, "unpack carve")
 
 
 def _knowledge_module() -> Any:
@@ -1688,6 +1811,7 @@ def make_triage_node(
         from maljan.core.pack_steps import effective_steps
         from maljan.providers import sandbox_tools
 
+        steps = effective_steps(getattr(cfg.triage, "steps", None) or ())
         inputs = PackInputs(
             sample_path=path,
             sha256=str(state.get("file_hash") or ""),
@@ -1705,9 +1829,10 @@ def make_triage_node(
             budget_s=float(cfg.triage.budget_seconds),
             memory_floor_bytes=int(cfg.triage.memory_floor_mb) * 1024 * 1024,
             floss=FlossSettings(
-                environ=_analysis_server_environ(container), job_id=container.job_key()
+                environ=_decoder_server_environ(container, steps), job_id=container.job_key()
             ),
-            steps=effective_steps(getattr(cfg.triage, "steps", None) or ()),
+            carve_environ=_carve_server_environ(container),
+            steps=steps,
         )
 
         def _elapsed_ms() -> int:

@@ -4704,7 +4704,9 @@ is assembled from what the run gathered rather than recomputed beside it:
   technique a deterministic rule asserted and no analyst claimed is marked in
   the ATT&CK table: "rule match only (yara `rule`, N string(s)), no analyst
   claim", the count read from the scan's answer (distinct string identifiers,
-  kept as `rule_match_strings`). The publish rule is unchanged. Such a
+  kept as `rule_match_strings`, each row with the asserting layer that matched
+  it, so any signature-rule tool's rows are named under its own label). The
+  publish rule is unchanged. Such a
   technique grounds no capability word: neither its id, its name nor its
   rule's row in the evidence counts toward `narrative.ungrounded_capability`.
   The report writer is told so per technique — every section's list of

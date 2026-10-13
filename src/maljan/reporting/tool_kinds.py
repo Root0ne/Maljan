@@ -114,10 +114,10 @@ def declared_facts(entry: Any) -> ToolFacts | None:
 def _builtin_sources() -> frozenset[SourceRef]:
     """The sources the platform ships a declaration for, read once."""
     from maljan.core.builtin_declarations import builtin_server_names, in_process_declarations
-    from maljan.core.tool_declarations import PROVIDER_BLOCKS
+    from maljan.core.tool_declarations import shipped_provider_blocks
 
     refs = {SourceRef("mcp", key) for key in builtin_server_names()}
-    refs |= {SourceRef.parse(text) for text in PROVIDER_BLOCKS}
+    refs |= {SourceRef.parse(text) for text in shipped_provider_blocks()}
     refs |= set(in_process_declarations())
     return frozenset(refs)
 

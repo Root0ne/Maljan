@@ -20,7 +20,9 @@ before any analyst starts. Each step is declared here as a :class:`PackStep`:
 * ``formats``: the routed formats the step runs for; empty is every format.
 * ``budget_seconds``: the step's wall clock; ``None`` takes the tool's
   declared ``timeout_seconds``, else, for a long step, what is left of the
-  pack's budget.
+  pack's budget. A step of the platform's own takes one only where its
+  shipped declaration says its in-process code honours a clock
+  (``wall_clock``, which no declaration sets).
 * ``peak_mb``: the memory the step is declared to take at its peak, read
   where a step that measures none is scheduled beside others.
 * ``starts_after`` and ``beside``: a step that may run while the pack goes on
@@ -59,6 +61,7 @@ from pydantic import (
     ConfigDict,
     Field,
     SerializerFunctionWrapHandler,
+    ValidationInfo,
     field_validator,
     model_serializer,
     model_validator,
@@ -132,8 +135,9 @@ PACK_RENDERERS: dict[str, str] = {
     "function_table": "a function index, placed in the room the rest of the pack leaves",
 }
 
-# The platform's own steps that take a wall clock of their own.
-_BUDGETED_BUILTINS = frozenset({"capa", "floss", "yara_scan"})
+# The validation context under which a step is one of the shipped list's:
+# only there may it say it takes a wall clock (``PackStep.wall_clock``).
+_SHIPPED_CONTEXT = {"shipped": True}
 
 # The renderers that read an answer through its tool's declared facts (its
 # rows, their values and places, its techniques) as well as in the shape of
@@ -170,6 +174,21 @@ class PackStep(BaseModel):
     display_name: str = ""
     enabled: bool = True
     after: str = ""
+    # Whether the platform's own in-process step honours ``budget_seconds``:
+    # said by the shipped step itself, never dumped and never declared, since
+    # it is what the in-process code does, not a setting.
+    wall_clock: bool = Field(default=False, exclude=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _wall_clock_is_the_platforms(cls, data: Any, info: ValidationInfo) -> Any:
+        shipped = isinstance(info.context, Mapping) and bool(info.context.get("shipped"))
+        if isinstance(data, Mapping) and "wall_clock" in data and not shipped:
+            raise ValueError(
+                "wall_clock is what a step of the platform's own does, not something a "
+                "declaration sets; give the step budget_seconds instead"
+            )
+        return data
 
     @field_validator("id")
     @classmethod
@@ -267,16 +286,17 @@ def _builtin_problems(step: PackStep) -> list[str]:
             f"step {step.id!r} is one of the platform's own and computes its own arguments; "
             "to call the tool with arguments of your own, name the server that serves it"
         )
-    if step.budget_seconds is not None and step.id not in _BUDGETED_BUILTINS:
+    if step.budget_seconds is not None and not (shipped is not None and shipped.wall_clock):
         problems.append(
             f"step {step.id!r} runs in-process with no wall clock of its own to set; "
-            "budget_seconds applies to " + ", ".join(sorted(_BUDGETED_BUILTINS))
+            "budget_seconds applies to "
+            + ", ".join(sorted(own.id for own in default_steps() if own.wall_clock))
         )
     return problems
 
 
 def _o(**fields: Any) -> PackStep:
-    return PackStep(**fields)
+    return PackStep.model_validate(fields, context=_SHIPPED_CONTEXT)
 
 
 def _shipped() -> tuple[PackStep, ...]:
@@ -314,8 +334,8 @@ def _shipped() -> tuple[PackStep, ...]:
         ),
         _o(id="strings", renderer="string_runs", display_name="strings"),
         _o(id="iocs_from_file", renderer="file_iocs", display_name="iocs"),
-        _o(id="yara_scan", renderer="signature_rules", display_name="yara"),
-        _o(id="capa", renderer="capability_rules", display_name="capa"),
+        _o(id="yara_scan", renderer="signature_rules", display_name="yara", wall_clock=True),
+        _o(id="capa", renderer="capability_rules", display_name="capa", wall_clock=True),
         _o(id="sigma_match_sandbox", renderer="event_rules", display_name="sigma"),
         _o(id="api_capability", renderer="api_catalogue", display_name="api catalogue"),
         _o(id="lolbin_lookup", renderer="command_match", display_name="lolbin"),
@@ -331,6 +351,7 @@ def _shipped() -> tuple[PackStep, ...]:
             peak_mb=FLOSS_ADDRESS_SPACE_BYTES // mib,
             renderer="emulated_strings",
             display_name="decoded strings",
+            wall_clock=True,
         ),
         _o(
             id="resolve_api_hashes",

@@ -195,18 +195,27 @@ _API_CATALOGUE = "evidence_summary.catalogue_associations"
 
 
 def yara_rule_strings(ledger: Sequence[Any] | None) -> dict[str, list[dict[str, Any]]]:
-    """``{technique_id: [{"rule": name, "strings": n}, ...]}`` for the YARA rules that assert one.
+    """``{technique_id: [{"rule": name, "strings": n, "source": layer}, ...]}`` for the
+    signature rules that assert one.
 
     ``strings`` is how many of the rule's own strings matched — distinct
     identifiers, not offsets — which is what a reader needs to weigh a
     technique a rule alone put in the report: one string in a large file is a
-    different finding from a rule whose whole condition matched. Read from the
+    different finding from a rule whose whole condition matched. ``source`` is
+    the name the corroboration row gives the asserting tool
+    (:func:`asserting_source`), so each row is read with the layer that matched
+    it; a row of an entry that asserts no technique carries none and is read
+    under the shipped signature-rule label, as a stored row is. Read from the
     scan's structured answer as the tool wrote it.
     """
     found: dict[str, list[dict[str, Any]]] = {}
     for entry in ledger or []:
         if not reads_as(entry, _SIGNATURE_RULES):
             continue
+        # An entry whose declaration asserts no technique gives no layer: its
+        # rows are read as a stored row is, under the shipped signature-rule
+        # label (``corroboration._rule_row_layers``), as they always were.
+        layer = asserting_source(entry)
         structured = getattr(entry, "structured", None)
         matches = structured.get("matches") if isinstance(structured, dict) else None
         for match in matches or []:
@@ -221,7 +230,12 @@ def yara_rule_strings(ledger: Sequence[Any] | None) -> dict[str, list[dict[str, 
             } - {""}
             for tid in technique_ids_in(meta.get("technique_id")):
                 rows = found.setdefault(tid, [])
-                row = {"rule": str(match.get("rule") or ""), "strings": len(identifiers)}
+                row: dict[str, Any] = {
+                    "rule": str(match.get("rule") or ""),
+                    "strings": len(identifiers),
+                }
+                if layer:
+                    row["source"] = layer
                 if row not in rows:
                     rows.append(row)
     return found
@@ -313,8 +327,10 @@ def invalid_technique_ids(ledger: Sequence[Any] | None) -> set[str]:
 
 
 def catalogue_associations(ledger: Sequence[Any] | None) -> dict[str, list[str]]:
-    """``{technique_id: ["api_capability"]}`` for the rules the import set cleared.
+    """``{technique_id: [tool]}`` for the rules the import set cleared.
 
+    ``tool`` is the catalogue tool's own name, as the entry that associated
+    the technique first recorded it (the pack's ``api_capability``).
     Reference, not evidence: the table says these APIs are listed under the
     technique, and a reader may weigh that; nothing counts it as a source.
     """
@@ -322,8 +338,9 @@ def catalogue_associations(ledger: Sequence[Any] | None) -> dict[str, list[str]]
     for entry in ledger or []:
         if not reads_as(entry, _API_CATALOGUE):
             continue
+        tool = bare_name(getattr(entry, "tool", ""))
         for hit in api_capability_hits(getattr(entry, "structured", None)):
-            out.setdefault(hit["technique_id"], ["api_capability"])
+            out.setdefault(hit["technique_id"], [tool])
     return out
 
 

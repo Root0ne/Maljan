@@ -157,11 +157,13 @@ class StaticEvidenceBundle:
     capa_rules: list[dict[str, Any]] = field(default_factory=list)
     yara_matches: list[dict[str, Any]] = field(default_factory=list)
 
-    def answers(self, source: str = "provider:capa_yara") -> tuple[EvidenceAnswer, ...]:
+    def answers(self, source: str) -> tuple[EvidenceAnswer, ...]:
         """Every answer of the bundle: ``entries``, then the legacy rule fields as answers.
 
         A legacy field becomes the answer of its kind under the tool
-        ``source``'s declaration names for that kind.
+        ``source``'s declaration names for that kind; ``source`` is the
+        declaration source of the provider that built the bundle
+        (``StaticProvider.declaration_source``), never assumed.
         """
         legacy: list[EvidenceAnswer] = []
         for kind, payload in (
@@ -375,6 +377,10 @@ class StaticProvider(ABC):
     # not secrets, which published text keeps whole (``pipeline.events``); read
     # from the registered class, never from a run's settings.
     variable_names: ClassVar[tuple[str, ...]] = ()
+    # The dotted settings path of a server block of this provider's own, whose
+    # declaration its tools are read by as a built-in's block is
+    # (``core.tool_declarations.provider_blocks``); empty for none.
+    declaration_block: ClassVar[str] = ""
     # What this provider's anti-analysis scan checks, as the triage pack's line
     # says it in short; empty names the scan alone.
     scan_checks_short: ClassVar[str] = ""
@@ -392,7 +398,7 @@ class StaticProvider(ABC):
         under ``provider:<id>`` (``core.tool_declarations``) wherever a
         built-in's block is read, so a provider registered at runtime declares
         its tools the way the built-ins do. Read for a provider whose block is
-        not one of ``PROVIDER_BLOCKS``; a provider that drives a server of the
+        not a provider block (``provider_blocks``); a provider that drives a server of the
         registry (``declaration_source`` ``mcp:<key>``) is declared by that
         server.
         """
@@ -706,6 +712,8 @@ class SandboxProvider(ABC):
     # The non-secret environment variable names this provider's own sentences
     # name, kept whole in published text (as ``StaticProvider.variable_names``).
     variable_names: ClassVar[tuple[str, ...]] = ()
+    # A server block of this provider's own (as ``StaticProvider.declaration_block``).
+    declaration_block: ClassVar[str] = ""
 
     @classmethod
     @abstractmethod
@@ -720,7 +728,7 @@ class SandboxProvider(ABC):
         under ``provider:<id>`` (``core.tool_declarations``) wherever a
         built-in's block is read, so a provider registered at runtime declares
         its tools the way the built-ins do. Read for a provider whose block is
-        not one of ``PROVIDER_BLOCKS``; a provider that drives a server of the
+        not a provider block (``provider_blocks``); a provider that drives a server of the
         registry (``declaration_source`` ``mcp:<key>``) is declared by that
         server.
         """

@@ -58,20 +58,46 @@ def _has_successful_rep(obj: dict[str, Any]) -> bool:
     return isinstance(rep, dict) and bool(rep.get("source"))
 
 
-def _carry_cape_context(prev: Any, rep: dict[str, Any]) -> None:
-    """Preserve sandbox-sourced context when live enrichment replaces reputation.
+# The fields of a row's earlier reputation a new record keeps where it has
+# none of its own: the sandbox context of an IP. A record's ``link`` (the
+# neutral field a source declares its permalink under, in its ``record``) is
+# its own source's, so it is carried only together with that source, as
+# ``link`` and ``link_source`` (:func:`_carry_seeded_context`). A stored row
+# seeded before ``link`` holds its permalink under the legacy key
+# (``core.legacy_reputation``), whose key names its service, kept as it is.
+CARRIED_REPUTATION_FIELDS: tuple[str, ...] = ("hostname", "contacted_ports")
+LINK_FIELD = "link"
+LINK_SOURCE_FIELD = "link_source"
 
-    The network extractor seeds ``reputation`` with a deterministic
-    ``virustotal_url`` permalink (plus ``hostname`` / ``contacted_ports`` for
-    IPs) straight from the sandbox report. The live records are richer but
-    lack those keys, so fold them forward instead of clobbering them.
+
+def _carry_seeded_context(prev: Any, rep: dict[str, Any]) -> None:
+    """Preserve the earlier record's context when live enrichment replaces reputation.
+
+    A row's reputation may already hold, for an IP, ``hostname`` /
+    ``contacted_ports`` from the sandbox report, and a permalink (``link``).
+    The live records are richer but may lack those keys, so they are folded
+    forward instead of clobbered. A ``link`` moves only with the source that
+    gave it (the earlier record's ``link_source``, else its ``source``), into
+    ``link`` and ``link_source``, so it is never read as the new record's
+    source's; a link with no source is not carried, and that is logged.
     """
+    from maljan.core.legacy_reputation import STORED_REPUTATION_LINK_KEYS
+
     if not isinstance(prev, dict):
         return
-    for key in ("virustotal_url", "hostname", "contacted_ports"):
+    for key in (*STORED_REPUTATION_LINK_KEYS, *CARRIED_REPUTATION_FIELDS):
         val = prev.get(key)
         if val is not None and rep.get(key) is None:
             rep[key] = val
+    link = prev.get(LINK_FIELD)
+    if link is None or rep.get(LINK_FIELD) is not None:
+        return
+    given_by = prev.get(LINK_SOURCE_FIELD) or prev.get("source")
+    if not given_by:
+        logger.debug("enrichment: an earlier record's link names no source; not carried.")
+        return
+    rep[LINK_FIELD] = link
+    rep[LINK_SOURCE_FIELD] = given_by
 
 
 def _is_public_ip(address: str) -> bool:
@@ -204,7 +230,7 @@ async def _first_record(
 def _keep(row: dict[str, Any], found: tuple[ReadySource, dict[str, Any]]) -> None:
     source, rep = found
     annotate_age(rep, source.source)
-    _carry_cape_context(row.get("reputation"), rep)
+    _carry_seeded_context(row.get("reputation"), rep)
     row["reputation"] = rep
     # Feed verified reputation back into the heuristic suspicion flag so an
     # enriched-malicious indicator is not stuck at is_suspicious=False.

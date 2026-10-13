@@ -1781,9 +1781,21 @@ the model is not offered the tool; with it, the first call on a sample emulates
 for up to ten minutes (the tool's declared `timeout_s`) within 4 GiB of address
 space, and later pages of the answer come from the kept result. The triage pack
 runs the same function once on every PE, reading `MALJAN_FLOSS_PATH` and
-`MALJAN_STAGING_DIR` from this process's environment with the `analysis`
-server's `env` over it. Name a build in the server's `env` and the pack and
-the tool find the same one; a `MALJAN_FLOSS_PATH` set only in the worker's own
+`MALJAN_STAGING_DIR` from this process's environment with the decoder's
+server's `env` over it. That server is the decoded-strings step's own `server`
+when it names an enabled one, else the server whose tool declarations name the
+step's tool (`floss`), else one declaring a tool of that tool's kind. The
+pack's UPX carve picks its server apart, by the same rule applied to the unpack
+tool (`unpack_upx`, kind `unpack`), and writes under that server's
+`MALJAN_STAGING_DIR`, so the `carved_path` it states is one that server's file
+tools open even when the decoded-strings step is moved to another server. The
+in-process steps run whether the server is switched on or not, so a
+switched-off server still lends its `env`; among several candidates, enabled
+servers come first (by name, then by kind, in `mcp.servers` order) and
+switched-off ones are the last resort. The run logs the choice once when
+several qualify or the one read is switched off. As shipped, both are the
+`analysis` server. Name a build in the server's `env` and the pack
+and the tool find the same one; a `MALJAN_FLOSS_PATH` set only in the worker's own
 environment reaches the pack and not the tool, whose child environment carries
 only the server's `env` and its allowed keys. Without a build the pack's entry
 says so and names the remedy.
@@ -2129,7 +2141,7 @@ own, as JSON, laid over it:
 | `tool`, `server` | what the step calls. No `server`: one of the platform's own steps, named by its shipped id. A `server`: that tool server's tool, called through the tool server registry as an agent's call is, to the path that server opens the sample at, and recorded under that server |
 | `arguments` | a server step's argument template; a string at any depth (inside objects and lists too) may hold `{sample_path}`, `{sha256}` and `{file_type}`, each filled once. None: the argument the tool declares for the `path` role takes the sample's path and the one for `hash` its sha256. The platform's own steps compute their own and refuse one |
 | `formats` | the routed formats the step runs for; empty is every format |
-| `budget_seconds` | the step's wall clock; none takes the tool's declared `timeout_seconds`, else what is left of `triage.budget_seconds`. Of the platform's own steps only `capa` (else `static.capa.timeout_seconds`), `floss` and `yara_scan` take one |
+| `budget_seconds` | the step's wall clock; none takes the tool's declared `timeout_seconds`, else what is left of `triage.budget_seconds`. Of the platform's own steps only those whose shipped declaration says their in-process code honours a clock take one: `capa` (else `static.capa.timeout_seconds`), `floss` and `yara_scan` |
 | `peak_mb` | the memory the step takes at its peak, where this worker does not measure it; only on a step that starts beside the pack or that another step runs beside |
 | `starts_after`, `beside` | a step that starts on a thread of its own right after `starts_after`, when the host has room for it beside the steps `beside` names (their peaks and its own against `triage.memory_floor_mb`); its entry keeps its place in the list, its thread is let go when its work is done, and `triage_facts.<id>` and the run summary's `triage.<id>` say `beside …` or `in turn: <why>`. Any server's tool can; of the platform's own steps only `floss` |
 | `renderer` | how its pack line shows the answer: one of the pack's renderers (`core.pack_steps.PACK_RENDERERS`). `capability_rules` reads the answer of a tool declared of kind `capability_rules` (or a step whose `kind` says so) through its declaration: each declared row that is an object and has a readable name a rule, by its `values.rule`, at its `places.addresses`, with its techniques when the tool asserts them; it is refused on a tool declared another kind or none. Every other renderer reads only the answer of the platform's own step it was written for. None: a tool of kind `capability_rules` is shown as that renderer shows it, any other by the generic line, the count of the declared rows that are objects, each by its declared `rule`, `text`, `name` or `value` (a declaration naming none of these gives the row's other declared values as `name=value`) at its first declared place |
@@ -3701,8 +3713,18 @@ registered with `register_static_provider` or `register_sandbox_provider`
 declares its own tools by answering `declaration(cfg)` with the declaration
 fields of a server block (an object or a mapping); they are read under
 `provider:<id>`, wherever a built-in provider's block is read, and switched on
-while the settings select the provider. The built-in providers' blocks
-(`static.ghidra`, `static.r2`, `sandbox.cape2.mcp`) are read as before.
+while the settings select the provider. A class whose settings hold a server
+block of its own names that block's dotted path in `declaration_block`
+instead: the block joins the provider blocks, is read, snapshotted and
+switched on and off as a built-in's is, and leaves them when the provider is
+taken out. The built-in providers' blocks (`static.ghidra`, `static.r2`,
+`sandbox.cape2.mcp`) are read as before, and no class may name another path
+for one of them. Registration refuses, with the reason, a path where the
+settings model holds no server block (a block with `tool_facts`) and a path
+that is, holds or sits inside another provider's block, shipped or registered,
+so two providers never read one block. The settings have no place for a
+third-party provider's own block yet, so such a provider declares through
+`declaration(cfg)`.
 
 **Saving.** A built-in's stored block takes the shipped value of any field it
 never set, and one the operator set, empty included, is kept. A save stores

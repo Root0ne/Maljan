@@ -447,6 +447,7 @@ class TriageReportReader(ReportReader):
         report = triage_overview_to_sandbox_report(
             payload,
             provider=provider,
+            source_format=self.id,
             task_reports=context.get("task_reports"),
             task_id=task_id,
             # A disputed lineage row names its sandbox as the matched format declares it.

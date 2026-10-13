@@ -823,6 +823,21 @@ def provider_declaration(provider: str) -> dict[str, Any]:
     return _block(_PROVIDER_BLOCKS.get(provider, {}))
 
 
+# Where each shipped provider-owned block sits in the settings, by the source
+# its declarations are read under; a provider registered at runtime adds its
+# own (``core.tool_declarations.register_provider_block``).
+_PROVIDER_BLOCK_PATHS: dict[str, str] = {
+    "provider:ghidra": "static.ghidra",
+    "provider:r2": "static.r2",
+    "provider:cape2": "sandbox.cape2.mcp",
+}
+
+
+def provider_block_paths() -> dict[str, str]:
+    """Each shipped provider-owned block's dotted settings path, by its source text."""
+    return dict(_PROVIDER_BLOCK_PATHS)
+
+
 @cache
 def shipped_variable_names() -> frozenset[str]:
     """Every non-secret environment variable name a shipped declaration names.

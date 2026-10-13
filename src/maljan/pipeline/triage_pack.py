@@ -43,9 +43,9 @@ record every reader reads (``core.reputation``).
 A PE's decoded strings come after every other tool. FLOSS runs through
 ``maljan.tools.emulated_strings`` — the function the sidecar's ``floss`` tool
 serves, with its pinned build, its wall clock and its memory limit — with the
-analysis server's ``env`` over this process's environment — a build named
-there is the one both find — and a directory inside this job's staging
-directory, so nothing is left that the job's teardown does not remove. It
+``env`` of the server whose tool the step stands in for over this process's
+environment — a build named there is the one both find — and a directory inside
+this job's staging directory, so nothing is left that the job's teardown does not remove. It
 comes after them so that every id issued before it is the id it was before
 the step existed.
 
@@ -464,7 +464,7 @@ class CapaSettings:
 class FlossSettings:
     """What the decoded-strings step runs FLOSS with.
 
-    ``environ`` is the analysis server's environment — this process's
+    ``environ`` is the decoder step's server's environment — this process's
     overlaid with the server's own ``env`` map — so ``MALJAN_FLOSS_PATH`` and
     ``MALJAN_STAGING_DIR`` mean here what they mean to the server; ``None``
     reads this process's. ``job_id`` names the staging directory the run's
@@ -504,6 +504,10 @@ class PackInputs:
     # The steps to run, in order (``core.pack_steps``); ``None`` runs the
     # shipped list.
     steps: tuple[PackStep, ...] | None = None
+    # The environment the UPX carve reads its staging base from: the server
+    # declaring the unpack tool's kind, kept apart from the decoder's server.
+    # ``None`` reads ``floss.environ``.
+    carve_environ: Mapping[str, str] | None = None
 
 
 # The one reputation call, made by the node through the tool server. It takes
@@ -1507,9 +1511,10 @@ class _Pack:
         and only when ``pe_info``'s packer signatures name UPX or a pack header
         with a true checksum byte stands where UPX writes one (renamed sections
         keep their header; a UPX-named file with none gets its ``no:``). The unpacked
-        program is written where the analysis server's ``carve_payloads``
-        writes for this job and sample, so the ``carved_path`` the answer gives
-        is one every file tool of the server reads. The pack is not run again
+        program is written under the staging base of the server declaring the
+        unpack tool's kind (``PackInputs.carve_environ``), for this job and
+        sample, so the ``carved_path`` the answer gives is one every file
+        tool of that server reads. The pack is not run again
         on it: the entry states it exists and where, and the models decide
         what to open. A run with no job directory to write in is one entry
         saying so.
@@ -1522,11 +1527,11 @@ class _Pack:
         if not settings.job_id:
             self._record_absent(upx.TOOL, args, UPX_NO_JOB)
             return
+        carve_environ = self.inputs.carve_environ
+        environ = settings.environ if carve_environ is None else carve_environ
 
         def call() -> dict[str, Any]:
-            carved = staging.open_job_directory(
-                settings.job_id, staging.CARVED_DIRECTORY, settings.environ
-            )
+            carved = staging.open_job_directory(settings.job_id, staging.CARVED_DIRECTORY, environ)
             destination = staging.private_dir(carved / _file_digest(path))
             return upx.unpack_upx(path, destination)
 

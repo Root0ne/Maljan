@@ -57,7 +57,10 @@ def _task(requests: list[dict[str, Any]]) -> dict[str, Any]:
 def _document(requests: list[dict[str, Any]]) -> dict[str, Any]:
     overview = {"sample": {"target": "s.exe", "sha256": "a" * 64}}
     report = triage_overview_to_sandbox_report(
-        overview, task_reports={"behavioral1": _task(requests)}
+        overview,
+        provider="triage",
+        source_format="triage",
+        task_reports={"behavioral1": _task(requests)},
     )
     return sandbox_document(report)
 

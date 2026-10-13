@@ -31,7 +31,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from maljan.core.declared_reading import kind_of, reads_as
+from maljan.core.declared_reading import kind_free_facts, kind_of, reads_as
 from maljan.core.undeclared_tools import (
     entry_address_arguments,
     entry_lists_a_function,
@@ -88,9 +88,27 @@ _KIND_WORDS: dict[str, tuple[str, str]] = {
     "name": ("resolved name", "resolved names"),
     "text": ("decoded text", "decoded texts"),
     "call": ("call-site fact", "call-site facts"),
-    "decoded": ("string FLOSS decoded", "strings FLOSS decoded"),
+    # Named by the emulator's declared display name where one names them all
+    # (:func:`_kind_words`); these words where none does.
+    "decoded": ("string decoded by emulation", "strings decoded by emulation"),
 }
 _KIND_ORDER = tuple(_KIND_WORDS)
+
+
+def _kind_words(kind: str, artefacts: Sequence[Artefact]) -> tuple[str, str]:
+    """How a count of ``kind`` is worded, singular and plural.
+
+    A decoded string is counted under the display name the tool that placed
+    it declares, where every one of them was placed by tools of one name.
+    """
+    if kind != "decoded":
+        return _KIND_WORDS[kind]
+    names = {a.by for a in artefacts if a.kind == kind}
+    name = next(iter(names)) if len(names) == 1 else ""
+    if name:
+        return f"string {name} decoded", f"strings {name} decoded"
+    return _KIND_WORDS[kind]
+
 
 # Why the run holds no whole function index, when an index entry is there.
 INDEX_FAILED = "no: [{entry}] the function index failed"
@@ -104,6 +122,9 @@ class Artefact:
     kind: str
     value: str
     entry: str
+    # The declared display name of the tool whose answer placed it, where
+    # the count names it (a decoded string); empty for none.
+    by: str = ""
 
 
 @dataclass
@@ -202,6 +223,11 @@ def _count(n: int, one: str, many: str) -> str:
     return f"{n} {one if n == 1 else many}"
 
 
+def _display_name(entry: Any) -> str:
+    """The display name ``entry``'s tool declares, ``""`` for none."""
+    return str(kind_free_facts(entry).display_name or "")
+
+
 def _parsed(entry: Any) -> Any:
     structured = getattr(entry, "structured", None)
     if isinstance(structured, dict | list):
@@ -278,7 +304,7 @@ def function_artefacts(entries: Iterable[Any]) -> FunctionArtefacts:
         elif kind == _BLOB_KIND:
             _blob_artefacts(found, data, entry_id)
         else:
-            _floss_artefacts(found, data, entry_id)
+            _floss_artefacts(found, data, entry_id, _display_name(entry))
     return found
 
 
@@ -358,7 +384,9 @@ def _call_fact(text: str, passed: Any) -> str:
     return f"{text}: {said} at {passed['call_at']}" + (f" to {target}" if target else "")
 
 
-def _floss_artefacts(found: FunctionArtefacts, data: Mapping[str, Any], entry_id: str) -> None:
+def _floss_artefacts(
+    found: FunctionArtefacts, data: Mapping[str, Any], entry_id: str, by: str = ""
+) -> None:
     for row in data.get("strings") or []:
         if not isinstance(row, dict) or not row.get("string"):
             continue
@@ -375,7 +403,7 @@ def _floss_artefacts(found: FunctionArtefacts, data: Mapping[str, Any], entry_id
                 address -= bases[0]
             else:
                 virtual = True
-        found.add(address, Artefact("decoded", str(row["string"]), entry_id), virtual=virtual)
+        found.add(address, Artefact("decoded", str(row["string"]), entry_id, by), virtual=virtual)
 
 
 def keeps_for_the_map(entry: Any) -> bool:
@@ -697,7 +725,8 @@ def _visited_line(entry: MapEntry) -> str:
         parts.append(
             "reaches "
             + ", ".join(
-                f"{_count(n, *_KIND_WORDS[kind])} ({', '.join(ids)})" for kind, n, ids in kinds
+                f"{_count(n, *_kind_words(kind, entry.artefacts))} ({', '.join(ids)})"
+                for kind, n, ids in kinds
             )
         )
     if entry.summary:
@@ -713,7 +742,7 @@ def _unvisited_item(found: FunctionMap, address: int, artefacts: Sequence[Artefa
     else:
         where = f"offset {hex(address)}"
     kinds = _kinds(artefacts)
-    counts = ", ".join(_count(n, *_KIND_WORDS[kind]) for kind, n, _ in kinds)
+    counts = ", ".join(_count(n, *_kind_words(kind, artefacts)) for kind, n, _ in kinds)
     ids = list(dict.fromkeys(i for _, _, entry_ids in kinds for i in entry_ids))
     return f"{where} ({counts}; {', '.join(ids)})" if ids else f"{where} ({counts})"
 

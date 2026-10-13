@@ -46,7 +46,9 @@ CASE_IDS = ["synthetic", *_IDS]
 
 @pytest.mark.parametrize("name,raw", CASES, ids=CASE_IDS)
 def test_every_stored_cape_citation_names_the_row_it_named(name: str, raw: dict[str, Any]) -> None:
-    document = sandbox_document(cape_report_to_sandbox_report(raw, provider="cape2"))
+    document = sandbox_document(
+        cape_report_to_sandbox_report(raw, provider="cape2", source_format="cape2")
+    )
     sections = ss.Sections(document, ("cape2", "cape2", "raw"))
     rows = _stored_rows(raw)
     stored_index = ss.ItemIndex.from_answer(
@@ -71,7 +73,10 @@ def test_a_document_laid_out_before_the_rename_is_read_as_what_it_holds(
     name: str, raw: dict[str, Any]
 ) -> None:
     current = ss.section_index(
-        sandbox_document(cape_report_to_sandbox_report(raw, provider="cape2")), ("cape2", "cape2")
+        sandbox_document(
+            cape_report_to_sandbox_report(raw, provider="cape2", source_format="cape2")
+        ),
+        ("cape2", "cape2"),
     )["sections"]
     stored = ss.section_index(raw, ("cape2", "cape2"))["sections"]
     for section in ("extracted", "procdumps", "alerts", "resolved_apis", "processes"):
