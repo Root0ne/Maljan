@@ -725,6 +725,58 @@ _VIRUSTOTAL_BOOTSTRAP: dict[str, Any] = {
     ),
 }
 
+# The tools of each shipped server that only read the staged file or the
+# platform's own reference tables: an identical call answers the same, so
+# each is declared ``read_only`` (``ToolFacts.read_only``). A tool that
+# writes, carves, unpacks, transforms, delivers, analyses or runs rules over
+# the sample, polls a status, or asks an outside service whose answer moves
+# (a reputation, a submission) is not, nor one in doubt. The triage pack's
+# own steps keep their facts as they were.
+ANALYSIS_READ_ONLY: frozenset[str] = frozenset(
+    {
+        "apk_info",
+        "archive_list",
+        "capabilities",
+        "document_info",
+        "elf_info",
+        "find_crypto_constants",
+        "hashes",
+        "identify_file",
+        "iocs_from_file",
+        "iocs_from_text",
+        "macho_info",
+        "pe_info",
+        "resolve_api_hashes",
+        "signing_info",
+        "strings",
+    }
+)
+KNOWLEDGE_READ_ONLY: frozenset[str] = frozenset(
+    {
+        "api_capability",
+        "attck_lookup",
+        "attck_validate",
+        "capabilities",
+        "family_lookup",
+        "lolbin_lookup",
+        "resolve_technique",
+    }
+)
+NETWORK_READ_ONLY: frozenset[str] = frozenset({"capabilities"})
+
+
+def _marked_read_only(
+    tools: dict[str, dict[str, Any]], names: frozenset[str]
+) -> dict[str, dict[str, Any]]:
+    missing = sorted(names - set(tools))
+    if missing:
+        raise KeyError(f"read-only marks for undeclared tools: {missing}")
+    return {
+        name: {**facts, "read_only": True} if name in names else facts
+        for name, facts in tools.items()
+    }
+
+
 # Each built-in server's declaration. ``roles``: ``reputation`` on the two
 # servers that declare a reputation lookup. ``reads_staged_sample`` on the
 # three servers whose path-taking tools read the sample the platform staged
@@ -743,19 +795,19 @@ _SERVER_BLOCKS: dict[str, dict[str, Any]] = {
         ],
         "reads_staged_sample": True,
         "platform_owned": True,
-        "tool_facts": _ANALYSIS_TOOLS,
+        "tool_facts": _marked_read_only(_ANALYSIS_TOOLS, ANALYSIS_READ_ONLY),
     },
     "knowledge": {
         "roles": ["reference"],
         "required_env_allow": ["MALJAN_INDEX_RETRY_SECONDS"],
         "reads_staged_sample": True,
-        "tool_facts": _KNOWLEDGE_TOOLS,
+        "tool_facts": _marked_read_only(_KNOWLEDGE_TOOLS, KNOWLEDGE_READ_ONLY),
     },
     "network": {
         "roles": ["capture"],
         "required_env_allow": ["MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS"],
         "reads_staged_sample": True,
-        "tool_facts": _NETWORK_TOOLS,
+        "tool_facts": _marked_read_only(_NETWORK_TOOLS, NETWORK_READ_ONLY),
     },
     "threatintel": {"roles": ["reputation"], "tool_facts": _THREATINTEL_TOOLS},
     "virustotal": {
