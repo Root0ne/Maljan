@@ -338,6 +338,18 @@ describe("DeclarationProposals", () => {
     expect(render(readProposals(result({ v: 1, tools: {}, server: {} }))!)).toBe("");
   });
 
+  it("shows what the probe says of the server as a whole, as text", () => {
+    const hint = "The rows of get_processes read like a sandbox run's; declare roles: [sandbox] <b>";
+    const proposals = readProposals(
+      result({ v: 1, tools: { get_processes: { facts: {}, fields: {} } }, server: {}, notes: [hint, 3] }),
+    )!;
+    expect(proposals.notes).toEqual([hint]);
+    const html = render(proposals);
+    expect(html).toContain("data-proposal-note");
+    expect(html).toContain("declare roles: [sandbox] &lt;b&gt;");
+    expect(readProposals(result({ v: 1, tools: {}, server: {} }))!.notes).toBeUndefined();
+  });
+
   it("lists a tool proposed nothing on one line, with no accept", () => {
     const proposals = readProposals(
       result({ v: 1, tools: { quiet_one: { facts: {}, fields: {} }, quiet_two: { facts: {}, fields: {} } }, server: {} }),

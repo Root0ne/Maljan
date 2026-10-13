@@ -258,3 +258,179 @@ def test_a_tool_asked_about_a_subject_is_no_run_even_on_a_sandbox_source(
     proposal = propose_tool(tool, sandbox_source=True)
     assert proposal is not None
     assert not str(proposal.facts.get("kind", "")).startswith("sandbox_")
+
+
+# The re-review's lists whose question is spelled ``request`` or ``query``
+# but that are no DNS questions: an HTTP request log, WMI, LDAP, registry and
+# database queries, and an import table whose types read ``A``.
+_NO_DNS: dict[str, Any] = {
+    "analysis": {"task_id": 7, "sha256": "a" * 64},
+    "behavior": {"processes": [{"pid": 1, "ppid": 0, "name": "a.exe", "command_line": "a.exe"}]},
+}
+_HTTP = {"http": [{"request": "GET /x HTTP/1.1", "host": "a.example", "port": 80, "method": "GET"}]}
+
+
+def _with(base: dict[str, Any], block: str, extra: dict[str, Any]) -> dict[str, Any]:
+    report = json.loads(json.dumps(base))
+    report.setdefault(block, {}).update(json.loads(json.dumps(extra)))
+    return report
+
+
+class TestARequestOrQueryKeyIsNoDnsEvidenceAlone:
+    @pytest.mark.parametrize(
+        ("block", "extra"),
+        [
+            ("network", _HTTP),
+            ("network", {**_HTTP, "domains": [{"domain": "a.example", "ip": "192.0.2.1"}]}),
+            ("behavior", {"wmi_queries": [{"query": "SELECT * FROM Win32_Process", "ns": "x"}]}),
+            ("behavior", {"ldap": [{"query": "(objectClass=user)", "base": "dc=x"}]}),
+            ("behavior", {"registry_queries": [{"query": "HKLM\\Software\\X", "result": "ok"}]}),
+            ("db", {"queries": [{"query": "select 1", "duration": 3}]}),
+            ("static", {"imports": [{"name": "CreateFileA", "type": "A"}]}),
+        ],
+        ids=["http", "http-and-domains", "wmi", "ldap", "registry", "sql", "imports-typed-A"],
+    )
+    def test_no_such_list_takes_the_dns_mapping(self, block: str, extra: dict[str, Any]) -> None:
+        proposal = propose_format(_with(_NO_DNS, block, extra))
+        assert "mapping.dns" not in proposal["fields"]
+        assert "dns" not in proposal["declaration"]["mapping"]
+
+    @pytest.mark.parametrize(
+        ("dns", "confidence"),
+        [
+            ([{"hostname": "a.example", "ip": "192.0.2.1"}], "low"),
+            ([{"request": "a.example", "type": "A", "answers": ["192.0.2.1"]}], "high"),
+        ],
+        ids=["hostname-ip", "request-type-answers"],
+    )
+    def test_a_real_dns_list_keeps_the_dns_mapping_beside_an_http_log(
+        self, dns: list[dict[str, Any]], confidence: str
+    ) -> None:
+        proposal = propose_format(_with(_NO_DNS, "network", {**_HTTP, "dns": dns}))
+        assert proposal["declaration"]["mapping"]["dns"] == "$['network']['dns'][*]"
+        assert proposal["fields"]["mapping.dns"]["confidence"] == confidence
+
+    def test_host_name_questions_under_a_generic_key_read_as_dns(self) -> None:
+        report = _with(_NO_DNS, "net", {"lookups_x": [{"query": "a.example"}, {"query": "wpad"}]})
+        proposal = propose_format(report)
+        assert proposal["declaration"]["mapping"]["dns"] == "$['net']['lookups_x'][*]"
+        assert proposal["fields"]["mapping.dns"]["confidence"] == "medium"
+
+    def test_a_generic_spelling_with_one_signal_is_never_high(self) -> None:
+        one = row_shape("items", ["request"], host_names={"request": True})
+        assert one is not None and one.kind == "dns" and one.confidence == "medium"
+        typed = row_shape("items", ["request", "type"], record_types=True)
+        assert typed is not None and typed.confidence == "medium"
+        two = row_shape(
+            "items", ["request", "type", "answers"], record_types=True, host_names={"request": True}
+        )
+        assert two is not None and two.confidence == "high"
+
+    @pytest.mark.parametrize(
+        ("keys", "extra"),
+        [
+            (["request"], {}),
+            (["query", "answers", "score"], {}),
+            (["query", "duration", "rows"], {}),
+            (["request", "host", "port", "method"], {"host_names": {"request": True}}),
+            (["query", "namespace"], {"host_names": {"query": False}}),
+        ],
+    )
+    def test_a_generic_spelling_without_a_second_signal_is_no_dns(
+        self, keys: list[str], extra: dict[str, Any]
+    ) -> None:
+        assert row_shape(["queries", "query_log"], keys, **extra) is None
+
+    def test_a_dns_only_key_outweighs_values_that_are_no_host_names(self) -> None:
+        shape = row_shape("items", ["qname", "qtype"], host_names={"qname": False})
+        assert shape is not None and shape.kind == "dns"
+
+
+@pytest.mark.parametrize(
+    ("name", "rows", "keys", "description"),
+    [
+        ("query_log", "queries", ["query", "duration", "rows"], ""),
+        ("search_kb", "results", ["query", "answers", "score"], ""),
+        ("dns_settings", "servers", ["name", "address", "port"], "Configured DNS servers."),
+    ],
+)
+def test_a_sandbox_server_s_query_and_settings_tools_are_no_run_network(
+    name: str, rows: str, keys: list[str], description: str
+) -> None:
+    tool = _tool(name, rows, keys, description)
+    tool["inputSchema"] = {"type": "object", "properties": {}}
+    proposal = propose_tool(tool, sandbox_source=True)
+    assert proposal is not None
+    assert not str(proposal.facts.get("kind", "")).startswith("sandbox_")
+
+
+@pytest.mark.parametrize(
+    ("answer", "kind"),
+    [
+        ({"items": [{"query": "how?", "answers": ["like so"]}]}, None),
+        ({"imports": [{"name": "CreateFileA", "type": "A"}]}, None),
+        ({"dns": [{"request": "a.example"}, {"request": "b.example"}]}, "sandbox_network"),
+        (
+            {"rows": [{"query": "a.example", "type": "A"}, {"query": "b.example", "type": "MX"}]},
+            "sandbox_network",
+        ),
+    ],
+    ids=["kb-answers", "imports-typed-A", "dns-sparse", "typed-generic"],
+)
+def test_a_probe_answer_s_values_are_read_by_the_shape_test(
+    answer: dict[str, Any], kind: str | None
+) -> None:
+    tool = {"name": "task_rows", "inputSchema": {"type": "object", "properties": {}}}
+    proposal = propose_tool(tool, answer=answer, sandbox_source=True)
+    assert proposal is not None
+    assert proposal.facts.get("kind") == kind
+
+
+def test_a_second_list_read_as_the_same_slot_is_named_in_the_notes() -> None:
+    report = _with(
+        _NO_DNS,
+        "network",
+        {
+            "dns": {
+                "udp": [{"request": "a.example", "type": "A", "answers": ["192.0.2.1"]}],
+                "tcp": [{"request": "b.example", "type": "A"}],
+            }
+        },
+    )
+    proposal = propose_format(report)
+    assert proposal["declaration"]["mapping"]["dns"] == "$['network']['dns']['udp'][*]"
+    notes = [note for note in proposal.get("notes", []) if note.startswith("mapping.dns")]
+    assert len(notes) == 1
+    assert "$['network']['dns']['tcp'][*]" in notes[0]
+
+
+def test_one_list_per_slot_says_nothing() -> None:
+    assert "notes" not in propose_format(_REAL_DNS)
+
+
+class TestAServerWithoutTheSandboxRoleIsToldOfIt:
+    _PROCS = _tool("get_processes", "processes", ["pid", "ppid", "name", "command_line"])
+
+    def test_run_shaped_rows_give_the_hint_and_no_kind(self) -> None:
+        from maljan.core.declaration_proposals import propose
+
+        out = propose([self._PROCS])
+        assert out["tools"]["get_processes"]["facts"].get("kind") is None
+        assert len(out["notes"]) == 1
+        assert "get_processes" in out["notes"][0]
+        assert "roles: [sandbox]" in out["notes"][0]
+        # The hint is the server's, never a field of the tool's proposal.
+        assert out["notes"][0] not in out["tools"]["get_processes"].get("notes", [])
+
+    def test_a_sandbox_source_gets_the_kind_and_no_hint(self) -> None:
+        from maljan.core.declaration_proposals import propose
+
+        out = propose([self._PROCS], sandbox_source=True)
+        assert out["tools"]["get_processes"]["facts"]["kind"] == "sandbox_processes"
+        assert "notes" not in out
+
+    def test_a_server_whose_rows_read_like_no_run_gets_no_hint(self) -> None:
+        from maljan.core.declaration_proposals import propose
+
+        out = propose([_tool("list_functions", "items", ["name", "address", "type"])])
+        assert "notes" not in out

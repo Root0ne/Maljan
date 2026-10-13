@@ -680,6 +680,7 @@ def _proposals(
         call["credential"] = withheld is None
         call["withheld"] = list(withheld or [])
     held = proposals["tools"] or proposals["server"] or proposals.get("failed")
+    held = held or proposals.get("notes")
     return proposals if held else None
 
 
