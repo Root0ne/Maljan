@@ -1783,15 +1783,18 @@ space, and later pages of the answer come from the kept result. The triage pack
 runs the same function once on every PE, reading `MALJAN_FLOSS_PATH` and
 `MALJAN_STAGING_DIR` from this process's environment with the decoder's
 server's `env` over it. That server is the decoded-strings step's own `server`
-when it names an enabled one, else the enabled server whose tool declarations
-name the step's tool (`floss`), else one declaring a tool of that tool's kind,
-in `mcp.servers` order. The pack's UPX carve picks its server apart, by the
-same rule applied to the unpack tool (`unpack_upx`, kind `unpack`), and writes
-under that server's `MALJAN_STAGING_DIR`, so the `carved_path` it states is one
-that server's file tools open even when the decoded-strings step is moved to
-another server. A switched-off server is never read; when several enabled
-servers qualify, the first is taken and the run logs which, once. As shipped,
-both are the `analysis` server. Name a build in the server's `env` and the pack
+when it names an enabled one, else the server whose tool declarations name the
+step's tool (`floss`), else one declaring a tool of that tool's kind. The
+pack's UPX carve picks its server apart, by the same rule applied to the unpack
+tool (`unpack_upx`, kind `unpack`), and writes under that server's
+`MALJAN_STAGING_DIR`, so the `carved_path` it states is one that server's file
+tools open even when the decoded-strings step is moved to another server. The
+in-process steps run whether the server is switched on or not, so a
+switched-off server still lends its `env`; among several candidates, enabled
+servers come first (by name, then by kind, in `mcp.servers` order) and
+switched-off ones are the last resort. The run logs the choice once when
+several qualify or the one read is switched off. As shipped, both are the
+`analysis` server. Name a build in the server's `env` and the pack
 and the tool find the same one; a `MALJAN_FLOSS_PATH` set only in the worker's own
 environment reaches the pack and not the tool, whose child environment carries
 only the server's `env` and its allowed keys. Without a build the pack's entry

@@ -7,8 +7,12 @@
 * A step that names its own server reads that server.
 * A switched-off step still reads its shipped declaration's server.
 * No server declaring the tool leaves this process's environment.
-* A switched-off server is never read, and a server declaring only a tool of
-  the step's tool's kind qualifies after the ones naming the tool.
+* Among several declaring servers an enabled one is read before a switched-off
+  one, and a server declaring only a tool of the step's tool's kind qualifies
+  after the ones naming the tool.
+* The in-process steps run with the server switched off, so a switched-off
+  server that alone declares the tool still lends its ``env``, and that is
+  logged.
 * Several qualifying servers give the first, and the choice is logged once.
 * The UPX carve's environment is the unpack-declaring server's, apart from
   the decoder's: an operator who moves the decoded-strings step to its own
@@ -84,7 +88,7 @@ def test_no_declaring_server_leaves_this_processs_environment(monkeypatch: Any) 
     assert environ["MALJAN_FLOSS_PATH"] == "/own"
 
 
-def test_a_switched_off_server_is_never_read() -> None:
+def test_an_enabled_server_is_read_before_a_switched_off_one() -> None:
     servers = {
         "old": _server(("floss", "unpack_upx"), {"MALJAN_STAGING_DIR": "/old"}, enabled=False),
         "analysis": _server(("floss", "unpack_upx"), {"MALJAN_STAGING_DIR": "/shared"}),
@@ -94,6 +98,22 @@ def test_a_switched_off_server_is_never_read() -> None:
         "/shared"
     )
     assert nodes._carve_server_environ(container)["MALJAN_STAGING_DIR"] == "/shared"
+
+
+def test_a_switched_off_server_alone_still_lends_its_env(monkeypatch: Any) -> None:
+    from maljan.core.config import Settings
+
+    said: list[str] = []
+    monkeypatch.setattr(nodes.logger, "info", lambda msg, *args: said.append(msg % args))
+    settings = Settings(_env_file=None)
+    analysis = settings.mcp.servers["analysis"]
+    analysis.enabled = False
+    analysis.env = {"MALJAN_STAGING_DIR": "/shared"}
+    container = SimpleNamespace(config=settings)
+    steps = effective_steps(())
+    assert nodes._decoder_server_environ(container, steps)["MALJAN_STAGING_DIR"] == "/shared"
+    assert nodes._carve_server_environ(container)["MALJAN_STAGING_DIR"] == "/shared"
+    assert len(said) == 2 and all("switched off" in line for line in said)
 
 
 def test_a_server_declaring_the_tools_kind_qualifies_after_one_naming_it() -> None:

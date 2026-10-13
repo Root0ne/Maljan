@@ -1630,42 +1630,49 @@ def _declared_kind(called: str) -> str:
 
 
 def _declaring_server_key(servers: Mapping[str, Any], called: str, *, purpose: str) -> str:
-    """The key of the enabled server declaring a step's ``called`` tool or its kind.
+    """The key of the server declaring a step's ``called`` tool or its kind, ``""`` for none.
 
-    Servers declaring ``called`` by name come first, then servers declaring a
-    tool of the same declared kind, each in ``mcp.servers`` order; a
-    switched-off server is never read. When more than one qualifies, the
-    first is taken and the choice is logged at info (the node resolves each
-    purpose once per run). ``""`` when none qualifies.
+    The in-process step stands in for that server's tool whether the server
+    is switched on or not, so a switched-off server still lends its ``env``.
+    Among several, enabled servers come first: those declaring ``called`` by
+    name, then those declaring a tool of the same declared kind, each in
+    ``mcp.servers`` order; switched-off servers follow in the same order, a
+    last resort. When more than one qualifies, or the one read is switched
+    off, the choice is logged at info (the node resolves each purpose once
+    per run).
     """
     kind = _declared_kind(called)
-    by_name: list[str] = []
-    by_kind: list[str] = []
+    by_name: dict[bool, list[str]] = {True: [], False: []}
+    by_kind: dict[bool, list[str]] = {True: [], False: []}
     for key, server in servers.items():
-        if not getattr(server, "enabled", True):
-            continue
+        enabled = bool(getattr(server, "enabled", True))
         facts = getattr(server, "tool_facts", None) or {}
         if called in facts:
-            by_name.append(str(key))
+            by_name[enabled].append(str(key))
         elif kind and any(getattr(f, "kind", None) == kind for f in facts.values()):
-            by_kind.append(str(key))
-    qualified = by_name + by_kind
-    if len(qualified) > 1:
-        logger.info(
-            "triage pack: %s reads server %r; %s also declare %r.",
-            purpose,
-            qualified[0],
-            ", ".join(repr(k) for k in qualified[1:]),
-            called if not by_kind else f"{called} or its kind {kind}",
-        )
-    return qualified[0] if qualified else ""
+            by_kind[enabled].append(str(key))
+    qualified = by_name[True] + by_kind[True] + by_name[False] + by_kind[False]
+    if not qualified:
+        return ""
+    chosen = qualified[0]
+    switched_off = chosen in by_name[False] or chosen in by_kind[False]
+    if len(qualified) > 1 or switched_off:
+        declared = repr(called)
+        if by_kind[True] or by_kind[False]:
+            declared = f"{called!r} or its kind {kind!r}"
+        also = ""
+        if len(qualified) > 1:
+            also = f"; {', '.join(repr(k) for k in qualified[1:])} also declare {declared}"
+        off = " (switched off; its env is still read)" if switched_off else ""
+        logger.info("triage pack: %s reads server %r%s%s.", purpose, chosen, off, also)
+    return chosen
 
 
 def _decoder_server_key(servers: Mapping[str, Any], steps: Sequence[Any]) -> str:
     """The key of the server the pack's decoded-strings step declares, ``""`` for none.
 
-    The step's own ``server`` when it is enabled, else the enabled server
-    declaring the tool the step calls (:func:`_declaring_server_key`): the
+    The step's own ``server`` when it is enabled, else the server declaring
+    the tool the step calls (:func:`_declaring_server_key`): the
     server whose tool the in-process step stands in for. With the step left
     out of ``steps`` (switched off), its shipped declaration is read.
     """
@@ -1683,8 +1690,8 @@ def _carve_server_key(servers: Mapping[str, Any]) -> str:
     """The key of the server whose file tools read what the pack's UPX carve writes.
 
     The carve is the platform's own step, so its shipped declaration names
-    the tool it stands in for; the enabled server declaring that tool or its
-    kind (:func:`_declaring_server_key`) is the one whose staging base the
+    the tool it stands in for; the server declaring that tool or its kind
+    (:func:`_declaring_server_key`) is the one whose staging base the
     carve writes under. Independent of the decoded-strings step: an operator
     who moves that step to another server leaves the carve where it was.
     """
@@ -1712,7 +1719,7 @@ def _server_environ(
         logger.debug("triage pack: the %s server's env could not be read (%s).", what, exc)
         return environ
     if not key:
-        logger.debug("triage pack: no enabled server declares the %s's tool; own env read.", what)
+        logger.debug("triage pack: no server declares the %s's tool; own env read.", what)
     environ.update({str(k): str(v) for k, v in extra.items()})
     return environ
 
