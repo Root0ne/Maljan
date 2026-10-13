@@ -58,22 +58,22 @@ def _entries(*extra: Any) -> EntryTexts:
                     {
                         "is_dll": True,
                         "image_base": BASE,
-                        "imports": {"KERNEL32.dll": ["PeekNamedPipe", "CreateMutexW"]},
+                        "imports": {"LIBA.dll": ["ReadThingW", "MakeThingW"]},
                     }
                 ),
             ),
             _entry(
                 57,
                 "get_function_callers",
-                {"address": hex(BASE + 0xB4CC)},
-                f"FUN_{BASE + 0x4110:x} @ {BASE + 0x4110:x}\n"
-                f"FUN_{BASE + 0x6C2C:x} @ {BASE + 0x6C2C:x}",
+                {"address": hex(BASE + 0x7C40)},
+                f"FUN_{BASE + 0x4400:x} @ {BASE + 0x4400:x}\n"
+                f"FUN_{BASE + 0x4800:x} @ {BASE + 0x4800:x}",
             ),
-            _entry(55, "get_function_callers", {"address": hex(BASE + 0x2200)}, "No callers found"),
+            _entry(55, "get_function_callers", {"address": hex(BASE + 0x3300)}, "No callers found"),
             _entry(
-                159, "decompile_function", {"address": hex(BASE + 0x6634)}, _listing(BASE + 0x6634)
+                159, "decompile_function", {"address": hex(BASE + 0x5A10)}, _listing(BASE + 0x5A10)
             ),
-            _entry(160, "decompile_function", {"address": hex(BASE + 0x6370)}, "", ok=False),
+            _entry(160, "decompile_function", {"address": hex(BASE + 0x5B20)}, "", ok=False),
             *extra,
         ]
     )
@@ -85,25 +85,25 @@ def _asked(text: str, entries: EntryTexts | None = None) -> list[Any]:
 
 class TestAStatementTheLedgerContradicts:
     def test_a_routine_said_not_read_whose_decompile_answered(self) -> None:
-        [violation] = _asked("The buffer is then passed to routine 0x6634, which is not read.")
+        [violation] = _asked("The buffer is then passed to routine 0x5a10, which is not read.")
         assert violation.code == ABSENCE_CONTRADICTS_LEDGER_CODE
-        assert "0x6634 was not read" in violation.message
+        assert "0x5a10 was not read" in violation.message
         assert "ev_0159 (decompile_function)" in violation.message
 
     def test_callers_said_not_in_the_ledger_after_the_sentence_naming_the_routine(self) -> None:
         [violation] = _asked(
-            "Routine 0xb4cc formats rundll32 command lines. "
+            "Routine 0x7c40 formats launcher command lines. "
             "Its callers and arguments are not in the ledger."
         )
-        assert "0xb4cc is not in the ledger" in violation.message
+        assert "0x7c40 is not in the ledger" in violation.message
         assert "ev_0057 (get_function_callers)" in violation.message
 
     def test_values_said_not_confirmed_by_the_entry_cited_for_them(self) -> None:
         [violation] = _asked(
-            "The import names (PeekNamedPipe, CreateMutexW) are not confirmed by the parser "
+            "The import names (ReadThingW, MakeThingW) are not confirmed by the parser "
             "output, which gives a count only [ev_0004]."
         )
-        assert "PeekNamedPipe, CreateMutexW are not confirmed" in violation.message
+        assert "ReadThingW, MakeThingW are not confirmed" in violation.message
         assert "ev_0004 (pe_info) holds them" in violation.message
 
     def test_an_entry_id_said_not_in_the_ledger(self) -> None:
@@ -111,13 +111,13 @@ class TestAStatementTheLedgerContradicts:
         assert "ev_0057 is not in the ledger" in violation.message
 
     def test_a_virtual_address_and_its_offset_are_one_routine(self) -> None:
-        [violation] = _asked(f"Routine {BASE + 0x6634:#x} was never decompiled.")
+        [violation] = _asked(f"Routine {BASE + 0x5A10:#x} was never decompiled.")
         assert "ev_0159" in violation.message
 
     def test_one_question_per_routine_however_often_it_is_said(self) -> None:
         found = _asked(
-            "Routine 0x6634 is not read. Later, routine 0x6634 is not read either.\n"
-            "Again: 0x6634 has not been read."
+            "Routine 0x5a10 is not read. Later, routine 0x5a10 is not read either.\n"
+            "Again: 0x5a10 has not been read."
         )
         assert len(found) == 1
 
@@ -130,9 +130,9 @@ class TestAStatementThatStands:
         "text",
         [
             # The callers query answered with no caller: the absence is right.
-            "The callers of 0x2200 are not in the ledger.",
+            "The callers of 0x3300 are not in the ledger.",
             # The decompile failed: nothing was read.
-            "Routine 0x6370 is not read.",
+            "Routine 0x5b20 is not read.",
             # Another routine.
             "Routine 0x7000 is not read.",
             # An assessment, not a statement about the ledger.
@@ -144,7 +144,7 @@ class TestAStatementThatStands:
             "Whether that line is sent back is not read.",
             "The information-class values are not in the ledger.",
             # A pronoun after a sentence naming two routines: which one is unknown.
-            "Routines 0xb4cc and 0x6634 build it. Its arguments are not in the ledger.",
+            "Routines 0x7c40 and 0x5a10 build it. Its arguments are not in the ledger.",
             # A small number is an offset or a flag, not a routine.
             "The value at offset 0x60 is not read.",
         ],
@@ -153,7 +153,7 @@ class TestAStatementThatStands:
         assert _asked(text) == []
 
     def test_a_ledger_with_no_entries_judges_nothing(self) -> None:
-        assert ledger_absence_contradictions({"body": "0x6634 is not read."}, None) == []
+        assert ledger_absence_contradictions({"body": "0x5a10 is not read."}, None) == []
         assert ledger_absence_contradictions(None, _entries()) == []
 
 

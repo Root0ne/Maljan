@@ -143,21 +143,21 @@ def _isr(*claims: ClaimEvidence) -> AgentISR:
 
 class TestARoundOfWordingOnly:
     def test_other_words_for_the_same_values_ids_and_technique_are_unchanged(self) -> None:
-        before = _isr(_claim("Routine 0x1400 decodes 101 blobs with key '12345'."))
-        after = _isr(_claim("The decoder at 0x1400 handles all 101 blobs; its key is '12345'."))
+        before = _isr(_claim("Routine 0x1400 decodes 57 blobs with key 'k7q2'."))
+        after = _isr(_claim("The decoder at 0x1400 handles all 57 blobs; its key is 'k7q2'."))
         assert unchanged_in_substance(before, after)
 
     @pytest.mark.parametrize(
         "after",
         [
-            _isr(_claim("Routine 0x1400 decodes 100 blobs with key '12345'.")),
-            _isr(_claim("Routine 0x1400 decodes 101 blobs with key '12345'.", ref="[ev_0005]")),
-            _isr(_claim("Routine 0x1400 decodes 101 blobs with key '12345'.", technique="T1140")),
+            _isr(_claim("Routine 0x1400 decodes 56 blobs with key 'k7q2'.")),
+            _isr(_claim("Routine 0x1400 decodes 57 blobs with key 'k7q2'.", ref="[ev_0005]")),
+            _isr(_claim("Routine 0x1400 decodes 57 blobs with key 'k7q2'.", technique="T1140")),
             _isr(),
         ],
     )
     def test_a_changed_value_entry_or_technique_is_a_change(self, after: AgentISR) -> None:
-        before = _isr(_claim("Routine 0x1400 decodes 101 blobs with key '12345'."))
+        before = _isr(_claim("Routine 0x1400 decodes 57 blobs with key 'k7q2'."))
         assert not unchanged_in_substance(before, after)
 
     def test_an_answer_with_no_claim_is_never_reworded(self) -> None:
