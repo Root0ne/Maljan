@@ -34,7 +34,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
@@ -2093,12 +2093,15 @@ class JudgeAgent(BudgetMeter):
             )
             _hold_the_turn(held_binding, self.llm, held)
             self._publish_questions(conversation, asked)
-            # Each turn of the loop says so, as an analyst's does, for a
-            # provider that caches a conversation it will send again
-            # (``anthropic_history``): the first turn writes the prompt's
-            # prefix and every later turn of the loop reads it. The note rides
-            # the request alone, never the loop's own messages.
-            if conversation:
+            # Each turn after the loop's first tool round says it is a loop
+            # turn, as an analyst's does, for a provider that caches a
+            # conversation it will send again (``anthropic_history``): that
+            # turn writes the prompt's prefix and every later turn reads it.
+            # The first request is not noted: most mediations answer on it, and
+            # a single-turn call pays no write premium for a prefix nothing
+            # reads. The note rides the request alone, never the loop's own
+            # messages.
+            if conversation and any(isinstance(m, AIMessage) for m in conversation):
                 last = conversation[-1]
                 sent = last.model_copy()
                 sent.response_metadata = {
