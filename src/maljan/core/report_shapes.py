@@ -94,14 +94,22 @@ KINDS: tuple[str, ...] = ("processes", "dropped_files", "flows", "dns")
 
 _WORD = re.compile(r"[a-z0-9]+")
 # A name and a type are what many lists hold (functions, sections, rules,
-# classifications), and a digest, a name and a size what every archive or
-# resource listing holds. Such rows read as DNS questions, or as files a run
-# dropped, only with evidence of their own: the words of a name the list sits
-# under (its own, the block holding it, the tool answering it), a key only
-# DNS rows write, an answer, or (where the values are seen) a question type
-# that is a DNS record type.
+# classifications), a name and its addresses what interfaces, hosts files,
+# name servers and embedded configurations hold, and a digest, a name and a
+# size what every archive or resource listing holds. Such rows read as DNS
+# questions, or as files a run dropped, only with evidence of their own. For
+# DNS that is DNS-specific evidence: the question named as a request or a
+# query, its answers named as answers, a key only DNS rows write, or (where
+# the values are seen) a question type that is a DNS record type; failing
+# those, the words of a name the list sits under (its own, the block holding
+# it, the tool answering it), read with low confidence. A name with
+# addresses (``addresses``, ``ips``, ``resolved``) is no DNS evidence.
 _DNS_WORDS = frozenset({"dns", "lookups", "resolutions", "queries"})
 _DNS_KEYS = frozenset({"qname", "qtype", "query_type", "record_type", "rrtype", "rrname", "rdata"})
+# The question's spellings that say request or query, and the answers'
+# spellings that say answer: the DNS-specific ones among each part's.
+_DNS_REQUEST_KEYS = frozenset({"request", "query", "qname", "rrname"})
+_DNS_ANSWER_KEYS = frozenset({"answers", "answer"})
 _DNS_RECORD_TYPES = frozenset(
     {"a", "aaaa", "cname", "mx", "ns", "ptr", "soa", "srv", "txt", "caa", "any", "https", "svcb"}
 )
@@ -115,9 +123,22 @@ class RowShape:
     kind: str
     parts: dict[str, str] = field(default_factory=dict)
     confidence: str = "medium"
+    # How many signals of its own kind the list carries beyond its parts (a
+    # DNS-only key, record types, a name the list sits under that says so):
+    # where two lists read as one kind, the one with the stronger evidence is
+    # the kind's (:attr:`strength`).
+    evidence: int = 0
     # For flows: the protocol key, and the spelling each of tcp and udp is written in.
     protocol_key: str = ""
     protocols: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def strength(self) -> tuple[int, int, int]:
+        """How strong the reading is: its confidence, its own evidence, then its parts."""
+        return (_CONFIDENCE_RANK.get(self.confidence, 0), self.evidence, len(self.parts))
+
+
+_CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
 
 
 def _words(name: str) -> set[str]:
@@ -137,19 +158,21 @@ def row_shape(
     list_name: str | Iterable[str],
     keys: Iterable[str],
     *,
-    record_types: bool = False,
+    record_types: bool | None = None,
 ) -> RowShape | None:
     """The kind a list whose rows carry ``keys`` reads as, or ``None``.
 
     ``list_name`` is the list's own name, or the names the list sits under,
     its own first (the block holding it, the tool answering it).
     ``record_types`` says every value seen under the rows' question-type key is
-    a DNS record type. ``high`` where every part is under the consumer's own
-    field name, ``medium`` where some part is under another spelling, ``low``
-    for a DNS list recognised by its name alone. A list whose evidence fits
-    another kind better reads as none: a name and a type are not a DNS
-    question, a digest, a name and a size not a dropped file, without evidence
-    of their own (see :data:`_DNS_WORDS`).
+    a DNS record type (``True``), that the values seen are not (``False``, which
+    no name the list sits under outweighs), or that none was seen (``None``).
+    ``high`` where every part is under the consumer's own field name,
+    ``medium`` where some part is under another spelling, ``low`` for a DNS
+    list recognised by its name alone. A list whose evidence fits another
+    kind better reads as none: a name and a type, or a name and its
+    addresses, are not a DNS question, a digest, a name and a size not a
+    dropped file, without evidence of their own (see :data:`_DNS_WORDS`).
     """
     names = (list_name,) if isinstance(list_name, str) else tuple(list_name)
     by_lower: dict[str, str] = {}
@@ -165,19 +188,31 @@ def row_shape(
         if not all(part in parts for part in _REQUIRED[kind]):
             continue
         confidence = "high" if all(parts[part] == part for part in parts) else "medium"
+        evidence = 0
         if kind == "dns":
-            dns_key = bool(_DNS_KEYS & set(by_lower)) or any("dns" in _words(k) for k in by_lower)
-            if "answers" in parts or dns_key or (record_types and "type" in parts):
+            signals = (
+                parts["request"].lower() in _DNS_REQUEST_KEYS,
+                parts.get("answers", "").lower() in _DNS_ANSWER_KEYS,
+                bool(_DNS_KEYS & set(by_lower)),
+                bool(record_types) and "type" in parts,
+            )
+            # A key or a name saying "dns" adds to the evidence, never makes
+            # it: an interface lists its DNS servers.
+            said = any("dns" in _words(k) for k in by_lower)
+            evidence = sum(signals) + said + _named(names, _DNS_WORDS)
+            if any(signals):
                 pass
-            elif _named(names, _DNS_WORDS):
-                confidence = "low" if "type" not in parts else confidence
+            elif _named(names, _DNS_WORDS) and record_types is not False:
+                confidence = "low"
             else:
                 continue
-        if kind == "dropped_files" and not _named(names, _DROPPED_WORDS):
-            continue
+        if kind == "dropped_files":
+            if not _named(names, _DROPPED_WORDS):
+                continue
+            evidence = 1
         if kind == "processes" and parts["ppid"] == parts["name"]:
             continue
-        shape = RowShape(kind, parts, confidence)
+        shape = RowShape(kind, parts, confidence, evidence=evidence)
         if kind == "flows":
             shape.protocol_key = next((by_lower[k] for k in _PROTOCOL_KEYS if k in by_lower), "")
         return shape

@@ -1,5 +1,5 @@
 {
- "about": "propose_tool on origin/dev e8ef382a for each definition (and probe answer) here: the shipped sidecars' served tools, the undeclared-server fixtures and static tool shapes the sandbox shape test must leave alone",
+ "about": "propose_tool on origin/dev e8ef382a for each definition (and probe answer) here: the shipped sidecars' served tools, the undeclared-server fixtures and static tool shapes the sandbox shape test must leave alone; the re-review cases (a resolver, a passive DNS and a domain lookup, name servers, interfaces, a hosts file, an embedded configuration, a memory image, a capture, an installer's file list, imports) were captured on origin/dev 4cdbac18",
  "cases": [
   {
    "definition": {
@@ -5313,6 +5313,1018 @@
       }
      }
     }
+   }
+  },
+  {
+   "definition": {
+    "description": "Resolve a domain's DNS records now.",
+    "inputSchema": {
+     "properties": {
+      "domain": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "domain"
+     ],
+     "type": "object"
+    },
+    "name": "dns_lookup",
+    "outputSchema": {
+     "properties": {
+      "records": {
+       "items": {
+        "properties": {
+         "data": {
+          "type": "string"
+         },
+         "name": {
+          "type": "string"
+         },
+         "ttl": {
+          "type": "string"
+         },
+         "type": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "re-review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "domain": "domain"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.domain (name)"
+      ],
+      "value": {
+       "domain": "domain"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "domain": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "domain"
+     ],
+     "type": "object"
+    },
+    "name": "resolve_domain",
+    "outputSchema": {
+     "properties": {
+      "answers": {
+       "items": {
+        "properties": {
+         "data": {
+          "type": "string"
+         },
+         "name": {
+          "type": "string"
+         },
+         "type": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "re-review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "domain": "domain"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.domain (name)"
+      ],
+      "value": {
+       "domain": "domain"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "Historical passive DNS resolutions for a domain.",
+    "inputSchema": {
+     "properties": {
+      "domain": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "domain"
+     ],
+     "type": "object"
+    },
+    "name": "passive_dns",
+    "outputSchema": {
+     "properties": {
+      "resolutions": {
+       "items": {
+        "properties": {
+         "hostname": {
+          "type": "string"
+         },
+         "ip_address": {
+          "type": "string"
+         },
+         "last_seen": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "re-review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "domain": "domain"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.domain (name)"
+      ],
+      "value": {
+       "domain": "domain"
+      }
+     }
+    },
+    "notes": [
+     "rows not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "domain": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "domain"
+     ],
+     "type": "object"
+    },
+    "name": "domain_report",
+    "outputSchema": {
+     "properties": {
+      "resolutions": {
+       "items": {
+        "properties": {
+         "date": {
+          "type": "string"
+         },
+         "hostname": {
+          "type": "string"
+         },
+         "ips": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "re-review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "domain": "domain"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.domain (name)"
+      ],
+      "value": {
+       "domain": "domain"
+      }
+     }
+    },
+    "notes": [
+     "rows not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "domain": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "domain"
+     ],
+     "type": "object"
+    },
+    "name": "whois",
+    "outputSchema": {
+     "properties": {
+      "name_servers": {
+       "items": {
+        "properties": {
+         "hostname": {
+          "type": "string"
+         },
+         "ips": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "re-review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "domain": "domain"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.domain (name)"
+      ],
+      "value": {
+       "domain": "domain"
+      }
+     }
+    },
+    "notes": [
+     "rows not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {},
+     "required": [],
+     "type": "object"
+    },
+    "name": "list_interfaces",
+    "outputSchema": {
+     "properties": {
+      "interfaces": {
+       "items": {
+        "properties": {
+         "addresses": {
+          "type": "string"
+         },
+         "mtu": {
+          "type": "string"
+         },
+         "name": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "re-review case",
+   "proposal": {
+    "facts": {},
+    "fields": {},
+    "notes": [
+     "rows, places, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "Extract the malware's embedded configuration.",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    },
+    "name": "extract_config",
+    "outputSchema": {
+     "properties": {
+      "c2": {
+       "items": {
+        "properties": {
+         "domain": {
+          "type": "string"
+         },
+         "ips": {
+          "type": "string"
+         },
+         "port": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "re-review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "List processes in a memory image.",
+    "inputSchema": {
+     "properties": {
+      "dump_path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "dump_path"
+     ],
+     "type": "object"
+    },
+    "name": "pslist",
+    "outputSchema": {
+     "properties": {
+      "processes": {
+       "items": {
+        "properties": {
+         "cmdline": {
+          "type": "string"
+         },
+         "name": {
+          "type": "string"
+         },
+         "pid": {
+          "type": "string"
+         },
+         "ppid": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "re-review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "dump_path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.dump_path (name)"
+      ],
+      "value": {
+       "path": "dump_path"
+      }
+     }
+    },
+    "notes": [
+     "rows, places, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "Parse a capture file.",
+    "inputSchema": {
+     "properties": {
+      "pcap_path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "pcap_path"
+     ],
+     "type": "object"
+    },
+    "name": "parse_pcap",
+    "outputSchema": {
+     "properties": {
+      "flows": {
+       "items": {
+        "properties": {
+         "dport": {
+          "type": "string"
+         },
+         "dst": {
+          "type": "string"
+         },
+         "proto": {
+          "type": "string"
+         },
+         "sport": {
+          "type": "string"
+         },
+         "src": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "re-review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "pcap_path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.pcap_path (name)"
+      ],
+      "value": {
+       "path": "pcap_path"
+      }
+     }
+    },
+    "notes": [
+     "rows not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "task_id": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "task_id"
+     ],
+     "type": "object"
+    },
+    "name": "get_dns",
+    "outputSchema": {
+     "properties": {
+      "dns": {
+       "items": {
+        "properties": {
+         "answers": {
+          "type": "string"
+         },
+         "request": {
+          "type": "string"
+         },
+         "type": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "re-review case",
+   "proposal": {
+    "facts": {},
+    "fields": {},
+    "notes": [
+     "rows not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "task_id": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "task_id"
+     ],
+     "type": "object"
+    },
+    "name": "get_processes",
+    "outputSchema": {
+     "properties": {
+      "processes": {
+       "items": {
+        "properties": {
+         "command_line": {
+          "type": "string"
+         },
+         "name": {
+          "type": "string"
+         },
+         "pid": {
+          "type": "string"
+         },
+         "ppid": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "re-review case",
+   "proposal": {
+    "facts": {},
+    "fields": {},
+    "notes": [
+     "rows, places, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "Files the installer would create.",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    },
+    "name": "list_created_files",
+    "outputSchema": {
+     "properties": {
+      "files": {
+       "items": {
+        "properties": {
+         "name": {
+          "type": "string"
+         },
+         "sha256": {
+          "type": "string"
+         },
+         "size": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "re-review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    },
+    "name": "hosts_entries",
+    "outputSchema": {
+     "properties": {
+      "entries": {
+       "items": {
+        "properties": {
+         "addresses": {
+          "type": "string"
+         },
+         "hostname": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "re-review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, places not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "answer": {
+    "records": [
+     {
+      "data": "93.184.216.34",
+      "name": "example.com",
+      "ttl": 300,
+      "type": "A"
+     }
+    ]
+   },
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "domain": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "dns_lookup"
+   },
+   "origin": "re-review case answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "domain": "domain"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.domain (name)"
+      ],
+      "value": {
+       "domain": "domain"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "answer": {
+    "resolutions": [
+     {
+      "hostname": "example.com",
+      "ip_address": "192.0.2.4"
+     }
+    ]
+   },
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "domain": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "passive_dns"
+   },
+   "origin": "re-review case answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "domain": "domain"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.domain (name)"
+      ],
+      "value": {
+       "domain": "domain"
+      }
+     }
+    },
+    "notes": [
+     "rows not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "answer": {
+    "imports": [
+     {
+      "name": "CreateFileA",
+      "type": "A"
+     },
+     {
+      "name": "MessageBoxA",
+      "type": "A"
+     }
+    ]
+   },
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "list_imports"
+   },
+   "origin": "re-review case answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "answer": {
+    "interfaces": [
+     {
+      "addresses": [
+       "10.0.0.5"
+      ],
+      "name": "eth0"
+     }
+    ]
+   },
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {},
+     "type": "object"
+    },
+    "name": "list_interfaces"
+   },
+   "origin": "re-review case answer",
+   "proposal": {
+    "facts": {},
+    "fields": {},
+    "notes": [
+     "rows, places, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "answer": {
+    "entries": [
+     {
+      "addresses": [
+       "127.0.0.1"
+      ],
+      "hostname": "localhost"
+     }
+    ]
+   },
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "read_hosts"
+   },
+   "origin": "re-review case answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, places not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "answer": {
+    "c2": [
+     {
+      "domain": "bad.example",
+      "ips": [
+       "192.0.2.4"
+      ]
+     }
+    ]
+   },
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "extract_config"
+   },
+   "origin": "re-review case answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows not offered: read only through a kind, and nothing the server said names one"
+    ]
    }
   }
  ]

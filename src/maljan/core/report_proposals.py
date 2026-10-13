@@ -287,32 +287,45 @@ def _filtered(segments: tuple[str, ...], key: str, value: str) -> str:
 
 
 def _channels(walk: _Walk) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
-    """``(channel paths, field renames)``, each a proposed field, for the first list of each kind.
+    """``(channel paths, field renames)``, each a proposed field, for each kind's strongest list.
 
-    Lists are tried shallowest first, then in path order, so the proposal is
-    the same for the same report.
+    Every list is read; per channel the list whose reading is strongest
+    (:attr:`core.report_shapes.RowShape.strength`: its confidence, the
+    evidence of its own kind it carries, then how many parts it names) is
+    the channel's, so a decoy list that only resembles a kind never takes it
+    from a list that is plainly of it. Equal readings go to the shallowest,
+    then the first in path order, so the proposal is the same for the same
+    report.
     """
-    channels: dict[str, dict[str, Any]] = {}
-    renames: dict[str, dict[str, Any]] = {}
+    best: dict[str, tuple[tuple[int, int, int], RowShape, tuple[str, ...], str, str]] = {}
     for path in sorted(walk.lists, key=lambda p: (len(p), p)):
         held = walk.lists[path]
         names = [s for s in reversed(path) if s != "*"][:2]
-        record_types = any(held["record_types"].values())
+        seen = held["record_types"]
+        record_types = any(seen.values()) if seen else None
         shape = row_shape(names, held["keys"], record_types=record_types)
         if shape is None:
             continue
+        for channel, expression, confidence in _channel_paths(shape, path, held):
+            strength = (_RANK[confidence], *shape.strength[1:])
+            if channel not in best or strength > best[channel][0]:
+                best[channel] = (strength, shape, path, expression, confidence)
+    channels: dict[str, dict[str, Any]] = {}
+    renames: dict[str, dict[str, Any]] = {}
+    chosen = sorted(best.items(), key=lambda item: (len(item[1][2]), item[1][2], item[0]))
+    for channel, (_strength, shape, path, expression, confidence) in chosen:
         where = _where((*path, "*"))
         evidence = [f"{where} ({', '.join(sorted(shape.parts.values()))})"]
-        for channel, expression, confidence in _channel_paths(shape, path, held):
-            if channel in channels:
-                continue
-            channels[channel] = _field(expression, evidence, confidence)
-            for part, key in shape.parts.items():
-                if part in _CONSUMER_FIELDS[channel] and key != part:
-                    renames[f"{channel}.{part}"] = _field(
-                        key, [f"{where}.{key}"], confidence, f"mapping.{channel}"
-                    )
+        channels[channel] = _field(expression, evidence, confidence)
+        for part, key in shape.parts.items():
+            if part in _CONSUMER_FIELDS[channel] and key != part:
+                renames[f"{channel}.{part}"] = _field(
+                    key, [f"{where}.{key}"], confidence, f"mapping.{channel}"
+                )
     return channels, renames
+
+
+_RANK = {LOW: 0, MEDIUM: 1, HIGH: 2}
 
 
 def _channel_paths(

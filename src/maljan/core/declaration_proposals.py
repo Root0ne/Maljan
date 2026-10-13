@@ -19,7 +19,9 @@ server already said when it listed its tools:
   the operator asks for it: the row shape of an answer that has no
   ``outputSchema``, the auto-name prefixes a listing writes and the text the
   server answers a missing file with;
-* the shape test of a sandbox report (``core.report_shapes``): rows whose keys
+* for a server declared a sandbox source (its ``roles`` hold ``sandbox``)
+  and only for one, the shape test of a sandbox report
+  (``core.report_shapes``): rows whose keys
   say process id, parent and name propose a sandbox's process kind, with the
   process id as the place a run root is read from; rows naming a destination
   and its port, or a DNS question, a sandbox's network kind (read as a flow
@@ -752,6 +754,7 @@ def propose_tool(
     *,
     manifest_cell: Mapping[str, Any] | None = None,
     answer: Any = None,
+    sandbox_source: bool = False,
 ) -> ToolProposal | None:
     """The proposal for one tool, or ``None`` for one whose name a declaration cannot hold.
 
@@ -759,6 +762,12 @@ def propose_tool(
     ``manifest_cell`` the tool's cell of the server's ``capabilities``
     manifest; ``answer`` the parsed answer of a harmless probe call, read for
     the answer's shape when the definition has no ``outputSchema``.
+    ``sandbox_source`` says the server is declared a sandbox source (its
+    ``roles`` hold :data:`~maljan.core.tool_declarations.SANDBOX_ROLE`): only
+    then are its rows read by the sandbox shape test, since rows shaped like
+    a run's (processes, connections, DNS questions, dropped files) are also
+    what a memory image, a capture, a live resolver or an intelligence lookup
+    answers with, and a sandbox kind makes them observed run facts.
     """
     name = _get(definition, "name")
     if not isinstance(name, str):
@@ -819,10 +828,17 @@ def propose_tool(
         )
 
     # The kind, when something the server said names one; a sandbox's rows, by
-    # the shape test, only where nothing else names a kind, with the parts a
-    # run reads.
+    # the shape test, only for a server declared a sandbox source and where
+    # nothing else names a kind, with the parts a run reads.
     found_kind = _kind_of(name, words, word_origin, proposal, reading)
-    sandbox = None if found_kind is not None else _sandbox_kind(name, reading)
+    # A tool asked about an address, a domain or a URL describes that subject
+    # (a lookup, a resolution), not what a run did, whatever server serves it.
+    subject = bool(_SUBJECT_ROLES & set(proposal.roles))
+    sandbox = (
+        _sandbox_kind(name, reading)
+        if sandbox_source and found_kind is None and not subject
+        else None
+    )
     if sandbox is not None:
         kind, extra = sandbox
         found_kind = kind, extra["_kind"].confidence, list(extra["_kind"].evidence)
@@ -937,6 +953,9 @@ def _kind_of(
     return None
 
 
+# The argument roles that name a subject to describe rather than a run or its
+# sample: a tool taking one is never read by the sandbox shape test.
+_SUBJECT_ROLES = frozenset({"ip", "domain", "url"})
 # The top-level keys a flow table lays its rows out under
 # (``analysis.evidence_roots``: reader ``flow_table``).
 _FLOW_TABLE_KEYS = frozenset({"tcp", "udp", "conversations", "dns"})
@@ -1169,6 +1188,7 @@ def propose(
     capabilities: Mapping[str, Any] | None = None,
     answers: Mapping[str, tuple[ProbeCall, Any]] | None = None,
     skip: Iterable[str] = (),
+    sandbox_source: bool = False,
 ) -> dict[str, Any]:
     """The proposals for every tool ``definitions`` lists, as JSON the console reads.
 
@@ -1178,7 +1198,8 @@ def propose(
     confirm; ``failed`` the tools whose schema could not be read, each losing
     only its own proposal. ``answers`` are the harmless calls made and what
     each returned (the text, or the parsed object); ``skip`` names tools
-    proposed for nothing (the manifest tool itself).
+    proposed for nothing (the manifest tool itself); ``sandbox_source`` says
+    the server is declared a sandbox source (:func:`propose_tool`).
     """
     cells = _manifest_cells(capabilities)
     skipped = set(skip)
@@ -1197,7 +1218,12 @@ def propose(
         try:
             held = answered.get(name)
             answer = _parsed(held[1]) if held is not None else None
-            proposal = propose_tool(definition, manifest_cell=cells.get(name), answer=answer)
+            proposal = propose_tool(
+                definition,
+                manifest_cell=cells.get(name),
+                answer=answer,
+                sandbox_source=sandbox_source,
+            )
             if proposal is None:
                 continue
             call = harmless_call(proposal)

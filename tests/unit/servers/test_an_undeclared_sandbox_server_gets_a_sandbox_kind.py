@@ -7,9 +7,11 @@ answers its connections laid out as a flow table, with no ``outputSchema``, so
 only a harmless probe call shows the answer's shape; one answers the files the
 run dropped.
 
-* The connection test proposes the sandbox kinds from the rows' keys (the
+* The connection test of a server declared a sandbox source (``roles``
+  holding ``sandbox``) proposes the sandbox kinds from the rows' keys (the
   sandbox report shape test), with the process id as the place a run root is
-  read from.
+  read from. A server not declared one is proposed none: the same rows are
+  what a memory image or a capture answers with.
 * Accepted, the processes tool's answer is a sandbox's: its entry reads as a
   ``run`` root per process, it is drawn as the built-in sandbox's processes
   are, and it is counted among the sandbox's entries rather than as a look at
@@ -161,10 +163,10 @@ def installed() -> Iterator[Any]:
     declared_reading.forget()
 
 
-def _probe(confirmed: list[str] | None = None) -> Any:
+def _probe(confirmed: list[str] | None = None, *, roles: tuple[str, ...] = ("sandbox",)) -> Any:
     from app.services.settings_probes import probe_mcp
 
-    entry = {"enabled": True, "command": "livebox-server"}
+    entry = {"enabled": True, "command": "livebox-server", "roles": list(roles)}
     return asyncio.run(
         probe_mcp({"name": SERVER, "entry": entry, "confirmed_calls": list(confirmed or [])})
     )
@@ -210,6 +212,12 @@ def test_the_probe_proposes_sandbox_kinds_from_the_rows_keys() -> None:
     assert flows["kind"] == "sandbox_network"
     assert flows["reader"] == "flow_table"
     assert proposals["run_dropped"]["facts"]["kind"] == "sandbox_dropped_files"
+
+
+def test_a_server_not_declared_a_sandbox_source_is_proposed_no_sandbox_kind() -> None:
+    proposals = _probe(confirmed=["run_connections"], roles=()).details["proposals"]["tools"]
+    kinds = {name: held["facts"].get("kind") for name, held in proposals.items()}
+    assert not any(str(kind).startswith("sandbox_") for kind in kinds.values()), kinds
 
 
 def test_an_accepted_sandbox_kind_gives_run_roots_and_a_sandbox_s_reading(installed: Any) -> None:
