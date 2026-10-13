@@ -192,13 +192,20 @@ report instead:
    report's block count. Where no list reads as one of those parts, no
    declaration is proposed (it would read nothing the unread read does not).
 
-   A list reads as DNS questions only with evidence of its own: a key only DNS
-   rows write (`qname`, `qtype`, `rrtype` ...), an answer, question types that
-   are DNS record types, or a name it sits under saying so (`dns`, `lookups`).
-   A name and a type alone are what function, section, rule and classification
-   lists hold. Likewise a digest, a name and a size read as dropped files only
-   under a name saying so (`dropped`, `written`), not as an archive's or a
-   resource listing's members.
+   A list reads as DNS questions only with DNS-specific evidence: the question
+   under `request` or `query`, its answers under `answers`, a key only DNS
+   rows write (`qname`, `qtype`, `rrtype` ...), or question types that are DNS
+   record types; a name it sits under saying so (`dns`, `lookups`) alone reads
+   with low confidence, and not where its type values are seen to be no record
+   types. A name and a type alone are what function, section, rule and
+   classification lists hold, and a name with its addresses (`addresses`,
+   `ips`, `resolved`) what interfaces, hosts files and embedded configurations
+   hold. Likewise a digest, a name and a size read as dropped files only under
+   a name saying so (`dropped`, `written`), not as an archive's or a resource
+   listing's members. Each mapping slot goes to the list with the strongest
+   evidence (its confidence, the evidence of its own kind, then the parts it
+   names), not to the first one found, so a list that only resembles a kind
+   never takes the slot from one that plainly is of it.
 2. A run reads it *unread*: every top-level block is a raw `report.<block>`
    channel the dynamic analyst reads, every section is listed as unavailable,
    and no observed fact (process, flow, DNS name, indicator) is drawn from it.
@@ -207,13 +214,20 @@ report instead:
    needed and accepts it (`POST /api/v1/sandbox-report-formats/accept`, with
    `declaration`, `sample_id` and `report_id`), for any stored report. The
    declaration is saved only if it validates, is the format that recognises
-   that report, and a trial read of the report with it reads something (a row
-   in a channel or a place, or the target hash). A format read through a
+   that report, and a trial read of the report with it reads a fact: one of
+   its consumer channel paths (processes, calls, signatures, DNS, HTTP, TCP,
+   UDP, hosts, domains, dropped files, registry) or place paths keeps a row,
+   or its target hash path names a hash. Its own `channels` are not counted:
+   a kept raw `report.<block>` channel keeps a row from any report, so a
+   mapping whose fact paths all miss is refused. A format read through a
    mapping is tried after every built-in format and every registered reader,
    so it never takes a report a built-in reads; a declaration a built-in or
    another declared format also recognises for that report is refused, naming
-   that format. Accepts run one at a time, so none drops another's
-   declaration.
+   that format. Accepts, and the settings writes of `sandbox.report_formats`
+   and `sandbox.upload.allowed_formats` (a save, an import, a reset), run one
+   at a time under one lock, so none drops another's declaration. Across API
+   processes only PostgreSQL serialises them (a transaction-scoped advisory
+   lock); on another database only the writes of one process are.
    It is saved through the settings path every declaration takes, its name is
    added to `allowed_formats`, and the upload's row records the format, task id
    and target match. From then on the report, and every report shaped like it,
@@ -270,7 +284,12 @@ must say how it is recognised (`detect`), and it is tried before the built-ins,
 so a report shaped like Cuckoo but carrying your marker is yours. A new format
 read through a mapping (`reader: generic`, an accepted proposal among them) is
 the exception: it is tried after every built-in and every registered reader,
-so it never takes a report one of them reads. A
+so it never takes a report one of them reads. Saving such a format whose
+detect overlaps a built-in's returns a warning beside its `detect` (the save
+is kept): a built-in recognises the plainest report one of its detect groups
+describes, or it recognises the plainest report one of a built-in's groups
+describes. A format carries no stored sample report, so the check reads those
+plainest reports, built from the tests themselves. A
 declaration under a built-in's name is merged over that built-in field by
 field: a field you set replaces the shipped value, a field you leave out keeps
 it. So `{"name": "cape2", "signature_scale": {...}}` changes CAPE's scale alone,
@@ -418,7 +437,7 @@ coding it:
 | `sandbox.rest.submit` | The multipart submission (`method`, `path`, `file_field`, `extra_fields`, `submit_fields`) and the JSONPath of the task id in its answer. |
 | `sandbox.rest.status` | The poll path, the JSONPath of the state, and the done and failed values. |
 | `sandbox.rest.report` | Where the report is, the registered reader or declared format that reads it (`cape2`, `cuckoo`, `triage`, `generic`, one an operator registers, or a format declared in `sandbox.report_formats`, read through its own `mapping` and on its own scale as an upload of it is), an optional capture path, and for a `generic` report its signature scale (`signature_scale_rungs`, `signature_scale_name`). |
-| `sandbox.rest.mapping` | For a `generic` report, an RFC 9535 JSONPath per channel: processes, calls, signatures, DNS, HTTP, TCP, UDP, hosts, domains, dropped files, registry; and per report place with no channel (`places`): `process_tree`, `resolved_apis`, `extracted`, `procdumps`, `memory`, `ids_alerts`, each match kept as the sandbox published it and read whole. A place holds the report at most once: its matches, each counted with everything nested in it, never hold more values than the report does, so a descendant path whose matches nest (`$..children[*]` over a nested tree) is cut there, and the cut is logged and counted as truncated. A path with more than one descendant segment (`$..a..b`), or a filter whose absolute query descends (`$.a[*][?count($..x) > 0]`, read again for every candidate), walks the report again under every node the first reached; saving one returns a warning beside it (never a refusal), so anchor it where you can. A channel is still cut at 5,000 rows, a limit kept from before. |
+| `sandbox.rest.mapping` | For a `generic` report, an RFC 9535 JSONPath per channel: processes, calls, signatures, DNS, HTTP, TCP, UDP, hosts, domains, dropped files, registry; and per report place with no channel (`places`): `process_tree`, `resolved_apis`, `extracted`, `procdumps`, `memory`, `ids_alerts`, each match kept as the sandbox published it and read whole. Every channel and place is read whole, as a built-in reader reads its lists: no row count cuts it. A path is bounded only by the report's own size: a channel's matches never outnumber the values the report holds, and an operator channel's or a place's matches, each counted with everything nested in it, never hold more values than the report does, so a path whose matches repeat or nest (`$..children[*]` over a nested tree) is cut there, and the cut is logged and counted as truncated. A path with more than one descendant segment (`$..a..b`) walks the report again under every node the first reached, and a filter holding any absolute query (`$.a[?count($.b[*]) > 0]`, `$.a[?@.v == $.b[0]]`) runs it from the report's root for every candidate; saving one returns a warning beside it (never a refusal), so anchor it, or test the candidate (`@`), where you can. |
 
 An empty path in `mapping` says the sandbox does not publish that channel, and
 the report lists it as unavailable rather than reading like a clean sample by
