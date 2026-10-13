@@ -93,8 +93,25 @@ const BY_SUFFIX: Array<[string, SectionTab]> = [
   ["_exports", "static"],
 ];
 
-/** The tab a section is drawn on. */
-export function tabOfSection(key: string): SectionTab {
+/**
+ * Where the API placed the sections an operator's tool produced, by key
+ * (`ReportDetailDTO.section_tabs`): by the kind its tool declared, else by
+ * the analyst whose call it cites. A key the map does not name, or names
+ * with a tab that draws no sections, is placed by its key alone.
+ */
+export type SectionPlacements = Record<string, string> | null | undefined;
+
+/** The tab a section is drawn on: by its key, else where the API placed it. */
+export function tabOfSection(key: string, placed?: SectionPlacements): SectionTab {
+  const byKey = tabOfKey(key);
+  if (byKey !== "other" || !placed) return byKey;
+  const tab = placed[(key ?? "").trim()];
+  return typeof tab === "string" && RENDERED_TABS.has(tab as SectionTab)
+    ? (tab as SectionTab)
+    : "other";
+}
+
+function tabOfKey(key: string): SectionTab {
   const name = (key ?? "").trim();
   if (!name) return "other";
   const dot = name.indexOf(".");
@@ -134,10 +151,11 @@ export function sectionHasContent(section: EvidenceSection): boolean {
 /** The sections one tab draws, in the order the run gathered them. */
 export function sectionsForTab(
   sections: EvidenceSection[] | null | undefined,
-  tab: SectionTab
+  tab: SectionTab,
+  placed?: SectionPlacements
 ): EvidenceSection[] {
   return (sections ?? []).filter(
-    (section) => sectionHasContent(section) && tabOfSection(section.key) === tab
+    (section) => sectionHasContent(section) && tabOfSection(section.key, placed) === tab
   );
 }
 
@@ -168,11 +186,12 @@ export function isCoveredBySection(
  * page rather than a hole in the routing. Everything else lands here.
  */
 export function unrenderedSections(
-  sections: EvidenceSection[] | null | undefined
+  sections: EvidenceSection[] | null | undefined,
+  placed?: SectionPlacements
 ): EvidenceSection[] {
   return (sections ?? []).filter(
     (section) =>
-      sectionHasContent(section) && !RENDERED_TABS.has(tabOfSection(section.key))
+      sectionHasContent(section) && !RENDERED_TABS.has(tabOfSection(section.key, placed))
   );
 }
 

@@ -756,6 +756,17 @@ def _capability_evidence(run: RunRecord) -> list[str]:
     return _ids(_list(static.get("api_capabilities_evidence_ids")))
 
 
+def _titled_engine(title: Any) -> str:
+    """The tool a rule table's title names, lower-cased; ``""`` for a title of neither form."""
+    from maljan.reporting.ledger_report import CAPABILITIES_TITLE, RULE_MATCHES_TITLE, titled_tool
+
+    for template in (RULE_MATCHES_TITLE, CAPABILITIES_TITLE):
+        named = titled_tool(title, template)
+        if named:
+            return named.lower()
+    return ""
+
+
 def _detection_items(run: RunRecord) -> tuple[list[_Item], bool, list[str]]:
     """Rule-match rows, whether any rule section was recorded, and the sections' ids.
 
@@ -771,7 +782,11 @@ def _detection_items(run: RunRecord) -> tuple[list[_Item], bool, list[str]]:
         if spec is None:
             continue
         recorded = True
-        engine, compared = spec
+        kind_engine, compared = spec
+        # Rows pair by the section's kind, so one rule matched by two tools of
+        # the kind in two runs is one detection; the label names the tool the
+        # table's title names (a swapped one as itself), else the kind's engine.
+        label_engine = _titled_engine(section.get("title")) or kind_engine
         columns = [_text(c).lower() for c in _list(section.get("columns"))]
         try:
             rule_at = columns.index("rule")
@@ -790,7 +805,7 @@ def _detection_items(run: RunRecord) -> tuple[list[_Item], bool, list[str]]:
                 name.lower(): (_text(cells[pos]) if pos < len(cells) else "") or None
                 for name, pos in positions.items()
             }
-            items.append(_Item(f"{engine}|{rule}", f"{engine}: {rule}", fields))
+            items.append(_Item(f"{kind_engine}|{rule}", f"{label_engine}: {rule}", fields))
     return items, recorded, evidence
 
 

@@ -41,8 +41,8 @@ from maljan.agents.delegation import (
     WAITING_ON_EACH_OTHER_REFUSAL,
     _what_an_ask_gets_sentence,
 )
+from maljan.agents.dynamic_analyst import sandbox_server_label
 from maljan.agents.evidence_recorder import earlier_chunk_answer, same_function_notice
-from maljan.agents.ghidra_http_client import no_program_as_error
 from maljan.agents.judge_agent import (
     COMPACT_BUNDLE_RULES,
     CONTRADICTION_DEFINITION,
@@ -66,7 +66,13 @@ from maljan.agents.judge_agent import (
     verdict_cut_violation,
 )
 from maljan.agents.judge_agent import QUESTION_ROOTS_LABEL as _ROOTS_LABEL
-from maljan.agents.network_analyst import NO_PACKET_TOOL_LINE, OTHER_TOOLS_THEN_ANALYZE
+from maljan.agents.network_analyst import (
+    NO_PACKET_TOOL_LINE,
+    OTHER_TOOLS_THEN_ANALYZE,
+    UNDECLARED_TOOLS_LINE,
+    _flows_label,
+    primary_evidence_line,
+)
 from maljan.agents.prompt_fragments import (
     CLAIM_FORMAT_FRAGMENT,
     ENDPOINTS_ROW_SHAPE,
@@ -74,6 +80,7 @@ from maljan.agents.prompt_fragments import (
     TOOL_FREE_TURN_STATEMENT,
     no_tool_call_question,
     tools_statement,
+    undeclared_server_text,
 )
 from maljan.agents.prompts import (
     ANDROID_STATIC_PROMPT,
@@ -86,6 +93,13 @@ from maljan.agents.static_analyst import (
     _reframe_static_raw_data,
     _tool_use_line,
 )
+from maljan.agents.tool_answer_clearing import (
+    READ_EVIDENCE_DESCRIPTION,
+    UNKNOWN_EVIDENCE_REMEDIATION,
+    cleared_reference,
+    read_again_note,
+    unknown_evidence_message,
+)
 from maljan.agents.tool_fence import FENCE_STATEMENT as _FENCE_STATEMENT
 from maljan.agents.tool_fence import fenced as _fenced
 from maljan.agents.tool_pinning import (
@@ -93,11 +107,15 @@ from maljan.agents.tool_pinning import (
     UNREADABLE_FILLED_CAPTURE_REMEDIATION,
 )
 from maljan.analysis import evidence_roots as _roots
+from maljan.analysis import sandbox_sections
 from maljan.analysis.evidence_roots import layers_and_roots as _layers_and_roots
 from maljan.analysis.evidence_roots import roots_phrase as _roots_phrase
 from maljan.analysis.function_summarizer import SHORTENED_NOTE as SUMMARISER_SHORTENED_NOTE
 from maljan.analysis.function_summarizer import SUMMARY_CUT_NOTE, SUMMARY_FENCE_STATEMENT
 from maljan.analysis.pcap_summary import CaptureRead
+from maljan.core.config import SampleOpenConfig
+from maljan.core.pack_steps import CALLED_API_CATALOGUE, shipped_label
+from maljan.core.reputation import read_answer
 from maljan.extractors.capability_matrix import (
     NOT_ASKED_UNKNOWN_ID,
     TechniqueQuestion,
@@ -107,24 +125,36 @@ from maljan.extractors.capability_matrix import (
 from maljan.llm.context_window import no_room_sentence
 from maljan.llm.tool_replies import NO_REPLY_RECORDED, NOT_RUN_REPLY
 from maljan.memory.technique_cards import card_lines, load_cards
-from maljan.pipeline import triage_pack
+from maljan.pipeline import function_claims, nodes, triage_pack
 from maljan.pipeline.debate_facts import (
+    ANALYSTS_FIELD_MISSING_NOTE,
+    BLOCK_NOT_READ_NOTE,
+    analysts_field_unknown_note,
     ledger_count_facts,
+    place_facts,
     with_ledger_facts,
+    with_place_facts,
 )
 from maljan.pipeline.evidence_summary import summarise
 from maljan.pipeline.mediation_models import (
     CONTRADICTIONS_BLOCK_MISSING_NOTE,
     CONTRADICTIONS_BLOCK_MIXED_NOTE,
     MediatorVerdict,
+    mediator_no_answer_note,
 )
 from maljan.pipeline.nodes import (
+    NO_LOOKUP_DECLARED,
+    NO_LOOKUP_ENABLED,
     NO_SANDBOX_DATA_REASON,
     NO_STATIC_FIXTURE_NOTE,
+    NOT_ASKED_TO_REVISE,
+    NOT_NAMED_BY_MEDIATOR,
     run_quality_note,
     skipped_analysts_reason,
 )
-from maljan.pipeline.run_state import NO_LIMIT, budget_line
+from maljan.pipeline.routing import NO_CONTESTED_POINT, NOT_REVISED, POINTS_UNCHANGED
+from maljan.pipeline.run_state import LOOKUP_UNREAD, NO_LIMIT, SHA256_GIVEN, budget_line
+from maljan.pipeline.sycophancy_detector import convergence_sentence
 from maljan.pipeline.validation import (
     _UNPARSED_ANSWER_MESSAGE,
     ANALYST_FEEDBACK_CLOSING,
@@ -171,10 +201,18 @@ from maljan.pipeline.validation import (
     undescribed_technique_finding,
     ungrounded_capabilities,
     unpublished_value_violations,
+    unreadable_answer_reason,
     validate_verdict_bundle,
     whole_answer_after_retry_question,
 )
-from maljan.providers.base import STATIC_EVIDENCE_INSTRUCTIONS, absent_provider_fragment
+from maljan.providers.base import (
+    CLAIM_CITATION,
+    STATIC_EVIDENCE_LEAD,
+    VERIFICATION_DISCIPLINE,
+    absent_provider_fragment,
+)
+from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
+from maljan.providers.sandbox.mock import MockSandboxProvider
 from maljan.providers.static import r2 as _r2
 from maljan.providers.static.ghidra import (
     GHIDRA_GUIDANCE,
@@ -182,6 +220,7 @@ from maljan.providers.static.ghidra import (
     ghidra_not_answering,
     sample_not_opened,
 )
+from maljan.providers.static.ghidra.http_client import no_program_as_error
 from maljan.providers.static.null import NullStaticProvider
 from maljan.providers.static.r2 import r2_error_reply
 from maljan.reporting.composer import (
@@ -197,7 +236,11 @@ from maljan.reporting.composer import (
     section_contract,
 )
 from maljan.reporting.evidence_bundles import sample_flow_fact
-from maljan.reporting.ledger_report import FUNCTION_NOT_SHOWN
+from maljan.reporting.ledger_report import (
+    CAPABILITIES_TITLE,
+    FUNCTION_NOT_SHOWN,
+    RULE_MATCHES_TITLE,
+)
 from maljan.reporting.models import (
     FileHashes,
     MalwareReport,
@@ -213,18 +256,24 @@ from maljan.reporting.narrative_agent import (
     EXAMPLE_OBJECT,
     EXPECTED_OBJECT,
     build_prompt_text,
+    support_note,
 )
 from maljan.reporting.renderers.markdown import analyst_list_note
 from maljan.reporting.renderers.stix_renderer import (
     BENIGN_NAME_IN_A_URL,
     BENIGN_NAME_RESOLVED,
     CAPTURE_TLS_NAME,
+    DECODED_FROM_THE_BYTES_TEMPLATE,
+    DECODER_PARTIAL,
+    EMULATOR_PARTIAL,
     FLOW_OUTSIDE_THE_TREE,
     JUDGE_KEPT_WHEN_TOLD,
     JUDGE_KEPT_WHEN_TOLD_OF_ITS_HOST,
     JUDGE_NOT_ASKED_IN_TIME,
     JUDGE_QUESTION_NOT_RECORDED,
+    RECOVERED_BY_EMULATION,
     SEARCHED_THE_REPORT,
+    SWEEP_PARTIAL,
     UNATTRIBUTED_FLOW,
     disputed_flow_reason,
     judge_not_told,
@@ -235,9 +284,10 @@ from maljan.reporting.renderers.stix_renderer import (
     seen_in_reason,
     yes_because,
 )
-from maljan.schemas.evidence import LedgerEntry, not_shown_record
+from maljan.schemas.evidence import LedgerEntry, build_entry, not_shown_record
 from maljan.schemas.isr_models import (
     ABSENCE_TECHNIQUE_MARKER,
+    FAILED_CALLS_MARKER,
     JUDGE_ONLY_TECHNIQUE_MARKER,
     JUDGE_UNCONFIRMED_TECHNIQUE_MARKER,
     AgentISR,
@@ -247,8 +297,9 @@ from maljan.schemas.isr_models import (
     judge_dropped_reason,
     judge_kept_note,
 )
+from maljan.schemas.sandbox_report import SECTION_IDS
 from maljan.schemas.stix_models import Bundle
-from maljan.tools import api_hashes, binary, knowledge, string_blobs
+from maljan.tools import api_hashes, artefact_index, binary, knowledge, string_blobs
 from maljan.tools.errors import CAPTURES_REMEDIATION, NO_CAPTURE_REMEDIATION
 
 # Every no: sentence a root reading writes, and the names of the roots.
@@ -469,6 +520,26 @@ def _function_index_text() -> str:
             "callees": ["0x403000", "0x404000"],
             "indirect": {"artefacts": 3, "through": 2},
             **({"names": ["anexport"], "entry_point": True} if i == 0 else {}),
+            # The relations that are no call, in the row of the second function.
+            **(
+                {
+                    "started_as_thread_by": [
+                        {"function": "0x402000", "through": "StartThing", "call": "0x402010"}
+                    ],
+                    "starts_threads": [
+                        {"function": "0x403000", "through": "StartThing", "call": "0x401110"},
+                        {
+                            "function": "0x404000",
+                            "through": "CreateRemoteThread",
+                            "call": "0x401120",
+                        },
+                    ],
+                    "address_taken_by": ["0x404000"],
+                    "takes_address_of": ["0x405000"],
+                }
+                if i == 1
+                else {}
+            ),
         }
         for i in range(3)
     ]
@@ -624,7 +695,8 @@ def _analysis_tool_descriptions(*names: str) -> str:
 
 def _deobfuscation_sentences() -> str:
     """Every sentence the deobfuscation passes put in front of a model, filled in."""
-    from maljan.analysis import ghidra_passes
+    from maljan.analysis import anti_analysis
+    from maljan.providers.static.ghidra import passes as ghidra_passes
     from maljan.tools import crypto_constants
 
     return " ".join(
@@ -632,19 +704,89 @@ def _deobfuscation_sentences() -> str:
             crypto_constants.SCAN_RULE,
             ghidra_passes.SCAN_CHECKS,
             ghidra_passes.STATED_RULE,
-            ghidra_passes.GS_OFF_BOUNDARY,
+            anti_analysis.GS_OFF_BOUNDARY,
             ghidra_passes.GHIDRA_SWITCHED_OFF,
             ghidra_passes.GHIDRA_NOT_OVER_HTTP.format(transport="stdio"),
             ghidra_passes.GHIDRA_HAS_NO_COPY,
             triage_pack.PASS_ROOM_SENTENCE.format(shown=1, total=2),
-            triage_pack.SCAN_CHECKS_SHORT,
+            ghidra_passes.SCAN_CHECKS_SHORT,
+            triage_pack.UNNAMED_SCANNER,
+        ]
+    )
+
+
+def _priority_hints() -> str:
+    """The sink pre-pass's hint, with Ghidra's closing sentence and with the neutral one."""
+    from maljan.analysis.sink_reachability import FOLLOW_UP, CallGraph, build_priority_hint
+    from maljan.providers.static.ghidra.call_graph import PRIORITY_FOLLOW_UP
+
+    graph = CallGraph.of_edges([("f", "CreateRemoteThread")], {"f": "0x1"})
+    return " ".join(
+        [
+            build_priority_hint(graph, follow_up=PRIORITY_FOLLOW_UP),
+            build_priority_hint(graph, follow_up=FOLLOW_UP),
+        ]
+    )
+
+
+def _reputation_lines() -> str:
+    """The pack's reputation lines from a declared lookup's read record, and why none was made."""
+    from maljan.core.tool_declarations import ToolFacts
+
+    facts = ToolFacts.model_validate(
+        {
+            "kind": "reputation",
+            "display_name": "A service",
+            "reputation": {
+                "stats": "/stats",
+                "malicious": "/stats/bad",
+                "labels": ["/names/*"],
+                "detections": "/engines",
+                "text_patterns": [r"(?P<malicious>\d+)/(?P<total>\d+) flagged"],
+            },
+        }
+    )
+    counted = {"stats": {"bad": 2, "good": 5}, "names": ["n1", "n2"], "engines": ["e1", "e1"]}
+    entries = [
+        build_entry(
+            entry_id=f"ev_000{i}",
+            seq=i,
+            agent="pipeline",
+            tool="a_lookup",
+            args={},
+            server="a_server",
+            output=output,
+            source="mcp:a_server",
+        )
+        for i, output in enumerate((json.dumps(counted), "3/9 flagged", "unknown hash"), 1)
+    ]
+    for entry in entries:
+        entry.reputation = read_answer(
+            facts, output=entry.output, structured=entry.structured, server="a_server"
+        ).stored()
+        entry.facts = {"v": 1, "kind": "reputation"}
+    failed = LedgerEntry(
+        id="ev_0004",
+        tool="a_lookup",
+        ok=False,
+        error="x",
+        seq=4,
+        source="mcp:a_server",
+        facts={"v": 1, "kind": "reputation"},
+    )
+    return " ".join(
+        [
+            triage_pack.pack_block([*entries, failed], 0),
+            NO_LOOKUP_ENABLED.format(servers="a_server, b_server"),
+            NO_LOOKUP_DECLARED,
+            triage_pack.reason_sentence(triage_pack.failure_reason(triage_pack.REPUTATION_STEP)),
         ]
     )
 
 
 def _deobfuscation_lines() -> str:
     """The two pass lines with and without a finding, and the lines of a pass not run."""
-    from maljan.analysis.ghidra_passes import ANTI_ANALYSIS_TOOL
+    from maljan.analysis.anti_analysis import SCAN_TOOL as ANTI_ANALYSIS_TOOL
     from maljan.tools import crypto_constants
 
     place = {"offset": "0x1", "rva": "0x2", "function": "0x0"}
@@ -692,6 +834,7 @@ def _deobfuscation_lines() -> str:
             triage_pack._anti_analysis(findings, max_chars=200),
             triage_pack._anti_analysis({"stated": [], "not_stated": 2, "total_findings": 2}),
             triage_pack._anti_analysis({"stated": []}),
+            triage_pack._anti_analysis({"stated": [], "server": "ghidra"}),
             triage_pack.pack_block([*not_run, *failed], 0),
         ]
     )
@@ -701,7 +844,7 @@ def _ghidra_pass_failures() -> str:
     """What each way a Ghidra pass can stop says, from the passes' own code."""
     import httpx
 
-    from maljan.analysis.ghidra_passes import GhidraPasses, GhidraPassFailed
+    from maljan.providers.static.ghidra.passes import GhidraPasses, GhidraPassFailed
 
     def ghidra(answers: dict[str, Any]) -> GhidraPasses:
         def handler(request: httpx.Request) -> httpx.Response:
@@ -712,7 +855,11 @@ def _ghidra_pass_failures() -> str:
                 return httpx.Response(answer)
             return httpx.Response(200, json=answer)
 
-        return GhidraPasses(base_url="http://g.invalid", transport=httpx.MockTransport(handler))
+        return GhidraPasses(
+            base_url="http://g.invalid",
+            transport=httpx.MockTransport(handler),
+            note_key="remote http://g.invalid:80",
+        )
 
     opened = {"/get_current_program_info": {"image_base": "1000"}}
     cases = [
@@ -918,9 +1065,17 @@ _SECTIONS_ENTRY = (
 def _sandbox_sections_sentences() -> str:
     """What the sandbox sections tell a model: the index, the tool, its answers, the questions."""
     from maljan.analysis import sandbox_sections as ss
+    from maljan.core.report_formats import UNREAD_RUN_REASON
+    from maljan.core.safe_json import CYCLE_MARK, DEEPER_MARK, SHARED_MARK
     from maljan.providers import sandbox_tools as st
+    from maljan.providers.sandbox.readers import TriageReportReader, report_reader
     from maljan.schemas.evidence import LedgerEntry
+    from maljan.schemas.sandbox_document import DNS_AS_WRITTEN_KEY, sandbox_document
 
+    # A report accepted unread: its blocks as raw channels, every section unavailable.
+    unread = sandbox_document(
+        report_reader("unread").read({"run": {"procs": [{"pid": 1}]}}, provider="upload")
+    )
     report: dict[str, Any] = {
         "behavior": {
             "processes": [
@@ -974,9 +1129,22 @@ def _sandbox_sections_sentences() -> str:
             json.dumps(ss.section_index(report, ("cape2", "cape2"))),
             json.dumps(st.sandbox_items(report, "files", normalised_by=("rest", "generic"))),
             json.dumps(st.sandbox_items(report, "signatures", pid=7)),
-            *(ss.NO_OVERVIEW.format(provider="upload", section=n) for n in ss.SECTION_PREFIXES),
+            *(
+                ss.NO_PARTIAL.format(provider="upload", how=TriageReportReader.PARTIAL, section=n)
+                for n in ss.SECTION_PREFIXES
+            ),
             *(ss.NO_PID_ROWS.format(section=n) for n in ss.SECTION_PREFIXES),
+            # The key a network section answer may show a source's unread DNS value under.
+            DNS_AS_WRITTEN_KEY,
             ITEM_UNREAD.format(item="net:1"),
+            # What a report nested past the guard, holding itself or sharing a
+            # container is written out with where a model reads it.
+            DEEPER_MARK,
+            CYCLE_MARK,
+            SHARED_MARK,
+            json.dumps(ss.section_index(unread, ("upload", "unread", ""))),
+            json.dumps(st.sandbox_items(unread, "processes", normalised_by=("upload", "unread"))),
+            UNREAD_RUN_REASON,
         ]
     )
 
@@ -1014,6 +1182,22 @@ def _message_of(violation: Violation | None) -> str:
     """A question's words, which the builder answers only when there is one to ask."""
     assert violation is not None
     return violation.message
+
+
+def _network_reputation_paragraph() -> str:
+    """The network analyst's flows text, with the paragraph on reputation records."""
+    from maljan.parsers.network_parser import REPUTATION_HEADING, NetworkParser
+
+    text = NetworkParser().parse({"dns": [], "http": [], "tcp": [], "udp": [], "hosts": []})
+    assert REPUTATION_HEADING in text
+    return text
+
+
+def _unsupported_malware_question() -> str:
+    """The judge's question for a Malware verdict over a run no analyst examined."""
+    from maljan.pipeline.validation import UNSUPPORTED_MALWARE_QUESTION
+
+    return UNSUPPORTED_MALWARE_QUESTION.format(listed="ev_0001, ev_0002")
 
 
 def _function_claim_question(several: bool = False) -> str:
@@ -1120,6 +1304,17 @@ PROMPTS: dict[str, str] = {
     "composer published-techniques heading": PUBLISHED_TECHNIQUES_HEADING,
     "composer claim note": WHERE_QUOTED_LEAD,
     "composer cut-at-cap question": section_cut_violation(8192).message,
+    "composer question for an answer with no text": unreadable_answer_reason(""),
+    "composer question for an answer that is not valid JSON": unreadable_answer_reason(
+        '{"text": "a value with a stray " quote"}'
+    ),
+    "composer question for an answer holding no JSON object": " ".join(
+        unreadable_answer_reason(answer)
+        for answer in ("[]", '[{"a": 1}]', "{}", "null", "true", "0", '"text"')
+    ),
+    "composer question naming a raw control character": unreadable_answer_reason(
+        '{"text": "one\ntwo"}'
+    ),
     "composer cut-at-cap question on a repeating answer": section_cut_violation(
         8192, chars=20000, begun=160, distinct=20
     ).message,
@@ -1249,6 +1444,8 @@ PROMPTS: dict[str, str] = {
         8192, '{"type": "bundle", "objects": [{"type": "attack-pattern", "id": "a"}'
     ).message,
     "absence marker": ABSENCE_TECHNIQUE_MARKER,
+    "failed-calls marker": FAILED_CALLS_MARKER,
+    "sandbox-called api catalogue label": shipped_label("api_capability", CALLED_API_CATALOGUE),
     "capability questions for the anti-analysis and anti-forensics terms": " ".join(
         v.message
         for v in ungrounded_capabilities(
@@ -1264,6 +1461,9 @@ PROMPTS: dict[str, str] = {
             knowledge.RESOLVED_AT_RUNTIME,
             str(knowledge.api_capability.__doc__ or ""),
         ]
+    ),
+    "the function-match answer of a backend without function hashes": (
+        knowledge.NO_FUNCTION_HASH_STORE
     ),
     "the claims headings of a composer section and the narrative round": (
         f"{ANALYST_CLAIMS_HEADING} {CLAIMS_IN_FORCE_HEADING}"
@@ -1470,6 +1670,50 @@ PROMPTS: dict[str, str] = {
             CONTRADICTIONS_BLOCK_MIXED_NOTE,
         ]
     ),
+    "a mediation round whose mediator wrote no answer": " ".join(
+        [
+            mediator_no_answer_note(
+                "the answer was empty; asked once more, the answer was empty again"
+            ),
+            mediator_no_answer_note(
+                "the answer was cut at 4096 tokens with no text; not asked again, as the same "
+                "call would be cut again"
+            ),
+            mediator_no_answer_note(
+                "the answer was empty; asking once more was refused by the job's spend ceiling"
+            ),
+            mediator_no_answer_note("the answer was empty; asking once more failed (TimeoutError)"),
+            mediator_no_answer_note("the call was not admitted under the job's spend ceiling"),
+            mediator_no_answer_note(
+                "the tool loop stopped at its step limit with no text; the tool loop was not "
+                "run again"
+            ),
+            mediator_no_answer_note(
+                "the tool loop ended (3 repeated tool call(s)) and the call to write its "
+                "reasoning failed (TimeoutError); the tool loop was not run again"
+            ),
+            mediator_no_answer_note(
+                "the tool loop ended (the job's spend ceiling was reached) and the call to write "
+                "its reasoning was not admitted under the job's spend ceiling; the tool loop was "
+                "not run again"
+            ),
+            mediator_no_answer_note(
+                "the tool loop ended (before its final answer) with no time left to write its "
+                "reasoning; the tool loop was not run again"
+            ),
+        ]
+    ),
+    "a revision round that made no change": " ".join([NOT_REVISED, NOT_ASKED_TO_REVISE]),
+    "a revision round asking only the analysts the mediator names": " ".join(
+        [
+            NOT_NAMED_BY_MEDIATOR,
+            BLOCK_NOT_READ_NOTE,
+            ANALYSTS_FIELD_MISSING_NOTE,
+            analysts_field_unknown_note(["network", "@@@"]),
+            NO_CONTESTED_POINT,
+            POINTS_UNCHANGED,
+        ]
+    ),
     "a chunk still cut after its question": chunk_cut_unread_sentence("chunk 1 of 2"),
     "mediator structured extraction and its schema": " ".join(
         [
@@ -1493,7 +1737,121 @@ PROMPTS: dict[str, str] = {
     "the spend ceiling's reason and a call it refused": _spend_sentences(),
     "an ask refused for a mutual wait": WAITING_ON_EACH_OTHER_REFUSAL.format(callee="'helper'"),
     "the pack's decoded strings in part": triage_pack.DECODED_STRINGS_ROOM_SENTENCE.format(
-        shown=10, total=90, offset=10
+        shown=10, total=90, offset=10, tool="recover"
+    ),
+    "the pack's declared steps: a step not asked, scheduled, or read generically": " ".join(
+        [
+            triage_pack.NO_SERVER_CALLS.format(server="scanner", tool="recover"),
+            nodes.STEP_WITHHELD.format(server="scanner", tool="recover"),
+            nodes.STEP_WITHHELD_UNREAD.format(server="scanner"),
+            nodes.STEP_NO_SERVER.format(server="scanner", tool="recover"),
+            triage_pack.room_beside(
+                host_available=12 * 1024**3,
+                cgroup_left=None,
+                peaks=[("Matcher", 2 * 1024**3, "measured"), ("Recover", 4 * 1024**3, "x")],
+                floor=10 * 1024**3,
+            ),
+            triage_pack.room_beside(
+                host_available=64 * 1024**3,
+                cgroup_left=1024**3,
+                peaks=[("Recover", 4 * 1024**3, "declared")],
+                floor=0,
+            ),
+            triage_pack.room_beside(
+                host_available=None, cgroup_left=None, peaks=[("Recover", None, "x")], floor=0
+            ),
+            artefact_index.RULES_NOT_JOINED,
+            artefact_index.RULES_UNLABELLED,
+            triage_pack.render_pack(
+                [
+                    LedgerEntry(
+                        id="ev_0001",
+                        agent=triage_pack.PIPELINE,
+                        server="scanner",
+                        tool="recover",
+                        output='{"rows": [{"t": "a b", "at": "0x10"}]}',
+                        structured={"rows": [{"t": "a b", "at": "0x10"}]},
+                        facts={
+                            "v": 1,
+                            "kind": "decoded_strings",
+                            "rows": "/rows/*",
+                            "values": {"text": "/t"},
+                            "places": {"rva": "/at"},
+                        },
+                        pack_step={"v": 1, "id": "recover", "label": "Recover"},
+                    )
+                ],
+                0,
+            ),
+            triage_pack._around({"after_function_start": "0x1000"}),
+        ]
+    ),
+    "a swapped matcher's and decoder's answers, named by no tool that did not run": " ".join(
+        [
+            triage_pack.render_pack(
+                [
+                    LedgerEntry(
+                        id="ev_0001",
+                        agent=triage_pack.PIPELINE,
+                        server="scanner",
+                        tool="match",
+                        output="{}",
+                        structured={"hits": [{"name": "reads a key", "at": ["0x1200"]}]},
+                        facts={
+                            "v": 1,
+                            "kind": "capability_rules",
+                            "rows": "/hits/*",
+                            "values": {"rule": "/name"},
+                            "places": {"addresses": "/at"},
+                            "display_name": "Matcher",
+                        },
+                        pack_step={"v": 1, "id": "capa"},
+                    )
+                ],
+                0,
+            ),
+            artefact_index.row_parts(
+                {artefact_index.rules_field(False): [{"rule": "reads a key", "sources": ["e1"]}]},
+                "ev_0002",
+                {"e1": "Matcher"},
+            ),
+            triage_pack._decoded_blobs(
+                {
+                    "results": [
+                        {
+                            "text": "a word",
+                            "rva": "0x3000",
+                            "scheme": "rot",
+                            string_blobs.decoder_word(False): {
+                                "function_rva": "0x1100",
+                                "called_at_rva": "0x1180",
+                            },
+                        }
+                    ],
+                    "total": 1,
+                    f"also_recovered_by_{string_blobs.decoder_word(False)}": 1,
+                    f"{string_blobs.decoder_word(False)}_rows_compared": 1,
+                }
+            ),
+            triage_pack._constant_item(
+                {
+                    "algorithm": "a cipher",
+                    "what": "table",
+                    triage_pack.RULES_MARK_NEUTRAL: [{"rule": "reads a key", "at": "0x1200"}],
+                }
+            ),
+            json.dumps({"rule_sources": {"ev_0001": "Matcher"}}),
+            function_claims._row_words(
+                {
+                    artefact_index.rules_field(False): [
+                        {"rule": "reads a key " + "x" * 300, "sources": ["e1"]}
+                    ]
+                },
+                "ev_0002",
+                artefact_index.row_parts,
+            ),
+            triage_pack._row_named({"ns": "a/b", "count": 2}, ("ns", "count")),
+        ]
     ),
     "the pack's resolved hashes and decoded blobs in part": " ".join(
         [
@@ -1667,6 +2025,7 @@ PROMPTS: dict[str, str] = {
     ],
     "the deobfuscation passes' pack lines": _deobfuscation_lines(),
     "what a Ghidra pass that stopped says": _ghidra_pass_failures(),
+    "the sink pre-pass's priority hints": _priority_hints(),
     "the constant sets as the pack line names them": _constant_set_names(),
     "the constant scan's description": _analysis_tool_descriptions("find_crypto_constants"),
     "the function index tool's description": _analysis_tool_descriptions("function_index"),
@@ -1675,6 +2034,12 @@ PROMPTS: dict[str, str] = {
     _SECTIONS_ENTRY: _sandbox_sections_sentences(),
     "a term's example ids and how many more": _term_ids_said(["T1000", "T1001", "T1002"]),
     "run-state budget line of a loop with no limit": budget_line(NO_LIMIT, NO_LIMIT),
+    "run-state line of an undeclared call given the sample's hash": SHA256_GIVEN.format(
+        id="ev_0002", tool="lookup", agent="judge"
+    ),
+    "run-state line of a declared lookup whose counts were not read": LOOKUP_UNREAD.format(
+        id="ev_0002", tool="lookup", agent="judge"
+    ),
     "ask tool budget sentence with no limit": _what_an_ask_gets_sentence("lead", None, None),
     "judge technique question head": technique_question_head("r", "Suspicious", ["T1112"]),
     "judge technique question entry marks": " ".join(
@@ -1733,8 +2098,20 @@ PROMPTS: dict[str, str] = {
     "the line an r2 answer carries when the adapter ran af first": _r2.af_ran_note("0x401000"),
     "the function map block": _function_map_text(),
     "the function index as the pack, the run state and the map say it": _function_index_text(),
+    "a cleared tool answer's reference and the tool that reads it again": " ".join(
+        [
+            cleared_reference("ev_0001", 12_345),
+            unknown_evidence_message("ev_0002"),
+            read_again_note("ev_0001"),
+            READ_EVIDENCE_DESCRIPTION,
+            UNKNOWN_EVIDENCE_REMEDIATION,
+        ]
+    ),
     "a tool answer the conversation had no room for, as told and as recorded": " ".join(
         [no_room_sentence(12_345), not_shown_record(12_345), FUNCTION_NOT_SHOWN]
+    ),
+    "analyst cut-at-cap question for an answer cut while still reasoning": (
+        analyst_cut_violation(4096, "").message
     ),
     "analyst cut-at-cap question naming a chunk": analyst_cut_violation(
         4096, "CLAIM: The file opens a window.\nCLAIM: The fi", chunk="chunk 1 of 2"
@@ -1780,9 +2157,13 @@ PROMPTS: dict[str, str] = {
         provider_label="the Ghidra static provider",
     ),
     "analyst tool statement for a request with none": NO_TOOLS_STATEMENT,
+    # The citation before it is the text every static prompt carried before
+    # the leak test; the shared verification discipline after it is scanned
+    # whole, with the sentence of its own.
     "static provider sentence when none is attached": NullStaticProvider.NO_PROVIDER_FRAGMENT[
-        len(STATIC_EVIDENCE_INSTRUCTIONS) :
+        len(STATIC_EVIDENCE_LEAD + CLAIM_CITATION) :
     ],
+    "the shared verification discipline, whole": VERIFICATION_DISCIPLINE,
     "a Ghidra that could not open the job's sample, as an ask's caller reads it": str(
         sample_not_opened("File not found: /data/samples/.work/a.bin")
     ),
@@ -1793,7 +2174,7 @@ PROMPTS: dict[str, str] = {
         "No program loaded.", "get_function_count"
     ),
     "static provider sentence when its tools did not attach": absent_provider_fragment("Ghidra")[
-        len(STATIC_EVIDENCE_INSTRUCTIONS) :
+        len(STATIC_EVIDENCE_LEAD + CLAIM_CITATION) :
     ],
     "static human-turn tool lines": " ".join(
         [
@@ -1801,9 +2182,38 @@ PROMPTS: dict[str, str] = {
             _tool_use_line([_StampedTool("a", "analysis")]),
             _extract_load_hint('{"analysis_file_path": "/s/a.bin"}', frozenset({"x"})),
             _extract_load_hint('{"analysis_file_path": "/s/a.bin"}', frozenset()),
+            _extract_load_hint(
+                '{"analysis_file_path": "/s/a.bin"}',
+                frozenset({"open_file"}),
+                SampleOpenConfig(open_tool="open_file", path_argument="file_path"),
+            ),
         ]
     ),
-    "network packet-tool lines": f"{NO_PACKET_TOOL_LINE} {OTHER_TOOLS_THEN_ANALYZE}",
+    "network packet-tool lines": (
+        f"{NO_PACKET_TOOL_LINE} {OTHER_TOOLS_THEN_ANALYZE} {UNDECLARED_TOOLS_LINE}"
+    ),
+    "a server that declares no workflow, in its own quoted words": undeclared_server_text(
+        "custom", "Served words.", [_StampedTool("decompile_function", "custom")]
+    ),
+    "the network flows named by the job's sandbox, or by neither": " ".join(
+        [_flows_label(None), _flows_label(CAPE2SandboxProvider), _flows_label(MockSandboxProvider)]
+    ),
+    "a sandbox's own tool server named by its display name": " ".join(
+        [sandbox_server_label(CAPE2SandboxProvider), sandbox_server_label(None)]
+    ),
+    "the network analyst's primary-evidence line": " ".join(
+        [
+            primary_evidence_line(None),
+            primary_evidence_line(CAPE2SandboxProvider, '{"asn": 1, "geo": "x", "reputation": {}}'),
+            primary_evidence_line(None, '{"country": "x"}'),
+        ]
+    ),
+    "the served function index's sentence on a disassembler's list": (
+        artefact_index.SERVED_FUNCTION_LISTS
+    ),
+    "a sandbox section the report names unavailable, by its section id": " ".join(
+        sandbox_sections.NO_UNAVAILABLE.format(name=name) for name in SECTION_IDS
+    ),
     "question for an entry said to hold one line": " ".join(
         v.message
         for v in misstated_entry_contents(
@@ -1826,6 +2236,14 @@ PROMPTS: dict[str, str] = {
                 "a claim by the dynamic analyst",
             ),
             disputed_flow_reason(["SearchHost.exe (procid 104)"], ["cmd.exe (procid 7)"]),
+            disputed_flow_reason(["SearchHost.exe (procid 104)"], ["cmd.exe (procid 7)"], "CAPE"),
+            DECODED_FROM_THE_BYTES_TEMPLATE.format(tool="Unblob"),
+            EMULATOR_PARTIAL.format(tools="MyEmu or AltEmu"),
+            DECODER_PARTIAL.format(tools="Unblob"),
+            SWEEP_PARTIAL.format(tools="texts"),
+            RULE_MATCHES_TITLE.format(tool="MyRules"),
+            CAPABILITIES_TITLE.format(tool="MyRules"),
+            RECOVERED_BY_EMULATION,
             not_kept_reason("x", "", "an artifact of the network analyst"),
             public_resolver_reason(
                 UNATTRIBUTED_FLOW, "an artifact of the network analyst", "a claim by the x analyst"
@@ -1935,6 +2353,75 @@ PROMPTS: dict[str, str] = {
             ["a", "b"],
         ),
     ),
+    "the functions a blocking line names, told to a revision round": with_place_facts(
+        "mediator feedback",
+        place_facts(
+            ["[analysts: a] A claim 1 names 0x1000 and 0x2000 [ev_0002]. [blocking: r]"],
+            {},
+            [
+                {
+                    "id": "ev_0001",
+                    "tool": "decompile_function",
+                    "args": {"address": "0x1000"},
+                    "output": "void f(void) {}",
+                },
+                {
+                    "id": "ev_0002",
+                    "tool": "function_index",
+                    "structured": {"rows": [{"offset": "0x1000"}, {"offset": "0x2000"}]},
+                },
+            ],
+            ["a"],
+        ),
+        can_read=True,
+    ),
+    "evidence summary with the sources each technique traces to": summarise(
+        {
+            "a": AgentISR(
+                agent_id="a",
+                domain="static",
+                claims=[
+                    ClaimEvidence(
+                        claim="x", evidence_ref="[ev_0001]", confidence=0.5, technique_id="T1112"
+                    )
+                ],
+            )
+        },
+        None,
+        {
+            "T1112": {
+                "sources": ["ev_0001", "ev_0002", "ev_0003"],
+                "independent_sources": 2,
+                "source_kinds": {"artefact": 1, "report": 1, "unplaced": 1},
+                "support": "unobserved",
+            }
+        },
+    ),
+    "a published technique no source of which is behaviour": " ".join(
+        [
+            support_note(
+                TTPMapping(
+                    technique_id="T1112",
+                    technique_name="x",
+                    sources=["ev_0001", "ev_0002"],
+                    source_kinds={"artefact": 2},
+                    support="capability",
+                )
+            ),
+            support_note(
+                TTPMapping(
+                    technique_id="T1112",
+                    technique_name="x",
+                    sources=["ev_0001"],
+                    source_kinds={"report": 1},
+                    support="unobserved",
+                )
+            ),
+        ]
+    ),
+    "a revision that moved towards a peer, told to the mediation": convergence_sentence(
+        [{"agent": "a", "towards": "b", "before": 0.4, "after": 0.95}]
+    ),
     "claims that say only that a library is used": _message_of(
         library_only_claims_violation(
             AgentISR(
@@ -1947,6 +2434,16 @@ PROMPTS: dict[str, str] = {
         )
     ),
     "claim naming a call its function's facts do not hold": _function_claim_question(),
+    "claim naming a string no strings source holds": function_claims.NOT_A_SAMPLE_STRING.format(
+        value="a value", emulators=function_claims.attached_emulators()
+    ),
+    "claim naming a string no strings source holds, no emulator attached": (
+        function_claims.NOT_A_SAMPLE_STRING.format(
+            value="a value", emulators=function_claims.NO_EMULATOR_NAMED
+        )
+    ),
+    "network flows' reputation paragraph": _network_reputation_paragraph(),
+    "judge's question for a Malware verdict nothing examined": (_unsupported_malware_question()),
     "claim naming a call two functions' facts do not hold, one row counted, one with none": (
         _function_claim_question(several=True)
     ),
@@ -2049,6 +2546,9 @@ PROMPTS: dict[str, str] = {
             _FENCE_STATEMENT,
             _fenced("ev_0001", "line one\n<<a line of the answer"),
         ]
+    ),
+    "the pack's reputation lines from any declared lookup, and why none was made": (
+        _reputation_lines()
     ),
     "evidence roots beside the layers, and why a cited entry gives none": " ".join(
         [
@@ -2170,8 +2670,8 @@ def _without_named_operations(text: str) -> str:
 
 
 # The entry that names the sandbox report's sections and lists as the report
-# names them (``analysis.sandbox_sections``): ``mutexes`` is a section and a
-# CAPE report's own list, ``mutex:<n>`` the form of its items' ids. The
+# names them (``analysis.sandbox_sections``): ``mutexes`` is a section and the
+# report document's own list, ``mutex:<n>`` the form of its items' ids. The
 # allowance is those names, written as identifiers (between backticks, as a
 # JSON string, or as an id prefix before its number) in that entry and nowhere
 # else; the same word written as a word is scanned as it stands.
@@ -2183,11 +2683,11 @@ _REPORT_NAME_ID = re.compile(
 
 def _report_names() -> frozenset[str]:
     from maljan.analysis import sandbox_sections as ss
+    from maljan.schemas.sandbox_document import place_path
 
-    paths = {f"behavior.summary.{key}" for keys in ss._SUMMARY_LISTS.values() for key in keys} | {
-        key for keys in ss._SUMMARY_LISTS.values() for key in keys
-    }
-    return frozenset({*ss.SECTION_PREFIXES, *ss.SECTION_PREFIXES.values(), *paths})
+    paths = {place_path(name) for names in ss._SUMMARY_LISTS.values() for name in names}
+    keys = {path.rsplit(".", 1)[-1] for path in paths}
+    return frozenset({*ss.SECTION_PREFIXES, *ss.SECTION_PREFIXES.values(), *paths, *keys})
 
 
 # What an allowed identifier is replaced by: a token no scored term holds, so
@@ -2402,3 +2902,40 @@ def test_both_new_capability_terms_are_scanned() -> None:
     text = PROMPTS["capability questions for the anti-analysis and anti-forensics terms"]
 
     assert "claims anti-analysis" in text and "claims anti-forensics" in text
+
+
+# The evaluation-key terms each static provider's whole system prompt carried
+# on dev 767bd97a, for a Windows PE (``format_fragment("pe", "windows")``),
+# with no tools and with the provider expected: the format fragment's
+# ``mutex`` and ``scheduled task``, and the citation's technique ids where the
+# provider's fragment held the citation. A prompt built today from the shipped
+# declarations carries no term beyond its provider's.
+DEV_STATIC_PROMPT_TERMS: dict[str, frozenset[str]] = {
+    "r2": frozenset({"mutex", "scheduled task", "t1027", "t1055", "t1106", "t1140"}),
+    "generic_mcp": frozenset({"mutex", "scheduled task", "t1027", "t1055", "t1106", "t1140"}),
+    "none": frozenset({"mutex", "scheduled task", "t1027", "t1055", "t1106", "t1140"}),
+    "capa_yara": frozenset({"mutex", "scheduled task", "t1055"}),
+}
+
+
+@pytest.mark.parametrize("provider_id", sorted(DEV_STATIC_PROMPT_TERMS))
+@pytest.mark.parametrize("expected", [False, True])
+def test_a_non_ghidra_static_prompt_carries_no_key_term_dev_s_did_not(
+    provider_id: str, expected: bool
+) -> None:
+    from maljan.agents.prompt_fragments import format_fragment
+    from maljan.agents.static_analyst import assemble_static_prompt
+    from maljan.core.config import Settings
+    from maljan.providers.registry import get_static_provider
+
+    settings = Settings(_env_file=None)
+    settings.static.provider = provider_id
+    provider = get_static_provider(settings)
+    prompt = assemble_static_prompt(
+        provider, format_fragment("pe", "windows"), [], provider_expected=expected
+    ).lower()
+    carried = {term for term in KEY_TERMS if term in prompt}
+    assert carried <= DEV_STATIC_PROMPT_TERMS[provider_id], sorted(
+        carried - DEV_STATIC_PROMPT_TERMS[provider_id]
+    )
+    assert VERIFICATION_DISCIPLINE.lower() in prompt

@@ -1,0 +1,5 @@
+{
+ "_comment": "The checks each scenario fails today (pins), with the exact detail, and the numbers a defect moves (observations), with the exact value; each names its product defect. A fix makes the rehearsal integration test fail and ask to strike the entry.",
+ "pins": [],
+ "observations": []
+}

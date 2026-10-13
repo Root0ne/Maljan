@@ -1,6 +1,6 @@
 """A Ghidra that cannot open the job's sample stops its agent, and says so.
 
-With the worker's ``GHIDRA_CONTAINER_SAMPLES_PATH`` set to a host path the
+With Ghidra's ``sample_mount`` set to a host path the
 container cannot see, Ghidra's ``load_program`` answered HTTP 200 with
 ``{"error": "File not found: ..."}``, no exception was raised, and every call
 after it answered "No program loaded". With no default loop limits a reverser
@@ -38,17 +38,17 @@ from maljan.agents.base_agent import BaseAnalyst
 from maljan.agents.composition import ResolvedAgent
 from maljan.agents.configurable_analyst import ConfigurableAnalyst
 from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
-from maljan.agents.ghidra_http_client import GhidraHTTPClient
 from maljan.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
 from maljan.core.exceptions import SampleNotOpened
 from maljan.pipeline.events import describe_exception
+from maljan.providers.base import prepare_sample
 from maljan.providers.static.ghidra import (
     GhidraStaticProvider,
     ghidra_not_answering,
     load_failure,
-    prepare_sample,
     sample_not_opened,
 )
+from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
 from maljan.schemas.evidence import EvidenceCounter
 
 CONTAINER_PATH = "/data/samples/.work/abc.exe"
@@ -119,7 +119,7 @@ class TestAGhidraErrorReplyIsAFailedCall:
         assert "No program loaded." in (entry.error or "")
 
     def test_an_answer_that_only_begins_with_the_sentence_is_kept(self) -> None:
-        from maljan.agents.ghidra_http_client import no_program_as_error
+        from maljan.providers.static.ghidra.http_client import no_program_as_error
 
         longer = "No program loaded. Loaded programs: none; open one with load_program."
         assert no_program_as_error(longer, "t") == longer
@@ -157,13 +157,13 @@ class TestWhatALoadAnswerSays:
         said = str(sample_not_opened(f"File not found: {HOST_PATH}"))
         assert said == (
             f"Ghidra could not open the job's sample: File not found: {HOST_PATH}; "
-            "check GHIDRA_CONTAINER_SAMPLES_PATH / the container mount"
+            "check core.static.ghidra.sample_mount / the container mount"
         )
 
     def test_the_published_form_keeps_the_sentence_and_drops_the_host_path(self) -> None:
         published = describe_exception(sample_not_opened(f"File not found: {HOST_PATH}"))
         assert "Ghidra could not open the job's sample" in published
-        assert "GHIDRA_CONTAINER_SAMPLES_PATH" in published
+        assert "core.static.ghidra.sample_mount" in published
         assert "/home/someone" not in published
 
 
@@ -192,6 +192,7 @@ class _HttpClient:
         self.load_body = load_body
         self.failures = list(failures or [])
         self.paths: list[str] = []
+        self.switch_refused = False
 
     def __call__(self, **_kwargs: Any) -> _HttpClient:
         return self
@@ -202,11 +203,21 @@ class _HttpClient:
     def __exit__(self, *exc: object) -> None:
         return None
 
-    def post(self, url: str, json: Any = None, params: Any = None) -> _Resp:  # noqa: A002
+    def post(self, url: str, json: Any = None, params: Any = None, **_kw: Any) -> _Resp:  # noqa: A002
         self.paths.append(url.rsplit("/", 1)[-1])
         if url.endswith("/load_program") and self.failures:
             raise self.failures.pop(0)
-        return _Resp(self.load_body if url.endswith("/load_program") else "{}")
+        if url.endswith("/load_program"):
+            return _Resp(self.load_body)
+        if url.endswith("/switch_program"):
+            if self.switch_refused:
+                self.switch_refused = False
+                return _Resp('{"error": "Program not found"}')
+            name = (params or {}).get("program", "")
+            return _Resp(f'{{"success": true, "switched_to": "{name}"}}')
+        if url.endswith("/run_analysis"):
+            return _Resp('{"success": true, "program": "abc.exe"}')
+        return _Resp("{}")
 
     def get(self, url: str, params: Any = None) -> _Resp:
         self.paths.append(url.rsplit("/", 1)[-1])
@@ -225,11 +236,14 @@ def _status(code: int) -> httpx.HTTPStatusError:
 
 
 def _settings(*, sink: bool = True) -> Any:
+    from maljan.core.config import GHIDRA_SAMPLE_OPEN
+
     class _G:
         enabled = True
         transport = "http"
         url = "http://ghidra.invalid"
         auth_token = SecretStr("")
+        sample_open = GHIDRA_SAMPLE_OPEN
 
     class _P:
         use_sink_reachability = sink
@@ -245,9 +259,9 @@ def _settings(*, sink: bool = True) -> Any:
     return _S()
 
 
-def _provider() -> GhidraStaticProvider:
-    cfg = _settings().static.ghidra
-    return GhidraStaticProvider(cfg, None, None)  # type: ignore[arg-type]
+def _provider(*, sink: bool = True) -> GhidraStaticProvider:
+    settings = _settings(sink=sink)
+    return GhidraStaticProvider(settings.static.ghidra, settings.preprocessing, None)  # type: ignore[arg-type]
 
 
 class TestTheLoadIsAPrecondition:
@@ -257,7 +271,7 @@ class TestTheLoadIsAPrecondition:
         http = _HttpClient(NOT_FOUND)
         monkeypatch.setattr("httpx.Client", http)
         with pytest.raises(SampleNotOpened) as stopped:
-            prepare_sample(_settings(), "ghidra", CONTAINER_PATH)
+            prepare_sample(_provider(), CONTAINER_PATH)
         assert http.paths == ["load_program"]
         assert f"File not found: {HOST_PATH}" in str(stopped.value)
 
@@ -267,15 +281,28 @@ class TestTheLoadIsAPrecondition:
         http = _HttpClient(NOT_FOUND)
         monkeypatch.setattr("httpx.Client", http)
         with pytest.raises(SampleNotOpened):
-            prepare_sample(_settings(sink=False), "ghidra", CONTAINER_PATH)
+            prepare_sample(_provider(sink=False), CONTAINER_PATH)
 
-    def test_an_opened_sample_is_made_current_and_the_pass_is_optional(
+    def test_an_opened_sample_is_made_current_and_analysed_and_the_pass_is_optional(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         http = _HttpClient(LOADED)
         monkeypatch.setattr("httpx.Client", http)
-        assert prepare_sample(_settings(sink=False), "ghidra", CONTAINER_PATH) == ""
-        assert http.paths == ["load_program", "switch_program"]
+        assert prepare_sample(_provider(sink=False), CONTAINER_PATH) == ""
+        assert http.paths == ["load_program", "switch_program", "run_analysis"]
+
+    def test_with_the_pass_on_the_call_graph_is_read_after_the_open(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        http = _HttpClient(LOADED)
+        monkeypatch.setattr("httpx.Client", http)
+        assert prepare_sample(_provider(), CONTAINER_PATH) == ""
+        assert http.paths == [
+            "load_program",
+            "switch_program",
+            "run_analysis",
+            "get_full_call_graph",
+        ]
 
     def test_the_provider_remembers_and_is_not_asked_again(
         self, monkeypatch: pytest.MonkeyPatch
@@ -285,16 +312,80 @@ class TestTheLoadIsAPrecondition:
         provider = _provider()
         provider.pin_sample(CONTAINER_PATH)
         with pytest.raises(SampleNotOpened):
-            prepare_sample(_settings(), "ghidra", CONTAINER_PATH, provider=provider)
+            prepare_sample(provider, CONTAINER_PATH)
         with pytest.raises(SampleNotOpened):
-            prepare_sample(_settings(), "ghidra", CONTAINER_PATH, provider=provider)
+            prepare_sample(provider, CONTAINER_PATH)
         assert http.paths == ["load_program"]
         assert provider.sample_failure() is not None
 
-    def test_another_provider_calls_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_a_path_the_job_analysed_is_switched_to_and_not_loaded_again(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        http = _HttpClient(LOADED)
+        monkeypatch.setattr("httpx.Client", http)
+        provider = _provider(sink=False)
+        prepare_sample(provider, CONTAINER_PATH)
+        prepare_sample(provider, CONTAINER_PATH)
+        assert http.paths == ["load_program", "switch_program", "run_analysis", "switch_program"]
+        noted = provider.sample_notes.get("remote http://ghidra.invalid:80", CONTAINER_PATH)
+        assert noted is not None and noted.name == "abc.exe" and noted.answer == LOADED
+
+    def test_a_refused_switch_loads_and_analyses_afresh(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        http = _HttpClient(LOADED)
+        monkeypatch.setattr("httpx.Client", http)
+        provider = _provider(sink=False)
+        provider.sample_notes.note(
+            "remote http://ghidra.invalid:80", CONTAINER_PATH, "abc.exe", LOADED
+        )
+        http.switch_refused = True
+        prepare_sample(provider, CONTAINER_PATH)
+        assert http.paths == ["switch_program", "load_program", "switch_program", "run_analysis"]
+        # The analysis was confirmed, so the path is noted again.
+        assert (
+            provider.sample_notes.get("remote http://ghidra.invalid:80", CONTAINER_PATH) is not None
+        )
+
+    def test_a_job_s_note_is_its_own(self) -> None:
+        first, second = _provider(), _provider()
+        first.sample_notes.note(
+            "remote http://ghidra.invalid:80", CONTAINER_PATH, "abc.exe", LOADED
+        )
+        assert second.sample_notes.get("remote http://ghidra.invalid:80", CONTAINER_PATH) is None
+
+    def test_with_nothing_declared_the_load_is_made_current_and_not_analysed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.core.config import SampleOpenConfig
+
+        http = _HttpClient(LOADED)
+        monkeypatch.setattr("httpx.Client", http)
+        provider = _provider(sink=False)
+        provider._cfg.sample_open = SampleOpenConfig()
+        try:
+            prepare_sample(provider, CONTAINER_PATH)
+        finally:
+            from maljan.core.config import GHIDRA_SAMPLE_OPEN
+
+            provider._cfg.sample_open = GHIDRA_SAMPLE_OPEN
+        assert http.paths == ["load_program", "switch_program"]
+
+    def test_ghidra_over_stdio_calls_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         http = _HttpClient(NOT_FOUND)
         monkeypatch.setattr("httpx.Client", http)
-        assert prepare_sample(_settings(), "r2", CONTAINER_PATH) == ""
+        provider = _provider()
+        provider._cfg.transport = "stdio"
+        try:
+            assert prepare_sample(provider, CONTAINER_PATH) == ""
+        finally:
+            provider._cfg.transport = "http"
+        assert http.paths == []
+
+    def test_no_provider_calls_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        http = _HttpClient(NOT_FOUND)
+        monkeypatch.setattr("httpx.Client", http)
+        assert prepare_sample(None, CONTAINER_PATH) == ""
         assert http.paths == []
 
 
@@ -474,6 +565,7 @@ def _generic() -> ConfigurableAnalyst:
     )
     agent = ConfigurableAnalyst("all_tools_reverser_ghidra", resolved, llm=None)  # type: ignore[arg-type]
     agent._analysis_file_path = CONTAINER_PATH
+    agent._container = _Container(_provider())
     return agent
 
 
@@ -567,7 +659,7 @@ class TestTheFailureIsTheAgents:
         report = update["reports"]["network"]
         assert report.startswith("[ERROR]")
         assert "Ghidra could not open the job's sample: File not found: abc.exe" in report
-        assert "check GHIDRA_CONTAINER_SAMPLES_PATH / the container mount" in report
+        assert "check core.static.ghidra.sample_mount / the container mount" in report
         assert "/home/someone" not in report
         (message,) = [data for kind, data in published if kind == ev.AGENT_MESSAGE]
         assert message["status"] == "failed"
@@ -585,8 +677,8 @@ class TestAGhidraThatDidNotAnswer:
     ) -> None:
         http = _HttpClient(LOADED, failures=[_refused()])
         monkeypatch.setattr("httpx.Client", http)
-        assert prepare_sample(_settings(sink=False), "ghidra", CONTAINER_PATH) == ""
-        assert http.paths == ["load_program", "load_program", "switch_program"]
+        assert prepare_sample(_provider(sink=False), CONTAINER_PATH) == ""
+        assert http.paths == ["load_program", "load_program", "switch_program", "run_analysis"]
 
     def test_two_failed_connections_name_the_address_and_not_the_samples_path(
         self, monkeypatch: pytest.MonkeyPatch
@@ -594,14 +686,14 @@ class TestAGhidraThatDidNotAnswer:
         monkeypatch.setattr("httpx.Client", _HttpClient(LOADED, failures=[_refused(), _refused()]))
         provider = _provider()
         with pytest.raises(SampleNotOpened) as stopped:
-            prepare_sample(_settings(), "ghidra", CONTAINER_PATH, provider=provider)
+            prepare_sample(provider, CONTAINER_PATH)
         said = str(stopped.value)
         assert said == (
             "Ghidra at http://ghidra.invalid:80 did not answer the load of the job's sample "
             "(ConnectError); check the Ghidra container is running at that address and "
             "core.static.ghidra.auth_token matches its GHIDRA_MCP_AUTH_TOKEN"
         )
-        assert "GHIDRA_CONTAINER_SAMPLES_PATH" not in said
+        assert "sample_mount" not in said
         assert provider.sample_failure(CONTAINER_PATH) is None
 
     @pytest.mark.parametrize("code", [401, 403, 500, 503])
@@ -612,7 +704,7 @@ class TestAGhidraThatDidNotAnswer:
         monkeypatch.setattr("httpx.Client", http)
         provider = _provider()
         with pytest.raises(SampleNotOpened) as stopped:
-            prepare_sample(_settings(), "ghidra", CONTAINER_PATH, provider=provider)
+            prepare_sample(provider, CONTAINER_PATH)
         assert http.paths == ["load_program"]
         assert f"HTTP {code}" in str(stopped.value)
         assert provider.sample_failure(CONTAINER_PATH) is None
@@ -622,10 +714,8 @@ class TestAGhidraThatDidNotAnswer:
         monkeypatch.setattr("httpx.Client", http)
         provider = _provider()
         with pytest.raises(SampleNotOpened):
-            prepare_sample(_settings(sink=False), "ghidra", CONTAINER_PATH, provider=provider)
-        assert (
-            prepare_sample(_settings(sink=False), "ghidra", CONTAINER_PATH, provider=provider) == ""
-        )
+            prepare_sample(provider, CONTAINER_PATH)
+        assert prepare_sample(provider, CONTAINER_PATH) == ""
 
     def test_the_published_form_keeps_the_address_host_and_the_setting(self) -> None:
         published = describe_exception(ghidra_not_answering("http://localhost:8089", "HTTP 401"))

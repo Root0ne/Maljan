@@ -24,6 +24,9 @@ function texts(events: RunEvent[]): string[] {
   );
 }
 
+/** The providers that declare a per-agent endpoint, as the schema serves them. */
+const ENDPOINTS: ReadonlySet<string> = new Set(["openai", "ollama"]);
+
 describe("a turn a fallback model gave", () => {
   it("is named where it happened, with the model and the reason", () => {
     const lines = texts([
@@ -148,12 +151,12 @@ describe("the fallback list in the agent editor", () => {
   });
 
   it("stages a row once it names a provider and a model, with an endpoint only where one is taken", () => {
-    expect(storedChoice({ provider: "ollama", model: "" })).toBeNull();
-    expect(storedChoice({ provider: "anthropic", model: "c", base_url: "http://x" })).toEqual({
+    expect(storedChoice({ provider: "ollama", model: "" }, ENDPOINTS)).toBeNull();
+    expect(storedChoice({ provider: "anthropic", model: "c", base_url: "http://x" }, ENDPOINTS)).toEqual({
       provider: "anthropic",
       model: "c",
     });
-    expect(storedChoice({ provider: "ollama", model: "g", base_url: "http://box:11434" })).toEqual({
+    expect(storedChoice({ provider: "ollama", model: "g", base_url: "http://box:11434" }, ENDPOINTS)).toEqual({
       provider: "ollama",
       model: "g",
       base_url: "http://box:11434",

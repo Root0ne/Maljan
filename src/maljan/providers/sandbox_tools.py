@@ -1,5 +1,9 @@
 """The job's sandbox report, as tools instead of one wall of JSON.
 
+The report is the neutral sandbox report's document
+(``schemas.sandbox_document``), whichever sandbox and reader produced it; each
+tool reads its parts by name (``place``), never by a sandbox's own key.
+
 The dynamic analyst has always been handed the whole report as text, chunked
 to fit and truncated where it did not. That is the wrong shape for a model
 that wants three specific things: what ran, what it talked to, and what the
@@ -26,10 +30,13 @@ return nothing.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
 from maljan.pipeline.sandbox_status import NOT_RUN, sandbox_status
+from maljan.providers.call_arguments import pick_argument
+from maljan.schemas.sandbox_document import place
 from maljan.utils.marked_cut import marked_cut
 
 if TYPE_CHECKING:
@@ -45,12 +52,12 @@ if TYPE_CHECKING:
 # report.
 
 
-def _page(rows: list[Any], offset: Any = 0, limit: Any = 0) -> tuple[list[Any], dict[str, Any]]:
+def _page(rows: Sequence[Any], offset: Any = 0, limit: Any = 0) -> tuple[list[Any], dict[str, Any]]:
     """One page of ``rows`` and what it says about itself when it is not all of them."""
     start = max(0, _count(offset))
     wanted = _count(limit)
     stop = start + wanted if wanted > 0 else len(rows)
-    shown = rows[start:stop]
+    shown = list(rows[start:stop])
     if start == 0 and len(shown) == len(rows):
         return shown, {}
     meta: dict[str, Any] = {"shown": f"{len(shown)} of {len(rows)} rows, from offset {start}"}
@@ -87,13 +94,13 @@ def _no_report(report: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _report_of(container: Any) -> dict[str, Any] | None:
-    """The job's sandbox report as the CAPE-shaped dict every reader expects.
+    """The job's sandbox report as the neutral report's document every reader reads.
 
     ``container.sandbox_report`` is set by ``app.arun`` alongside
     ``sample_format``, for the same reason: agents are built lazily, from nodes
-    that do not all carry the graph state. A ``SandboxReport`` model assigned
-    there instead of a dict is rendered through ``cape_view`` so both forms
-    read identically here.
+    that do not all carry the graph state. A ``SandboxReport`` assigned there
+    instead of its document is laid out (``schemas.sandbox_document``) so both
+    forms read identically here.
     """
     report = getattr(container, "sandbox_report", None)
     if report is None:
@@ -101,17 +108,18 @@ def _report_of(container: Any) -> dict[str, Any] | None:
     if isinstance(report, dict):
         return report
     try:
-        from maljan.providers.cape_view import to_cape_shaped_dict
+        from maljan.schemas.sandbox_document import sandbox_document
 
-        return to_cape_shaped_dict(report)
+        return sandbox_document(report)
     except Exception as exc:  # noqa: BLE001 — an unreadable report is an empty one
-        logger.warning("sandbox tools: could not render the report (%s).", exc)
+        logger.warning("sandbox tools: could not lay out the report (%s).", type(exc).__name__)
         return None
 
 
-def _behavior(report: dict[str, Any]) -> dict[str, Any]:
-    behavior = report.get("behavior")
-    return behavior if isinstance(behavior, dict) else {}
+def _list_at(report: dict[str, Any], name: str) -> list[Any] | None:
+    """The part ``name`` of the report where it is a list, else ``None``."""
+    value = place(report, name)
+    return value if isinstance(value, list) else None
 
 
 def sandbox_report_section(
@@ -120,9 +128,10 @@ def sandbox_report_section(
     """One top-level section of the report, bounded.
 
     The escape hatch for a section the other tools do not model — ``target``,
-    ``static``, ``cti``, whatever a particular sandbox publishes. The section
-    names are listed in the answer when the requested one is absent, so a model
-    that guessed wrong can correct itself in one turn instead of guessing again.
+    ``cti``, ``extracted``, ``memory``, ``ids`` or any block a sandbox published
+    with no place of its own, under its own name. The section names are listed
+    in the answer when the requested one is absent, so a model that guessed
+    wrong can correct itself in one turn instead of guessing again.
     """
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
@@ -165,7 +174,7 @@ def sandbox_processes(
     """
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
-    processes = _behavior(report).get("processes")
+    processes = place(report, "processes")
     rows: list[dict[str, Any]] = []
     page, meta = _page(processes if isinstance(processes, list) else [], offset, limit)
     if page:
@@ -198,13 +207,12 @@ def sandbox_network(
     """
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
-    network = report.get("network")
-    if not isinstance(network, dict):
+    if not isinstance(report.get("network"), dict):
         return {"dns": [], "hosts": [], "http": [], "tcp": [], "udp": []}
     out: dict[str, Any] = {}
     for key in NETWORK_VIEW_KINDS:
-        rows = network.get(key)
-        if isinstance(rows, list):
+        rows = _list_at(report, f"network.{key}")
+        if rows is not None:
             page, meta = _page(rows, offset, limit)
             out[key] = [_with_resolver_fact(row) for row in page]
             if meta:
@@ -245,33 +253,58 @@ def _with_resolver_fact(row: Any) -> Any:
     return row
 
 
+def _signature_techniques(sig: Mapping[str, Any]) -> list[str]:
+    """The ATT&CK ids a sandbox tags one signature with, read from any field it uses.
+
+    The normalised report's ``ttp_tags`` and the raw shapes it is read from
+    (``ttp``, ``ttps``, ``attck_id``, ``technique_ids``), each read as the ids
+    it writes (``analysis.technique_ids.technique_ids_in``); never the
+    signature's name.
+    """
+    from maljan.analysis.technique_ids import technique_ids_in
+
+    found: dict[str, None] = {}
+    for key in ("ttp_tags", "ttp", "ttps", "attck_id", "technique_ids"):
+        value = sig.get(key)
+        for item in value if isinstance(value, list) else [value]:
+            if item:
+                found.update(dict.fromkeys(technique_ids_in(item)))
+    return list(found)
+
+
 def sandbox_signatures(
     report: dict[str, Any] | None, offset: int = 0, limit: int = 0
 ) -> dict[str, Any]:
     """The sandbox's own signature hits, with their severity.
 
     Reported as what they are — one detection engine's opinion — not folded
-    into the verdict. A CAPE signature firing is evidence the agent weighs
+    into the verdict. A sandbox signature firing is evidence the agent weighs
     alongside everything else it found.
     """
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
-    signatures = report.get("signatures")
+    signatures = place(report, "signatures")
     rows: list[dict[str, Any]] = []
     page, meta = _page(signatures if isinstance(signatures, list) else [], offset, limit)
     if page:
         for sig in page:
             if not isinstance(sig, dict):
                 continue
-            rows.append(
-                {
-                    "name": sig.get("name") or sig.get("signature") or "",
-                    "description": sig.get("description") or "",
-                    "severity": sig.get("severity"),
-                    "confidence": sig.get("confidence"),
-                    "references": list(sig.get("references") or [])[:5],
-                }
-            )
+            row = {
+                "name": sig.get("name") or sig.get("signature") or "",
+                "description": sig.get("description") or "",
+                "severity": sig.get("severity"),
+                "confidence": sig.get("confidence"),
+                "references": list(sig.get("references") or [])[:5],
+            }
+            # The technique ids the sandbox itself tags the signature with, as
+            # its report declares them, under the key the tool's declaration
+            # reads technique ids from (``technique_ids``). Left out where the
+            # sandbox declares none, so an answer without tags is as it was.
+            tags = _signature_techniques(sig)
+            if tags:
+                row["technique_ids"] = tags
+            rows.append(row)
     total = len(signatures) if isinstance(signatures, list) else 0
     return {"signatures": rows, "total": total, **meta}
 
@@ -282,8 +315,9 @@ def sandbox_dropped_files(
     """Files the sample wrote, with the hashes the sandbox computed for them."""
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
-    dropped = report.get("dropped")
+    dropped = place(report, "dropped_files")
     if not isinstance(dropped, list):
+        # A document written before the parts were declared named the list so.
         dropped = report.get("dropped_files")
     rows: list[dict[str, Any]] = []
     page, meta = _page(dropped if isinstance(dropped, list) else [], offset, limit)
@@ -316,68 +350,129 @@ _REGISTRY_OPS: dict[str, str] = {
     "ntcreatekey": "create",
     "regdeletekeya": "delete",
     "regdeletekeyw": "delete",
+    "regdeletekeyexa": "delete",
+    "regdeletekeyexw": "delete",
     "regdeletevaluea": "delete",
     "regdeletevaluew": "delete",
     "ntdeletekey": "delete",
     "ntdeletevaluekey": "delete",
     "regqueryvalueexa": "query",
     "regqueryvalueexw": "query",
-    "ntquueryvaluekey": "query",
+    "ntqueryvaluekey": "query",
     "regopenkeyexa": "query",
     "regopenkeyexw": "query",
     "ntopenkey": "query",
+    "ntopenkeyex": "query",
 }
 
+# What a call says it did, where the operation its API names is only what it
+# may do: for each such operation, the argument the outcome is filed under and
+# what each recorded value means. A create call opens the key when it already
+# exists and says so in its disposition (1 created a new key, 2 opened an
+# existing one), and a key only opened was read, not created. A call that
+# records no outcome, or one this table does not know, keeps its API's
+# operation.
+_REGISTRY_OUTCOMES: dict[str, tuple[str, dict[int, str]]] = {
+    "create": ("Disposition", {1: "create", 2: "query"}),
+}
+
+# A write the call itself reports as failed (``status`` false) changed
+# nothing: the key was reached and that is all, so it is recorded as bare
+# access, which any read or write of the key replaces.
+_FAILED_WRITE = "access"
+
+# What one operation on a key says, against another on the same key: the bare
+# fact of access least, a read more, a write most.
+_REGISTRY_OP_WEIGHT: dict[str, int] = {
+    "access": 0,
+    "query": 1,
+    "create": 2,
+    "modify": 2,
+    "delete": 2,
+}
+
+# The argument names each reader takes its value from, most wanted first: a
+# call's own argument order never decides. A registry key is a full path before
+# a subkey and a subkey before the bare hive handle (``Registry``), which is
+# the key only for a call that names nothing else; a value is what was written
+# or, for a query, what was read (``Data``, or ``Information`` for the native
+# value query); a service is its name, under either spelling, before its
+# display name or the binary it runs.
 _REGISTRY_KEY_ARGS = ("FullName", "KeyName", "ObjectAttributes", "SubKey", "Registry")
-_REGISTRY_VALUE_ARGS = ("Buffer", "Data", "ValueData", "Value")
+_REGISTRY_VALUE_ARGS = ("Buffer", "Data", "ValueData", "Value", "Information")
 _MUTEX_APIS = frozenset({"ntcreatemutant", "ntopenmutant", "createmutexa", "createmutexw"})
 _MUTEX_ARGS = ("MutexName", "lpName", "ObjectAttributes", "Name")
 _SERVICE_APIS = frozenset({"createservicea", "createservicew", "startservicea", "startservicew"})
-_SERVICE_ARGS = ("ServiceName", "DisplayName", "BinaryPathName", "lpServiceName")
+_SERVICE_ARGS = ("ServiceName", "lpServiceName", "DisplayName", "BinaryPathName")
 
 
 def _calls(report: dict[str, Any]) -> list[dict[str, Any]]:
     """Every API call the report recorded, however it filed them.
 
-    CAPE publishes a flat ``behavior.calls`` and also one list per process;
-    a report that has both would double-count, so the flat list wins when it
-    is there.
+    A report may carry a flat call list and also one list per process; a
+    report that has both would double-count, so the flat list wins when it is
+    there.
     """
-    behavior = _behavior(report)
-    flat = behavior.get("calls")
+    flat = place(report, "calls")
     if isinstance(flat, list) and flat:
         return [row for row in flat if isinstance(row, dict)]
     out: list[dict[str, Any]] = []
-    for proc in behavior.get("processes") or []:
+    for proc in _list_at(report, "processes") or []:
         if isinstance(proc, dict):
             out.extend(row for row in (proc.get("calls") or []) if isinstance(row, dict))
     return out
 
 
+def _text(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
 def _argument(call: dict[str, Any], names: tuple[str, ...]) -> str:
-    """The first of ``names`` this call carries, whichever shape it filed them in."""
-    arguments = call.get("arguments")
-    if isinstance(arguments, dict):
-        pools: list[dict[str, Any]] = [arguments]
-    elif isinstance(arguments, list):
-        pools = [row for row in arguments if isinstance(row, dict)]
-    else:
-        pools = []
-    for pool in pools:
-        for key in names:
-            value = pool.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-        # Cuckoo's older shape files each argument as {"name": ..., "value": ...}.
-        if pool.get("name") in names and isinstance(pool.get("value"), str):
-            return str(pool["value"]).strip()
-    return ""
+    """The text of the first of ``names``, in that order, this call carries.
+
+    Whichever shape the call filed its arguments in; see ``call_arguments``.
+    """
+    value = pick_argument(call.get("arguments"), names, accept=_text)
+    return value.strip() if isinstance(value, str) else ""
 
 
-def _summary_list(report: dict[str, Any], key: str) -> list[str]:
-    rows = _behavior(report).get("summary")
-    values = rows.get(key) if isinstance(rows, dict) else None
+def _summary_list(report: dict[str, Any], name: str) -> list[str]:
+    """The text entries of the behaviour summary's part ``name``."""
+    values = place(report, name)
     return [str(v) for v in values if isinstance(v, str)] if isinstance(values, list) else []
+
+
+def _registry_operation(call: dict[str, Any], operation: str) -> str:
+    """What ``call`` did to its key: its API's operation, as the call's own outcome refines it."""
+    if operation != "query" and call.get("status") is False:
+        return _FAILED_WRITE
+    outcome = _REGISTRY_OUTCOMES.get(operation)
+    if outcome is None:
+        return operation
+    name, meanings = outcome
+    code = _outcome_code(pick_argument(call.get("arguments"), (name,)))
+    return operation if code is None else meanings.get(code, operation)
+
+
+def _outcome_code(recorded: Any) -> int | None:
+    """An outcome a call recorded, as the number it is: filed as an integer or as text.
+
+    Text is read as written, a ``0x`` prefix as hexadecimal and leading zeros
+    as decimal (``"02"`` is 2); anything else is no outcome.
+    """
+    if isinstance(recorded, bool):
+        return None
+    if isinstance(recorded, int):
+        return recorded
+    if not isinstance(recorded, str):
+        return None
+    text = recorded.strip()
+    for base in (0, 10):
+        try:
+            return int(text, base)
+        except ValueError:
+            continue
+    return None
 
 
 def sandbox_registry_ops(
@@ -389,23 +484,40 @@ def sandbox_registry_ops(
     key list, which says a key was touched and nothing else, and the registry
     API calls themselves, which say what was done and what was written. The
     call wins where both name the same key — an operation is worth more than
-    the bare fact of access.
+    the bare fact of access — and for the same reason a read never replaces a
+    write: a key created, modified or deleted and then read stays the write,
+    with what was written, and a read that saw no value leaves an earlier
+    read's value standing. Between writes the later one in the report's order
+    stands; that order is the report's process by process, not time.
+
+    A call's own outcome refines what its API may do (``_REGISTRY_OUTCOMES``):
+    a create that opened an existing key is a read. A write the call reports as
+    failed is bare access, without the value it did not write.
     """
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
     rows: dict[str, dict[str, Any]] = {}
-    for key in _summary_list(report, "keys"):
+    for key in _summary_list(report, "registry"):
         rows.setdefault(key, {"key": key, "operation": "access", "value": None})
     for call in _calls(report):
         api = str(call.get("api") or "")
-        operation = _REGISTRY_OPS.get(api.lower())
-        if operation is None:
+        listed = _REGISTRY_OPS.get(api.lower())
+        if listed is None:
             continue
         key = _argument(call, _REGISTRY_KEY_ARGS)
         if not key:
             continue
-        value = _argument(call, _REGISTRY_VALUE_ARGS)
-        rows[key] = {"key": key, "operation": operation, "value": value or None}
+        operation = _registry_operation(call, listed)
+        value = _argument(call, _REGISTRY_VALUE_ARGS) or None
+        if operation == _FAILED_WRITE:
+            value = None
+        before = rows.get(key)
+        if before is not None:
+            if _REGISTRY_OP_WEIGHT[operation] < _REGISTRY_OP_WEIGHT[before["operation"]]:
+                continue
+            if operation == before["operation"] == "query" and value is None:
+                continue
+        rows[key] = {"key": key, "operation": operation, "value": value}
     ordered = list(rows.values())
     page, meta = _page(ordered, offset, limit)
     return {"registry": page, "total": len(ordered), **meta}
@@ -421,15 +533,13 @@ def _calls_by_process(report: dict[str, Any]) -> list[tuple[str, dict[str, Any]]
     """Every API call with the pid that made it, ``""`` when the report lost it.
 
     The same walk as :func:`_calls`, keeping the process each nested list
-    belongs to; a flat ``behavior.calls`` carries its pid on the row or not at
-    all.
+    belongs to; a flat call list carries its pid on the row or not at all.
     """
-    behavior = _behavior(report)
-    flat = behavior.get("calls")
+    flat = place(report, "calls")
     if isinstance(flat, list) and flat:
         return [(str(row.get("pid") or ""), row) for row in flat if isinstance(row, dict)]
     out: list[tuple[str, dict[str, Any]]] = []
-    for proc in behavior.get("processes") or []:
+    for proc in _list_at(report, "processes") or []:
         if isinstance(proc, dict):
             pid = str(proc.get("pid") or "")
             out.extend((pid, row) for row in (proc.get("calls") or []) if isinstance(row, dict))
@@ -462,10 +572,9 @@ def sandbox_api_calls(
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
 
-    behavior = _behavior(report)
     names_by_pid = {
         str(proc.get("pid")): str(proc.get("process_name") or proc.get("name") or "")
-        for proc in behavior.get("processes") or []
+        for proc in _list_at(report, "processes") or []
         if isinstance(proc, dict)
     }
     wanted_process = (process or "").strip().lower()
@@ -481,7 +590,7 @@ def sandbox_api_calls(
 
     counts: dict[str, int] = {}
     callers: dict[str, set[str]] = {}
-    apistats = behavior.get("apistats")
+    apistats = place(report, "apistats")
     if isinstance(apistats, dict):
         for pid, stats in apistats.items():
             if not _is_wanted(str(pid)) or not isinstance(stats, dict):
@@ -540,7 +649,7 @@ def sandbox_mutexes(
     """
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
-    names: list[str] = list(_summary_list(report, "mutexes"))
+    names: list[str] = list(_summary_list(report, "summary.mutexes"))
     for call in _calls(report):
         if str(call.get("api") or "").lower() not in _MUTEX_APIS:
             continue
@@ -563,10 +672,10 @@ def sandbox_services_and_tasks(
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
     services: list[str] = [
-        *_summary_list(report, "created_services"),
-        *_summary_list(report, "started_services"),
+        *_summary_list(report, "summary.created_services"),
+        *_summary_list(report, "summary.started_services"),
     ]
-    commands: list[str] = list(_summary_list(report, "executed_commands"))
+    commands: list[str] = list(_summary_list(report, "summary.executed_commands"))
     tasks: list[str] = [cmd for cmd in commands if "schtasks" in cmd.lower()]
     for call in _calls(report):
         api = str(call.get("api") or "").lower()
@@ -592,22 +701,25 @@ def sandbox_channels(
     """The platform-namespaced channels a non-Windows guest publishes.
 
     ``android.permissions``, ``linux.systemd``, ``macos.launchd`` and whatever
-    else a sandbox has to say that the CAPE-shaped fields have no home for.
+    else a sandbox has to say that the report's other parts have no home for.
     Called with no name it lists what exists, which is how an agent discovers a
     channel it did not know to ask for.
     """
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
-    channels = report.get("channels")
+    channels = place(report, "channels")
     if not isinstance(channels, dict):
         return {"channels": [], "rows": []}
     available = sorted(str(k) for k in channels)
     key = str(name).strip()
     if not key:
         return {"channels": available, "rows": []}
-    rows = channels.get(key)
-    if not isinstance(rows, list):
+    if key not in channels:
         return {"error": f"no channel {key!r}", "channels": available}
+    from maljan.schemas.sandbox_document import channel_rows
+
+    # A kept block's items are each a row, built only for the page asked.
+    rows = channel_rows(channels[key]) or []
     page, meta = _page(rows, offset, limit)
     return {"channel": key, "rows": page, "total": len(rows), **meta}
 
@@ -846,11 +958,11 @@ def items_tool(
 
         ``section`` is one of ``processes``, ``api_calls``, ``files``,
         ``registry``, ``network``, ``signatures``, ``dropped``, ``mutexes``,
-        ``commands``, ``services``, ``events``, ``apistats``, ``channels`` or
-        ``screenshots``, and for a raw CAPE report ``cape`` (its extracted
-        configurations and payloads), ``resolved_apis``, ``alerts`` (Suricata)
-        and ``procdumps``; the pack's sandbox section index gives each one's
-        item count, or why the report does not carry it. Each item comes
+        ``commands``, ``services``, ``events``, ``apistats``, ``channels``,
+        ``screenshots``, ``extracted`` (the configurations and payloads the
+        sandbox extracted), ``resolved_apis``, ``alerts`` (an intrusion
+        detection engine's) or ``procdumps``; the pack's sandbox section index
+        gives each one's item count, or why the report does not carry it. Each item comes
         with its id (proc:<pid> for a process, <prefix>:<n> for the n-th item
         of any other section), the report list it came from and the report's
         own fields. ``pid`` (a number) keeps the items of that process id, in
@@ -896,7 +1008,8 @@ def _sized(func: Any, sizer: Any, narrowing: tuple[str, ...] = _PAGING) -> Any:
     so every row stays reachable.
     """
     import functools
-    import json
+
+    from maljan.core.safe_json import dumps
 
     if sizer is None:
         return func
@@ -904,7 +1017,7 @@ def _sized(func: Any, sizer: Any, narrowing: tuple[str, ...] = _PAGING) -> Any:
     @functools.wraps(func)
     def _answer(*args: Any, **kwargs: Any) -> Any:
         value = func(*args, **kwargs)
-        text = json.dumps(value, default=str)
+        text = dumps(value, default=str)
         return sizer._apply_output_guardrail(text, narrowing)
 
     return _answer

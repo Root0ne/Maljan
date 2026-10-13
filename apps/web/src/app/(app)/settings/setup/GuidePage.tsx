@@ -7,7 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import type { CatalogEntry, PatchResult, ProbeResult } from "@/types/settings";
 import FieldRow from "../configuration/FieldRow";
 import { buildFieldRowProps } from "../configuration/fieldRowProps";
-import { probeLabel } from "../configuration/GroupHeader";
+import { probeLabelFrom } from "@/lib/providerFacts";
 import {
   buildReviewItems,
   ReviewErrorSummary,
@@ -20,7 +20,7 @@ import AgentFormStep, { agentStepSection } from "./steps/AgentFormStep";
 import ProfilePickerStep from "./steps/ProfilePickerStep";
 import RestMappingStep from "./steps/RestMappingStep";
 import ServerFormStep, { serverStepSection } from "./steps/ServerFormStep";
-import VirustotalStep from "./steps/VirustotalStep";
+import CredentialStep from "./steps/CredentialStep";
 import {
   PROVIDER_CHOICE_KEY,
   providerChoiceCopy,
@@ -62,7 +62,7 @@ function ProviderChoice({
       <legend className="sr-only">{entry.title}</legend>
       <div className="grid gap-2 sm:grid-cols-2">
         {choices.map((choice) => {
-          const copy = providerChoiceCopy(selectorKey, choice);
+          const copy = providerChoiceCopy(ctx.schema, selectorKey, choice);
           return (
             <label
               key={choice}
@@ -346,8 +346,13 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
 
       {step.component === "rest-mapping" && <RestMappingStep />}
 
-      {step.component === "virustotal" && (
-        <VirustotalStep state={state} setState={setGuideState} />
+      {step.component === "credential" && step.server && (
+        <CredentialStep
+          server={step.server}
+          note={step.note}
+          state={state}
+          setState={setGuideState}
+        />
       )}
 
       {probeId && (
@@ -358,7 +363,7 @@ export default function GuidePage({ guide }: { guide: GuideDef }) {
             disabled={result === "running"}
             onClick={() => void onProbe(probeId)}
           >
-            {probeLabel(probeId)}
+            {probeLabelFrom(ctx.schema, probeId)}
           </button>
           {result === "running" && <span className="text-[11px] text-text-muted">testing…</span>}
           {result && result !== "running" && (

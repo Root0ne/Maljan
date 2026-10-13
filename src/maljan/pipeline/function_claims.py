@@ -30,7 +30,8 @@ name, as the API catalogue compares them
 (``analysis.api_capability_db.canonical_name``); strings by the citation
 check's own whole-value reading (``EntryTexts``). A quoted value is read as a
 claimed string only when it is a sample string some entry holds as data: a
-strings tool's answer, FLOSS's, the blob decoder's, or the index's rows.
+strings tool's answer, an attached string emulator's (named by its declared
+display name), the blob decoder's, or the index's rows.
 
 A value none of them holds is stated to the analyst, once, through the
 validation turn every other question goes through: the claim, the function
@@ -62,14 +63,18 @@ from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from maljan.core.undeclared_tools import (
+    entry_address_arguments,
+    entry_is_strings_source,
+    entry_lists_a_function,
+    entry_lists_any_code,
+)
 from maljan.pipeline.events import safe_finding_value
 from maljan.pipeline.validation import (
-    _ADDRESS_ARGUMENTS,
     _BARE_ADDRESS,
     _CLAUSE_BREAK_RE,
     _CODE_SPAN_RE,
     _CUE_THAT_ASSERTS_RE,
-    _GENERIC_FUNCTION_NAME,
     _HEX_ADDRESS,
     _INSIDE_A_NEGATION_RE,
     _LIST_END_RE,
@@ -95,6 +100,7 @@ from maljan.pipeline.validation import (
     claim_block_indexes,
     decidable,
     decompiled_functions,
+    generic_function_name,
     literal_values,
 )
 from maljan.schemas.evidence import answer_not_shown, entry_ids_in
@@ -138,8 +144,38 @@ CALLEES_UNKNOWN = (
     "artefact of their own, so the functions reachable from {address} are not all known"
 )
 NOT_A_SAMPLE_STRING = (
-    'no: "{value}" is no string a strings tool, FLOSS, the blob decoder or the function index holds'
+    'no: "{value}" is no string a strings tool, {emulators}, the blob decoder or the '
+    "function index holds"
 )
+# ``{emulators}`` when no string emulator is attached: the neutral words.
+NO_EMULATOR_NAMED = "a string emulator"
+# The declared kind of a string emulator's answer.
+_EMULATOR_KIND = "emulated_strings"
+
+
+def attached_emulators() -> str:
+    """The attached string emulators by their declared display names, for ``{emulators}``.
+
+    Every enabled tool of the emulated-strings kind, each distinct name once,
+    in declaration order ("FLOSS" for a built-in run); the neutral words when
+    none is attached or none declares a name. Never raises: unreadable
+    declarations give the neutral words, and are logged.
+    """
+    from maljan.core.declared_reading import declarations
+
+    try:
+        held = declarations().tools_of_kind(_EMULATOR_KIND, enabled_only=True)
+    except Exception as exc:  # noqa: BLE001 — a name is never worth a lost check
+        from maljan.core.logger import logger
+
+        logger.debug("function claims: the emulators were not read (%s).", type(exc).__name__)
+        return NO_EMULATOR_NAMED
+    names = dict.fromkeys(
+        str(facts.display_name).strip() for _source, _tool, facts in held if facts.display_name
+    )
+    return ", ".join(name for name in names if name) or NO_EMULATOR_NAMED
+
+
 FACTS_UNREAD = "no: the function facts could not be read ({kind})"
 # What the reach does not follow, said with every question.
 NOT_FOLLOWED = (
@@ -261,12 +297,6 @@ def _names_in(text: str) -> set[str]:
     return {_api_key(token) for token in _IDENTIFIER.findall(str(text or "")) if len(token) >= 3}
 
 
-def _is_a_strings_source(tool: str) -> bool:
-    """Whether an entry's tool answers with the sample's strings as data."""
-    lowered = tool.lower()
-    return "string" in lowered or "floss" in lowered
-
-
 # ---------------------------------------------------------------------------
 # The functions a claim may be about
 # ---------------------------------------------------------------------------
@@ -285,8 +315,7 @@ def listed_functions(entries: Iterable[Any]) -> list[DecompiledFunction]:
     for function in decompiled_functions(entries):
         found[function.address if function.address is not None else function.names[0]] = function
     for entry in entries:
-        tool = str(getattr(entry, "tool", "") or "").lower()
-        if "disassembl" not in tool or "function" not in tool:
+        if not entry_lists_a_function(entry):
             continue
         if not getattr(entry, "ok", True) or answer_not_shown(entry):
             continue
@@ -294,7 +323,7 @@ def listed_functions(entries: Iterable[Any]) -> list[DecompiledFunction]:
             continue
         args = getattr(entry, "args", None) or {}
         address: int | None = None
-        for argument in _ADDRESS_ARGUMENTS:
+        for argument in entry_address_arguments(entry):
             if argument in args and address is None:
                 address = _address_value(args[argument])
         names = [
@@ -304,7 +333,7 @@ def listed_functions(entries: Iterable[Any]) -> list[DecompiledFunction]:
         ]
         if address is None:
             for name in names:
-                generic = _GENERIC_FUNCTION_NAME.fullmatch(name)
+                generic = generic_function_name().fullmatch(name)
                 if generic is not None:
                     address = int(generic.group(1), 16)
                     break
@@ -428,9 +457,11 @@ class FunctionFacts:
     # The names a sentence may name: the catalogue's and this run's, lower-cased.
     known_names: frozenset[str] = frozenset()
     listings: dict[str, _Held] = field(default_factory=dict)
-    # The sample strings as data: the strings tools' answers, FLOSS's, the blob
+    # The sample strings as data: the strings tools' answers, an emulator's, the blob
     # decoder's, and the index rows' strings.
     strings: EntryTexts = field(default_factory=EntryTexts)
+    # The attached string emulators, as the function check names them.
+    emulators: str = NO_EMULATOR_NAMED
     # The index rows' strings, each whole, lower-cased.
     index_strings: frozenset[str] = frozenset()
     # Every text of the rows, the placed values and the index strings, read
@@ -551,14 +582,17 @@ def _row_held(row: Mapping[str, Any]) -> _Held:
             if isinstance(cell, Mapping) and cell.get("name"):
                 held.names.add(_api_key(str(cell["name"]).rpartition("!")[2]))
                 held.texts.append(str(cell["name"]).lower())
-    for key, field_name in (
-        ("decoded_strings", "text"),
-        ("plain_strings", "text"),
-        ("capa", "rule"),
-    ):
+    from maljan.tools.artefact_index import rule_cells
+
+    for key in ("decoded_strings", "plain_strings"):
         for cell in row.get(key) or []:
-            if isinstance(cell, Mapping) and cell.get(field_name):
-                held.texts.append(str(cell[field_name]).lower())
+            if isinstance(cell, Mapping) and cell.get("text"):
+                held.texts.append(str(cell["text"]).lower())
+    # The rules matched in the function, whichever matcher answered: the
+    # row holds them under the shipped matcher's name or the neutral one.
+    for cell in rule_cells(row):
+        if cell.get("rule"):
+            held.texts.append(str(cell["rule"]).lower())
     return held
 
 
@@ -591,16 +625,11 @@ def function_facts(
     from maljan.tools.artefact_index import row_line
 
     found = merged_artefacts(artefacts, function_artefacts(entries))
-    facts = FunctionFacts()
+    facts = FunctionFacts(emulators=attached_emulators())
     run_names: set[str] = set()
-    sources = [
-        entry
-        for entry in [*pack_entries, *entries]
-        if _is_a_strings_source(str(getattr(entry, "tool", "") or ""))
-    ]
+    sources = [entry for entry in [*pack_entries, *entries] if entry_is_strings_source(entry)]
     for entry in entries:
-        tool = str(getattr(entry, "tool", "") or "").lower()
-        if "decompil" not in tool and "disassembl" not in tool:
+        if not entry_lists_any_code(entry):
             continue
         entry_id = str(getattr(entry, "id", "") or "")
         output = str(getattr(entry, "output", "") or "")
@@ -1024,7 +1053,7 @@ def _named_at(text: str, names: frozenset[str] | set[str]) -> list[tuple[str, in
     described: set[str] = set()
     for match in _IDENTIFIER.finditer(text):
         token = match.group(0)
-        if token in seen or len(token) < 3 or _GENERIC_FUNCTION_NAME.fullmatch(token):
+        if token in seen or len(token) < 3 or generic_function_name().fullmatch(token):
             continue
         if not _is_a_name(token, names):
             continue
@@ -1053,7 +1082,7 @@ def _named_at(text: str, names: frozenset[str] | set[str]) -> list[tuple[str, in
             or not re.search(r"[A-Za-z0-9]", _ESCAPE.sub("", value))
             or not decidable(value)
             or _api_key(value) in keys
-            or _GENERIC_FUNCTION_NAME.fullmatch(value)
+            or generic_function_name().fullmatch(value)
             or entry_ids_in(value)
         ):
             continue
@@ -1173,6 +1202,7 @@ def _row_words(row: Mapping[str, Any], entry: str, row_parts: Any) -> str:
     finding row's bound for one value (``events.FINDING_VALUE_LIMIT``)."""
     from maljan.agents.function_map import _count
     from maljan.pipeline.events import FINDING_VALUE_LIMIT
+    from maljan.tools.artefact_index import rule_cells, rule_count_words
 
     said = str(row_parts(row, entry))
     if len(said) <= FINDING_VALUE_LIMIT:
@@ -1188,11 +1218,13 @@ def _row_words(row: Mapping[str, Any], entry: str, row_parts: Any) -> str:
         ("resolved", "resolved name", "resolved names"),
         ("decoded_strings", "decoded string", "decoded strings"),
         ("plain_strings", "plain string", "plain strings"),
-        ("capa", "capa rule", "capa rules"),
     ):
         n = len([c for c in row.get(key) or [] if isinstance(c, Mapping)])
         if n:
             counts.append(_count(n, one, many))
+    rules = rule_cells(row)
+    if rules:
+        counts.append(_count(len(rules), *rule_count_words(row)))
     callers, callees = len(row.get("callers") or []), len(row.get("callees") or [])
     counted = ", ".join(counts) or "no artefact of its own"
     return safe_finding_value(
@@ -1313,7 +1345,10 @@ def check_function_claims(
                 claimed.append(value)
             else:
                 out.not_checked.append(
-                    f"claim {number}: {NOT_A_SAMPLE_STRING.format(value=safe_finding_value(value))}"
+                    f"claim {number}: "
+                    + NOT_A_SAMPLE_STRING.format(
+                        value=safe_finding_value(value), emulators=facts.emulators
+                    )
                 )
         unheld = [
             (value, api)
@@ -1364,7 +1399,7 @@ def _attribution(
     from bisect import bisect_right
 
     mentions: list[tuple[int, str]] = []
-    for pattern in (_HEX_ADDRESS, _GENERIC_FUNCTION_NAME, _SUFFIXED_ADDRESS, _BARE_ADDRESS):
+    for pattern in (_HEX_ADDRESS, generic_function_name(), _SUFFIXED_ADDRESS, _BARE_ADDRESS):
         for match in pattern.finditer(sentence):
             start = facts.offset(int(match.group(1), 16))
             if start is None:
@@ -1375,7 +1410,7 @@ def _attribution(
                 mentions.append((match.start(), facts.va(start)))
     for function in about:
         for name in function.names:
-            if _GENERIC_FUNCTION_NAME.fullmatch(name) or len(name) < 3:
+            if generic_function_name().fullmatch(name) or len(name) < 3:
                 continue
             for match in re.finditer(r"(?<![\w.])" + re.escape(name) + r"(?![\w])", sentence):
                 mentions.append((match.start(), ""))

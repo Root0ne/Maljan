@@ -1,20 +1,23 @@
-"""The CAPE round trip is an identity, and the render is complete without it.
+"""The CAPE round trip lays the report out as published, and the layout is complete without it.
 
 Three properties, one file:
-  (a) a CAPE-sourced report renders to *the same object* it came from, so no
-      consumer can observe the provider layer at all;
-  (b) the sandbox tools answer the same on the rendered dict and on the raw one;
-  (c) with ``raw`` emptied — the path a non-CAPE provider takes — the render
-      still carries every key the nine consumers read.
+  (a) a CAPE-sourced report's document is the report it came from, key for key
+      and in order, its renamed blocks under the document's words
+      (``schemas.sandbox_report.CAPE_RENAMES``), so no consumer observes the
+      neutral form in between;
+  (b) the sandbox tools answer the same on the document and on the raw report;
+  (c) with the source's arrangement dropped — the path a reader that keeps none
+      takes — the layout still carries every key the consumers read.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from maljan.providers.cape_view import to_cape_shaped_dict
+from maljan.schemas.sandbox_document import sandbox_document
 from maljan.schemas.sandbox_report import cape_report_to_sandbox_report
 from tests.unit._ledger_helpers import sandbox_view
+from tests.unit.providers._document import as_published
 from tests.unit.providers.test_sandbox_tools_golden import cape_reports
 
 _REPORTS = cape_reports()
@@ -80,21 +83,25 @@ def _at(d, path):
 
 
 @pytest.mark.parametrize("name,raw", _REPORTS, ids=_IDS)
-def test_cape_render_is_the_same_object(name, raw):
-    report = cape_report_to_sandbox_report(raw, provider="cape2")
-    assert to_cape_shaped_dict(report) is raw
+def test_cape_document_is_the_report_as_published(name, raw):
+    report = cape_report_to_sandbox_report(raw, provider="cape2", source_format="cape2")
+    assert as_published(sandbox_document(report), raw)
 
 
 @pytest.mark.parametrize("name,raw", _REPORTS, ids=_IDS)
 def test_the_tools_answer_the_same_on_rendered_and_raw(name, raw):
-    rendered = to_cape_shaped_dict(cape_report_to_sandbox_report(raw, provider="cape2"))
+    rendered = sandbox_document(
+        cape_report_to_sandbox_report(raw, provider="cape2", source_format="cape2")
+    )
     assert sandbox_view(rendered) == sandbox_view(raw)
 
 
 @pytest.mark.parametrize("name,raw", _REPORTS[:5], ids=_IDS[:5])
-def test_the_render_reproduces_every_consumer_key_without_the_short_circuit(name, raw):
-    report = cape_report_to_sandbox_report(raw, provider="cape2").model_copy(update={"raw": {}})
-    rendered = to_cape_shaped_dict(report)
+def test_the_layout_reproduces_every_consumer_key_without_the_source_arrangement(name, raw):
+    report = cape_report_to_sandbox_report(raw, provider="cape2", source_format="cape2").model_copy(
+        update={"arrangement": None}
+    )
+    rendered = sandbox_document(report)
     assert rendered is not raw
     for path, kind in CONSUMER_KEYS:
         value = _at(rendered, path)
@@ -105,9 +112,11 @@ def test_the_render_reproduces_every_consumer_key_without_the_short_circuit(name
 
 @pytest.mark.parametrize("name,raw", _REPORTS[:5], ids=_IDS[:5])
 def test_the_rendered_report_still_answers_what_the_raw_one_answered(name, raw):
-    """The rendered dict is not merely shaped right; it carries the same evidence."""
-    report = cape_report_to_sandbox_report(raw, provider="cape2").model_copy(update={"raw": {}})
-    rendered = to_cape_shaped_dict(report)
+    """The laid-out dict is not merely shaped right; it carries the same evidence."""
+    report = cape_report_to_sandbox_report(raw, provider="cape2", source_format="cape2").model_copy(
+        update={"arrangement": None}
+    )
+    rendered = sandbox_document(report)
     raw_view, new_view = sandbox_view(raw), sandbox_view(rendered)
     assert len(new_view["sandbox_processes"]["processes"]) == len(
         raw_view["sandbox_processes"]["processes"]
@@ -131,8 +140,9 @@ def test_pcap_path_and_unavailable_survive_the_render():
         {"target": {"sha256": "a" * 64}, "network": {"pcap_local_path": "/tmp/x.pcap"}},
         provider="triage",
         source_format="triage",
+        keep_arrangement=False,
     ).model_copy(update={"unavailable": ["apistats", "calls"]})
-    rendered = to_cape_shaped_dict(report)
+    rendered = sandbox_document(report)
     assert rendered["network"]["pcap_local_path"] == "/tmp/x.pcap"
     assert rendered["unavailable"] == ["apistats", "calls"]
 
@@ -148,8 +158,10 @@ def test_file_writes_survives_the_render_as_the_flat_list_it_is():
         "target": {"sha256": "a" * 64},
         "file_writes": ["/etc/rc.local", "/etc/ld.so.preload"],
     }
-    report = cape_report_to_sandbox_report(raw, provider="cape2").model_copy(update={"raw": {}})
-    rendered = to_cape_shaped_dict(report)
+    report = cape_report_to_sandbox_report(
+        raw, provider="cape2", source_format="cape2", keep_arrangement=False
+    )
+    rendered = sandbox_document(report)
     assert rendered is not raw
     assert rendered["file_writes"] == ["/etc/rc.local", "/etc/ld.so.preload"]
 

@@ -15,9 +15,10 @@ description of the model — and nothing else:
   with, as before.
 * **Thinking** is not configured: a model that thinks by default thinks as it
   would, and no ``budget_tokens`` is ever sent (a 400 on these models).
-  How deep it goes is ``llm.anthropic.effort``, sent as
-  ``output_config.effort`` when set; a level the Models API says the model does
-  not take is refused here, before the job spends anything.
+  How deep it goes is the agent entry's own ``effort``, else
+  ``llm.anthropic.effort``, sent as ``output_config.effort`` when set; a level
+  the Models API says the model does not take is refused here, before the job
+  spends anything.
 * **Prompt caching** is asked for only where a prefix is sent again — a tool
   loop's requests, its first one included, and any request that continues a
   conversation — with explicit breakpoints on the newest user turn and on the
@@ -39,6 +40,7 @@ description of the model — and nothing else:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import threading
 from pathlib import Path
@@ -46,9 +48,16 @@ from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from maljan.core.config import Settings
+from maljan.core.config import AnthropicConfig, Settings
 from maljan.core.exceptions import LLMError
 from maljan.core.logger import logger
+from maljan.llm.provider_base import (
+    COMPLETION_MAX_TOKENS,
+    COMPLETION_PROMPT,
+    LLMProvider,
+    ModelListing,
+    OneTurnRequest,
+)
 from maljan.llm.registry import register_provider
 
 _table_lock = threading.Lock()
@@ -216,11 +225,311 @@ def with_unforced_structured_output(chat_class: Any) -> Any:
     return unforced
 
 
+_PROMPT_USAGE_CLASSES: dict[type, type] = {}
+_capture_skipped_said = threading.Event()
+
+
+def _say_capture_skipped(exc: BaseException) -> None:
+    """Warn once per process that a stream's prompt usage could not be read from its chunk."""
+    if _capture_skipped_said.is_set():
+        return
+    _capture_skipped_said.set()
+    logger.warning(
+        "anthropic provider: the chunk langchain-anthropic built from message_start has a "
+        "shape this reader does not know (%s); the stream is unaffected, and a stream that "
+        "breaks is charged by estimate without the prompt usage the provider reported.",
+        type(exc).__name__,
+    )
+
+
+def with_reported_prompt_usage(chat_class: Any) -> Any:
+    """``chat_class`` whose stream's first chunk keeps the prompt usage Anthropic reported.
+
+    ``message_start`` reports the call's input and its cache reads and writes
+    before any of the answer streams; langchain-anthropic drops it and keeps
+    only ``message_delta``'s usage, which a stream broken mid-answer never
+    sends. It is kept on that chunk's ``response_metadata`` under
+    ``generation_rate.PROMPT_USAGE_KEY``, in LangChain's usage shape with no
+    output counted (``message_start``'s output figure is a placeholder), so a
+    failed attempt is charged the prompt the provider counted
+    (``llm.transient``). Nothing else reads it, and nothing sent changes.
+    """
+    if not isinstance(chat_class, type) or not hasattr(
+        chat_class, "_make_message_chunk_from_anthropic_event"
+    ):
+        return chat_class
+    cached = _PROMPT_USAGE_CLASSES.get(chat_class)
+    if cached is not None:
+        return cached
+    base: Any = chat_class
+
+    def _make_message_chunk_from_anthropic_event(self: Any, event: Any, **kwargs: Any) -> Any:
+        result = base._make_message_chunk_from_anthropic_event(self, event, **kwargs)
+        if getattr(event, "type", "") != "message_start":
+            return result
+        # The base's result is handed back exactly as it came, whatever its
+        # shape: the capture is read from it inside this guard, and a shape it
+        # does not expect skips the capture alone.
+        try:
+            message, _block = result
+            metadata = message.response_metadata if message is not None else None
+            if message is not None and not isinstance(metadata, dict):
+                raise TypeError(type(metadata).__name__)
+        except Exception as exc:  # noqa: BLE001 — the stream is never touched
+            _say_capture_skipped(exc)
+            return result
+        usage = getattr(getattr(event, "message", None), "usage", None)
+        if isinstance(metadata, dict) and usage is not None:
+            with contextlib.suppress(Exception):
+                from langchain_anthropic.chat_models import _create_usage_metadata
+
+                from maljan.llm.generation_rate import PROMPT_USAGE_KEY
+
+                reported: dict[str, Any] = dict(_create_usage_metadata(usage))
+                reported["output_tokens"] = 0
+                reported["total_tokens"] = int(reported.get("input_tokens") or 0)
+                reported.pop("output_token_details", None)
+                metadata[PROMPT_USAGE_KEY] = reported
+        return result
+
+    kept = type(
+        chat_class.__name__,
+        (chat_class,),
+        {"_make_message_chunk_from_anthropic_event": _make_message_chunk_from_anthropic_event},
+    )
+    kept.__module__ = __name__
+    kept.__qualname__ = chat_class.__qualname__
+    _PROMPT_USAGE_CLASSES[chat_class] = kept
+    return kept
+
+
+_LOOP_BOUND_CLASSES: dict[type, type] = {}
+
+
+def with_loop_bound_async_client(chat_class: Any) -> Any:
+    """``chat_class`` whose async client never sends on a connection of another event loop.
+
+    ``ChatAnthropic`` takes its async httpx client from a process-wide
+    ``lru_cache`` keyed on the endpoint, so every model built for the API —
+    the analysts' on the agent loop, the reporter's and the composer's on the
+    worker's — shared one pool, and the first request the reporter sent on a
+    connection the analysts had opened failed with "bound to a different event
+    loop". The client is built by the same function, uncached, once per event
+    loop (``maljan.llm.loop_clients``), and shared per endpoint as before; the
+    SDK client and every request it builds are unchanged.
+    """
+    if not isinstance(chat_class, type) or "_async_client" not in dir(chat_class):
+        return chat_class
+    cached = _LOOP_BOUND_CLASSES.get(chat_class)
+    if cached is not None:
+        return cached
+
+    from functools import cached_property
+
+    def _async_client(self: Any) -> Any:
+        import anthropic
+        from langchain_anthropic import chat_models
+
+        from maljan.llm.loop_clients import (
+            loop_bound_async_client,
+            shared_loop_bound_async_client,
+        )
+
+        client_params = self._client_params
+        http_params: dict[str, Any] = {"base_url": client_params["base_url"]}
+        if "timeout" in client_params:
+            http_params["timeout"] = client_params["timeout"]
+        if self.anthropic_proxy:
+            http_params["anthropic_proxy"] = self.anthropic_proxy
+        cached_build = chat_models._get_default_async_httpx_client
+        build = getattr(cached_build, "__wrapped__", cached_build)
+
+        def make() -> Any:
+            return build(**http_params)
+
+        try:
+            key = (build, tuple(sorted(http_params.items())))
+            hash(key)
+        except TypeError:
+            http_client = loop_bound_async_client(make)
+        else:
+            http_client = shared_loop_bound_async_client(key, make)
+        return anthropic.AsyncClient(**client_params, http_client=http_client)
+
+    prop = cached_property(_async_client)
+    prop.__set_name__(chat_class, "_async_client")
+    bound = type(chat_class.__name__, (chat_class,), {"_async_client": prop})
+    bound.__module__ = __name__
+    bound.__qualname__ = chat_class.__qualname__
+    _LOOP_BOUND_CLASSES[chat_class] = bound
+    return bound
+
+
+# Anthropic's API, where no address is configured, and the headers every
+# request to it carries.
+ANTHROPIC_ROOT = "https://api.anthropic.com"
+
+
+def anthropic_headers(api_key: str) -> dict[str, str]:
+    """The headers an Anthropic request authenticates with; ``{}`` without a key."""
+    from maljan.llm.context_window import ANTHROPIC_VERSION
+
+    return {"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION} if api_key else {}
+
+
 @register_provider("anthropic")
-class AnthropicProvider:
+class AnthropicProvider(LLMProvider):
     """Builds LangChain ChatAnthropic instances."""
 
     name = "anthropic"
+    settings_model = AnthropicConfig
+    choice_order = 1
+    label = "Anthropic"
+    description = "Claude models via the Anthropic API"
+    hosted = True
+    legacy_credential_keys = ("anthropic_api_key",)
+    guide_leaves = (
+        "api_key",
+        "base_url",
+        "allow_plain_http_to_docker_host",
+        "effort",
+        "prompt_cache_ttl",
+    )
+    guide_advanced_leaves = (
+        "base_url",
+        "allow_plain_http_to_docker_host",
+        "effort",
+        "prompt_cache_ttl",
+    )
+    sdk_packages = frozenset({"anthropic"})
+    llm_types = ("anthropic-chat",)
+    timeout_kwarg = "timeout"
+    base_url_leaf = "base_url"
+    default_endpoint = "the Anthropic API"
+    effort_setting = "llm.anthropic.effort"
+    concurrency = "hosted"
+    # A cached prefix is readable only once an answer to the request that wrote
+    # it has begun; concurrent requests sent before that each write it again
+    # (https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
+    caches_once_answered = True
+    window_probe_needs_key = True
+
+    @classmethod
+    def effort_levels(cls, model: str) -> tuple[list[str] | None, list[str], str]:
+        """The levels a build would send, those the description left out, and the source.
+
+        A description that names no level says nothing about levels, so the
+        setting's list stands. Once it names any, a level it refuses is left
+        out (the build refuses it too) and a level it says nothing about is
+        offered and listed as undescribed, because the build sends it.
+        """
+        from maljan.core.config import ANTHROPIC_EFFORT_LEVELS
+        from maljan.llm.model_capabilities import takes_effort
+
+        said = {level: takes_effort(model, level) for level in ANTHROPIC_EFFORT_LEVELS}
+        if all(answer is None for answer in said.values()):
+            return list(ANTHROPIC_EFFORT_LEVELS), [], "settings"
+        offered = [level for level, answer in said.items() if answer is not False]
+        undescribed = [level for level, answer in said.items() if answer is None]
+        return offered, undescribed, "models_api"
+
+    @classmethod
+    def effort_refusal(cls, effort: str) -> str | None:
+        from maljan.core.config import ANTHROPIC_EFFORT_LEVELS
+
+        if effort in ANTHROPIC_EFFORT_LEVELS:
+            return None
+        return (
+            f"effort {effort!r} is not one of the Anthropic levels "
+            f"({', '.join(ANTHROPIC_EFFORT_LEVELS)})."
+        )
+
+    @classmethod
+    def supports_structured_output(cls, settings: Any) -> bool:
+        return True
+
+    @classmethod
+    def window_probes(cls, endpoint: object, model: str) -> tuple[Any, ...]:
+        from urllib.parse import quote
+
+        from maljan.llm import context_window as cw
+
+        name = str(model or "").strip()
+        if not name:
+            return ()
+        root = cw._root_of(endpoint)
+        # A configured address (``llm.anthropic.base_url``) is asked in place
+        # of the vendor's; the vendor's own name is no address.
+        anthropic_root = root if "://" in root else cw.ANTHROPIC_API_ROOT
+        return (
+            cw.Ask(
+                "GET",
+                f"{anthropic_root}{cw.ANTHROPIC_MODEL_PATH}{quote(name, safe='')}",
+                None,
+                cw.window_from_anthropic_model,
+                cw.ANTHROPIC_MODELS_API,
+                auth=anthropic_headers,
+            ),
+        )
+
+    @classmethod
+    def writes_hour_caches(cls, settings: Any) -> bool:
+        return str(getattr(cls.settings_block(settings), "prompt_cache_ttl", "") or "") == "1h"
+
+    @classmethod
+    def _root(cls, endpoint: str) -> str:
+        base = str(endpoint or "").rstrip("/")
+        return base if "://" in base else ANTHROPIC_ROOT
+
+    @classmethod
+    def model_listing(cls, settings: Any) -> ModelListing:
+        root = cls._root(cls.endpoint(None, cls.configured_base_url(settings)))
+        return ModelListing(
+            url=f"{root}/v1/models",
+            headers={
+                "x-api-key": cls.api_key(settings),
+                "anthropic-version": _anthropic_version(),
+            },
+            names=lambda payload: [m.get("id", "") for m in (payload or {}).get("data", [])],
+            where=root,
+        )
+
+    @classmethod
+    def one_turn_request(
+        cls, settings: Any, endpoint: str, model: str, effort: str | None = None
+    ) -> OneTurnRequest:
+        body: dict[str, Any] = {
+            "model": model,
+            "max_tokens": COMPLETION_MAX_TOKENS,
+            "messages": [{"role": "user", "content": COMPLETION_PROMPT}],
+        }
+        # The effort a job's every request carries, so a level the model does
+        # not take fails here, before a job.
+        level = str(effort or "").strip()
+        if level:
+            body["output_config"] = {"effort": level}
+        return OneTurnRequest(
+            f"{cls._root(endpoint)}/v1/messages",
+            {"x-api-key": cls.api_key(settings), "anthropic-version": _anthropic_version()},
+            body,
+        )
+
+    @classmethod
+    def said_something(cls, payload: Any) -> bool:
+        content = payload.get("content")
+        if not isinstance(content, list) or not content:
+            return False
+        # A thinking block counts: a model that thinks by default may spend the
+        # probe's eight tokens thinking, and its block, with its signature, is
+        # the model speaking (its text is empty by default on some models).
+        return any(
+            str(part.get("text") or "").strip()
+            or part.get("name")
+            or (part.get("type") == "thinking" and str(part.get("signature") or "").strip())
+            or (part.get("type") == "redacted_thinking" and part.get("data"))
+            for part in content
+            if isinstance(part, dict)
+        )
 
     def __init__(self, config: Settings) -> None:
         self._config = config
@@ -259,18 +568,35 @@ class AnthropicProvider:
         else:
             kwargs["temperature"] = temperature
 
-        effort = str(getattr(settings, "effort", "") or "")
+        # An agent entry's own effort (``llm.agents.<key>.effort``) arrives
+        # as a keyword with the setting it was read from; without one the
+        # global ``llm.anthropic.effort`` is sent, as it always was.
+        own_effort = str(kwargs.pop("effort", None) or "")
+        own_setting = str(kwargs.pop("effort_setting", None) or "the agent entry's effort")
+        if own_effort:
+            effort, effort_setting = own_effort, own_setting
+        else:
+            effort, effort_setting = (
+                str(getattr(settings, "effort", "") or ""),
+                ("llm.anthropic.effort"),
+            )
         if effort:
             from maljan.llm.model_capabilities import takes_effort
 
             if takes_effort(model, effort) is False:
                 raise LLMError(
-                    f"llm.anthropic.effort is {effort!r}, which the Anthropic Models API says "
+                    f"{effort_setting} is {effort!r}, which the Anthropic Models API says "
                     f"{model} does not take."
                 )
             output_config = dict(kwargs.pop("output_config", None) or {})
             output_config.setdefault("effort", effort)
             kwargs["output_config"] = output_config
+
+        # A configured address (``llm.anthropic.base_url``) takes every
+        # request; none leaves the client's own, the Anthropic API.
+        address = str(getattr(settings, "base_url", None) or "").strip()
+        if address:
+            kwargs.setdefault("base_url", address)
 
         if needs_streaming(model, kwargs.get("max_tokens")):
             kwargs.setdefault("streaming", True)
@@ -284,16 +610,36 @@ class AnthropicProvider:
         # the same history is completed the same way on every request.
         from maljan.llm.anthropic_history import with_preserved_thinking
         from maljan.llm.tool_replies import with_answered_tool_calls
+        from maljan.llm.transient import with_transient_retries
 
+        # A provider saying "not now" — 5xx, 529, 429, a dropped connection, or
+        # an ``overloaded_error`` event after the stream began — is asked again
+        # by the one policy the OpenAI provider's model uses
+        # (``maljan.llm.transient``). The SDK's own two retries are off for the
+        # reason they are off there: they would stack on that policy, and they
+        # never covered an error that arrived inside the stream.
         chat_class = with_answered_tool_calls(
-            with_preserved_thinking(
-                with_unforced_structured_output(with_sized_request_timeout(ChatAnthropic)),
-                str(getattr(settings, "prompt_cache_ttl", "5m") or "5m"),
+            with_transient_retries(
+                with_preserved_thinking(
+                    with_unforced_structured_output(
+                        with_sized_request_timeout(
+                            with_reported_prompt_usage(with_loop_bound_async_client(ChatAnthropic))
+                        )
+                    ),
+                    str(getattr(settings, "prompt_cache_ttl", "5m") or "5m"),
+                )
             ),
             "anthropic",
         )
+        kwargs.setdefault("max_retries", 0)
         return chat_class(  # type: ignore[no-any-return]
             model_name=model,
             api_key=api_key,
             **kwargs,
         )
+
+
+def _anthropic_version() -> str:
+    from maljan.llm.context_window import ANTHROPIC_VERSION
+
+    return ANTHROPIC_VERSION

@@ -64,6 +64,11 @@ dependencies = [
     # a consumer's parser accepts. schemas.stix_pattern reads the grammar
     # itself only where this is absent.
     "stix2-patterns==2.1.2",
+    # RE2, which matches in time linear in the text whatever the pattern: the
+    # engine every regular expression an operator declares on a tool server
+    # runs on (core.tool_declarations), since those are held against tool
+    # answers a sample's own strings reach. BSD-3-Clause, wheels for 3.13.
+    "google-re2>=1.1",
 ]
 
 [project.scripts]

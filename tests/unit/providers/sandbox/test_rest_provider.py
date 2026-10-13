@@ -216,12 +216,15 @@ def test_a_cape_shaped_body_goes_through_the_cape_reader_untouched():
     provider = _provider(lambda r: httpx.Response(200, json=body), cfg)
     run = provider.fetch("T-9")
     assert run.report.source_format == "cape2"
-    from maljan.providers.cape_view import to_cape_shaped_dict
+    from maljan.schemas.sandbox_document import sandbox_document
+    from tests.unit.providers._document import as_published
 
-    assert to_cape_shaped_dict(run.report) is run.report.raw, "identity, as for every CAPE source"
+    assert as_published(sandbox_document(run.report), body), (
+        "as published, as for every CAPE source"
+    )
 
 
-def test_a_real_cape_fixture_goes_through_the_cape_reader_by_identity():
+def test_a_real_cape_fixture_goes_through_the_cape_reader_as_published():
     """The committed/real CAPE fixture, not a hand-rolled minimal body."""
     from tests.unit.providers._cape_fixture import first_cape_report
 
@@ -231,9 +234,10 @@ def test_a_real_cape_fixture_goes_through_the_cape_reader_by_identity():
     provider = _provider(lambda r: httpx.Response(200, json=body), cfg)
     run = provider.fetch("T-9")
     assert run.report.source_format == "cape2"
-    from maljan.providers.cape_view import to_cape_shaped_dict
+    from maljan.schemas.sandbox_document import sandbox_document
+    from tests.unit.providers._document import as_published
 
-    assert to_cape_shaped_dict(run.report) is run.report.raw
+    assert as_published(sandbox_document(run.report), body)
 
 
 def test_a_triage_shaped_body_goes_through_the_triage_reader():
@@ -294,7 +298,7 @@ def test_a_generic_golden_report_names_every_unmapped_channel_unavailable():
     unavailable = set(report.unavailable)
     # Every channel this mapping left unpointed (http, udp, hosts, domains)
     # plus the three that never have a settings field of their own.
-    for channel in ("http", "udp", "hosts", "domains", "generic_events", "screenshots"):
+    for channel in ("http", "udp", "hosts", "domains", "events", "screenshots"):
         assert channel in unavailable, f"{channel!r} should be named unavailable"
     # And every channel the mapping does point at produced at least one row.
     assert report.processes and report.signatures and report.network.dns
@@ -394,3 +398,25 @@ def test_a_bare_token_with_no_scheme_is_also_redacted():
     with pytest.raises(ProviderError) as exc:
         provider._raise_for_status(echoed, "probe")
     assert "s3cr3t-token" not in str(exc.value)
+
+
+def test_a_triage_body_names_its_sandbox_as_the_declared_formats_do(monkeypatch):
+    """A lineage sentence names the configured format's declared sandbox, an operator's too."""
+    from maljan.core.report_formats import ReportFormat
+    from maljan.schemas import sandbox_report
+
+    seen: dict[str, object] = {}
+    reader = sandbox_report.triage_overview_to_sandbox_report
+
+    def recording(overview, **kwargs):
+        seen.update(kwargs)
+        return reader(overview, **kwargs)
+
+    monkeypatch.setattr(sandbox_report, "triage_overview_to_sandbox_report", recording)
+    cfg = _cfg()
+    cfg.sandbox.rest.report.format = "triage"
+    cfg.sandbox.report_formats = [ReportFormat(name="triage", display_name="AcmeTriage")]
+    overview = json.loads((FIX / "triage_overview.json").read_text(encoding="utf-8"))
+    provider = _provider(lambda r: httpx.Response(200, json=overview), cfg)
+    provider.fetch("260904-abcdefgh1")
+    assert seen["marked_by"] == "AcmeTriage"

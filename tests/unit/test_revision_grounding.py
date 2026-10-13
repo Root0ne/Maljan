@@ -90,7 +90,11 @@ class TestSingleChunkPath:
 
         _build_revision_context(state, container, "dynamic")
 
-        container.load_chunked.assert_called_once_with("hash123", "dynamic")
+        container.load_chunked.assert_called_once()
+        args, kwargs = container.load_chunked.call_args
+        assert args == ("hash123", "dynamic")
+        # The agent's own input room, as its first analysis was chunked at.
+        assert callable(kwargs["room"])
 
 
 # ---------------------------------------------------------------------------

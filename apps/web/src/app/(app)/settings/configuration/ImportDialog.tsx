@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import { SettingsValidationError } from "@/types/settings";
 import type { PatchResult } from "@/types/settings";
+import { usableFields } from "./declarationFields";
 import { buildImportPreview, type ImportDoc, type ImportPreview } from "./importPreview";
 import { useSettingsContext } from "./SettingsContext";
 import { appliesSummary, APPLIES_SENTENCE } from "./vocabulary";
@@ -111,7 +112,14 @@ export default function ImportDialog({ onClose }: { onClose: () => void }) {
         }
       }
       setDoc(parsedDoc);
-      setPreview(buildImportPreview(parsedDoc, ctx.entriesByKey, currentValues));
+      setPreview(
+        buildImportPreview(
+          parsedDoc,
+          ctx.entriesByKey,
+          currentValues,
+          usableFields(ctx.schema?.tool_declaration_fields)
+        )
+      );
     } catch {
       setReadError("This file could not be read as a settings export.");
     }

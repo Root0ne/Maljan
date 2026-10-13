@@ -189,12 +189,12 @@ class TestEveryRealCallIsMeasured:
 
         container = ServiceContainer(Settings(_env_file=None), mock=True)  # type: ignore[call-arg]
         registry = MagicMock()
-        registry.build_model.return_value = FakeMessagesListChatModel(
+        registry.build_model_for_agent.return_value = FakeMessagesListChatModel(
             responses=[_ollama_answer(38, 10.0)]
         )
         container._llm_registry = registry  # type: ignore[assignment]
 
-        llm: Any = container.get_expert_llm()
+        llm: Any = container.get_mediator_llm()
         llm.invoke([HumanMessage(content="a")])
 
         assert any(isinstance(cb, RateMeter) for cb in llm.callbacks or [])

@@ -57,6 +57,42 @@ class AgentArgument(BaseModel):
             "listed lines cite, every one of them, as the platform put them to it."
         ),
     )
+    # Routing data for the platform, never model input: the history a prompt
+    # carries is this model's repr, so none of these fields is in it.
+    place_facts: list[str] = Field(
+        default_factory=list,
+        repr=False,
+        description=(
+            "For the mediator: for each blocking line naming a function the run knows, which "
+            "functions it names and whether the ledger holds a listing of each, as the "
+            "platform put them to the analysts the line names."
+        ),
+    )
+    converged: list[dict[str, Any]] = Field(
+        default_factory=list,
+        repr=False,
+        description=(
+            "For the mediator: the revisions of the round before it that moved towards a peer "
+            "beyond the sources both cite, with no citation added and no tool call "
+            "(``sycophancy_detector.convergence_flags``), as it was told them."
+        ),
+    )
+    revise: list[str] | None = Field(
+        default=None,
+        repr=False,
+        description=(
+            "For the mediator: the analysts its blocking lines name in their "
+            "[analysts: ...] field, the ones a revision round asks; ``[]`` when its "
+            "final block lists no blocking line. ``None`` when the names were not read "
+            "(``revise_note`` says why, where the platform tried) — a revision round "
+            "then asks every analyst."
+        ),
+    )
+    revise_note: str = Field(
+        default="",
+        repr=False,
+        description="For the mediator: the platform's sentence on why ``revise`` was not read.",
+    )
     note: str = Field(
         default="",
         description=(
@@ -69,9 +105,11 @@ class AgentArgument(BaseModel):
     status: str = Field(
         default="complete",
         description=(
-            "``complete`` | ``failed`` | ``timeout``. Whether this contribution "
-            "was actually produced. A mediation that *errored* and one where the "
-            "agents simply did not converge both leave ``is_consensus=False`` "
+            "``complete`` | ``failed`` | ``timeout`` | ``no_answer``. Whether this "
+            "contribution was actually produced; ``no_answer`` is a mediator that "
+            "wrote no answer (empty, or cut at the output cap before any text). "
+            "A mediation that *errored* and one where the agents simply did not "
+            "converge both leave ``is_consensus=False`` "
             "with a 0.0 confidence, and until this field existed the only thing "
             "telling them apart anywhere in the system was the literal prefix "
             "'[ERROR] Mediation ' inside ``finding`` — sniffed independently by "

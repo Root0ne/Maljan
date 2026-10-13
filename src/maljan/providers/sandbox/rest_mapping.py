@@ -14,11 +14,11 @@ Three rules make that safe to run against a report nobody has seen:
 * A channel with no path goes into ``SandboxReport.unavailable``. An empty
   ``network.dns`` and a sandbox that publishes no DNS at all look identical in
   a rendered report, and only one of them means the sample was quiet.
-* Every channel is capped at ``MAX_ROWS_PER_CHANNEL``. A JSONPath over a
-  200 MB report can select a million rows, and a report nobody can render is
-  not more evidence than one that stops at five thousand and says so; a
-  truncated channel says so too (``ChannelStats.truncated``), rather than
-  quietly looking like a sandbox with exactly five thousand rows of data.
+* Every channel is read whole, as a built-in reader reads its lists: no row
+  count cuts it. A path is bounded only by the report's own size (the values
+  it holds): a path that names each value at most once never reaches it, and
+  one that does repeats values and is cut there, saying so
+  (``ChannelStats.truncated``, and a warning), never quietly.
 
 Three channels are not settings the operator can point anywhere:
 
@@ -27,9 +27,12 @@ Three channels are not settings the operator can point anywhere:
   is, and named unavailable exactly when ``calls`` is.
 * Anything else a sandbox publishes goes through ``mapping.channels``, an
   operator-named ``<name> -> JSONPath`` map landing in
-  ``SandboxReport.channels``. Those rows are carried close to the shape the
-  sandbox published them in, because this module has no consumer to coerce
-  them for.
+  ``SandboxReport.channels``, or ``mapping.places``, a ``<place> -> JSONPath``
+  map onto the report's places with no channel of their own (the process
+  tree, the resolved API names, what the sandbox extracted, the dumps, the
+  memory regions, the IDS alerts). Those rows are carried close to the shape
+  the sandbox published them in, because this module has no consumer to
+  coerce them for.
 * ``generic_events`` and ``screenshots`` have no ``RestMappingConfig`` field
   at all. No REST sandbox this mapping has been built against publishes
   either through a documented API, so both are named unavailable
@@ -46,6 +49,7 @@ from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
 from maljan.providers.errors import ProviderConfigurationError
+from maljan.schemas.sandbox_report import section_id
 
 if TYPE_CHECKING:
     from maljan.core.config import RestMappingConfig
@@ -85,10 +89,15 @@ REST_MAPPING_FILLS: frozenset[str] = frozenset(
         "dropped_files",
         "registry",
         "channels",
+        # The open places, each where ``mapping.places`` names a path for it.
+        "process_tree",
+        "resolved_apis",
+        "extracted",
+        "procdumps",
+        "memory",
+        "ids_alerts",
     }
 )
-
-MAX_ROWS_PER_CHANNEL = 5000
 
 # The field each channel's consumer indexes on. A row without it is not a
 # thinner row, it is a row the consumer will skip or crash on.
@@ -150,6 +159,8 @@ class CompiledMapping:
     # ``channels.<name>`` paths, compiled the same way as the fixed channels
     # but named by the operator rather than by this module.
     channel_paths: dict[str, Any] = field(default_factory=dict)
+    # ``places.<place>`` paths, onto the report's open places.
+    place_paths: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -186,9 +197,18 @@ def compile_mapping(cfg: RestMappingConfig) -> CompiledMapping:
         for name, expression in cfg.channels.items()
         if expression
     }
+    place_paths = {
+        name: _compile_one(expression, f"places.{name}")
+        for name, expression in cfg.places.items()
+        if expression
+    }
     target = _compile_one(cfg.target_sha256, "target_sha256") if cfg.target_sha256 else None
     return CompiledMapping(
-        config=cfg, target_sha256=target, paths=paths, channel_paths=channel_paths
+        config=cfg,
+        target_sha256=target,
+        paths=paths,
+        channel_paths=channel_paths,
+        place_paths=place_paths,
     )
 
 
@@ -229,29 +249,60 @@ def _normalize_sha256(value: Any) -> tuple[str, str]:
 
 
 def _select_open_channels(
-    compiled: CompiledMapping, payload: dict[str, Any]
-) -> tuple[dict[str, list[dict[str, Any]]], dict[str, ChannelStats]]:
-    """Run the operator's own ``channels.<name>`` paths.
+    compiled: CompiledMapping,
+    payload: dict[str, Any],
+    sizes: dict[int, int],
+    *,
+    places: bool = False,
+) -> tuple[dict[str, list[Any]], dict[str, ChannelStats]]:
+    """Run the operator's own ``channels.<name>`` paths, or its ``places.<place>`` ones.
 
     These have no consumer field to require and no row shape to coerce into:
     the point of an open channel is that this module does not know what a
     sandbox publishes there. A mapping is kept as it is, anything else is
-    wrapped so every row is still a mapping, and the cap applies as it does to
-    every other channel.
+    wrapped so every row is still a mapping (a name the resolved API names
+    place holds is kept as the text it is). A channel or a place is read
+    whole, as a built-in reader reads its lists, bounded only by the report's
+    own size, in what it holds as well as in its rows: each match is kept by
+    reference, and a document writes each match out whole, so a descendant
+    path whose matches nest (``$..x`` where an ``x`` holds an ``x``) would
+    write the inner ones again inside the outer ones. The values the kept
+    matches hold, each match counted with everything nested in it, never
+    exceed the values the report holds: one reaching that is cut there and
+    says so (``truncated``, and a warning). A path whose matches do not nest
+    holds at most the report once and is never cut. Each match's size is
+    looked up in ``sizes``, one measure of the report taken before
+    (:func:`subtree_sizes`), so the bound costs time linear in the report.
     """
-    rows: dict[str, list[dict[str, Any]]] = {}
+    rows: dict[str, list[Any]] = {}
     stats: dict[str, ChannelStats] = {}
-    for name, path in compiled.channel_paths.items():
-        label = f"channels.{name}"
+    paths = compiled.place_paths if places else compiled.channel_paths
+    bound = sizes.get(id(payload), 1)
+    for name, path in paths.items():
+        label = f"places.{name}" if places else f"channels.{name}"
         try:
             values = (node.value for node in path.finditer(payload))
-            peeked = list(islice(values, MAX_ROWS_PER_CHANNEL + 1))
+            peeked = list(islice(values, bound + 1))
         except Exception as exc:  # noqa: BLE001 — a path valid in isolation can still fail on data
             stats[label] = ChannelStats(error=f"{type(exc).__name__}: {exc}")
             continue
-        truncated = len(peeked) > MAX_ROWS_PER_CHANNEL
-        matches = peeked[:MAX_ROWS_PER_CHANNEL]
-        kept = [m if isinstance(m, dict) else {"value": m} for m in matches if m not in (None, "")]
+        truncated = len(peeked) > bound
+        matches = peeked[:bound]
+        held = 0
+        for kept_count, match in enumerate(matches):
+            held += sizes.get(id(match), 1)
+            if held > bound:
+                matches, truncated = matches[:kept_count], True
+                break
+        if truncated:
+            logger.warning(
+                "rest mapping: a %s path matched more than the report holds (%d values); "
+                "its matches repeat or nest, and it was cut there.",
+                "place" if places else "channel",
+                bound,
+            )
+        converted = (_open_row(name if places else "", m) for m in matches)
+        kept = [row for row in converted if row is not None]
         stats[label] = ChannelStats(
             matched=len(matches),
             kept=len(kept),
@@ -264,15 +315,120 @@ def _select_open_channels(
     return rows, stats
 
 
+# The channel a top-level block no path names lands in: ``report.<block>``.
+UNNAMED_BLOCK_PREFIX = "report."
+
+# The top-level block a JSONPath starts in: ``$.name``, ``$['name']`` or
+# ``$["name"]``. A path that starts anywhere else (``$..x``, ``$[*]``, a
+# filter) may reach any block, so it names them all.
+_FIRST_BLOCK_RE = re.compile(r"""^\$(?:\.([A-Za-z_][\w-]*)|\[\s*(?:'([^']*)'|"([^"]*)")\s*\])""")
+
+
+def _named_blocks(cfg: RestMappingConfig) -> set[str] | None:
+    """The top-level blocks the mapping's paths start in, or ``None`` where one may start in any."""
+    paths = [getattr(cfg, channel) for channel in CHANNELS]
+    paths += [cfg.target_sha256, *cfg.channels.values(), *cfg.places.values()]
+    named: set[str] = set()
+    for path in paths:
+        text = str(path or "").strip()
+        if not text:
+            continue
+        found = _FIRST_BLOCK_RE.match(text)
+        if found is None:
+            return None
+        named.add(next(group for group in found.groups() if group is not None))
+    return named
+
+
+def unnamed_blocks(cfg: RestMappingConfig, payload: dict[str, Any]) -> dict[str, Any]:
+    """Each top-level block of ``payload`` no mapping path starts in, as a ``report.<block>``.
+
+    One pass over the payload's top-level keys; the blocks are kept whole and
+    carried by reference, never read or copied row by row. A block with no
+    value (empty text, an empty list or object, null) has nothing to read.
+    """
+    named = _named_blocks(cfg)
+    if named is None:
+        return {}
+    return {
+        f"{UNNAMED_BLOCK_PREFIX}{key}": value
+        for key, value in payload.items()
+        if key not in named and value not in (None, "", [], {})
+    }
+
+
+def subtree_sizes(payload: Any) -> dict[int, int]:
+    """How many values each container of ``payload`` holds, itself and all nested, by identity.
+
+    One post-order walk with a stack, each distinct container measured once,
+    so a report costs time and memory linear in its size, and a container
+    reached twice is counted once. A value that is no container holds one.
+    """
+    sizes: dict[int, int] = {}
+    stack: list[tuple[Any, bool]] = [(payload, False)]
+    while stack:
+        node, closing = stack.pop()
+        if not isinstance(node, dict | list):
+            continue
+        key = id(node)
+        children = node.values() if isinstance(node, dict) else node
+        if closing:
+            sizes[key] = 1 + sum(
+                sizes.get(id(child), 1) if isinstance(child, dict | list) else 1
+                for child in children
+            )
+            continue
+        if key in sizes:
+            continue
+        sizes[key] = 1  # open: a container reached again inside itself counts once
+        stack.append((node, True))
+        stack.extend((child, False) for child in children if isinstance(child, dict | list))
+    return sizes
+
+
+def node_count(payload: Any) -> int:
+    """How many values ``payload`` holds, itself and every one nested in it, counted once each.
+
+    Walked with a stack, never recursion, so a deeply nested report costs time
+    linear in its size and no call depth.
+    """
+    count = 0
+    stack: list[Any] = [payload]
+    while stack:
+        value = stack.pop()
+        count += 1
+        if isinstance(value, dict):
+            stack.extend(value.values())
+        elif isinstance(value, list):
+            stack.extend(value)
+    return count
+
+
+def _open_row(place: str, match: Any) -> Any:
+    """One match of an open channel or place, as the row it lands as; ``None`` for no value."""
+    if match in (None, ""):
+        return None
+    if not place:
+        # An operator's channel: its rows are mappings, as on dev.
+        return match if isinstance(match, dict) else {"value": match}
+    if place == "resolved_apis" and isinstance(match, dict):
+        text = match.get("value")
+        return text if text not in (None, "") else None
+    # A place holds each match as the sandbox published it, by reference.
+    return match
+
+
 def _select(
-    compiled: CompiledMapping, channel: str, payload: dict[str, Any]
+    compiled: CompiledMapping, channel: str, payload: dict[str, Any], bound: int
 ) -> tuple[ChannelStats, list[Any]]:
     """Run one channel's path and coerce what it selected.
 
-    ``finditer`` is only ever pulled through ``islice(..., MAX_ROWS_PER_CHANNEL
-    + 1)`` — one past the cap, never the whole thing — so a path that selects
-    a million rows never materialises more than 5001 of them before this
-    function knows to stop and say ``truncated``.
+    The channel is read whole, as a built-in reader reads its lists: no row
+    count cuts it. ``bound`` is how many values the report holds; a path that
+    names each value at most once matches no more, so ``finditer`` is pulled
+    through ``islice(..., bound + 1)`` and a path that matches more repeats
+    values (a descendant segment over nested matches) and is cut there,
+    saying so (``truncated``, and a warning).
 
     Returns ``(stats, kept_rows)`` rather than smuggling the rows onto the
     frozen ``ChannelStats`` through ``object.__setattr__`` (F15): that hid a
@@ -285,14 +441,17 @@ def _select(
         return ChannelStats(), []
     try:
         values = (node.value for node in path.finditer(payload))
-        peeked = list(islice(values, MAX_ROWS_PER_CHANNEL + 1))
+        peeked = list(islice(values, bound + 1))
     except Exception as exc:  # noqa: BLE001 — a path valid in isolation can still fail on data
         return ChannelStats(error=f"{type(exc).__name__}: {exc}"), []
-    truncated = len(peeked) > MAX_ROWS_PER_CHANNEL
-    matches = peeked[:MAX_ROWS_PER_CHANNEL]
+    truncated = len(peeked) > bound
+    matches = peeked[:bound]
     if truncated:
         logger.warning(
-            "rest mapping: %s: more than %d rows, truncated", channel, MAX_ROWS_PER_CHANNEL
+            "rest mapping: %s: the path matched more than the report holds (%d values); its "
+            "matches repeat, and it was cut there.",
+            channel,
+            bound,
         )
     names = compiled.config.field_names
     kept: list[Any] = []
@@ -325,11 +484,26 @@ def apply_mapping(
         SandboxTarget,
     )
 
-    selected = {channel: _select(compiled, channel, payload) for channel in CHANNELS}
+    # One measure of the report bounds every path (the values it holds, and
+    # per container what it holds where a path keeps matches by reference),
+    # taken only where a path needs it.
+    open_paths = bool(compiled.channel_paths or compiled.place_paths)
+    sizes = subtree_sizes(payload) if open_paths else {}
+    bound = sizes.get(id(payload), 1) if open_paths else 0
+    if not bound and compiled.paths:
+        bound = node_count(payload)
+    selected = {channel: _select(compiled, channel, payload, bound) for channel in CHANNELS}
     stats: dict[str, ChannelStats] = {c: s for c, (s, _rows) in selected.items()}
     rows: dict[str, list[Any]] = {c: list(r) for c, (_s, r) in selected.items()}
-    open_channels, open_stats = _select_open_channels(compiled, payload)
+    open_channels, open_stats = _select_open_channels(compiled, payload, sizes)
     stats.update(open_stats)
+    # Every top-level block of the payload no path names, kept whole as a raw
+    # section the analyst reads: the model decides what it means, and no fact
+    # is drawn from it here. An operator's channel of the same name wins.
+    for name, block_rows in unnamed_blocks(compiled.config, payload).items():
+        open_channels.setdefault(name, block_rows)
+    open_places, place_stats = _select_open_channels(compiled, payload, sizes, places=True)
+    stats.update(place_stats)
 
     processes = [
         SandboxProcess(
@@ -403,7 +577,8 @@ def apply_mapping(
     unavailable_set.update({"generic_events", "screenshots"})
     if "calls" in unavailable_set:
         unavailable_set.add("apistats")
-    unavailable = sorted(unavailable_set)
+    # Named by the platform's own section ids, not the mapping's channel words.
+    unavailable = sorted({section_id(channel) for channel in unavailable_set})
     for channel, stat in stats.items():
         if stat.error:
             logger.warning(
@@ -432,5 +607,11 @@ def apply_mapping(
         channels=open_channels,
         unavailable=unavailable,
         raw=payload,
+        process_tree=open_places.get("process_tree", []),
+        resolved_apis=open_places.get("resolved_apis", []),
+        extracted=open_places.get("extracted", []),
+        procdumps=open_places.get("procdumps", []),
+        memory=open_places.get("memory", []),
+        ids_alerts=open_places.get("ids_alerts", []),
     )
     return MappingResult(report=report, stats=stats)

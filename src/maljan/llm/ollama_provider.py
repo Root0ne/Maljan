@@ -4,7 +4,15 @@ from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from maljan.core.config import Settings
+from maljan.core.config import OllamaConfig, Settings
+from maljan.llm.provider_base import (
+    COMPLETION_MAX_TOKENS,
+    COMPLETION_PROMPT,
+    LLMProvider,
+    ModelListing,
+    OneTurnRequest,
+    _text,
+)
 from maljan.llm.registry import register_provider
 
 # One subclass per chat class seen, so pydantic builds each schema once.
@@ -181,11 +189,195 @@ def with_watched_streams(chat_class: Any) -> Any:
     return watched_class
 
 
+def _bind_async_client_per_loop(built: Any) -> None:
+    """Give ``built``'s Ollama client async connections of each event loop's own.
+
+    ``ChatOllama`` builds one ``ollama.AsyncClient`` (one httpx pool) per
+    model, and one model is awaited on the agent loop and on the worker's own;
+    a pooled connection reused across the two fails with "bound to a different
+    event loop". Each loop gets an httpx client built by ``ollama.AsyncClient``
+    from the same host and arguments ``ChatOllama`` used, so headers, the
+    request timeout and the proxies httpx reads from the environment are what
+    they were (``maljan.llm.loop_clients``); every request is still built by
+    the original client.
+    """
+    from maljan.llm.loop_clients import layout_not_recognised, loop_bound_async_client
+
+    holder: Any = getattr(built, "_async_client", None)
+    import httpx
+
+    original = getattr(holder, "_client", None)
+    if not isinstance(original, httpx.AsyncClient):
+        layout_not_recognised(
+            "ollama", "ChatOllama holds no ollama.AsyncClient with an httpx client"
+        )
+        return
+    try:
+        from langchain_ollama._utils import merge_auth_headers, parse_url_with_auth
+    except ImportError as exc:
+        layout_not_recognised("ollama", f"langchain_ollama's URL helpers moved ({exc})")
+        return
+    client_class: Any = type(holder)
+    client_kwargs = dict(built.client_kwargs or {})
+    host, auth_headers = parse_url_with_auth(built.base_url)
+    merge_auth_headers(client_kwargs, auth_headers)
+    async_kwargs = {**client_kwargs, **(built.async_client_kwargs or {})}
+    try:
+        holder._client = loop_bound_async_client(
+            lambda: client_class(host=host, **async_kwargs)._client, template=original
+        )
+    except TypeError as exc:
+        layout_not_recognised("ollama", str(exc))
+
+
+# The setting whose default a reasoning model on Ollama fails the probe at, and
+# the sentence that names it. A measured trial: a 12B reasoning model answered
+# nothing in 55 s at the default and answered in 243 ms with the setting on.
+# The default stays (an operator who wants the model's reasoning gets it), but
+# the wall names its door.
+THINKING_SETTING = "core.llm.ollama.disable_thinking"
+
+
 @register_provider("ollama")
-class OllamaProvider:
+class OllamaProvider(LLMProvider):
     """Builds LangChain ChatOllama instances for local models."""
 
     name = "ollama"
+    window_setting = "core.llm.ollama.num_ctx"
+    settings_model = OllamaConfig
+    choice_order = 2
+    label = "Ollama"
+    description = "Models running locally through Ollama"
+    hosted = False
+    credential_leaf = ""
+    legacy_credential_keys = ()
+    guide_leaves = ("base_url", "num_ctx", "keep_alive", "disable_thinking")
+    guide_advanced_leaves = ("num_ctx", "keep_alive", "disable_thinking")
+    sdk_packages = frozenset({"ollama"})
+    llm_types = ("chat-ollama",)
+    # ``ChatOllama`` reads its cap only inside ``options`` and refuses an
+    # unknown keyword, so a call takes no cap of its own.
+    per_call_cap_field = None
+    timeout_kwarg = "request_timeout"
+    supports_agent_base_url = True
+    base_url_leaf = "base_url"
+    default_endpoint = "http://localhost:11434"
+    # A runtime somebody runs, taken to serve one request at a time.
+    concurrency = "serial"
+    probe_note = (
+        "A reasoning model answers in its thinking channel and leaves the answer empty, "
+        "so the test reports that it answered nothing: turn on "
+        "core.llm.ollama.disable_thinking above and test again."
+    )
+
+    @classmethod
+    def window_probes(cls, endpoint: object, model: str) -> tuple[Any, ...]:
+        from maljan.llm import context_window as cw
+
+        base = cw._root_of(endpoint) or cls.default_endpoint
+        return (
+            cw.Ask(
+                "POST",
+                f"{base}{cw.OLLAMA_SHOW_PATH}",
+                {"model": model},
+                cw.window_from_ollama_show,
+                "the Ollama model description",
+            ),
+        )
+
+    @classmethod
+    def declared_window(cls, settings: Any) -> tuple[int, bool]:
+        # ``num_ctx`` is sent with every call, so it is half of the served
+        # window whether or not anybody chose it; the second element says
+        # whether it is the shipped default rather than an operator's word.
+        from maljan.core.config import OllamaConfig
+
+        value = int(settings.llm.ollama.num_ctx)
+        shipped = int(OllamaConfig.model_fields["num_ctx"].default)
+        return value, value == shipped
+
+    @classmethod
+    def reasoning_counts_against_cap(cls, settings: Any) -> bool:
+        # ``num_predict`` counts the reasoning channel with the answer.
+        return not bool(getattr(cls.settings_block(settings), "disable_thinking", False))
+
+    @classmethod
+    def model_listing(cls, settings: Any) -> ModelListing:
+        base = cls.endpoint(None, cls.configured_base_url(settings))
+        return ModelListing(
+            url=f"{base}/api/tags",
+            headers={},
+            names=lambda payload: [m.get("name", "") for m in (payload or {}).get("models", [])],
+            where=base,
+            noun="models available",
+            check=cls._missing,
+        )
+
+    @classmethod
+    def _missing(cls, settings: Any, listed: list[str]) -> str | None:
+        block = cls.settings_block(settings)
+        named = {
+            str(getattr(block, "expert_model", "") or ""),
+            str(getattr(block, "judge_model", "") or ""),
+        }
+        missing = [m for m in named if m and m not in listed]
+        return f"{len(listed)} models available; missing {missing}" if missing else None
+
+    @classmethod
+    def probed_model(cls, settings: Any, listed: list[str]) -> str:
+        return str(getattr(cls.settings_block(settings), "expert_model", "") or "")
+
+    @classmethod
+    def one_turn_request(
+        cls, settings: Any, endpoint: str, model: str, effort: str | None = None
+    ) -> OneTurnRequest:
+        block = cls.settings_block(settings)
+        body: dict[str, Any] = {
+            "model": model,
+            "prompt": COMPLETION_PROMPT,
+            "stream": False,
+            "options": {"num_predict": COMPLETION_MAX_TOKENS},
+        }
+        # Only when the deployment asked for it: Ollama refuses ``think`` for a
+        # model with no thinking mode.
+        if bool(getattr(block, "disable_thinking", False)):
+            body["think"] = False
+        # The job's own window and keep-alive, so the model this loads is the
+        # instance the job's first call finds rather than one it reloads.
+        num_ctx = int(getattr(block, "num_ctx", 0) or 0)
+        if num_ctx:
+            body["options"]["num_ctx"] = num_ctx
+        keep_alive = str(getattr(block, "keep_alive", "") or "")
+        if keep_alive:
+            body["keep_alive"] = keep_alive
+        base = str(endpoint or "").rstrip("/")
+        return OneTurnRequest(f"{base or cls.default_endpoint}/api/generate", {}, body)
+
+    @classmethod
+    def said_something(cls, payload: Any) -> bool:
+        # Thinking counts: a reasoning model given eight tokens spends them in
+        # its thinking channel and answers with an empty ``response``.
+        # ``/api/chat`` puts the same two fields under ``message``, and a proxy
+        # may answer in either shape, so both are read.
+        message = payload.get("message")
+        message = message if isinstance(message, dict) else {}
+        return bool(
+            _text(payload.get("response"))
+            or _text(payload.get("thinking"))
+            or _text(message.get("content"))
+            or _text(message.get("thinking"))
+            or message.get("tool_calls")
+        )
+
+    @classmethod
+    def silence_remedy(cls, settings: Any) -> str:
+        if bool(getattr(cls.settings_block(settings), "disable_thinking", False)):
+            return ""
+        return (
+            f" A reasoning model answers in its thinking channel and leaves the answer empty:"
+            f" set {THINKING_SETTING} to true, which asks Ollama for the answer without the"
+            f" reasoning, and test again."
+        )
 
     def __init__(self, config: Settings) -> None:
         self._config = config
@@ -236,11 +428,15 @@ class OllamaProvider:
         # No request sends a tool call without a ``tool`` message after it,
         # whatever the history it was built from (``maljan.llm.tool_replies``).
         from maljan.llm.tool_replies import with_answered_tool_calls
+        from maljan.llm.transient import with_transient_retries
 
+        # A server saying "not now" is asked again, a whole request at a time,
+        # by the policy every provider's model uses (``maljan.llm.transient``).
         chat_class = with_answered_tool_calls(
-            with_sized_request_timeout(with_watched_streams(ChatOllama)), "ollama"
+            with_transient_retries(with_sized_request_timeout(with_watched_streams(ChatOllama))),
+            "ollama",
         )
-        return chat_class(  # type: ignore[no-any-return]
+        built = chat_class(
             model=model,
             client_kwargs=client_kwargs,
             base_url=base_url,
@@ -249,3 +445,6 @@ class OllamaProvider:
             num_ctx=self._config.llm.ollama.num_ctx,
             **kwargs,
         )
+        # Its async connections never cross event loops.
+        _bind_async_client_per_loop(built)
+        return built  # type: ignore[no-any-return]

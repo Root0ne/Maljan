@@ -38,6 +38,13 @@ class CatalogEntryDTO(BaseModel):
     subgroup: str | None = None
     advanced: bool = False
     required_env: dict[str, list[str]] | None = None
+    choice_labels: dict[str, str] | None = None
+    choice_titles: dict[str, str] | None = None
+    choice_descriptions: dict[str, str] | None = None
+    choice_facts: dict[str, dict[str, Any]] | None = None
+    builtin_servers: list[str] | None = None
+    reserved_servers: list[str] | None = None
+    capability_servers: dict[str, list[str]] | None = None
 
 
 class GroupDTO(BaseModel):
@@ -49,6 +56,34 @@ class GroupDTO(BaseModel):
 
 class SchemaResponse(BaseModel):
     groups: list[GroupDTO]
+    # The label of every connection test the API answers, by probe id: the
+    # providers' own declarations and the API's own probes.
+    probe_labels: dict[str, str] = Field(default_factory=dict)
+    # Every post-verdict enrichment source in force, in its declared order:
+    # key, label, the indicator kinds it answers, whether it is enabled, the
+    # catalog key holding its credential (or whether it holds its own), its
+    # server for a server source, and whether it declares a connection test.
+    enrichment_sources: list[dict[str, Any]] = Field(default_factory=list)
+    # Every tool server in force that declares ``credential_bootstrap``, by
+    # key: its label, the family it registers under and its operator note.
+    credential_servers: dict[str, dict[str, str]] = Field(default_factory=dict)
+    # How a tool declaration's fields split (``core.tool_declarations.
+    # declaration_fields``): the word naming no kind, and each kind-free and
+    # kind-dependent field with its default, so the console's declaration box
+    # applies the API's rules from the API's own list.
+    tool_declaration_fields: dict[str, Any] = Field(default_factory=dict)
+    # Per block (``mcp.servers.<key>`` or a provider block's path), the tools
+    # whose stored change the model refuses over what this release ships
+    # (``core.settings_overrides.refused_tool_changes``): each is in force as
+    # shipped, and the console marks it for the operator to reset or edit.
+    tool_facts_conflicts: dict[str, list[str]] = Field(default_factory=dict)
+    # Each stored triage pack step the settings leave out, by id (else
+    # ``#<position>``), with why, sanitised
+    # (``core.settings_overrides.pack_steps_left_out``): whatever left it out
+    # (a step this release cannot run, a reset of the server it calls, a
+    # shipped declaration that changed its tool's kind), the shipped step it
+    # changed, if any, is in force, and the console marks it on the steps.
+    pack_steps_left_out: dict[str, str] = Field(default_factory=dict)
 
 
 class ValueDTO(BaseModel):
@@ -105,6 +140,10 @@ class ImportRequest(BaseModel):
 
 class ProbeRequest(BaseModel):
     values: dict[str, Any] = Field(default_factory=dict)
+    # The MCP probe's harmless calls the admin confirmed, by tool name, after
+    # the previous probe listed them (``details.proposals.planned``). Empty:
+    # nothing is called. Read by ``/test/mcp`` alone.
+    confirmed_calls: list[str] = Field(default_factory=list)
 
 
 class ProbeResponse(BaseModel):
@@ -146,14 +185,38 @@ class ContextWindowResponse(BaseModel):
     remedy: str = ""
 
 
-class VirustotalRegisterResponse(BaseModel):
-    """The VirusTotal server as it stands after a registration.
+class EffortOptionsResponse(BaseModel):
+    """What a per-agent effort field may offer for one provider and model.
+
+    ``takes_effort`` is false for a provider that sends no reasoning effort,
+    and the field is not drawn. ``levels`` is the list to choose from, or
+    ``None`` where each endpoint names its own levels and the value is typed
+    as the endpoint takes it. ``levels_source`` is ``models_api`` when the
+    Anthropic Models API described the model, ``settings`` when the list is
+    the setting's own, ``none`` otherwise. ``global_key``/``global_value``
+    are the provider-wide setting an unset field inherits.
+    ``undescribed_levels`` are offered levels the Models API's description
+    said nothing about; the run sends them and the API answers.
+    """
+
+    provider: str
+    model: str
+    takes_effort: bool
+    levels: list[str] | None
+    undescribed_levels: list[str] = []
+    levels_source: str
+    global_key: str | None = None
+    global_value: str | None = None
+
+
+class CredentialBootstrapResponse(BaseModel):
+    """A tool server as it stands after its credential was obtained.
 
     The token is never part of it: ``auth_token`` carries the same mask the
     server map shows for a stored credential, so the console can render "set
-    from the UI" without the value ever reaching a browser. The agent id and
-    the public handle are VirusTotal's own names for this deployment, which is
-    what an operator matches against their VirusTotal account.
+    from the UI" without the value ever reaching a browser. ``facts`` are the
+    answer's values the server's declaration names (an id, a handle): what an
+    operator matches against the service's own listing of this deployment.
     """
 
     server: str
@@ -161,8 +224,7 @@ class VirustotalRegisterResponse(BaseModel):
     transport: str
     url: str
     auth_token: str
-    agent_id: str
-    public_handle: str
+    facts: dict[str, str] = Field(default_factory=dict)
     tools: list[str] | None = None
 
 

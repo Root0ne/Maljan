@@ -64,6 +64,7 @@ from maljan.pipeline.validation import (
     technique_name_violations,
     wrong_entry_citations,
 )
+from maljan.reporting import tool_kinds
 from maljan.reporting.models import (
     DefensiveRecommendation,
     KeyFinding,
@@ -150,7 +151,55 @@ from offline backups.",
 # ---------------------------------------------------------------------------
 
 
-_SYSTEM_PROMPT = (
+# Where rule 5 names the rule tables a detection may point at (:func:`system_prompt`).
+_RULE_POINTER = "\x00rule pointer\x00"
+# Each rule-table kind's word when no tool of the kind is shipped or tabled.
+_NEUTRAL_RULE_WORDS: dict[str, str] = {
+    "event_rules": "event-rule",
+    "signature_rules": "signature-rule",
+}
+
+
+def _shipped_rule_word(kind: str) -> str:
+    """The shipped tool of ``kind``'s declared display name, lower-cased, else the kind's word."""
+    from maljan.core.declared_reading import shipped_by_name
+
+    named = next(
+        (f.display_name for f in shipped_by_name().values() if f.kind == kind and f.display_name),
+        "",
+    )
+    return str(named).lower() or _NEUTRAL_RULE_WORDS[kind]
+
+
+def rule_pointer(report: Any = None) -> str:
+    """The rule pointer rule 5 offers, read from the rule tables ``report`` holds.
+
+    One word per rule-table kind (event rules, then signature rules): the
+    tool the report's table of that kind is titled by, lower-cased, so a tool
+    swapped in for a shipped one is named as itself; a kind the report holds
+    no table of keeps the shipped tool's word ("sigma/yara" for a built-in
+    run, as before).
+    """
+    from maljan.reporting.ledger_report import RULE_MATCHES_TITLE, RULE_TABLE_OF_KIND, titled_tool
+
+    titles = {
+        str(getattr(section, "key", "")): getattr(section, "title", "")
+        for section in getattr(report, "sections", None) or ()
+    }
+    words = [
+        titled_tool(titles.get(key), RULE_MATCHES_TITLE).lower() or _shipped_rule_word(kind)
+        for kind, key in RULE_TABLE_OF_KIND.items()
+    ]
+    pointer = "/".join(dict.fromkeys(words))
+    return f"{'an' if pointer[:1] in 'aeiou' else 'a'} {pointer} pointer"
+
+
+def system_prompt(report: Any = None) -> str:
+    """The narrative's system prompt, its rule pointer read from ``report``'s rule tables."""
+    return _SYSTEM_PROMPT_TEMPLATE.replace(_RULE_POINTER, rule_pointer(report))
+
+
+_SYSTEM_PROMPT_TEMPLATE = (
     "You are a senior malware reverse engineer producing a CTI analyst report. "
     "Write in calm, technical prose suitable for a SOC handover. "
     "STRICT RULES:\n"
@@ -184,7 +233,7 @@ _SYSTEM_PROMPT = (
     "the 'Published ATT&CK techniques' list above (null only if none applies)\n"
     "   - `detection`: CONCRETE technical detection guidance — name the "
     "specific API call, registry key, telemetry source (e.g. Sysmon EventID 3 "
-    "for network, EventID 13 for registry), or a sigma/yara pointer. Do NOT "
+    "for network, EventID 13 for registry), or " + _RULE_POINTER + ". Do NOT "
     "write generic advice like 'monitor for suspicious activity'; cite the "
     "exact observable.\n"
     "   Each entry is a distinct, non-overlapping action; do not duplicate an "
@@ -200,6 +249,8 @@ _SYSTEM_PROMPT = (
     + "\nFor example (the shape only; write what this run's evidence supports):\n"
     + EXAMPLE_OBJECT
 )
+# The prompt with the shipped rule pointer: a report holding no rule table.
+_SYSTEM_PROMPT = system_prompt()
 
 
 _LIST_FIELDS = ("key_findings", "defensive_recommendations")
@@ -207,6 +258,23 @@ _LIST_FIELDS = ("key_findings", "defensive_recommendations")
 # The calls the manual path may make: the answer and the one retry the
 # validation loop gives an answer it finds fault with.
 NARRATIVE_ATTEMPTS = 2
+
+
+def support_note(mapping: Any) -> str:
+    """Beside a published technique no source of which is behaviour: what its sources are.
+
+    ``published as capability, not observed: 3 sources: …; no sandbox
+    observation, code listing or rule match stands behind it`` (or ``as not
+    observed``), from ``corroboration.support_sentence``; ``""`` for any other.
+    """
+    from maljan.analysis.corroboration import support_sentence
+
+    sentence = support_sentence(
+        str(getattr(mapping, "support", "") or ""),
+        getattr(mapping, "source_kinds", None),
+        len(getattr(mapping, "sources", None) or []),
+    )
+    return f"published as {sentence}" if sentence else ""
 
 
 def _parse_keeping_duplicate_keys(text: str) -> dict[str, Any] | None:
@@ -364,10 +432,14 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
             rule_note = (
                 f" — {rule_only[mapping.technique_id]}" if mapping.technique_id in rule_only else ""
             )
+            # Published as a capability: every source is an artefact of the
+            # file, so the report model is told it was not seen done.
+            support_said = support_note(mapping)
+            capability_note = f" — {support_said}" if support_said else ""
             lines.append(
                 f"  - {mapping.technique_id} {mapping.technique_name} "
                 f"(conf={confidence_text(mapping.confidence)}, layers={layers}{independent})"
-                f"{rule_note}: "
+                f"{rule_note}{capability_note}: "
                 f"{quote}"
             )
         if any(m.technique_id in rule_only for m in report.ttp_mappings):
@@ -398,7 +470,9 @@ def build_prompt_text(report: MalwareReport, isr_reports: Any = None) -> str:
         else:
             lines.append("  (none stated)")
         rule_hits = [
-            h for h in report.static.api_technique_hits if h.get("source") == "api_capability"
+            h
+            for h in report.static.api_technique_hits
+            if tool_kinds.hit_of_kind(h, "api_catalogue")
         ]
         from maljan.tools.knowledge import RESOLVED_AT_RUNTIME
 
@@ -740,7 +814,7 @@ class NarrativeAgent:
         # this round is graded on the same grounding the composer is: without
         # the ISRs, a capability an analyst stated in a claim would be a
         # violation here and a pass there, on one run.
-        grounding = CapabilityGrounding.from_report(report, isr_reports)
+        grounding = CapabilityGrounding.from_report(report, isr_reports, ledger=evidence)
         # What the run publishes, which is what a recommendation may act on:
         # its indicators and its techniques.
         answers = published_answers(report)
@@ -868,12 +942,22 @@ class NarrativeAgent:
                 spend_release(getattr(self, "token_ledger", None), slot)
             return raw
 
+        # The text the latest answer was read from: an answer that gives the
+        # reader nothing is told why (``schema_violations``' ``answer``).
+        answer_read = [""]
+
+        def _parse(answer: Any) -> dict[str, Any] | None:
+            answer_read[0] = _message_text(answer)
+            return _narrative_payload(answer)
+
         try:
             payload, violations, retries = await retry_with_feedback(
                 _run,
                 list(messages),
                 [
-                    lambda p: schema_violations(NarrativeOutput, p, code="narrative.schema"),
+                    lambda p: schema_violations(
+                        NarrativeOutput, p, code="narrative.schema", answer=answer_read[0]
+                    ),
                     lambda p: narrative_capability_violations(p, grounding),
                     lambda p: key_finding_citation_violations(p, known_ids, self._items),
                     lambda p: citation_violations(
@@ -885,7 +969,7 @@ class NarrativeAgent:
                     lambda p: recommendation_indicator_violations(p, answers),
                     lambda p: recommendation_technique_violations(p, published),
                 ],
-                parse=_narrative_payload,
+                parse=_parse,
                 on_feedback=self.validation_tally.count,
             )
         except SpendCeilingStop as stop:
@@ -994,7 +1078,7 @@ class NarrativeAgent:
         if run_state:
             body = f"{with_run_state('', run_state)}\n\n{body}"
         return [
-            SystemMessage(content=_SYSTEM_PROMPT),
+            SystemMessage(content=system_prompt(report)),
             HumanMessage(content=body),
         ]
 

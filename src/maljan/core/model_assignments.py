@@ -14,8 +14,9 @@ The provider is carried alongside for the sentence a refusal prints, but it is
 not part of the key — two providers cannot serve one model at one endpoint.
 
 An endpoint is a URL where a provider has one, and the vendor's own name where
-it does not: Anthropic and Gemini are vendor APIs with nothing per-agent to
-override, so "the Anthropic API" is the whole of what an address means there.
+it does not: a vendor API with nothing per-agent to override is reached at one
+place, so its name is the whole of what an address means there. Each
+provider's adapter says which it is (``LLMProvider.endpoint``).
 
 There is one function that answers where a call goes, and the settings probe
 calls it too. A probe that worked the address out for itself and a gate that
@@ -29,16 +30,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from urllib.parse import urlsplit, urlunsplit
 
-# Where a provider with no configurable endpoint sends its calls. Not a URL,
-# because nothing here would do anything with one: it is the name of the only
-# place that provider can be reached.
-_VENDOR_ENDPOINTS = {
-    "anthropic": "the Anthropic API",
-    "gemini": "the Gemini API",
-}
-# What an entry with no base_url of its own talks to.
-_OPENAI_DEFAULT = "https://api.openai.com/v1"
-_OLLAMA_DEFAULT = "http://localhost:11434"
 # The port each scheme means without one, so two spellings of one server do
 # not become two keys.
 _DEFAULT_PORTS = {"http": 80, "https": 443}
@@ -55,6 +46,9 @@ class ModelAssignment:
     # Where this model stands in the agent's list: 0 for the model it calls
     # first, 1 for the first it falls back to, and so on.
     position: int = 0
+    # The model's own reasoning effort (``llm.agents.<key>.effort``), or
+    # ``None`` where it inherits the provider's global one.
+    effort: str | None = None
 
     @property
     def label(self) -> str:
@@ -63,8 +57,33 @@ class ModelAssignment:
 
     @property
     def key(self) -> tuple[str, str]:
-        """What a stored probe result is filed under."""
-        return (self.endpoint, self.model)
+        """What a stored probe result is filed under.
+
+        The model's own effort is part of it when one is set (``filed_model``),
+        so a change of that effort alone finds no row and asks for a probe;
+        a model with none is filed under the pair it always was.
+        """
+        return (self.endpoint, filed_model(self.model, self.effort))
+
+
+# The width of the column a probe row's model half is stored in
+# (``model_probes.model``, ``String(200)``). A model with its own effort is
+# stored as ``filed_model`` spells it, and an entry whose spelling would not
+# fit is refused at settings validation rather than filed as nothing.
+FILED_MODEL_MAX_CHARS = 200
+
+
+def filed_model(model: str, effort: str | None = None) -> str:
+    """The model half of a probe row's key: the model, and its own effort when set.
+
+    A row stores ``(endpoint, model)``; a probe taken at an entry's own effort
+    is a different question from one taken at the provider's global effort, so
+    it is filed under the model with that effort beside it. ``None`` or blank
+    is the model alone, which keeps every row filed before efforts existed
+    valid for the entries that still set none.
+    """
+    level = str(effort or "").strip()
+    return f"{model} (effort {level})" if level else str(model)
 
 
 def normalised_endpoint(url: object) -> str:
@@ -137,36 +156,28 @@ def endpoint_label(endpoint: object) -> str:
     return address or "(unparseable endpoint)"
 
 
-def endpoint_where(
-    provider: str,
-    base_url: object = None,
-    *,
-    openai_base_url: object = None,
-    ollama_base_url: object = None,
-) -> str:
+def endpoint_where(provider: str, base_url: object = None, *, configured: object = None) -> str:
     """Where ``provider`` sends its calls, an entry's own ``base_url`` first.
 
-    The plain-value form of ``endpoint_for``, for the settings probe, which
-    holds staged values rather than a settings object. One function under both
-    so that the address a probe files its answer under and the address the gate
-    looks that answer up under cannot be two.
+    ``configured`` is the provider's own configured address. The plain-value
+    form of ``endpoint_for``, for the settings probe, which holds staged values
+    rather than a settings object. One function under both so that the address
+    a probe files its answer under and the address the gate looks that answer
+    up under cannot be two. The provider's adapter decides
+    (``LLMProvider.endpoint``): whether an entry may name its own address,
+    whether the provider has a configured one, and the default.
     """
-    named = normalised_endpoint(base_url)
-    if provider == "openai":
-        return named or normalised_endpoint(openai_base_url) or _OPENAI_DEFAULT
-    if provider == "ollama":
-        return named or normalised_endpoint(ollama_base_url) or _OLLAMA_DEFAULT
-    return _VENDOR_ENDPOINTS.get(provider, provider)
+    from maljan.llm.provider_base import facts_of
+
+    return facts_of(provider).endpoint(base_url, configured) or str(provider)
 
 
 def endpoint_for(settings: object, provider: str, base_url: str | None = None) -> str:
     """Where ``provider`` sends its calls under ``settings``, agent override first."""
-    llm = settings.llm  # type: ignore[attr-defined]
+    from maljan.llm.provider_base import facts_of
+
     return endpoint_where(
-        provider,
-        base_url,
-        openai_base_url=llm.openai.base_url,
-        ollama_base_url=llm.ollama.base_url,
+        provider, base_url, configured=facts_of(provider).configured_base_url(settings)
     )
 
 
@@ -187,7 +198,13 @@ def model_label(provider: object, model: object, endpoint: object = None) -> str
 
 
 def _assignment(
-    settings: object, agent: str, provider: str, model: str, base_url: str | None, position: int
+    settings: object,
+    agent: str,
+    provider: str,
+    model: str,
+    base_url: str | None,
+    position: int,
+    effort: str | None = None,
 ) -> ModelAssignment:
     return ModelAssignment(
         agent=agent,
@@ -195,7 +212,33 @@ def _assignment(
         endpoint=endpoint_for(settings, provider, base_url),
         model=model,
         position=position,
+        effort=str(effort or "").strip() or None,
     )
+
+
+def builds_provider(provider: str) -> bool:
+    """Whether the LLM registry builds a model for ``provider``.
+
+    Read from the registry itself (every provider ``register_provider``
+    named, the built-in ones discovered first), so a provider a deployment
+    plugs in counts as soon as it is registered. An entry naming one the
+    registry does not build is built on its role's global model instead
+    (``build_model_for_agent``), and is read that way here too.
+    """
+    try:
+        from maljan.llm.registry import _PROVIDER_REGISTRY, discover_providers
+
+        discover_providers()
+    except Exception as exc:  # noqa: BLE001 — a registry that cannot load decides nothing
+        from maljan.core.logger import logger
+
+        logger.debug(
+            "The LLM provider registry could not load every built-in provider (%s); "
+            "an entry's provider is read as built.",
+            type(exc).__name__,
+        )
+        return True
+    return str(provider) in _PROVIDER_REGISTRY
 
 
 def assignment_chain_for(
@@ -207,11 +250,12 @@ def assignment_chain_for(
     model for ``role`` alone when the agent has no entry. A fallback is a
     model the run can reach exactly as the first one is, so everything that
     asks what a run will call — the probe gate, the context window — asks
-    this.
+    this. An entry whose provider the registry builds nothing for is read as
+    no entry, because the builder then builds the role's global model.
     """
     llm = settings.llm  # type: ignore[attr-defined]
     override = llm.agents.get(agent)
-    if override is not None:
+    if override is not None and builds_provider(str(getattr(override, "provider", ""))):
         chain = override.chain() if hasattr(override, "chain") else [override]
         return [
             _assignment(
@@ -221,12 +265,25 @@ def assignment_chain_for(
                 str(choice.model),
                 choice.base_url,
                 position,
+                getattr(choice, "effort", None),
             )
             for position, choice in enumerate(chain)
         ]
     provider = str(llm.provider)
     model = str(llm.judge_model if role == "judge" else llm.expert_model)
     return [_assignment(settings, agent, provider, model, None, 0)]
+
+
+def builder_role(agent: str) -> str:
+    """The role whose global model ``agent`` is built on when it has no entry.
+
+    The judge and the reporter are built on the judge role
+    (``get_judge_llm``, ``get_reporter_llm``); every other agent, the mediator
+    and the function summariser included, on the expert role.
+    """
+    from maljan.core.config import JUDGE_AGENT_KEY, REPORTER_AGENT_KEY
+
+    return "judge" if agent in (JUDGE_AGENT_KEY, REPORTER_AGENT_KEY) else "expert"
 
 
 def assignment_for(settings: object, agent: str) -> ModelAssignment:
@@ -242,35 +299,23 @@ def model_label_for(settings: object, agent: str, *, role: str = "expert") -> st
         return ""
 
 
-def global_model_label(settings: object, role: str = "expert") -> str:
-    """The label of the global model for ``role``, whatever any agent's entry says.
-
-    For a caller built on the role's model directly rather than through an
-    agent's entry — the mediator runs on the expert model — so its calls are
-    recorded under the model that answered them. ``""`` when it cannot be read.
-    """
-    try:
-        llm = settings.llm  # type: ignore[attr-defined]
-        provider = str(llm.provider)
-        model = str(llm.judge_model if role == "judge" else llm.expert_model)
-        return _assignment(settings, "", provider, model, None, 0).label
-    except Exception:  # noqa: BLE001 — a label is never worth a lost turn
-        return ""
-
-
 def configured_endpoint_labels(settings: object) -> set[str]:
     """The model endpoints the settings configure, each as a run records it (its label).
 
-    The global provider's endpoint for each role, the OpenAI-compatible and
-    Ollama base URLs, and every endpoint an agent's own entry or its
-    fallbacks name. A vendor API's own name is no address and is left out.
+    The global provider's endpoint for each role, the endpoint of every
+    provider an agent may point at an address of its own, and every endpoint
+    an agent's own entry or its fallbacks name. A vendor API's own name is no
+    address and is left out.
     """
+    from maljan.llm.provider_base import facts_of, provider_names
+
     llm = settings.llm  # type: ignore[attr-defined]
-    where: list[str] = [
-        endpoint_for(settings, str(llm.provider)),
-        endpoint_for(settings, "openai"),
-        endpoint_for(settings, "ollama"),
-    ]
+    where: list[str] = [endpoint_for(settings, str(llm.provider))]
+    where.extend(
+        endpoint_for(settings, name)
+        for name in provider_names()
+        if facts_of(name).supports_agent_base_url
+    )
     for agent in list(getattr(llm, "agents", {}) or {}):
         where.extend(a.endpoint for a in assignment_chain_for(settings, agent))
     return {endpoint_label(w) for w in where if "://" in str(w or "")}

@@ -17,7 +17,7 @@ import httpx
 import pytest
 
 from app.services import settings_probes  # noqa: E402
-from app.services.settings_probes import PROBES, probe_agent, run_agent_probe  # noqa: E402
+from app.services.settings_probes import known_probe, probe_agent, run_agent_probe  # noqa: E402
 
 _REAL_COMPLETE_ONE_TURN = settings_probes.complete_one_turn
 
@@ -156,6 +156,114 @@ async def test_every_model_the_agent_falls_back_to_is_asked_and_filed(monkeypatc
     assert result.ok is False, "an agent passes only when every model on its list answered"
     assert [c["model"] for c in result.details["completions"]] == ["qwen3:4b", "gemma3:nope"]
     assert "fallback 1 ollama/gemma3:nope" in result.detail
+
+
+@pytest.mark.asyncio
+async def test_each_model_is_asked_at_the_effort_its_run_sends(monkeypatch):
+    asked: list[tuple[str, str]] = []
+
+    async def _answered(provider: str, *, endpoint: str, model: str, **body: Any):
+        asked.append((model, body.get("effort") or ""))
+        return (True, f"{model!r} answered")
+
+    monkeypatch.setattr(settings_probes, "complete_one_turn", _answered)
+    staged = {
+        "llm.openai.reasoning_effort": "max",
+        "llm.agents": {
+            "network": {
+                "provider": "openai",
+                "model": "first",
+                "effort": "high",
+                "fallbacks": [
+                    {"provider": "openai", "model": "second"},
+                    {"provider": "ollama", "model": "third"},
+                ],
+            }
+        },
+    }
+    result = await probe_agent({"name": "network", "settings": staged})
+    assert asked == [("first", "high"), ("second", "max"), ("third", "")]
+    assert [c.get("effort") for c in result.details["completions"]] == ["high", None, None]
+
+
+class TestARoleWithNoDefinition:
+    """The mediator and the summariser are probed by their key, as an agent is.
+
+    They have no prompt and no tools to resolve, so the probe is the call
+    alone: each model of the role's entry asked at the effort its run sends,
+    or the global expert model while the role has no entry.
+    """
+
+    @pytest.mark.asyncio
+    async def test_each_model_of_its_entry_is_asked_at_its_own_effort(self, monkeypatch):
+        asked: list[tuple[str, str]] = []
+
+        async def _answered(provider: str, *, endpoint: str, model: str, **body: Any):
+            asked.append((model, body.get("effort") or ""))
+            return (True, f"{model!r} answered")
+
+        monkeypatch.setattr(settings_probes, "complete_one_turn", _answered)
+        staged = {
+            "llm.openai.reasoning_effort": "max",
+            "llm.agents": {
+                "mediator": {
+                    "provider": "openai",
+                    "model": "first",
+                    "effort": "high",
+                    "fallbacks": [{"provider": "openai", "model": "second"}],
+                }
+            },
+        }
+
+        result = await probe_agent({"name": "mediator", "settings": staged})
+
+        assert result.ok is True
+        assert asked == [("first", "high"), ("second", "max")]
+        completions = result.details["completions"]
+        assert [(c["model"], c.get("effort")) for c in completions] == [
+            ("first", "high"),
+            ("second", None),
+        ]
+        assert result.details["llm"]["model"] == "first"
+        assert result.tools == []
+
+    @pytest.mark.asyncio
+    async def test_with_no_entry_it_asks_the_global_expert_model(self, monkeypatch):
+        asked: list[str] = []
+
+        async def _answered(
+            provider: str, *, endpoint: str, model: str, api_key: str = "", **body: Any
+        ):
+            asked.append(model)
+            return (True, f"{model!r} answered")
+
+        monkeypatch.setattr(settings_probes, "complete_one_turn", _answered)
+        staged = {"llm.provider": "ollama", "llm.ollama.expert_model": "qwen-global"}
+
+        result = await probe_agent({"name": "summarizer", "settings": staged})
+
+        assert result.ok is True
+        assert asked == ["qwen-global"]
+        assert result.details["llm"] == {
+            "provider": "ollama",
+            "model": "qwen-global",
+            "endpoint": "http://localhost:11434",
+        }
+
+    @pytest.mark.asyncio
+    async def test_a_model_that_did_not_answer_fails_the_probe(self, monkeypatch):
+        async def _refused(
+            provider: str, *, endpoint: str, model: str, api_key: str = "", **body: Any
+        ):
+            return (False, "no such model")
+
+        monkeypatch.setattr(settings_probes, "complete_one_turn", _refused)
+        staged = {"llm.agents": {"mediator": {"provider": "ollama", "model": "gone"}}}
+
+        result = await probe_agent({"name": "mediator", "settings": staged})
+
+        assert result.ok is False
+        assert "no such model" in result.detail
 
 
 @pytest.mark.asyncio
@@ -330,7 +438,7 @@ async def test_a_stored_definition_alone_is_enough():
 
 
 def test_the_probe_is_registered_under_its_own_name():
-    assert "agent" in PROBES
+    assert known_probe("agent")
 
 
 def test_the_route_is_admin_only_and_passes_the_name_through(monkeypatch):
@@ -519,9 +627,13 @@ class TestTheProbeMakesTheCallTheJobWillMake:
     def test_every_provider_is_asked_for_one_short_answer(
         self, provider: str, endpoint: str, fragment: str
     ) -> None:
-        from app.services.settings_probes import COMPLETION_MAX_TOKENS, _completion_request
+        from app.services.settings_probes import COMPLETION_MAX_TOKENS
+        from maljan.core.settings_overrides import build_settings
+        from maljan.llm.provider_base import facts_of
 
-        url, _headers, body = _completion_request(provider, endpoint, "a-model", "k")
+        request = facts_of(provider).one_turn_request(build_settings({}), endpoint, "a-model")
+        assert request is not None
+        url, body = request.url, request.body
 
         assert url is not None and fragment in url
         assert "a-model" in (url + json.dumps(body))
@@ -670,19 +782,22 @@ class TestTheProbeMakesTheCallTheJobWillMake:
         )
 
         result = await settings_probes.probe_llm(
-            {
-                "provider": "ollama",
-                "ollama_base_url": "http://ollama:11434",
-                "ollama_expert_model": "qwen3:8b",
-                "ollama_judge_model": "qwen3:70b",
-                "agents": {
-                    "network": {
-                        "provider": "ollama",
-                        "model": "qwen3:4b",
-                        "base_url": "http://gpu-box:11434",
-                    }
+            settings_probes.candidate_settings(
+                {
+                    "core.llm.provider": "ollama",
+                    "core.llm.ollama.base_url": "http://ollama:11434",
+                    "core.llm.ollama.expert_model": "qwen3:8b",
+                    "core.llm.ollama.judge_model": "qwen3:70b",
+                    "core.llm.agents": {
+                        "network": {
+                            "provider": "ollama",
+                            "model": "qwen3:4b",
+                            "base_url": "http://gpu-box:11434",
+                        }
+                    },
                 },
-            }
+                {},
+            )
         )
 
         filed = {(p["endpoint"], p["model"]) for p in (result.details or {})["completions"]}

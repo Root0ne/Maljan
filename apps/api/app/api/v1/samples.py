@@ -592,14 +592,25 @@ async def delete_sample(
                 extra={"user_id": str(user.id), "component": "minio"},
             )
 
+        from maljan.providers.registry import mirror_work_dirs
+
         from app.worker import sample_files
 
-        mirror_dir = None
+        subdirs: tuple[str, ...] | None = None
         try:
-            mirror_dir = (await effective_core_settings(db)).static.r2.mirror_dir
+            subdirs = mirror_work_dirs(await effective_core_settings(db))
         except Exception as exc:  # noqa: BLE001 - cleanup must not fail the delete
-            logger.warning("Could not read the mirror directory setting: %s", exc)
-        for removed in sample_files.remove_for_sha(sha256, mirror_dir=mirror_dir):
+            logger.warning("Could not read the mirror directories: %s", type(exc).__name__)
+        try:
+            removed_copies = sample_files.remove_for_sha(sha256, subdirs=subdirs)
+        except Exception as exc:  # noqa: BLE001 - cleanup must not fail the delete
+            removed_copies = []
+            logger.warning(
+                "The worker's local copies of sample %s were not cleared: %s",
+                log_safe(sample_id),
+                type(exc).__name__,
+            )
+        for removed in removed_copies:
             logger.info(
                 "Removed local copy %s", log_safe(removed), extra={"sample_id": log_safe(sample_id)}
             )

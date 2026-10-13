@@ -40,7 +40,7 @@ from __future__ import annotations
 import json
 import re
 import threading
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -120,6 +120,18 @@ _NOT_SHOWN_RE = re.compile(re.escape(_NOT_SHOWN_HEAD) + r"[\d,]+ characters\.")
 def not_shown_record(chars: int) -> str:
     """The ledger's output for an answer of ``chars`` characters none of which reached the model."""
     return f"{_NOT_SHOWN_HEAD}{max(0, int(chars)):,} characters."
+
+
+def lists_code(tool: Any) -> bool:
+    """Whether an undeclared tool's name says it decompiles or disassembles.
+
+    The name half of ``core.undeclared_tools``: a reader that holds the
+    entry reads it by its declared kind (``entry_lists_any_code``) and comes
+    here only for a tool whose name is all it has.
+    """
+    from maljan.core.undeclared_tools import named_as_code_listing, named_as_decompiler
+
+    return named_as_decompiler(tool) or named_as_code_listing(tool)
 
 
 def answer_not_shown(entry: Any) -> bool:
@@ -286,6 +298,96 @@ class LedgerEntry(BaseModel):
     started_at: float = Field(default=0.0, description="Unix timestamp the call started at.")
     duration_ms: int = Field(default=0, description="Wall-clock duration of the call.")
     seq: int = Field(default=0, description="Call order within the job, 1-based.")
+    source: str | None = Field(
+        default=None,
+        # An entry with no source dumps exactly as one written before the
+        # field existed, so every stored ledger, fixture and pinned dump is
+        # unchanged; the schema still names the field.
+        exclude_if=lambda value: value is None,
+        description=(
+            "Where the tool's declaration lives, recorded when the entry was written: "
+            "'mcp:<server key>', 'provider:<static or sandbox provider id>', 'sandbox' (the "
+            "platform's sandbox report tools) or 'pack' (the triage pack). None on an entry "
+            "written before sources were recorded, which is read by the legacy readers only "
+            "(core.tool_declarations)."
+        ),
+    )
+    facts: dict[str, Any] | None = Field(
+        default=None,
+        # Like ``source``: an entry with none dumps as it always did.
+        exclude_if=lambda value: value is None,
+        description=(
+            "What the tool declared about its answer when the entry was written, resolved "
+            "under its source (core.declared_reading.facts_record): {'v': 1, 'kind', and "
+            "where set 'reader', 'asserts_techniques', 'source', 'display_name', 'rows', "
+            "'places', 'values', 'techniques', 'reputation', 'words', 'report_sections'}. "
+            "{'v': 1} alone: the source declares nothing for the tool. None on an entry "
+            "written before facts were recorded, which is read by the legacy readers. Read "
+            "later from here, never from the reading process's settings."
+        ),
+    )
+    reputation: dict[str, Any] | None = Field(
+        default=None,
+        # Like ``facts``: an entry with none dumps as it always did.
+        exclude_if=lambda value: value is None,
+        description=(
+            "A reputation lookup's answer as its declaration read it when the entry was "
+            "written (core.reputation.ReputationRecord): {'v': 1, 'service', and where the "
+            "answer gave them 'malicious', 'suspicious', 'total', 'engines', 'stats', "
+            "'labels', 'detections', 'first_seen', 'last_seen', 'link', 'summary'}. None for "
+            "any other tool, a call that did not answer and an entry written before records "
+            "were. Read later from here, never from the reading process's settings."
+        ),
+    )
+
+    pack_step: dict[str, Any] | None = Field(
+        default=None,
+        # Like ``facts``: an entry with none dumps as it always did.
+        exclude_if=lambda value: value is None,
+        description=(
+            "The triage pack step that wrote the entry, where an operator declared it "
+            "(core.pack_steps): {'v': 1, 'id', and where set 'label' (what the pack's line "
+            "calls it) and 'renderer' (how the pack's line shows its answer)}. None on an "
+            "entry of a step as shipped, and on every other entry, which the pack reads by "
+            "its shipped steps. Read later from here, never from the reading process's "
+            "settings."
+        ),
+    )
+
+    structured_from_server: bool = Field(
+        default=False,
+        # Like ``facts``: an entry without one dumps as it always did.
+        exclude_if=lambda value: value is False,
+        description=(
+            "Whether structured is the structured answer the tool's server returned beside a "
+            "prose text (MCP structuredContent) rather than the text parsed: kept only where "
+            "the text is not JSON, the object is not the text wrapped again, its JSON is no "
+            "longer than the model could be shown of the call, the answer was not cut, and "
+            "the evidence budget had room for it after every text. The text in output is what "
+            "the model read."
+        ),
+    )
+
+    agent_role: str | None = Field(
+        default=None,
+        # Like ``source``: an entry written without one dumps as it did.
+        exclude_if=lambda value: value is None,
+        description=(
+            "The role the calling agent's definition declared when the entry was written "
+            "(core.config.AgentDefinition.role: static, dynamic, network, judge, generic …), "
+            "read later from here, never from the reading process's settings. None for a "
+            "call no agent definition made (the pack) and an entry written before roles were."
+        ),
+    )
+    agent_tab: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "The console tab the calling agent's definition declared when the entry was "
+            "written (core.config.AgentDefinition.tab), which a section of an operator's tool "
+            "is placed by when its kind places none. None where the definition declares none."
+        ),
+    )
 
     def to_captured(self) -> CapturedToolOutput:
         """This entry in the shape readers of the previous capture expect."""
@@ -296,6 +398,9 @@ class LedgerEntry(BaseModel):
             symbol=self.symbol,
             output=self.output,
             seq=max(0, self.seq - 1),
+            source=self.source,
+            facts=self.facts,
+            ok=self.ok,
         )
 
     @classmethod
@@ -312,10 +417,12 @@ class LedgerEntry(BaseModel):
             tool=captured.tool_name,
             args=dict(captured.args),
             symbol=captured.symbol,
-            ok=True,
+            ok=captured.ok,
             output=captured.output,
             structured=parse_structured(captured.output),
             seq=seq,
+            source=captured.source,
+            facts=captured.facts,
         )
 
 
@@ -341,6 +448,10 @@ def build_entry(
     model: str | None = None,
     not_shown: bool = False,
     chars_dropped: int = 0,
+    source: str | None = None,
+    structured_content: dict[str, Any] | None = None,
+    agent_role: str | None = None,
+    agent_tab: str | None = None,
 ) -> LedgerEntry:
     """One entry, with the output trimmed and parsed the same way every time.
 
@@ -382,6 +493,13 @@ def build_entry(
     ``chars_dropped`` is what the tool-output guardrail cut from the answer
     before the model read it: ``output`` is what the model was handed, and
     the entry is marked ``truncated`` because it is not the whole answer.
+
+    ``structured_content`` is the structured answer the tool's server
+    returned beside its text (MCP ``structuredContent``): kept, and read as
+    ``structured``, only where it adds something the text does not carry
+    (the text is not JSON and the object is not the text wrapped again) and
+    the entry holds the whole answer: an answer cut, not shown or repeated
+    keeps no structure the model did not read.
     """
     safe_args = dict(args) if isinstance(args, dict) else {}
     full = str(output or "")
@@ -394,6 +512,27 @@ def build_entry(
             _code, message, hint = returned
             ok, error = False, message
             remediation = remediation or hint
+    facts = _facts_at_write(source, tool)
+    if ok and error is None and not repeated_of and _declares_no_kind(facts):
+        # A tool its source declares nothing for has no declared way to say
+        # it failed: an answer that is only an error line is filed as failed.
+        from maljan.core.undeclared_tools import prose_error
+
+        said = prose_error(full)
+        if said is not None:
+            ok, error = False, said
+    # The platform cut or replaced the answer: the conversation had no room for
+    # it, or the guardrail or a ceiling left a prefix. No reputation record is
+    # read from such an output (``_reputation_at_write``).
+    cut = bool(not_shown) or len(text) < len(full) or int(chars_dropped) > 0
+    structured = None if repeated_of or not_shown else parse_structured(full)
+    content = (
+        _structured_beside(structured_content, full, structured)
+        if not (repeated_of or cut)
+        else None
+    )
+    if content is not None:
+        structured = content
     return LedgerEntry(
         id=entry_id,
         stage=stage,
@@ -406,9 +545,9 @@ def build_entry(
         error=error,
         remediation=remediation if error else None,
         output=text,
-        truncated=bool(not_shown) or len(text) < len(full) or int(chars_dropped) > 0,
+        truncated=cut,
         chars_dropped=max(0, int(chars_dropped)),
-        structured=None if repeated_of or not_shown else parse_structured(full),
+        structured=structured,
         repeated_of=repeated_of,
         args_repaired=bool(args_repaired),
         args_raw=args_raw if args_repaired else None,
@@ -416,19 +555,82 @@ def build_entry(
         started_at=started_at,
         duration_ms=max(0, int(duration_ms)),
         seq=seq,
+        source=source or None,
+        facts=facts,
+        structured_from_server=content is not None,
+        agent_role=agent_role or None,
+        agent_tab=agent_tab or None,
+        reputation=_reputation_at_write(
+            facts,
+            ok=ok and not repeated_of and not cut,
+            output=full,
+            structured=structured,
+            server=server,
+        ),
     )
 
 
+def _facts_at_write(source: str | None, tool: str) -> dict[str, Any] | None:
+    """The tool's declared facts under ``source``, resolved now, to be stored with the entry."""
+    if not source:
+        return None
+    from maljan.core.declared_reading import facts_record
+
+    return facts_record(source, tool)
+
+
+def _declares_no_kind(facts: dict[str, Any] | None) -> bool:
+    """Whether the facts stored at write time say the tool's source declares no kind for it.
+
+    ``None`` (no source recorded: the platform's own calls, a stored run's
+    entries) is not such a record: those are read as they always were.
+    """
+    return isinstance(facts, dict) and not str(facts.get("kind") or "").strip()
+
+
+def _reputation_at_write(
+    facts: dict[str, Any] | None, *, ok: bool, output: str, structured: Any, server: str | None
+) -> dict[str, Any] | None:
+    """A reputation lookup's answer read through its stored facts, to be stored with the entry.
+
+    Read from the whole answer, so a later budget that drops the output keeps
+    what the answer said.
+    """
+    if facts is None or not ok:
+        return None
+    from maljan.core.reputation import record_at_write
+
+    return record_at_write(facts, ok=ok, output=output, structured=structured, server=server)
+
+
+def _structured_beside(content: Any, text: str, parsed: Any) -> dict[str, Any] | None:
+    """The structured answer a server returned beside ``text``, where it adds something.
+
+    Only a JSON object, and only beside a text that is not JSON itself: a
+    JSON text already is the answer's structure, and the model read it (the
+    MCP SDK's servers return a dict both ways). An object that only wraps the
+    text again (``{"result": <the text>}``, the SDK's form for a text return)
+    adds nothing either. ``None`` in every such case.
+    """
+    if not isinstance(content, dict) or not content or parsed is not None:
+        return None
+    if len(content) == 1 and next(iter(content.values())) == text:
+        return None
+    return dict(content)
+
+
 def stored_bytes(entry: LedgerEntry) -> int:
-    """What the entry keeps: the full parsed result when there is one, else the text.
+    """What the entry's answer costs: the full parsed result when there is one, else the text.
 
     The row persists both columns, so what is written is their sum; what the
     budget charges is the larger of the two, because the text is a prefix of
     the result's JSON and charging it twice would halve the budget for
-    nothing.
+    nothing. A structure the server returned beside a prose text
+    (``structured_from_server``) is not the answer's cost: it is charged on
+    its own (:func:`beside_bytes`), after every text.
     """
     text = len(entry.output.encode("utf-8", errors="ignore"))
-    if entry.structured is None:
+    if entry.structured is None or getattr(entry, "structured_from_server", False):
         return text
     try:
         parsed = len(json.dumps(entry.structured, ensure_ascii=False).encode("utf-8"))
@@ -437,8 +639,101 @@ def stored_bytes(entry: LedgerEntry) -> int:
     return max(text, parsed)
 
 
+def beside_bytes(entry: LedgerEntry) -> int:
+    """What a structure the server returned beside a prose text costs; 0 for every other entry."""
+    if not getattr(entry, "structured_from_server", False) or entry.structured is None:
+        return 0
+    try:
+        return len(json.dumps(entry.structured, ensure_ascii=False).encode("utf-8"))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _drop_beside(entry: LedgerEntry) -> None:
+    entry.structured = None
+    entry.structured_from_server = False
+
+
+def _get(entry: Any, name: str) -> Any:
+    return entry.get(name) if isinstance(entry, Mapping) else getattr(entry, name, None)
+
+
+def _text_cost(entry: Any) -> int:
+    """:func:`stored_bytes` of a ledger entry or of its dump."""
+    if isinstance(entry, LedgerEntry):
+        return stored_bytes(entry)
+    text = len(str(_get(entry, "output") or "").encode("utf-8", errors="ignore"))
+    structured = _get(entry, "structured")
+    if structured is None or _get(entry, "structured_from_server"):
+        return text
+    try:
+        parsed = len(json.dumps(structured, ensure_ascii=False).encode("utf-8"))
+    except (TypeError, ValueError):
+        return text
+    return max(text, parsed)
+
+
+def _beside_cost(entry: Any) -> int:
+    """:func:`beside_bytes` of a ledger entry or of its dump."""
+    if not _get(entry, "structured_from_server") or _get(entry, "structured") is None:
+        return 0
+    try:
+        return len(json.dumps(_get(entry, "structured"), ensure_ascii=False).encode("utf-8"))
+    except (TypeError, ValueError):
+        return 0
+
+
+def fit_structures_to_budget(entries: Sequence[Any], budget_bytes: int) -> int:
+    """Drop kept structures, largest first, until each agent's kept bytes fit its budget.
+
+    The last pass over a run's ledger (ledger entries or their dumps) before
+    it is saved and built into the report. Per agent, the entry's own
+    ``agent``: its texts cost what :func:`apply_budget` charged them, and the
+    structures servers returned beside prose texts (``structured_from_server``)
+    are dropped largest first until texts and structures together are within
+    ``budget_bytes``. A text is never touched. Nothing happens when no entry
+    carries such a structure (every built-in's ledger) or with no budget.
+    Returns how many structures were dropped.
+    """
+    if budget_bytes <= 0:
+        return 0
+    flagged = [entry for entry in entries if _beside_cost(entry)]
+    if not flagged:
+        return 0
+    texts: dict[str, int] = {}
+    for entry in entries:
+        if _get(entry, "repeated_of"):
+            continue
+        agent = str(_get(entry, "agent") or "")
+        texts[agent] = texts.get(agent, 0) + _text_cost(entry)
+    dropped = 0
+    for agent in dict.fromkeys(str(_get(entry, "agent") or "") for entry in flagged):
+        own = sorted(
+            (entry for entry in flagged if str(_get(entry, "agent") or "") == agent),
+            key=lambda entry: (_beside_cost(entry), str(_get(entry, "id") or "")),
+            reverse=True,
+        )
+        total = texts.get(agent, 0) + sum(_beside_cost(entry) for entry in own)
+        for entry in own:
+            if total <= budget_bytes:
+                break
+            total -= _beside_cost(entry)
+            if isinstance(entry, LedgerEntry):
+                _drop_beside(entry)
+            else:
+                entry["structured"] = None
+                entry.pop("structured_from_server", None)
+            dropped += 1
+    return dropped
+
+
 def apply_budget(
-    entries: list[LedgerEntry], budget_bytes: int, *, already_spent: int = 0
+    entries: list[LedgerEntry],
+    budget_bytes: int,
+    *,
+    already_spent: int = 0,
+    already_beside: int = 0,
+    earlier: Sequence[LedgerEntry] = (),
 ) -> tuple[int, int]:
     """Drop the outputs that overrun ``budget_bytes``, in call order.
 
@@ -450,6 +745,18 @@ def apply_budget(
     The entries themselves stay: which tool was called, with what, and whether
     it worked is the cheap half of the record and the half a reader needs in
     order to know something is missing.
+
+    A structure a server returned beside a prose text (``structured_from_server``)
+    never costs an answer anything, and kept structures are the first thing
+    evicted. Every text is decided first, exactly as with no structure at all,
+    and ``spent`` counts texts only, so every loop's texts are decided as they
+    would be with none. Then the structures already kept are held to the room
+    left after every text: ``earlier`` are the entries of earlier loops still in
+    the agent's hands, whose structures are dropped largest first until they
+    fit, and ``already_beside`` the bytes of structures already handed out of
+    those hands, which can no longer be dropped. Last, this call's structures
+    are kept in call order while the room left holds them; one that does not
+    fit is dropped and its text stays.
     """
     if budget_bytes <= 0:
         return 0, already_spent
@@ -467,6 +774,28 @@ def apply_budget(
             continue
         entry.output = ""
         entry.structured = None
+        entry.structured_from_server = False
         entry.truncated = True
         trimmed += 1
+    room = budget_bytes - spent - max(0, already_beside)
+    held = sorted(
+        (entry for entry in earlier if beside_bytes(entry)),
+        key=lambda entry: (beside_bytes(entry), str(getattr(entry, "id", ""))),
+        reverse=True,
+    )
+    total = sum(beside_bytes(entry) for entry in held)
+    for entry in held:
+        if total <= room:
+            break
+        total -= beside_bytes(entry)
+        _drop_beside(entry)
+    room -= total
+    for entry in entries:
+        size = beside_bytes(entry)
+        if not size:
+            continue
+        if size <= room:
+            room -= size
+            continue
+        _drop_beside(entry)
     return trimmed, spent

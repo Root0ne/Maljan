@@ -18,7 +18,6 @@ this morning.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -35,6 +34,7 @@ from maljan.agents.prompt_fragments import (
     tool_families,
 )
 from maljan.core.exceptions import SampleNotOpened
+from maljan.loaders.binary_chunker import head_object
 from maljan.pipeline.events import describe_exception
 from maljan.schemas.isr_models import AgentISR
 
@@ -73,18 +73,15 @@ _PATH_HEADER = (
 def _analysis_path_in(data: str) -> str | None:
     """The ``analysis_file_path`` spliced into a head chunk, when there is one.
 
-    Mirrors the static analyst's own extraction rather than importing it: the
-    static module pulls in Ghidra, RAG and sink-reachability machinery a custom
-    agent has no business loading.
+    Read from the object the chunk opens with (``loaders.binary_chunker.
+    head_object``): a reverser's head chunk is the sample context followed by
+    the sandbox slice joined after it, and the path is the head's whatever is
+    joined behind it. Mirrors the static analyst's own extraction rather than
+    importing it: the static module pulls in its RAG and sink-reachability
+    machinery a custom agent has no business loading.
     """
-    stripped = data.strip()
-    if not stripped.startswith("{"):
-        return None
-    try:
-        parsed = json.loads(stripped)
-    except (json.JSONDecodeError, ValueError):
-        return None
-    if not isinstance(parsed, dict):
+    parsed = head_object(data)
+    if parsed is None:
         return None
     path = parsed.get("analysis_file_path")
     return path if isinstance(path, str) and path else None
@@ -142,45 +139,48 @@ class ConfigurableAnalyst(BaseAnalyst):
         return _PATH_HEADER.format(path=path) + data
 
     def _priority_hint(self, data: str) -> str:
-        """The static provider's priority-functions hint, for an agent that reads Ghidra.
+        """The static provider's priority-functions hint, for an agent that reads a provider.
 
-        The same load and sink-reachability pre-pass the static analyst runs,
-        for a generic agent whose own provider is Ghidra and whose request
-        carries Ghidra's tools — the reverser a team puts on Ghidra reads the
-        call graph's ranking as the static analyst does. Computed on the chunk
+        The same open and sink-reachability pre-pass the static analyst runs
+        (``providers.base.prepare_sample``), for a generic agent whose request
+        carries its own static provider's tools — the reverser a team puts on
+        a disassembler reads the call graph's ranking as the static analyst
+        does, wherever the provider gives a call graph. Computed on the chunk
         that carries the sample path (the head chunk), once per sample, and
-        ``""`` for every other agent, provider and chunk. A sample Ghidra
-        cannot open raises :class:`SampleNotOpened` here, before the loop.
+        ``""`` for every other agent and chunk and for a provider with no call
+        graph. A sample the provider knows it cannot open raises
+        :class:`SampleNotOpened` here, before the loop.
         """
         if _analysis_path_in(data) is None:
             return ""
         if PROVIDER_FAMILY not in tool_families(self.tools):
             return ""
-        provider_id = str(getattr(self._resolved, "static_provider_id", "") or "")
-        if provider_id != "ghidra":
-            # A provider whose session must open the file first (radare2's)
-            # opens its own mirror before the loop; it has no hint to give.
-            provider = self._own_static_provider()
-            opener = getattr(provider, "open_sample", None)
-            if callable(opener):
-                try:
-                    opener(self._analysis_file_path or _analysis_path_in(data))
-                except Exception as exc:  # noqa: BLE001 — the model's own open is still there
-                    self.logger.debug("the provider did not open the sample early: %s", exc)
-            return ""
+        from maljan.providers.base import prepare_sample
+
         path = self._analysis_file_path or _analysis_path_in(data) or ""
-        container = getattr(self, "_container", None)
-        cfg = getattr(container, "config", None)
-        if cfg is None:
-            from maljan.core.config import get_settings
-
-            cfg = get_settings()
-        from maljan.providers.static.ghidra import prepare_sample
-
-        hint = prepare_sample(
-            cfg, provider_id, path, self.logger, provider=self._own_static_provider()
-        )
+        hint = prepare_sample(self._own_static_provider(), path, self.logger)
         return f"{hint}\n" if hint else ""
+
+    def _load_hint(self, data: str) -> str:
+        """The static role's load line, for an agent given a server's declared open tool.
+
+        A server that declares ``sample_open`` (declared, accepted from a
+        proposal, or bound to the agent by the operator) marks its open tool
+        (``providers.sample_open.mark_open_tool``); an agent offered it is told
+        to open the sample with it first, as the static role is. Only on the
+        chunk that carries the sample path, and not for an agent whose
+        provider tools open the sample before the loop (``_priority_hint``):
+        every other request is unchanged.
+        """
+        path = _analysis_path_in(data)
+        if path is None or PROVIDER_FAMILY in tool_families(self.tools):
+            return ""
+        from maljan.providers.sample_open import declared_open, load_line
+
+        spec = declared_open(self.tools)
+        if spec is None:
+            return ""
+        return load_line(spec.open_tool, spec.path_argument, self._analysis_file_path or path)
 
     # ------------------------------------------------------------------
     # Text interface
@@ -218,7 +218,12 @@ class ConfigurableAnalyst(BaseAnalyst):
         return self._run(
             [
                 ("system", self._resolved.prompt),
-                ("human", self._priority_hint(data) + self._with_path_header(data)),
+                (
+                    "human",
+                    self._priority_hint(data)
+                    + self._load_hint(data)
+                    + self._with_path_header(data),
+                ),
             ],
             "analysis",
         ).text

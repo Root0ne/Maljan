@@ -41,13 +41,25 @@ from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 from maljan.schemas.stix_models import AttackPattern, Bundle
 from maljan.tools import knowledge
 
+# The roots and the sources a row states beside its lists, tested apart
+# (``tests/unit/analysis/test_a_technique_on_one_source_or_on_artefacts_is_not_corroborated.py``).
+_TESTED_APART = (
+    "evidence_roots",
+    "roots_not_read",
+    "sources",
+    "independent_sources",
+    "source_kinds",
+    "support",
+    "independent_sayers",
+)
+
 
 def corroboration(isrs: Any, ledger: Any) -> dict[str, dict[str, Any]]:
     """The record's source lists, the evidence roots beside them left out: these
     tests are about who asserts and who claims, and the roots are tested apart
     (``tests/unit/analysis/test_corroboration_counts_evidence_roots.py``)."""
     return {
-        tid: {k: v for k, v in row.items() if k not in ("evidence_roots", "roots_not_read")}
+        tid: {k: v for k, v in row.items() if k not in _TESTED_APART}
         for tid, row in _corroboration(isrs, ledger).items()
     }
 
@@ -912,6 +924,17 @@ class TestACatalogueAssociationIsNeverASource:
             "associated_by": ["api_capability"],
         }
         assert corroboration_sources(rows["T1113"]) == []
+
+    def test_an_operator_catalogue_is_named_by_its_own_name(self) -> None:
+        """Any tool declared a catalogue is named as it is, never as the shipped catalogue."""
+        from maljan.pipeline.evidence_summary import catalogue_associations
+        from maljan.tools.knowledge import api_capability
+
+        payload = api_capability(["GetDIBits", "PrintWindow", "GetDC", "BitBlt"])
+        entry = _entry("refs__lookup_apis", payload, 1).model_copy(
+            update={"source": "mcp:refs", "facts": {"v": 1, "kind": "api_catalogue"}}
+        )
+        assert catalogue_associations([entry])["T1113"] == ["lookup_apis"]
 
 
 class TestEverySurfaceSaysWhatHappenedToARetiredId:

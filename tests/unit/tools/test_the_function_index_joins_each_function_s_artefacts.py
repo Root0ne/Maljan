@@ -282,7 +282,7 @@ class TestADataAddressIsReadFromTheOperandThatHoldsIt:
 
 
 class TestTheRunsAnswersArePlaced:
-    def _answers(self, places: dict[str, int]) -> dict[str, tuple[str, dict[str, Any]]]:
+    def _answers(self, places: dict[str, int]) -> dict[str, Any]:
         floss = {
             "strings": [
                 {
@@ -321,11 +321,13 @@ class TestTheRunsAnswersArePlaced:
                 {"rule": "a file rule", "addresses": []},
             ],
         }
+        rules = [(row["rule"], row["addresses"]) for row in capa["capabilities"]]
         return {
-            "floss": ("ev_0017", floss),
+            "site_strings": [("floss", "ev_0017", floss["strings"])],
             "blobs": ("ev_0016", blobs),
             "hashes": ("ev_0020", hashes),
-            "capa": ("ev_0008", capa),
+            "function_starts": [("capa", "ev_0008", capa["function_starts"])],
+            "rule_hits": [("capa", "ev_0008", rules)],
         }
 
     def test_one_text_from_two_answers_is_one_artefact_citing_both(self, tmp_path: Path) -> None:

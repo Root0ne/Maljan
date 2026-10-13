@@ -1,0 +1,716 @@
+"""The composer writes its sections at once and applies them in their fixed order.
+
+Every section's request is built before any section answers, from state no
+section's answer changes, so the requests are the ones a sequential run sends.
+The answers are applied in ``COMPOSED_SECTIONS`` order, with each section's
+validation record, degradations and flagged sentences, so the report, its
+Markdown and HTML, the tally and the degradation list are byte-identical to a
+sequential run given the same answers.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import time
+from datetime import UTC, datetime
+from typing import Any
+from unittest.mock import patch
+
+import pytest
+from langchain_core.messages import AIMessage, BaseMessage
+from langchain_openai.chat_models.base import _convert_message_to_dict
+
+from maljan.reporting.composer import COMPOSED_SECTIONS, ReportComposer
+from maljan.reporting.models import (
+    FileHashes,
+    MalwareReport,
+    NetworkDomain,
+    NetworkIOCs,
+    SampleIdentity,
+)
+from maljan.reporting.renderers.html import HtmlRenderer
+from maljan.reporting.renderers.markdown import MarkdownRenderer
+from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+
+_LEAD = "The evidence for the "
+
+
+def _section_of(messages: list[BaseMessage]) -> str:
+    text = str(messages[1].content)
+    start = text.index(_LEAD) + len(_LEAD)
+    return text[start : text.index(" section follows.", start)]
+
+
+def _report() -> MalwareReport:
+    """A report whose every composed section has evidence to be written from."""
+
+    def tool(name: str, output: str) -> dict[str, str]:
+        return {"tool_name": name, "symbol": "", "output": output}
+
+    return MalwareReport(
+        identity=SampleIdentity(
+            hashes=FileHashes(sha256="a" * 64),
+            file_type="PE32 executable",
+            platform="Windows",
+        ),
+        verdict="Malware",
+        generated_at=datetime(2026, 1, 1, tzinfo=UTC),
+        network=NetworkIOCs(domains=[NetworkDomain(fqdn="update.example.invalid")]),
+        technical_evidence={
+            "static": [
+                tool("list_strings", "RESTORE_FILES.example.txt --path update.example.invalid"),
+                tool("list_segments", ".text .rdata .packed"),
+                tool("detect_crypto_constants", "AES sbox at 0x401000"),
+                tool("find_anti_analysis_techniques", "IsDebuggerPresent"),
+                tool("list_imports", "kernel32.dll FindFirstFileW"),
+                tool("extract_iocs_with_context", "update.example.invalid in .rdata"),
+            ],
+            "reversing": [
+                tool("decompile_function", "void dispatch(int c) { switch (c) { case 1: ; } }"),
+                tool("emulate_function", "decoded: example-config"),
+            ],
+        },
+    )
+
+
+def _isr() -> dict[str, Any]:
+    return {
+        "static": AgentISR(
+            agent_id="static",
+            domain="static",
+            claims=[
+                ClaimEvidence(
+                    claim="Encrypts files with AES and drops a ransom note",
+                    evidence_ref="detect_crypto_constants",
+                    confidence=0.7,
+                )
+            ],
+        )
+    }
+
+
+# One recorded answer per section. Some carry a key their schema does not
+# declare, so the run leaves degradations whose order is the sections' order;
+# none cites an id, so prose sections leave findings on the record.
+_ANSWERS: dict[str, dict[str, Any]] = {
+    "introduction": {"text": "A Windows executable that encrypts files."},
+    "execution_flow": {
+        "steps": [{"order": 1, "action": "Enumerates drives", "voice": "assessed"}],
+        "extra_flow": 1,
+    },
+    "configuration": {"items": [{"key": "Extension", "value": ".locked"}]},
+    "host_identifiers": {
+        "identifiers": [{"kind": "Note file name", "value": "RESTORE_FILES.example.txt"}]
+    },
+    "commands": {"commands": [{"id": "1", "name": "dispatch", "description": "Runs case 1"}]},
+    "encryption_scheme": {"cipher": "AES", "extra_cipher": "x"},
+    "cli_flags": {"flags": [{"flag": "--path", "description": "Limits the walk"}]},
+    "ransom_note": {"filename": "RESTORE_FILES.example.txt"},
+    "communications": {
+        "channels": [
+            {"name": "Update", "protocol": "HTTP", "endpoints": ["update.example.invalid"]}
+        ]
+    },
+}
+
+
+def _answer(section: str) -> dict[str, Any]:
+    if section in _ANSWERS:
+        return _ANSWERS[section]
+    return {"body": f"The {section} evidence shows a packed loader.", "evidence_refs": []}
+
+
+class _Recorder:
+    """A model that records each request as its body would be sent, and answers per section."""
+
+    def __init__(self, *, delay: float = 0.0, failing: frozenset[str] = frozenset()) -> None:
+        self.delay = delay
+        self.failing = failing
+        self.requests: list[str] = []
+        self.sections: list[str] = []
+        self.spans: dict[str, list[tuple[float, float]]] = {}
+        self.in_flight = 0
+        self.most_in_flight = 0
+
+    async def ainvoke(self, messages: list[BaseMessage], **kwargs: Any) -> AIMessage:
+        section = _section_of(messages)
+        self.sections.append(section)
+        self.requests.append(
+            json.dumps(
+                {"messages": [_convert_message_to_dict(m) for m in messages], **kwargs},
+                sort_keys=True,
+            )
+        )
+        began = time.monotonic()
+        self.in_flight += 1
+        self.most_in_flight = max(self.most_in_flight, self.in_flight)
+        try:
+            await asyncio.sleep(self.delay)
+        finally:
+            self.in_flight -= 1
+            self.spans.setdefault(section, []).append((began, time.monotonic()))
+        if section in self.failing:
+            raise RuntimeError("the stub refuses this section")
+        return AIMessage(content=json.dumps(_answer(section)))
+
+
+def _compose(
+    llm: Any, *, concurrent: bool, timeout: int = 30
+) -> tuple[ReportComposer, MalwareReport]:
+    report = _report()
+    composer = ReportComposer(llm=llm, per_section_timeout=timeout)
+    with patch("maljan.reporting.composer.structured_output_supported_for_llm", return_value=False):
+        asyncio.run(composer.compose(report, _isr(), concurrent=concurrent))
+    return composer, report
+
+
+class TestTheSectionsRunAtOnce:
+    def test_every_section_has_evidence_in_the_test_report(self) -> None:
+        llm = _Recorder()
+        _compose(llm, concurrent=False)
+        assert set(llm.sections) == set(COMPOSED_SECTIONS)
+
+    def test_the_requests_are_the_sequential_requests(self) -> None:
+        sequential, concurrent = _Recorder(), _Recorder()
+        _compose(sequential, concurrent=False)
+        _compose(concurrent, concurrent=True)
+        assert sorted(concurrent.requests) == sorted(sequential.requests)
+        assert len(concurrent.requests) == len(sequential.requests)
+
+    def test_the_report_and_its_renders_are_the_sequential_ones(self) -> None:
+        first, report_one = _compose(_Recorder(), concurrent=False)
+        second, report_two = _compose(_Recorder(delay=0.01), concurrent=True)
+        assert report_two.model_dump_json() == report_one.model_dump_json()
+        assert MarkdownRenderer().render(report_two) == MarkdownRenderer().render(report_one)
+        assert HtmlRenderer().render(report_two) == HtmlRenderer().render(report_one)
+        assert second.degradations == first.degradations
+        assert second.validation_tally.to_dict() == first.validation_tally.to_dict()
+        assert first.degradations, "the recorded answers leave degradations to order"
+        assert report_one.flagged_statements, "and flagged sentences"
+
+    def test_the_order_holds_when_the_sections_finish_in_reverse(self) -> None:
+        class _Reversed(_Recorder):
+            async def ainvoke(self, messages: list[BaseMessage], **kwargs: Any) -> AIMessage:
+                position = COMPOSED_SECTIONS.index(_section_of(messages))
+                self.delay = 0.005 * (len(COMPOSED_SECTIONS) - position)
+                return await super().ainvoke(messages, **kwargs)
+
+        first, report_one = _compose(_Recorder(), concurrent=False)
+        second, report_two = _compose(_Reversed(), concurrent=True)
+        assert report_two.model_dump_json() == report_one.model_dump_json()
+        assert second.degradations == first.degradations
+        assert second.validation_tally.to_dict() == first.validation_tally.to_dict()
+
+    def test_the_wall_time_is_the_slowest_section_not_the_sum(self) -> None:
+        delay = 0.2
+        llm = _Recorder(delay=delay)
+        began = time.monotonic()
+        _compose(llm, concurrent=True)
+        wall = time.monotonic() - began
+        calls = len(llm.requests)
+        assert calls >= len(COMPOSED_SECTIONS)
+        assert llm.most_in_flight == len(COMPOSED_SECTIONS), "no limit on how many run at once"
+        # The slowest section is its answer and its one retry.
+        assert wall < delay * calls / 3
+
+    def test_a_failing_section_leaves_the_others_as_they_were(self) -> None:
+        _composer, whole = _compose(_Recorder(), concurrent=True)
+        failed_composer, partial = _compose(
+            _Recorder(failing=frozenset({"commands"})), concurrent=True
+        )
+        assert partial.technical_analysis is not None and whole.technical_analysis is not None
+        assert partial.technical_analysis.commands == []
+        assert any("'commands'" in reason for reason in failed_composer.degradations)
+        kept = whole.technical_analysis.model_dump()
+        kept["commands"] = []
+        assert partial.technical_analysis.model_dump() == kept
+        assert partial.intro_background == whole.intro_background
+        assert partial.c2_channels == whole.c2_channels
+
+
+class TestTheWaitFollowsThePace:
+    def test_a_section_still_running_is_given_the_wait_a_later_pace_sizes(self) -> None:
+        """A wait measured before any section answered grows with what was measured since."""
+
+        class _Rates:
+            def __init__(self) -> None:
+                self.per_call = 0.05
+
+            def call_timeout(self, *_args: Any, **_kwargs: Any) -> float:
+                return self.per_call
+
+        rates = _Rates()
+
+        class _Slow(_Recorder):
+            async def ainvoke(self, messages: list[BaseMessage], **kwargs: Any) -> AIMessage:
+                # A section answering slowly measures a slower pace than the
+                # wait every section was given at the start.
+                rates.per_call = 5.0
+                return await super().ainvoke(messages, **kwargs)
+
+        llm = _Slow(delay=0.2)
+        report = _report()
+        composer = ReportComposer(llm=llm, per_section_timeout=0, generation_rates=rates)
+        composer.per_section_timeout = 0.1  # type: ignore[assignment]
+        composer.output_cap = 100
+        with patch(
+            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+        ):
+            asyncio.run(composer.compose(report, _isr(), concurrent=True))
+        assert not any("did not answer within" in reason for reason in composer.degradations)
+        assert report.intro_background
+
+
+class TestTheCachedHeadIsWrittenFirst:
+    def test_on_a_model_that_caches_the_lead_section_answers_before_the_rest_are_sent(
+        self,
+    ) -> None:
+        class _Caching(_Recorder):
+            _llm_type = "anthropic-chat"
+
+        llm = _Caching(delay=0.05)
+        _compose(llm, concurrent=True)
+        lead = llm.sections[0]
+        lead_ended = llm.spans[lead][0][1]
+        later = [span[0][0] for section, span in llm.spans.items() if section != lead]
+        assert later and min(later) >= lead_ended
+        assert llm.most_in_flight == len(COMPOSED_SECTIONS) - 1
+
+    def test_the_first_piece_of_the_lead_answer_releases_the_rest(self) -> None:
+        from maljan.reporting.composer import _FirstPiece, _on_first_piece
+
+        async def _run() -> bool:
+            released = asyncio.Event()
+            handler = _FirstPiece()
+            with _on_first_piece(released):
+                handler.on_llm_new_token("x")
+            await asyncio.sleep(0)
+            return released.is_set()
+
+        assert asyncio.run(_run())
+
+    def test_a_model_that_does_not_cache_sends_every_section_at_once(self) -> None:
+        llm = _Recorder(delay=0.05)
+        _compose(llm, concurrent=True)
+        assert llm.most_in_flight == len(COMPOSED_SECTIONS)
+
+
+@pytest.mark.parametrize("concurrent", [False, True])
+def test_the_head_note_rides_on_the_section_request(concurrent: bool) -> None:
+    """On a caching model's manual path every section shares the head, noted on its request."""
+    from maljan.llm.anthropic_history import SHARED_HEAD
+
+    seen: list[BaseMessage] = []
+
+    class _Keeps(_Recorder):
+        _llm_type = "anthropic-chat"
+
+        async def ainvoke(self, messages: list[BaseMessage], **kwargs: Any) -> AIMessage:
+            seen.append(messages[1])
+            return await super().ainvoke(messages, **kwargs)
+
+    report = _report()
+    composer = ReportComposer(llm=_Keeps(), per_section_timeout=30)
+    with patch("maljan.reporting.composer.structured_output_supported_for_llm", return_value=False):
+        asyncio.run(
+            composer.compose(
+                report, _isr(), facts_block="FACTS", run_state="", concurrent=concurrent
+            )
+        )
+    heads = {str(m.content)[: m.response_metadata[SHARED_HEAD]] for m in seen}
+    assert heads == {"FACTS\n\n"}
+
+
+class TestTheLeadReleasesItsGroup:
+    def test_a_lead_section_that_fails_still_releases_the_others(self) -> None:
+        class _LeadFails(_Recorder):
+            _llm_type = "anthropic-chat"
+
+        llm = _LeadFails(delay=0.01, failing=frozenset({"introduction"}))
+        composer, report = _compose(llm, concurrent=True)
+        assert report.intro_background == ""
+        assert set(llm.sections) == set(COMPOSED_SECTIONS)
+        assert any("'introduction'" in reason for reason in composer.degradations)
+
+    def test_the_first_call_ending_releases_the_others_before_the_lead_s_retry(self) -> None:
+        """A listener attached to the model hears the lead's first answer end."""
+        from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+
+        followers: list[float] = []
+        retry_ended: list[float] = []
+
+        class _Heard(GenericFakeChatModel):
+            async def _agenerate(self, messages: Any, *args: Any, **kwargs: Any) -> Any:
+                from langchain_core.outputs import ChatGeneration, ChatResult
+
+                section = _section_of(messages)
+                if section != "introduction":
+                    followers.append(time.monotonic())
+                    text = json.dumps(_answer(section))
+                elif len(messages) == 2:
+                    # The lead's first answer breaks its schema: it is asked again.
+                    text = "not an object"
+                else:
+                    await asyncio.sleep(0.3)
+                    retry_ended.append(time.monotonic())
+                    text = json.dumps(_answer(section))
+                return ChatResult(generations=[ChatGeneration(message=AIMessage(content=text))])
+
+            @property
+            def _llm_type(self) -> str:
+                return "anthropic-chat"
+
+        llm = _Heard(messages=iter([]))
+        _composer, report = _compose(llm, concurrent=True)
+        assert any(type(cb).__name__ == "_FirstPiece" for cb in llm.callbacks or [])
+        assert report.intro_background and retry_ended
+        assert min(followers) < retry_ended[0] - 0.2, "released when the first call ended"
+
+    def test_a_model_that_takes_no_listener_is_said_in_the_log(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        class _Closed(_Recorder):
+            _llm_type = "anthropic-chat"
+
+            @property
+            def callbacks(self) -> None:
+                return None
+
+        with caplog.at_level(logging.INFO, logger="maljan"):
+            _compose(_Closed(), concurrent=True)
+        assert any("no listener" in r.getMessage() for r in caplog.records)
+
+
+def test_a_cancelled_job_leaves_no_section_running() -> None:
+    class _Closing(_Recorder):
+        """A call that takes a moment to close its connection when cancelled."""
+
+        async def ainvoke(self, messages: list[BaseMessage], **kwargs: Any) -> AIMessage:
+            try:
+                return await super().ainvoke(messages, **kwargs)
+            except asyncio.CancelledError:
+                await asyncio.sleep(0.05)
+                raise
+
+    async def _run() -> list[asyncio.Task[Any]]:
+        composer = ReportComposer(llm=_Closing(delay=5.0), per_section_timeout=30)
+        with patch(
+            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+        ):
+            job = asyncio.create_task(composer.compose(_report(), _isr(), concurrent=True))
+            await asyncio.sleep(0.1)
+            job.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await job
+        return [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+
+    assert asyncio.run(_run()) == []
+
+
+class TestAStoppedComposeKeepsWhatItWrote:
+    """A run stopped inside the composer keeps the sections already written in ``report``.
+
+    The stopped run's partial report is read from the report being built
+    (``pipeline.stopped_run.partial_report``), so every section that answered
+    before the stop is applied to it, in the fixed order, and only the ones
+    still running are lost.
+    """
+
+    _FAST = frozenset({"introduction", "commands", "communications"})
+
+    class _Mixed(_Recorder):
+        def __init__(self, fast: frozenset[str]) -> None:
+            super().__init__()
+            self.fast = fast
+
+        async def ainvoke(self, messages: list[BaseMessage], **kwargs: Any) -> AIMessage:
+            self.delay = 0.0 if _section_of(messages) in self.fast else 5.0
+            return await super().ainvoke(messages, **kwargs)
+
+    def _stopped(self, concurrent: bool, fast: frozenset[str]) -> MalwareReport:
+        report = _report()
+
+        async def _run() -> None:
+            composer = ReportComposer(llm=self._Mixed(fast), per_section_timeout=30)
+            with patch(
+                "maljan.reporting.composer.structured_output_supported_for_llm",
+                return_value=False,
+            ):
+                job = asyncio.create_task(composer.compose(report, _isr(), concurrent=concurrent))
+                await asyncio.sleep(0.3)
+                job.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await job
+
+        asyncio.run(_run())
+        return report
+
+    def test_sections_at_once_keep_every_section_that_answered_before_the_stop(self) -> None:
+        report = self._stopped(True, self._FAST)
+        assert report.intro_background == _ANSWERS["introduction"]["text"]
+        assert report.technical_analysis is not None
+        assert [c.name for c in report.technical_analysis.commands] == ["dispatch"]
+        assert report.technical_analysis.execution_flow == []
+        assert [c.name for c in report.c2_channels] == ["Update"]
+
+    def test_sections_one_after_another_keep_the_ones_written_before_the_stop(self) -> None:
+        fast = frozenset({"introduction", "execution_flow"})
+        report = self._stopped(False, fast)
+        assert report.intro_background
+        assert report.technical_analysis is not None
+        assert report.technical_analysis.execution_flow
+        assert report.technical_analysis.commands == []
+
+
+def test_a_job_cancelled_inside_one_section_ends_every_other_before_compose_returns() -> None:
+    from maljan.core.cancellation import JobCancelled
+
+    class _CancelledInOne(_Recorder):
+        async def ainvoke(self, messages: list[BaseMessage], **kwargs: Any) -> AIMessage:
+            if _section_of(messages) == "commands":
+                await asyncio.sleep(0.05)
+                raise JobCancelled("the operator cancelled the job")
+            try:
+                return await super().ainvoke(messages, **kwargs)
+            except asyncio.CancelledError:
+                await asyncio.sleep(0.05)
+                raise
+
+    async def _run() -> list[asyncio.Task[Any]]:
+        composer = ReportComposer(llm=_CancelledInOne(delay=5.0), per_section_timeout=30)
+        with patch(
+            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+        ):
+            with pytest.raises(JobCancelled):
+                await composer.compose(_report(), _isr(), concurrent=True)
+        return [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+
+    assert asyncio.run(_run()) == []
+
+
+class TestAgainstTheSequentialBase:
+    """The sections written at once send and write what cb04d3ad did one after another.
+
+    ``tests/fixtures/composer_requests_before_concurrency.json`` was captured
+    from that commit's tree by ``scripts/goldens/capture_composer_requests.py``
+    (its request bodies, Markdown and HTML are those of d92a76fc too; only the
+    report's JSON took the stopped-run fields added between them),
+    with a shared head (pack facts and run state) on every request.
+    """
+
+    def test_the_requests_and_the_report_are_those_of_the_base(self) -> None:
+        import hashlib
+        from pathlib import Path
+
+        fixture = Path(__file__).resolve().parents[2] / "fixtures"
+        base = json.loads((fixture / "composer_requests_before_concurrency.json").read_text())
+        llm = _Recorder(delay=0.005)
+        report = _report()
+        composer = ReportComposer(llm=llm, per_section_timeout=60)
+        with patch(
+            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+        ):
+            asyncio.run(
+                composer.compose(
+                    report,
+                    _isr(),
+                    facts_block=(
+                        "DETERMINISTIC FACTS (complete list):\n- file_type: PE32 executable"
+                    ),
+                    run_state="Stages run: triage, static. Stages not run: dynamic.",
+                    concurrent=True,
+                )
+            )
+
+        def digest(text: str) -> str:
+            return hashlib.sha256(text.encode()).hexdigest()
+
+        assert sorted(llm.requests) == base["requests"]
+        assert digest(report.model_dump_json()) == base["report_sha256"]
+        assert digest(MarkdownRenderer().render(report)) == base["markdown_sha256"]
+        assert digest(HtmlRenderer().render(report)) == base["html_sha256"]
+        assert composer.degradations == base["degradations"]
+        assert composer.validation_tally.to_dict() == base["tally"]
+
+
+class TestEachSectionKeepsItsOwnTurnDeadline:
+    @staticmethod
+    def _list() -> Any:
+        from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+
+        from maljan.llm.fallback import FallbackChatModel
+
+        models = [FakeMessagesListChatModel(responses=[AIMessage(content="{}")]) for _ in range(2)]
+        return FallbackChatModel(models=models, labels=["first", "second"], agent="reporter")
+
+    def test_a_short_section_s_first_model_deadline_is_within_its_own_wait(self) -> None:
+        llm = self._list()
+
+        async def _section(seconds: float) -> float:
+            llm.enter_task_loop(seconds, 0.5)
+            await asyncio.sleep(0.01)
+            return float(llm._deadline(0))
+
+        async def _both() -> list[float]:
+            return list(await asyncio.gather(_section(1.0), _section(100.0)))
+
+        short, long = asyncio.run(_both())
+        assert short <= 0.5
+        assert long > 40
+
+    def test_a_task_s_clock_reaches_the_call_it_waits_on_when_it_grows(self) -> None:
+        llm = self._list()
+
+        async def _run() -> float:
+            llm.enter_task_loop(1.0, 0.5)
+
+            async def _call() -> float:
+                await asyncio.sleep(0.02)
+                return float(llm._deadline(0))
+
+            inner = asyncio.ensure_future(_call())
+            llm.enter_task_loop(100.0, 0.5)
+            return await inner
+
+        assert asyncio.run(_run()) > 40
+
+    def test_the_sections_written_at_once_each_start_their_own_clock(self) -> None:
+        entered: list[tuple[str, float]] = []
+
+        class _Listed(_Recorder):
+            def enter_loop(self, seconds: float, share: float) -> None:
+                entered.append(("shared", seconds))
+
+            def enter_task_loop(self, seconds: float, share: float) -> None:
+                entered.append(("own", seconds))
+
+        composer = ReportComposer(llm=_Listed(), per_section_timeout=30, turn_share=0.5)
+        with patch(
+            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+        ):
+            asyncio.run(composer.compose(_report(), _isr(), concurrent=True))
+        assert entered and {kind for kind, _seconds in entered} == {"own"}
+
+
+def test_a_model_that_does_not_cache_is_sent_no_head_note() -> None:
+    from maljan.llm.anthropic_history import SHARED_HEAD
+
+    seen: list[BaseMessage] = []
+
+    class _Keeps(_Recorder):
+        async def ainvoke(self, messages: list[BaseMessage], **kwargs: Any) -> AIMessage:
+            seen.append(messages[1])
+            return await super().ainvoke(messages, **kwargs)
+
+    composer = ReportComposer(llm=_Keeps(), per_section_timeout=30)
+    with patch("maljan.reporting.composer.structured_output_supported_for_llm", return_value=False):
+        asyncio.run(composer.compose(_report(), _isr(), facts_block="FACTS", concurrent=True))
+    assert seen and not any(SHARED_HEAD in m.response_metadata for m in seen)
+
+
+class _Priced(_Recorder):
+    """A priced model that reports usage, so the spend ceiling settles each call."""
+
+    model_name = "priced-model"
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.caps: dict[str, list[Any]] = {}
+
+    async def ainvoke(self, messages: list[BaseMessage], **kwargs: Any) -> AIMessage:
+        self.caps.setdefault(_section_of(messages), []).append(kwargs.get("max_tokens"))
+        answer = await super().ainvoke(messages, **kwargs)
+        answer.usage_metadata = {"input_tokens": 100, "output_tokens": 200, "total_tokens": 300}
+        return answer
+
+
+def _compose_under_a_ceiling(concurrent: bool) -> tuple[_Priced, ReportComposer, bool]:
+    """Compose under a spend ceiling on a thread of its own; whether it finished in time."""
+    import threading
+
+    from maljan.core.spend import SpendMeter
+    from maljan.core.token_ledger import TokenLedger
+
+    meter = SpendMeter(
+        0.05,
+        {"priced-model": {"input_usd_per_mtok": 0.0, "output_usd_per_mtok": 10.0}},
+        table={},
+    )
+    llm = _Priced(delay=0.05)
+    composer = ReportComposer(
+        llm=llm,  # type: ignore[arg-type]
+        section_max_tokens=1000,
+        per_section_timeout=30,
+        token_ledger=TokenLedger(spend=meter),
+        model_label="priced-model",
+    )
+
+    def _run() -> None:
+        with patch(
+            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+        ):
+            asyncio.run(composer.compose(_report(), _isr(), concurrent=concurrent))
+
+    worker = threading.Thread(target=_run, daemon=True)
+    worker.start()
+    worker.join(20)
+    return llm, composer, not worker.is_alive()
+
+
+class TestUnderASpendCeiling:
+    def test_the_sections_finish_and_are_held_as_written_one_after_another(self) -> None:
+        sequential, first, finished_one = _compose_under_a_ceiling(False)
+        concurrent, second, finished_two = _compose_under_a_ceiling(True)
+        assert finished_one and finished_two, "the event loop is never held by an admission"
+        assert concurrent.caps == sequential.caps
+        assert sorted(concurrent.requests) == sorted(sequential.requests)
+        assert second.degradations == first.degradations
+
+
+class _Slots(_Recorder):
+    """A local server that serves ``slots`` requests at a time and queues the rest."""
+
+    def __init__(self, slots: int, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.slots = slots
+        self._served: asyncio.Semaphore | None = None
+        self.queued = 0
+
+    async def ainvoke(self, messages: list[BaseMessage], **kwargs: Any) -> AIMessage:
+        if self._served is None:
+            self._served = asyncio.Semaphore(self.slots)
+        if self._served.locked():
+            self.queued += 1
+        async with self._served:
+            return await super().ainvoke(messages, **kwargs)
+
+
+class TestALocalServerIsGivenWhatItServes:
+    @pytest.mark.parametrize("slots", [1, 2])
+    def test_every_section_is_written_on_a_server_of_few_slots(self, slots: int) -> None:
+        # One call takes 0.1 s and a section at most two calls: a wait of
+        # 0.35 s holds a section served at once, never one queued behind
+        # sixteen.
+        llm = _Slots(slots, delay=0.1)
+        report = _report()
+        composer = ReportComposer(llm=llm, per_section_timeout=0.35)  # type: ignore[arg-type]
+        with patch(
+            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+        ):
+            asyncio.run(composer.compose(report, _isr(), concurrent=True, at_once=slots))
+        assert not [r for r in composer.degradations if "did not answer within" in r]
+        assert set(llm.sections) == set(COMPOSED_SECTIONS)
+        assert llm.most_in_flight <= slots
+        assert llm.queued == 0, "nothing waits in the server's queue"
+
+    def test_without_the_slot_count_the_queued_sections_would_time_out(self) -> None:
+        llm = _Slots(2, delay=0.1)
+        composer = ReportComposer(llm=llm, per_section_timeout=0.35)  # type: ignore[arg-type]
+        with patch(
+            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+        ):
+            asyncio.run(composer.compose(_report(), _isr(), concurrent=True))
+        assert [r for r in composer.degradations if "did not answer within" in r]

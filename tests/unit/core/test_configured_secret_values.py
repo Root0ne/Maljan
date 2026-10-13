@@ -181,3 +181,18 @@ def test_a_configured_url_gives_every_credential_it_carries() -> None:
 
     assert {short, token, query} <= found
     assert "operator" not in found and "plain" not in found
+
+
+def test_every_sandbox_api_token_stays_secret_by_the_generic_rules() -> None:
+    """No sandbox's token needs its own name in the secret list: its type or its key covers it."""
+    from maljan.core.config import Settings
+    from maljan.core.settings_catalog import core_catalog, names_a_credential_value
+
+    tokens = [e for e in core_catalog() if e.path.startswith("sandbox.") and "token" in e.path]
+    assert tokens and all(entry.secret for entry in tokens)
+    held = password(20, variant=7)
+    settings = Settings(_env_file=None, sandbox={"cape2": {"api_token": held}})
+    assert held in configured_secret_values(settings)
+    # A stored map keyed by the retired flat name is still a credential key.
+    assert names_a_credential_value("cape2_api_token")
+    assert configured_secret_values({"stored": {"cape2_api_token": held}}) == {held}

@@ -456,3 +456,31 @@ def test_the_official_validator_finds_no_error_and_no_new_kind_of_warning() -> N
 def _without_ids(warnings: list[str]) -> list[str]:
     """Warnings with the object ids taken out: fresh ids are minted per render."""
     return sorted(w.split(": ", 1)[-1] for w in warnings)
+
+
+class TestTheSupportMarkOnTheJudgesEdge:
+    """A technique no source of which is behaviour is marked on this run's
+    ``uses`` edge, the judge's own edge included once the export remaps it to
+    the technique's stable attack-pattern id."""
+
+    def test_the_judges_remapped_edge_carries_the_mark(self) -> None:
+        judge = _judge()
+        report = _report("Malware", judge)
+        (mapping,) = [m for m in report.ttp_mappings if m.technique_id == "T1055"]
+        mapping.sources = ["ev_0002"]
+        mapping.source_kinds = {"artefact": 1}
+        mapping.support = "capability"
+
+        objects = _dumped(
+            ExtendedSTIXRenderer().render(
+                report, judge, technique_evidence={}, ledger_ids=LEDGER_IDS
+            )
+        )
+
+        edge = _uses(objects, "T1055")
+        assert edge["x_maljan_confidence"] == 0.9  # the judge's own edge
+        assert edge["x_maljan_support"] == "capability"
+        assert edge["x_maljan_support_note"].startswith("capability, not observed: 1 source")
+        assert "x_maljan_support" not in _uses(objects, "T1071")
+        patterns = [o for o in objects if o["type"] == "attack-pattern"]
+        assert all("x_maljan_support" not in o for o in patterns)

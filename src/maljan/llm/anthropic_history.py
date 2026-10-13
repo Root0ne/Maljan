@@ -39,6 +39,12 @@ the one before it plus its new turns:
   reasoning. A block is kept where leaving it out would empty its turn or
   touch the latest assistant turn, and the request then asks to drop again.
 
+**No empty text block** reaches the API, on any model: one that is empty or
+only whitespace, which the API refuses with a 400, is left out of every turn
+and the system prompt, and a turn left with nothing is left out whole. A
+streamed answer sent back again carries one (LangChain's join of a stream
+starts with the empty string of its opening chunk).
+
 **Prompt caching** is asked for only where a prefix is sent again: a request
 of a tool loop (the loop's turns are noted, :data:`TOOL_LOOP_TURN`) or one that
 carries an earlier assistant turn. It gets explicit breakpoints on the last
@@ -46,7 +52,12 @@ block of its newest user turn and on the user turn before its newest assistant
 turn. A tool loop's first user turn is sent as a one-block list on every
 request, so it can carry a breakpoint on the first request without changing
 shape on the next. A single-shot call carries none and pays no write premium
-(https://platform.claude.com/docs/en/build-with-claude/prompt-caching).
+(https://platform.claude.com/docs/en/build-with-claude/prompt-caching) — except
+where its first user turn is noted with a head that other requests repeat
+(:data:`SHARED_HEAD`, the report composer's sections): that turn is sent as two
+text blocks, the head with a breakpoint and the rest after it, whose texts
+joined are the turn's text, so every request sharing the head reads one cached
+prefix.
 
 What is remembered lives on the chat model that sent it (:func:`memory_of`),
 which a job's service container builds for its own agents and drops when the
@@ -73,6 +84,9 @@ BINDING_BETA = "thinking-binding-controls-2026-08-01"
 # (which no client sends).
 RUN_STATE_ATTACHED = "maljan_run_state_attached"
 TOOL_LOOP_TURN = "maljan_tool_loop_turn"
+# Where a user turn says how many of its leading characters are a head other
+# requests send too, in ``response_metadata``.
+SHARED_HEAD = "maljan_shared_head"
 
 _THINKING_KINDS = ("thinking", "redacted_thinking")
 
@@ -446,6 +460,55 @@ def _marked(message: dict[str, Any], marker: dict[str, str]) -> dict[str, Any]:
     return message
 
 
+def _turn_text(content: Any) -> str | None:
+    """A user turn's text when it is one string or one plain text block, else ``None``."""
+    if isinstance(content, str):
+        return content
+    if (
+        isinstance(content, list)
+        and len(content) == 1
+        and isinstance(content[0], dict)
+        and content[0].get("type") == "text"
+        and set(content[0]) <= {"type", "text"}
+        and isinstance(content[0].get("text"), str)
+    ):
+        return str(content[0]["text"])
+    return None
+
+
+def _shared_heads(messages: list[Any], heads: dict[str, int], marker: dict[str, str]) -> list[Any]:
+    """Each user turn noted with a shared head, as the head with a breakpoint and the rest.
+
+    ``heads`` maps a noted turn's whole text to its head's length. The two
+    blocks' texts joined are the turn's text, character for character; a
+    head that is empty or the whole turn leaves the turn as it is.
+    """
+    if not heads:
+        return messages
+    out: list[Any] = []
+    for message in messages:
+        if isinstance(message, dict) and message.get("role") == "user":
+            text = _turn_text(message.get("content"))
+            size = heads.get(text, 0) if text is not None else 0
+            # Split only where both parts hold text: a part of whitespace
+            # alone is a block the API refuses.
+            if (
+                text is not None
+                and 0 < size < len(text)
+                and text[:size].strip()
+                and text[size:].strip()
+            ):
+                message = {
+                    **message,
+                    "content": [
+                        {"type": "text", "text": text[:size], "cache_control": marker},
+                        {"type": "text", "text": text[size:]},
+                    ],
+                }
+        out.append(message)
+    return out
+
+
 def _cache_breakpoints(messages: list[Any], marker: dict[str, str], loop: bool) -> list[Any]:
     """Explicit breakpoints on a conversation that re-sends its prefix, none otherwise."""
     roles = [m.get("role") if isinstance(m, dict) else None for m in messages]
@@ -459,6 +522,77 @@ def _cache_breakpoints(messages: list[Any], marker: dict[str, str], loop: bool) 
         if before:
             marks.add(before[-1])
     return [_marked(m, marker) if i in marks else m for i, m in enumerate(messages)]
+
+
+# ── Empty text ────────────────────────────────────────────────────────────
+
+
+def _holds_text(block: Any) -> bool:
+    """Whether ``block`` is anything but a text block with no character other than whitespace."""
+    if not isinstance(block, dict) or block.get("type") != "text":
+        return True
+    return bool(str(block.get("text") or "").strip())
+
+
+def _with_text_kept(block: Any) -> Any:
+    """``block``, a ``tool_result`` without the empty text blocks of its list content.
+
+    A result whose list held nothing else goes without content, which the API
+    takes as a result with none.
+    """
+    if not isinstance(block, dict) or block.get("type") != "tool_result":
+        return block
+    inner = block.get("content")
+    if not isinstance(inner, list) or all(_holds_text(part) for part in inner):
+        return block
+    kept = [part for part in inner if _holds_text(part)]
+    if kept:
+        return {**block, "content": kept}
+    return {key: value for key, value in block.items() if key != "content"}
+
+
+def _without_empty_text(payload: dict[str, Any], messages: list[Any]) -> list[Any]:
+    """``messages`` and ``payload['system']`` without a text block the API refuses as empty.
+
+    The Messages API refuses, with a 400, a text block that is empty or holds
+    only whitespace, and a turn other than a final prefill with no content.
+    LangChain joins a streamed answer's chunks into a list that starts with
+    the empty string the opening chunk carried, and ``ChatAnthropic`` sends
+    that string back as an empty text block when the answer is sent again (a
+    validation retry, a tool loop's next step). Every such block is left out
+    here, from every turn, from a ``tool_result``'s list content and from the
+    system prompt; a turn left with nothing is left out whole, and the API
+    takes the turns either side of it as one. ``_shared_heads``, which runs
+    after this, splits a turn only where both parts hold text, so no step of
+    this hook makes such a block again.
+    Every other block keeps its place and its bytes, so a thinking block's
+    signature still checks. One pass over the request.
+    """
+    system = payload.get("system")
+    if isinstance(system, list) and not all(_holds_text(block) for block in system):
+        kept_system = [block for block in system if _holds_text(block)]
+        if kept_system:
+            payload["system"] = kept_system
+        else:
+            payload.pop("system", None)
+    out: list[Any] = []
+    for message in messages:
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, str):
+            if content.strip():
+                out.append(message)
+            continue
+        if isinstance(content, list):
+            kept = [_with_text_kept(block) for block in content if _holds_text(block)]
+            if not kept:
+                continue
+            changed = len(kept) != len(content) or any(
+                a is not b for a, b in zip(kept, content, strict=False)
+            )
+            out.append({**message, "content": kept} if changed else message)
+            continue
+        out.append(message)
+    return out
 
 
 # ── The request hook ──────────────────────────────────────────────────────
@@ -478,6 +612,7 @@ def prepared(
     cache_marker: dict[str, str],
     attached: str = "",
     loop: bool = False,
+    heads: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """The request ``payload`` built to keep its replayed thinking valid and cache what repeats.
 
@@ -485,13 +620,22 @@ def prepared(
     (:func:`binds_thinking_to_prefix`); only such a model's history is kept
     append-only and its blocks checked. ``attached`` is the exact run-state
     block the platform put on the newest turn, ``loop`` whether the request is
-    a tool loop's. Never raises: a request this cannot read is sent as built.
+    a tool loop's. ``heads`` maps the text of each user turn noted with a
+    shared head to the head's length (:data:`SHARED_HEAD`). On every model, a
+    text block that is empty or only whitespace is left out first
+    (:func:`_without_empty_text`). Never raises: a request this cannot read is
+    sent as built.
     """
     try:
         messages = payload.get("messages")
         if not isinstance(messages, list):
             return payload
         payload = dict(payload)
+        # First, so every later step, and the digests the thinking check
+        # keeps, read the request as it is sent.
+        messages = _without_empty_text(payload, messages)
+        payload["messages"] = messages
+        messages = _shared_heads(messages, dict(heads or {}), cache_marker)
         messages = _first_turn_listed(memory, messages, loop)
         if bound:
             messages = _keep_run_state_appended(memory, messages, attached)
@@ -545,6 +689,21 @@ def _notes_of(model: Any, input_: Any) -> tuple[str, bool]:
     return (block if isinstance(block, str) else ""), bool(noted.get(TOOL_LOOP_TURN))
 
 
+def _heads_of(model: Any, input_: Any) -> dict[str, int]:
+    """Each user turn's text noted with a shared head, and the head's length."""
+    try:
+        messages = model._convert_input(input_).to_messages()
+    except Exception:  # noqa: BLE001 — a request whose turns cannot be read carries no note
+        return {}
+    heads: dict[str, int] = {}
+    for message in messages:
+        size = (getattr(message, "response_metadata", None) or {}).get(SHARED_HEAD)
+        text = _turn_text(getattr(message, "content", None))
+        if isinstance(size, int) and not isinstance(size, bool) and size > 0 and text:
+            heads[text] = size
+    return heads
+
+
 _PRESERVED_CLASSES: dict[tuple[type, str], type] = {}
 
 
@@ -575,6 +734,7 @@ def with_preserved_thinking(chat_class: Any, cache_ttl: str = "5m") -> Any:
             cache_marker=marker,
             attached=attached,
             loop=loop,
+            heads=_heads_of(self, input_),
         )
 
     def _generate_with_cache(self: Any, *args: Any, **kwargs: Any) -> Any:

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import served from "@/test-fixtures/settings-schema.json";
 import type { CatalogEntry, SettingsSchema } from "@/types/settings";
 import { GUIDES, guideById, providerChoiceCopy, type GuideContext } from "../guides";
 
@@ -8,58 +9,31 @@ import { GUIDES, guideById, providerChoiceCopy, type GuideContext } from "../gui
  * step order and the reasons Continue is blocked.
  */
 
-const entry = (key: string): CatalogEntry => ({
-  key,
-  namespace: key.startsWith("api.") ? "api" : "core",
-  path: key.slice(key.indexOf(".") + 1),
-  type: "str",
-  default: "",
-  nullable: false,
-  choices: null,
-  minimum: null,
-  maximum: null,
-  secret: false,
-  group: key.split(".")[1] ?? "",
-  title: key,
-  description: "",
-  applies: "next_job",
-  editable: true,
-  reason: null,
+/** The schema the API serves a fresh deployment, as
+ *  `scripts/dev/write_console_schema.py` writes it (and a test on the API side
+ *  keeps it current): the guides are walked against the real catalogue. */
+const SERVED = served as unknown as SettingsSchema;
+
+/** A memory backend a package might register, with keys but no probe: the one
+ *  thing the served catalogue cannot show. */
+const INVENTED_BACKEND: CatalogEntry = {
+  ...(SERVED.groups.flatMap((g) => g.entries).find((e) => e.key === "core.memory.qdrant.url") as CatalogEntry),
+  key: "core.memory.vectorhub.endpoint",
+  path: "memory.vectorhub.endpoint",
   probe: null,
   applies_when: null,
-  order: 0,
-  choices_from: null,
-  editor: null,
-  subgroup: null,
-  advanced: false,
-  required_env: null,
-});
-
-/** Enough of the catalog for the guides that name key families by prefix. */
-const KEYS = [
-  "core.static.provider",
-  "core.static.r2.binary_path",
-  "core.static.r2.mirror_dir",
-  "core.static.capa.rules_dir",
-  "core.static.yara.rules_dir",
-  "core.static.generic.server",
-  "core.sandbox.provider",
-  "core.sandbox.cape2.base_url",
-  "core.sandbox.cape2.api_token",
-  "core.sandbox.cape2.mcp.enabled",
-  "core.sandbox.cape2.mcp.url",
-  "core.sandbox.rest.base_url",
-  "core.sandbox.rest.submit.method",
-  "core.sandbox.rest.submit.path",
-  "core.sandbox.rest.status.path",
-  "core.sandbox.rest.report.path",
-  "core.sandbox.rest.report.format",
-  "core.memory.backend",
-];
+};
 
 const schema: SettingsSchema = {
-  groups: [{ key: "all", title: "All", description: "", entries: KEYS.map(entry) }],
+  ...SERVED,
+  groups: [
+    ...SERVED.groups,
+    { key: "invented", title: "Invented", description: "", entries: [INVENTED_BACKEND] },
+  ],
 };
+
+const allKeys = schema.groups.flatMap((g) => g.entries).map((e) => e.key);
+const keysUnder = (prefix: string) => allKeys.filter((key) => key.startsWith(prefix));
 
 function context(
   values: Record<string, unknown> = {},
@@ -114,13 +88,13 @@ describe("the guide list", () => {
       ["core.sandbox.provider", ["mock", "cape2", "upload", "triage", "rest"]],
     ] as const) {
       for (const choice of choices) {
-        const copy = providerChoiceCopy(key, choice);
+        const copy = providerChoiceCopy(schema, key, choice);
         expect(copy.title).not.toBe(choice);
         expect(copy.blurb.length).toBeGreaterThan(10);
       }
     }
     // An unknown choice still gets a card, under its own id.
-    expect(providerChoiceCopy("core.static.provider", "future")).toEqual({
+    expect(providerChoiceCopy(schema, "core.static.provider", "future")).toEqual({
       title: "future",
       blurb: "",
     });
@@ -225,14 +199,18 @@ describe("the sandbox guide", () => {
     ]);
   });
 
-  it("folds the CAPE MCP sidecar away and blocks on the CAPE probe", () => {
+  it("shows CAPE's token, URL, poll and timeout up front and folds its MCP sidecar away", () => {
     const values = { "core.sandbox.provider": "cape2" };
     const fields = guideById("sandbox")!.steps(context(values))[1];
-    expect(fields.keys).toContain("core.sandbox.cape2.api_token");
-    expect(fields.advancedKeys).toEqual([
-      "core.sandbox.cape2.mcp.enabled",
-      "core.sandbox.cape2.mcp.url",
+    const folded = fields.advancedKeys ?? [];
+    expect(fields.keys!.filter((key) => !folded.includes(key))).toEqual([
+      "core.sandbox.cape2.api_token",
+      "core.sandbox.cape2.base_url",
+      "core.sandbox.cape2.poll_interval_seconds",
+      "core.sandbox.cape2.timeout_seconds",
     ]);
+    expect(folded).toEqual(keysUnder("core.sandbox.cape2.mcp."));
+    expect(folded.length).toBeGreaterThan(0);
     expect(blockedReason("sandbox", "test", context(values))).toBe("run the test first");
     expect(blockedReason("sandbox", "test", context(values, { probes: ["cape2"] }))).toBeNull();
   });
@@ -246,9 +224,9 @@ describe("the sandbox guide", () => {
 });
 
 describe("the tool-server guide", () => {
-  it("offers VirusTotal first, then asks which server before it shows any field", () => {
+  it("offers each server whose credential can be obtained first, then asks which server", () => {
     expect(stepIds("tool-server", context())).toEqual([
-      "virustotal",
+      "credential-virustotal",
       "which",
       "connection",
       "tools",
@@ -266,18 +244,43 @@ describe("the tool-server guide", () => {
     expect(blockedReason("tool-server", "tools", context({}, { state }))).toBeNull();
   });
 
-  it("never blocks on the VirusTotal step, which is optional", () => {
-    // Registering is one way to get a tool server, not a prerequisite for
-    // adding one by hand, so Continue must pass straight through it.
-    expect(blockedReason("tool-server", "virustotal", context())).toBeNull();
+  it("never blocks on a credential step, which is optional", () => {
+    // Obtaining a credential is one way to get a tool server, not a
+    // prerequisite for adding one by hand, so Continue passes straight through.
+    expect(blockedReason("tool-server", "credential-virustotal", context())).toBeNull();
   });
 
-  it("stages the server map through the VirusTotal step's review keys", () => {
+  it("stages the server map through a credential step's review keys", () => {
     const step = guideById("tool-server")!
       .steps(context())
-      .find((s) => s.id === "virustotal");
-    expect(step?.component).toBe("virustotal");
+      .find((s) => s.id === "credential-virustotal");
+    expect(step?.component).toBe("credential");
+    expect(step?.server).toBe("virustotal");
+    expect(step?.note).toContain("quota");
     expect(step?.reviewKeys).toContain("core.mcp.servers");
+  });
+
+  it("gives a server declared only as data its own credential step", () => {
+    const invented: SettingsSchema = {
+      ...schema,
+      credential_servers: {
+        ...schema.credential_servers,
+        intelhub: { label: "Intel hub", family: "maljan", note: "Issued per deployment." },
+      },
+    };
+    const steps = guideById("tool-server")!.steps({ ...context(), schema: invented });
+    expect(steps.map((s) => s.id).slice(0, 3)).toEqual([
+      "credential-virustotal",
+      "credential-intelhub",
+      "which",
+    ]);
+    const step = steps.find((s) => s.id === "credential-intelhub");
+    expect(step).toMatchObject({
+      title: "Connect Intel hub",
+      component: "credential",
+      server: "intelhub",
+      note: "Issued per deployment.",
+    });
   });
 });
 
@@ -307,20 +310,30 @@ describe("the agent guide", () => {
 });
 
 describe("the memory guide", () => {
-  it("skips the Qdrant steps for the in-process backend", () => {
+  it("asks a backend with no keys of its own for nothing more", () => {
     expect(stepIds("memory", context({ "core.memory.backend": "memory" }))).toEqual([
       "backend",
       "review",
     ]);
-    expect(stepIds("memory", context({ "core.memory.backend": "qdrant" }))).toEqual([
-      "backend",
-      "qdrant",
-      "test",
-      "review",
-    ]);
   });
 
-  it("blocks the Qdrant test until it has passed", () => {
+  it("asks for the keys under the backend's id and tests with the probe they declare", () => {
+    const qdrant = context({ "core.memory.backend": "qdrant" });
+    expect(stepIds("memory", qdrant)).toEqual(["backend", "connection", "test", "review"]);
+    const connection = guideById("memory")!
+      .steps(qdrant)
+      .find((s) => s.id === "connection");
+    expect(connection?.keys).toEqual([...keysUnder("core.memory.qdrant."), "core.memory.top_k"]);
+    expect(connection?.keys).toContain("core.memory.qdrant.url");
+    expect(guideById("memory")!.steps(qdrant).find((s) => s.id === "test")?.probe).toBe("qdrant");
+  });
+
+  it("offers a backend whose keys declare no probe its keys and no test", () => {
+    const other = context({ "core.memory.backend": "vectorhub" });
+    expect(stepIds("memory", other)).toEqual(["backend", "connection", "review"]);
+  });
+
+  it("blocks the test until it has passed", () => {
     const values = { "core.memory.backend": "qdrant" };
     expect(blockedReason("memory", "test", context(values))).toBe("run the test first");
     expect(blockedReason("memory", "test", context(values, { probes: ["qdrant"] }))).toBeNull();
@@ -333,8 +346,69 @@ describe("the enrichment guide", () => {
     const steps = guide.steps(context());
     expect(steps.map((s) => s.id)).toEqual(["switch", "virustotal", "abuseipdb", "review"]);
     expect(steps.map((s) => s.probe)).toEqual([undefined, "virustotal", "abuseipdb", undefined]);
+    // The shipped sources' steps read as they did when the guide named them.
+    expect(steps[1]).toMatchObject({
+      title: "VirusTotal",
+      intro: "Leave the key empty to skip VirusTotal. The key is stored on the server and never shown again.",
+      keys: ["api.virustotal_api_key"],
+    });
+    expect(steps[2]).toMatchObject({ title: "AbuseIPDB", keys: ["api.abuseipdb_api_key"] });
     for (const step of steps) {
       expect(step.canContinue?.(context()) ?? null).toBeNull();
     }
+  });
+
+  it("offers a source declared only as data, with its own key in the source map", () => {
+    const invented: SettingsSchema = {
+      ...schema,
+      enrichment_sources: [
+        {
+          key: "domainrep",
+          label: "Domain reputation",
+          kinds: ["domain"],
+          enabled: true,
+          credential_key: null,
+          own_credential: true,
+          server: null,
+          probe: true,
+        },
+        ...(schema.enrichment_sources ?? []),
+      ],
+    };
+    const steps = guideById("enrichment")!.steps({ ...context(), schema: invented });
+    expect(steps.map((s) => s.id)).toEqual([
+      "switch",
+      "domainrep",
+      "virustotal",
+      "abuseipdb",
+      "review",
+    ]);
+    expect(steps[1]).toMatchObject({
+      title: "Domain reputation",
+      keys: ["api.enrichment_sources"],
+      probe: "domainrep",
+    });
+  });
+});
+
+describe("the llm guide", () => {
+  it("offers the Anthropic base URL among the credentials, folded away as advanced", () => {
+    const guide = guideById("llm")!;
+    const credentials = guide
+      .steps(context({ "core.llm.provider": "anthropic" }))
+      .find((s) => s.id === "credentials")!;
+    expect(credentials.keys).toEqual([
+      "core.llm.anthropic.api_key",
+      "core.llm.anthropic.base_url",
+      "core.llm.anthropic.allow_plain_http_to_docker_host",
+      "core.llm.anthropic.effort",
+      "core.llm.anthropic.prompt_cache_ttl",
+    ]);
+    expect(credentials.advancedKeys).toEqual([
+      "core.llm.anthropic.base_url",
+      "core.llm.anthropic.allow_plain_http_to_docker_host",
+      "core.llm.anthropic.effort",
+      "core.llm.anthropic.prompt_cache_ttl",
+    ]);
   });
 });

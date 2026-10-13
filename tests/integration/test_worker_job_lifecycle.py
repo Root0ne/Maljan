@@ -441,6 +441,7 @@ async def test_mock_mode_with_an_attached_report_fails_with_a_worded_message(
     report_row.id = uuid.UUID("0b6c6e0e-0000-4000-8000-000000000000")
     report_row.sample_id = sample.id
     report_row.storage_path = "sandbox-reports/0b/0b6c.../report.json"
+    report_row.format = "cape2"
 
     def _make_result(obj: Any) -> MagicMock:
         m = MagicMock()
@@ -584,6 +585,7 @@ async def test_a_hash_mismatch_on_the_attached_report_is_recorded_as_a_degradati
     report_row.id = uuid.UUID("0b6c6e0e-0000-4000-8000-000000000000")
     report_row.sample_id = sample.id
     report_row.storage_path = "sandbox-reports/0b/0b6c.../report.json"
+    report_row.format = "cape2"
     report_row.sample_sha256_match = False
 
     result = await _run_with_attached_report(mock_ctx, mock_db_session, job, sample, report_row)
@@ -607,6 +609,7 @@ async def test_a_matching_attached_report_records_no_such_degradation(
     report_row.id = uuid.UUID("0b6c6e0e-0000-4000-8000-000000000000")
     report_row.sample_id = sample.id
     report_row.storage_path = "sandbox-reports/0b/0b6c.../report.json"
+    report_row.format = "cape2"
     report_row.sample_sha256_match = True
 
     result = await _run_with_attached_report(mock_ctx, mock_db_session, job, sample, report_row)
@@ -616,6 +619,58 @@ async def test_a_matching_attached_report_records_no_such_degradation(
     reason = "uploaded sandbox report's target hash differs from the sample"
     assert reason not in (saved_report.run_summary.get("degradation_reasons") or [])
     assert reason not in (saved_report.malware_report.get("degradation_reasons") or [])
+
+
+@pytest.mark.asyncio
+async def test_an_attached_report_of_a_format_no_longer_declared_fails_in_words(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+) -> None:
+    """The run reads the format the upload row recorded; one no longer declared
+    stops the job with the reason rather than running without the evidence."""
+    job = _make_job(config={"sandbox_report_id": "0b6c6e0e-0000-4000-8000-000000000000"})
+    sample = _make_sample()
+
+    report_row = MagicMock()
+    report_row.id = uuid.UUID("0b6c6e0e-0000-4000-8000-000000000000")
+    report_row.sample_id = sample.id
+    report_row.storage_path = "sandbox-reports/0b/0b6c.../report.json"
+    report_row.format = "retired_format"
+    report_row.sample_sha256_match = True
+
+    result = await _run_with_attached_report(mock_ctx, mock_db_session, job, sample, report_row)
+
+    assert result["status"] == "failed", result
+    assert "'retired_format', which is no longer declared" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_an_attached_report_of_a_format_no_longer_allowed_fails_in_words(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+) -> None:
+    """A recorded format taken out of the allow list stops the job with the
+    reason, as a removed declaration does, rather than running without it."""
+    job = _make_job(config={"sandbox_report_id": "0b6c6e0e-0000-4000-8000-000000000000"})
+    sample = _make_sample()
+
+    report_row = MagicMock()
+    report_row.id = uuid.UUID("0b6c6e0e-0000-4000-8000-000000000000")
+    report_row.sample_id = sample.id
+    report_row.storage_path = "sandbox-reports/0b/0b6c.../report.json"
+    report_row.format = "cuckoo"
+    report_row.sample_sha256_match = True
+
+    async def _overrides(db: Any) -> dict[str, Any]:
+        # The settings read still takes its place in the session's sequence.
+        await db.execute(None)
+        return {"sandbox.upload.allowed_formats": ["cape2"]}
+
+    with patch("app.services.settings_service.load_core_overrides", new=_overrides):
+        result = await _run_with_attached_report(mock_ctx, mock_db_session, job, sample, report_row)
+
+    assert result["status"] == "failed", result
+    assert "'cuckoo', which sandbox.upload.allowed_formats no longer accepts" in result["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -765,12 +820,13 @@ async def test_worker_removes_private_sample_copies_after_pipeline_failure(
 
 def test_worker_settings_sanity() -> None:
     """Verify ARQ worker tuning values are production-ready."""
+    from datetime import timedelta
+
     assert WorkerSettings.max_jobs == 1
-    # 2026-07-13: bumped 3600 -> 28800 (8h) for the deep-analysis restore.
-    # Full-depth static runs one ReAct loop PER CHUNK (~8-10 chunks), so a
-    # realistic-slow cold-cache run is ~2-4h; the outer ARQ ceiling must sit
-    # above the inner per-loop safety nets so it never kills a progressing run.
-    assert WorkerSettings.job_timeout == 28800
+    # No deadline arq can reach: a job's limit is ``core.job_timeout``, empty
+    # by default, which the run enforces itself so a stopped job keeps what it
+    # produced (``test_the_job_timeout_is_a_setting``).
+    assert WorkerSettings.job_timeout == timedelta.max.total_seconds()
     assert WorkerSettings.max_tries == 1
 
 

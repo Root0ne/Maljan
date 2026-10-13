@@ -12,9 +12,17 @@ from urllib.parse import urlparse
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from maljan.core.config import Settings
+from maljan.core.config import OpenAIConfig, Settings
 from maljan.core.exceptions import LLMError
 from maljan.core.logger import logger
+from maljan.llm.provider_base import (
+    COMPLETION_MAX_TOKENS,
+    COMPLETION_PROMPT,
+    LLMProvider,
+    ModelListing,
+    OneTurnRequest,
+    _text,
+)
 from maljan.llm.registry import register_provider
 from maljan.llm.tool_replies import (  # noqa: F401 — the names this module has always offered
     NO_REPLY_RECORDED,
@@ -183,7 +191,7 @@ def forget_standard_only(base_url: str | None = None) -> None:
 
 
 def unshared_async_client(base_url: str | None, timeout: Any) -> Any | None:
-    """An httpx async pool this model alone owns, or ``None`` if it cannot be built.
+    """An httpx async client this model alone owns, or ``None`` if it cannot be built.
 
     ``langchain_openai`` caches its async client with ``@lru_cache`` keyed on
     ``(base_url, timeout, socket_options)``, so every model this provider builds
@@ -195,25 +203,31 @@ def unshared_async_client(base_url: str | None, timeout: Any) -> Any | None:
     ``APIConnectionError("Connection error.")`` — the fault diagnosed for the
     judge and then seen again on the narrative round.
 
-    Owning the pool is what makes the container's per-loop model cache mean
-    anything: two models for two loops must not share one set of connections.
-    The keepalive socket options langchain applies are kept by reusing its own
+    The client is the model's own, and it keeps one pool per event loop it
+    sends on (``maljan.llm.loop_clients``), so a model held across two loops —
+    the narrative agent, the composer — never crosses them either. The
+    keepalive socket options langchain applies are kept by reusing its own
     builder; a version that no longer exposes it falls back to a plain client
     rather than to the shared one.
     """
+    from maljan.llm.loop_clients import loop_bound_async_client  # noqa: PLC0415
+
     try:
         from langchain_openai.chat_models._client_utils import (  # noqa: PLC0415
             _build_async_httpx_client,
             _default_socket_options,
         )
 
-        return _build_async_httpx_client(base_url, timeout, _default_socket_options())
+        options = _default_socket_options()
+        return loop_bound_async_client(
+            lambda: _build_async_httpx_client(base_url, timeout, options)
+        )
     except Exception as exc:  # noqa: BLE001 — a private helper is allowed to move
         logger.debug("openai provider: langchain's client builder is unavailable (%s).", exc)
     try:
         import httpx  # noqa: PLC0415
 
-        return httpx.AsyncClient(timeout=timeout)
+        return loop_bound_async_client(lambda: httpx.AsyncClient(timeout=timeout))
     except Exception as exc:  # noqa: BLE001 — no client at all means the shared one
         logger.warning(
             "openai provider: could not build a private httpx pool (%s); this model "
@@ -1022,11 +1036,166 @@ def with_reasoning_passback(chat_class: Any) -> Any:
     return kept
 
 
+def _openai_extras(
+    base: str, disable_thinking: bool, compat: str, reasoning_effort: str = ""
+) -> dict[str, Any]:
+    """The request fields beyond OpenAI's basic ones this endpoint gets in a run.
+
+    Decided by the two functions every model build uses: ``sends_llama_cpp_extras``
+    says whether this endpoint takes the llama.cpp fields at all (a hosted
+    OpenAI-compatible API answers an unknown body field with 400), and the
+    thinking switch is the dialect's own. A probe that asked a different
+    question from the run it gates let a local reasoning model spend its eight
+    tokens inside its own chain of thought and answer with an empty string.
+    """
+    extras: dict[str, Any] = {}
+    if sends_llama_cpp_extras(base, str(compat or "auto")):
+        add_thinking_switch(extras, bool(disable_thinking))
+    elif compat == "deepseek":
+        add_deepseek_thinking_switch(extras, bool(disable_thinking))
+    # The operator's effort as the run sends it: a value the endpoint does not
+    # know is refused by the probe rather than on the job's first call.
+    effort = str(reasoning_effort or "").strip()
+    if effort:
+        extras["reasoning_effort"] = effort
+    return extras
+
+
 @register_provider("openai")
-class OpenAIProvider:
+class OpenAIProvider(LLMProvider):
     """Builds LangChain ChatOpenAI instances."""
 
     name = "openai"
+    window_setting = "core.llm.openai.context_size"
+    settings_model = OpenAIConfig
+    choice_order = 0
+    label = "OpenAI"
+    description = "Hosted OpenAI models or any OpenAI-compatible server"
+    hosted = True
+    legacy_credential_keys = ("openai_api_key",)
+    guide_leaves = (
+        "api_key",
+        "base_url",
+        "disable_thinking",
+        "reasoning_effort",
+        "repetition_penalty",
+    )
+    guide_advanced_leaves = ("disable_thinking", "reasoning_effort", "repetition_penalty")
+    sdk_packages = frozenset({"openai"})
+    llm_types = ("openai-chat",)
+    timeout_kwarg = "request_timeout"
+    supports_agent_base_url = True
+    base_url_leaf = "base_url"
+    default_endpoint = "https://api.openai.com/v1"
+    effort_setting = "llm.openai.reasoning_effort"
+    concurrency = "endpoint"
+    # A thinking model's reasoning a provider sends back with the turn
+    # (``with_reasoning_passback``) stays with the turn it belongs to.
+    reasoning_passback_keys = (REASONING_CONTENT_KEY,)
+
+    @classmethod
+    def supports_structured_output(cls, settings: Any) -> bool:
+        # Against api.openai.com; a deployment with its own address is a local
+        # or another vendor's server, where a structured call hung for the
+        # whole request timeout.
+        return settings is None or not cls.configured_base_url(settings)
+
+    @classmethod
+    def model_declines_structured_output(cls, llm: Any) -> bool:
+        # A per-agent endpoint survives only on the model object, as
+        # ``openai_api_base``; only a real non-empty string counts.
+        candidate = getattr(llm, "openai_api_base", None)
+        return isinstance(candidate, str) and bool(candidate.strip())
+
+    @classmethod
+    def window_probes(cls, endpoint: object, model: str) -> tuple[Any, ...]:
+        from maljan.llm import context_window as cw
+
+        root = cw._root_of(endpoint)
+        if not root:
+            return ()
+        return (
+            cw.Ask(
+                "GET",
+                f"{root}{cw.LLAMA_PROPS_PATH}",
+                None,
+                cw.window_from_llama_props,
+                "llama.cpp /props",
+            ),
+            cw.Ask(
+                "GET",
+                f"{root}{cw.MODEL_LIST_PATH}",
+                None,
+                cw.window_from_model_list,
+                "the served model list",
+            ),
+            cw.Ask(
+                "GET",
+                f"{root}{cw.TGI_INFO_PATH}",
+                None,
+                cw.window_from_tgi_info,
+                "the server description",
+            ),
+        )
+
+    @classmethod
+    def declared_window(cls, settings: Any) -> tuple[int, bool]:
+        # ``context_size`` ships at zero, so a positive value is always an
+        # operator's decision.
+        return int(getattr(cls.settings_block(settings), "context_size", 0) or 0), False
+
+    @classmethod
+    def reasoning_counts_against_cap(cls, settings: Any) -> bool:
+        # llama.cpp's ``n_predict`` counts the reasoning channel with the answer.
+        return not bool(getattr(cls.settings_block(settings), "disable_thinking", False))
+
+    @classmethod
+    def model_listing(cls, settings: Any) -> ModelListing:
+        base = cls.endpoint(None, cls.configured_base_url(settings))
+        return ModelListing(
+            url=f"{base}/models",
+            headers={"Authorization": f"Bearer {cls.api_key(settings) or 'none'}"},
+            names=lambda payload: [m.get("id", "") for m in (payload or {}).get("data", [])],
+            where=base,
+        )
+
+    @classmethod
+    def one_turn_request(
+        cls, settings: Any, endpoint: str, model: str, effort: str | None = None
+    ) -> OneTurnRequest:
+        block = cls.settings_block(settings)
+        base = str(endpoint or "").rstrip("/")
+        return OneTurnRequest(
+            f"{base or cls.default_endpoint}/chat/completions",
+            {"Authorization": f"Bearer {cls.api_key(settings) or 'none'}"},
+            {
+                "model": model,
+                "max_tokens": COMPLETION_MAX_TOKENS,
+                "messages": [{"role": "user", "content": COMPLETION_PROMPT}],
+                **_openai_extras(
+                    base,
+                    bool(getattr(block, "disable_thinking", False)),
+                    str(getattr(block, "compat", "auto") or "auto"),
+                    str(effort or ""),
+                ),
+            },
+        )
+
+    @classmethod
+    def said_something(cls, payload: Any) -> bool:
+        choices = payload.get("choices")
+        if not isinstance(choices, list) or not choices:
+            return False
+        message = (choices[0] or {}).get("message") or {}
+        # Reasoning text counts: a local server serving a reasoning model with
+        # thinking left on puts the whole answer in ``reasoning_content``
+        # (``reasoning`` on some builds) and hands back an empty ``content``.
+        return bool(
+            _text(message.get("content"))
+            or _text(message.get(REASONING_CONTENT_KEY))
+            or _text(message.get("reasoning"))
+            or message.get("tool_calls")
+        )
 
     def __init__(self, config: Settings) -> None:
         self._config = config
@@ -1047,6 +1216,13 @@ class OpenAIProvider:
         # the endpoint. Every local-server branch below keys off this resolved
         # value, so a per-agent server gets the same llama.cpp treatment.
         base_url = kwargs.pop("base_url", None) or self._config.llm.openai.base_url
+        # An agent entry's own effort (``llm.agents.<key>.effort``) is sent in
+        # place of the global ``llm.openai.reasoning_effort``; ``_build`` only
+        # fills the global one in where none is already named.
+        own_effort = str(kwargs.pop("effort", None) or "").strip()
+        kwargs.pop("effort_setting", None)
+        if own_effort:
+            kwargs["reasoning_effort"] = own_effort
         return self._build(model, temperature, base_url, dict(kwargs))
 
     def _build(
@@ -1110,9 +1286,11 @@ class OpenAIProvider:
         # ReAct budget). 1800s (2026-07-13) stays >= the longest agent
         # ``wait_for`` hard cap: the deep-analysis restore raised static's
         # per-chunk budget to 1500s (hard cap timeout+30 = 1530s), plus decode
-        # headroom on a cold-cache local 35B. ``max_retries=0`` keeps a single
-        # attempt regardless of size — the daemon-thread cap in
-        # ``execute_tool_loop`` is the only retry policy we want.
+        # headroom on a cold-cache local 35B. ``max_retries=0`` stops the SDK
+        # retrying underneath Maljan: its own retries would make a *stalled*
+        # request three times over its timeout, and would stack on Maljan's
+        # retry. A provider saying "not now" is asked again by the one policy
+        # (``maljan.llm.transient``), which never retries a stall.
         from maljan.llm.registry import PROVIDER_REQUEST_TIMEOUT_SECONDS
 
         build_kwargs.setdefault("request_timeout", PROVIDER_REQUEST_TIMEOUT_SECONDS)
@@ -1126,6 +1304,7 @@ class OpenAIProvider:
                 build_kwargs["http_async_client"] = private
 
         from maljan.llm.generation_rate import with_sized_request_timeout
+        from maljan.llm.transient import with_transient_retries
 
         # Every request carries a timeout sized for its own output cap once the
         # model's pace is measured; the client's stands until then.
@@ -1140,6 +1319,9 @@ class OpenAIProvider:
             # reaches them the way the model's own does. Its answer is read
             # as a stream and joined into the one it would have sent whole.
             chat_class = with_streamed_llama_answers(with_per_request_llama_cap(chat_class))
+        # A provider saying "not now" is asked again, a whole request at a
+        # time, as the Anthropic provider's model is (``maljan.llm.transient``).
+        chat_class = with_transient_retries(chat_class)
         # Last, over the dialect's own changes: no request sends a tool call
         # without its reply, whatever the history it was built from — the one
         # rule every provider applies (``maljan.llm.tool_replies``).
@@ -1353,6 +1535,11 @@ def _with_standard_retry(
             from maljan.llm.generation_rate import carry_rate_meter
 
             carry_rate_meter(model_obj, replacement)
+            # And the job's retry recorder, so the healed model's retries are
+            # rows and its failed attempts charged, as the original's were.
+            from maljan.llm.transient import carry_retry_recorder
+
+            carry_retry_recorder(model_obj, replacement)
             healed.append(replacement)
         _close_sync_client(model_obj)
         _announce_healed(model_obj, replacement)

@@ -11,7 +11,7 @@ separately from the CAPE round trip covered in
     without a report is not a run);
   * ``cape_report_to_sandbox_report`` carries the input dict through as
     ``raw`` untouched — the same object, not a copy — because that identity is
-    what lets ``to_cape_shaped_dict`` short-circuit later.
+    what lets ``sandbox_document`` short-circuit later.
 """
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ def test_sandbox_run_holds_the_report_once_given_one():
 
 def test_cape_report_to_sandbox_report_keeps_raw_is_raw():
     raw = {"target": {"file": {"sha256": "a" * 64}}}
-    report = cape_report_to_sandbox_report(raw, provider="cape2")
+    report = cape_report_to_sandbox_report(raw, provider="cape2", source_format="cape2")
     assert report.raw is raw
 
 
@@ -84,7 +84,7 @@ def test_report_raw_preserves_identity_for_a_dict():
 def test_report_raw_rejects_a_non_dict():
     # The wrap validator's other half: identity is not the same as "accepts
     # anything". A bare ``SkipValidation`` would let a string or ``None``
-    # through, and ``to_cape_shaped_dict`` would hand it to every consumer as
+    # through, and ``sandbox_document`` would hand it to every consumer as
     # if it were the CAPE dict.
     with pytest.raises(ValidationError):
         SandboxReport(provider="cape2", source_format="cape2", raw="not-a-dict")  # type: ignore[arg-type]
@@ -117,7 +117,7 @@ def test_target_reads_the_real_cape_nesting_under_file():
             }
         }
     }
-    report = cape_report_to_sandbox_report(raw, provider="cape2")
+    report = cape_report_to_sandbox_report(raw, provider="cape2", source_format="cape2")
     assert report.target.sha256 == "b" * 64
     assert report.target.md5 == "c" * 32
     assert report.target.name == "sample.exe"
@@ -139,7 +139,7 @@ def test_registry_keeps_the_real_string_shape_not_just_dict_rows():
     # but a dict-only filter here would silently drop 100% of that data the
     # moment one does — the same mistake file_writes had, fixed the same way.
     raw = {"behavior": {"summary": {"keys": ["HKEY_LOCAL_MACHINE\\Software\\Run"]}}}
-    report = cape_report_to_sandbox_report(raw, provider="cape2")
+    report = cape_report_to_sandbox_report(raw, provider="cape2", source_format="cape2")
     assert report.registry == ["HKEY_LOCAL_MACHINE\\Software\\Run"]
 
 
@@ -157,7 +157,7 @@ def test_summary_and_file_writes_carry_the_linux_persistence_evidence():
         "behavior": {"summary": {"write_files": ["/etc/cron.d/x"]}},
         "file_writes": ["/etc/rc.local"],
     }
-    report = cape_report_to_sandbox_report(raw, provider="cape2")
+    report = cape_report_to_sandbox_report(raw, provider="cape2", source_format="cape2")
     assert report.summary["write_files"] == ["/etc/cron.d/x"]
     assert report.summary["files"] == []
     assert report.file_writes == ["/etc/rc.local"]

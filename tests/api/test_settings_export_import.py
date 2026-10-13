@@ -50,7 +50,7 @@ def test_export_omits_secrets_and_lists_their_names(client):
     assert r.headers["content-type"].startswith("application/json")
     assert r.headers["content-disposition"] == "attachment; filename=maljan-settings.json"
     body = r.json()
-    assert body["format"] == "maljan-settings/1"
+    assert body["format"] == "maljan-settings/2"
     assert body["values"] == {"core.llm.provider": "openai"}
     assert body["secrets_omitted"] == ["core.llm.openai.api_key"]
     exported_at = datetime.fromisoformat(body["exported_at"])
@@ -241,6 +241,35 @@ def test_import_rejects_unknown_and_read_only_keys_before_applying(client):
         "core.no.such.key": "unknown key",
         "api.debug": "read-only",
     }
+    save.assert_not_called()
+
+
+def test_import_names_a_retired_key_as_the_one_to_delete(client):
+    """An export written before a setting was retired is refused, saying which key to delete."""
+    with patch("app.api.v1.settings.SettingsService.save", AsyncMock()) as save:
+        r = client.post(
+            "/api/v1/settings/import",
+            json={
+                "format": "maljan-settings/1",
+                "values": {
+                    "core.preprocessing.summarizer_provider": "openai",
+                    "core.preprocessing.summarizer_model": "gpt-x",
+                    "core.reporting.narrative_max_tokens": 1500,
+                    "core.llm.provider": "openai",
+                },
+            },
+        )
+    assert r.status_code == 422
+    errors = r.json()["errors"]
+    assert set(errors) == {
+        "core.preprocessing.summarizer_provider",
+        "core.preprocessing.summarizer_model",
+        "core.reporting.narrative_max_tokens",
+    }
+    for key, message in errors.items():
+        assert message.startswith("retired setting"), key
+        assert "delete" in message, key
+    assert "llm.agents.summarizer" in errors["core.preprocessing.summarizer_model"]
     save.assert_not_called()
 
 

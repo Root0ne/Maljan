@@ -122,7 +122,7 @@
         "api": "NtCreateFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x000002e0'}, {'name': 'DesiredAccess', 'value': '0x40100080', 'pretty_value': 'GENERIC_WRITE|FILE_READ_ATTRIBUTES|SYNCHRONIZE'}, {'name': 'FileName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Microsoft\\\\AppNotifications\\\\Settings\\\\History.db'}, {'name': 'CreateDisposition', 'value': '3', 'pretty_value': 'FILE_OPEN_IF'}, {'name': 'ShareAccess', 'value': '3', 'p\u2026",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x000002e0'}, {'name': 'DesiredAccess', 'value': '0x40100080', 'pretty_value': 'GENERIC_WRITE|FILE_READ_ATTRIBUTES|SYNCHRONIZE'}, {'name': 'FileName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Microsoft\\\\AppNotifications\\\\Settings\\\\History.db'}, {'name': 'CreateDisposition', 'value': '3', 'pretty_value': 'FILE_OPEN_IF'}, {'name': 'ShareAccess', 'value': '3', 'p…",
         "first_seen": "2026-08-13 22:30:21,952",
         "process_count": 0,
         "processes": []
@@ -194,7 +194,7 @@
         "api": "NtProtectVirtualMemory",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x7ffa0b3f1000'}, {'name': 'ModuleName', 'value': 'ntdll.dll'}, {'name': 'NumberOfBytesProtected', 'value': '0x00004000'}, {'name': 'MemoryType', 'value': '0x00000000'}, {'name': 'NewAccessProtection', 'value': '0x00000004', 'pretty_value': 'PAGE_READWRITE'}, {'name': 'OldAccessProtection', 'value': '0x00000002',\u2026",
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x7ffa0b3f1000'}, {'name': 'ModuleName', 'value': 'ntdll.dll'}, {'name': 'NumberOfBytesProtected', 'value': '0x00004000'}, {'name': 'MemoryType', 'value': '0x00000000'}, {'name': 'NewAccessProtection', 'value': '0x00000004', 'pretty_value': 'PAGE_READWRITE'}, {'name': 'OldAccessProtection', 'value': '0x00000002',…",
         "first_seen": "2026-08-13 22:30:08,999",
         "process_count": 0,
         "processes": []
@@ -212,7 +212,7 @@
         "api": "NtQueryInformationToken",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'TokenInformationClass', 'value': '1'}, {'name': 'TokenInformation', 'value': '`\\\\xef\\\\xdf\\\\x0bI\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\xfa\\\\x7f\\\\x00\\\\x00\\\\x01\\\\x05\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x05\\\\x15\\\\x00\\\\x00\\\\x009a\\\\x00k\\\\xe9&C.\\\\xcf\\\\x1f\\\\xe7\\\\xfe\\\\xe8\\\\x03\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\xa0\\\\x05\\\\xe7 \\\\x83\\\\x01\\\\x00\\\\x00\\\\x94\\\\xef\\\\xdf\\\\x0bI\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\u2026",
+        "first_args": "[{'name': 'TokenInformationClass', 'value': '1'}, {'name': 'TokenInformation', 'value': '`\\\\xef\\\\xdf\\\\x0bI\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\xfa\\\\x7f\\\\x00\\\\x00\\\\x01\\\\x05\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x05\\\\x15\\\\x00\\\\x00\\\\x009a\\\\x00k\\\\xe9&C.\\\\xcf\\\\x1f\\\\xe7\\\\xfe\\\\xe8\\\\x03\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\xa0\\\\x05\\\\xe7 \\\\x83\\\\x01\\\\x00\\\\x00\\\\x94\\\\xef\\\\xdf\\\\x0bI\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00…",
         "first_seen": "2026-08-13 22:30:09,155",
         "process_count": 0,
         "processes": []
@@ -293,7 +293,7 @@
         "api": "NtWriteFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x000002e0'}, {'name': 'HandleName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Microsoft\\\\AppNotifications\\\\Settings\\\\History.db'}, {'name': 'Buffer', 'value': 'SQLite format 3\\\\x00\\\\xb2\\\\x9c\\\\x9a\\\\x802\\\\xe0\\\\x10\\\\xa7\\\\x99\\\\x0b\\\\x14\\\\xcd`\\\\xd8Gr+1\\\\xbcD\\\\xb6\\\\xdf\\\\xa6\\\\x0fA\\\\x8e\\\\x96\\\\xd7t\\\\x14\\\\xabz\\\\xbc\\\\xd5\\\\xaaj\\\\x9f(=\\\\x13\\\\xdd\\\\xa4\\\\xca\\\\xefFV\\\\xf8QM\\\\xcc\u2026",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x000002e0'}, {'name': 'HandleName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Microsoft\\\\AppNotifications\\\\Settings\\\\History.db'}, {'name': 'Buffer', 'value': 'SQLite format 3\\\\x00\\\\xb2\\\\x9c\\\\x9a\\\\x802\\\\xe0\\\\x10\\\\xa7\\\\x99\\\\x0b\\\\x14\\\\xcd`\\\\xd8Gr+1\\\\xbcD\\\\xb6\\\\xdf\\\\xa6\\\\x0fA\\\\x8e\\\\x96\\\\xd7t\\\\x14\\\\xabz\\\\xbc\\\\xd5\\\\xaaj\\\\x9f(=\\\\x13\\\\xdd\\\\xa4\\\\xca\\\\xefFV\\\\xf8QM\\\\xcc…",
         "first_seen": "2026-08-13 22:30:21,952",
         "process_count": 0,
         "processes": []
@@ -2711,8 +2711,8 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Control Panel\\Desktop\\PreferredUILanguages",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "\\x00"
       },
       {
         "key": "HKEY_CURRENT_USER\\Control Panel\\Desktop\\MuiCached",
@@ -2721,8 +2721,8 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Control Panel\\Desktop\\MuiCached\\MachinePreferredUILanguages",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "\\x00"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\LanguageOverlay\\OverlayPackages\\en-US",
@@ -2736,12 +2736,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\GRE_Initialize\\DisableMetaFiles",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\GRE_Initialize\\DisableUmpdBufferSizeCheck",
-        "operation": "access",
+        "operation": "query",
         "value": null
       }
     ],

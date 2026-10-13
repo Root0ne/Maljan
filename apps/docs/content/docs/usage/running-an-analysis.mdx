@@ -36,10 +36,13 @@ side of the same lifecycle is in
    -H "Authorization: Bearer $TOKEN" -F 'file=@report.json'
  ```
 
- The format is sniffed from the content; CAPEv2, Cuckoo and Triage reports
- are accepted by default (`sandbox.upload.allowed_formats`), up to 64 MiB
- (`sandbox.upload.max_report_bytes`). The upload records whether the report's
- own target hash matches the sample.
+ The format is sniffed from the content against the declared report formats;
+ CAPEv2, Cuckoo and Triage reports are accepted by default
+ (`sandbox.upload.allowed_formats`), and a format of your own is declared as
+ data in `sandbox.report_formats` (see [Report formats are
+ declarations](/tools/sandboxes/#report-formats-are-declarations)), up to
+ 64 MiB (`sandbox.upload.max_report_bytes`). The upload records whether the
+ report's own target hash matches the sample.
 
 </Step>
 
@@ -93,7 +96,11 @@ submit rather than a failed job minutes later. Unknown keys pass through.
 three kinds of job that could only fail later:
 
 - **A model no probe has reached.** With `llm.require_probe` on (the default),
-  every model an agent of the team names must have answered a connection test.
+  every model the job calls must have answered a connection test: every agent
+  of the team and every agent it can ask, the mediator and summariser when they
+  run, and the judge and (while reporting is on) the reporter on the global judge
+  model unless they
+  have an entry.
   See [a model is probed before a job may name
   it](/configuration/#a-model-is-probed-before-a-job-may-name-it).
 - **A static provider that is not ready.** Ghidra does not degrade, so a team
@@ -169,7 +176,8 @@ Programmatically:
 | :-- | :-- |
 | `GET /api/v1/jobs/{job_id}` | The job's `status` — `pending`, `running`, `completed`, `failed` or `cancelled` — with its timing and error message. |
 | `/ws/analysis/{job_id}` | The run's events as they happen, including `stage_started`, `stage_skipped` and `stage_finished` once per stage. |
-| `GET /api/v1/jobs/{job_id}/events` | The same events, in sequence order, for a tab that opens mid-run or resumes with `since`. They are read first from a live buffer (24 hours, at most 1,000 events) and then from the `job_events` table, kept for `core.events.retention_days` (30 days by default). |
+| `GET /api/v1/jobs/{job_id}/events` | The same events, in sequence order, for a tab that opens mid-run or resumes with `since`. They are read first from a live buffer (24 hours, at most 1,000 events) and then from the `job_events` table, kept for `core.events.retention_days` (30 days by default). Each model call's `model_usage` event is in the table alone and is merged in by `seq` either way. |
+| `GET /api/v1/jobs/{job_id}/usage` | The job's usage so far, from its `model_usage` events: `calls`, `retries`, `failed_attempts`, `tokens` (the run summary's block: input, output, cache reads and writes, reasoning, per agent) and `spend` (`spent_usd`, the sum of what the spend meter charged each call when it was settled, where each price came from, calls that could not be priced, `repriced_calls` for older records without a charge, per agent). Answers during a run and after a worker that died. |
 | `GET /api/v1/jobs/{job_id}/evidence` | The evidence ledger, one entry per tool call, filterable by stage, agent and tool. |
 | `DELETE /api/v1/jobs/{job_id}` | Cancels a pending or running job; its model calls stop. |
 

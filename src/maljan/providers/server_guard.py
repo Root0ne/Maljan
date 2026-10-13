@@ -119,6 +119,15 @@ class ServerGuard:
         self.explicit_call_timeout = bool(explicit_call_timeout)
         self._declared: dict[str, float] = {}
         self._long_running: frozenset[str] = frozenset()
+        # The budgets and long-running tools the server's settings block
+        # declares for its tools (``ToolFacts.timeout_seconds`` and
+        # ``long_running``), held beside the manifest's: a server with no
+        # manifest of its own is held to what its declaration says.
+        self._facts_declared: dict[str, float] = {}
+        self._facts_long_running: frozenset[str] = frozenset()
+        # The tools the server's settings block declares to open and analyse a
+        # sample (``sample_open``), held as long-running like a manifest's.
+        self._opening: frozenset[str] = frozenset()
         self._on_open = on_open
         self._clock = clock
         self._lock = threading.Lock()
@@ -143,10 +152,45 @@ class ServerGuard:
             self._declared = declared
             self._long_running = frozenset(long_running)
 
-    def long_running(self, tool: str) -> bool:
-        """Whether the server's manifest declares ``tool`` long-running with no wall clock."""
+    def declare_tool_facts(self, tool_facts: Any) -> None:
+        """Keep the budgets the server's settings block declares, per tool (``tool_facts``).
+
+        ``ToolFacts.timeout_seconds`` is a budget like a manifest's
+        ``timeout_s`` (the larger of the two is kept), and
+        ``ToolFacts.long_running`` holds a tool long-running like a manifest's
+        own flag. Read for any server, declared by an operator or shipped.
+        """
+        declared: dict[str, float] = {}
+        long_running: set[str] = set()
+        for name, facts in (tool_facts or {}).items():
+            value = getattr(facts, "timeout_seconds", None)
+            if isinstance(value, int | float) and not isinstance(value, bool) and value > 0:
+                declared[str(name)] = float(value)
+            if getattr(facts, "long_running", False) is True:
+                long_running.add(str(name))
         with self._lock:
-            return tool in self._long_running
+            self._facts_declared = declared
+            self._facts_long_running = frozenset(long_running)
+
+    def declare_sample_open(self, spec: Any) -> None:
+        """Hold the tools ``spec`` (a block's ``sample_open``) declares to open and analyse a
+        sample as long-running, as a manifest's own declaration is held."""
+        from maljan.providers.sample_open import long_running_tools
+
+        opening = long_running_tools(spec)
+        with self._lock:
+            self._opening = opening
+
+    def long_running(self, tool: str) -> bool:
+        """Whether ``tool`` runs with no wall clock: by the server's manifest, by the open
+        and analysis tools its settings block declares (``sample_open``), or by its
+        declared ``long_running``."""
+        with self._lock:
+            return (
+                tool in self._long_running
+                or tool in self._opening
+                or tool in self._facts_long_running
+            )
 
     def call_timeout(self, tool: str) -> float | None:
         """How long one call of ``tool`` may take before it is a transport failure, or ``None``.
@@ -164,7 +208,7 @@ class ServerGuard:
             # would only abandon a call the server is still working on.
             return None
         with self._lock:
-            declared = self._declared.get(tool, 0.0)
+            declared = max(self._declared.get(tool, 0.0), self._facts_declared.get(tool, 0.0))
         return max(self.call_timeout_seconds, declared) + CALL_TIMEOUT_GRACE_SECONDS
 
     # -- the breaker ---------------------------------------------------------
@@ -294,37 +338,66 @@ def _resting_answer(tool: str, message: str) -> str:
 
 
 def guard_from_settings(
-    server: str, cfg: Any, on_open: Callable[[dict[str, Any]], None] | None = None
+    server: str,
+    cfg: Any,
+    on_open: Callable[[dict[str, Any]], None] | None = None,
+    sample_open: Any = None,
+    block: Any = None,
 ) -> ServerGuard:
-    """A guard for ``server`` with the thresholds ``cfg.mcp.breaker`` sets."""
+    """A guard for ``server`` with the thresholds ``cfg.mcp.breaker`` sets.
+
+    ``sample_open`` is the server's own block's declaration: its open and
+    analysis tools are held long-running. ``block`` is the server's settings
+    block, whose ``call_timeout_seconds`` is the budget each of its calls gets
+    (:func:`server_call_budget`) and whose ``tool_facts`` declare each tool's
+    own budget and long-running flag (:meth:`ServerGuard.declare_tool_facts`);
+    with none given it is ``cfg.mcp.servers[server]``.
+    """
     breaker = getattr(getattr(cfg, "mcp", None), "breaker", None)
-    return ServerGuard(
+    if block is None:
+        servers = getattr(getattr(cfg, "mcp", None), "servers", None)
+        block = servers.get(server) if isinstance(servers, dict) else None
+    guard = ServerGuard(
         server,
         failures_to_open=int(getattr(breaker, "failures_to_open", 3)),
         cooldown_seconds=float(getattr(breaker, "cooldown_seconds", 60.0)),
         max_concurrent_calls=int(getattr(breaker, "max_concurrent_calls", 4)),
-        call_timeout_seconds=deployment_call_budget(cfg),
+        call_timeout_seconds=server_call_budget(cfg, block),
         on_open=on_open,
-        explicit_call_timeout=float(getattr(breaker, "call_timeout_seconds", 0.0) or 0.0) > 0,
+        explicit_call_timeout=explicit_call_timeout(cfg) > 0,
     )
+    guard.declare_sample_open(sample_open)
+    guard.declare_tool_facts(getattr(block, "tool_facts", None))
+    return guard
 
 
-def deployment_call_budget(cfg: Any) -> float:
-    """The budget every tool call gets at least: the setting, or the longest tool budget configured.
+def explicit_call_timeout(cfg: Any) -> float:
+    """The per-call budget an operator set (``mcp.breaker.call_timeout_seconds``), or ``0``.
 
-    ``core.mcp.breaker.call_timeout_seconds`` when it is set. Zero means
-    "derive it": the longest budget the deployment gives a tool — capa's
-    ``core.static.capa.timeout_seconds`` (300 by default, raised to 900 for a
-    slow host) and YARA's — so a call never times out at the transport before
-    the analysis it runs is allowed to finish.
+    Only an operator's number bounds a long-running tool.
     """
     breaker = getattr(getattr(cfg, "mcp", None), "breaker", None)
-    explicit = float(getattr(breaker, "call_timeout_seconds", 0.0) or 0.0)
+    return max(0.0, float(getattr(breaker, "call_timeout_seconds", 0.0) or 0.0))
+
+
+def server_call_budget(cfg: Any, block: Any) -> float:
+    """The budget each call to one server gets at least: the operator's, or the server's own.
+
+    ``core.mcp.breaker.call_timeout_seconds`` when an operator set it, for
+    every server. Otherwise the ``call_timeout_seconds`` the server's own
+    block declares (``MCPServerConfig``; zero sends its calls with no deadline
+    of their own). A block that declares none (every built-in), or no block,
+    gets the deployment's floor exactly as it was derived before servers
+    declared their own (``core.legacy_tool_tables.legacy_call_floor``), so
+    stored settings keep every server's budget. A tool that declares a longer
+    budget of its own gets that one (:meth:`ServerGuard.call_timeout`).
+    """
+    from maljan.core.legacy_tool_tables import legacy_call_floor
+
+    explicit = explicit_call_timeout(cfg)
     if explicit > 0:
         return explicit
-    static = getattr(cfg, "static", None)
-    budgets = [
-        float(getattr(getattr(static, name, None), "timeout_seconds", 0) or 0)
-        for name in ("capa", "yara")
-    ]
-    return max([b for b in budgets if b > 0], default=0.0)
+    declared = getattr(block, "call_timeout_seconds", None) if block is not None else None
+    if isinstance(declared, int | float) and not isinstance(declared, bool):
+        return max(0.0, float(declared))
+    return legacy_call_floor(cfg)

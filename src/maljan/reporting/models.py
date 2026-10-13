@@ -22,8 +22,16 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+)
 
+from maljan.core.reputation import ReputationRecord
 from maljan.schemas.stix_models import get_utcnow
 
 # ---------------------------------------------------------------------------
@@ -326,9 +334,16 @@ class DynamicBehavior(BaseModel):
     registry_mods: list[RegistryMod] = Field(default_factory=list)
     file_operations: list[dict[str, Any]] = Field(default_factory=list)
     notable_apis: list[dict[str, Any]] = Field(default_factory=list)
+    # The behaviour categories of the APIs the sandbox recorded the sample
+    # calling, counted per category by what an API catalogue answer of the run
+    # said of each name (one count per name). A name no catalogue answer
+    # covers is not counted. Empty on a report stored before it was read.
+    api_capabilities: dict[str, int] = Field(default_factory=dict)
     sandbox_signatures: list[SandboxSignature] = Field(default_factory=list)
-    # Sections this sandbox structurally cannot produce, e.g. ["apistats",
-    # "calls", "registry", "generic_events"] for Hatching Triage. Named rather
+    # Sections this sandbox structurally cannot produce, by the platform's
+    # section ids (``schemas.sandbox_report.SECTION_IDS``), printed as stored:
+    # a report stored before the ids were normalised holds its sandbox's own
+    # words, read through ``LEGACY_SECTION_IDS`` wherever compared. Named rather
     # than left empty: an empty API-call table reads as "the sample did
     # nothing", which is the opposite of "we could not see". Every renderer
     # prints "Not provided by this sandbox" for these, and no detection layer
@@ -379,6 +394,22 @@ class NetworkDomain(BaseModel):
     # HTTP view naming it: a TLS name says nothing about which process made
     # the connection, so the row waits for the judge.
     capture_only: bool = False
+    # Whether the platform stopped reading the answers of this name's DNS
+    # request before it had read them all: the request's questions shared more
+    # answers than the request's own size bounds (``schemas.sandbox_document.
+    # DnsAnswers``), so ``resolved_ips`` holds fewer addresses, never a wrong
+    # one, and how many of the request's answers were not read for it. Left out
+    # of a dump where nothing was withheld, so a stored report reads as before.
+    resolved_ips_partial: bool = False
+    resolved_ips_withheld: int = 0
+
+    @model_serializer(mode="wrap")
+    def _dump(self, handler: SerializerFunctionWrapHandler) -> Any:
+        dumped = handler(self)
+        if isinstance(dumped, dict) and not dumped.get("resolved_ips_partial"):
+            dumped.pop("resolved_ips_partial", None)
+            dumped.pop("resolved_ips_withheld", None)
+        return dumped
 
 
 class NetworkIP(BaseModel):
@@ -411,11 +442,16 @@ class NetworkIP(BaseModel):
     # refuses the row. Empty when the report names none.
     outside_processes: list[str] = Field(default_factory=list)
     # The processes the two lineage facts disagree about that made flows to
-    # it, as ``<image> (procid N)``: the ones only Triage's ``orig`` mark names
+    # it, as ``<image> (procid N)``: the ones only the sandbox's own mark names
     # as the sample's, and the ones only the submitted file's own process tree
     # does. Their flows state no attribution, and the publish rule says why.
     marked_only_processes: list[str] = Field(default_factory=list)
     file_only_processes: list[str] = Field(default_factory=list)
+    # The name the sandbox whose mark ``marked_only_processes`` are declares
+    # (its report format's display name). ``None`` on a row stored before it
+    # was recorded, and then left out of the dump; the publish rule then
+    # names the one sandbox whose mark such a row could be.
+    marked_by: str | None = Field(default=None, exclude_if=lambda value: value is None)
     # Whether the address is a public DNS resolver's, which a sandbox guest
     # reaches whatever the sample does.
     public_resolver: bool = False
@@ -588,6 +624,28 @@ class CapabilityCell(BaseModel):
     evidence_roots: list[str] = Field(default_factory=list)
     # One ``<entry id>: no: <reason>`` per cited entry that gave no root.
     roots_not_read: list[str] = Field(default_factory=list)
+    # The ledger entries and sandbox items behind the technique: each cited
+    # source that gives a statement naming it a root, and each asserting
+    # entry whose rows name it (``validation.technique_sources``). One entry
+    # is one source however many agents cite it. Empty on rows built without
+    # the ledger.
+    sources: list[str] = Field(default_factory=list)
+    # How many of ``sources`` are independent: sources whose roots overlap
+    # (two tools reading one place) count once.
+    independent_sources: int = 0
+    # The matrix's own decision, the one ``TTPMapping.is_corroborated`` carries
+    # for a published row, so the console reads it rather than recounting.
+    # ``None`` on a cell stored before it was recorded.
+    is_corroborated: bool | None = None
+    # The sources counted by what each is: ``code``, ``run``, ``rule``,
+    # ``artefact`` (a place in the file), ``report`` (an external assessment of
+    # the whole file) or ``unplaced`` (cited, giving no root).
+    source_kinds: dict[str, int] = Field(default_factory=dict)
+    # ``capability`` when no source is behaviour (code, run, rule) and the
+    # placed ones are all artefacts of the file: what the sample can do, not
+    # what it was seen doing; ``unobserved`` when no source is behaviour and
+    # one is an external assessment or none is placed. Empty otherwise.
+    support: str = ""
 
 
 class TTPMapping(BaseModel):
@@ -612,6 +670,12 @@ class TTPMapping(BaseModel):
     # See ``CapabilityCell.evidence_roots`` and ``roots_not_read``.
     evidence_roots: list[str] = Field(default_factory=list)
     roots_not_read: list[str] = Field(default_factory=list)
+    # See ``CapabilityCell.sources``, ``independent_sources``, ``source_kinds``
+    # and ``support``.
+    sources: list[str] = Field(default_factory=list)
+    independent_sources: int = 0
+    source_kinds: dict[str, int] = Field(default_factory=dict)
+    support: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -732,6 +796,10 @@ class ExternalReference(BaseModel):
     source: str  # "VirusTotal", "MalwareBazaar", "MITRE ATT&CK", ...
     url: str
     note: str | None = None
+    # Whether the Sigma draft lists this link among its references, as the
+    # lookup it came from declares (``reporting.reference_urls``' ``sigma``).
+    # Left out of the dump when false, so a stored report dumps as it did.
+    sigma: bool = Field(default=False, exclude_if=lambda value: not value)
 
 
 # ---------------------------------------------------------------------------
@@ -974,6 +1042,14 @@ class RecoveredValue(BaseModel):
     # argument 2, is then argument 2 of the call at …; it is not followed past
     # that call"); empty where it joined none, or on a record stored before it.
     passed_to: list[str] = Field(default_factory=list)
+    # The tool's declared kind (``emulated_strings`` for emulation,
+    # ``decoded_strings`` for a static decoder), which decides the words the
+    # recovery is stated in, and the name published text gives the tool (its
+    # declared display name). Empty on a record stored before they were
+    # recorded, and then left out of the dump: such a record is read by its
+    # tool's name (``legacy_tool_names``).
+    kind: str = Field(default="", exclude_if=lambda value: not value)
+    named: str = Field(default="", exclude_if=lambda value: not value)
 
 
 class EmulatedStrings(BaseModel):
@@ -1186,6 +1262,66 @@ class EvidenceIndexRow(BaseModel):
     # repeats; the row's own id for a call a guard answered with no tool run
     # and no earlier entry; ``None`` for a call that ran.
     repeated_of: str | None = None
+    # The source the entry recorded its tool under (``LedgerEntry.source``),
+    # which the report reads the tool's declaration by
+    # (``reporting.tool_kinds``). ``None`` on a row of an entry written before
+    # sources were recorded, and then left out of the dump, so a stored report
+    # reads and dumps as it did.
+    source: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    # The facts the entry stored when it was written (``LedgerEntry.facts``),
+    # which the report reads the tool's kind, display name and paths by, so a
+    # re-render reads what the worker read (``core.declared_reading``). ``None``
+    # on a row of an entry that stored none, and then left out of the dump.
+    facts: dict[str, Any] | None = Field(default=None, exclude_if=lambda value: value is None)
+    # The role the calling agent's definition declared when the entry was
+    # written (``LedgerEntry.agent_role``), which the console tab of a section
+    # an operator's tool produced is read by (``reporting.section_tabs``).
+    # ``None`` on a row of an entry written without one, and then left out.
+    agent_role: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    # The console tab the calling agent's definition declared
+    # (``LedgerEntry.agent_tab``), which places a section of an operator's
+    # tool when its kind places none. ``None`` where none was, and left out.
+    agent_tab: str | None = Field(default=None, exclude_if=lambda value: value is None)
+
+
+class ReputationAnswer(ReputationRecord):
+    """One reputation lookup's answer in the report: its entry, its tool and its read record.
+
+    The record the lookup's declaration read from the answer when the entry
+    was written (``core.reputation.ReputationRecord``), so the Markdown
+    renderer and the console read it as the worker read it, without settings.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    entry_id: str
+    tool: str = ""
+
+
+def _readable_reputation(value: Any) -> Any:
+    """A stored report's reputation records, each one that cannot be read left out.
+
+    One malformed record never costs the stored report: it is dropped with a
+    warning, and a field a later version added is ignored (``extra="ignore"``).
+    ``None`` (a report stored before the records), or a value that is not a
+    list, reads as ``None``: the report is read the way a stored one is.
+    """
+    if value is None or not isinstance(value, list):
+        return None
+    from pydantic import ValidationError
+
+    from maljan.core.logger import logger
+
+    kept: list[Any] = []
+    for raw in value:
+        try:
+            kept.append(ReputationAnswer.model_validate(raw))
+        except ValidationError as exc:
+            logger.warning(
+                "report: a reputation record that cannot be read is left out (%d problems).",
+                exc.error_count(),
+            )
+    return kept
 
 
 # ---------------------------------------------------------------------------
@@ -1211,6 +1347,12 @@ class MalwareReport(BaseModel):
 
     # --- Verdict & severity ---
     verdict: Literal["Malware", "Suspicious", "Benign"] = "Suspicious"
+    # Why no verdict was reached at all, when none was: a run stopped before
+    # its verdict stage ran (``pipeline.stopped_run``). ``verdict`` above then
+    # holds the schema's placeholder and every surface says "not assessed"
+    # instead, with no judge named. ``None`` on every report a judge, or the
+    # pipeline standing in for a judge that did not answer, gave a verdict.
+    verdict_not_assessed: str | None = None
     # ``None`` when nothing assessed a confidence — a verdict the pipeline
     # wrote itself because the judge never answered. It is not defaulted to
     # 0.0 for the same reason ``severity`` is not defaulted to "Informational":
@@ -1287,10 +1429,12 @@ class MalwareReport(BaseModel):
     # after the body is composed (``reporting.claim_coverage``) and printed in
     # a section of their own; empty on a report stored before the field existed.
     claims_not_discussed: list[ClaimNotDiscussed] = Field(default_factory=list)
-    # For each technique a YARA rule of this run asserted, the rules and how
-    # many of each rule's own strings matched (``{"rule", "strings"}``), as the
-    # scan answered. Read by the ATT&CK table's "rule match only" note and by
-    # the capability grounding; empty on a report stored before it existed.
+    # For each technique a signature rule of this run asserted, the rules, how
+    # many of each rule's own strings matched and the asserting layer that
+    # matched it (``{"rule", "strings", "source"}``; a row stored before
+    # ``source`` is the shipped signature tool's), as the scan answered. Read by
+    # the ATT&CK table's "rule match only" note and by the capability
+    # grounding; empty on a report stored before it existed.
     rule_match_strings: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     # What emulation alone recovered, built from the ledger's FLOSS and strings
     # entries at build time; ``None`` on a report stored before it existed,
@@ -1327,6 +1471,15 @@ class MalwareReport(BaseModel):
     # list of calls behind them, without their outputs.
     sections: list[EvidenceSection] = Field(default_factory=list)
     evidence_index: list[EvidenceIndexRow] = Field(default_factory=list)
+    # Every reputation answer the run's lookups gave, as each lookup's
+    # declaration read it when its entry was written (``core.reputation``), in
+    # ledger order. ``None`` on a report stored before the records, and then
+    # left out of the dump, so a stored report reads and dumps as it did and
+    # its readers read it the way they always did (``core.legacy_reputation``);
+    # an empty list says the run's lookups established nothing.
+    reputation: Annotated[list[ReputationAnswer] | None, BeforeValidator(_readable_reputation)] = (
+        Field(default=None, exclude_if=lambda value: value is None)
+    )
 
     # --- Professional-report front-matter & spine ---
     # All additive/optional. Deterministic extractors fill front_matter /

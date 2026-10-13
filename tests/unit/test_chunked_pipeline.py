@@ -510,7 +510,7 @@ class TestServiceContainerLoadChunked:
     def test_calls_load_chunked_on_first_access(self) -> None:
         container = self._make_container()
         result = container.load_chunked("hash1", "static")
-        container.loader.load_chunked.assert_called_once_with("hash1", "static")
+        container.loader.load_chunked.assert_called_once_with("hash1", "static", room=None)
         assert len(result) == 1
 
     def test_uses_cached_text_if_available(self) -> None:
@@ -518,6 +518,6 @@ class TestServiceContainerLoadChunked:
         container._data_cache[("hash1", "static")] = "cached text"
         result = container.load_chunked("hash1", "static")
         # Cache hit ⇒ chunk_text() is called directly; load_chunked is bypassed.
-        container.loader.chunk_text.assert_called_once_with("static", "cached text")
+        container.loader.chunk_text.assert_called_once_with("static", "cached text", room=None)
         container.loader.load_chunked.assert_not_called()
         assert len(result) == 1

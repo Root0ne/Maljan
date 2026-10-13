@@ -425,6 +425,26 @@ class TestBuildEventsFromSandbox:
         events = build_events_from_sandbox(sandbox)
         assert any(e.get("TargetObject") == "HKLM\\Software\\Evil" for e in events)
 
+    def test_the_full_path_is_the_target_whatever_order_the_call_lists_it_in(self) -> None:
+        sandbox = {
+            "behavior": {
+                "calls": [
+                    {
+                        "api": "RegCreateKeyExW",
+                        "arguments": [
+                            {"name": "Registry", "value": "0x80000002"},
+                            {"name": "lpSubKey", "value": "Software\\Evil"},
+                            {"name": "FullName", "value": "HKLM\\Software\\Evil"},
+                        ],
+                    }
+                ]
+            }
+        }
+        events = build_events_from_sandbox(sandbox)
+        assert [e["TargetObject"] for e in events if "TargetObject" in e] == [
+            "HKLM\\Software\\Evil"
+        ]
+
 
 # ---------------------------------------------------------------------------
 # A corpus is third-party data, and one unreadable rule in it used to be fatal.

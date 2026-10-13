@@ -140,7 +140,7 @@
         "api": "NtCreateFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x000002d0'}, {'name': 'DesiredAccess', 'value': '0x80100080', 'pretty_value': 'GENERIC_READ|FILE_READ_ATTRIBUTES|SYNCHRONIZE'}, {'name': 'FileName', 'value': 'C:\\\\Windows\\\\System32\\\\ntdll.dll'}, {'name': 'CreateDisposition', 'value': '1', 'pretty_value': 'FILE_OPEN'}, {'name': 'ShareAccess', 'value': '1', 'pretty_value': 'FILE_SHARE_READ'}, {'name': 'FileAttribu\u2026",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x000002d0'}, {'name': 'DesiredAccess', 'value': '0x80100080', 'pretty_value': 'GENERIC_READ|FILE_READ_ATTRIBUTES|SYNCHRONIZE'}, {'name': 'FileName', 'value': 'C:\\\\Windows\\\\System32\\\\ntdll.dll'}, {'name': 'CreateDisposition', 'value': '1', 'pretty_value': 'FILE_OPEN'}, {'name': 'ShareAccess', 'value': '1', 'pretty_value': 'FILE_SHARE_READ'}, {'name': 'FileAttribu…",
         "first_seen": "2026-08-13 19:44:01,487",
         "process_count": 0,
         "processes": []
@@ -194,7 +194,7 @@
         "api": "NtOpenKey",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000254'}, {'name': 'DesiredAccess', 'value': '0x00020019', 'pretty_value': 'KEY_READ'}, {'name': 'ObjectAttributesHandle', 'value': '0x00000000'}, {'name': 'ObjectAttributesName', 'value': '\\\\Registry\\\\Machine\\\\System\\\\CurrentControlSet\\\\Control\\\\Nls\\\\CustomLocale'}, {'name': 'ObjectAttributes', 'value': 'HKEY_LOCAL_MACHINE\\\\System\\\\CurrentControlSet\\\\Control\\\u2026",
+        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000254'}, {'name': 'DesiredAccess', 'value': '0x00020019', 'pretty_value': 'KEY_READ'}, {'name': 'ObjectAttributesHandle', 'value': '0x00000000'}, {'name': 'ObjectAttributesName', 'value': '\\\\Registry\\\\Machine\\\\System\\\\CurrentControlSet\\\\Control\\\\Nls\\\\CustomLocale'}, {'name': 'ObjectAttributes', 'value': 'HKEY_LOCAL_MACHINE\\\\System\\\\CurrentControlSet\\\\Control\\…",
         "first_seen": "2026-08-13 19:44:01,331",
         "process_count": 0,
         "processes": []
@@ -203,7 +203,7 @@
         "api": "NtProtectVirtualMemory",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x77500000'}, {'name': 'ModuleName', 'value': 'USER32.dll'}, {'name': 'NumberOfBytesProtected', 'value': '0x00001000'}, {'name': 'MemoryType', 'value': '0x00000000'}, {'name': 'NewAccessProtection', 'value': '0x00000040', 'pretty_value': 'PAGE_EXECUTE_READWRITE'}, {'name': 'OldAccessProtection', 'value': '0x00000\u2026",
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x77500000'}, {'name': 'ModuleName', 'value': 'USER32.dll'}, {'name': 'NumberOfBytesProtected', 'value': '0x00001000'}, {'name': 'MemoryType', 'value': '0x00000000'}, {'name': 'NewAccessProtection', 'value': '0x00000040', 'pretty_value': 'PAGE_EXECUTE_READWRITE'}, {'name': 'OldAccessProtection', 'value': '0x00000…",
         "first_seen": "2026-08-13 19:44:01,737",
         "process_count": 0,
         "processes": []
@@ -266,7 +266,7 @@
         "api": "NtReadFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x000002d0'}, {'name': 'HandleName', 'value': 'C:\\\\Windows\\\\SysWOW64\\\\ntdll.dll'}, {'name': 'Buffer', 'value': 'MZ\\\\x90\\\\x00\\\\x03\\\\x00\\\\x00\\\\x00\\\\x04\\\\x00\\\\x00\\\\x00\\\\xff\\\\xff\\\\x00\\\\x00\\\\xb8\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00@\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\u2026",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x000002d0'}, {'name': 'HandleName', 'value': 'C:\\\\Windows\\\\SysWOW64\\\\ntdll.dll'}, {'name': 'Buffer', 'value': 'MZ\\\\x90\\\\x00\\\\x03\\\\x00\\\\x00\\\\x00\\\\x04\\\\x00\\\\x00\\\\x00\\\\xff\\\\xff\\\\x00\\\\x00\\\\xb8\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00@\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00…",
         "first_seen": "2026-08-13 19:44:01,550",
         "process_count": 0,
         "processes": []
@@ -2995,17 +2995,17 @@
     "registry": [
       {
         "key": "HKEY_CURRENT_USER\\Software\\Borland\\Locales",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Borland\\Locales",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Borland\\Delphi\\Locales",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3015,7 +3015,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CustomLocale\\en-US",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3025,13 +3025,13 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\ExtendedLocale\\en-US",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\Sorting\\Versions\\000603xx",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "kernel32.dll"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Nls\\Sorting\\Ids",
@@ -3040,17 +3040,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\Sorting\\Ids\\en-US",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\Sorting\\Ids\\en",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3070,7 +3070,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3080,7 +3080,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3090,26 +3090,16 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\DontShowUI",
         "operation": "modify",
         "value": "1"
-      },
-      {
-        "key": "0x80000001",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x80000002",
-        "operation": "query",
-        "value": null
       }
     ],
-    "total": 23
+    "total": 21
   },
   "sandbox_services_and_tasks": {
     "commands": [],

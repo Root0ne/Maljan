@@ -133,20 +133,23 @@ def test_a_probe_runs_with_no_transaction_open(
     assert session.commits >= 1
 
 
-def test_the_virustotal_registration_runs_with_no_transaction_open(
+def test_a_credential_bootstrap_runs_with_no_transaction_open(
     client: TestClient, session: FakeSession
 ) -> None:
-    """The call goes to VirusTotal; the request's transaction does not wait on it."""
+    """The call goes to the issuing service; the request's transaction does not wait on it."""
     open_during_the_call: list[bool] = []
 
-    from app.services.virustotal_register import RegistrationError
+    from app.services.credential_bootstrap import BootstrapError
 
-    async def _register() -> dict[str, str]:
+    async def _obtain(*_args: Any, **_kwargs: Any) -> tuple[str, dict[str, str]]:
         open_during_the_call.append(session.in_transaction)
-        raise RegistrationError("VirusTotal refused the registration")
+        raise BootstrapError("the service refused the request")
 
-    with patch("app.api.v1.settings.register_agent", _register):
-        response = client.post("/api/v1/settings/virustotal/register")
+    with (
+        _stored_is_empty(),
+        patch("app.services.credential_bootstrap.obtain_credential", _obtain),
+    ):
+        response = client.post("/api/v1/settings/servers/virustotal/credential")
 
     assert response.status_code == 502
     assert open_during_the_call == [False]
@@ -170,6 +173,9 @@ def test_the_memory_purge_runs_with_no_transaction_open(session: FakeSession) ->
         def purge_low_quality(self, **kwargs: Any) -> int:
             open_during_the_purge.append(session.in_transaction)
             return 3
+
+        def close(self) -> None:
+            return None
 
     async def _build(db: Any) -> Any:
         # Reading the settings is what puts the request in a transaction.

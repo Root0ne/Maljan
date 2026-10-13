@@ -26,6 +26,12 @@ def _mcp(server: str) -> dict:
     return {"kind": "mcp", "server": server, "name": None}
 
 
+# Reputation is reached by capability: every server declaring a reputation
+# lookup, except a built-in its seed binds by `agents` (VirusTotal's own server
+# with the shipped map, which these definitions named by key before).
+_REPUTATION = {"kind": "capability", "server": None, "name": None, "capability": "reputation"}
+
+
 def _paper_stages() -> list[dict]:
     """The four stages a plain analyst list has always meant, as they dump.
 
@@ -129,7 +135,7 @@ DEFAULT_AGENTS = {
             "role": "static",
             "label": "Static analyst",
             "prompt": None,
-            "tools": [_mcp("analysis"), _mcp("knowledge"), _mcp("virustotal")],
+            "tools": [_mcp("analysis"), _mcp("knowledge"), _REPUTATION],
             "static_provider": None,
             "enabled": True,
             "data_sources": [],
@@ -137,6 +143,7 @@ DEFAULT_AGENTS = {
             # (pinned in tests/unit/agents/test_delegation.py).
             "max_steps": None,
             "timeout_seconds": None,
+            "tab": "static",
         },
         "dynamic": {
             "role": "dynamic",
@@ -150,12 +157,13 @@ DEFAULT_AGENTS = {
             # (pinned in tests/unit/agents/test_delegation.py).
             "max_steps": None,
             "timeout_seconds": None,
+            "tab": "dynamic",
         },
         "network": {
             "role": "network",
             "label": "Network analyst",
             "prompt": None,
-            "tools": [_mcp("network"), _mcp("knowledge"), _mcp("virustotal")],
+            "tools": [_mcp("network"), _mcp("knowledge"), _REPUTATION],
             "static_provider": None,
             "enabled": True,
             "data_sources": [],
@@ -163,12 +171,13 @@ DEFAULT_AGENTS = {
             # (pinned in tests/unit/agents/test_delegation.py).
             "max_steps": None,
             "timeout_seconds": None,
+            "tab": "network",
         },
         "judge": {
             "role": "judge",
             "label": "Judge",
             "prompt": None,
-            "tools": [_mcp("knowledge"), _mcp("virustotal")],
+            "tools": [_mcp("knowledge"), _REPUTATION],
             "static_provider": None,
             "enabled": True,
             "data_sources": [],
@@ -176,6 +185,7 @@ DEFAULT_AGENTS = {
             # (pinned in tests/unit/agents/test_delegation.py).
             "max_steps": None,
             "timeout_seconds": None,
+            "tab": "identity",
         },
         # The narrative/composer step as a definition: an LLM entry and a
         # prompt of its own instead of borrowing the judge's, and no tools —
@@ -192,6 +202,7 @@ DEFAULT_AGENTS = {
             # (pinned in tests/unit/agents/test_delegation.py).
             "max_steps": None,
             "timeout_seconds": None,
+            "tab": None,
         },
     },
 }
@@ -617,7 +628,7 @@ class TestALegacyDatabaseGetsTheNewToolDefaults:
 
         refs = cfg.agents.definitions["static"].tools
 
-        assert [r.server for r in refs] == ["analysis", "knowledge", "virustotal"]
+        assert [r.model_dump() for r in refs] == [_mcp("analysis"), _mcp("knowledge"), _REPUTATION]
 
     def test_loading_such_a_database_does_not_read_as_tampering(self):
         """The failure mode this guards: settings that refuse to load at all,
@@ -651,7 +662,11 @@ class TestALegacyDatabaseGetsTheNewToolDefaults:
         definition = cfg.agents.definitions["network"]
 
         assert definition.enabled is False
-        assert [r.server for r in definition.tools] == ["network", "knowledge", "virustotal"]
+        assert [r.model_dump() for r in definition.tools] == [
+            _mcp("network"),
+            _mcp("knowledge"),
+            _REPUTATION,
+        ]
 
     def test_a_custom_definition_keeps_its_empty_tool_list(self):
         """The re-seed reads an empty list as "not set", which is only true for

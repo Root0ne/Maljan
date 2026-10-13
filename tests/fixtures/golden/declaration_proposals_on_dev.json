@@ -1,0 +1,6331 @@
+{
+ "about": "propose_tool on origin/dev e8ef382a for each definition (and probe answer) here: the shipped sidecars' served tools, the undeclared-server fixtures and static tool shapes the sandbox shape test must leave alone; the re-review cases (a resolver, a passive DNS and a domain lookup, name servers, interfaces, a hosts file, an embedded configuration, a memory image, a capture, an installer's file list, imports) were captured on origin/dev 4cdbac18",
+ "cases": [
+  {
+   "definition": {
+    "description": "What this server can do on this host.\n\nEach tool, its optional dependency, and whether it is available.\n",
+    "inputSchema": {
+     "properties": {},
+     "title": "capabilitiesArguments",
+     "type": "object"
+    },
+    "name": "capabilities",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "capabilitiesDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {},
+    "fields": {}
+   }
+  },
+  {
+   "definition": {
+    "description": "Detect a file's format, platform, mime type, size and magic bytes.\n\nGive ``carved_path`` to read a file an earlier call in this run wrote instead of the sample: pass the ``carved_path`` value of an entry ``carve_payloads`` returned, or of the ``child`` ``unpack_upx`` returned, exactly as it was returned and with no quotes around it. Leave it out and the sample is read.",
+    "inputSchema": {
+     "properties": {
+      "carved_path": {
+       "default": "",
+       "title": "Carved Path",
+       "type": "string"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "title": "identify_fileArguments",
+     "type": "object"
+    },
+    "name": "identify_file",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "identify_fileDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "medium",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Compute md5, sha1, sha256 and any available fuzzy or import hash.\n\nGive ``carved_path`` to read a file an earlier call in this run wrote instead of the sample: pass the ``carved_path`` value of an entry ``carve_payloads`` returned, or of the ``child`` ``unpack_upx`` returned, exactly as it was returned and with no quotes around it. Leave it out and the sample is read.",
+    "inputSchema": {
+     "properties": {
+      "carved_path": {
+       "default": "",
+       "title": "Carved Path",
+       "type": "string"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "title": "hashesArguments",
+     "type": "object"
+    },
+    "name": "hashes",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "hashesDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "medium",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Report whether the file carries a code signature, for one format.\n\n``file_type`` is the format the sample was routed as (\"pe\", \"apk\",\n\"mach-o\"); with none, the format is read from the bytes. The answer covers\nthat format alone \u2014 a PE is asked about Authenticode and nothing else.\n\nGive ``carved_path`` to read a file an earlier call in this run wrote instead of the sample: pass the ``carved_path`` value of an entry ``carve_payloads`` returned, or of the ``child`` ``unpack_upx`` returned, exactly as it was returned and with no quotes around it. Leave it out and the sample is read.",
+    "inputSchema": {
+     "properties": {
+      "carved_path": {
+       "default": "",
+       "title": "Carved Path",
+       "type": "string"
+      },
+      "file_type": {
+       "default": "",
+       "title": "File Type",
+       "type": "string"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "title": "signing_infoArguments",
+     "type": "object"
+    },
+    "name": "signing_info",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "signing_infoDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "medium",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "List printable ASCII and UTF-16LE runs with their byte offsets.\n\nThe page is small on purpose: 150 runs by default, because a larger answer\nis cut before you see it. Read ``next_offset`` in the answer and pass it as\n``offset`` to get the following page \u2014 it is ``null`` when this page was\nthe last one \u2014 and read ``total_matched`` to see how many runs the filters\nkept in all. Paging counts runs, not bytes.\n\nUse ``start``/``end`` for a byte range and ``pattern`` to keep only the runs\ncontaining a marker (case-insensitive substring, or ``re:<expression>`` for\na regular expression); searching with ``pattern`` finds more in one call\nthan paging through everything.\n\nGive ``carved_path`` to read a file an earlier call in this run wrote instead of the sample: pass the ``carved_path`` value of an entry ``carve_payloads`` returned, or of the ``child`` ``unpack_upx`` returned, exactly as it was returned and with no quotes around it. Leave it out and the sample is read.\n\nGive ``pattern`` the value itself, as it should be matched; a value that is only the parameter's name is asked about, not run. One pair of quotes around the whole value is read as not part of it, and the answer's ``read_as`` says so when that happened.",
+    "inputSchema": {
+     "properties": {
+      "carved_path": {
+       "default": "",
+       "title": "Carved Path",
+       "type": "string"
+      },
+      "encodings": {
+       "anyOf": [
+        {
+         "items": {
+          "type": "string"
+         },
+         "type": "array"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Encodings"
+      },
+      "end": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "End"
+      },
+      "limit": {
+       "default": 150,
+       "title": "Limit",
+       "type": "integer"
+      },
+      "min_len": {
+       "default": 6,
+       "title": "Min Len",
+       "type": "integer"
+      },
+      "offset": {
+       "default": 0,
+       "title": "Offset",
+       "type": "integer"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      },
+      "pattern": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Pattern"
+      },
+      "start": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Start"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "title": "stringsArguments",
+     "type": "object"
+    },
+    "name": "strings",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "stringsDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "medium",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Extract typed indicators (url, domain, ip, path, secret, ...) from text.",
+    "inputSchema": {
+     "properties": {
+      "kinds": {
+       "anyOf": [
+        {
+         "items": {
+          "type": "string"
+         },
+         "type": "array"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Kinds"
+      },
+      "text": {
+       "title": "Text",
+       "type": "string"
+      }
+     },
+     "required": [
+      "text"
+     ],
+     "title": "iocs_from_textArguments",
+     "type": "object"
+    },
+    "name": "iocs_from_text",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "iocs_from_textDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {},
+    "fields": {}
+   }
+  },
+  {
+   "definition": {
+    "description": "Extract typed indicators from a file's ASCII and wide strings.\n\nGive ``carved_path`` to read a file an earlier call in this run wrote instead of the sample: pass the ``carved_path`` value of an entry ``carve_payloads`` returned, or of the ``child`` ``unpack_upx`` returned, exactly as it was returned and with no quotes around it. Leave it out and the sample is read.",
+    "inputSchema": {
+     "properties": {
+      "carved_path": {
+       "default": "",
+       "title": "Carved Path",
+       "type": "string"
+      },
+      "kinds": {
+       "anyOf": [
+        {
+         "items": {
+          "type": "string"
+         },
+         "type": "array"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Kinds"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "title": "iocs_from_fileArguments",
+     "type": "object"
+    },
+    "name": "iocs_from_file",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "iocs_from_fileDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "medium",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Parse a PE: sections with entropy, imports, exports, resources, overlay, PDB path.\n\nImports are listed without interpretation: each row is dll, function (the name\nor Ordinal_N), ordinal, hint and address. Ask api_capability what an API is\nused for.\n\nGive ``carved_path`` to read a file an earlier call in this run wrote instead of the sample: pass the ``carved_path`` value of an entry ``carve_payloads`` returned, or of the ``child`` ``unpack_upx`` returned, exactly as it was returned and with no quotes around it. Leave it out and the sample is read.",
+    "inputSchema": {
+     "properties": {
+      "carved_path": {
+       "default": "",
+       "title": "Carved Path",
+       "type": "string"
+      },
+      "exports": {
+       "default": true,
+       "title": "Exports",
+       "type": "boolean"
+      },
+      "imports": {
+       "default": true,
+       "title": "Imports",
+       "type": "boolean"
+      },
+      "overlay": {
+       "default": true,
+       "title": "Overlay",
+       "type": "boolean"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      },
+      "pdb": {
+       "default": true,
+       "title": "Pdb",
+       "type": "boolean"
+      },
+      "resources": {
+       "default": true,
+       "title": "Resources",
+       "type": "boolean"
+      },
+      "sections": {
+       "default": true,
+       "title": "Sections",
+       "type": "boolean"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "title": "pe_infoArguments",
+     "type": "object"
+    },
+    "name": "pe_info",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "pe_infoDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "medium",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Parse an ELF: sections, imports (listed without interpretation), exports, segments,\ninterpreter, DT_NEEDED. Ask api_capability with platform=\"linux\" what a symbol is used for.\n\nGive ``carved_path`` to read a file an earlier call in this run wrote instead of the sample: pass the ``carved_path`` value of an entry ``carve_payloads`` returned, or of the ``child`` ``unpack_upx`` returned, exactly as it was returned and with no quotes around it. Leave it out and the sample is read.",
+    "inputSchema": {
+     "properties": {
+      "carved_path": {
+       "default": "",
+       "title": "Carved Path",
+       "type": "string"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "title": "elf_infoArguments",
+     "type": "object"
+    },
+    "name": "elf_info",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "elf_infoDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "medium",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Parse a Mach-O: headers, load commands, dylibs, code-signature presence.\n\nGive ``carved_path`` to read a file an earlier call in this run wrote instead of the sample: pass the ``carved_path`` value of an entry ``carve_payloads`` returned, or of the ``child`` ``unpack_upx`` returned, exactly as it was returned and with no quotes around it. Leave it out and the sample is read.",
+    "inputSchema": {
+     "properties": {
+      "carved_path": {
+       "default": "",
+       "title": "Carved Path",
+       "type": "string"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "title": "macho_infoArguments",
+     "type": "object"
+    },
+    "name": "macho_info",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "macho_infoDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "medium",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Read an APK's manifest, permissions, components, certificates and native libs.\n\nGive ``carved_path`` to read a file an earlier call in this run wrote instead of the sample: pass the ``carved_path`` value of an entry ``carve_payloads`` returned, or of the ``child`` ``unpack_upx`` returned, exactly as it was returned and with no quotes around it. Leave it out and the sample is read.",
+    "inputSchema": {
+     "properties": {
+      "carved_path": {
+       "default": "",
+       "title": "Carved Path",
+       "type": "string"
+      },
+      "certs": {
+       "default": true,
+       "title": "Certs",
+       "type": "boolean"
+      },
+      "components": {
+       "default": true,
+       "title": "Components",
+       "type": "boolean"
+      },
+      "dex_strings": {
+       "default": false,
+       "title": "Dex Strings",
+       "type": "boolean"
+      },
+      "limit": {
+       "default": 500,
+       "title": "Limit",
+       "type": "integer"
+      },
+      "manifest": {
+       "default": true,
+       "title": "Manifest",
+       "type": "boolean"
+      },
+      "native_libs": {
+       "default": true,
+       "title": "Native Libs",
+       "type": "boolean"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      },
+      "permissions": {
+       "default": true,
+       "title": "Permissions",
+       "type": "boolean"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "title": "apk_infoArguments",
+     "type": "object"
+    },
+    "name": "apk_info",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "apk_infoDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "medium",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Write each embedded payload found in the file out as its own file.\n\nThe carved files land under the sidecar's private staging directory, in\ncarved/<sha256 of the sample>/, and the returned paths point there; the\ndestination is not an argument. Each entry answers with its ``carved_path``\n\u2014 the value to pass back as this argument on any tool that reads a file.\n\nGive ``carved_path`` to read a file an earlier call in this run wrote instead of the sample: pass the ``carved_path`` value of an entry ``carve_payloads`` returned, or of the ``child`` ``unpack_upx`` returned, exactly as it was returned and with no quotes around it. Leave it out and the sample is read.",
+    "inputSchema": {
+     "properties": {
+      "carved_path": {
+       "default": "",
+       "title": "Carved Path",
+       "type": "string"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "title": "carve_payloadsArguments",
+     "type": "object"
+    },
+    "name": "carve_payloads",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "carve_payloadsDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "medium",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Unpack a UPX-packed PE and write the program it holds out as a file of its own.\n\nReads UPX's own pack header and records in Python, as ``upx -d`` would,\nwith nothing in the file run and no upx program needed: the methods\nNRV2B, NRV2D and NRV2E (32-, 16- and 8-bit streams) and LZMA, the code\nfilters 0x24, 0x25 and 0x26, the import table from UPX's import records,\nthe relocations, the export table and the resources UPX moved. The\nunpacked file lands where ``carve_payloads`` writes, private to this\nrun, and its ``carved_path`` (in ``child``) is the value to pass to any\ntool here that reads a file.\n\nThe answer states the pack header (offset, version, format, method,\nlevel, filter), the compressed and unpacked sizes, both adler32\nchecksums as stated and computed and whether each matched, then the\nunpacked file: its SHA-256, size, ``carved_path``, entry point, section\ntable, import count and what each rebuild step wrote. A file that is not\nUPX-packed, or uses a method, filter or record kind not read here, or\nstates an unpacked size above the platform's fixed sample upload cap,\nanswers ``unpacked`` with a ``no:`` sentence saying which. A checksum\nthat does not match, or data that does not decode as UPX writes it, is\nan error naming where, and no file is written.\n\nGive ``carved_path`` to read a file an earlier call in this run wrote instead of the sample: pass the ``carved_path`` value of an entry ``carve_payloads`` returned, or of the ``child`` ``unpack_upx`` returned, exactly as it was returned and with no quotes around it. Leave it out and the sample is read.",
+    "inputSchema": {
+     "properties": {
+      "carved_path": {
+       "default": "",
+       "title": "Carved Path",
+       "type": "string"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "title": "unpack_upxArguments",
+     "type": "object"
+    },
+    "name": "unpack_upx",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "unpack_upxDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "medium",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "List a zip, 7z, tar or gzip archive's members without extracting them.\n\nGive ``carved_path`` to read a file an earlier call in this run wrote instead of the sample: pass the ``carved_path`` value of an entry ``carve_payloads`` returned, or of the ``child`` ``unpack_upx`` returned, exactly as it was returned and with no quotes around it. Leave it out and the sample is read.",
+    "inputSchema": {
+     "properties": {
+      "carved_path": {
+       "default": "",
+       "title": "Carved Path",
+       "type": "string"
+      },
+      "limit": {
+       "default": 500,
+       "title": "Limit",
+       "type": "integer"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "title": "archive_listArguments",
+     "type": "object"
+    },
+    "name": "archive_list",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "archive_listDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "medium",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Inspect an OLE2, OOXML or PDF document for macros, parts and action markers.\n\nGive ``carved_path`` to read a file an earlier call in this run wrote instead of the sample: pass the ``carved_path`` value of an entry ``carve_payloads`` returned, or of the ``child`` ``unpack_upx`` returned, exactly as it was returned and with no quotes around it. Leave it out and the sample is read.",
+    "inputSchema": {
+     "properties": {
+      "carved_path": {
+       "default": "",
+       "title": "Carved Path",
+       "type": "string"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "title": "document_infoArguments",
+     "type": "object"
+    },
+    "name": "document_info",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "document_infoDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "medium",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Scan a file or a block of text against a YARA rule corpus.\n\nGive ``carved_path`` to read a file an earlier call in this run wrote instead of the sample: pass the ``carved_path`` value of an entry ``carve_payloads`` returned, or of the ``child`` ``unpack_upx`` returned, exactly as it was returned and with no quotes around it. Leave it out and the sample is read.",
+    "inputSchema": {
+     "properties": {
+      "carved_path": {
+       "default": "",
+       "title": "Carved Path",
+       "type": "string"
+      },
+      "path": {
+       "default": "",
+       "title": "Path",
+       "type": "string"
+      },
+      "ruleset": {
+       "default": "default",
+       "title": "Ruleset",
+       "type": "string"
+      },
+      "text": {
+       "default": "",
+       "title": "Text",
+       "type": "string"
+      },
+      "timeout_s": {
+       "default": 60,
+       "title": "Timeout S",
+       "type": "integer"
+      }
+     },
+     "title": "yara_scanArguments",
+     "type": "object"
+    },
+    "name": "yara_scan",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "yara_scanDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "carved_path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "medium",
+      "evidence": [
+       "inputSchema.properties.carved_path (name)"
+      ],
+      "value": {
+       "path": "carved_path"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Match structured events against a Sigma rule corpus.",
+    "inputSchema": {
+     "properties": {
+      "events": {
+       "items": {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       "title": "Events",
+       "type": "array"
+      },
+      "ruleset": {
+       "default": "default",
+       "title": "Ruleset",
+       "type": "string"
+      }
+     },
+     "required": [
+      "events"
+     ],
+     "title": "sigma_matchArguments",
+     "type": "object"
+    },
+    "name": "sigma_match",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "sigma_matchDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {},
+    "fields": {}
+   }
+  },
+  {
+   "definition": {
+    "description": "Derive Sysmon-shaped events from a sandbox report and match Sigma rules.",
+    "inputSchema": {
+     "properties": {
+      "report": {
+       "additionalProperties": true,
+       "title": "Report",
+       "type": "object"
+      },
+      "ruleset": {
+       "default": "default",
+       "title": "Ruleset",
+       "type": "string"
+      }
+     },
+     "required": [
+      "report"
+     ],
+     "title": "sigma_match_sandboxArguments",
+     "type": "object"
+    },
+    "name": "sigma_match_sandbox",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "sigma_match_sandboxDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {},
+    "fields": {}
+   }
+  },
+  {
+   "definition": {
+    "description": "Run capa and report the capabilities it finds, with ATT&CK and MBC metadata.\n\nGive ``carved_path`` to read a file an earlier call in this run wrote instead of the sample: pass the ``carved_path`` value of an entry ``carve_payloads`` returned, or of the ``child`` ``unpack_upx`` returned, exactly as it was returned and with no quotes around it. Leave it out and the sample is read.",
+    "inputSchema": {
+     "properties": {
+      "backend": {
+       "default": "auto",
+       "title": "Backend",
+       "type": "string"
+      },
+      "carved_path": {
+       "default": "",
+       "title": "Carved Path",
+       "type": "string"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      },
+      "timeout_s": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Timeout S"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "title": "capaArguments",
+     "type": "object"
+    },
+    "name": "capa",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "capaDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "medium",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Recover the strings a PE only builds at run time: decoded, stack and tight strings.\n\nUse it when the strings of a PE look encrypted or are missing: ``strings``\nshows mostly noise, few readable paths, URLs or messages, and the import\ntable is tiny. Those strings (mutex names, file paths, URLs, User-Agents,\ncommands, keys) only appear here. The triage pack already ran it once on a\nPE and shows the first strings with their ledger id; call it for the rest\n(``offset``) or to search them (``pattern``).\n\nFLOSS emulates the sample's own decoding routines and string-building\nfunctions under vivisect; the sample is never executed. Each row carries the\n``kind``, the ``string``, the ``function`` that decoded or built it (a\nvirtual address, and ``function_rva`` relative to the image base, which is\nthe address to look at in a disassembler) and, for a decoded string, the\n``called_at`` call site. The first call emulates and takes up to a few\nminutes; later pages of the same answer are immediate.\n\nPaged like ``strings``: read ``next_offset`` and pass it as ``offset``.\n``kinds`` keeps some of \"decoded\", \"stack\", \"tight\"; ``pattern`` keeps the\nrows containing a marker (case-insensitive substring, or ``re:<expression>``).\n\nGive ``carved_path`` to read a file an earlier call in this run wrote instead of the sample: pass the ``carved_path`` value of an entry ``carve_payloads`` returned, or of the ``child`` ``unpack_upx`` returned, exactly as it was returned and with no quotes around it. Leave it out and the sample is read.\n\nGive ``pattern`` the value itself, as it should be matched; a value that is only the parameter's name is asked about, not run. One pair of quotes around the whole value is read as not part of it, and the answer's ``read_as`` says so when that happened.",
+    "inputSchema": {
+     "properties": {
+      "carved_path": {
+       "default": "",
+       "title": "Carved Path",
+       "type": "string"
+      },
+      "kinds": {
+       "anyOf": [
+        {
+         "items": {
+          "type": "string"
+         },
+         "type": "array"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Kinds"
+      },
+      "limit": {
+       "default": 150,
+       "title": "Limit",
+       "type": "integer"
+      },
+      "min_len": {
+       "default": 4,
+       "title": "Min Len",
+       "type": "integer"
+      },
+      "offset": {
+       "default": 0,
+       "title": "Offset",
+       "type": "integer"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      },
+      "pattern": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Pattern"
+      },
+      "timeout_s": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Timeout S"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "title": "flossArguments",
+     "type": "object"
+    },
+    "name": "floss",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "flossDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "medium",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Name the Windows functions a PE finds by a 32-bit value instead of by name.\n\nEach value is compared with the name hashes of every exported function of\ncommon Windows DLLs, under a set of published algorithms the answer lists\nunder ``algorithms``; the name lists and their source are named under\n``names``. Pass ``hashes`` (numbers, or strings such as \"0x1a2b3c4d\") to\nresolve values you found; leave it out and the file is scanned for\ncandidates (the 32-bit immediates of push, mov and cmp in code, and the\naligned 32-bit values of the data sections). Nothing is run.\n\nEach hit is the value, every reading of it (algorithm, name and the DLLs\nthat export the name; a value two names or two algorithms give carries\nboth, and none is picked) and every place in the file the value is stored:\nthe offset from the image base, the section and, in code, the start of the\nfunction around it when the file's own function table says. In a scan,\n``lone_hits`` holds the values whose algorithm resolves nothing else in the\nfile, which are most often coincidences. The triage pack already ran the\nscan once on a PE and shows its hits with the ledger id; ``offset`` and\n``limit`` page a long answer.\n\nGive ``carved_path`` to read a file an earlier call in this run wrote instead of the sample: pass the ``carved_path`` value of an entry ``carve_payloads`` returned, or of the ``child`` ``unpack_upx`` returned, exactly as it was returned and with no quotes around it. Leave it out and the sample is read.",
+    "inputSchema": {
+     "properties": {
+      "algorithms": {
+       "anyOf": [
+        {
+         "items": {
+          "type": "string"
+         },
+         "type": "array"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Algorithms"
+      },
+      "carved_path": {
+       "default": "",
+       "title": "Carved Path",
+       "type": "string"
+      },
+      "hashes": {
+       "anyOf": [
+        {
+         "items": {
+          "anyOf": [
+           {
+            "type": "string"
+           },
+           {
+            "type": "integer"
+           }
+          ]
+         },
+         "type": "array"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Hashes"
+      },
+      "limit": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Limit"
+      },
+      "offset": {
+       "default": 0,
+       "title": "Offset",
+       "type": "integer"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "title": "resolve_api_hashesArguments",
+     "type": "object"
+    },
+    "name": "resolve_api_hashes",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "resolve_api_hashesDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "medium",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Decode the text a PE keeps encoded in its data sections, by simple key schemes.\n\nThe schemes, named in each result with their key: one key byte over every\nbyte, a key byte that rises by one per byte, a key stored in front of the\ntext with its length, and a seed-and-length header before a rising key;\nand a text-encoding layer on top of any of them. Nothing is run or\nemulated. Only text that passes the test the answer states under\n``readable_test`` is reported.\n\n``results`` holds the decodings some code or data refers to by address, or\nthat FLOSS also recovered in this run: each with the blob's offset from the\nimage base, the scheme and its parameters, the text, and the places that\nrefer to it with the function around each when the file's function table\nsays (``floss`` gives FLOSS's routine and call site when it decoded the\nsame text). Where a place loads the address of the encoded bytes as an\nargument and the next transfer of control in its function is a call,\n``passed_to`` names that call's target (an import, a function address, or\nthe slot a pointer is read from) and the argument position, and\n``output_passed_to`` the next call in the function that receives the frame\nslot that call was given as another argument, or its return value, with\nwhich was followed; inside it, one hop more, its own ``output_passed_to``\nnames the next call that receives that later call's frame slot or return\nvalue the same way, and nothing is followed past it. Each hop states the\ncallee and the argument position and is absent where the code does not\nshow it. The\nother decodings are counted under ``unreferenced`` and listed with\n``include_unreferenced``. Use it beside ``floss``: FLOSS runs the sample's\nown routines under emulation, this undoes the common schemes those routines\nuse when the emulation does not reach them. The triage pack already ran it\nonce on a PE; ``schemes`` keeps some of the scheme names, and ``offset``\nand ``limit`` page a long answer.\n\nGive ``carved_path`` to read a file an earlier call in this run wrote instead of the sample: pass the ``carved_path`` value of an entry ``carve_payloads`` returned, or of the ``child`` ``unpack_upx`` returned, exactly as it was returned and with no quotes around it. Leave it out and the sample is read.",
+    "inputSchema": {
+     "properties": {
+      "carved_path": {
+       "default": "",
+       "title": "Carved Path",
+       "type": "string"
+      },
+      "include_unreferenced": {
+       "default": false,
+       "title": "Include Unreferenced",
+       "type": "boolean"
+      },
+      "limit": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Limit"
+      },
+      "min_len": {
+       "default": 8,
+       "title": "Min Len",
+       "type": "integer"
+      },
+      "offset": {
+       "default": 0,
+       "title": "Offset",
+       "type": "integer"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      },
+      "schemes": {
+       "anyOf": [
+        {
+         "items": {
+          "type": "string"
+         },
+         "type": "array"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Schemes"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "title": "decode_string_blobsArguments",
+     "type": "object"
+    },
+    "name": "decode_string_blobs",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "decode_string_blobsDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "medium",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Find the published constants of ciphers, hash functions and checksums in a file.\n\nEvery set is computed from its algorithm's definition: substitution boxes\nand round tables of block ciphers, the round constants and initial values\nof hash functions, a checksum's lookup table and single magic numbers. The\nrule the file is searched by is stated under ``how``: a table only whole,\nin either byte order for words; round constants and initial values value\nby value. ``found`` holds each set found, with every place its values or\nits table stand: the file offset and, for a PE, the offset from the image\nbase, the section and the function the file's own table puts around it.\n``lone`` holds the sets of which only one value stands, which one value\nalone often does by chance. Nothing is run. The triage pack already ran it\nonce on an executable and shows its sets with the ledger id.\n\nGive ``carved_path`` to read a file an earlier call in this run wrote instead of the sample: pass the ``carved_path`` value of an entry ``carve_payloads`` returned, or of the ``child`` ``unpack_upx`` returned, exactly as it was returned and with no quotes around it. Leave it out and the sample is read.",
+    "inputSchema": {
+     "properties": {
+      "carved_path": {
+       "default": "",
+       "title": "Carved Path",
+       "type": "string"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "title": "find_crypto_constantsArguments",
+     "type": "object"
+    },
+    "name": "find_crypto_constants",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "find_crypto_constantsDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "medium",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "List every function of a PE with the artefacts it holds, ranked by how many.\n\nThe functions come from the file's exception directory, its exports, its\nentry point and the direct call targets the platform's x86 decoder reaches.\nEach row names a function at the image base plus its offset (the address\na disassembler takes) and states the imports it calls, the calls it\nmakes through slots the hash resolution fills, the names its hashes\nresolve to, how many plain and decoded strings it refers to, its\ncallers and callees, and how many artefacts its callees hold (counted per\ncallee). A function another starts on a thread (a code address in the\nstart-routine argument of a thread-starting API) and a function whose\naddress is taken as a value are stated as such, never as a caller or a\ncallee. Each cell names the tool whose answer states it. Joined here:\n``pe_info``, ``resolve_api_hashes`` and ``decode_string_blobs`` over the\nsame file, and FLOSS's rows when FLOSS ran on it in this server; each\nsource not joined, capa always, is stated under ``absent`` with its reason.\nWith no ``address``, ``table`` holds the whole index. An ``address`` is\nhexadecimal, with or without ``0x``; a value at or above the image base is\ntried first as a virtual address, then as an offset. ``row`` then holds the\nrow of the function that starts at it or holds it, ``address_read`` which\nreading answered and whether the address is the start or inside, and\n``callers`` and ``callees`` its neighbours; an address no function starts\nat or holds is a ``no:`` sentence. Nothing is run. The triage pack's ledger\nentry holds the index built with capa; its id is in the run-state block.\n\nGive ``carved_path`` to read a file an earlier call in this run wrote instead of the sample: pass the ``carved_path`` value of an entry ``carve_payloads`` returned, or of the ``child`` ``unpack_upx`` returned, exactly as it was returned and with no quotes around it. Leave it out and the sample is read.",
+    "inputSchema": {
+     "properties": {
+      "address": {
+       "default": "",
+       "title": "Address",
+       "type": "string"
+      },
+      "carved_path": {
+       "default": "",
+       "title": "Carved Path",
+       "type": "string"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "title": "function_indexArguments",
+     "type": "object"
+    },
+    "name": "function_index",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "function_indexDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "address": "address",
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "medium",
+      "evidence": [
+       "inputSchema.properties.address (name)",
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "address": "address",
+       "path": "path"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Read one byte range of the file and apply an ordered list of steps to it.\n\nThe range is exactly one of ``offset`` (a file offset), ``rva`` (an offset\nfrom the image base) or ``va`` (a virtual address), the last two resolved\nthrough the file's own section table, with ``length``; left out, the range\nruns to the end of the file, and a range past the end is cut there and\nsays so. A number is an integer, or a string read as hexadecimal after\n``0x`` and as decimal otherwise.\n\n``steps`` is a list of objects, each with ``op`` and its parameters, each\napplied to the output of the one before: ``xor`` (``key``, and\n``increment``: output byte i is input byte i exclusive-or (key byte i mod key\nlength plus increment times i, mod 256)); ``rc4`` (``key``); ``aes`` (``mode``\necb, cbc or ctr; ``key`` of 16, 24 or 32 bytes; ``iv`` for cbc;\n``nonce`` for ctr, the 16-byte initial counter block; ``padding`` none or\npkcs7); ``base64`` (``alphabet`` standard, urlsafe or the 64 characters in\norder; ``skip_whitespace``); ``hex``; ``lznt1``; ``zlib``, ``gzip`` and\n``deflate`` (raw); ``reverse``; ``slice`` (``start`` and ``length``\nwithin the current buffer). A ``key``, ``iv`` or ``nonce`` is\n``{\"hex\": \"...\"}``, ``{\"text\": \"...\"}`` (UTF-8) or a range of the same\nfile, ``{\"offset\": ..., \"length\": ...}`` (or ``rva`` or ``va``).\n\nThe answer names the range (its offset, rva and section) and every step\nwith its parameters as given, then states the output: its length, SHA-256,\nthe share of printable bytes and its entropy in bits per byte, over the\nwhole output; and, over the part ``shown``, the first 64 bytes in hex, the\ntext it reads as in ASCII and in UTF-16LE, and the hosts, URLs, addresses,\npaths and registry keys the indicator reader finds in it with their offsets\nin the output, as many rows as the answer's room leaves. The part shown is\nthe first bytes the 6000 characters of one answer carry beside its other\nfields (at most 705) unless ``show_offset`` and ``show_length`` name\nanother; the answer says when it is not the whole output, and a\n``show_length`` past what the largest answer carries is cut to it and says\nso. An unknown operation, a key of the wrong length, an input that is not\nwhole blocks or padding that does not read is an error naming the step and\nwhy; nothing is tried with other parameters. Decompression stops at the\nplatform's fixed sample upload cap and says so, and so does a chain whose\nsteps have written that much in all. Nothing is run.\n\nGive ``carved_path`` to read a file an earlier call in this run wrote instead of the sample: pass the ``carved_path`` value of an entry ``carve_payloads`` returned, or of the ``child`` ``unpack_upx`` returned, exactly as it was returned and with no quotes around it. Leave it out and the sample is read.",
+    "inputSchema": {
+     "properties": {
+      "carved_path": {
+       "default": "",
+       "title": "Carved Path",
+       "type": "string"
+      },
+      "length": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Length"
+      },
+      "offset": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Offset"
+      },
+      "path": {
+       "title": "Path",
+       "type": "string"
+      },
+      "rva": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Rva"
+      },
+      "show_length": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Show Length"
+      },
+      "show_offset": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Show Offset"
+      },
+      "steps": {
+       "anyOf": [
+        {
+         "items": {
+          "additionalProperties": true,
+          "type": "object"
+         },
+         "type": "array"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Steps"
+      },
+      "va": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Va"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "title": "transform_bytesArguments",
+     "type": "object"
+    },
+    "name": "transform_bytes",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "transform_bytesDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "address": "va",
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "medium",
+      "evidence": [
+       "inputSchema.properties.va (name)",
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "address": "va",
+       "path": "path"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Upload a sample in one call and get back the path to analyse it at.",
+    "inputSchema": {
+     "properties": {
+      "content_b64": {
+       "title": "Content B64",
+       "type": "string"
+      },
+      "filename": {
+       "title": "Filename",
+       "type": "string"
+      },
+      "sha256": {
+       "default": "",
+       "title": "Sha256",
+       "type": "string"
+      }
+     },
+     "required": [
+      "filename",
+      "content_b64"
+     ],
+     "title": "put_sampleArguments",
+     "type": "object"
+    },
+    "name": "put_sample",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "put_sampleDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "hash": "sha256",
+      "path": "filename"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.sha256 (name)",
+       "inputSchema.properties.filename (name)"
+      ],
+      "value": {
+       "hash": "sha256",
+       "path": "filename"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Start a chunked upload for a sample too large to send in one call.",
+    "inputSchema": {
+     "properties": {
+      "filename": {
+       "title": "Filename",
+       "type": "string"
+      },
+      "sha256": {
+       "title": "Sha256",
+       "type": "string"
+      },
+      "size": {
+       "title": "Size",
+       "type": "integer"
+      }
+     },
+     "required": [
+      "filename",
+      "sha256",
+      "size"
+     ],
+     "title": "put_sample_beginArguments",
+     "type": "object"
+    },
+    "name": "put_sample_begin",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "put_sample_beginDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "hash": "sha256",
+      "path": "filename"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.sha256 (name)",
+       "inputSchema.properties.filename (name)"
+      ],
+      "value": {
+       "hash": "sha256",
+       "path": "filename"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Send one chunk of a chunked upload, identified by its sequence number.",
+    "inputSchema": {
+     "properties": {
+      "content_b64": {
+       "title": "Content B64",
+       "type": "string"
+      },
+      "seq": {
+       "title": "Seq",
+       "type": "integer"
+      },
+      "upload_id": {
+       "title": "Upload Id",
+       "type": "string"
+      }
+     },
+     "required": [
+      "upload_id",
+      "seq",
+      "content_b64"
+     ],
+     "title": "put_sample_chunkArguments",
+     "type": "object"
+    },
+    "name": "put_sample_chunk",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "put_sample_chunkDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {},
+    "fields": {}
+   }
+  },
+  {
+   "definition": {
+    "description": "Assemble a chunked upload, verify its digest and return the sample's path.",
+    "inputSchema": {
+     "properties": {
+      "upload_id": {
+       "title": "Upload Id",
+       "type": "string"
+      }
+     },
+     "required": [
+      "upload_id"
+     ],
+     "title": "put_sample_finishArguments",
+     "type": "object"
+    },
+    "name": "put_sample_finish",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "put_sample_finishDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "analysis sidecar",
+   "proposal": {
+    "facts": {},
+    "fields": {}
+   }
+  },
+  {
+   "definition": {
+    "description": "What this server can do on this host.\n\nEach tool, its optional dependency, and whether it is available.\n",
+    "inputSchema": {
+     "properties": {},
+     "title": "capabilitiesArguments",
+     "type": "object"
+    },
+    "name": "capabilities",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "capabilitiesDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "knowledge sidecar",
+   "proposal": {
+    "facts": {},
+    "fields": {}
+   }
+  },
+  {
+   "definition": {
+    "description": "Rank ATT&CK techniques against a behavioural description.\n\nGive ``text`` the value itself, as it should be matched; a value that is only the parameter's name is asked about, not run. One pair of quotes around the whole value is read as not part of it, and the answer's ``read_as`` says so when that happened.",
+    "inputSchema": {
+     "properties": {
+      "domain": {
+       "default": "",
+       "title": "Domain",
+       "type": "string"
+      },
+      "k": {
+       "default": 5,
+       "title": "K",
+       "type": "integer"
+      },
+      "text": {
+       "title": "Text",
+       "type": "string"
+      }
+     },
+     "required": [
+      "text"
+     ],
+     "title": "resolve_techniqueArguments",
+     "type": "object"
+    },
+    "name": "resolve_technique",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "resolve_techniqueDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "knowledge sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "domain": "domain"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.domain (name)"
+      ],
+      "value": {
+       "domain": "domain"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Look up one ATT&CK technique: name, domain, platforms, tactics, url.\n\nGive ``technique_id`` the value itself, as it should be matched; a value that is only the parameter's name is asked about, not run. One pair of quotes around the whole value is read as not part of it, and the answer's ``read_as`` says so when that happened.",
+    "inputSchema": {
+     "properties": {
+      "technique_id": {
+       "title": "Technique Id",
+       "type": "string"
+      }
+     },
+     "required": [
+      "technique_id"
+     ],
+     "title": "attck_lookupArguments",
+     "type": "object"
+    },
+    "name": "attck_lookup",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "attck_lookupDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "knowledge sidecar",
+   "proposal": {
+    "facts": {},
+    "fields": {}
+   }
+  },
+  {
+   "definition": {
+    "description": "Report which technique ids do not exist, with likely intended ids.\n\nGive ``ids`` the value itself, as it should be matched; a value that is only the parameter's name is asked about, not run. One pair of quotes around the whole value is read as not part of it, and the answer's ``read_as`` says so when that happened.",
+    "inputSchema": {
+     "properties": {
+      "ids": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Ids",
+       "type": "array"
+      }
+     },
+     "required": [
+      "ids"
+     ],
+     "title": "attck_validateArguments",
+     "type": "object"
+    },
+    "name": "attck_validate",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "attck_validateDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "knowledge sidecar",
+   "proposal": {
+    "facts": {},
+    "fields": {}
+   }
+  },
+  {
+   "definition": {
+    "description": "What each named API does, and which techniques the catalogue associates it with.\n\n``platform`` picks the vocabulary: ``windows`` for a PE's imports,\n``linux`` for an ELF's dynamic symbols. The two overlap by name \u2014\n``connect``, ``send``, ``system`` are in both \u2014 so asking the wrong one\ngives a libc symbol a Win32 category, and a platform the catalogue has no\nblock for answers empty rows and a ``reason`` rather than the other\nplatform's answers.\n\nA reference lookup, not an observation: the catalogue lists ``BitBlt``\nand ``CreateCompatibleDC`` under screen capture, and every GUI program\nimports them. What comes back is an association a reader may weigh; it\nis never counted as a rule match or a source.\n\nThe whole set is matched once, so a rule fires on the set and not on the\nname a row hangs under. Almost every rule needs two or more names; a rule\nwhose one name *is* the act sets ``min_apis`` to one. An API the table has\nnever heard of gets empty lists, not a guess.\n\nRead every measured number in the one direction it was measured in: it says\nhow often this *rule* fires on software that is not a sample. None of them\nis a probability that *this* sample is benign, and nothing here is evidence\nabout this sample at all. None of the corpora carry technique-level ground\ntruth either, so what a malware number says is that a combination separates\nbinaries already known to be bad from binaries already known to be good,\nnever that this sample performs the technique. An association nobody\nmeasured carries no ``measured`` key rather than a zero \u2014 an absent key is\n\"not measured\" and never \"never fires\".\n\n``catalog_flags`` carries the catalogue's own labels (``suspicious`` for a\ncategory it tiers high or medium, where its ``flags_with`` combination is\nin the set too), named as the catalogue's. A bare ``suspicious: true``\nwould be a verdict, and the tools state facts. ``corroborated_by`` lists\nthe APIs that would give weight to a row whose category means nothing on\nits own (drawing, a message queue).\n\n``resolved_names`` are names got by resolving the file's stored values\n(``resolve_api_hashes``), not read in the import table: matched with the\nrest and marked, ``obtained`` on the row and ``resolved_at_runtime_from_hashes``\nin the answer, since a function resolved at runtime is not an import.\n\nGive ``api_names`` the value itself, as it should be matched; a value that is only the parameter's name is asked about, not run. One pair of quotes around the whole value is read as not part of it, and the answer's ``read_as`` says so when that happened.",
+    "inputSchema": {
+     "properties": {
+      "api_names": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Api Names",
+       "type": "array"
+      },
+      "platform": {
+       "default": "windows",
+       "title": "Platform",
+       "type": "string"
+      },
+      "resolved_names": {
+       "anyOf": [
+        {
+         "items": {
+          "type": "string"
+         },
+         "type": "array"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Resolved Names"
+      }
+     },
+     "required": [
+      "api_names"
+     ],
+     "title": "api_capabilityArguments",
+     "type": "object"
+    },
+    "name": "api_capability",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "api_capabilityDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "knowledge sidecar",
+   "proposal": {
+    "facts": {},
+    "fields": {}
+   }
+  },
+  {
+   "definition": {
+    "description": "Match command lines against the signed-proxy-execution (LOLBin) table.",
+    "inputSchema": {
+     "properties": {
+      "command_lines": {
+       "items": {
+        "type": "string"
+       },
+       "title": "Command Lines",
+       "type": "array"
+      }
+     },
+     "required": [
+      "command_lines"
+     ],
+     "title": "lolbin_lookupArguments",
+     "type": "object"
+    },
+    "name": "lolbin_lookup",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "lolbin_lookupDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "knowledge sidecar",
+   "proposal": {
+    "facts": {},
+    "fields": {}
+   }
+  },
+  {
+   "definition": {
+    "description": "Retrieve malware families whose fingerprint is closest to the query.\n\nGive ``query`` the value itself, as it should be matched; a value that is only the parameter's name is asked about, not run. One pair of quotes around the whole value is read as not part of it, and the answer's ``read_as`` says so when that happened.",
+    "inputSchema": {
+     "properties": {
+      "k": {
+       "default": 5,
+       "title": "K",
+       "type": "integer"
+      },
+      "query": {
+       "title": "Query",
+       "type": "string"
+      }
+     },
+     "required": [
+      "query"
+     ],
+     "title": "family_lookupArguments",
+     "type": "object"
+    },
+    "name": "family_lookup",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "family_lookupDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "knowledge sidecar",
+   "proposal": {
+    "facts": {},
+    "fields": {}
+   }
+  },
+  {
+   "definition": {
+    "description": "Retrieve prior cases with similar behaviour, and the techniques they share.\n\nGive ``text`` the value itself, as it should be matched; a value that is only the parameter's name is asked about, not run. One pair of quotes around the whole value is read as not part of it, and the answer's ``read_as`` says so when that happened.",
+    "inputSchema": {
+     "properties": {
+      "k": {
+       "default": 5,
+       "title": "K",
+       "type": "integer"
+      },
+      "text": {
+       "title": "Text",
+       "type": "string"
+      }
+     },
+     "required": [
+      "text"
+     ],
+     "title": "similar_casesArguments",
+     "type": "object"
+    },
+    "name": "similar_cases",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "similar_casesDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "knowledge sidecar",
+   "proposal": {
+    "facts": {},
+    "fields": {}
+   }
+  },
+  {
+   "definition": {
+    "description": "What this server can do on this host.\n\nEach tool, its optional dependency, and whether it is available.\n",
+    "inputSchema": {
+     "properties": {},
+     "title": "capabilitiesArguments",
+     "type": "object"
+    },
+    "name": "capabilities",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "capabilitiesDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "network sidecar",
+   "proposal": {
+    "facts": {},
+    "fields": {}
+   }
+  },
+  {
+   "definition": {
+    "description": "Summarise a PCAP file, or list its IP packets one line each.\n\nWith no ``packet_limit`` the answer is the whole capture's facts: packet\ncount, protocols, every external conversation, TLS names and periodic\ncontacts. With one, it lists ``packet_limit`` packets from ``offset``, one\nline each, and names the offset of the next page.\n",
+    "inputSchema": {
+     "properties": {
+      "offset": {
+       "default": 0,
+       "title": "Offset",
+       "type": "integer"
+      },
+      "packet_limit": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Packet Limit"
+      },
+      "pcap_path": {
+       "title": "Pcap Path",
+       "type": "string"
+      }
+     },
+     "required": [
+      "pcap_path"
+     ],
+     "title": "read_pcap_summaryArguments",
+     "type": "object"
+    },
+    "name": "read_pcap_summary",
+    "outputSchema": {
+     "properties": {
+      "result": {
+       "title": "Result",
+       "type": "string"
+      }
+     },
+     "required": [
+      "result"
+     ],
+     "title": "read_pcap_summaryOutput",
+     "type": "object"
+    }
+   },
+   "origin": "network sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "pcap_path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.pcap_path (name)"
+      ],
+      "value": {
+       "path": "pcap_path"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Extract every DNS query name in a PCAP file; ``packet_limit`` reads fewer packets.",
+    "inputSchema": {
+     "properties": {
+      "packet_limit": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Packet Limit"
+      },
+      "pcap_path": {
+       "title": "Pcap Path",
+       "type": "string"
+      }
+     },
+     "required": [
+      "pcap_path"
+     ],
+     "title": "extract_dnsArguments",
+     "type": "object"
+    },
+    "name": "extract_dns",
+    "outputSchema": {
+     "properties": {
+      "result": {
+       "title": "Result",
+       "type": "string"
+      }
+     },
+     "required": [
+      "result"
+     ],
+     "title": "extract_dnsOutput",
+     "type": "object"
+    }
+   },
+   "origin": "network sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "pcap_path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.pcap_path (name)"
+      ],
+      "value": {
+       "path": "pcap_path"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Extract every HTTP request line and Host header; ``packet_limit`` reads fewer packets.",
+    "inputSchema": {
+     "properties": {
+      "packet_limit": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Packet Limit"
+      },
+      "pcap_path": {
+       "title": "Pcap Path",
+       "type": "string"
+      }
+     },
+     "required": [
+      "pcap_path"
+     ],
+     "title": "extract_httpArguments",
+     "type": "object"
+    },
+    "name": "extract_http",
+    "outputSchema": {
+     "properties": {
+      "result": {
+       "title": "Result",
+       "type": "string"
+      }
+     },
+     "required": [
+      "result"
+     ],
+     "title": "extract_httpOutput",
+     "type": "object"
+    }
+   },
+   "origin": "network sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "pcap_path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.pcap_path (name)"
+      ],
+      "value": {
+       "path": "pcap_path"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Summarise a capture: conversations, TLS SNI destinations and beaconing.\n\nThe whole-capture view, next to the three packet-level tools above. An\nagent that reads this first knows which conversation to go and read\nindividual packets from, instead of walking the capture to find out.\n",
+    "inputSchema": {
+     "properties": {
+      "packet_limit": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "default": null,
+       "title": "Packet Limit"
+      },
+      "pcap_path": {
+       "title": "Pcap Path",
+       "type": "string"
+      }
+     },
+     "required": [
+      "pcap_path"
+     ],
+     "title": "pcap_summaryArguments",
+     "type": "object"
+    },
+    "name": "pcap_summary",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "pcap_summaryDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "network sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "pcap_path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.pcap_path (name)"
+      ],
+      "value": {
+       "path": "pcap_path"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "What this server can do on this host.\n\nEach tool, the setting it needs, and whether it is configured.\n",
+    "inputSchema": {
+     "properties": {},
+     "title": "capabilitiesArguments",
+     "type": "object"
+    },
+    "name": "capabilities",
+    "outputSchema": {
+     "additionalProperties": true,
+     "title": "capabilitiesDictOutput",
+     "type": "object"
+    }
+   },
+   "origin": "threatintel sidecar",
+   "proposal": {
+    "facts": {},
+    "fields": {}
+   }
+  },
+  {
+   "definition": {
+    "description": "Check the reputation of an IP address.\n\nQueries VirusTotal and AbuseIPDB when API keys are available; falls back\nto heuristic mock data otherwise.\n\nGive ``ip_address`` the value itself, as it should be matched; a value that is only the parameter's name is asked about, not run. One pair of quotes around the whole value is read as not part of it, and the answer names the value that was looked up.",
+    "inputSchema": {
+     "properties": {
+      "ip_address": {
+       "title": "Ip Address",
+       "type": "string"
+      }
+     },
+     "required": [
+      "ip_address"
+     ],
+     "title": "check_ip_reputationArguments",
+     "type": "object"
+    },
+    "name": "check_ip_reputation",
+    "outputSchema": {
+     "properties": {
+      "result": {
+       "title": "Result",
+       "type": "string"
+      }
+     },
+     "required": [
+      "result"
+     ],
+     "title": "check_ip_reputationOutput",
+     "type": "object"
+    }
+   },
+   "origin": "threatintel sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "ip": "ip_address"
+     },
+     "kind": "indicator_reputation"
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.ip_address (name)"
+      ],
+      "value": {
+       "ip": "ip_address"
+      }
+     },
+     "kind": {
+      "confidence": "low",
+      "evidence": [
+       "description (reputation)",
+       "inputSchema indicator argument"
+      ],
+      "value": "indicator_reputation"
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Check the reputation of a domain.\n\nQueries VirusTotal when an API key is available; falls back to heuristic\nmock data otherwise.\n\nGive ``domain`` the value itself, as it should be matched; a value that is only the parameter's name is asked about, not run. One pair of quotes around the whole value is read as not part of it, and the answer names the value that was looked up.",
+    "inputSchema": {
+     "properties": {
+      "domain": {
+       "title": "Domain",
+       "type": "string"
+      }
+     },
+     "required": [
+      "domain"
+     ],
+     "title": "check_domain_reputationArguments",
+     "type": "object"
+    },
+    "name": "check_domain_reputation",
+    "outputSchema": {
+     "properties": {
+      "result": {
+       "title": "Result",
+       "type": "string"
+      }
+     },
+     "required": [
+      "result"
+     ],
+     "title": "check_domain_reputationOutput",
+     "type": "object"
+    }
+   },
+   "origin": "threatintel sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "domain": "domain"
+     },
+     "kind": "indicator_reputation"
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.domain (name)"
+      ],
+      "value": {
+       "domain": "domain"
+      }
+     },
+     "kind": {
+      "confidence": "low",
+      "evidence": [
+       "description (reputation)",
+       "inputSchema indicator argument"
+      ],
+      "value": "indicator_reputation"
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Check the reputation of a file hash (MD5, SHA1, or SHA256).\n\nQueries VirusTotal when an API key is available; falls back to heuristic\nmock data otherwise.\n\nGive ``file_hash`` the value itself, as it should be matched; a value that is only the parameter's name is asked about, not run. One pair of quotes around the whole value is read as not part of it, and the answer names the value that was looked up.",
+    "inputSchema": {
+     "properties": {
+      "file_hash": {
+       "title": "File Hash",
+       "type": "string"
+      }
+     },
+     "required": [
+      "file_hash"
+     ],
+     "title": "check_hashArguments",
+     "type": "object"
+    },
+    "name": "check_hash",
+    "outputSchema": {
+     "properties": {
+      "result": {
+       "title": "Result",
+       "type": "string"
+      }
+     },
+     "required": [
+      "result"
+     ],
+     "title": "check_hashOutput",
+     "type": "object"
+    }
+   },
+   "origin": "threatintel sidecar",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "hash": "file_hash"
+     },
+     "kind": "reputation"
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.file_hash (name)"
+      ],
+      "value": {
+       "hash": "file_hash"
+      }
+     },
+     "kind": {
+      "confidence": "low",
+      "evidence": [
+       "description (reputation)",
+       "inputSchema hash argument"
+      ],
+      "value": "reputation"
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Return the current status of ThreatIntel MCP integrations.",
+    "inputSchema": {
+     "properties": {},
+     "title": "get_threatintel_statusArguments",
+     "type": "object"
+    },
+    "name": "get_threatintel_status",
+    "outputSchema": {
+     "properties": {
+      "result": {
+       "title": "Result",
+       "type": "string"
+      }
+     },
+     "required": [
+      "result"
+     ],
+     "title": "get_threatintel_statusOutput",
+     "type": "object"
+    }
+   },
+   "origin": "threatintel sidecar",
+   "proposal": {
+    "facts": {},
+    "fields": {}
+   }
+  },
+  {
+   "definition": {
+    "annotations": {
+     "readOnlyHint": true,
+     "title": "Rule scanner"
+    },
+    "description": "Matches the server's rules against the file at file_path and lists each match with its ATT&CK tags.",
+    "inputSchema": {
+     "properties": {
+      "file_path": {
+       "description": "Path to the file to scan.",
+       "type": "string"
+      },
+      "sha256": {
+       "pattern": "^[a-f0-9]{64}$",
+       "type": "string"
+      }
+     },
+     "required": [
+      "file_path"
+     ],
+     "type": "object"
+    },
+    "name": "scan_rules",
+    "outputSchema": {
+     "properties": {
+      "matches": {
+       "items": {
+        "properties": {
+         "rule": {
+          "type": "string"
+         },
+         "strings": {
+          "items": {
+           "properties": {
+            "offset": {
+             "type": "integer"
+            }
+           },
+           "type": "object"
+          },
+          "type": "array"
+         },
+         "tags": {
+          "items": {
+           "type": "string"
+          },
+          "type": "array"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "G10b fixture",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "hash": "sha256",
+      "path": "file_path"
+     },
+     "asserts_techniques": true,
+     "display_name": "Rule scanner",
+     "kind": "signature_rules",
+     "places": {
+      "offset": "/strings/*/offset"
+     },
+     "rows": "/matches/*",
+     "techniques": [
+      {
+       "format": "sigma_tag",
+       "path": "/**2/tags"
+      }
+     ],
+     "values": {
+      "rule": "/rule"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.sha256 (name)",
+       "inputSchema.properties.file_path (name)"
+      ],
+      "value": {
+       "hash": "sha256",
+       "path": "file_path"
+      }
+     },
+     "asserts_techniques": {
+      "confidence": "low",
+      "evidence": [
+       "description (rule match)",
+       "rows with techniques",
+       "outputSchema.matches[].tags"
+      ],
+      "requires": [
+       "kind",
+       "techniques"
+      ],
+      "value": true
+     },
+     "display_name": {
+      "confidence": "high",
+      "evidence": [
+       "title"
+      ],
+      "value": "Rule scanner"
+     },
+     "kind": {
+      "confidence": "low",
+      "evidence": [
+       "description (rule match)",
+       "rows with techniques"
+      ],
+      "value": "signature_rules"
+     },
+     "places": {
+      "confidence": "medium",
+      "evidence": [
+       "outputSchema.matches[].strings[].offset"
+      ],
+      "requires": [
+       "kind",
+       "rows"
+      ],
+      "value": {
+       "offset": "/strings/*/offset"
+      }
+     },
+     "rows": {
+      "confidence": "medium",
+      "evidence": [
+       "outputSchema.matches (a list of objects)"
+      ],
+      "requires": [
+       "kind"
+      ],
+      "value": "/matches/*"
+     },
+     "techniques": {
+      "confidence": "medium",
+      "evidence": [
+       "outputSchema.matches[].tags"
+      ],
+      "requires": [
+       "kind"
+      ],
+      "value": [
+       {
+        "format": "sigma_tag",
+        "path": "/**2/tags"
+       }
+      ]
+     },
+     "values": {
+      "confidence": "medium",
+      "evidence": [
+       "outputSchema.matches[].rule"
+      ],
+      "requires": [
+       "kind",
+       "rows"
+      ],
+      "value": {
+       "rule": "/rule"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "annotations": {
+     "openWorldHint": true,
+     "readOnlyHint": true
+    },
+    "description": "Looks a file's hash up.",
+    "inputSchema": {
+     "properties": {
+      "hash": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "hash"
+     ],
+     "type": "object"
+    },
+    "name": "query_hash",
+    "outputSchema": {
+     "properties": {
+      "permalink": {
+       "type": "string"
+      },
+      "stats": {
+       "properties": {
+        "malicious": {
+         "type": "integer"
+        },
+        "total": {
+         "type": "integer"
+        }
+       },
+       "type": "object"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "G10b fixture",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "hash": "hash"
+     },
+     "kind": "reputation",
+     "reputation": {
+      "link": [
+       "/permalink"
+      ],
+      "malicious": "/stats/malicious",
+      "stats": "/stats",
+      "total": "/stats/total"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.hash (name)"
+      ],
+      "value": {
+       "hash": "hash"
+      }
+     },
+     "kind": {
+      "confidence": "medium",
+      "evidence": [
+       "a malicious count in the answer (/stats/malicious)",
+       "inputSchema hash argument"
+      ],
+      "value": "reputation"
+     },
+     "reputation": {
+      "confidence": "medium",
+      "evidence": [
+       "outputSchema.permalink",
+       "outputSchema.stats.malicious",
+       "outputSchema.stats.total"
+      ],
+      "requires": [
+       "kind"
+      ],
+      "value": {
+       "link": [
+        "/permalink"
+       ],
+       "malicious": "/stats/malicious",
+       "stats": "/stats",
+       "total": "/stats/total"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "annotations": {
+     "openWorldHint": false,
+     "readOnlyHint": true
+    },
+    "description": "Lists the sections of the file.",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    },
+    "name": "section_list"
+   },
+   "origin": "G10b fixture",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Sends a URL on.",
+    "inputSchema": {
+     "properties": {
+      "url": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "url"
+     ],
+     "type": "object"
+    },
+    "name": "submit_url"
+   },
+   "origin": "G10b fixture",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "url": "url"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.url (name)"
+      ],
+      "value": {
+       "url": "url"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "annotations": {
+     "destructiveHint": true
+    },
+    "description": "Writes a note next to the file.",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    },
+    "name": "write_note"
+   },
+   "origin": "G10b fixture",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "What this server can do.",
+    "inputSchema": {
+     "type": "object"
+    },
+    "name": "capabilities"
+   },
+   "origin": "G10b fixture",
+   "proposal": {
+    "facts": {},
+    "fields": {}
+   }
+  },
+  {
+   "answer": {
+    "matches": [
+     {
+      "rule": "demo_rule",
+      "strings": [
+       {
+        "offset": 1024
+       }
+      ],
+      "tags": [
+       "attack.t1055"
+      ]
+     }
+    ]
+   },
+   "definition": {
+    "annotations": {
+     "readOnlyHint": true,
+     "title": "Rule scanner"
+    },
+    "description": "Matches the server's rules against the file at file_path and lists each match with its ATT&CK tags.",
+    "inputSchema": {
+     "properties": {
+      "file_path": {
+       "description": "Path to the file to scan.",
+       "type": "string"
+      },
+      "sha256": {
+       "pattern": "^[a-f0-9]{64}$",
+       "type": "string"
+      }
+     },
+     "required": [
+      "file_path"
+     ],
+     "type": "object"
+    },
+    "name": "scan_rules"
+   },
+   "origin": "G10b fixture answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "hash": "sha256",
+      "path": "file_path"
+     },
+     "asserts_techniques": true,
+     "display_name": "Rule scanner",
+     "kind": "signature_rules",
+     "places": {
+      "offset": "/strings/*/offset"
+     },
+     "rows": "/matches/*",
+     "techniques": [
+      {
+       "format": "sigma_tag",
+       "path": "/**2/tags"
+      }
+     ],
+     "values": {
+      "rule": "/rule"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.sha256 (name)",
+       "inputSchema.properties.file_path (name)"
+      ],
+      "value": {
+       "hash": "sha256",
+       "path": "file_path"
+      }
+     },
+     "asserts_techniques": {
+      "confidence": "low",
+      "evidence": [
+       "description (rule match)",
+       "rows with techniques",
+       "probe answer.matches[].tags"
+      ],
+      "requires": [
+       "kind",
+       "techniques"
+      ],
+      "value": true
+     },
+     "display_name": {
+      "confidence": "high",
+      "evidence": [
+       "title"
+      ],
+      "value": "Rule scanner"
+     },
+     "kind": {
+      "confidence": "low",
+      "evidence": [
+       "description (rule match)",
+       "rows with techniques"
+      ],
+      "value": "signature_rules"
+     },
+     "places": {
+      "confidence": "low",
+      "evidence": [
+       "probe answer.matches[].strings[].offset"
+      ],
+      "requires": [
+       "kind",
+       "rows"
+      ],
+      "value": {
+       "offset": "/strings/*/offset"
+      }
+     },
+     "rows": {
+      "confidence": "low",
+      "evidence": [
+       "probe answer.matches (a list of objects)"
+      ],
+      "requires": [
+       "kind"
+      ],
+      "value": "/matches/*"
+     },
+     "techniques": {
+      "confidence": "low",
+      "evidence": [
+       "probe answer.matches[].tags"
+      ],
+      "requires": [
+       "kind"
+      ],
+      "value": [
+       {
+        "format": "sigma_tag",
+        "path": "/**2/tags"
+       }
+      ]
+     },
+     "values": {
+      "confidence": "low",
+      "evidence": [
+       "probe answer.matches[].rule"
+      ],
+      "requires": [
+       "kind",
+       "rows"
+      ],
+      "value": {
+       "rule": "/rule"
+      }
+     }
+    }
+   }
+  },
+  {
+   "answer": {
+    "permalink": "https://example.invalid/r",
+    "stats": {
+     "malicious": 3,
+     "total": 70
+    }
+   },
+   "definition": {
+    "annotations": {
+     "openWorldHint": true,
+     "readOnlyHint": true
+    },
+    "description": "Looks a file's hash up.",
+    "inputSchema": {
+     "properties": {
+      "hash": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "hash"
+     ],
+     "type": "object"
+    },
+    "name": "query_hash"
+   },
+   "origin": "G10b fixture answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "hash": "hash"
+     },
+     "kind": "reputation",
+     "reputation": {
+      "link": [
+       "/permalink"
+      ],
+      "malicious": "/stats/malicious",
+      "stats": "/stats",
+      "total": "/stats/total"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.hash (name)"
+      ],
+      "value": {
+       "hash": "hash"
+      }
+     },
+     "kind": {
+      "confidence": "medium",
+      "evidence": [
+       "a malicious count in the answer (/stats/malicious)",
+       "inputSchema hash argument"
+      ],
+      "value": "reputation"
+     },
+     "reputation": {
+      "confidence": "low",
+      "evidence": [
+       "probe answer.permalink",
+       "probe answer.stats.malicious",
+       "probe answer.stats.total"
+      ],
+      "requires": [
+       "kind"
+      ],
+      "value": {
+       "link": [
+        "/permalink"
+       ],
+       "malicious": "/stats/malicious",
+       "stats": "/stats",
+       "total": "/stats/total"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "list_functions",
+    "outputSchema": {
+     "properties": {
+      "items": {
+       "items": {
+        "properties": {
+         "address": {
+          "type": "string"
+         },
+         "name": {
+          "type": "string"
+         },
+         "type": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, places, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "answer": {
+    "items": [
+     {
+      "address": "x",
+      "name": "x",
+      "type": "x"
+     }
+    ]
+   },
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "list_functions"
+   },
+   "origin": "review case answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, places, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "yara_scan",
+    "outputSchema": {
+     "properties": {
+      "items": {
+       "items": {
+        "properties": {
+         "description": {
+          "type": "string"
+         },
+         "name": {
+          "type": "string"
+         },
+         "techniques": {
+          "type": "string"
+         },
+         "type": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, values, techniques not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "answer": {
+    "items": [
+     {
+      "description": "x",
+      "name": "x",
+      "techniques": "x",
+      "type": "x"
+     }
+    ]
+   },
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "yara_scan"
+   },
+   "origin": "review case answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, values, techniques not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "extract_archive",
+    "outputSchema": {
+     "properties": {
+      "items": {
+       "items": {
+        "properties": {
+         "name": {
+          "type": "string"
+         },
+         "sha256": {
+          "type": "string"
+         },
+         "size": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "answer": {
+    "items": [
+     {
+      "name": "x",
+      "sha256": "x",
+      "size": "x"
+     }
+    ]
+   },
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "extract_archive"
+   },
+   "origin": "review case answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "strings",
+    "outputSchema": {
+     "properties": {
+      "items": {
+       "items": {
+        "properties": {
+         "name": {
+          "type": "string"
+         },
+         "text": {
+          "type": "string"
+         },
+         "type": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "answer": {
+    "items": [
+     {
+      "name": "x",
+      "text": "x",
+      "type": "x"
+     }
+    ]
+   },
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "strings"
+   },
+   "origin": "review case answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "pe_sections",
+    "outputSchema": {
+     "properties": {
+      "items": {
+       "items": {
+        "properties": {
+         "entropy": {
+          "type": "string"
+         },
+         "name": {
+          "type": "string"
+         },
+         "type": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "answer": {
+    "items": [
+     {
+      "entropy": "x",
+      "name": "x",
+      "type": "x"
+     }
+    ]
+   },
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "pe_sections"
+   },
+   "origin": "review case answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "decompile_function",
+    "outputSchema": {
+     "properties": {
+      "items": {
+       "items": {
+        "properties": {
+         "code": {
+          "type": "string"
+         },
+         "name": {
+          "type": "string"
+         },
+         "type": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     },
+     "kind": "decompile",
+     "rows": "/items/*",
+     "values": {
+      "name": "/name"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     },
+     "kind": {
+      "confidence": "low",
+      "evidence": [
+       "tool name"
+      ],
+      "value": "decompile"
+     },
+     "rows": {
+      "confidence": "medium",
+      "evidence": [
+       "outputSchema.items (a list of objects)"
+      ],
+      "requires": [
+       "kind"
+      ],
+      "value": "/items/*"
+     },
+     "values": {
+      "confidence": "medium",
+      "evidence": [
+       "outputSchema.items[].name"
+      ],
+      "requires": [
+       "kind",
+       "rows"
+      ],
+      "value": {
+       "name": "/name"
+      }
+     }
+    }
+   }
+  },
+  {
+   "answer": {
+    "items": [
+     {
+      "code": "x",
+      "name": "x",
+      "type": "x"
+     }
+    ]
+   },
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "decompile_function"
+   },
+   "origin": "review case answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     },
+     "kind": "decompile",
+     "rows": "/items/*",
+     "values": {
+      "name": "/name"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     },
+     "kind": {
+      "confidence": "low",
+      "evidence": [
+       "tool name"
+      ],
+      "value": "decompile"
+     },
+     "rows": {
+      "confidence": "low",
+      "evidence": [
+       "probe answer.items (a list of objects)"
+      ],
+      "requires": [
+       "kind"
+      ],
+      "value": "/items/*"
+     },
+     "values": {
+      "confidence": "low",
+      "evidence": [
+       "probe answer.items[].name"
+      ],
+      "requires": [
+       "kind",
+       "rows"
+      ],
+      "value": {
+       "name": "/name"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "list_resources",
+    "outputSchema": {
+     "properties": {
+      "items": {
+       "items": {
+        "properties": {
+         "name": {
+          "type": "string"
+         },
+         "sha256": {
+          "type": "string"
+         },
+         "size": {
+          "type": "string"
+         },
+         "type": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "answer": {
+    "items": [
+     {
+      "name": "x",
+      "sha256": "x",
+      "size": "x",
+      "type": "x"
+     }
+    ]
+   },
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "list_resources"
+   },
+   "origin": "review case answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "archive_list",
+    "outputSchema": {
+     "properties": {
+      "items": {
+       "items": {
+        "properties": {
+         "name": {
+          "type": "string"
+         },
+         "path": {
+          "type": "string"
+         },
+         "sha256": {
+          "type": "string"
+         },
+         "size": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "answer": {
+    "items": [
+     {
+      "name": "x",
+      "path": "x",
+      "sha256": "x",
+      "size": "x"
+     }
+    ]
+   },
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "archive_list"
+   },
+   "origin": "review case answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "Lists the functions of the binary.",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "list_functions",
+    "outputSchema": {
+     "properties": {
+      "functions": {
+       "items": {
+        "properties": {
+         "address": {
+          "type": "string"
+         },
+         "name": {
+          "type": "string"
+         },
+         "type": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "review case named",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, places, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "answer": {
+    "functions": [
+     {
+      "address": "x",
+      "name": "x",
+      "type": "x"
+     }
+    ]
+   },
+   "definition": {
+    "description": "Lists the functions of the binary.",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "list_functions"
+   },
+   "origin": "review case named answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, places, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "The PE sections.",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "pe_sections",
+    "outputSchema": {
+     "properties": {
+      "sections": {
+       "items": {
+        "properties": {
+         "entropy": {
+          "type": "string"
+         },
+         "name": {
+          "type": "string"
+         },
+         "size": {
+          "type": "string"
+         },
+         "type": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "review case named",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "answer": {
+    "sections": [
+     {
+      "entropy": "x",
+      "name": "x",
+      "size": "x",
+      "type": "x"
+     }
+    ]
+   },
+   "definition": {
+    "description": "The PE sections.",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "pe_sections"
+   },
+   "origin": "review case named answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "Matches YARA rules against the file.",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "yara_scan",
+    "outputSchema": {
+     "properties": {
+      "rules": {
+       "items": {
+        "properties": {
+         "name": {
+          "type": "string"
+         },
+         "tags": {
+          "type": "string"
+         },
+         "type": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "review case named",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     },
+     "asserts_techniques": true,
+     "kind": "signature_rules",
+     "rows": "/rules/*",
+     "techniques": [
+      {
+       "format": "sigma_tag",
+       "path": "/**2/tags"
+      }
+     ],
+     "values": {
+      "name": "/name"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     },
+     "asserts_techniques": {
+      "confidence": "low",
+      "evidence": [
+       "description (rule match)",
+       "rows with techniques",
+       "outputSchema.rules[].tags"
+      ],
+      "requires": [
+       "kind",
+       "techniques"
+      ],
+      "value": true
+     },
+     "kind": {
+      "confidence": "low",
+      "evidence": [
+       "description (rule match)",
+       "rows with techniques"
+      ],
+      "value": "signature_rules"
+     },
+     "rows": {
+      "confidence": "medium",
+      "evidence": [
+       "outputSchema.rules (a list of objects)"
+      ],
+      "requires": [
+       "kind"
+      ],
+      "value": "/rules/*"
+     },
+     "techniques": {
+      "confidence": "medium",
+      "evidence": [
+       "outputSchema.rules[].tags"
+      ],
+      "requires": [
+       "kind"
+      ],
+      "value": [
+       {
+        "format": "sigma_tag",
+        "path": "/**2/tags"
+       }
+      ]
+     },
+     "values": {
+      "confidence": "medium",
+      "evidence": [
+       "outputSchema.rules[].name"
+      ],
+      "requires": [
+       "kind",
+       "rows"
+      ],
+      "value": {
+       "name": "/name"
+      }
+     }
+    }
+   }
+  },
+  {
+   "answer": {
+    "rules": [
+     {
+      "name": "x",
+      "tags": "x",
+      "type": "x"
+     }
+    ]
+   },
+   "definition": {
+    "description": "Matches YARA rules against the file.",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "yara_scan"
+   },
+   "origin": "review case named answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     },
+     "asserts_techniques": true,
+     "kind": "signature_rules",
+     "rows": "/rules/*",
+     "techniques": [
+      {
+       "format": "sigma_tag",
+       "path": "/**2/tags"
+      }
+     ],
+     "values": {
+      "name": "/name"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     },
+     "asserts_techniques": {
+      "confidence": "low",
+      "evidence": [
+       "description (rule match)",
+       "rows with techniques",
+       "probe answer.rules[].tags"
+      ],
+      "requires": [
+       "kind",
+       "techniques"
+      ],
+      "value": true
+     },
+     "kind": {
+      "confidence": "low",
+      "evidence": [
+       "description (rule match)",
+       "rows with techniques"
+      ],
+      "value": "signature_rules"
+     },
+     "rows": {
+      "confidence": "low",
+      "evidence": [
+       "probe answer.rules (a list of objects)"
+      ],
+      "requires": [
+       "kind"
+      ],
+      "value": "/rules/*"
+     },
+     "techniques": {
+      "confidence": "low",
+      "evidence": [
+       "probe answer.rules[].tags"
+      ],
+      "requires": [
+       "kind"
+      ],
+      "value": [
+       {
+        "format": "sigma_tag",
+        "path": "/**2/tags"
+       }
+      ]
+     },
+     "values": {
+      "confidence": "low",
+      "evidence": [
+       "probe answer.rules[].name"
+      ],
+      "requires": [
+       "kind",
+       "rows"
+      ],
+      "value": {
+       "name": "/name"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Lists the members of an archive.",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "archive_list",
+    "outputSchema": {
+     "properties": {
+      "files": {
+       "items": {
+        "properties": {
+         "name": {
+          "type": "string"
+         },
+         "sha256": {
+          "type": "string"
+         },
+         "size": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "review case named",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "answer": {
+    "files": [
+     {
+      "name": "x",
+      "sha256": "x",
+      "size": "x"
+     }
+    ]
+   },
+   "definition": {
+    "description": "Lists the members of an archive.",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "archive_list"
+   },
+   "origin": "review case named answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "Extracts an archive.",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "extract_archive",
+    "outputSchema": {
+     "properties": {
+      "extracted": {
+       "items": {
+        "properties": {
+         "name": {
+          "type": "string"
+         },
+         "path": {
+          "type": "string"
+         },
+         "sha256": {
+          "type": "string"
+         },
+         "size": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "review case named",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "answer": {
+    "extracted": [
+     {
+      "name": "x",
+      "path": "x",
+      "sha256": "x",
+      "size": "x"
+     }
+    ]
+   },
+   "definition": {
+    "description": "Extracts an archive.",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "extract_archive"
+   },
+   "origin": "review case named answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "The PE resources.",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "pe_resources",
+    "outputSchema": {
+     "properties": {
+      "resources": {
+       "items": {
+        "properties": {
+         "name": {
+          "type": "string"
+         },
+         "sha256": {
+          "type": "string"
+         },
+         "size": {
+          "type": "string"
+         },
+         "type": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "review case named",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "answer": {
+    "resources": [
+     {
+      "name": "x",
+      "sha256": "x",
+      "size": "x",
+      "type": "x"
+     }
+    ]
+   },
+   "definition": {
+    "description": "The PE resources.",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "pe_resources"
+   },
+   "origin": "review case named answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "Classifies the sample.",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "classify",
+    "outputSchema": {
+     "properties": {
+      "classification": {
+       "items": {
+        "properties": {
+         "name": {
+          "type": "string"
+         },
+         "type": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "review case named",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "answer": {
+    "classification": [
+     {
+      "name": "x",
+      "type": "x"
+     }
+    ]
+   },
+   "definition": {
+    "description": "Classifies the sample.",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "classify"
+   },
+   "origin": "review case named answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "Decompiles one function.",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "decompile_function",
+    "outputSchema": {
+     "properties": {
+      "functions": {
+       "items": {
+        "properties": {
+         "code": {
+          "type": "string"
+         },
+         "name": {
+          "type": "string"
+         },
+         "type": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "review case named",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     },
+     "kind": "decompile",
+     "rows": "/functions/*",
+     "values": {
+      "name": "/name"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     },
+     "kind": {
+      "confidence": "low",
+      "evidence": [
+       "tool name"
+      ],
+      "value": "decompile"
+     },
+     "rows": {
+      "confidence": "medium",
+      "evidence": [
+       "outputSchema.functions (a list of objects)"
+      ],
+      "requires": [
+       "kind"
+      ],
+      "value": "/functions/*"
+     },
+     "values": {
+      "confidence": "medium",
+      "evidence": [
+       "outputSchema.functions[].name"
+      ],
+      "requires": [
+       "kind",
+       "rows"
+      ],
+      "value": {
+       "name": "/name"
+      }
+     }
+    }
+   }
+  },
+  {
+   "answer": {
+    "functions": [
+     {
+      "code": "x",
+      "name": "x",
+      "type": "x"
+     }
+    ]
+   },
+   "definition": {
+    "description": "Decompiles one function.",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "decompile_function"
+   },
+   "origin": "review case named answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     },
+     "kind": "decompile",
+     "rows": "/functions/*",
+     "values": {
+      "name": "/name"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     },
+     "kind": {
+      "confidence": "low",
+      "evidence": [
+       "tool name"
+      ],
+      "value": "decompile"
+     },
+     "rows": {
+      "confidence": "low",
+      "evidence": [
+       "probe answer.functions (a list of objects)"
+      ],
+      "requires": [
+       "kind"
+      ],
+      "value": "/functions/*"
+     },
+     "values": {
+      "confidence": "low",
+      "evidence": [
+       "probe answer.functions[].name"
+      ],
+      "requires": [
+       "kind",
+       "rows"
+      ],
+      "value": {
+       "name": "/name"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Extracts the strings of the file.",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "strings",
+    "outputSchema": {
+     "properties": {
+      "strings": {
+       "items": {
+        "properties": {
+         "name": {
+          "type": "string"
+         },
+         "text": {
+          "type": "string"
+         },
+         "type": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "review case named",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     },
+     "kind": "strings",
+     "rows": "/strings/*",
+     "values": {
+      "name": "/name",
+      "text": "/text"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     },
+     "kind": {
+      "confidence": "low",
+      "evidence": [
+       "description (strings)",
+       "rows with a text value"
+      ],
+      "value": "strings"
+     },
+     "rows": {
+      "confidence": "medium",
+      "evidence": [
+       "outputSchema.strings (a list of objects)"
+      ],
+      "requires": [
+       "kind"
+      ],
+      "value": "/strings/*"
+     },
+     "values": {
+      "confidence": "medium",
+      "evidence": [
+       "outputSchema.strings[].name",
+       "outputSchema.strings[].text"
+      ],
+      "requires": [
+       "kind",
+       "rows"
+      ],
+      "value": {
+       "name": "/name",
+       "text": "/text"
+      }
+     }
+    }
+   }
+  },
+  {
+   "answer": {
+    "strings": [
+     {
+      "name": "x",
+      "text": "x",
+      "type": "x"
+     }
+    ]
+   },
+   "definition": {
+    "description": "Extracts the strings of the file.",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "strings"
+   },
+   "origin": "review case named answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     },
+     "kind": "strings",
+     "rows": "/strings/*",
+     "values": {
+      "name": "/name",
+      "text": "/text"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     },
+     "kind": {
+      "confidence": "low",
+      "evidence": [
+       "description (strings)",
+       "rows with a text value"
+      ],
+      "value": "strings"
+     },
+     "rows": {
+      "confidence": "low",
+      "evidence": [
+       "probe answer.strings (a list of objects)"
+      ],
+      "requires": [
+       "kind"
+      ],
+      "value": "/strings/*"
+     },
+     "values": {
+      "confidence": "low",
+      "evidence": [
+       "probe answer.strings[].name",
+       "probe answer.strings[].text"
+      ],
+      "requires": [
+       "kind",
+       "rows"
+      ],
+      "value": {
+       "name": "/name",
+       "text": "/text"
+      }
+     }
+    }
+   }
+  },
+  {
+   "definition": {
+    "description": "Resolve a domain's DNS records now.",
+    "inputSchema": {
+     "properties": {
+      "domain": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "domain"
+     ],
+     "type": "object"
+    },
+    "name": "dns_lookup",
+    "outputSchema": {
+     "properties": {
+      "records": {
+       "items": {
+        "properties": {
+         "data": {
+          "type": "string"
+         },
+         "name": {
+          "type": "string"
+         },
+         "ttl": {
+          "type": "string"
+         },
+         "type": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "re-review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "domain": "domain"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.domain (name)"
+      ],
+      "value": {
+       "domain": "domain"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "domain": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "domain"
+     ],
+     "type": "object"
+    },
+    "name": "resolve_domain",
+    "outputSchema": {
+     "properties": {
+      "answers": {
+       "items": {
+        "properties": {
+         "data": {
+          "type": "string"
+         },
+         "name": {
+          "type": "string"
+         },
+         "type": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "re-review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "domain": "domain"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.domain (name)"
+      ],
+      "value": {
+       "domain": "domain"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "Historical passive DNS resolutions for a domain.",
+    "inputSchema": {
+     "properties": {
+      "domain": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "domain"
+     ],
+     "type": "object"
+    },
+    "name": "passive_dns",
+    "outputSchema": {
+     "properties": {
+      "resolutions": {
+       "items": {
+        "properties": {
+         "hostname": {
+          "type": "string"
+         },
+         "ip_address": {
+          "type": "string"
+         },
+         "last_seen": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "re-review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "domain": "domain"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.domain (name)"
+      ],
+      "value": {
+       "domain": "domain"
+      }
+     }
+    },
+    "notes": [
+     "rows not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "domain": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "domain"
+     ],
+     "type": "object"
+    },
+    "name": "domain_report",
+    "outputSchema": {
+     "properties": {
+      "resolutions": {
+       "items": {
+        "properties": {
+         "date": {
+          "type": "string"
+         },
+         "hostname": {
+          "type": "string"
+         },
+         "ips": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "re-review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "domain": "domain"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.domain (name)"
+      ],
+      "value": {
+       "domain": "domain"
+      }
+     }
+    },
+    "notes": [
+     "rows not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "domain": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "domain"
+     ],
+     "type": "object"
+    },
+    "name": "whois",
+    "outputSchema": {
+     "properties": {
+      "name_servers": {
+       "items": {
+        "properties": {
+         "hostname": {
+          "type": "string"
+         },
+         "ips": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "re-review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "domain": "domain"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.domain (name)"
+      ],
+      "value": {
+       "domain": "domain"
+      }
+     }
+    },
+    "notes": [
+     "rows not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {},
+     "required": [],
+     "type": "object"
+    },
+    "name": "list_interfaces",
+    "outputSchema": {
+     "properties": {
+      "interfaces": {
+       "items": {
+        "properties": {
+         "addresses": {
+          "type": "string"
+         },
+         "mtu": {
+          "type": "string"
+         },
+         "name": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "re-review case",
+   "proposal": {
+    "facts": {},
+    "fields": {},
+    "notes": [
+     "rows, places, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "Extract the malware's embedded configuration.",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    },
+    "name": "extract_config",
+    "outputSchema": {
+     "properties": {
+      "c2": {
+       "items": {
+        "properties": {
+         "domain": {
+          "type": "string"
+         },
+         "ips": {
+          "type": "string"
+         },
+         "port": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "re-review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "List processes in a memory image.",
+    "inputSchema": {
+     "properties": {
+      "dump_path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "dump_path"
+     ],
+     "type": "object"
+    },
+    "name": "pslist",
+    "outputSchema": {
+     "properties": {
+      "processes": {
+       "items": {
+        "properties": {
+         "cmdline": {
+          "type": "string"
+         },
+         "name": {
+          "type": "string"
+         },
+         "pid": {
+          "type": "string"
+         },
+         "ppid": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "re-review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "dump_path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.dump_path (name)"
+      ],
+      "value": {
+       "path": "dump_path"
+      }
+     }
+    },
+    "notes": [
+     "rows, places, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "Parse a capture file.",
+    "inputSchema": {
+     "properties": {
+      "pcap_path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "pcap_path"
+     ],
+     "type": "object"
+    },
+    "name": "parse_pcap",
+    "outputSchema": {
+     "properties": {
+      "flows": {
+       "items": {
+        "properties": {
+         "dport": {
+          "type": "string"
+         },
+         "dst": {
+          "type": "string"
+         },
+         "proto": {
+          "type": "string"
+         },
+         "sport": {
+          "type": "string"
+         },
+         "src": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "re-review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "pcap_path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.pcap_path (name)"
+      ],
+      "value": {
+       "path": "pcap_path"
+      }
+     }
+    },
+    "notes": [
+     "rows not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "task_id": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "task_id"
+     ],
+     "type": "object"
+    },
+    "name": "get_dns",
+    "outputSchema": {
+     "properties": {
+      "dns": {
+       "items": {
+        "properties": {
+         "answers": {
+          "type": "string"
+         },
+         "request": {
+          "type": "string"
+         },
+         "type": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "re-review case",
+   "proposal": {
+    "facts": {},
+    "fields": {},
+    "notes": [
+     "rows not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "task_id": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "task_id"
+     ],
+     "type": "object"
+    },
+    "name": "get_processes",
+    "outputSchema": {
+     "properties": {
+      "processes": {
+       "items": {
+        "properties": {
+         "command_line": {
+          "type": "string"
+         },
+         "name": {
+          "type": "string"
+         },
+         "pid": {
+          "type": "string"
+         },
+         "ppid": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "re-review case",
+   "proposal": {
+    "facts": {},
+    "fields": {},
+    "notes": [
+     "rows, places, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "Files the installer would create.",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    },
+    "name": "list_created_files",
+    "outputSchema": {
+     "properties": {
+      "files": {
+       "items": {
+        "properties": {
+         "name": {
+          "type": "string"
+         },
+         "sha256": {
+          "type": "string"
+         },
+         "size": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "re-review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path"
+     ],
+     "type": "object"
+    },
+    "name": "hosts_entries",
+    "outputSchema": {
+     "properties": {
+      "entries": {
+       "items": {
+        "properties": {
+         "addresses": {
+          "type": "string"
+         },
+         "hostname": {
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "type": "array"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "origin": "re-review case",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, places not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "answer": {
+    "records": [
+     {
+      "data": "93.184.216.34",
+      "name": "example.com",
+      "ttl": 300,
+      "type": "A"
+     }
+    ]
+   },
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "domain": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "dns_lookup"
+   },
+   "origin": "re-review case answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "domain": "domain"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.domain (name)"
+      ],
+      "value": {
+       "domain": "domain"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "answer": {
+    "resolutions": [
+     {
+      "hostname": "example.com",
+      "ip_address": "192.0.2.4"
+     }
+    ]
+   },
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "domain": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "passive_dns"
+   },
+   "origin": "re-review case answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "domain": "domain"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.domain (name)"
+      ],
+      "value": {
+       "domain": "domain"
+      }
+     }
+    },
+    "notes": [
+     "rows not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "answer": {
+    "imports": [
+     {
+      "name": "CreateFileA",
+      "type": "A"
+     },
+     {
+      "name": "MessageBoxA",
+      "type": "A"
+     }
+    ]
+   },
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "list_imports"
+   },
+   "origin": "re-review case answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "answer": {
+    "interfaces": [
+     {
+      "addresses": [
+       "10.0.0.5"
+      ],
+      "name": "eth0"
+     }
+    ]
+   },
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {},
+     "type": "object"
+    },
+    "name": "list_interfaces"
+   },
+   "origin": "re-review case answer",
+   "proposal": {
+    "facts": {},
+    "fields": {},
+    "notes": [
+     "rows, places, values not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "answer": {
+    "entries": [
+     {
+      "addresses": [
+       "127.0.0.1"
+      ],
+      "hostname": "localhost"
+     }
+    ]
+   },
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "read_hosts"
+   },
+   "origin": "re-review case answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows, places not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  },
+  {
+   "answer": {
+    "c2": [
+     {
+      "domain": "bad.example",
+      "ips": [
+       "192.0.2.4"
+      ]
+     }
+    ]
+   },
+   "definition": {
+    "description": "",
+    "inputSchema": {
+     "properties": {
+      "path": {
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "name": "extract_config"
+   },
+   "origin": "re-review case answer",
+   "proposal": {
+    "facts": {
+     "arguments": {
+      "path": "path"
+     }
+    },
+    "fields": {
+     "arguments": {
+      "confidence": "high",
+      "evidence": [
+       "inputSchema.properties.path (name)"
+      ],
+      "value": {
+       "path": "path"
+      }
+     }
+    },
+    "notes": [
+     "rows not offered: read only through a kind, and nothing the server said names one"
+    ]
+   }
+  }
+ ]
+}

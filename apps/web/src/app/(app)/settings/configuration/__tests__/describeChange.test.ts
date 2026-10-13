@@ -538,6 +538,23 @@ describe("describeChange: core.llm.agents", () => {
     expect(line.detail).toEqual(["network: ollama/qwen3:8b @ http://gpu-box:11434 (temp 0.2)"]);
   });
 
+  it("names a per-agent effort, each fallback's too", () => {
+    const before = {};
+    const after = {
+      reporter: {
+        provider: "anthropic",
+        model: "claude",
+        effort: "high",
+        temperature: 0.2,
+        fallbacks: [{ provider: "openai", model: "ds", effort: "max" }],
+      },
+    };
+    const line = describeChange(llmAgentsEntry, before, after);
+    expect(line.detail).toEqual([
+      "reporter: anthropic/claude (effort high) (temp 0.2), then openai/ds (effort max)",
+    ]);
+  });
+
   it("reports a removed override", () => {
     const before = { network: { provider: "openai", model: "gpt-4" } };
     const after = {};

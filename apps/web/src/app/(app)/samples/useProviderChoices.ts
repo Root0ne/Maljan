@@ -15,16 +15,23 @@ import { api } from "@/lib/api";
  * dialog falls back to offering only "Inherit from settings", which is the
  * safe answer — the job then uses whatever the settings say.
  */
-export function useProviderChoices(): {
+export interface ProviderChoices {
   staticProviders: string[];
   sandboxProviders: string[];
   profiles: string[];
-} {
-  const [choices, setChoices] = useState<{
-    staticProviders: string[];
-    sandboxProviders: string[];
-    profiles: string[];
-  }>({ staticProviders: [], sandboxProviders: [], profiles: [] });
+  /** The words each provider declares for a reader choosing it (its `choice_label`), by key. */
+  staticTitles: Record<string, string>;
+  sandboxTitles: Record<string, string>;
+}
+
+export function useProviderChoices(): ProviderChoices {
+  const [choices, setChoices] = useState<ProviderChoices>({
+    staticProviders: [],
+    sandboxProviders: [],
+    profiles: [],
+    staticTitles: {},
+    sandboxTitles: {},
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -33,6 +40,8 @@ export function useProviderChoices(): {
         const schema = await api.getSettingsSchema();
         const entries = schema.groups.flatMap((g) => g.entries);
         const find = (key: string) => entries.find((e) => e.key === key)?.choices ?? [];
+        const titles = (key: string) =>
+          entries.find((e) => e.key === key)?.choice_labels ?? {};
         if (!cancelled) {
           setChoices({
             staticProviders: find("core.static.provider"),
@@ -40,6 +49,8 @@ export function useProviderChoices(): {
             // Resolved server-side from the effective profile map, exactly as
             // the two provider lists are resolved from their registries.
             profiles: find("core.agents.profile"),
+            staticTitles: titles("core.static.provider"),
+            sandboxTitles: titles("core.sandbox.provider"),
           });
         }
       } catch {

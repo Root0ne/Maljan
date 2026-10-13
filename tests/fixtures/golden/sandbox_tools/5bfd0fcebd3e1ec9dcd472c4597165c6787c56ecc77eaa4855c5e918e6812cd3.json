@@ -50,7 +50,7 @@
         "api": "NtProtectVirtualMemory",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x7ff9fd422000'}, {'name': 'ModuleName', 'value': 'MSCOREE.DLL'}, {'name': 'NumberOfBytesProtected', 'value': '0x00001000'}, {'name': 'MemoryType', 'value': '0x00000000'}, {'name': 'NewAccessProtection', 'value': '0x00000004', 'pretty_value': 'PAGE_READWRITE'}, {'name': 'OldAccessProtection', 'value': '0x00000002\u2026",
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x7ff9fd422000'}, {'name': 'ModuleName', 'value': 'MSCOREE.DLL'}, {'name': 'NumberOfBytesProtected', 'value': '0x00001000'}, {'name': 'MemoryType', 'value': '0x00000000'}, {'name': 'NewAccessProtection', 'value': '0x00000004', 'pretty_value': 'PAGE_READWRITE'}, {'name': 'OldAccessProtection', 'value': '0x00000002…",
         "first_seen": "2026-08-13 23:08:01,654",
         "process_count": 0,
         "processes": []
@@ -2651,36 +2651,26 @@
     "registry": [
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\.NETFramework\\Policy\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\.NETFramework\\policy\\v4.0",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\.NETFramework",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\.NETFramework\\InstallRoot",
         "operation": "query",
         "value": "C:\\Windows\\Microsoft.NET\\Framework64\\"
-      },
-      {
-        "key": "0x80000002",
-        "operation": "query",
-        "value": null
-      },
-      {
-        "key": "0x00000220",
-        "operation": "query",
-        "value": null
       }
     ],
-    "total": 6
+    "total": 4
   },
   "sandbox_services_and_tasks": {
     "commands": [],

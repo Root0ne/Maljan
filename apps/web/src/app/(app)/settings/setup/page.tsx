@@ -33,7 +33,10 @@ const GUIDE_ICON: Record<GuideId, LucideIcon> = {
 export default function SetupHubPage() {
   const ctx = useSettingsContext();
   const isSet = (key: string) => ctx.values[key]?.is_set === true;
-  const configured = llmLooksConfigured(ctx.effectiveValue, isSet);
+  // The display phrase the catalogue serves for a key's choice (`choice_labels`).
+  const choiceLabel = (key: string, choice: string) =>
+    ctx.entriesByKey[key]?.choice_labels?.[choice] ?? undefined;
+  const configured = llmLooksConfigured(ctx.effectiveValue, isSet, ctx.schema);
   const guides = guidesFor(configured);
 
   return (
@@ -58,7 +61,7 @@ export default function SetupHubPage() {
               <p className="text-xs text-text-muted mt-2">
                 <span className="uppercase tracking-wider text-[11px]">Now:</span>{" "}
                 <span data-testid={`guide-status-${guide.id}`}>
-                  {guideStatus(guide.id, ctx.effectiveValue, isSet)}
+                  {guideStatus(guide.id, ctx.effectiveValue, isSet, choiceLabel, ctx.schema)}
                 </span>
               </p>
               <Link

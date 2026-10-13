@@ -183,7 +183,8 @@ def _run(provider: Any, sample: Path) -> dict[str, Any] | None:
 
 
 def _stub_run(task_id: str = "42") -> Any:
-    from maljan.schemas.sandbox_report import SandboxReport, SandboxRun
+    from maljan.providers.sandbox.readers import required_reader
+    from maljan.schemas.sandbox_report import SandboxRun
 
     raw = {"target": {"sha256": "abc"}, "behavior": {}, "signatures": [], "network": {}}
     return SandboxRun(
@@ -191,7 +192,7 @@ def _stub_run(task_id: str = "42") -> Any:
         sample_sha256="abc",
         sample_name="s.exe",
         status="reported",
-        report=SandboxReport(provider="mock", source_format="mock", raw=raw),
+        report=required_reader("mock").read(raw, provider="mock"),
         raw=raw,
         error="",
     )
@@ -246,7 +247,7 @@ class TestMaljanAppSandboxProvider:
         assert isinstance(app.container.get_sandbox_provider(), SandboxProvider)
         assert app.container.get_sandbox_provider().id == "mock"
 
-    def test_submit_drives_the_provider_and_returns_the_cape_shaped_report(
+    def test_submit_drives_the_provider_and_returns_the_report_document(
         self, tmp_path: Path
     ) -> None:
         sample = tmp_path / "s.exe"
@@ -256,9 +257,10 @@ class TestMaljanAppSandboxProvider:
         report = _run(provider, sample)
 
         assert report is not None
-        # ``to_cape_shaped_dict`` hands a mock/cape source its ``raw`` back. The
-        # stub reports as the mock, and a mock report that is not the stand-in
-        # was read from a fixture file, which it now says of itself.
+        # A report read by a reader that keeps its source's arrangement lays
+        # out as the source. The stub reports as the mock, and a mock report
+        # that is not the stand-in was read from a fixture file, which it now
+        # says of itself.
         assert report == {
             "target": {"sha256": "abc"},
             "behavior": {},

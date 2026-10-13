@@ -167,21 +167,14 @@ class TestTheCapReachesDeepSeek:
         assert "max_tokens" not in wire.bodies[0]
 
     def test_the_settings_probe_asks_with_the_same_fields(self) -> None:
-        from app.services.settings_probes import _completion_request
+        from maljan.llm.openai_provider import OpenAIProvider
 
-        _url, _headers, body = _completion_request(
-            "openai",
-            HOSTED,
-            "deepseek-flash",
-            "k",
-            disable_thinking=True,
-            compat="deepseek",
-            reasoning_effort="max",
-        )
+        thinking_off = _settings(HOSTED, compat="deepseek", disable_thinking=True)
+        body = OpenAIProvider.one_turn_request(thinking_off, HOSTED, "deepseek-flash", "max").body
         assert body["thinking"] == {"type": "disabled"}
         assert body["reasoning_effort"] == "max"
         assert "chat_template_kwargs" not in body
-        _url, _headers, plain = _completion_request("openai", HOSTED, "m", "k")
+        plain = OpenAIProvider.one_turn_request(_settings(HOSTED), HOSTED, "m").body
         assert "reasoning_effort" not in plain and "thinking" not in plain
 
 

@@ -77,7 +77,11 @@ from maljan.providers.base import ProviderProbe, SandboxCapabilities, SandboxPro
 from maljan.providers.errors import ProviderError
 from maljan.providers.registry import register_sandbox_provider
 from maljan.providers.sandbox.limits import read_capped, stream_to_file_capped
-from maljan.schemas.sandbox_report import triage_overview_to_sandbox_report
+from maljan.providers.sandbox.readers import required_reader
+
+# The registered report reader (``providers.sandbox.readers``) this provider's
+# reports are read by.
+_READER = "triage"
 
 if TYPE_CHECKING:
     from maljan.core.config import SandboxTriageConfig, Settings
@@ -160,16 +164,35 @@ class TriageSandboxProvider(SandboxProvider):
     sample gets no screenshot either (the "Dynamic Report" docs page lists
     Triage's own top-level report fields — Version/Sample/Task/Errors/
     Analysis/Processes/Signatures/Network/Debug/Dumped/Extracted — and none
-    of them is a screenshot). ``UNAVAILABLE`` names all five rather than
-    leaving them silently empty, which would read exactly like a clean
+    of them is a screenshot). ``UNAVAILABLE`` names all five, by the
+    platform's own section ids (``schemas.sandbox_report.SECTION_IDS``), rather
+    than leaving them silently empty, which would read exactly like a clean
     sample.
     """
 
+    # What the console calls this provider and says about it, and its test's label.
+    choice_label = "Hatching Triage"
+    guide_leaves = (
+        "api_token",
+        "base_url",
+        "profile",
+        "fetch_pcap",
+        "poll_interval_seconds",
+        "timeout_seconds",
+    )
+    choice_order = 3
+    title = "Hatching Triage"
+    description = "Triage runs the sample in its cloud and returns the report it produced."
+    probe_label = "Test Triage connection"
+    settings_intro = "The API token is stored on the server and never shown again."
+    # The behavioural task reports are fetched beside the overview (``fetch``).
+    FETCHES_TASK_REPORTS = True
+
     UNAVAILABLE: ClassVar[tuple[str, ...]] = (
         "apistats",
-        "calls",
+        "api_calls",
         "registry",
-        "generic_events",
+        "events",
         "screenshots",
     )
 
@@ -194,7 +217,7 @@ class TriageSandboxProvider(SandboxProvider):
             can_fetch_report=True,
             can_fetch_pcap=bool(self._cfg.fetch_pcap),
             provides_tools=False,
-            report_format="triage",
+            report_format=_READER,
             degrade_on_failure=True,
         )
 
@@ -481,8 +504,11 @@ class TriageSandboxProvider(SandboxProvider):
                 response.read()
                 self._raise_for_status(response, operation)
             body = read_capped(response, what=f"The Triage {operation.split()[0]} body")
+        from maljan.core.safe_json import loads
+
         try:
-            return json.loads(body)
+            # Read at any nesting depth (``core.safe_json``).
+            return loads(body)
         except ValueError as exc:
             raise ProviderError(f"Triage {operation} did not return valid JSON.") from exc
 
@@ -514,8 +540,8 @@ class TriageSandboxProvider(SandboxProvider):
                 continue
             task_reports[name] = report
 
-        report = triage_overview_to_sandbox_report(
-            overview, provider="triage", task_reports=task_reports, task_id=str(task_id)
+        report = required_reader(_READER).read(
+            overview, provider=self.id, task_id=str(task_id), task_reports=task_reports
         )
         return SandboxRun(
             task_id=str(task_id),

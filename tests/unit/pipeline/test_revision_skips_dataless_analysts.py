@@ -63,7 +63,7 @@ def _container(chunks_by_agent: dict[str, list[_Chunk]]) -> MagicMock:
     container.config.llm.parallel_analysts = False
     agents = {name: _agent(name) for name in chunks_by_agent}
     container.get_agent.side_effect = lambda n: agents[n]
-    container.load_chunked.side_effect = lambda _h, n: chunks_by_agent[n]
+    container.load_chunked.side_effect = lambda _h, n, room=None: chunks_by_agent[n]
     container.load_data.side_effect = lambda _h, n: chunks_by_agent[n][0].content
     container._agents = agents  # test handle
     return container

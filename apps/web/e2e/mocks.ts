@@ -1,5 +1,6 @@
 import type { Page, Route, WebSocketRoute } from "@playwright/test";
-import type { SettingsSchema, SettingsValues } from "@/types/settings";
+import served from "@/test-fixtures/settings-schema.json";
+import type { CatalogEntry, SettingsSchema, SettingsValues } from "@/types/settings";
 
 /** The four stages a plain analyst list has always meant, as the API dumps
  *  them. A function rather than a constant so two mocked teams cannot share
@@ -72,6 +73,47 @@ const PAPER_STAGES = () => [
 const unmockedByPage = new WeakMap<Page, string[]>();
 
 const JSON_HEADERS = { "content-type": "application/json" };
+
+/** The schema the API serves a fresh deployment (`scripts/dev/write_console_schema.py`). */
+const SERVED = served as unknown as SettingsSchema;
+const SERVED_BY_KEY = new Map(
+  SERVED.groups.flatMap((group) => group.entries).map((entry) => [entry.key, entry])
+);
+
+/**
+ * A mocked schema carrying the providers' own declarations exactly as the API
+ * serves them: each provider selector's `choice_titles`, `choice_descriptions`,
+ * `choice_labels` and `choice_facts`, the server map's built-in and reserved
+ * keys, and the probe labels. The console keeps no table of its own, so a mock
+ * without these would test a console that names nothing.
+ */
+function withServedDeclarations<T extends { groups: { entries: unknown[] }[] }>(schema: T): T {
+  const groups = schema.groups.map((group) => ({
+    ...group,
+    entries: group.entries.map((raw) => {
+      const entry = raw as CatalogEntry;
+      const real = SERVED_BY_KEY.get(entry.key);
+      if (!real) return raw;
+      return {
+        ...entry,
+        choice_titles: real.choice_titles ?? null,
+        choice_descriptions: real.choice_descriptions ?? null,
+        choice_labels: real.choice_labels ?? entry.choice_labels ?? null,
+        choice_facts: real.choice_facts ?? null,
+        builtin_servers: real.builtin_servers ?? null,
+        reserved_servers: real.reserved_servers ?? null,
+      };
+    }),
+  }));
+  return {
+    ...schema,
+    groups,
+    probe_labels: SERVED.probe_labels ?? {},
+    enrichment_sources: SERVED.enrichment_sources ?? [],
+    credential_servers: SERVED.credential_servers ?? {},
+    tool_declaration_fields: SERVED.tool_declaration_fields,
+  };
+}
 
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({
@@ -237,8 +279,11 @@ export const MOCK_SYSTEM_STATUS = {
   // What a single-process install answers: the enrichment is queued beside the
   // analyses, so there is no second worker to be missing.
   enrichment_worker: "not_required",
-  has_virustotal_key: true,
-  has_abuseipdb_key: false,
+  enrichment_configured: 1,
+  enrichment_sources: [
+    { key: "virustotal", label: "VirusTotal", configured: true },
+    { key: "abuseipdb", label: "AbuseIPDB", configured: false },
+  ],
 };
 
 export const MOCK_SAMPLE = {
@@ -315,7 +360,7 @@ export const MOCK_API_KEY = {
  * the `generic_mcp` static provider's server picker (`choices_from:
  * "mcp_servers"`).
  */
-export const MOCK_SETTINGS_SCHEMA = {
+export const MOCK_SETTINGS_SCHEMA = withServedDeclarations({
   groups: [
     {
       key: "negotiation",
@@ -717,7 +762,7 @@ export const MOCK_SETTINGS_SCHEMA = {
       ],
     },
   ],
-};
+});
 
 export const MOCK_SETTINGS_VALUES = {
   values: {
@@ -979,7 +1024,7 @@ export const MOCK_SETTINGS_VALUES = {
  * badge after the LLM guide lands on "LLM & model" (just the provider) and
  * "Providers" (the three ollama fields), never a combined count on one.
  */
-export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
+export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = withServedDeclarations({
   groups: [
     {
       key: "llm",
@@ -1302,11 +1347,11 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           minimum: null, maximum: null, secret: false, group: "memory",
           title: "Backend", description: "In-process memory, or a Qdrant instance that survives a restart.",
           applies: "next_job", editable: true, reason: null, probe: null,
-          applies_when: null, order: -1, choices_from: null, editor: null, subgroup: null, advanced: false,
-          required_env: null,
+          applies_when: null, order: -1, choices_from: "memory_backends", editor: null, subgroup: null, advanced: false,
+          required_env: null, choice_labels: { memory: "in-process" },
         },
         {
-          key: "core.memory.qdrant_url", namespace: "core", path: "memory.qdrant_url",
+          key: "core.memory.qdrant.url", namespace: "core", path: "memory.qdrant.url",
           type: "str", default: "", nullable: false, choices: null,
           minimum: null, maximum: null, secret: false, group: "memory",
           title: "Qdrant URL", description: "Where the Qdrant instance lives.",
@@ -1315,7 +1360,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           required_env: null,
         },
         {
-          key: "core.memory.qdrant_api_key", namespace: "core", path: "memory.qdrant_api_key",
+          key: "core.memory.qdrant.api_key", namespace: "core", path: "memory.qdrant.api_key",
           type: "secret", default: null, nullable: true, choices: null,
           minimum: null, maximum: null, secret: true, group: "memory",
           title: "Qdrant API key", description: "Credential for a hosted Qdrant instance.",
@@ -1324,7 +1369,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           required_env: null,
         },
         {
-          key: "core.memory.qdrant_collection", namespace: "core", path: "memory.qdrant_collection",
+          key: "core.memory.qdrant.collection", namespace: "core", path: "memory.qdrant.collection",
           type: "str", default: "maljan_findings", nullable: false, choices: null,
           minimum: null, maximum: null, secret: false, group: "memory",
           title: "Qdrant collection", description: "Collection findings are written to and read from.",
@@ -1333,8 +1378,8 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           required_env: null,
         },
         {
-          key: "core.memory.qdrant_function_hash_collection", namespace: "core",
-          path: "memory.qdrant_function_hash_collection",
+          key: "core.memory.qdrant.function_hash_collection", namespace: "core",
+          path: "memory.qdrant.function_hash_collection",
           type: "str", default: "maljan_function_hashes", nullable: false, choices: null,
           minimum: null, maximum: null, secret: false, group: "memory",
           title: "Qdrant function-hash collection", description: "Collection function hashes are written to and read from.",
@@ -1397,7 +1442,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
       ],
     },
   ],
-};
+});
 
 function unset(source: "default" | "ui" = "default"): {
   is_set: null;
@@ -1471,10 +1516,10 @@ export const MOCK_SETTINGS_VALUES_FULL: SettingsValues = {
       ...unset(),
     },
     "core.memory.backend": { value: "memory", ...unset() },
-    "core.memory.qdrant_url": { value: "", ...unset() },
-    "core.memory.qdrant_api_key": { value: null, is_set: false, hint: null, source: "default", updated_at: null, updated_by: null },
-    "core.memory.qdrant_collection": { value: "maljan_findings", ...unset() },
-    "core.memory.qdrant_function_hash_collection": { value: "maljan_function_hashes", ...unset() },
+    "core.memory.qdrant.url": { value: "", ...unset() },
+    "core.memory.qdrant.api_key": { value: null, is_set: false, hint: null, source: "default", updated_at: null, updated_by: null },
+    "core.memory.qdrant.collection": { value: "maljan_findings", ...unset() },
+    "core.memory.qdrant.function_hash_collection": { value: "maljan_function_hashes", ...unset() },
     "core.memory.top_k": { value: 5, ...unset() },
     "api.enrichment_enabled": { value: false, ...unset() },
     "api.enrichment_max_lookups": { value: 10, ...unset() },

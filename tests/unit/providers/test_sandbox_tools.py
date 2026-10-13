@@ -129,6 +129,312 @@ class TestNetwork:
         assert result["dns_next_offset"] == 6
 
 
+class TestRegistryOps:
+    """Every registry row comes back unless a page is asked for.
+
+    The golden answers over the real corpus once held 200 rows per report
+    while the tool already answered all of them, and nothing outside that
+    corpus noticed; this pins the whole-list answer where CI runs it.
+    """
+
+    @staticmethod
+    def _report(count: int) -> dict[str, Any]:
+        keys = [f"HKEY_CURRENT_USER\\Software\\Example\\k{i}" for i in range(count)]
+        return {"behavior": {"summary": {"keys": keys}}}
+
+    def test_every_row_comes_back_when_no_page_is_asked_for(self) -> None:
+        result = sandbox_tools.sandbox_registry_ops(self._report(500))
+
+        assert len(result["registry"]) == 500
+        assert result["total"] == 500
+        assert "next_offset" not in result
+
+    def test_a_page_says_where_the_next_starts(self) -> None:
+        result = sandbox_tools.sandbox_registry_ops(self._report(10), limit=3, offset=3)
+
+        assert [row["key"][-2:] for row in result["registry"]] == ["k3", "k4", "k5"]
+        assert result["total"] == 10
+        assert result["next_offset"] == 6
+
+    @staticmethod
+    def _one_call(api: str, arguments: list[dict[str, str]]) -> dict[str, Any]:
+        return {"behavior": {"processes": [{"calls": [{"api": api, "arguments": arguments}]}]}}
+
+    def test_an_open_or_create_listing_the_hive_handle_first_is_keyed_by_its_path(self) -> None:
+        for api, operation in (("RegOpenKeyExW", "query"), ("RegCreateKeyExW", "create")):
+            report = self._one_call(
+                api,
+                [
+                    {"name": "Registry", "value": "0x80000002"},
+                    {"name": "SubKey", "value": "SOFTWARE\\Example"},
+                    {"name": "Handle", "value": "0x00000120"},
+                    {"name": "FullName", "value": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Example"},
+                ],
+            )
+
+            rows = sandbox_tools.sandbox_registry_ops(report)["registry"]
+
+            assert rows == [
+                {
+                    "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Example",
+                    "operation": operation,
+                    "value": None,
+                }
+            ]
+
+    def test_without_a_full_path_the_subkey_is_the_key_not_the_handle(self) -> None:
+        report = self._one_call(
+            "RegCreateKeyExW",
+            [
+                {"name": "Registry", "value": "0x80000001"},
+                {"name": "SubKey", "value": "Software\\Example"},
+            ],
+        )
+
+        rows = sandbox_tools.sandbox_registry_ops(report)["registry"]
+
+        assert [row["key"] for row in rows] == ["Software\\Example"]
+
+    def test_a_value_query_through_the_native_api_is_a_query_with_the_value_read(self) -> None:
+        report = self._one_call(
+            "NtQueryValueKey",
+            [
+                {"name": "KeyHandle", "value": "0x00000124"},
+                {"name": "ValueName", "value": "Example"},
+                {"name": "Information", "value": "1"},
+                {"name": "FullName", "value": "HKEY_CURRENT_USER\\Software\\Example\\Example"},
+            ],
+        )
+        report["behavior"]["summary"] = {"keys": ["HKEY_CURRENT_USER\\Software\\Example\\Example"]}
+
+        rows = sandbox_tools.sandbox_registry_ops(report)["registry"]
+
+        assert rows == [
+            {
+                "key": "HKEY_CURRENT_USER\\Software\\Example\\Example",
+                "operation": "query",
+                "value": "1",
+            }
+        ]
+
+    @staticmethod
+    def _calls(*calls: tuple[str, str | None]) -> dict[str, Any]:
+        rows = []
+        for api, value in calls:
+            arguments = [{"name": "FullName", "value": "HKEY_CURRENT_USER\\Software\\Example\\v"}]
+            if value is not None:
+                arguments.insert(0, {"name": "Data", "value": value})
+            rows.append({"api": api, "arguments": arguments})
+        return {"behavior": {"processes": [{"calls": rows}]}}
+
+    def test_a_read_after_a_write_leaves_the_write_and_what_was_written(self) -> None:
+        report = self._calls(("RegSetValueExW", "written"), ("RegQueryValueExW", "read back"))
+
+        [row] = sandbox_tools.sandbox_registry_ops(report)["registry"]
+
+        assert (row["operation"], row["value"]) == ("modify", "written")
+
+    def test_a_read_that_saw_nothing_leaves_an_earlier_read_s_value(self) -> None:
+        report = self._calls(("RegQueryValueExW", "seen"), ("NtQueryValueKey", None))
+
+        [row] = sandbox_tools.sandbox_registry_ops(report)["registry"]
+
+        assert (row["operation"], row["value"]) == ("query", "seen")
+
+    def test_between_writes_the_later_one_stands(self) -> None:
+        report = self._calls(("RegSetValueExW", "written"), ("RegDeleteValueW", None))
+
+        [row] = sandbox_tools.sandbox_registry_ops(report)["registry"]
+
+        assert (row["operation"], row["value"]) == ("delete", None)
+
+    @staticmethod
+    def _create(api: str, disposition: str | None, status: bool = True) -> dict[str, Any]:
+        arguments = [
+            {"name": "Registry", "value": "0x80000001"},
+            {"name": "SubKey", "value": "Software\\Example"},
+            {"name": "FullName", "value": "HKEY_CURRENT_USER\\Software\\Example"},
+        ]
+        if disposition is not None:
+            arguments.append({"name": "Disposition", "value": disposition})
+        call = {"api": api, "status": status, "arguments": arguments}
+        return {"behavior": {"processes": [{"calls": [call]}]}}
+
+    def test_a_create_that_opened_an_existing_key_is_a_read(self) -> None:
+        for api in ("RegCreateKeyExW", "RegCreateKeyExA", "NtCreateKey"):
+            [row] = sandbox_tools.sandbox_registry_ops(self._create(api, "2"))["registry"]
+
+            assert row["operation"] == "query", api
+
+    def test_a_create_that_made_a_new_key_is_a_create(self) -> None:
+        for api in ("RegCreateKeyExW", "RegCreateKeyExA", "NtCreateKey"):
+            [row] = sandbox_tools.sandbox_registry_ops(self._create(api, "1"))["registry"]
+
+            assert row["operation"] == "create", api
+
+    def test_a_disposition_filed_as_an_integer_or_padded_reads_as_its_text_form(self) -> None:
+        cases: tuple[tuple[object, str], ...] = (
+            (2, "query"),
+            (1, "create"),
+            ("02", "query"),
+            ("0x2", "query"),
+        )
+        for disposition, expected in cases:
+            report = self._create("RegCreateKeyExW", None)
+            report["behavior"]["processes"][0]["calls"][0]["arguments"].append(
+                {"name": "Disposition", "value": disposition}
+            )
+
+            [row] = sandbox_tools.sandbox_registry_ops(report)["registry"]
+
+            assert row["operation"] == expected, disposition
+
+    def test_a_create_with_no_known_outcome_keeps_its_api_s_operation(self) -> None:
+        for disposition in (None, "", "1701304", "not a number"):
+            report = self._create("RegCreateKeyExW", disposition)
+
+            [row] = sandbox_tools.sandbox_registry_ops(report)["registry"]
+
+            assert row["operation"] == "create", disposition
+
+    def test_an_opened_key_does_not_outrank_a_later_write(self) -> None:
+        report = self._create("RegCreateKeyExW", "2")
+        report["behavior"]["processes"][0]["calls"].append(
+            {
+                "api": "RegSetValueExW",
+                "status": True,
+                "arguments": [
+                    {"name": "Buffer", "value": "x"},
+                    {"name": "FullName", "value": "HKEY_CURRENT_USER\\Software\\Example"},
+                ],
+            }
+        )
+
+        [row] = sandbox_tools.sandbox_registry_ops(report)["registry"]
+
+        assert (row["operation"], row["value"]) == ("modify", "x")
+
+    def test_a_failed_write_is_bare_access_without_its_value(self) -> None:
+        report = self._create("RegCreateKeyExW", "1", status=False)
+        report["behavior"]["processes"][0]["calls"].append(
+            {
+                "api": "RegDeleteValueA",
+                "status": False,
+                "return": "0x00000002",
+                "arguments": [
+                    {"name": "Handle", "value": "0x00000120"},
+                    {"name": "ValueName", "value": "Example"},
+                    {"name": "FullName", "value": "HKEY_CURRENT_USER\\Software\\Run\\Example"},
+                ],
+            }
+        )
+
+        rows = sandbox_tools.sandbox_registry_ops(report)["registry"]
+
+        assert [(row["operation"], row["value"]) for row in rows] == [
+            ("access", None),
+            ("access", None),
+        ]
+
+    def test_a_read_replaces_a_failed_write(self) -> None:
+        report = self._calls(("RegSetValueExW", "never written"), ("RegQueryValueExW", "seen"))
+        report["behavior"]["processes"][0]["calls"][0]["status"] = False
+
+        [row] = sandbox_tools.sandbox_registry_ops(report)["registry"]
+
+        assert (row["operation"], row["value"]) == ("query", "seen")
+
+    def test_a_failed_read_is_still_a_read(self) -> None:
+        report = self._calls(("NtQueryValueKey", None))
+        report["behavior"]["processes"][0]["calls"][0]["status"] = False
+
+        [row] = sandbox_tools.sandbox_registry_ops(report)["registry"]
+
+        assert row["operation"] == "query"
+
+    def test_the_extended_open_and_delete_calls_are_read(self) -> None:
+        open_ex = {
+            "api": "NtOpenKeyEx",
+            "status": True,
+            "arguments": [
+                {"name": "KeyHandle", "value": "0x00000130"},
+                {"name": "ObjectAttributes", "value": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Opened"},
+            ],
+        }
+        delete_ex = {
+            "api": "RegDeleteKeyExW",
+            "status": True,
+            "arguments": [
+                {"name": "Handle", "value": "0x00000134"},
+                {"name": "SubKey", "value": "Deleted"},
+                {"name": "FullName", "value": "HKEY_CURRENT_USER\\Software\\Deleted"},
+            ],
+        }
+        report = {"behavior": {"processes": [{"calls": [open_ex, delete_ex]}]}}
+
+        rows = sandbox_tools.sandbox_registry_ops(report)["registry"]
+
+        assert [(row["key"], row["operation"]) for row in rows] == [
+            ("HKEY_LOCAL_MACHINE\\SOFTWARE\\Opened", "query"),
+            ("HKEY_CURRENT_USER\\Software\\Deleted", "delete"),
+        ]
+
+    def test_every_outcome_refines_a_listed_operation_into_a_weighed_one(self) -> None:
+        listed = set(sandbox_tools._REGISTRY_OPS.values())
+        for operation, (_name, meanings) in sandbox_tools._REGISTRY_OUTCOMES.items():
+            assert operation in listed
+            assert set(meanings.values()) <= set(sandbox_tools._REGISTRY_OP_WEIGHT)
+        assert sandbox_tools._FAILED_WRITE in sandbox_tools._REGISTRY_OP_WEIGHT
+
+    def test_every_operation_the_table_names_has_a_weight(self) -> None:
+        operations = set(sandbox_tools._REGISTRY_OPS.values()) | {"access"}
+        assert operations <= set(sandbox_tools._REGISTRY_OP_WEIGHT)
+
+
+class TestApiNameTables:
+    """Every API a sandbox tool matches calls by is spelt as Windows exports it.
+
+    A name the table spells wrong matches no call and fails silently: the
+    native value query was once listed with a doubled letter and every one of
+    its calls fell out of the registry view. The spelling list is the vendored
+    export-name catalogue ``api_hashes`` reads.
+    """
+
+    @staticmethod
+    def _exported() -> set[str]:
+        from maljan.tools.api_hashes import load_export_names
+
+        names: set[str] = set()
+        stack: list[Any] = [load_export_names()]
+        while stack:
+            item = stack.pop()
+            if isinstance(item, str):
+                names.add(item.lower())
+            elif isinstance(item, dict):
+                stack.extend(item.values())
+            elif isinstance(item, list):
+                stack.extend(item)
+        return names
+
+    def test_every_listed_api_is_an_exported_windows_function(self) -> None:
+        exported = self._exported()
+        listed = (
+            set(sandbox_tools._REGISTRY_OPS)
+            | set(sandbox_tools._MUTEX_APIS)
+            | set(sandbox_tools._SERVICE_APIS)
+        )
+
+        assert sorted(name for name in listed if name not in exported) == []
+
+    def test_the_tables_are_lower_case_as_the_lookups_ask(self) -> None:
+        for table in (
+            sandbox_tools._REGISTRY_OPS,
+            sandbox_tools._MUTEX_APIS,
+            sandbox_tools._SERVICE_APIS,
+        ):
+            assert all(name == name.lower() for name in table)
+
+
 class TestSignatures:
     def test_a_signature_is_reported_as_the_engine_s_opinion_with_its_severity(self) -> None:
         result = sandbox_tools.sandbox_signatures(REPORT)

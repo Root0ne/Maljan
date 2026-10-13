@@ -2,11 +2,18 @@
 
 import uuid
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ── Job Schemas ──────────────────────────────────────────────────
+
+
+def _registered(value: str | None, known: list[str], field: str) -> str | None:
+    """``value`` when its registry holds it; refused with the registered names otherwise."""
+    if value is None or value in known:
+        return value
+    raise ValueError(f"{field} must be one of: {', '.join(known)}")
 
 
 class _KnownJobConfig(BaseModel):
@@ -20,12 +27,13 @@ class _KnownJobConfig(BaseModel):
     model_config = {"extra": "allow"}
 
     max_iterations: Annotated[int, Field(ge=1)] | None = None
-    llm_provider: Literal["openai", "anthropic", "ollama", "gemini"] | None = None
+    # The providers for this job, each a name its registry holds: a provider
+    # registered at runtime is accepted the day it is registered, and the
+    # registries are the one list of what a valid provider is.
+    llm_provider: str | None = None
     mock_mode: bool | None = None
-    # Static-analysis provider for this job; repeats StaticConfig.provider's choices.
-    static_provider: Literal["ghidra", "r2", "capa_yara", "generic_mcp", "none"] | None = None
-    # Sandbox provider for this job; repeats SandboxConfig.provider's choices.
-    sandbox_provider: Literal["mock", "cape2", "upload", "triage", "rest"] | None = None
+    static_provider: str | None = None
+    sandbox_provider: str | None = None
     # An uploaded report to attach; build_job_settings forces sandbox.provider="upload".
     sandbox_report_id: uuid.UUID | None = None
     # The agent profile for this job. A free string rather than a Literal
@@ -33,6 +41,33 @@ class _KnownJobConfig(BaseModel):
     # the code owns; the route checks it against the effective profile map at
     # submit time, which is where "known" can actually be answered.
     profile: str | None = None
+
+    @field_validator("llm_provider")
+    @classmethod
+    def _a_registered_llm_provider(cls, value: str | None) -> str | None:
+        from maljan.llm.provider_base import missing_block, provider_names
+
+        value = _registered(value, provider_names(), "llm_provider")
+        # A provider with no settings block of its own names no role model;
+        # the job would run with none, so it is refused here.
+        problem = missing_block(value) if value is not None else None
+        if problem:
+            raise ValueError(f"llm_provider: {problem}")
+        return value
+
+    @field_validator("static_provider")
+    @classmethod
+    def _a_registered_static_provider(cls, value: str | None) -> str | None:
+        from maljan.providers.registry import static_provider_ids
+
+        return _registered(value, static_provider_ids(), "static_provider")
+
+    @field_validator("sandbox_provider")
+    @classmethod
+    def _a_registered_sandbox_provider(cls, value: str | None) -> str | None:
+        from maljan.providers.registry import sandbox_provider_ids
+
+        return _registered(value, sandbox_provider_ids(), "sandbox_provider")
 
     @model_validator(mode="after")
     def _mock_mode_cannot_consume_an_uploaded_report(self) -> "_KnownJobConfig":
@@ -170,14 +205,59 @@ class SandboxReportResponse(BaseModel):
     sample_sha256_match: bool
     warning: str | None = None
     uploaded_at: datetime = Field(validation_alias="created_at")
+    # For a report accepted unread: a proposed format declaration read from its
+    # shape (``maljan.core.report_proposals``), each field with its evidence and
+    # confidence, for an operator to accept or edit. Nothing reads it but the
+    # console.
+    proposal: dict[str, Any] | None = None
 
     model_config = {"from_attributes": True, "populate_by_name": True}
+
+
+class AcceptReportFormatRequest(BaseModel):
+    """A report format declaration an operator accepts, and the unread upload it is for."""
+
+    declaration: dict[str, Any]
+    sample_id: uuid.UUID
+    report_id: uuid.UUID
 
 
 class SandboxReportListResponse(BaseModel):
     """Every sandbox report attached to one sample."""
 
     items: list[SandboxReportResponse]
+    total: int
+
+
+class SignatureScaleResponse(BaseModel):
+    """A signature severity scale: the rung each score from 1 to ``max`` means."""
+
+    name: str
+    max: int
+    rungs: list[str]
+
+
+class SandboxReportFormatResponse(BaseModel):
+    """One declared sandbox report format, as the upload route and the run read it."""
+
+    name: str
+    builtin: bool
+    # Whether ``sandbox.upload.allowed_formats`` accepts it for upload.
+    allowed: bool
+    reader: str
+    detect: list[list[dict[str, Any]]]
+    task_id_paths: list[str]
+    target_sha256_paths: list[str]
+    signature_scale: SignatureScaleResponse | None = None
+    # The operator's declaration as written (only the fields it sets), or null
+    # for a built-in served as shipped. The fields above are what is in effect.
+    declared: dict[str, Any] | None = None
+
+
+class SandboxReportFormatListResponse(BaseModel):
+    """Every declared sandbox report format, in the order a payload is tried against them."""
+
+    items: list[SandboxReportFormatResponse]
     total: int
 
 
@@ -275,6 +355,12 @@ class ReportDetailResponse(BaseModel):
     # produced before the report feature shipped. Frontend tabs fall back
     # to the legacy fields above when this is missing.
     malware_report: dict | None = None
+    # The console tab each section an operator's tool produced is drawn on,
+    # by section key (``maljan.reporting.section_tabs``): read from the kind
+    # its tool declared, else the analyst whose call it cites. Computed when
+    # the report is served, never stored; a section it does not name is
+    # placed by its key, as before. ``None`` when no section is placed.
+    section_tabs: dict[str, str] | None = None
     # A report kept from a run that failed after the report was built says so
     # here: where the run failed and the error id. ``None`` on a report of a
     # completed run.

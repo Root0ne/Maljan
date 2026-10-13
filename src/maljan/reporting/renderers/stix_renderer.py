@@ -38,8 +38,10 @@ from maljan.agents._indicator_denylists import (
     malformed_hash_in,
     whole_value_in,
 )
+from maljan.analysis.corroboration import support_sentence
 from maljan.analysis.technique_ids import attack_reference_id
 from maljan.core.logger import logger
+from maljan.core.tool_declarations import select
 from maljan.extractors.network_extractor import (
     address_is_publishable,
     corroboration_reason,
@@ -51,6 +53,7 @@ from maljan.extractors.network_extractor import (
     url_host,
 )
 from maljan.pipeline.events import safe_finding_value
+from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import distinct_processes
 from maljan.reporting.ledger_report import ANALYST_SECTION_SOURCES
 from maljan.reporting.models import (
@@ -65,6 +68,7 @@ from maljan.reporting.models import (
     stated_family,
 )
 from maljan.schemas.judgement import indicator_type_for
+from maljan.schemas.sandbox_report import LINEAGE_STORED_MARKED_BY
 from maljan.schemas.stix_models import (
     ATTACK_PATTERN_NAMESPACE,
     EVIDENCE_REFS_PROPERTY,
@@ -1301,7 +1305,12 @@ class ExtendedSTIXRenderer:
         #      it (``judge_postprocess.PLATFORM_ONLY_PROPERTIES``), and nothing
         #      else is kept.
         objects = _with_record_evidence(
-            objects, malware_id, technique_evidence or {}, ledger_order, minted_family_id
+            objects,
+            malware_id,
+            technique_evidence or {},
+            ledger_order,
+            minted_family_id,
+            support=_support_by_pattern(report),
         )
 
         # 9) Report SDO bundles every object_ref. Pre-existing AttackPattern
@@ -1621,12 +1630,30 @@ def _evidence_refs(ids: Any, ledger_order: Mapping[str, int]) -> list[str] | Non
     return held or None
 
 
+def _support_by_pattern(report: Any) -> dict[str, tuple[str, str]]:
+    """Per attack-pattern id, ``(support, sentence)`` for a published technique no
+    source of which is behaviour (``corroboration.support_sentence``)."""
+    out: dict[str, tuple[str, str]] = {}
+    for mapping in getattr(report, "ttp_mappings", None) or []:
+        support = str(getattr(mapping, "support", "") or "")
+        note = support_sentence(
+            support,
+            getattr(mapping, "source_kinds", None),
+            len(getattr(mapping, "sources", None) or []),
+        )
+        tid = str(getattr(mapping, "technique_id", "") or "").strip().upper()
+        if note and tid:
+            out[_pattern_id_for(tid)] = (support, note)
+    return out
+
+
 def _with_record_evidence(
     objects: list[Any],
     malware_id: str | None,
     technique_evidence: Mapping[str, Sequence[str]],
     ledger_order: Mapping[str, int],
     minted_id: str | None = None,
+    support: Mapping[str, tuple[str, str]] | None = None,
 ) -> list[Any]:
     """``objects`` with the property on each object exactly as the record gives it.
 
@@ -1660,6 +1687,21 @@ def _with_record_evidence(
             wanted = None
         if wanted != current:
             obj = obj.model_copy(update={EVIDENCE_REFS_PROPERTY: wanted})
+        if "x_maljan_support" in type(obj).model_fields:
+            uses = (
+                malware_id is not None
+                and getattr(obj, "type", "") == "relationship"
+                and getattr(obj, "relationship_type", "") == "uses"
+                and getattr(obj, "source_ref", None) == malware_id
+            )
+            marked = (
+                (support or {}).get(str(getattr(obj, "target_ref", "") or "")) if uses else None
+            )
+            mark = (marked[0], marked[1]) if marked else (None, None)
+            if (getattr(obj, "x_maljan_support", None), obj.x_maljan_support_note) != mark:
+                obj = obj.model_copy(
+                    update={"x_maljan_support": mark[0], "x_maljan_support_note": mark[1]}
+                )
         out.append(obj)
     return out
 
@@ -2379,25 +2421,24 @@ def _section_sightings(report: Any, key: str) -> list[tuple[str, str]]:
     return found
 
 
-# The tools whose answer is a structured sandbox network record, and the reason
-# a row one of them holds is not the sample's until the judge keeps it.
-_NETWORK_RECORD_TOOLS = frozenset({"sandbox_network", "pcap_summary"})
-
-
 def _stored_network_record(report: Any, kind: str, key: str) -> str:
     """The unattributed reason a stored report's network record gives a listed value, or ``""``.
 
     A report stored before the build searched every answer answers such a
     value the way a fresh build does: a capture conversation's or a flow
     table's address is an unattributed sandbox row, and a name only the
-    capture's TLS list holds is a capture-only name.
+    capture's TLS list holds is a capture-only name. Only such a report is
+    read here, and it was stored before entries recorded their source, so its
+    sections are read by their tools' names, as an entry with no source is.
     """
     if _field(report, "tool_sightings") is not None:
         return ""
-    tools = {tool for _ids, tool in _section_sightings(report, key)}
-    if kind == "ip" and tools & _NETWORK_RECORD_TOOLS:
+    sighted = [{"tool": tool} for _ids, tool in _section_sightings(report, key)]
+    if kind == "ip" and any(
+        tool_kinds.is_of(held, "evidence_bundles._NETWORK_SANDBOX_TOOLS") for held in sighted
+    ):
         return UNATTRIBUTED_FLOW
-    if kind == "domain" and "pcap_summary" in tools:
+    if kind == "domain" and any(tool_kinds.is_kind(held, "pcap") for held in sighted):
         return CAPTURE_TLS_NAME
     return ""
 
@@ -2442,23 +2483,40 @@ CAPTURE_TLS_NAME = (
     "a TLS name only the capture recorded, which does not say which process made the connection"
 )
 # What the rule says of a process the two lineage facts disagree about.
-MARKED_ONLY_PROCESS = (
-    "which Triage marks as the sample's but which runs none of the submitted file's names "
+# ``{sandbox}`` is the name the marking sandbox's report format declares
+# (``NetworkIP.marked_by``).
+MARKED_ONLY_PROCESS_TEMPLATE = (
+    "which {sandbox} marks as the sample's but which runs none of the submitted file's names "
     "and descends from none of its processes"
 )
-FILE_ONLY_PROCESS = (
-    "which runs the submitted file or descends from a process that does, but which Triage "
+FILE_ONLY_PROCESS_TEMPLATE = (
+    "which runs the submitted file or descends from a process that does, but which {sandbox} "
     "does not mark as the sample's"
 )
+# The sentences for a row stored before its marker's name was recorded.
+MARKED_ONLY_PROCESS = MARKED_ONLY_PROCESS_TEMPLATE.format(sandbox=LINEAGE_STORED_MARKED_BY)
+FILE_ONLY_PROCESS = FILE_ONLY_PROCESS_TEMPLATE.format(sandbox=LINEAGE_STORED_MARKED_BY)
 
 
-def disputed_flow_reason(marked_only: list[str], file_only: list[str]) -> str:
-    """Why a row the lineage facts disagree about is not the sample's, both facts said."""
+def disputed_flow_reason(
+    marked_only: list[str], file_only: list[str], marked_by: str | None = None
+) -> str:
+    """Why a row the lineage facts disagree about is not the sample's, both facts said.
+
+    ``marked_by`` names the sandbox whose mark the first fact is, as its report
+    format declares it; a row stored without it names the one sandbox whose
+    mark such a row could be.
+    """
+    sandbox = str(marked_by or "").strip() or LINEAGE_STORED_MARKED_BY
     parts = []
     if marked_only:
-        parts.append(f"{', '.join(marked_only)}, {MARKED_ONLY_PROCESS}")
+        parts.append(
+            f"{', '.join(marked_only)}, {MARKED_ONLY_PROCESS_TEMPLATE.format(sandbox=sandbox)}"
+        )
     if file_only:
-        parts.append(f"{', '.join(file_only)}, {FILE_ONLY_PROCESS}")
+        parts.append(
+            f"{', '.join(file_only)}, {FILE_ONLY_PROCESS_TEMPLATE.format(sandbox=sandbox)}"
+        )
     return "the sandbox report attributes its flows to " + "; and to ".join(parts)
 
 
@@ -2530,7 +2588,7 @@ def sandbox_row_kwargs(report: Any, kind: str, value: str, *, what: str = "it") 
         marked_only = [str(p) for p in (_field(row, "marked_only_processes") or []) if str(p)]
         file_only = [str(p) for p in (_field(row, "file_only_processes") or []) if str(p)]
         if _field(row, "sample_process_tree") is None and (marked_only or file_only):
-            why = disputed_flow_reason(marked_only, file_only)
+            why = disputed_flow_reason(marked_only, file_only, _field(row, "marked_by"))
         if _field(row, "asn"):
             why += f"; AS {_field(row, 'asn')}"
     else:
@@ -2684,16 +2742,63 @@ def _judge_url_hosts(report: Any) -> frozenset[tuple[str, str]]:
 # What the rule writes for a value emulation recovered, before the entry id.
 RECOVERED_BY_EMULATION = "recovered by emulation (decoded strings)"
 
-# The analysis server's static decoder of encoded text, by its tool name.
-DECODER_TOOL = "decode_string_blobs"
+# What the rule writes for an indicator a static decoder read out of text the
+# sample keeps encoded in its own bytes, before the entry id: ``{tool}`` is the
+# decoder's declared display name, else its tool name.
+DECODED_FROM_THE_BYTES_TEMPLATE = "decoded from the file's own bytes ({tool})"
+# As a record stored before decoders were read by their declaration states it.
+DECODED_FROM_THE_BYTES = DECODED_FROM_THE_BYTES_TEMPLATE.format(
+    tool=tool_kinds.stored_tool_of_kind("decoded_strings")
+)
 
-# What the rule writes for an indicator the static decoder read out of text the
-# sample keeps encoded in its own bytes, before the entry id.
-DECODED_FROM_THE_BYTES = f"decoded from the file's own bytes ({DECODER_TOOL})"
+# Why a recovery record may not be the run's whole: ``{tools}`` names the
+# entries' tools, by their display names.
+EMULATOR_PARTIAL = "no {tools} entry listed every string it recovered"
+DECODER_PARTIAL = "no {tools} entry listed every result it decoded"
+SWEEP_PARTIAL = "no {tools} entry listed every plain string in the file"
 
-# The FLOSS string kinds that are text the sample hid: a decoded string, a
-# stack string, a tight string. A static string FLOSS also lists is not.
+# The string kinds that are text the sample hid, as an emulator names a row's
+# scheme: a decoded string, a stack string, a tight string. A static string an
+# emulator also lists is not. A row whose emulator declares no scheme is text
+# it recovered.
 _EMULATED_KINDS = frozenset({"decoded", "stack", "tight"})
+
+# The kinds a recovery record reads (``CONSUMER_KINDS``), and the answer shape
+# a tool of each kind gives where its declaration names no rows: its rows and,
+# in each, the text.
+_EMULATED = "emulated_strings"
+_DECODED = "decoded_strings"
+_PLAIN = "strings"
+_FILE_IOCS = "file_iocs"
+_KIND_SHAPE: dict[str, tuple[str, str]] = {
+    _EMULATED: ("/strings/*", "/string"),
+    _DECODED: ("/results/*", "/text"),
+    _PLAIN: ("/strings/*", "/text"),
+    _FILE_IOCS: ("/iocs/*", "/value"),
+}
+
+
+def _rows_and_text(structured: Any, facts: Any) -> tuple[list[Any], str]:
+    """An answer's rows and the in-row path of each row's text, as declared or by its kind."""
+    rows_path, text_path = _KIND_SHAPE.get(facts.kind, ("", ""))
+    rows_path = facts.rows or rows_path
+    text_path = facts.values.get("text") or facts.values.get("value") or text_path
+    return select(structured, rows_path) if isinstance(structured, dict) else [], text_path
+
+
+def _is_emulated(how: RecoveredValue) -> bool:
+    """Whether a recovery is an emulator's: its recorded kind, or a stored record's tool's."""
+    return tool_kinds.recovery_kind(how) == _EMULATED
+
+
+def _is_decoded(how: RecoveredValue) -> bool:
+    """Whether a recovery is a static decoder's: its recorded kind, or a stored record's tool's."""
+    return tool_kinds.recovery_kind(how) == _DECODED
+
+
+def _named(how: RecoveredValue) -> str:
+    """The name a recovery's tool is stated under: its declared display name, else its name."""
+    return tool_kinds.recovery_name(how)
 
 
 def _emulation_admits(host: str, recovered: str, verdict: Any) -> str | None:
@@ -2778,20 +2883,48 @@ def _add_emulated(
                 listed.append(how)
 
 
-def _floss_provenance(row: dict[str, Any], entry: str) -> RecoveredValue:
-    """Where FLOSS says one recovered string came from: its kind, routine and call site."""
-    function = str(row.get("function_rva") or "")
-    site = str(row.get("called_at_rva") or "")
+def _emulator_provenance(
+    row: dict[str, Any], entry: str, facts: Any, source: Any = None
+) -> RecoveredValue:
+    """Where an emulator says one recovered string came from: its scheme, routine and call site.
+
+    Read where its declaration places them (``values.scheme``,
+    ``places.function``, ``places.call_site``).
+    """
+    function = _in_row(row, facts.places.get("function", ""))
+    site = _in_row(row, facts.places.get("call_site", ""))
+    tool, kind, named = tool_kinds.recovery_tool(source, facts)
     return RecoveredValue(
-        tool="floss",
+        tool=tool,
+        kind=kind,
+        named=named,
         entry=entry,
-        scheme=str(row.get("kind") or "").lower(),
+        scheme=_in_row(row, facts.values.get("scheme", "")).lower(),
         functions=[function] if function else [],
         sites=[site] if site else [],
     )
 
 
-def _decoder_provenance(row: dict[str, Any], entry: str) -> RecoveredValue:
+def _first_in_row(row: dict[str, Any], path: str) -> Any:
+    """The first value an in-row path names, as it is; ``None`` where none is."""
+    found = select(row, path) if path else []
+    return found[0] if found else None
+
+
+def _note(names: list[str], name: str) -> None:
+    if name not in names:
+        names.append(name)
+
+
+def _in_row(row: dict[str, Any], path: str) -> str:
+    """The first value an in-row path names, as text; ``""`` where none is declared."""
+    found = select(row, path) if path else []
+    return str(found[0] or "") if found else ""
+
+
+def _decoder_provenance(
+    row: dict[str, Any], entry: str, facts: Any = None, source: Any = None
+) -> RecoveredValue:
     """Where the static decoder says one decoded text came from, as its answer states it."""
     layers = [
         str(layer.get("scheme") or "")
@@ -2804,8 +2937,15 @@ def _decoder_provenance(row: dict[str, Any], entry: str) -> RecoveredValue:
     calls = [passed_to_words(ref.get("passed_to")) for ref in references]
     # The row's ``floss`` is FLOSS's routine and call site, not the decoder's
     # reading: FLOSS's own entry states it under FLOSS's name.
+    tool, kind, named = (
+        tool_kinds.recovery_tool(source, facts)
+        if facts is not None
+        else (tool_kinds.stored_tool_of_kind(_DECODED), "", "")
+    )
     return RecoveredValue(
-        tool=DECODER_TOOL,
+        tool=tool,
+        kind=kind,
+        named=named,
         entry=entry,
         scheme="+".join(part for part in [str(row.get("scheme") or ""), *layers] if part),
         offset=str(row.get("offset") or ""),
@@ -2869,31 +3009,42 @@ def emulation_from_ledger(ledger: Iterable[Any] | None) -> EmulatedStrings:
     spelled: dict[str, str] = {}
     plain_texts: list[tuple[str, str]] = []
     floss_whole = strings_whole = decoder_whole = False
-    saw_floss = saw_strings = saw_decoder = False
+    # The names each kind of entry is stated under in the partial reasons, in
+    # the order the entries were met.
+    emulators: list[str] = []
+    decoders: list[str] = []
+    sweeps: list[str] = []
     for entry in ledger or ():
-        tool = str(getattr(entry, "tool", "") or "").rsplit("__", 1)[-1]
+        facts = tool_kinds.recovering_facts(entry)
+        if facts is None or facts.kind not in _KIND_SHAPE:
+            continue
+        named = tool_kinds.stated_name(entry, facts)
         entry_id = str(getattr(entry, "id", "") or getattr(entry, "entry_id", "") or "")
         structured = getattr(entry, "structured", None)
-        if tool == "floss":
-            saw_floss = True
-            rows = _rows_of(structured, "strings")
+        rows, text_path = _rows_and_text(structured, facts)
+        if facts.kind == _EMULATED:
+            _note(emulators, named)
             floss_whole = floss_whole or _whole_listing(structured, rows)
+            scheme_path = facts.values.get("scheme", "")
             for row in rows:
-                if isinstance(row, dict) and str(row.get("kind") or "").lower() in _EMULATED_KINDS:
-                    how = _floss_provenance(row, entry_id)
-                    # The whole string, as before, and each indicator the one
-                    # reader finds in it, as for the decoder's texts.
-                    for value in [row.get("string"), *decoded_indicators(row.get("string"))]:
-                        _add_emulated(values, value, entry_id, provenance, how, spelled)
-        elif tool == DECODER_TOOL:
-            saw_decoder = True
-            rows = _rows_of(structured, "results")
+                if not isinstance(row, dict):
+                    continue
+                if scheme_path and _in_row(row, scheme_path).lower() not in _EMULATED_KINDS:
+                    continue
+                how = _emulator_provenance(row, entry_id, facts, entry)
+                text = _first_in_row(row, text_path)
+                # The whole string, as before, and each indicator the one
+                # reader finds in it, as for the decoder's texts.
+                for value in [text, *decoded_indicators(text)]:
+                    _add_emulated(values, value, entry_id, provenance, how, spelled)
+        elif facts.kind == _DECODED:
+            _note(decoders, named)
             decoder_whole = decoder_whole or _whole_listing(structured, rows)
             for row in rows:
                 if not isinstance(row, dict):
                     continue
-                how = _decoder_provenance(row, entry_id)
-                texts = [row.get("text")] + [
+                how = _decoder_provenance(row, entry_id, facts, entry)
+                texts = [_first_in_row(row, text_path)] + [
                     layer.get("text")
                     for layer in row.get("layers") or []
                     if isinstance(layer, dict)
@@ -2901,29 +3052,29 @@ def emulation_from_ledger(ledger: Iterable[Any] | None) -> EmulatedStrings:
                 for text in texts:
                     for value in decoded_indicators(text):
                         _add_emulated(values, value, entry_id, provenance, how, spelled)
-        elif tool == "strings":
-            saw_strings = True
-            rows = _rows_of(structured, "strings")
+        elif facts.kind == _PLAIN:
+            _note(sweeps, named)
             strings_whole = strings_whole or _whole_listing(structured, rows)
             plain_texts.extend(
-                (entry_id, str(row.get("text") or "").lower())
+                (entry_id, str(_first_in_row(row, text_path) or "").lower())
                 for row in rows
-                if isinstance(row, dict) and row.get("text")
+                if isinstance(row, dict) and _first_in_row(row, text_path)
             )
-        elif tool == "iocs_from_file":
+        else:
             plain_texts.extend(
-                (entry_id, str(row.get("value") or "").lower())
-                for row in _rows_of(structured, "iocs")
-                if isinstance(row, dict) and row.get("value")
+                (entry_id, str(_first_in_row(row, text_path) or "").lower())
+                for row in rows
+                if isinstance(row, dict) and _first_in_row(row, text_path)
             )
     kept, plain = _hold_out_plain(values, plain_texts)
     why: list[str] = []
-    if saw_floss and not floss_whole:
-        why.append("no FLOSS entry listed every string it recovered")
-    if saw_decoder and not decoder_whole:
-        why.append(f"no {DECODER_TOOL} entry listed every result it decoded")
-    if kept and not (saw_strings and strings_whole):
-        why.append("no strings entry listed every plain string in the file")
+    if emulators and not floss_whole:
+        why.append(EMULATOR_PARTIAL.format(tools=" or ".join(emulators)))
+    if decoders and not decoder_whole:
+        why.append(DECODER_PARTIAL.format(tools=" or ".join(decoders)))
+    if kept and not (sweeps and strings_whole):
+        said = " or ".join(sweeps) or tool_kinds.stored_word_of_kind(_PLAIN)
+        why.append(SWEEP_PARTIAL.format(tools=said))
     # Every string FLOSS recovered is a value of the record, and most are not
     # network values: the stored provenance is kept for the values the decoder
     # read and for the FLOSS values that are a domain, an address or a URL.
@@ -2937,7 +3088,7 @@ def emulation_from_ledger(ledger: Iterable[Any] | None) -> EmulatedStrings:
             for key in kept
             if key in provenance
             and (
-                any(how.tool != "floss" for how in provenance[key])
+                any(not _is_emulated(how) for how in provenance[key])
                 or key in decoded_indicators(key)
             )
         },
@@ -3050,8 +3201,14 @@ def emulation_kwargs(
     if not entry:
         return dict(observed)
     first = next(iter(found.recovered_by.get(key) or []), None)
-    decoded = first is not None and first.tool == DECODER_TOOL
-    reason = f"{DECODED_FROM_THE_BYTES if decoded else RECOVERED_BY_EMULATION}, {entry}"
+
+    decoded = first is not None and _is_decoded(first)
+    said = (
+        DECODED_FROM_THE_BYTES_TEMPLATE.format(tool=_named(first))
+        if first is not None and decoded
+        else ""
+    )
+    reason = f"{said or RECOVERED_BY_EMULATION}, {entry}"
     if found.partial:
         reason += f" (the record is partial: {found.partial})"
     stated = _field(report, "overall_confidence") is not None
@@ -3070,7 +3227,7 @@ def _recovery_words(how: RecoveredValue, entries: Sequence[str] = ()) -> str:
     them.
     """
     named = ", ".join(entries) if entries else how.entry
-    head = f"{how.tool}, {named}" if named else how.tool
+    head = f"{_named(how)}, {named}" if named else _named(how)
     where = _recovery_place(how)
     return f"{head} ({', '.join(where)})" if where else head
 
@@ -3079,12 +3236,12 @@ def _recovery_place(how: RecoveredValue) -> list[str]:
     """Where in the file one tool's recovery of a value stands."""
     where: list[str] = []
     if how.scheme:
-        where.append(f"{how.scheme} string" if how.tool == "floss" else how.scheme)
+        where.append(f"{how.scheme} string" if _is_emulated(how) else how.scheme)
     if how.offset:
         where.append(f"at file offset {how.offset}")
-    if how.tool == "floss" and how.scheme == "decoded":
-        # A FLOSS decoded string names the routine that decoded it and where
-        # that routine was called, which is FLOSS's own wording.
+    if _is_emulated(how) and how.scheme == "decoded":
+        # An emulator's decoded string names the routine that decoded it and where
+        # that routine was called, which is the emulator's own wording.
         if how.functions:
             where.append("routine " + ", ".join(how.functions))
         if how.sites:
@@ -3115,12 +3272,13 @@ def recovered_by_words(record: EmulatedStrings, kind: str, value: str) -> str:
     entry = record.values.get(key)
     if not entry:
         return ""
-    listed = record.recovered_by.get(key) or [RecoveredValue(tool="floss", entry=entry)]
+    stored = RecoveredValue(tool=tool_kinds.stored_tool_of_kind(_EMULATED), entry=entry)
+    listed = record.recovered_by.get(key) or [stored]
     # One tool's same recovery from two of its calls (the pack's and an
     # analyst's) is one place with two entries, stated once.
     places: dict[tuple[str, tuple[str, ...]], tuple[RecoveredValue, list[str]]] = {}
     for how in listed:
-        _first, entries = places.setdefault((how.tool, tuple(_recovery_place(how))), (how, []))
+        _first, entries = places.setdefault((_named(how), tuple(_recovery_place(how))), (how, []))
         if how.entry and how.entry not in entries:
             entries.append(how.entry)
     return "; ".join(_recovery_words(how, entries) for how, entries in places.values())
@@ -3559,10 +3717,15 @@ def _publishable_domains(report: Any) -> frozenset[str]:
 # section built from the sweep's own output is the thing being corroborated,
 # and reading it would let every string corroborate itself.
 
-# The tools whose output *is* the string sweep. An analyst quoting one of these
-# in a finding has quoted the sweep's own table back, which is one source said
-# twice.
-_STRING_SWEEP_TOOLS = ("strings", "iocs_from_file", "iocs_from_text")
+# The tools whose output *is* the string sweep, by their declared kinds
+# (``CONSUMER_KINDS``). An analyst quoting one of these in a finding has quoted
+# the sweep's own table back, which is one source said twice.
+_STRING_SWEEP_TOOLS = "stix_renderer._STRING_SWEEP_TOOLS"
+
+
+def _sweeps_the_strings(row: Any, named: str) -> bool:
+    """Whether an entry is the string sweep's (``tool_kinds.sweeps_the_strings``)."""
+    return tool_kinds.sweeps_the_strings(row, named.removeprefix("tool:"))
 
 
 def _section_text(section: Any) -> list[str]:
@@ -3611,6 +3774,7 @@ def _corroborating_values(report: Any, corpus: Any = None) -> str:
         parts.append(str(getattr(mechanism, "payload", "") or ""))
 
     sections = list(getattr(report, "sections", None) or [])
+    index = tool_kinds.index_by_id(getattr(report, "evidence_index", None) or [])
     cited: set[str] = set()
     # The cited entries a section already contributed text for, so the corpus
     # is read only where the stored record has nothing left.
@@ -3623,7 +3787,7 @@ def _corroborating_values(report: Any, corpus: Any = None) -> str:
         origin = str(getattr(section, "source", "") or "").strip().lower()
         if not origin.startswith("tool:"):
             continue
-        if origin.removeprefix("tool:") in _STRING_SWEEP_TOOLS:
+        if _sweeps_the_strings(tool_kinds.section_entry(section, index), origin):
             continue
         if not cited.intersection(str(eid) for eid in (section.evidence_ids or [])):
             continue
@@ -3639,7 +3803,8 @@ def _corroborating_values(report: Any, corpus: Any = None) -> str:
     if corpus is not None:
         for entry_id in sorted(cited - drawn):
             try:
-                if str(corpus.tool_of(entry_id) or "") in _STRING_SWEEP_TOOLS:
+                named = str(corpus.tool_of(entry_id) or "")
+                if _sweeps_the_strings(index.get(str(entry_id)), named):
                     continue
                 parts.append(str(corpus.text_for(entry_id) or ""))
             except Exception:  # noqa: BLE001 — a weaker haystack, never a failed render

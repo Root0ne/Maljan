@@ -104,7 +104,7 @@ import math
 import re
 import threading
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -159,6 +159,19 @@ STAGE_CALL_KINDS: dict[str, tuple[str, ...]] = {
 # What the token ledger names a verdict or report call, and the planned kind
 # each one is.
 TAIL_CALLS = {"verdict": "verdict", "report section": "report", "narrative": "report"}
+
+# Set on a stated estimate whose prompt is to be priced at the share of the
+# model's input this job measured read from the provider's cache.
+AT_CACHED_SHARE = "at_cached_share"
+
+# Set on a stated estimate of a call's output alone, handed beside the usage
+# its provider did report (a stream broken after its prompt usage arrived):
+# the call is priced on both, and only the output's part is an estimate.
+OUTPUT_ESTIMATED = "output_estimated"
+
+# What a charge says was estimated (``estimated_part`` on its record).
+ESTIMATED_WHOLE = "input and output"
+ESTIMATED_OUTPUT = "output"
 
 # What the run summary names a price the provider reported with its answer.
 PROVIDER_REPORTED = "provider-reported"
@@ -615,6 +628,11 @@ def _clean(model: str) -> str:
     return name.rsplit("/", 1)[-1]
 
 
+def price_key(model: str) -> str:
+    """The name the spend block keys a model by (``prices_from``, ``unpriced_models``)."""
+    return _clean(model) or "(unnamed model)"
+
+
 def _untagged(name: str) -> str:
     return name.split(":", 1)[0]
 
@@ -678,12 +696,19 @@ class SpendMeter:
         *,
         table: Mapping[str, Price] | None = None,
         clock: Callable[[], datetime] | None = None,
-        hour_writes: bool = False,
+        hour_writes: bool | Iterable[str] = False,
     ) -> None:
         self.ceiling_usd = None if ceiling_usd is None else float(ceiling_usd)
-        # Whether a request may write the prompt cache for an hour (the
-        # Anthropic provider's ``prompt_cache_ttl``), which admission prices.
-        self.hour_writes = bool(hour_writes)
+        # Which models' requests may write the prompt cache for an hour, which
+        # admission prices and a write reported without its lifetime is
+        # settled as: ``True`` every model, ``False`` none, or the names of the
+        # models whose provider says so (``LLMProvider.writes_hour_caches``).
+        if isinstance(hour_writes, bool):
+            self._hour_models: frozenset[str] | None = None
+            self.hour_writes = hour_writes
+        else:
+            self._hour_models = frozenset(_clean(name) for name in hour_writes if name)
+            self.hour_writes = bool(self._hour_models)
         self._lock = threading.Lock()
         # Woken whenever a reservation goes, for a call waiting on one.
         self._drained = threading.Condition(self._lock)
@@ -759,12 +784,18 @@ class SpendMeter:
     @classmethod
     def from_settings(cls, cfg: Any) -> SpendMeter:
         llm = getattr(cfg, "llm", None)
-        anthropic = getattr(llm, "anthropic", None)
         return cls(
             getattr(llm, "max_spend_usd_per_job", None),
             getattr(llm, "model_prices", None) or {},
-            hour_writes=str(getattr(anthropic, "prompt_cache_ttl", "") or "") == "1h",
+            hour_writes=hour_cache_models(cfg),
         )
+
+    def writes_hour_caches(self, model: str) -> bool:
+        """Whether ``model``'s requests may write the prompt cache for an hour."""
+        if self._hour_models is None:
+            return self.hour_writes
+        name = _clean(model)
+        return name in self._hour_models or _untagged(name) in self._hour_models
 
     # ── Prices ────────────────────────────────────────────────────────────
 
@@ -797,7 +828,7 @@ class SpendMeter:
             return None
         in_force = price.at(_sent_at(usage, self._clock()))
         if (
-            self.hour_writes
+            self.writes_hour_caches(model)
             and usage.get("cache_write_input_tokens")
             and "cache_write_1h_input_tokens" not in usage
         ):
@@ -807,11 +838,11 @@ class SpendMeter:
             usage = {**usage, "cache_write_1h_input_tokens": usage["cache_write_input_tokens"]}
         return in_force.cost(usage), in_force.source
 
-    def _cost(self, usage: Mapping[str, Any] | None, model: str) -> float | None:
+    def _cost(self, usage: Mapping[str, Any] | None, model: str) -> tuple[float, str] | None:
         if usage is None:
             self._note_unreported()
             return None
-        name = _clean(model) or "(unnamed model)"
+        name = price_key(model)
         charged = self._charged(usage, model)
         if charged is None:
             self._note_unpriced(name)
@@ -819,7 +850,7 @@ class SpendMeter:
         cost, source = charged
         with self._lock:
             self._priced_from.setdefault(name, set()).add(source)
-        return cost
+        return cost, source
 
     def _measure_locked(self, usage: Mapping[str, Any], name: str, group: str) -> None:
         out = int(usage.get("output_tokens") or 0)
@@ -877,17 +908,29 @@ class SpendMeter:
         call: str = "",
         *,
         estimated: Mapping[str, Any] | None = None,
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """One recorded call, from the token ledger; ``call`` is what the ledger names it.
 
         ``estimated`` is the stated estimate a call that reported no usage
         carried (its prompt priced as uncached input and its generated pieces
         as output). It is charged against the ceiling and counted apart as
         estimated; the call's reported figures stay absent.
+
+        An ``estimated`` carrying :data:`OUTPUT_ESTIMATED` beside ``usage`` is
+        an estimate of the output alone: the call is priced on the reported
+        usage with that output, and the output's share of the cost is counted
+        as estimated.
+
+        Returns what the call was charged, as its record keeps it
+        (``priced_usd``, ``price_source``, and for a charge by estimate
+        ``estimated_usd`` and ``estimated_part``), or ``None`` where nothing
+        was charged: no usage and no estimate, a model with no price, or a
+        failure here.
         """
         if usage is None and estimated:
-            self._settle_estimate(estimated, model)
-            return
+            return self._settle_estimate(estimated, model)
+        if usage is not None and estimated and estimated.get(OUTPUT_ESTIMATED):
+            return self._settle_output_estimate(usage, estimated, model)
         try:
             name = _clean(model)
             if usage and name:
@@ -908,33 +951,93 @@ class SpendMeter:
                             self._count_answer_locked(usage, name, f"tail:{tail}")
                         else:
                             self._count_answer_locked(usage, name, "single")
-            cost = self._cost(usage, model)
-            if cost is not None:
-                with self._lock:
-                    self._settled += cost
+            charged = self._cost(usage, model)
+            if charged is None:
+                return None
+            cost, source = charged
+            with self._lock:
+                self._settled += cost
+            return {"priced_usd": cost, "price_source": source}
         except Exception as exc:  # noqa: BLE001 — telemetry never costs a run
             logger.debug("spend not settled (%s).", exc)
+            return None
 
-    def _settle_estimate(self, estimated: Mapping[str, Any], model: str) -> None:
+    def _settle_estimate(self, estimated: Mapping[str, Any], model: str) -> dict[str, Any] | None:
         try:
-            name = _clean(model) or "(unnamed model)"
+            name = price_key(model)
             figures = {
                 "input_tokens": int(estimated.get("input_tokens") or 0),
                 "output_tokens": int(estimated.get("output_tokens") or 0),
             }
+            said = str(estimated.get("source") or "")
+            if estimated.get(AT_CACHED_SHARE):
+                # The prompt priced at the share of this model's input the job
+                # measured read from the provider's cache, where it measured
+                # one; otherwise priced as uncached, and said to overstate.
+                with self._lock:
+                    share = self._cache_share_locked(name)
+                if share:
+                    figures["cached_input_tokens"] = round(figures["input_tokens"] * share)
+                    said += (
+                        f"; its prompt priced with {share:.0%} read from the cache, the share "
+                        "this job measured for the model"
+                    )
+                else:
+                    said += (
+                        "; its prompt priced as uncached input, which overstates a prompt the "
+                        "provider read from its cache"
+                    )
             charged = self._charged(figures, model)
             if charged is None:
                 self._note_unpriced(name)
-                return
+                return None
             cost, source = charged
             with self._lock:
                 self._priced_from.setdefault(name, set()).add(source)
                 self._settled += cost
                 self._estimated_calls += 1
                 self._estimated_usd += cost
-                self._estimated_source = str(estimated.get("source") or "")
+                self._estimated_source = said
+            return {
+                "priced_usd": cost,
+                "price_source": source,
+                "estimated_usd": cost,
+                "estimated_part": ESTIMATED_WHOLE,
+            }
         except Exception as exc:  # noqa: BLE001 — telemetry never costs a run
             logger.debug("estimated spend not settled (%s).", exc)
+            return None
+
+    def _settle_output_estimate(
+        self, usage: Mapping[str, Any], estimated: Mapping[str, Any], model: str
+    ) -> dict[str, Any] | None:
+        """A call priced on its reported usage and an estimate of its output alone."""
+        try:
+            name = price_key(model)
+            output = max(0, int(estimated.get("output_tokens") or 0))
+            whole = {**usage, "output_tokens": output}
+            charged = self._charged(whole, model)
+            unanswered = self._charged({**usage, "output_tokens": 0}, model)
+            if charged is None or unanswered is None:
+                self._note_unpriced(name)
+                return None
+            cost, source = charged
+            by_estimate = max(0.0, cost - unanswered[0])
+            with self._lock:
+                self._priced_from.setdefault(name, set()).add(source)
+                self._settled += cost
+                self._estimated_calls += 1
+                self._estimated_usd += by_estimate
+                self._estimated_source = str(estimated.get("source") or "")
+            return {
+                "priced_usd": cost,
+                "price_source": source,
+                "estimated_usd": by_estimate,
+                "estimated_part": ESTIMATED_OUTPUT,
+            }
+        except Exception as exc:  # noqa: BLE001 — telemetry never costs a run
+            logger.debug("estimated spend not settled (%s).", exc)
+            return None
 
     def note_loop(self, key: Any, turns: list[Any], model: str = "") -> None:
         """What a running loop's turns so far cost, counted until the ledger has them.
@@ -1070,7 +1173,7 @@ class SpendMeter:
         price = self.price_now(model)
         if price is None:
             return None
-        return price.for_admission(int(prompt_tokens), self.hour_writes).cost(
+        return price.for_admission(int(prompt_tokens), self.writes_hour_caches(model)).cost(
             {"input_tokens": int(prompt_tokens), "output_tokens": int(output_tokens)}
         )
 
@@ -1215,7 +1318,7 @@ class SpendMeter:
                 continue
             name = _clean(model)
             prompt, prompt_said = self._tail_prompt_locked(kind, int(allowed))
-            price = row_price.at(now).for_admission(prompt, self.hour_writes)
+            price = row_price.at(now).for_admission(prompt, self.writes_hour_caches(model))
             answer, answer_said = self._planned_answer_locked(kind, name, int(cap))
             if not answer:
                 continue
@@ -1374,7 +1477,7 @@ class SpendMeter:
             return None
         return row.highest_over(
             now, _default_deadline() if deadline_s is None else deadline_s
-        ).for_admission(prompt_tokens, self.hour_writes)
+        ).for_admission(prompt_tokens, self.writes_hour_caches(model))
 
     def preview(
         self,
@@ -1818,3 +1921,36 @@ class SpendMeter:
                     "cost and the job spent at least that"
                 )
             return out
+
+
+def hour_cache_models(cfg: Any) -> frozenset[str]:
+    """The models these settings call whose provider writes the prompt cache for an hour.
+
+    Each provider answers for itself (``LLMProvider.writes_hour_caches``), and
+    only the models that provider serves are priced that way: a job whose
+    agents run on another provider is not charged one provider's hour rate
+    because of that provider's setting. The models are the global ones and
+    every agent entry's, its fallbacks included. Never raises: settings it
+    cannot read name no model.
+    """
+    try:
+        from maljan.llm.provider_base import facts_of
+
+        llm = cfg.llm
+        pairs: list[tuple[str, str]] = []
+        provider = str(llm.provider)
+        pairs.extend((provider, str(m)) for m in (llm.expert_model, llm.judge_model))
+        for entry in (getattr(llm, "agents", None) or {}).values():
+            chain = entry.chain() if hasattr(entry, "chain") else [entry]
+            pairs.extend((str(c.provider), str(c.model)) for c in chain)
+        writes: dict[str, bool] = {}
+        out: set[str] = set()
+        for name, model in pairs:
+            if name not in writes:
+                writes[name] = bool(facts_of(name).writes_hour_caches(cfg))
+            if writes[name] and model:
+                out.add(model)
+        return frozenset(out)
+    except Exception as exc:  # noqa: BLE001 — a price knob is never worth a failed job
+        logger.debug("spend: the hour-cache providers could not be read (%s).", exc)
+        return frozenset()

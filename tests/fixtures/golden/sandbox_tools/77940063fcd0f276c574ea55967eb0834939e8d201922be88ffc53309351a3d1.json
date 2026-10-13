@@ -221,7 +221,7 @@
         "api": "NtCreateFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x00000348'}, {'name': 'DesiredAccess', 'value': '0x00100080', 'pretty_value': 'FILE_READ_ATTRIBUTES|SYNCHRONIZE'}, {'name': 'FileName', 'value': '\\\\??\\\\MountPointManager'}, {'name': 'CreateDisposition', 'value': '1', 'pretty_value': 'FILE_OPEN'}, {'name': 'ShareAccess', 'value': '3', 'pretty_value': 'FILE_SHARE_READ|FILE_SHARE_WRITE'}, {'name': 'FileAttributes',\u2026",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x00000348'}, {'name': 'DesiredAccess', 'value': '0x00100080', 'pretty_value': 'FILE_READ_ATTRIBUTES|SYNCHRONIZE'}, {'name': 'FileName', 'value': '\\\\??\\\\MountPointManager'}, {'name': 'CreateDisposition', 'value': '1', 'pretty_value': 'FILE_OPEN'}, {'name': 'ShareAccess', 'value': '3', 'pretty_value': 'FILE_SHARE_READ|FILE_SHARE_WRITE'}, {'name': 'FileAttributes',…",
         "first_seen": "2026-08-13 22:33:18,047",
         "process_count": 0,
         "processes": []
@@ -257,7 +257,7 @@
         "api": "NtDeviceIoControlFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x00000348'}, {'name': 'HandleName', 'value': '\\\\Device\\\\MountPointManager'}, {'name': 'IoControlCode', 'value': '0x006d0034', 'pretty_value': 'IOCTL_MOUNTMGR_QUERY_DOS_VOLUME_PATHS'}, {'name': 'InputBuffer', 'value': '`\\\\x00\\\\\\\\x00?\\\\x00?\\\\x00\\\\\\\\x00V\\\\x00o\\\\x00l\\\\x00u\\\\x00m\\\\x00e\\\\x00{\\\\x007\\\\x000\\\\x005\\\\x00a\\\\x003\\\\x000\\\\x000\\\\x00d\\\\x00-\\\\x007\\\\x00a\\\\x005\\\\x00\u2026",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x00000348'}, {'name': 'HandleName', 'value': '\\\\Device\\\\MountPointManager'}, {'name': 'IoControlCode', 'value': '0x006d0034', 'pretty_value': 'IOCTL_MOUNTMGR_QUERY_DOS_VOLUME_PATHS'}, {'name': 'InputBuffer', 'value': '`\\\\x00\\\\\\\\x00?\\\\x00?\\\\x00\\\\\\\\x00V\\\\x00o\\\\x00l\\\\x00u\\\\x00m\\\\x00e\\\\x00{\\\\x007\\\\x000\\\\x005\\\\x00a\\\\x003\\\\x000\\\\x000\\\\x00d\\\\x00-\\\\x007\\\\x00a\\\\x005\\\\x00…",
         "first_seen": "2026-08-13 22:33:18,047",
         "process_count": 0,
         "processes": []
@@ -329,7 +329,7 @@
         "api": "NtOpenKey",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000240'}, {'name': 'DesiredAccess', 'value': '0x00020019', 'pretty_value': 'KEY_READ'}, {'name': 'ObjectAttributesHandle', 'value': '0x00000000'}, {'name': 'ObjectAttributesName', 'value': '\\\\Registry\\\\MACHINE\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\SideBySide'}, {'name': 'ObjectAttributes', 'value': 'HKEY_LOCAL_MACHINE\\\\Software\\\\Microsoft\\\\Windows\\\\Cu\u2026",
+        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000240'}, {'name': 'DesiredAccess', 'value': '0x00020019', 'pretty_value': 'KEY_READ'}, {'name': 'ObjectAttributesHandle', 'value': '0x00000000'}, {'name': 'ObjectAttributesName', 'value': '\\\\Registry\\\\MACHINE\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\SideBySide'}, {'name': 'ObjectAttributes', 'value': 'HKEY_LOCAL_MACHINE\\\\Software\\\\Microsoft\\\\Windows\\\\Cu…",
         "first_seen": "2026-08-13 22:33:17,375",
         "process_count": 0,
         "processes": []
@@ -338,7 +338,7 @@
         "api": "NtOpenKeyEx",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'KeyHandle', 'value': '0x000002dc'}, {'name': 'DesiredAccess', 'value': '0x00000001', 'pretty_value': 'KEY_QUERY_VALUE'}, {'name': 'ObjectAttributesHandle', 'value': '0x000002d8'}, {'name': 'ObjectAttributesName', 'value': 'SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Themes\\\\Personalize'}, {'name': 'ObjectAttributes', 'value': 'HKEY_CURRENT_USER\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentV\u2026",
+        "first_args": "[{'name': 'KeyHandle', 'value': '0x000002dc'}, {'name': 'DesiredAccess', 'value': '0x00000001', 'pretty_value': 'KEY_QUERY_VALUE'}, {'name': 'ObjectAttributesHandle', 'value': '0x000002d8'}, {'name': 'ObjectAttributesName', 'value': 'SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Themes\\\\Personalize'}, {'name': 'ObjectAttributes', 'value': 'HKEY_CURRENT_USER\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentV…",
         "first_seen": "2026-08-13 22:33:17,875",
         "process_count": 0,
         "processes": []
@@ -374,7 +374,7 @@
         "api": "NtProtectVirtualMemory",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x7690c000'}, {'name': 'ModuleName', 'value': 'shcore.dll'}, {'name': 'NumberOfBytesProtected', 'value': '0x00001000'}, {'name': 'MemoryType', 'value': '0x00000000'}, {'name': 'NewAccessProtection', 'value': '0x00000002', 'pretty_value': 'PAGE_READONLY'}, {'name': 'OldAccessProtection', 'value': '0x00000004', 'pr\u2026",
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x7690c000'}, {'name': 'ModuleName', 'value': 'shcore.dll'}, {'name': 'NumberOfBytesProtected', 'value': '0x00001000'}, {'name': 'MemoryType', 'value': '0x00000000'}, {'name': 'NewAccessProtection', 'value': '0x00000002', 'pretty_value': 'PAGE_READONLY'}, {'name': 'OldAccessProtection', 'value': '0x00000004', 'pr…",
         "first_seen": "2026-08-13 22:33:17,844",
         "process_count": 0,
         "processes": []
@@ -419,7 +419,7 @@
         "api": "NtQueryInformationToken",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'TokenInformationClass', 'value': '1'}, {'name': 'TokenInformation', 'value': 'X\\\\xf3\\\\x19\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x01\\\\x05\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x05\\\\x15\\\\x00\\\\x00\\\\x009a\\\\x00k\\\\xe9&C.\\\\xcf\\\\x1f\\\\xe7\\\\xfe\\\\xe8\\\\x03\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\xfd;$sl/#\\\\xb2\\\\\u2026",
+        "first_args": "[{'name': 'TokenInformationClass', 'value': '1'}, {'name': 'TokenInformation', 'value': 'X\\\\xf3\\\\x19\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x01\\\\x05\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x05\\\\x15\\\\x00\\\\x00\\\\x009a\\\\x00k\\\\xe9&C.\\\\xcf\\\\x1f\\\\xe7\\\\xfe\\\\xe8\\\\x03\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\xfd;$sl/#\\\\xb2\\\\…",
         "first_seen": "2026-08-13 22:33:17,875",
         "process_count": 0,
         "processes": []
@@ -464,7 +464,7 @@
         "api": "NtReadFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x000003e8'}, {'name': 'HandleName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\77940063fcd0f276c574.exe'}, {'name': 'Buffer', 'value': 'MZ\\\\x90\\\\x00\\\\x03\\\\x00\\\\x00\\\\x00\\\\x04\\\\x00\\\\x00\\\\x00\\\\xff\\\\xff\\\\x00\\\\x00\\\\xb8\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00@\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x\u2026",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x000003e8'}, {'name': 'HandleName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\77940063fcd0f276c574.exe'}, {'name': 'Buffer', 'value': 'MZ\\\\x90\\\\x00\\\\x03\\\\x00\\\\x00\\\\x00\\\\x04\\\\x00\\\\x00\\\\x00\\\\xff\\\\xff\\\\x00\\\\x00\\\\xb8\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00@\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x…",
         "first_seen": "2026-08-13 22:33:18,500",
         "process_count": 0,
         "processes": []
@@ -500,7 +500,7 @@
         "api": "NtSetInformationProcess",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'ProcessInformationClass', 'value': '35'}, {'name': 'ProcessInformation', 'value': '\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x05\\\\x00\\\\x00\\\\x00\\n\\\\x00\\\\x00\\\\x00\\\\x02\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x98$^\\\\x00\\\\x02\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x98$^\\\\x00\\\\x02\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x98$^\\\\x00\\\\x02\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x98$^\\\\x00\\\\x02\\\\x00\\\\x00\\\\x00\u2026",
+        "first_args": "[{'name': 'ProcessInformationClass', 'value': '35'}, {'name': 'ProcessInformation', 'value': '\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x05\\\\x00\\\\x00\\\\x00\\n\\\\x00\\\\x00\\\\x00\\\\x02\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x98$^\\\\x00\\\\x02\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x98$^\\\\x00\\\\x02\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x98$^\\\\x00\\\\x02\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x98$^\\\\x00\\\\x02\\\\x00\\\\x00\\\\x00…",
         "first_seen": "2026-08-13 22:33:17,844",
         "process_count": 0,
         "processes": []
@@ -563,7 +563,7 @@
         "api": "NtWriteFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x00000454'}, {'name': 'HandleName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\Penicillate\\\\Kalkuns\\\\Tamul.Nyb'}, {'name': 'Buffer', 'value': '\\\\x00\\\\x16\\\\x00\\\\x93\\\\x00\\\\x89\\\\x00\\\\x00\\n\\n\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00v\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00&\\\\x00\\\\x00\\\\x00C\\\\x00D\\\\x00\\\\xce\\\\xce\\\\xce\\\\x00\\\\x0c\\\\x0c\\\\x0c\\\\x00$\\\\x00\\\\x00\\\\x00u\\\\x00\\\\x1d\\\\x00ii\\\\x00\\\\x00??\\\\x00\u2026",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x00000454'}, {'name': 'HandleName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\Penicillate\\\\Kalkuns\\\\Tamul.Nyb'}, {'name': 'Buffer', 'value': '\\\\x00\\\\x16\\\\x00\\\\x93\\\\x00\\\\x89\\\\x00\\\\x00\\n\\n\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00v\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00&\\\\x00\\\\x00\\\\x00C\\\\x00D\\\\x00\\\\xce\\\\xce\\\\xce\\\\x00\\\\x0c\\\\x0c\\\\x0c\\\\x00$\\\\x00\\\\x00\\\\x00u\\\\x00\\\\x1d\\\\x00ii\\\\x00\\\\x00??\\\\x00…",
         "first_seen": "2026-08-13 22:33:24,016",
         "process_count": 0,
         "processes": []
@@ -599,7 +599,7 @@
         "api": "RegCreateKeyExW",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'Registry', 'value': '0x80000002', 'pretty_value': 'HKEY_LOCAL_MACHINE'}, {'name': 'SubKey', 'value': 'baks\\\\Uninstall\\\\Svedekurenes\\\\rateableness'}, {'name': 'Class', 'value': ''}, {'name': 'Access', 'value': '0x00000002', 'pretty_value': 'KEY_SET_VALUE'}, {'name': 'Handle', 'value': '0x00000000'}, {'name': 'FullName', 'value': 'HKEY_LOCAL_MACHINE\\\\baks\\\\Uninstall\\\\Svedekurenes\\\\rateab\u2026",
+        "first_args": "[{'name': 'Registry', 'value': '0x80000002', 'pretty_value': 'HKEY_LOCAL_MACHINE'}, {'name': 'SubKey', 'value': 'baks\\\\Uninstall\\\\Svedekurenes\\\\rateableness'}, {'name': 'Class', 'value': ''}, {'name': 'Access', 'value': '0x00000002', 'pretty_value': 'KEY_SET_VALUE'}, {'name': 'Handle', 'value': '0x00000000'}, {'name': 'FullName', 'value': 'HKEY_LOCAL_MACHINE\\\\baks\\\\Uninstall\\\\Svedekurenes\\\\rateab…",
         "first_seen": "2026-08-13 22:33:23,875",
         "process_count": 0,
         "processes": []
@@ -3417,7 +3417,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\SideBySide\\PreferExternalManifest",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3427,13 +3427,13 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Lsa\\FipsAlgorithmPolicy\\STE",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Lsa\\FipsAlgorithmPolicy\\Enabled",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "0"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Lsa",
@@ -3442,12 +3442,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Lsa\\FipsAlgorithmPolicy",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Lsa\\FipsAlgorithmPolicy\\MDMEnabled",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3462,63 +3462,63 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize\\AppsUseLightTheme",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "0"
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MountPoints2\\CPC\\Volume",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MountPoints2\\CPC\\Volume\\{705a300d-7a5e-11f1-89db-806e6f6e6963}\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MountPoints2\\CPC\\Volume\\{705a300d-7a5e-11f1-89db-806e6f6e6963}\\Data",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "\\xd6\r\\x00\\x00\r\\xf0\\xad\\xba\\x01\\x00\\x00\\x00\\x10\\x00\\x00\\x00\\x00\\x00\\x00\\x80\\x00\\x00\\x00\\x00\\x00\\x00\\x000\\x00\\x00\\x00\\x80!\\x00\\x00\\x00\\x07\\x02H\\x01\\xfe\\x00\\x00\\x001\\x00\\x00\\x007\\xd7a\\xd9\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x0b\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\\\x00\\\\x00?\\x00\\\\x00S\\x00C\\x00S\\x00I\\x00#\\x00C\\x00d\\x00R\\x00o\\x00m\\x00&\\x00V\\x00e\\x00n\\x00_\\x00P\\x00N\\x00P\\x000\\x00&\\x00P\\x00r\\x00o\\x00d\\x00_\\x00H\\x00L\\x00-\\x00P\\x00Q\\x00-\\x00S\\x00V\\x00_\\x00W\\x00B\\x008\\x00#\\x004\\x00&\\x003\\x005\\x004\\x002\\x004\\x008\\x006\\x007\\x00&\\x000\\x00&\\x000\\x001\\x000\\x000\\x000\\x000\\x00#\\x00{\\x005\\x003\\x00f\\x005\\x006\\x003\\x000\\x00d\\x00-\\x00b\\x006\\x00b\\x00f\\x00-\\x001\\x001\\x00d\\x000\\x00-\\x009\\x004\\x00f\\x002\\x00-\\x000\\x000\\x00a\\x000\\x00c\\x009\\x001\\x00e\\x00f\\x00b\\x008\\x00b\\x00}\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00"
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MountPoints2\\CPC\\Volume\\{705a300d-7a5e-11f1-89db-806e6f6e6963}\\Generation",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "1"
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MountPoints2\\CPC\\Volume\\{f5be1900-0000-0000-0000-100000000000}\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MountPoints2\\CPC\\Volume\\{f5be1900-0000-0000-0000-100000000000}\\Data",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "\\xd6\r\\x00\\x00\r\\xf0\\xad\\xba\\x01\\x00\\x00\\x00\\x08\\x00\\x00\\x00\\x00\\x00\\x00\\x80\\x00\\x00\\x00\\x00\\x00\\x00\\x000\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\xff\\x06\\xe7\\x03\\xff\\x00\\x00\\x00\\x16\\x00\\x00\\x00\\x06\\xf7\\xbe$\\x1e\\x00\\x00\\x00\\x04\\x00\\x00\\x00\\x0b\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\\\x00\\\\x00?\\x00\\\\x00S\\x00T\\x00O\\x00R\\x00A\\x00G\\x00E\\x00#\\x00V\\x00o\\x00l\\x00u\\x00m\\x00e\\x00#\\x00{\\x007\\x000\\x005\\x00a\\x002\\x00f\\x00f\\x00a\\x00-\\x007\\x00a\\x005\\x00e\\x00-\\x001\\x001\\x00f\\x001\\x00-\\x008\\x009\\x00d\\x00b\\x00-\\x008\\x000\\x006\\x00e\\x006\\x00f\\x006\\x00e\\x006\\x009\\x006\\x003\\x00}\\x00#\\x000\\x000\\x000\\x000\\x000\\x000\\x000\\x000\\x000\\x000\\x001\\x000\\x000\\x000\\x000\\x000\\x00#\\x00{\\x005\\x003\\x00f\\x005\\x006\\x003\\x000\\x00d\\x00-\\x00b\\x006\\x00b\\x00f\\x00-\\x001\\x001\\x00d\\x000\\x00-\\x009\\x004\\x00f\\x002\\x00-\\x000\\x000\\x00a\\x000\\x00c\\x009\\x001\\x00e\\x00f\\x00b\\x008\\x00b\\x00}\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00"
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MountPoints2\\CPC\\Volume\\{f5be1900-0000-0000-0000-100000000000}\\Generation",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "1"
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MountPoints2\\CPC\\Volume\\{f5be1900-0000-0000-0000-300300000000}\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MountPoints2\\CPC\\Volume\\{f5be1900-0000-0000-0000-300300000000}\\Data",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "\\xd6\r\\x00\\x00\r\\xf0\\xad\\xbaA\\x00\\x00\\x00\\x08\\x00\\x00\\x00\\x00\\x00\\x00\\x80\\x00\\x00\\x00\\x00\\x00\\x00\\x000\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\xff\\x06\\xe7\\x03\\xff\\x00\\x00\\x00\\x16\\x00\\x00\\x00\\xd8L\\xc7\\xb4\\x1f\\x00\\x00\\x00\\x04@\\x00\\x00\\x0b\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\\\x00\\\\x00?\\x00\\\\x00S\\x00T\\x00O\\x00R\\x00A\\x00G\\x00E\\x00#\\x00V\\x00o\\x00l\\x00u\\x00m\\x00e\\x00#\\x00{\\x007\\x000\\x005\\x00a\\x002\\x00f\\x00f\\x00a\\x00-\\x007\\x00a\\x005\\x00e\\x00-\\x001\\x001\\x00f\\x001\\x00-\\x008\\x009\\x00d\\x00b\\x00-\\x008\\x000\\x006\\x00e\\x006\\x00f\\x006\\x00e\\x006\\x009\\x006\\x003\\x00}\\x00#\\x000\\x000\\x000\\x000\\x000\\x000\\x000\\x000\\x000\\x003\\x003\\x000\\x000\\x000\\x000\\x000\\x00#\\x00{\\x005\\x003\\x00f\\x005\\x006\\x003\\x000\\x00d\\x00-\\x00b\\x006\\x00b\\x00f\\x00-\\x001\\x001\\x00d\\x000\\x00-\\x009\\x004\\x00f\\x002\\x00-\\x000\\x000\\x00a\\x000\\x00c\\x009\\x001\\x00e\\x00f\\x00b\\x008\\x00b\\x00}\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00"
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MountPoints2\\CPC\\Volume\\{f5be1900-0000-0000-0000-300300000000}\\Generation",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "1"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\LanguageOverlay\\OverlayPackages\\en-US",
@@ -3532,47 +3532,47 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Session Manager\\ResourcePolicies",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Control Panel\\Desktop",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Control Panel\\Desktop\\SmoothScroll",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced\\EnableBalloonTips",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced\\ListviewAlphaSelect",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "1"
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced\\ListviewShadow",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "1"
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced\\AccListViewV6",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced\\UseDoubleClickTimer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3587,7 +3587,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CustomLocale\\tr-TR",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3597,117 +3597,117 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\ExtendedLocale\\tr-TR",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\FontLink\\SystemLink",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\DataStore_V1.0",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\DataStore_V1.0\\Disable",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\DataStore_V1.0\\DataFilePath",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "C:\\Windows\\Fonts\\staticcache.dat"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane1",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane2",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "SimSun-ExtB"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane3",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "SimSun-ExtG"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane4",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane5",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane6",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane7",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane8",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane9",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane10",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane11",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane12",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane13",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane14",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane15",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Plane16",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\Segoe UI",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3717,22 +3717,22 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\FontSubstitutes",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\FontSubstitutes\\Segoe UI",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\FontSubstitutes\\MS Shell Dlg 2",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "Tahoma"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\LanguagePack\\SurrogateFallback\\MS Shell Dlg 2",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3742,7 +3742,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\CTF\\Compatibility\\77940063fcd0f276c574.exe",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3752,17 +3752,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\OOBE\\LaunchUserOOBE",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\CTF\\Compatibility\\AppCompatClassName",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3772,32 +3772,32 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\CTF\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\CTF\\EnableAnchorContext",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer\\TurnOffSPIAnimations",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer\\TurnOffSPIAnimations",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3807,12 +3807,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\sophisticates\\brandes",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3822,76 +3822,71 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\unorthodoxy\\Uninstall\\afbrers",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\stenters\\emhttes\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Desktop\\NameSpace",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Desktop\\NameSpace\\ValidateRegItems",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Desktop\\NameSpace\\MonitorRegistry",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "1"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MyComputer\\NameSpace",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MyComputer\\NameSpace\\ValidateRegItems",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\MyComputer\\NameSpace\\MonitorRegistry",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Drive\\shellex\\FolderExtensions",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Classes\\Drive\\shellex\\FolderExtensions",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\Drive\\shellex\\FolderExtensions\\{fbeb8a05-beee-4442-804e-409d6c4515e9}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Classes\\Drive\\shellex\\FolderExtensions\\{fbeb8a05-beee-4442-804e-409d6c4515e9}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\Drive\\shellex\\FolderExtensions\\{fbeb8a05-beee-4442-804e-409d6c4515e9}\\DriveMask",
-        "operation": "access",
-        "value": null
-      },
-      {
-        "key": "0x80000002",
         "operation": "query",
-        "value": null
+        "value": "32"
       }
     ],
-    "total": 96
+    "total": 95
   },
   "sandbox_services_and_tasks": {
     "commands": [

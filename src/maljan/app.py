@@ -25,7 +25,7 @@ from maljan.loaders.sandbox_client import SubmissionResult
 from maljan.pipeline.builder import build_graph
 from maljan.pipeline.events import EventSink
 from maljan.pipeline.state import AnalysisState
-from maljan.providers.cape_view import to_cape_shaped_dict
+from maljan.schemas.sandbox_document import sandbox_document
 
 
 def _remember_the_secrets_of(config: Settings) -> None:
@@ -97,6 +97,11 @@ class MaljanApp:
         # Where the graph failed, when it did: ``node <name>``, or the step
         # whose writes could not be applied. ``None`` on a run that returned.
         self.failed_step: str | None = None
+        # The state after the last complete graph step, kept as each step
+        # lands: what a run stopped part-way (a job timeout, the operator's
+        # cancel, the worker shutting down) had produced when it stopped. An
+        # empty dict until the first step completes.
+        self.latest_state: dict[str, Any] = {}
 
     async def aclose(self) -> None:
         """Release the container's agents, toolkits and per-job caches.
@@ -136,6 +141,7 @@ class MaljanApp:
         sample_path: str | None = None,
         static_sample_path: str | None = None,
         static_sample_paths: dict[str, str] | None = None,
+        server_sample_paths: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Execute the full analysis pipeline synchronously.
 
@@ -148,6 +154,8 @@ class MaljanApp:
             static_sample_paths: One container-visible path per static provider
                 this job's profile uses, keyed by provider id; the globally
                 configured provider's entry is also ``static_sample_path``.
+            server_sample_paths: The path each tool server that declares a
+                ``sample_mount`` opens the sample at, keyed by server key.
 
         Returns:
             The final state dict including:
@@ -157,7 +165,14 @@ class MaljanApp:
         # Delegate to async implementation so sandbox submission and graph
         # execution share the same event loop (avoids nested asyncio.run).
         return asyncio.run(
-            self.arun(file_hash, file_name, sample_path, static_sample_path, static_sample_paths)
+            self.arun(
+                file_hash,
+                file_name,
+                sample_path,
+                static_sample_path,
+                static_sample_paths,
+                server_sample_paths=server_sample_paths,
+            )
         )
 
     def _infer_sample_platform(
@@ -187,7 +202,9 @@ class MaljanApp:
 
         # Best-effort MIME from the sandbox file block when we couldn't
         # read the bytes ourselves.
-        target = (sandbox_report or {}).get("target", {})
+        from maljan.schemas.sandbox_document import place
+
+        target = place(sandbox_report, "target", {})
         if isinstance(target, dict):
             sb_file = target.get("file") if isinstance(target.get("file"), dict) else {}
             mt = sb_file.get("type") if isinstance(sb_file, dict) else None
@@ -216,16 +233,32 @@ class MaljanApp:
             )
         return int(timeout), int(interval)
 
-    async def _submit_to_sandbox(self, sample_path: str | None) -> dict[str, Any] | None:
-        """Submit sample to sandbox and return normalized report.
-
-        Returns None if no sample_path is provided or if submission fails.
-        """
+    def _note_the_reader(self, provider: Any, run: Any) -> None:
+        """Which reader produced this job's report, and the signature scale its provider gives."""
+        from maljan.core.report_formats import effective_formats
         from maljan.schemas.sandbox_report import reader_of
 
+        self.container.sandbox_normalised = reader_of(run.report)
+        try:
+            scale = provider.signature_scale(
+                run, effective_formats(self.config.sandbox.report_formats)
+            )
+        except Exception as exc:  # noqa: BLE001 — a scale is a reading aid, never a reason to fail
+            logger.warning("Sandbox signature scale unavailable: %s", exc)
+            scale = None
+        self.container.sandbox_signature_scale = scale.record() if scale is not None else None
+
+    async def _submit_to_sandbox(self, sample_path: str | None) -> dict[str, Any] | None:
+        """Submit sample to sandbox and return the neutral report's document.
+
+        The document every consumer reads (``schemas.sandbox_document``), laid
+        out from the ``SandboxReport`` the provider's registered reader filled.
+        Returns None if no sample_path is provided or if submission fails.
+        """
         # Which reader produced this job's report, for the sandbox sections;
         # cleared first so a job with no report never reads the last one's.
         self.container.sandbox_normalised = None
+        self.container.sandbox_signature_scale = None
         if not sample_path or self.container.is_mock:
             return None
 
@@ -244,8 +277,8 @@ class MaljanApp:
                 except Exception as exc:  # noqa: BLE001 — same degrade contract as a failed submit
                     logger.error("Attached sandbox report unusable: %s", exc)
                     return None
-                self.container.sandbox_normalised = reader_of(run.report)
-                return to_cape_shaped_dict(run.report)
+                self._note_the_reader(provider, run)
+                return sandbox_document(run.report)
             logger.info("Submitting sample to sandbox: %s", sample_path)
 
             # Every provider call below is synchronous: the Triage provider
@@ -271,13 +304,13 @@ class MaljanApp:
             )
             if status == "reported":
                 run = await asyncio.to_thread(provider.fetch, task_id)
-                self.container.sandbox_normalised = reader_of(run.report)
+                self._note_the_reader(provider, run)
                 result = SubmissionResult(
                     task_id=run.task_id,
                     sample_sha256=run.sample_sha256,
                     sample_name=run.sample_name,
                     status=run.status,
-                    report=to_cape_shaped_dict(run.report),
+                    report=sandbox_document(run.report),
                     error=run.error,
                     normalized=run.report,
                 )
@@ -346,6 +379,7 @@ class MaljanApp:
         static_sample_path: str | None = None,
         static_sample_paths: dict[str, str] | None = None,
         started_at: float | None = None,
+        server_sample_paths: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Execute the full analysis pipeline asynchronously.
 
@@ -365,6 +399,10 @@ class MaljanApp:
             static_sample_paths: One container-visible path per static provider
                 this job's profile uses, keyed by provider id; the globally
                 configured provider's entry is also ``static_sample_path``.
+            server_sample_paths: The path each tool server that declares a
+                ``sample_mount`` opens the sample at, keyed by server key: the
+                worker's copy under that mount, which an agent bound to the
+                server is held to (``agents.composition``).
             started_at: When the caller's own clock says this run began, as a
                 Unix timestamp. The worker starts counting before the sample
                 reaches this method, and the report's elapsed time is the
@@ -414,6 +452,7 @@ class MaljanApp:
                 sample_path=sample_path,
                 static_sample_path=static_sample_path,
                 static_sample_paths=static_sample_paths,
+                server_sample_paths=server_sample_paths,
             )
 
         elapsed = time.time() - start
@@ -432,6 +471,7 @@ class MaljanApp:
         sample_path: str | None,
         static_sample_path: str | None,
         static_sample_paths: dict[str, str] | None,
+        server_sample_paths: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """The sandbox submission and the graph, for ``arun``."""
         # Submit to sandbox if sample_path is provided
@@ -456,6 +496,7 @@ class MaljanApp:
         self.container.sandbox_report = sandbox_report
         self.container.sample_path = sample_path
         self.container.sample_sha256 = file_hash
+        self.container.server_sample_paths = dict(server_sample_paths or {})
 
         initial_state: AnalysisState = {
             "file_hash": file_hash,
@@ -535,6 +576,7 @@ class MaljanApp:
 
         self.built_report = None
         self.failed_step = None
+        self.latest_state = {}
         latest: dict[str, Any] = {}
         # The nodes whose output arrived since the last complete step.
         step: list[str] = []
@@ -546,6 +588,7 @@ class MaljanApp:
             ):
                 if mode == "values":
                     latest = cast("dict[str, Any]", payload)
+                    self.latest_state = latest
                     step = []
                     continue
                 updates = payload if isinstance(payload, dict) else {}

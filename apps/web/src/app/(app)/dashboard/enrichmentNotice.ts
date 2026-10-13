@@ -25,18 +25,28 @@ export interface StatusNotice {
   setting: string;
 }
 
-const ENRICHMENT_WAITING: StatusNotice = {
-  label: "Enrichment waiting",
-  detail:
-    "Reputation enrichment is queued for a worker of its own, and no such " +
-    "worker is reading the queue. Every finished analysis keeps its " +
-    "VirusTotal and AbuseIPDB lookups queued until one is running.",
-  setting: ENRICHMENT_WORKER_SETTING,
-};
+/** The sources the waiting lookups are for, as one phrase: the configured
+ *  ones the status lists, in the order they are asked. */
+function lookupsPhrase(sources: readonly { label: string; configured: boolean }[]): string {
+  const labels = sources.filter((s) => s.configured).map((s) => s.label);
+  if (labels.length === 0) return "reputation lookups";
+  if (labels.length === 1) return `${labels[0]} lookups`;
+  return `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]} lookups`;
+}
 
-/** The notice for what `/system/status` said about the enrichment worker. */
+/** The notice for what `/system/status` said about the enrichment worker,
+ *  naming the configured sources it listed. */
 export function enrichmentWorkerNotice(
   state: string | null | undefined,
+  sources: readonly { label: string; configured: boolean }[] = [],
 ): StatusNotice | null {
-  return state === "down" ? ENRICHMENT_WAITING : null;
+  if (state !== "down") return null;
+  return {
+    label: "Enrichment waiting",
+    detail:
+      "Reputation enrichment is queued for a worker of its own, and no such " +
+      "worker is reading the queue. Every finished analysis keeps its " +
+      `${lookupsPhrase(sources)} queued until one is running.`,
+    setting: ENRICHMENT_WORKER_SETTING,
+  };
 }

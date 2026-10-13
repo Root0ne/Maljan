@@ -23,7 +23,7 @@
         "api": "CreateProcessW",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'ApplicationName', 'value': ''}, {'name': 'CommandLine', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\d06be7bd36b4cdd6ac12.exe dfsr'}, {'name': 'CreationFlags', 'value': '0x00000000'}, {'name': 'ProcessId', 'value': '2216'}, {'name': 'ThreadId', 'value': '2228'}, {'name': 'ProcessHandle', 'value': '0x00000278'}, {'name': 'ThreadHandle', 'value': '0x00000274'}, {'name': 'StackPivote\u2026",
+        "first_args": "[{'name': 'ApplicationName', 'value': ''}, {'name': 'CommandLine', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\d06be7bd36b4cdd6ac12.exe dfsr'}, {'name': 'CreationFlags', 'value': '0x00000000'}, {'name': 'ProcessId', 'value': '2216'}, {'name': 'ThreadId', 'value': '2228'}, {'name': 'ProcessHandle', 'value': '0x00000278'}, {'name': 'ThreadHandle', 'value': '0x00000274'}, {'name': 'StackPivote…",
         "first_seen": "2026-08-10 20:56:42,668",
         "process_count": 0,
         "processes": []
@@ -257,7 +257,7 @@
         "api": "NtCreateFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x00000000'}, {'name': 'DesiredAccess', 'value': '0x80100080', 'pretty_value': 'GENERIC_READ|FILE_READ_ATTRIBUTES|SYNCHRONIZE'}, {'name': 'FileName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\BDztadHhjA'}, {'name': 'CreateDisposition', 'value': '1', 'pretty_value': 'FILE_OPEN'}, {'name': 'ShareAccess', 'value': '1', 'pretty_value': 'FILE_SHARE_READ'}, {'n\u2026",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x00000000'}, {'name': 'DesiredAccess', 'value': '0x80100080', 'pretty_value': 'GENERIC_READ|FILE_READ_ATTRIBUTES|SYNCHRONIZE'}, {'name': 'FileName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\BDztadHhjA'}, {'name': 'CreateDisposition', 'value': '1', 'pretty_value': 'FILE_OPEN'}, {'name': 'ShareAccess', 'value': '1', 'pretty_value': 'FILE_SHARE_READ'}, {'n…",
         "first_seen": "2026-08-10 20:56:42,356",
         "process_count": 0,
         "processes": []
@@ -266,7 +266,7 @@
         "api": "NtCreateKey",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'KeyHandle', 'value': '0x0000037c'}, {'name': 'DesiredAccess', 'value': '0x00000010', 'pretty_value': 'KEY_NOTIFY'}, {'name': 'ObjectAttributesHandle', 'value': '0x0000035c'}, {'name': 'ObjectAttributesName', 'value': 'TenantRestrictions\\\\Payload'}, {'name': 'ObjectAttributes', 'value': 'HKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\Policies\\\\Microsoft\\\\Windows\\\\TenantRestrictions\\\\Payload'}, {'name':\u2026",
+        "first_args": "[{'name': 'KeyHandle', 'value': '0x0000037c'}, {'name': 'DesiredAccess', 'value': '0x00000010', 'pretty_value': 'KEY_NOTIFY'}, {'name': 'ObjectAttributesHandle', 'value': '0x0000035c'}, {'name': 'ObjectAttributesName', 'value': 'TenantRestrictions\\\\Payload'}, {'name': 'ObjectAttributes', 'value': 'HKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\Policies\\\\Microsoft\\\\Windows\\\\TenantRestrictions\\\\Payload'}, {'name':…",
         "first_seen": "2026-08-10 20:56:45,652",
         "process_count": 0,
         "processes": []
@@ -293,7 +293,7 @@
         "api": "NtCreateUserProcess",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'ProcessHandle', 'value': '0x00000278'}, {'name': 'ThreadHandle', 'value': '0x00000274'}, {'name': 'ProcessDesiredAccess', 'value': '0x02000000'}, {'name': 'ThreadDesiredAccess', 'value': '0x02000000'}, {'name': 'ProcessFileName', 'value': ''}, {'name': 'ThreadName', 'value': ''}, {'name': 'ImagePathName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\d06be7bd36b4cdd6ac12.exe'}, {'n\u2026",
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0x00000278'}, {'name': 'ThreadHandle', 'value': '0x00000274'}, {'name': 'ProcessDesiredAccess', 'value': '0x02000000'}, {'name': 'ThreadDesiredAccess', 'value': '0x02000000'}, {'name': 'ProcessFileName', 'value': ''}, {'name': 'ThreadName', 'value': ''}, {'name': 'ImagePathName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\d06be7bd36b4cdd6ac12.exe'}, {'n…",
         "first_seen": "2026-08-10 20:56:42,621",
         "process_count": 0,
         "processes": []
@@ -311,7 +311,7 @@
         "api": "NtDeviceIoControlFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x0000038c'}, {'name': 'HandleName', 'value': '\\\\Device\\\\Afd'}, {'name': 'IoControlCode', 'value': '0x000120b3'}, {'name': 'InputBuffer', 'value': '\\\\x17\\\\x00'}, {'name': 'OutputBuffer', 'value': '\\\\x02\\\\x00\\\\x00\\\\x00\\\\x1a\\\\x00\\\\x17\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\xfe\\\\x80\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\xa6-g\\\\xee\\\\xaca3\\\\x9b\\\\x0c\\\\x00\\\\x00\\\\x00\\\\x1a\\\\x00\\\\x1\u2026",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x0000038c'}, {'name': 'HandleName', 'value': '\\\\Device\\\\Afd'}, {'name': 'IoControlCode', 'value': '0x000120b3'}, {'name': 'InputBuffer', 'value': '\\\\x17\\\\x00'}, {'name': 'OutputBuffer', 'value': '\\\\x02\\\\x00\\\\x00\\\\x00\\\\x1a\\\\x00\\\\x17\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\xfe\\\\x80\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\xa6-g\\\\xee\\\\xaca3\\\\x9b\\\\x0c\\\\x00\\\\x00\\\\x00\\\\x1a\\\\x00\\\\x1…",
         "first_seen": "2026-08-10 20:56:45,652",
         "process_count": 0,
         "processes": []
@@ -392,7 +392,7 @@
         "api": "NtOpenKeyEx",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000000'}, {'name': 'DesiredAccess', 'value': '0x02000000', 'pretty_value': 'MAXIMUM_ALLOWED'}, {'name': 'ObjectAttributesHandle', 'value': '0x00000252'}, {'name': 'ObjectAttributesName', 'value': 'interfacE\\\\{b196b287-bab4-101a-b69c-00aa00341d07}'}, {'name': 'ObjectAttributes', 'value': 'HKEY_CURRENT_USER\\\\Software\\\\Classes\\\\interfacE\\\\{b196b287-bab4-101a-b69c\u2026",
+        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000000'}, {'name': 'DesiredAccess', 'value': '0x02000000', 'pretty_value': 'MAXIMUM_ALLOWED'}, {'name': 'ObjectAttributesHandle', 'value': '0x00000252'}, {'name': 'ObjectAttributesName', 'value': 'interfacE\\\\{b196b287-bab4-101a-b69c-00aa00341d07}'}, {'name': 'ObjectAttributes', 'value': 'HKEY_CURRENT_USER\\\\Software\\\\Classes\\\\interfacE\\\\{b196b287-bab4-101a-b69c…",
         "first_seen": "2026-08-10 20:56:42,528",
         "process_count": 0,
         "processes": []
@@ -428,7 +428,7 @@
         "api": "NtProtectVirtualMemory",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x75fef000'}, {'name': 'ModuleName', 'value': 'GDI32.dll'}, {'name': 'NumberOfBytesProtected', 'value': '0x00001000'}, {'name': 'MemoryType', 'value': '0x00000000'}, {'name': 'NewAccessProtection', 'value': '0x00000004', 'pretty_value': 'PAGE_READWRITE'}, {'name': 'OldAccessProtection', 'value': '0x00000002', 'pr\u2026",
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x75fef000'}, {'name': 'ModuleName', 'value': 'GDI32.dll'}, {'name': 'NumberOfBytesProtected', 'value': '0x00001000'}, {'name': 'MemoryType', 'value': '0x00000000'}, {'name': 'NewAccessProtection', 'value': '0x00000004', 'pretty_value': 'PAGE_READWRITE'}, {'name': 'OldAccessProtection', 'value': '0x00000002', 'pr…",
         "first_seen": "2026-08-10 20:56:42,215",
         "process_count": 0,
         "processes": []
@@ -455,7 +455,7 @@
         "api": "NtQueryInformationToken",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'TokenInformationClass', 'value': '1'}, {'name': 'TokenInformation', 'value': \"\\\\x84\\\\xf3\\\\x19\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x01\\\\x05\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x05\\\\x15\\\\x00\\\\x00\\\\x009a\\\\x00k\\\\xe9&C.\\\\xcf\\\\x1f\\\\xe7\\\\xfe\\\\xe8\\\\x03\\\\x00\\\\x00\\\\xc8\\\\xf3\\\\x19\\\\x00\\\\xde\\\\xcanv\\\\xbc\\\\xf3\\\\x19\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x90\\\\x00\\\\x00\\\\x00&\\\\x00'\\\\x00TAHw\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x8a\\\u2026",
+        "first_args": "[{'name': 'TokenInformationClass', 'value': '1'}, {'name': 'TokenInformation', 'value': \"\\\\x84\\\\xf3\\\\x19\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x01\\\\x05\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x05\\\\x15\\\\x00\\\\x00\\\\x009a\\\\x00k\\\\xe9&C.\\\\xcf\\\\x1f\\\\xe7\\\\xfe\\\\xe8\\\\x03\\\\x00\\\\x00\\\\xc8\\\\xf3\\\\x19\\\\x00\\\\xde\\\\xcanv\\\\xbc\\\\xf3\\\\x19\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x90\\\\x00\\\\x00\\\\x00&\\\\x00'\\\\x00TAHw\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x8a\\…",
         "first_seen": "2026-08-10 20:56:42,028",
         "process_count": 0,
         "processes": []
@@ -509,7 +509,7 @@
         "api": "NtSetInformationProcess",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'ProcessInformationClass', 'value': '35'}, {'name': 'ProcessInformation', 'value': '\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\n\\\\x00\\\\x00\\\\x00\\r\\\\x00\\\\x00\\\\x00\\\\x02\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00%\\\\x00\\\\\\\\x00\\\\x02\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00a\\\\x00t\\\\x00\\\\x02\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00c\\\\x00a\\\\x00\\\\x02\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x02\\\\x00\\\\x0\u2026",
+        "first_args": "[{'name': 'ProcessInformationClass', 'value': '35'}, {'name': 'ProcessInformation', 'value': '\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\n\\\\x00\\\\x00\\\\x00\\r\\\\x00\\\\x00\\\\x00\\\\x02\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00%\\\\x00\\\\\\\\x00\\\\x02\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00a\\\\x00t\\\\x00\\\\x02\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00c\\\\x00a\\\\x00\\\\x02\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x02\\\\x00\\\\x0…",
         "first_seen": "2026-08-10 20:56:45,714",
         "process_count": 0,
         "processes": []
@@ -3205,7 +3205,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Session Manager\\SafeProcessSearchMode",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3215,12 +3215,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Classes\\interfacE\\{b196b287-bab4-101a-b69c-00aa00341d07}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Classes\\interfacE\\{b196b287-bab4-101a-b69c-00aa00341d07}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3230,12 +3230,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Borland\\Locales",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Borland\\Delphi\\Locales",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3245,7 +3245,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CustomLocale\\en-US",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3255,13 +3255,13 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\ExtendedLocale\\en-US",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\Sorting\\Versions\\000603xx",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "kernel32.dll"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Nls\\Sorting\\Ids",
@@ -3270,12 +3270,12 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\Sorting\\Ids\\en-US",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\Sorting\\Ids\\en",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3285,62 +3285,62 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\GRE_Initialize\\DisableMetaFiles",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\GRE_Initialize\\DisableUmpdBufferSizeCheck",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\TenantRestrictions\\Payload",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\windows\\CurrentVersion\\Internet Settings",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\MigrateProxy",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "1"
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\ProxyEnable",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "0"
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\ProxyServer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\ProxyOverride",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\AutoConfigURL",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\AutoDetect",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\WinHttp",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3350,27 +3350,27 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\windows\\CurrentVersion\\Internet Settings",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\WinHttpLowerCaseHost",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Security_HKLM_only",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Internet Explorer\\Main\\FeatureControl\\FEATURE_IGNORE_POLICIES_ZONEMAP_IF_ESC_ENABLED_KB918915",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3380,7 +3380,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\ZoneMap\\Domains\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3390,7 +3390,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\ZoneMap\\Domains\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3400,7 +3400,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\ZoneMap\\Ranges\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3410,7 +3410,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\ZoneMap\\Ranges\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3420,7 +3420,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Internet Explorer\\Main\\FeatureControl\\FEATURE_ZONES_CHECK_ZONEMAP_POLICY_KB941001",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3430,7 +3430,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\ZoneMap",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3440,7 +3440,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\ZoneMap",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3450,17 +3450,17 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\ZoneMap\\",
-        "operation": "create",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\ZoneMap\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\ZoneMap\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3470,7 +3470,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\ZoneMap\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3480,7 +3480,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Internet Explorer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3490,67 +3490,67 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Internet Explorer\\Security",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Internet Explorer\\Security\\DisableSecuritySettingsCheck",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Internet Explorer\\Security",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Internet Explorer\\Security\\DisableSecuritySettingsCheck",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\Setup",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\Setup\\SystemSetupInProgress",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "0"
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\0",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\1",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\2",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\3",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\4",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3560,7 +3560,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3570,12 +3570,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\0",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\0",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3585,7 +3585,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\0",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3595,17 +3595,17 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\0\\Flags",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "33"
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\1",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\1",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3615,7 +3615,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\1",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3625,8 +3625,8 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\1\\Flags",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "219"
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\ZoneMap\\ProxyBypass",
@@ -3650,12 +3650,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\2",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\2",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3665,7 +3665,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\2",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3675,17 +3675,17 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\2\\Flags",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "71"
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\3",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\3",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3695,7 +3695,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\3",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3705,17 +3705,17 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\3\\Flags",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "1"
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\4",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\4",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3725,7 +3725,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\4",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3735,27 +3735,27 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\4\\Flags",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "3"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Internet Explorer\\Main\\FeatureControl\\FEATURE_LOCALMACHINE_LOCKDOWN",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Internet Explorer\\Main\\FeatureControl\\FEATURE_LOCALMACHINE_LOCKDOWN\\d06be7bd36b4cdd6ac12.exe",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Internet Explorer\\Main\\FeatureControl\\FEATURE_LOCALMACHINE_LOCKDOWN\\*",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3765,7 +3765,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3775,17 +3775,17 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\0",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\0",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3795,7 +3795,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\0",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3805,12 +3805,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\1",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\1",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3820,7 +3820,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\1",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3830,12 +3830,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\2",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\2",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3845,7 +3845,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\2",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3855,12 +3855,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\3",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\3",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3870,7 +3870,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\3",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3880,12 +3880,12 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\4",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\4",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3895,7 +3895,7 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Lockdown_Zones\\4",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3905,47 +3905,47 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\CreateUriCacheSize",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\CreateUriCacheSize",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\CreateUriCacheSize",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\CreateUriCacheSize",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\EnablePunycode",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\EnablePunycode",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\EnablePunycode",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\EnablePunycode",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "1"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Internet Explorer\\Main\\FeatureControl\\FEATURE_ALLOW_REVERSE_SOLIDUS_IN_USERINFO_KB932562",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3955,7 +3955,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Internet Explorer\\Main\\FeatureControl\\FEATURE_USE_IETLDLIST_FOR_DOMAIN_DETERMINATION",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3965,7 +3965,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Internet Explorer\\Main\\FeatureControl\\FEATURE_URI_DISABLECACHE",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -3980,17 +3980,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Services\\Tcpip\\Parameters\\Hostname",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "DESKTOP-D7VMOBK"
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\ZoneMap\\Domains\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\ZoneMap\\Domains\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4000,47 +4000,47 @@
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\ZoneMap\\ProtocolDefaults\\",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\3\\1A10",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\3",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\Zones\\3\\1A10",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "1"
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\5.0\\Cache",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\5.0\\Cache\\Extensible Cache",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Policies\\Microsoft\\Windows\\Explorer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\Microsoft\\Windows\\Explorer\\DisableKnownFolders",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_CURRENT_USER\\Software\\Policies\\Microsoft\\Windows\\Explorer",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4050,122 +4050,122 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{5E6C858F-0E22-4760-9AFE-EA3317B67173}",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{5E6C858F-0E22-4760-9AFE-EA3317B67173}\\Category",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "2"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{5E6C858F-0E22-4760-9AFE-EA3317B67173}\\Name",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "Profile"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{5E6C858F-0E22-4760-9AFE-EA3317B67173}\\ParentFolder",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{5E6C858F-0E22-4760-9AFE-EA3317B67173}\\Description",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{5E6C858F-0E22-4760-9AFE-EA3317B67173}\\RelativePath",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{5E6C858F-0E22-4760-9AFE-EA3317B67173}\\ParsingName",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{5E6C858F-0E22-4760-9AFE-EA3317B67173}\\InfoTip",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{5E6C858F-0E22-4760-9AFE-EA3317B67173}\\LocalizedName",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{5E6C858F-0E22-4760-9AFE-EA3317B67173}\\Icon",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{5E6C858F-0E22-4760-9AFE-EA3317B67173}\\Security",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{5E6C858F-0E22-4760-9AFE-EA3317B67173}\\StreamResource",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{5E6C858F-0E22-4760-9AFE-EA3317B67173}\\StreamResourceType",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{5E6C858F-0E22-4760-9AFE-EA3317B67173}\\LocalRedirectOnly",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{5E6C858F-0E22-4760-9AFE-EA3317B67173}\\Roamable",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{5E6C858F-0E22-4760-9AFE-EA3317B67173}\\PreCreate",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{5E6C858F-0E22-4760-9AFE-EA3317B67173}\\Stream",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{5E6C858F-0E22-4760-9AFE-EA3317B67173}\\PublishExpandedPath",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{5E6C858F-0E22-4760-9AFE-EA3317B67173}\\DefinitionFlags",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{5E6C858F-0E22-4760-9AFE-EA3317B67173}\\Attributes",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{5E6C858F-0E22-4760-9AFE-EA3317B67173}\\FolderTypeID",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{5E6C858F-0E22-4760-9AFE-EA3317B67173}\\InitFolderHandler",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{5E6C858F-0E22-4760-9AFE-EA3317B67173}\\PropertyBag",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4175,17 +4175,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList\\S-1-5-21-1795187001-776152809-4276559823-1000",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList\\S-1-5-21-1795187001-776152809-4276559823-1000\\ProfileImagePath",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "C:\\Users\\Admin"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\KnownFolderSettings",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -4195,11 +4195,166 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{2B0F765D-C0E9-4171-908E-08A611B84FF6}",
-        "operation": "access",
+        "operation": "query",
         "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{2B0F765D-C0E9-4171-908E-08A611B84FF6}\\Category",
+        "operation": "query",
+        "value": "4"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{2B0F765D-C0E9-4171-908E-08A611B84FF6}\\Name",
+        "operation": "query",
+        "value": "Cookies"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{2B0F765D-C0E9-4171-908E-08A611B84FF6}\\ParentFolder",
+        "operation": "query",
+        "value": "{F1B32785-6FBA-4FCF-9D55-7B8E7F157091}"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{2B0F765D-C0E9-4171-908E-08A611B84FF6}\\Description",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{2B0F765D-C0E9-4171-908E-08A611B84FF6}\\RelativePath",
+        "operation": "query",
+        "value": "Microsoft\\Windows\\INetCookies"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{2B0F765D-C0E9-4171-908E-08A611B84FF6}\\ParsingName",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{2B0F765D-C0E9-4171-908E-08A611B84FF6}\\InfoTip",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{2B0F765D-C0E9-4171-908E-08A611B84FF6}\\LocalizedName",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{2B0F765D-C0E9-4171-908E-08A611B84FF6}\\Icon",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{2B0F765D-C0E9-4171-908E-08A611B84FF6}\\Security",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{2B0F765D-C0E9-4171-908E-08A611B84FF6}\\StreamResource",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{2B0F765D-C0E9-4171-908E-08A611B84FF6}\\StreamResourceType",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{2B0F765D-C0E9-4171-908E-08A611B84FF6}\\LocalRedirectOnly",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{2B0F765D-C0E9-4171-908E-08A611B84FF6}\\Roamable",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{2B0F765D-C0E9-4171-908E-08A611B84FF6}\\PreCreate",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{2B0F765D-C0E9-4171-908E-08A611B84FF6}\\Stream",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{2B0F765D-C0E9-4171-908E-08A611B84FF6}\\PublishExpandedPath",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{2B0F765D-C0E9-4171-908E-08A611B84FF6}\\DefinitionFlags",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{2B0F765D-C0E9-4171-908E-08A611B84FF6}\\Attributes",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{2B0F765D-C0E9-4171-908E-08A611B84FF6}\\FolderTypeID",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{2B0F765D-C0E9-4171-908E-08A611B84FF6}\\InitFolderHandler",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{2B0F765D-C0E9-4171-908E-08A611B84FF6}\\PropertyBag",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\machine\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FolderDescriptions\\{2B0F765D-C0E9-4171-908E-08A611B84FF6}\\PropertyBag",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\SessionInfo\\1",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\SessionInfo\\1\\KnownFolders",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\AppModel\\Lookaside\\user\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\SessionInfo\\1\\KnownFolders",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\User Shell Folders",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\User Shell Folders\\Cookies",
+        "operation": "query",
+        "value": "%USERPROFILE%\\AppData\\Local\\Microsoft\\Windows\\INetCookies"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\WinSock2\\Parameters",
+        "operation": "query",
+        "value": null
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Services\\WinSock2\\Parameters\\WinSock_Registry_Version",
+        "operation": "query",
+        "value": "2.0"
+      },
+      {
+        "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Services\\WinSock2\\Parameters\\AutodialDLL",
+        "operation": "query",
+        "value": "C:\\Windows\\System32\\rasadhlp.dll"
       }
     ],
-    "total": 232
+    "total": 231
   },
   "sandbox_services_and_tasks": {
     "commands": [

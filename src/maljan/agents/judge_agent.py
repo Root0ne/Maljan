@@ -56,7 +56,6 @@ from maljan.agents.base_agent import (
     nudge_turns,
     recursion_limit,
     request_chars,
-    retry_on_connection_error,
     run_on_agent_loop,
     synthesis_budget_chars,
 )
@@ -74,7 +73,7 @@ from maljan.agents.tool_fence import (
     json_view,
     needs_fence,
 )
-from maljan.core.config import get_settings
+from maljan.core.config import MEDIATOR_AGENT_KEY, get_settings
 from maljan.core.logger import logger
 from maljan.core.spend import SpendCeilingStop, call_deadline_of
 from maljan.core.token_ledger import TokenLedger, structured_answer
@@ -87,6 +86,7 @@ from maljan.llm.context_window import (
     window_full_error,
 )
 from maljan.llm.generation_rate import GenerationRates, ModelCallDeadline, model_name_of
+from maljan.llm.transient import as_call
 from maljan.memory.attck_loader import technique_label
 from maljan.memory.long_term_memory import a_past_case_technique
 from maljan.memory.technique_cards import technique_card_lines
@@ -95,9 +95,11 @@ from maljan.pipeline.events import emit_judge_question, safe_finding_value, scru
 from maljan.pipeline.mediation_models import (
     CONTRADICTIONS_BLOCK_MISSING_NOTE,
     CONTRADICTIONS_BLOCK_MIXED_NOTE,
+    MEDIATOR_NO_ANSWER,
     MediatorVerdict,
     analysts_with_claims,
     consensus_applies,
+    mediator_no_answer_note,
 )
 from maljan.pipeline.state import AgentArgument
 from maljan.pipeline.turns import with_question
@@ -419,9 +421,8 @@ VERDICT_TIMEOUT_REASON = "the judge did not answer within its budget"
 
 
 def _answer_text(answer: Any) -> str:
-    """The text of a model answer, whatever shape it arrived in."""
-    content = getattr(answer, "content", answer)
-    return str(content if content is not None else "")
+    """The text of a model answer, whatever shape it arrived in, thinking aside."""
+    return answer_text(getattr(answer, "content", answer))
 
 
 def _is_not_json(answer: Any) -> bool:
@@ -441,6 +442,13 @@ def _is_not_json(answer: Any) -> bool:
 
 # Consensus threshold: mediator confidence must reach this to stop negotiation early
 CONSENSUS_THRESHOLD = 0.85
+
+# How many calls of the judge's own time limit one mediation can spend one
+# after another, at most: the fast call and its one second ask of an empty
+# answer, or a fast call that timed out and the tool loop after it; then the
+# question for a missing contradictions block and the extraction. The
+# negotiation node's outer cap is this many limits plus its decode headroom.
+MEDIATION_CALL_SPANS = 4
 
 # What we assume when the mediator's agreement score cannot be read at all.
 # Deliberately below CONSENSUS_THRESHOLD: an unreadable mediator must not be
@@ -467,13 +475,21 @@ CONTRADICTION_DEFINITION = (
     "claim that an evidence ledger entry contradicts."
 )
 
+# The field each listed line opens with: whom a revision round asks over it
+# (``pipeline.debate_facts.analysts_to_revise``).
+ANALYSTS_FIELD_RULE = (
+    "Open each line with [analysts: <name>, <name>] naming the analysts who must revise "
+    "over it, each written as its report is headed; a revision round asks only the analysts "
+    "the blocking lines name, and every other analyst keeps its answer as it stands."
+)
+
 # The closing block the mediator writes, and the only part of its answer the
 # contradictions are read from (``final_contradictions``).
 CONTRADICTIONS_BLOCK_RULE = (
     "After your reasoning, write one final block. It begins with a line reading exactly "
     "'CONTRADICTIONS:' and then lists each contradiction still standing on a line of its "
     "own: the analyst, its claim, and what contradicts it (another analyst's claim, or the "
-    "id of the ledger entry). When none stands, write the single line "
+    "id of the ledger entry). " + ANALYSTS_FIELD_RULE + " When none stands, write the single line "
     "'CONTRADICTIONS: NONE'. Only this final block is counted: a contradiction you drafted "
     "above it and then resolved is left out of it. End each line with "
     "[blocking: <one-line reason>] when the analysts must revise over it, or "
@@ -487,7 +503,8 @@ CONTRADICTIONS_BLOCK_QUESTION = (
     "Your answer has no final 'CONTRADICTIONS:' block. Write it now: a line reading "
     "exactly 'CONTRADICTIONS:' followed by one line per contradiction still standing (the "
     "analyst, its claim, and what contradicts it: another analyst's claim or the id of the "
-    "ledger entry), each ending in [blocking: <one-line reason>] or "
+    "ledger entry), each opening with [analysts: <name>, <name>] for the analysts who must "
+    "revise over it and ending in [blocking: <one-line reason>] or "
     "[not blocking: <one-line reason>], or the single line 'CONTRADICTIONS: NONE'; then the "
     "line 'agreement_confidence: <number>'. This turn carries no tools."
 )
@@ -498,7 +515,8 @@ MEDIATION_EXTRACTION_SYSTEM = (
     "Extract the final structured verdict from the mediator's reasoning log.\n"
     "You MUST produce a structured response with:\n"
     "- contradictions: the lines of the log's final 'CONTRADICTIONS:' block, one item "
-    "per line written whole with its [blocking: …] or [not blocking: …] mark, and an empty "
+    "per line written whole with its [analysts: …] field and its [blocking: …] or "
+    "[not blocking: …] mark, and an empty "
     "list when that block reads 'CONTRADICTIONS: NONE'. A "
     "contradiction the log drafted above that block and then resolved is not one.\n"
     "- resolution_summary: what was resolved and what remains\n"
@@ -1613,14 +1631,20 @@ class JudgeAgent(BudgetMeter):
         # only the last round's calls while the earlier ones consumed ids.
         self._evidence_entries: list[LedgerEntry] = []
         # Which of the container's models this instance was built on: the
-        # verdict's judge model, or the expert model the mediator runs on. A
-        # call is recorded under the model that answered it, and the
-        # mediator's answers are the expert model's whatever an entry for the
-        # judge says.
+        # verdict's judge model, or the mediator's (``llm.agents.mediator``,
+        # else the expert model). A call is recorded under the model that
+        # answered it, and the mediator's answers are its own model's whatever
+        # an entry for the judge says.
         self._runs_on: str = "judge"
         # What the tool definitions of the current loop weigh with each
         # request, for the budget record and the ticks; none before a loop.
         self._tool_definition_chars: int = 0
+        # The model message the last tool loop's text was read from, the
+        # bound its call was sent with, and how a loop with no final answer
+        # of its own ended.
+        self._last_answer: Any = None
+        self._last_answer_cap: int | None = None
+        self._last_loop_ending: str = ""
 
     def _output_cap(self) -> Any:
         """The output cap this judge's model was built with, and how it was reached.
@@ -1701,14 +1725,14 @@ class JudgeAgent(BudgetMeter):
 
     def _model_label(self) -> str:
         """The label of the model this instance calls first, or ``""`` outside a job."""
-        if getattr(self, "_runs_on", "judge") != "expert":
+        if getattr(self, "_runs_on", "judge") != MEDIATOR_AGENT_KEY:
             return super()._model_label()
         config = getattr(getattr(self, "_container", None), "config", None)
         if config is None:
             return ""
-        from maljan.core.model_assignments import global_model_label
+        from maljan.core.model_assignments import model_label_for
 
-        return global_model_label(config, "expert")
+        return model_label_for(config, MEDIATOR_AGENT_KEY)
 
     def _publish_questions(self, conversation: list[Any], already: set[str]) -> None:
         """Publish each question the judge has asked and not published yet.
@@ -1734,7 +1758,7 @@ class JudgeAgent(BudgetMeter):
                 if marker in already:
                     continue
                 already.add(marker)
-                text = str(getattr(message, "content", "") or "").strip()
+                text = _answer_text(message).strip()
                 if not text or not text.rstrip().endswith("?"):
                     continue
                 emit_judge_question(
@@ -1767,6 +1791,26 @@ class JudgeAgent(BudgetMeter):
     def _job_key(self) -> str:
         """A per-job identity for the handles' same-job short circuit."""
         return self._job_id or "job"
+
+    def _definition_role(self) -> str | None:
+        """The role the judge's definition declares, or ``None`` when the judge runs bare."""
+        container = getattr(self, "_container", None)
+        if container is None:
+            return None
+        from maljan.agents.composition import role_of
+        from maljan.core.config import JUDGE_AGENT_KEY
+
+        return role_of(container.config, JUDGE_AGENT_KEY)
+
+    def _definition_tab(self) -> str | None:
+        """The console tab the judge's definition declares, or ``None`` when the judge runs bare."""
+        container = getattr(self, "_container", None)
+        if container is None:
+            return None
+        from maljan.agents.composition import tab_of
+        from maljan.core.config import JUDGE_AGENT_KEY
+
+        return tab_of(container.config, JUDGE_AGENT_KEY)
 
     def _definition_tool_refs(self) -> list[Any]:
         """The judge definition's ``ToolRef``s, under the active profile.
@@ -1803,19 +1847,20 @@ class JudgeAgent(BudgetMeter):
         registry = self._server_registry()
         if registry is None:
             return
-        seen: dict[str, str] = {}
-        tools, reasons = await registry.atools_for(
-            "judge", self._job_key(), exclude=self._profile_excluded_servers(), seen=seen
-        )
         # The judge's definition names its servers the same way an analyst's
         # does, and ``knowledge`` reaches it by that reference alone — it is
         # bound to no role. Awaited here rather than taken from a
         # ``ResolvedAgent`` for the reason ``aclose`` spells out: whichever
         # loop enters a toolkit's exit stack has to be the one that unwinds it.
-        for ref in self._definition_tool_refs():
-            picked, ref_reasons = await registry.atools_for_ref(ref, self._job_key(), seen=seen)
-            tools.extend(picked)
-            reasons.extend(ref_reasons)
+        # The built-in servers and the definition's own claim their names
+        # before an operator's server bound by ``agents``.
+        tools, reasons = await registry.aagent_tools(
+            "judge",
+            self._job_key(),
+            self._definition_tool_refs(),
+            exclude=self._profile_excluded_servers(),
+            seen={},
+        )
         self.tools = tools
         self.degradation_reasons = reasons
         self.logger.info("Judge tool servers: %s", [t.name for t in self.tools])
@@ -1862,6 +1907,13 @@ class JudgeAgent(BudgetMeter):
                 messages_pre.append(SystemMessage(content=content))
             elif role == "human":
                 messages_pre.append(HumanMessage(content=content))
+        # The model message the returned text was read from, for a caller that
+        # has to say why the text is empty (an answer cut at the output cap),
+        # the bound that call was sent with, and how the loop ended when it
+        # ended without a final answer of its own.
+        self._last_answer = None
+        self._last_answer_cap = None
+        self._last_loop_ending = ""
 
         # The job's spend meter: a loop that starts after its ceiling was
         # reached runs no tool phase, and one running ends its tool phase there.
@@ -1901,11 +1953,7 @@ class JudgeAgent(BudgetMeter):
             held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
             try:
                 response = await asyncio.wait_for(
-                    retry_on_connection_error(
-                        lambda: self.llm.ainvoke(messages_pre, **held),
-                        what="Judge no-tools path",
-                        log=self.logger,
-                    ),
+                    as_call("Judge no-tools path", self.llm.ainvoke(messages_pre, **held)),
                     timeout=None if no_tools_timeout is None else float(no_tools_timeout),
                 )
                 self._record_usage(response, call="no-tools answer")
@@ -1919,6 +1967,7 @@ class JudgeAgent(BudgetMeter):
                 # ``finish_reason: "stop"`` — so the count is the only evidence.
                 cap=self._output_cap().tokens,
             )
+            self._last_answer = response
             return answer_text(response.content)
 
         self.logger.info("JudgeAgent starting ReAct agent loop with %d tools...", len(self.tools))
@@ -1939,6 +1988,8 @@ class JudgeAgent(BudgetMeter):
             stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
             sink=self._event_sink(),
             corpus=getattr(self, "evidence_corpus", None),
+            agent_role=self._definition_role(),
+            agent_tab=self._definition_tab(),
         )
         messages = messages_pre
 
@@ -2176,14 +2227,20 @@ class JudgeAgent(BudgetMeter):
                 # What is left of the loop's own time, as the analysts'
                 # salvage gets: loop and salvage together stay inside it.
                 return await self._reasoning_from_what_was_gathered(
-                    _msgs, budget.seconds_left(), settings, counted_window_tokens(room)
+                    _msgs,
+                    budget.seconds_left(),
+                    settings,
+                    counted_window_tokens(room),
+                    ended_why=why,
                 )
             # The graph's own sentence at its step limit is not the judge's
             # reasoning, and what reads the reasoning next is a model. The
             # judge wrote none; the budget record says why.
             if _msgs and is_the_graph_s_step_stop(_msgs[-1]):
                 cap = "steps"
+                self._last_loop_ending = "the tool loop stopped at its step limit with no text"
                 return ""
+            self._last_answer = _msgs[-1] if _msgs else None
             return answer_text(_msgs[-1].content) if _msgs else ""
         except ModelCallDeadline:
             # A model call's own deadline with nothing gathered: that call
@@ -2244,18 +2301,28 @@ class JudgeAgent(BudgetMeter):
             return self.llm
 
     async def _reasoning_from_what_was_gathered(
-        self, msgs: list[Any], timeout: float | None, settings: Any, window_tokens: int = 0
+        self,
+        msgs: list[Any],
+        timeout: float | None,
+        settings: Any,
+        window_tokens: int = 0,
+        *,
+        ended_why: str = "",
     ) -> str:
         """The judge's reasoning, asked for once from what its loop gathered.
 
         The analysts' salvage, for the judge: the conversation trimmed to the
         salvage budget, and one turn with no tools asking for the reasoning
         the loop did not get to write. What comes back is the model's own; a
-        salvage that fails leaves the reasoning empty, which mediation reads
-        as no agreement.
+        salvage that fails leaves the reasoning empty, which mediation records
+        as no answer with how the loop ended (``_last_loop_ending``).
         """
         if timeout is not None and timeout < 1.0:
             self.logger.warning("JudgeAgent reasoning salvage skipped: no time left.")
+            self._last_loop_ending = (
+                f"the tool loop ended ({ended_why or 'before its final answer'}) with no time "
+                "left to write its reasoning"
+            )
             return ""
         # Kept whole where the model binds its thinking to the turns before it
         # (``anthropic_history``); the tool-reply completion answers an
@@ -2280,6 +2347,10 @@ class JudgeAgent(BudgetMeter):
             bound = self._spend_admits("salvage", asked, slot=salvage_slot, deadline_s=timeout)
         except SpendCeilingStop as stop:
             self.logger.warning("JudgeAgent reasoning salvage not made: %s.", stop)
+            self._last_loop_ending = (
+                f"the tool loop ended ({ended_why or 'before its final answer'}) and the call "
+                "to write its reasoning was not admitted under the job's spend ceiling"
+            )
             return ""
         held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
         try:
@@ -2292,10 +2363,16 @@ class JudgeAgent(BudgetMeter):
             self._record_usage(response, call="reasoning salvage")
         except Exception as exc:  # noqa: BLE001 — a salvage that fails leaves no reasoning
             self.logger.warning("JudgeAgent reasoning salvage failed (%s).", type(exc).__name__)
+            self._last_loop_ending = (
+                f"the tool loop ended ({ended_why or 'before its final answer'}) and the call "
+                f"to write its reasoning failed ({type(exc).__name__})"
+            )
             return ""
         finally:
             self._spend_release(salvage_slot)
-        return str(getattr(response, "content", "") or "")
+        self._last_answer = response
+        self._last_answer_cap = bound if held else None
+        return _answer_text(response)
 
     def drain_evidence_entries(self) -> list[LedgerEntry]:
         """Every entry the judge's tool loops gathered, handing over ownership."""
@@ -2318,53 +2395,57 @@ class JudgeAgent(BudgetMeter):
         )
 
     def _holds_a_lookup_tool(self) -> bool:
-        """Whether a reputation server is among this judge's own tools.
+        """Whether a reputation lookup is among this judge's own tools.
 
-        Asked of the servers rather than of the tool names: the loop can only
-        answer an identity question if something in it can look a hash up, and
-        a judge holding only the knowledge sidecar would spend a full timeout
-        to learn nothing.
+        A tool attached to it that declares ``kind: reputation``, or a server
+        its definition references that declares one (``core.reputation``):
+        the loop can only answer an identity question if something in it can
+        look a hash up, and a judge holding only the knowledge sidecar would
+        spend a full timeout to learn nothing.
         """
-        from maljan.agents.tool_pinning import server_of
-        from maljan.core.config import REPUTATION_SERVER_KEYS
+        from maljan.core.declared_reading import declarations
+        from maljan.core.reputation import lookup_servers
 
-        attached = {server_of(tool) for tool in (getattr(self, "tools", None) or [])}
+        if self._holds_attached_lookup_tool():
+            return True
         referenced = {str(ref.server) for ref in self._definition_tool_refs()}
-        return bool((attached | referenced) & set(REPUTATION_SERVER_KEYS))
+        return bool(referenced & lookup_servers(declarations()))
 
     def _holds_attached_lookup_tool(self) -> bool:
-        """Whether a reputation server's tools are in this judge's attached list.
+        """Whether a tool that declares ``kind: reputation`` is in this judge's attached list.
 
         Unlike ``_holds_a_lookup_tool``, a reference that did not attach does
         not count: this answers what the mediator's prompt may say it has.
         """
-        from maljan.agents.tool_pinning import server_of
-        from maljan.core.config import REPUTATION_SERVER_KEYS
+        from maljan.agents.tool_pinning import declared_source_of
+        from maljan.core.declared_reading import declarations
+        from maljan.core.reputation import is_lookup
 
-        attached = {server_of(tool) for tool in (getattr(self, "tools", None) or [])}
-        return bool(attached & set(REPUTATION_SERVER_KEYS))
+        held = declarations()
+        for attached in getattr(self, "tools", None) or []:
+            source = declared_source_of(attached)
+            name = str(getattr(attached, "name", "") or "")
+            if source and is_lookup(held.declaration_for((source, name))):
+                return True
+        return False
 
-    def _can_ask_an_identity_question(self, ledger_servers: Iterable[str] | None) -> bool:
+    def _can_ask_an_identity_question(self, reputation_asked: bool) -> bool:
         """Whether the judge should open its tool loop to ask who this sample is.
 
         The loop used to run on dissent alone, so a run where every analyst
         agreed — and none of them had a reputation tool to agree *about* —
-        ended with a judge holding a bound VirusTotal server it never called
-        and a family of None.
+        ended with a judge holding a bound lookup it never called and a family
+        of None.
 
-        What settles it is the run's own record: the servers the evidence
-        ledger names. An earlier version read the analysts' prose for words
-        like "malware family", which turned the trigger *off* for the sentence
-        an analyst writes when it consulted nothing at all ("no malware family
-        could be determined") — the very case the trigger exists for. A tool
-        call is a fact, and a sentence is not one.
+        What settles it is the run's own record: whether the evidence ledger
+        holds a call to a reputation lookup (``core.reputation.asked``). An
+        earlier version read the analysts' prose for words like "malware
+        family", which turned the trigger *off* for the sentence an analyst
+        writes when it consulted nothing at all ("no malware family could be
+        determined") — the very case the trigger exists for. A tool call is a
+        fact, and a sentence is not one.
         """
-        if not self._holds_a_lookup_tool():
-            return False
-        from maljan.core.config import REPUTATION_SERVER_KEYS
-
-        asked = {str(name) for name in (ledger_servers or ())}
-        return not (asked & set(REPUTATION_SERVER_KEYS))
+        return self._holds_a_lookup_tool() and not reputation_asked
 
     async def mediate(
         self,
@@ -2372,7 +2453,7 @@ class JudgeAgent(BudgetMeter):
         history: list[AgentArgument],
         isr_reports: dict[str, AgentISR] | None = None,
         consensus_threshold: float | None = None,
-        ledger_servers: Iterable[str] | None = None,
+        reputation_asked: bool = False,
         sample: Any = None,
         facts_block: str = "",
         run_state: str = "",
@@ -2401,8 +2482,20 @@ class JudgeAgent(BudgetMeter):
             the argument carries no confidence.
         """
         self.logger.info("Mediating %d expert reports for contradictions...", len(reports))
+        answered_by: Any = None
+        # The output bound the answer's call was sent with: what a cut is
+        # measured against. ``None`` reads the model's built cap.
+        answered_cap: int | None = None
+        not_asked = False
+        fast_answered = False
+        # A tool loop answers for itself: how it ended when it wrote no final
+        # answer, and it is not run a second time.
+        looped = False
+        loop_ending = ""
         needs_tools = self._has_explicit_dissent(isr_reports)
-        identity_unanswered = not needs_tools and self._can_ask_an_identity_question(ledger_servers)
+        identity_unanswered = not needs_tools and self._can_ask_an_identity_question(
+            reputation_asked
+        )
         needs_tools = needs_tools or identity_unanswered
         # Attached before the prompt is written: the sentence about tools below
         # says what this request carries, and a server that would not attach is
@@ -2481,6 +2574,10 @@ class JudgeAgent(BudgetMeter):
             )
             await self._initialize_mcp_client()
             reasoning_text = await self.execute_tool_loop(prompt_messages)
+            answered_by = getattr(self, "_last_answer", None)
+            answered_cap = getattr(self, "_last_answer_cap", None)
+            loop_ending = getattr(self, "_last_loop_ending", "")
+            looped = True
         else:
             self.logger.info("Mediator: no dissent — fast path (single LLM call).")
             # Pass already-formatted content as BaseMessage list to avoid
@@ -2503,7 +2600,7 @@ class JudgeAgent(BudgetMeter):
                     "mediation", direct_messages, slot=fast_slot, deadline_s=fast_timeout
                 )
             except SpendCeilingStop as stop:
-                # Not made: mediation reads no reasoning as no agreement.
+                # Not made: the round records that the mediator wrote no answer.
                 self.logger.warning("Mediator fast path not made: %s.", stop)
                 fast_bound, direct_messages = None, []
             fast_held = output_bound_kwargs(self.llm, fast_bound) if fast_bound is not None else {}
@@ -2512,10 +2609,8 @@ class JudgeAgent(BudgetMeter):
                     response = None
                 else:
                     response = await asyncio.wait_for(
-                        retry_on_connection_error(
-                            lambda: self.llm.ainvoke(direct_messages, **fast_held),
-                            what="Mediator fast path",
-                            log=self.logger,
+                        as_call(
+                            "Mediator fast path", self.llm.ainvoke(direct_messages, **fast_held)
                         ),
                         timeout=fast_timeout,
                     )
@@ -2533,8 +2628,16 @@ class JudgeAgent(BudgetMeter):
                     for role, text in prompt_messages
                 ]
                 reasoning_text = await self.execute_tool_loop(prompt_messages)
+                answered_by = getattr(self, "_last_answer", None)
+                answered_cap = getattr(self, "_last_answer_cap", None)
+                loop_ending = getattr(self, "_last_loop_ending", "")
+                looped = True
             else:
                 reasoning_text = "" if response is None else answer_text(response.content)
+                answered_by = response
+                answered_cap = fast_bound if fast_held else None
+                not_asked = response is None
+                fast_answered = response is not None
             finally:
                 self._spend_release(fast_slot)
 
@@ -2561,6 +2664,59 @@ class JudgeAgent(BudgetMeter):
                         f"Consensus: not applicable — {len(claimants)} of {len(reports)} "
                         "analyst(s) produced claims."
                     ),
+                ),
+                None,
+            )
+
+        # A mediator that wrote no answer — an empty one, or one the output cap
+        # cut before any text — stated neither agreement nor a contradiction.
+        # An empty answer the cap did not cut is asked once more, as it was
+        # sent; a cut one never is, because the same call at the same budget
+        # would be cut again. Still without an answer, the round records that
+        # fact and why, consensus is neither reached nor refused, and the
+        # router sends the answers in force to the judge rather than reading
+        # the silence as disagreement and opening a revision round of every
+        # analyst.
+        # What became of a second ask, stated as it happened.
+        second_ask = ""
+        if not reasoning_text.strip() and fast_answered:
+            first = self._no_answer_reason(answered_by, answered_cap)
+            if self._cut_reason(answered_by, answered_cap or self._built_cap_tokens()):
+                second_ask = f"{first}; not asked again, as the same call would be cut again"
+            else:
+                self.logger.warning("Mediator wrote no answer; asking once more.")
+                again, again_cap, outcome = await self._ask_mediation_again(
+                    direct_messages, fast_timeout
+                )
+                if again is not None:
+                    answered_by, answered_cap = again, again_cap
+                    reasoning_text = answer_text(again.content)
+                    again_reason = self._no_answer_reason(answered_by, answered_cap)
+                    second_ask = f"{first}; asked once more, " + (
+                        "the answer was empty again"
+                        if again_reason == "the answer was empty"
+                        else again_reason
+                    )
+                else:
+                    second_ask = f"{first}; {outcome}"
+        if not reasoning_text.strip():
+            if looped:
+                ending = loop_ending or self._no_answer_reason(answered_by, answered_cap)
+                reason = f"{ending}; the tool loop was not run again"
+            else:
+                reason = second_ask or self._no_answer_reason(
+                    answered_by, answered_cap, not_asked=not_asked
+                )
+            self.logger.warning(
+                "Mediator wrote no answer; the round is not mediated (the round's note says why)."
+            )
+            return (
+                AgentArgument(
+                    agent_name="Mediator",
+                    finding="",
+                    confidence_score=None,
+                    status=MEDIATOR_NO_ANSWER,
+                    note=mediator_no_answer_note(reason),
                 ),
                 None,
             )
@@ -2685,6 +2841,70 @@ class JudgeAgent(BudgetMeter):
         )
         return argument, is_consensus
 
+    async def _ask_mediation_again(
+        self, messages: list[Any], timeout: float | None
+    ) -> tuple[Any, int | None, str]:
+        """The mediation's single call made once more, as it was sent.
+
+        ``(answer, the bound it was sent with, "")``; ``(None, None, what
+        happened)`` when the spend ceiling refused it or it failed.
+        """
+        from maljan.llm.context_window import output_bound_kwargs
+
+        slot = object()
+        try:
+            bound = self._spend_admits("mediation", messages, slot=slot, deadline_s=timeout)
+        except SpendCeilingStop as stop:
+            self.logger.warning("Mediator not asked once more: %s.", stop)
+            return None, None, "asking once more was refused by the job's spend ceiling"
+        held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
+        try:
+            response = await asyncio.wait_for(
+                as_call("Mediator asked once more", self.llm.ainvoke(messages, **held)),
+                timeout=timeout,
+            )
+            self._record_usage(response, call="mediation")
+            return response, (bound if held else None), ""
+        except Exception as exc:  # noqa: BLE001 — a second ask that fails leaves no answer
+            self.logger.warning("Mediator asked once more failed (%s).", type(exc).__name__)
+            return None, None, f"asking once more failed ({type(exc).__name__})"
+        finally:
+            self._spend_release(slot)
+
+    def _built_cap_tokens(self) -> int | None:
+        """The output cap this judge's model was built with, or ``None`` when it cannot be read."""
+        try:
+            cap = self._output_cap().tokens
+        except Exception:  # noqa: BLE001 — a cap that cannot be read is no cap
+            return None
+        return cap if isinstance(cap, int) else None
+
+    @staticmethod
+    def _cut_reason(answer: Any, cap: int | None) -> str | None:
+        """How the output cap cut ``answer``, or ``None`` when it did not."""
+        if answer is None or not _was_cut(answer, cap):
+            return None
+        from maljan.core.truncation_ledger import completion_tokens_of
+
+        produced = completion_tokens_of(answer)
+        tokens = produced if produced is not None else cap
+        if isinstance(tokens, int):
+            return f"the answer was cut at {tokens} tokens with no text"
+        return "the answer was cut at the output cap with no text"
+
+    def _no_answer_reason(
+        self, answer: Any, sent_cap: int | None = None, *, not_asked: bool = False
+    ) -> str:
+        """Why the mediator's text is empty: not asked, cut at the bound it was sent with, or empty.
+
+        ``sent_cap`` is the output bound the call carried; without one the
+        model's built cap is what bound it.
+        """
+        if not_asked:
+            return "the call was not admitted under the job's spend ceiling"
+        cap = sent_cap or self._built_cap_tokens()
+        return self._cut_reason(answer, cap) or "the answer was empty"
+
     async def _ask_for_contradictions_block(
         self, prompt_messages: list[tuple[str, str]], reasoning_text: str
     ) -> str:
@@ -2718,14 +2938,11 @@ class JudgeAgent(BudgetMeter):
             return reasoning_text
         held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
         try:
-            # Retried on a dropped connection as the fast path is: a socket that
-            # closed is not an answer that left the block out.
+            # A provider saying "not now" is asked again inside the model call
+            # (``llm.transient``): a socket that closed is not an answer that
+            # left the block out.
             response = await asyncio.wait_for(
-                retry_on_connection_error(
-                    lambda: self.llm.ainvoke(turns, **held),
-                    what="Mediator block question",
-                    log=self.logger,
-                ),
+                as_call("Mediator block question", self.llm.ainvoke(turns, **held)),
                 timeout,
             )
             self._record_usage(response, call="mediation block question")
@@ -2737,7 +2954,7 @@ class JudgeAgent(BudgetMeter):
             return reasoning_text
         finally:
             self._spend_release(slot)
-        answer = str(getattr(response, "content", "") or "").strip()
+        answer = _answer_text(response).strip()
         return f"{reasoning_text.rstrip()}\n\n{answer}" if answer else reasoning_text
 
     async def give_verdict(
@@ -2879,11 +3096,7 @@ class JudgeAgent(BudgetMeter):
             bound = self._spend_admits("verdict", turns, slot=verdict_slot)
             held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
             try:
-                answer = await retry_on_connection_error(
-                    lambda: self.llm.ainvoke(turns, **held),
-                    what="Judge verdict",
-                    log=self.logger,
-                )
+                answer = await as_call("Judge verdict", self.llm.ainvoke(turns, **held))
                 self._record_usage(answer, call="verdict")
             finally:
                 self._spend_release(verdict_slot)
@@ -3354,11 +3567,7 @@ class JudgeAgent(BudgetMeter):
             if structured:
                 try:
                     runnable = self.llm.with_structured_output(TechniqueAnswer, include_raw=True)
-                    result = await retry_on_connection_error(
-                        lambda: runnable.ainvoke(messages),
-                        what="Judge technique question",
-                        log=self.logger,
-                    )
+                    result = await as_call("Judge technique question", runnable.ainvoke(messages))
                 except (TimeoutError, asyncio.CancelledError):
                     raise
                 except Exception as exc:  # noqa: BLE001 — refused schema: asked once in text
@@ -3392,11 +3601,7 @@ class JudgeAgent(BudgetMeter):
                 self._spend_admits(
                     "technique question", messages, slot=question_slot, holdable=False
                 )
-            answer = await retry_on_connection_error(
-                lambda: self.llm.ainvoke(messages),
-                what="Judge technique question",
-                log=self.logger,
-            )
+            answer = await as_call("Judge technique question", self.llm.ainvoke(messages))
             self._record_usage(answer, call=TECHNIQUE_QUESTION_CALL)
             record_judge_response(getattr(self, "truncation_ledger", None), answer, cap=cap)
             return answer, None
@@ -3480,7 +3685,7 @@ class JudgeAgent(BudgetMeter):
         belong to the round rather than to this method, and because an answer
         that ends in the text fallback has nothing to record.
         """
-        raw = str(getattr(answer, "content", answer))
+        raw = _answer_text(answer)
 
         from maljan.utils.json_cleaner import safe_parse_json
 
@@ -3935,8 +4140,8 @@ class JudgeAgent(BudgetMeter):
 
         ``self._config`` was read here but never assigned (``JudgeAgent`` took
         no config), so the provider name came from ``ChatOpenAI._llm_type`` =
-        ``"openai-chat"``, absent from ``PROVIDER_CAPABILITIES``, and every
-        provider got the unknown-provider default. The container passes the
+        ``"openai-chat"``, which named no provider, and every provider got
+        the unknown-provider default. The container passes the
         config now, and the decision itself is shared with the two other
         callers that were making it independently.
         """

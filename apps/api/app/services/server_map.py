@@ -31,6 +31,24 @@ from maljan.core.config import (
     _builtin_servers,
     builtin_env_allow,
 )
+from maljan.core.settings_overrides import (
+    SERVER_MAP_PATH,
+    server_entry_in_force,
+    shipped_tool_facts,
+)
+from maljan.core.tool_declarations import (
+    changed_declaration_errors,
+    check_own_prefix,
+    fill_declaration,
+    holds_changes,
+    kept_stored_changes,
+    merge_tool_facts,
+    sent_names_refusal,
+    stored_changes,
+    strip_declaration_defaults,
+    with_mark,
+    without_mark,
+)
 from pydantic import ValidationError
 
 SERVER_MAP_KEY = "core.mcp.servers"
@@ -88,6 +106,7 @@ def validate_server_map(
         raise ServerMapError({"": "the server map must be an object keyed by server name"})
 
     out: dict[str, Any] = {}
+    builtins = _builtin_servers()
     for key, entry in value.items():
         if not _KEY_RE.match(str(key)):
             errors[str(key)] = (
@@ -108,6 +127,55 @@ def validate_server_map(
                 errors[f"{key}.agents"] = (
                     f"{role!r} is not a known agent; expected one of {', '.join(sorted(roles))}"
                 )
+        # The entry's tool declarations are its changes over what the server
+        # ships, one tool at a time (``tool_declarations.tool_facts_changes``):
+        # they are checked and validated as they are in force. The ones this
+        # save adds or changes are an operator's edit and are held to the
+        # strict rules; one it leaves as stored or shipped is read as it always
+        # was (leniently, below), so a stored entry never blocks an unrelated
+        # save.
+        facts_in = entry.get("tool_facts")
+        stored_facts: Any = None
+        kept: dict[str, Any] = {}
+        if isinstance(facts_in, dict):
+            shipped = shipped_tool_facts(f"{SERVER_MAP_PATH}.{key}")
+            stored_entry = (stored or {}).get(key)
+            stored_facts = (
+                stored_entry.get("tool_facts") if isinstance(stored_entry, dict) else None
+            )
+            stored_in_force = (
+                server_entry_in_force(key, stored_entry)["tool_facts"]
+                if isinstance(stored_facts, dict)
+                else None
+            )
+            # A sent map is read as every path reads one
+            # (``tool_declarations.sent_in_force``): marked, as the entry's
+            # changes over what the server ships, so a shipped tool it leaves
+            # out stays as shipped and only ``null`` removes one; without the
+            # mark, whole, as an earlier release read it. A map sent back
+            # exactly as stored therefore says what the stored one says. A
+            # tool sent with its stored change exactly as stored, where this
+            # release refuses that change, is not this save's edit: it is kept
+            # as stored and left out of every check (``kept_stored_changes``).
+            incoming = stored_changes(facts_in, shipped)
+            kept = kept_stored_changes(incoming, stored_facts, shipped, server=key)
+            # Every name of the map as sent is checked before it is merged,
+            # which drops a ``null`` entry: a refused name sent as ``null`` is
+            # refused here, naming the entry, as on a provider leaf.
+            refusal = sent_names_refusal(facts_in, kept, server=key)
+            if refusal:
+                errors[f"{key}.tool_facts"] = refusal
+                continue
+            in_force = merge_tool_facts(
+                shipped, {tool: change for tool, change in incoming.items() if tool not in kept}
+            )
+            entry = {**entry, "tool_facts": in_force}
+            before: list[Any] = [stored_in_force, shipped]
+            refused = changed_declaration_errors(in_force, before)
+            if refused:
+                for path, message in refused.items():
+                    errors[f"{key}.tool_facts.{path}"] = message
+                continue
         try:
             # The token is validated and stored separately (``split_server_secrets``);
             # blanking it here keeps it out of the JSON row under every path.
@@ -116,12 +184,41 @@ def validate_server_map(
             for err in exc.errors():
                 errors[f"{key}." + ".".join(str(p) for p in err["loc"])] = err["msg"]
             continue
+        try:
+            check_own_prefix(key, model.tool_facts)
+            for pattern in model.error_patterns:
+                check_own_prefix(key, pattern.tools)
+        except ValueError as exc:
+            errors[f"{key}.tool_facts"] = str(exc)
+            continue
         if model.transport == "stdio" and not model.command:
             errors[f"{key}.command"] = "a stdio server needs a command to launch"
         if model.transport != "stdio" and not model.url:
             errors[f"{key}.url"] = "an http server needs a URL"
+        builtin = builtins.get(key)
+        if builtin is not None:
+            # A declaration field the entry left out is the built-in's, as on
+            # load; one equal to the built-in's is then not stored, so the row
+            # keeps following the shipped declaration and only an operator's
+            # own value (an empty one included) is written down.
+            fill_declaration(model, builtin)
         dumped = model.model_dump(mode="json")
         dumped.pop("auth_token", None)
+        if builtin is not None:
+            dumped = strip_declaration_defaults(dumped, builtin)
+        if isinstance(facts_in, dict):
+            if facts_in == stored_facts and holds_changes(stored_facts):
+                # Sent back as stored: stored as it was, a change this release
+                # leaves out of what is in force (``stored_in_force``) included,
+                # so an unrelated save never drops the operator's change.
+                dumped["tool_facts"] = stored_facts
+            else:
+                # Stored marked as changes (a server that ships nothing: its
+                # whole map), with each tool kept as stored put back as it was.
+                changes = without_mark(dumped.get("tool_facts") or {})
+                changes.update(kept)
+                if changes:
+                    dumped["tool_facts"] = with_mark(changes)
         if key in BUILTIN_SERVER_KEYS:
             # The row an operator saves is the one every later load starts
             # from, so the names the sidecar cannot run without are written
@@ -139,11 +236,11 @@ def validate_server_map(
     # A built-in the body left out is re-seeded rather than removed: the
     # settings model would put it back on the next load anyway, and a stored
     # map missing it would silently discard the operator's own edits to it.
-    for key, default in _builtin_servers().items():
+    for key, default in builtins.items():
         if key not in out:
             entry = default.model_dump(mode="json")
             entry.pop("auth_token", None)
-            out[key] = entry
+            out[key] = strip_declaration_defaults(entry, default)
     return out
 
 

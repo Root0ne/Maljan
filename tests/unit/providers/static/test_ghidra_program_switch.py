@@ -23,7 +23,7 @@ import asyncio
 import json
 from typing import Any
 
-from maljan.analysis.ghidra_program import (
+from maljan.providers.static.ghidra.program import (
     SWITCH_PARAM,
     SWITCH_PATH,
     program_name_from_load,
@@ -77,12 +77,14 @@ class _FakeHTTP:
     def __init__(self, replies: dict[str, str]) -> None:
         self.replies = replies
         self.calls: list[tuple[str, str, dict[str, Any]]] = []
+        self.options: list[dict[str, Any]] = []
 
-    async def post(self, url: str, params=None, json=None, headers=None) -> _Response:  # noqa: A002
+    async def post(self, url: str, params=None, json=None, headers=None, **kw) -> _Response:  # noqa: A002
         self.calls.append(("POST", url, dict(params or {})))
+        self.options.append(kw)
         return _Response(self._reply(url))
 
-    async def get(self, url: str, params=None) -> _Response:
+    async def get(self, url: str, params=None, **kw) -> _Response:
         self.calls.append(("GET", url, dict(params or {})))
         return _Response(self._reply(url))
 
@@ -94,7 +96,7 @@ class _FakeHTTP:
 
 
 def _client(replies: dict[str, str]) -> tuple[Any, _FakeHTTP]:
-    from maljan.agents.ghidra_http_client import GhidraHTTPClient
+    from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
 
     c = GhidraHTTPClient(base_url="http://ghidra.invalid")
     http = _FakeHTTP(replies)

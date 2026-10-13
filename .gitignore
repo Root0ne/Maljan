@@ -64,8 +64,10 @@ external/
 data/sigma_rules/
 data/capa-rules/
 data/external/
-# CAPE analysis reports: ~7 MB each and reproducible from the instance.
-data/cape_reports/
+# CAPE analysis reports: ~7 MB each and reproducible from the instance. No
+# trailing slash, so a symlink to the reports (a worktree borrowing them) is
+# ignored as well as the directory.
+data/cape_reports
 
 # ── Local model weights ────────────────────────────────────────────────
 /models/
@@ -87,3 +89,6 @@ logs/
 .claude/settings.local.json
 # Ephemeral cron lock, written per session by Claude /schedule.
 .claude/scheduled_tasks.lock
+
+# Rehearsal outputs (scripts/rehearsal/run.py --out default) and its in-process work files.
+rehearsal-results/

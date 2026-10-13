@@ -350,9 +350,15 @@ class TestTheGate:
 
 
 class TestWhoTheGateChecks:
+    @staticmethod
+    def _called(settings: Settings, stages: Any = None) -> list[str]:
+        from maljan.agents.composition import called_assignments
+
+        return list(dict.fromkeys(a.agent for a in called_assignments(settings, stages)))
+
     def test_it_follows_the_agents_a_lead_can_ask(self) -> None:
         """The lead team names one agent in its stage; the rest are reached by name."""
-        from app.api.v1.jobs import _everyone_the_run_can_reach
+        from types import SimpleNamespace
 
         settings = Settings(
             _env_file=None,
@@ -377,16 +383,137 @@ class TestWhoTheGateChecks:
                 }
             },
         )
+        stages = [
+            SimpleNamespace(kind="analysis", agents=["boss"]),
+            SimpleNamespace(kind="verdict", agents=["judge"]),
+        ]
 
-        reached = _everyone_the_run_can_reach(settings, ["boss", "judge"])
+        reached = self._called(settings, stages)
 
         assert set(reached) == {"boss", "judge", "helper", "second", "third"}
         assert "stranger" not in reached
 
     def test_an_agent_nothing_names_is_not_checked(self) -> None:
-        from app.api.v1.jobs import _everyone_the_run_can_reach
+        from types import SimpleNamespace
 
-        assert _everyone_the_run_can_reach(_settings(), ["static"]) == ["static"]
+        stages = [SimpleNamespace(kind="analysis", agents=["static"])]
+
+        assert self._called(_settings(), stages) == ["static", "judge"]
+
+
+class TestTheRolesWithNoDefinition:
+    """The mediator and the summariser are checked whenever the job calls them.
+
+    With no entry each runs on the global expert model, and the gate checks
+    that model under its name; with an entry, the entry's models.
+    """
+
+    def _with(self, **over: Any) -> Settings:
+        return Settings(_env_file=None, **over)
+
+    @staticmethod
+    def _called(settings: Settings, stages: Any = None) -> dict[str, list[str]]:
+        from maljan.agents.composition import called_assignments
+
+        out: dict[str, list[str]] = {}
+        for assignment in called_assignments(settings, stages):
+            out.setdefault(assignment.agent, []).append(assignment.model)
+        return out
+
+    def test_a_mediator_entry_is_called_by_a_team_with_a_debate_stage(self) -> None:
+        settings = self._with(llm={"agents": {"mediator": {"provider": "ollama", "model": "m"}}})
+
+        assert self._called(settings)["mediator"] == ["m"]
+
+    def test_a_team_with_no_debate_stage_calls_no_mediator(self) -> None:
+        settings = self._with(llm={"agents": {"mediator": {"provider": "ollama", "model": "m"}}})
+        stages = [
+            s
+            for s in settings.agents.profiles[settings.agents.profile].stages
+            if s.kind != "debate"
+        ]
+
+        assert "mediator" not in self._called(settings, stages)
+
+    def test_a_summarizer_is_called_only_while_the_summariser_is_on(self) -> None:
+        entry = {"summarizer": {"provider": "ollama", "model": "s"}}
+        off = self._with(llm={"agents": entry})
+        on = self._with(llm={"agents": entry}, preprocessing={"use_function_summarizer": True})
+
+        assert "summarizer" not in self._called(off)
+        assert self._called(on)["summarizer"] == ["s"]
+
+    def test_with_no_entry_each_role_is_checked_on_the_model_it_calls(self) -> None:
+        settings = self._with(
+            llm={"openai": {"expert_model": "acme-expert", "judge_model": "acme-judge"}},
+            preprocessing={"use_function_summarizer": True},
+        )
+
+        called = self._called(settings)
+
+        assert called["mediator"] == called["summarizer"] == ["acme-expert"]
+        assert called["judge"] == called["reporter"] == ["acme-judge"]
+
+    @pytest.mark.asyncio
+    async def test_submitting_a_job_asks_about_a_mediator_entry(self) -> None:
+        from app.api.v1 import jobs
+
+        settings = self._with(llm={"agents": {"mediator": {"provider": "ollama", "model": "m"}}})
+        asked: list[list[str]] = []
+
+        async def _unprobed(_db: Any, _settings: Any, agents: list[Any]) -> list[str]:
+            asked.append([a.agent for a in agents])
+            return []
+
+        with (
+            patch(
+                "app.services.settings_service.effective_core_settings",
+                AsyncMock(return_value=settings),
+            ),
+            patch("app.services.model_probes.unprobed_models", _unprobed),
+        ):
+            await jobs._unprobed_models_for(MagicMock(), {})
+
+        assert "mediator" in asked[0]
+        assert "summarizer" not in asked[0]
+
+    @pytest.mark.asyncio
+    async def test_the_shipped_default_refuses_a_judge_model_no_probe_reached(self) -> None:
+        """The judge and the reporter call the global judge model, which is checked too."""
+        from app.api.v1 import jobs
+
+        settings = self._with()
+        expert = settings.llm.openai.expert_model
+        judge = settings.llm.openai.judge_model
+        rows = [_Row(endpoint_for(settings, "openai"), expert, True, "ok")]
+
+        with patch(
+            "app.services.settings_service.effective_core_settings",
+            AsyncMock(return_value=settings),
+        ):
+            refusals = await jobs._unprobed_models_for(_Db(rows), {})
+
+        assert expert != judge
+        assert refusals == [
+            f"agent 'judge' names model '{judge}' at https://api.openai.com: {NEVER_PROBED}",
+            f"agent 'reporter' names model '{judge}' at https://api.openai.com: {NEVER_PROBED}",
+        ]
+        both = [_Row(endpoint_for(settings, "openai"), m, True, "ok") for m in (expert, judge)]
+        with patch(
+            "app.services.settings_service.effective_core_settings",
+            AsyncMock(return_value=settings),
+        ):
+            assert await jobs._unprobed_models_for(_Db(both), {}) == []
+
+    @pytest.mark.asyncio
+    async def test_a_mediator_entry_that_no_probe_reached_refuses_the_job(self) -> None:
+        settings = self._with(
+            llm={"agents": {"mediator": {"provider": "ollama", "model": "never-asked"}}}
+        )
+
+        refusals = await unprobed_models(_Db([]), settings, ["mediator"])
+
+        assert refusals and "never-asked" in refusals[0]
 
 
 @pytest.fixture
@@ -556,7 +683,11 @@ class TestOneAddressUnderBothHalves:
             },
             {
                 "provider": "ollama",
-                "ollama": {"base_url": "http://ollama:11434/", "expert_model": "qwen3:8b"},
+                "ollama": {
+                    "base_url": "http://ollama:11434/",
+                    "expert_model": "qwen3:8b",
+                    "judge_model": "qwen3:8b",
+                },
             },
         ),
         "anthropic": (
@@ -612,7 +743,7 @@ class TestOneAddressUnderBothHalves:
                 transport=httpx.MockTransport(self._server(provider)), timeout=10
             ),
         )
-        result = await probes.probe_llm(dict(self.CASES[provider][0]))
+        result = await probes.probe_llm(_settings(**self.CASES[provider][1]))
         assert result.ok, result.detail
         return list((result.details or {})["completions"])
 
@@ -650,3 +781,174 @@ class TestOneAddressUnderBothHalves:
         assert store.rows, "the probe filed something"
         settings = _settings(**self.CASES[provider][1])
         assert await unprobed_models(store, settings, ["static", "network"]) == []
+
+
+class TestAnEntrysOwnEffort:
+    """A per-agent effort is part of what was probed, and only when it is set.
+
+    An entry with no effort of its own is filed and looked up under the pair it
+    always was, so the rows already stored for it stay valid. An entry that
+    names one is filed under the pair and its effort, so changing only the
+    effort asks for a probe at the new level.
+    """
+
+    ENTRY = {"provider": "openai", "model": "ds", "base_url": "http://box:8080/v1"}
+
+    def _entry_settings(self, **entry: Any) -> Settings:
+        return _settings(
+            provider="openai",
+            openai={"reasoning_effort": "max"},
+            agents={"static": {**self.ENTRY, **entry}},
+        )
+
+    @pytest.mark.asyncio
+    async def test_an_entry_without_one_is_looked_up_as_before(self) -> None:
+        rows = [_Row("http://box:8080/v1", "ds", True, "ok")]
+
+        assert await unprobed_models(_Db(rows), self._entry_settings(), ["static"]) == []
+
+    @pytest.mark.asyncio
+    async def test_a_row_taken_without_the_entry_s_effort_does_not_count(self) -> None:
+        rows = [_Row("http://box:8080/v1", "ds", True, "ok")]
+
+        refusals = await unprobed_models(_Db(rows), self._entry_settings(effort="high"), ["static"])
+
+        assert refusals == [
+            f"agent 'static' names model 'ds' at effort 'high' at http://box:8080: {NEVER_PROBED}"
+        ]
+
+    def test_the_column_holds_the_widest_spelling_settings_accept(self) -> None:
+        from app.models.model_probe import ModelProbe
+        from maljan.core.model_assignments import FILED_MODEL_MAX_CHARS
+
+        assert ModelProbe.__table__.c.model.type.length == FILED_MODEL_MAX_CHARS
+
+    @pytest.mark.asyncio
+    async def test_an_entry_without_one_is_refused_in_the_words_it_was_before(self) -> None:
+        refusals = await unprobed_models(_Db([]), self._entry_settings(), ["static"])
+
+        assert refusals == [f"agent 'static' names model 'ds' at http://box:8080: {NEVER_PROBED}"]
+
+    @pytest.mark.asyncio
+    async def test_a_fallback_s_effort_is_named_in_its_refusal(self) -> None:
+        settings = _settings(
+            provider="openai",
+            agents={
+                "static": {
+                    **self.ENTRY,
+                    "fallbacks": [{**self.ENTRY, "model": "pro", "effort": "low"}],
+                }
+            },
+        )
+        rows = [_Row("http://box:8080/v1", "ds", True, "ok")]
+
+        refusals = await unprobed_models(_Db(rows), settings, ["static"])
+
+        assert refusals == [
+            f"agent 'static' falls back to model 'pro' at effort 'low' at http://box:8080: "
+            f"{NEVER_PROBED}"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_row_taken_at_the_entry_s_effort_counts(self) -> None:
+        from maljan.core.model_assignments import filed_model
+
+        rows = [_Row("http://box:8080/v1", filed_model("ds", "high"), True, "ok")]
+
+        assert (
+            await unprobed_models(_Db(rows), self._entry_settings(effort="high"), ["static"]) == []
+        )
+
+    @pytest.mark.asyncio
+    async def test_an_effort_only_change_is_asked_about_on_save(self) -> None:
+        from app.services.model_probes import AGENT_MODELS_KEY, unprobed_models_being_saved
+
+        rows = [_Row("http://box:8080/v1", "ds", True, "ok")]
+        refusals = await unprobed_models_being_saved(
+            _Db(rows),
+            self._entry_settings(effort="high"),
+            {AGENT_MODELS_KEY: {"static": {**self.ENTRY, "effort": "high"}}},
+            {AGENT_MODELS_KEY: {"static": dict(self.ENTRY)}},
+        )
+
+        assert refusals and NEVER_PROBED in refusals[0]
+
+    @pytest.mark.asyncio
+    async def test_a_stored_entry_without_the_key_is_not_a_change(self) -> None:
+        from app.services.model_probes import AGENT_MODELS_KEY, unprobed_models_being_saved
+
+        refusals = await unprobed_models_being_saved(
+            _Db([]),
+            self._entry_settings(),
+            {AGENT_MODELS_KEY: {"static": {**self.ENTRY, "effort": None}}},
+            {AGENT_MODELS_KEY: {"static": dict(self.ENTRY)}},
+        )
+
+        assert refusals == []
+
+    @pytest.mark.asyncio
+    async def test_the_provider_probe_asks_each_entry_at_its_own_effort(self, monkeypatch) -> None:
+        import json
+
+        import httpx
+
+        from app.services import settings_probes as probes
+
+        asked: list[tuple[str, Any]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.method == "POST":
+                body = json.loads(request.content)
+                asked.append((body["model"], body.get("reasoning_effort")))
+                return httpx.Response(200, json={"choices": [{"message": {"content": "OK"}}]})
+            return httpx.Response(200, json={"data": [{"id": "qwen"}, {"id": "ds"}]})
+
+        monkeypatch.setattr(
+            probes,
+            "_client",
+            lambda *_a, **_k: httpx.AsyncClient(transport=httpx.MockTransport(handler), timeout=10),
+        )
+        result = await probes.probe_llm(
+            _settings(
+                provider="openai",
+                openai={
+                    "base_url": "http://box:8080/v1",
+                    "api_key": "k",
+                    "expert_model": "qwen",
+                    "reasoning_effort": "max",
+                },
+                agents={
+                    "static": {"provider": "openai", "model": "ds", "effort": "high"},
+                    "network": {"provider": "openai", "model": "ds"},
+                },
+            )
+        )
+
+        assert result.ok, result.detail
+        assert sorted(asked) == [("ds", "high"), ("ds", "max"), ("qwen", "max")]
+        completions = (result.details or {})["completions"]
+        filed = sorted((c["model"], c.get("effort") or "") for c in completions)
+        assert filed == [("ds", ""), ("ds", "high"), ("qwen", "")]
+
+    @pytest.mark.asyncio
+    async def test_a_probe_at_the_entry_s_effort_lets_the_job_through(self) -> None:
+        from app.api.v1.settings import _write_down_what_was_reached
+
+        store = _Store()
+        await _write_down_what_was_reached(
+            store,
+            [
+                {
+                    "endpoint": "http://box:8080/v1",
+                    "model": "ds",
+                    "provider": "openai",
+                    "ok": True,
+                    "detail": "ok",
+                    "effort": "high",
+                }
+            ],
+        )
+
+        settings = self._entry_settings(effort="high")
+        assert await unprobed_models(store, settings, ["static"]) == []
+        assert await unprobed_models(store, self._entry_settings(), ["static"]) != []

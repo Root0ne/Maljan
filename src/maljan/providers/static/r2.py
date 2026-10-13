@@ -15,34 +15,43 @@ import json
 import os
 import re
 import shutil
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from maljan.core import builtin_declarations
 from maljan.core.logger import logger
-from maljan.providers.base import MirrorSpec
+from maljan.core.tool_declarations import ErrorPattern
+from maljan.providers.base import MirrorSpec, ProviderProbe, with_claim_guidance
+from maljan.providers.declared_errors import PROTOCOL_ERROR, declared_error
 from maljan.providers.errors import ProviderError
 from maljan.providers.registry import register_static_provider
 from maljan.providers.static.generic_mcp import GenericMCPStaticProvider
-from maljan.tools.errors import BAD_ARGUMENT, TOOL_FAILED, error_parts, tool_error
+from maljan.tools.errors import error_parts, tool_error
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
 
     from maljan.core.config import Settings
 
-# The replies r2mcp gives in place of an answer, as it writes them. r2mcp sends
-# these as an ordinary text result rather than as an MCP error, so without this
-# list the ledger filed "Invalid regex used in filter parameter, try a simpler
-# expression" as a successful ``list_strings`` whose output was that sentence.
-# Matched against the whole reply, never a line inside one: a listing of the
-# sample's own strings can hold any sentence, and a string the sample carries is
-# not the tool failing.
-_R2_OPEN_FILE_FIRST = "call open_file with the path you are given, then call this tool again"
-# The same advice when the path radare2 can open for this sample is known: it
-# names it, so a model whose open failed is not left to guess it.
-_R2_OPEN_FILE_FIRST_AT = "call open_file with {readable}, then call this tool again"
+# radare2's error patterns are its declaration's (``core.builtin_declarations``),
+# held by the general rule (``core.tool_declarations.ErrorPattern``) and run by
+# RE2: the open-first refusal r2mcp raises as an MCP protocol error, its
+# ``<log>`` envelope of radare2 log lines with an ``[ERROR]`` or ``[FATAL]``
+# among them and nothing else, and the sentences it writes as an ordinary text
+# result. Each is held against the whole reply, never a line inside one: a
+# listing of the sample's own strings can hold any sentence.
+_R2_PATTERNS: tuple[ErrorPattern, ...] = tuple(
+    ErrorPattern.model_validate(p) for p in builtin_declarations.R2_ERROR_PATTERNS
+)
+_R2_OPEN_FIRST = next(p for p in _R2_PATTERNS if "protocol_error" in p.applies_to)
+_R2_LOG_ENVELOPE = next(p for p in _R2_PATTERNS if p.multiline)
+_R2_ERROR_REPLIES = tuple(
+    p for p in _R2_PATTERNS if p is not _R2_OPEN_FIRST and p is not _R2_LOG_ENVELOPE
+)
+# What a model is told after an answer that says no file is open.
+_R2_OPEN_FILE_FIRST = builtin_declarations.R2_OPEN_FILE_FIRST
 # What a failed open is told: the path it tried and the one radare2 can open.
 _R2_OPEN_FAILED_AT = (
     "open_file could not open {tried}; the path radare2 can open for this sample is "
@@ -53,42 +62,6 @@ _R2_OPEN_FAILED_ON_ITS_OWN = (
     "it with the server log"
 )
 _R2_OPEN_TOOL = "open_file"
-# The open-first refusal r2mcp raises as a protocol error rather than writing as
-# a reply; it reaches the tool layer as the MCP client's failure marker.
-_R2_OPEN_FIRST_ERROR = re.compile(
-    r"(?:\w+: )?Use the open_file method before calling any other method\b.*"
-)
-_R2_ERROR_REPLIES: tuple[tuple[re.Pattern[str], str, str | None], ...] = (
-    (re.compile(r"Invalid regex used in filter parameter\b.*"), BAD_ARGUMENT, None),
-    (re.compile(r"Invalid parameter '[^']*':.*"), BAD_ARGUMENT, None),
-    (re.compile(r"Invalid params:.*"), BAD_ARGUMENT, None),
-    (re.compile(r"Missing required parameter:.*"), BAD_ARGUMENT, None),
-    (re.compile(r"Unknown tool: .*"), BAD_ARGUMENT, None),
-    (re.compile(r"Unknown decompiler\b.*"), BAD_ARGUMENT, None),
-    (
-        re.compile(r"Cannot run (?:commands|script files) without calling the `open_file` tool.*"),
-        TOOL_FAILED,
-        _R2_OPEN_FILE_FIRST,
-    ),
-    (re.compile(r"No file is currently open\..*"), TOOL_FAILED, _R2_OPEN_FILE_FIRST),
-    (
-        re.compile(r"Failed to (?:open file|initialize r(?:adare)?2(?: core)?)\b.*"),
-        TOOL_FAILED,
-        None,
-    ),
-    (re.compile(r"Error: command returned NULL"), TOOL_FAILED, None),
-)
-
-
-# r2mcp hands back what radare2 logged while running a command inside a
-# ``<log>…</log>`` envelope. A reply that is that envelope and nothing else, and
-# whose lines are all radare2 log lines with at least one ``[ERROR]`` or
-# ``[FATAL]``, is radare2 saying the command failed ("[ERROR] Cannot find
-# function in 0x…") with no answer beside it. An envelope in front of an answer is not a failure.
-_R2_LOG_ENVELOPE = re.compile(r"<log>(?P<body>.*)</log>", re.DOTALL)
-# The levels radare2 logs a failure at; ``FATAL`` is the more severe of the two.
-_R2_FAILURE_LEVELS = frozenset({"ERROR", "FATAL"})
-_R2_LOG_LINE = re.compile(r"\[(?P<level>[A-Z]+)\]\s*\S.*")
 
 
 # radare2's words for a function tool called at an address its analysis holds no
@@ -134,16 +107,7 @@ def _unanalysed_address(tool: str, logged: str) -> str | None:
 
 def _r2_logged_error(text: str) -> str | None:
     """radare2's own error lines, when ``text`` is only a log envelope of them."""
-    envelope = _R2_LOG_ENVELOPE.fullmatch(text)
-    if envelope is None:
-        return None
-    lines = [line.strip() for line in envelope.group("body").splitlines() if line.strip()]
-    matched = [_R2_LOG_LINE.fullmatch(line) for line in lines]
-    if not lines or not all(matched):
-        return None
-    if not any(m is not None and m.group("level") in _R2_FAILURE_LEVELS for m in matched):
-        return None
-    return "\n".join(lines)
+    return _R2_LOG_ENVELOPE.message("", text)
 
 
 def r2_error_reply(
@@ -153,8 +117,14 @@ def r2_error_reply(
     tried: str | None = None,
     readable: str | None = None,
     analysed: bool = False,
+    patterns: Sequence[ErrorPattern] = _R2_PATTERNS,
 ) -> dict[str, Any] | None:
     """The structured failure for one r2mcp reply that is an error, else ``None``.
+
+    Read by the one function every server's answers are read by
+    (``providers.declared_errors.declared_error``) against ``patterns``, the
+    radare2 block's declared error patterns; this adapter adds only its own
+    remediations around a failure.
 
     ``None`` for anything that is not one of r2mcp's own error sentences as the
     whole reply, a log envelope holding nothing but radare2's log lines with
@@ -171,29 +141,25 @@ def r2_error_reply(
     call analyses that address; ``analysed`` says the adapter already ran
     ``af`` there, and the remediation then names what is left.
     """
-    marker = _open_first_marker(reply)
-    if marker is not None:
-        return tool_error(TOOL_FAILED, marker, tool=tool, remediation=_open_first(readable))
-    if not isinstance(reply, str):
+    found = declared_error(patterns, tool, reply)
+    if found is None:
         return None
-    text = reply.strip()
-    logged = _r2_logged_error(text)
-    if logged is not None:
-        address = _unanalysed_address(tool, logged)
-        if address is None:
-            return tool_error(TOOL_FAILED, logged, tool=tool)
+    pattern, message, target = found
+    remediation: str | None = pattern.remediation_for(readable) or None
+    if target == PROTOCOL_ERROR:
+        return tool_error(pattern.code, message, tool=tool, remediation=remediation)
+    address = _unanalysed_address(tool, message) if pattern.multiline else None
+    if address is not None:
         told = _R2_NO_FUNCTION_AFTER_AF if analysed else _R2_NO_FUNCTION_NO_AF
-        return tool_error(TOOL_FAILED, logged, tool=tool, remediation=told.format(address=address))
-    if not text or "\n" in text:
-        return None
-    for pattern, code, remediation in _R2_ERROR_REPLIES:
-        if pattern.fullmatch(text):
-            if remediation == _R2_OPEN_FILE_FIRST:
-                remediation = _open_first(readable)
-            elif tool == _R2_OPEN_TOOL and text.startswith("Failed to open file") and tried:
-                remediation = _open_failed(tried, readable)
-            return tool_error(code, text, tool=tool, remediation=remediation)
-    return None
+        remediation = told.format(address=address)
+    elif (
+        tool == _R2_OPEN_TOOL
+        and isinstance(reply, str)
+        and reply.strip().startswith("Failed to open file")
+        and tried
+    ):
+        remediation = _open_failed(tried, readable)
+    return tool_error(pattern.code, message, tool=tool, remediation=remediation)
 
 
 def _failure_message(failure: dict[str, Any] | None) -> str:
@@ -204,7 +170,7 @@ def _failure_message(failure: dict[str, Any] | None) -> str:
 
 def _open_first(readable: str | None) -> str:
     """The open-first advice, naming the path radare2 can open when it is known."""
-    return _R2_OPEN_FILE_FIRST_AT.format(readable=readable) if readable else _R2_OPEN_FILE_FIRST
+    return _R2_OPEN_FIRST.remediation_for(readable)
 
 
 def _open_failed(tried: str, readable: str | None) -> str:
@@ -214,21 +180,11 @@ def _open_failed(tried: str, readable: str | None) -> str:
     return _R2_OPEN_FAILED_ON_ITS_OWN.format(tried=tried)
 
 
-def _open_first_marker(reply: Any) -> str | None:
-    """The message of the MCP client's failure marker for r2mcp's open-first error, or ``None``."""
-    if not (isinstance(reply, dict) or (isinstance(reply, str) and reply.lstrip().startswith("{"))):
-        return None
-    parts = error_parts(reply)
-    if parts is None:
-        return None
-    _code, message, _remediation = parts
-    return message if _R2_OPEN_FIRST_ERROR.fullmatch(message.strip()) else None
-
-
 def _reading_error_replies(
     tool: Any,
     readable: Callable[[], str | None] | None = None,
     run_command: Callable[..., Awaitable[Any]] | None = None,
+    patterns: Sequence[ErrorPattern] = _R2_PATTERNS,
 ) -> Any:
     """``tool``, rebuilt so an r2mcp error reply comes back as the structured failure.
 
@@ -262,6 +218,7 @@ def _reading_error_replies(
             reply,
             tried=str(tried) if tried else None,
             readable=readable() if readable is not None else None,
+            patterns=patterns,
         )
         address = _unanalysed_address(name, _failure_message(failure))
         if address is not None and run_command is not None:
@@ -279,6 +236,7 @@ def _reading_error_replies(
                     reply,
                     readable=readable() if readable is not None else None,
                     analysed=True,
+                    patterns=patterns,
                 )
                 if failure is None and isinstance(reply, str):
                     # The entry says what produced the answer: the adapter's
@@ -427,20 +385,41 @@ class R2StaticProvider(GenericMCPStaticProvider):
     rather than a failed job.
     """
 
-    R2_PROMPT_FRAGMENT: ClassVar[str] = (
+    # What the console calls this provider and says about it, and its test's label.
+    choice_label = "radare2"
+    choice_order = 1
+    title = "radare2 MCP"
+    description = "A local radare2 binary answers disassembly questions over its MCP server."
+    probe_label = "Test radare2 MCP"
+    settings_intro = "Where the radare2 binary lives; the MCP server is launched from it."
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # This adapter reads its block's declared error patterns itself, by the
+        # same function, to add its own remediations and the analyse-and-ask-again
+        # step (``_reading_error_replies``).
+        self._handle.reads_own_errors = True
+
+    def _error_patterns(self) -> tuple[ErrorPattern, ...]:
+        """The radare2 block's declared error patterns; the shipped ones with no block."""
+        config = getattr(self._handle, "config", None)
+        if config is None:
+            return _R2_PATTERNS
+        return tuple(getattr(config, "error_patterns", None) or ())
+
+    @property
+    def declaration_source(self) -> str:
+        """radare2's own block, not a registry server: ``provider:r2``."""
+        return f"provider:{self.id}"
+
+    # radare2's opening sentence; its workflow is the text its block declares
+    # (``static.r2.prompt_fragment``, shipped as ``core.builtin_declarations.R2_WORKFLOW``).
+    # ``R2_PROMPT_FRAGMENT`` is the whole fragment with the shipped workflow.
+    R2_LEAD: ClassVar[str] = (
         "Analyze binary files (e.g. PE, ELF) utilizing radare2 through your available tools. "
-        "For EVERY claim you make, you MUST cite a concrete artifact: a function name, "
-        "string offset (.data+0xNN), API import, or hex pattern. "
-        "Focus on MITRE ATT&CK: T1027 (Obfuscation), T1106 (Native API), "
-        "T1055 (Process Injection), T1140 (Deobfuscation).\n\n"
-        "=== TOOL USAGE WORKFLOW ===\n"
-        "1. Call `open_file` with the path you are given, then `analyze` to run the\n"
-        "   analysis pass.\n"
-        "2. Call `list_imports` and `list_strings` to see what the binary can reach.\n"
-        "3. Call `list_functions` and pick the 3-5 that reference crypto, network or\n"
-        "   process APIs; `decompile_function` those and `xrefs_to` their addresses.\n"
-        "4. Summarise assembly patterns instead of dumping raw hex, and prefer one\n"
-        "   summarising call over many narrow ones.\n"
+    )
+    R2_PROMPT_FRAGMENT: ClassVar[str] = with_claim_guidance(
+        R2_LEAD, builtin_declarations.R2_WORKFLOW
     )
 
     # ``StaticR2Config.mirror_dir``'s own default, kept here too: a provider
@@ -460,11 +439,7 @@ class R2StaticProvider(GenericMCPStaticProvider):
             "r2",
             MCPServerConfig.model_validate({**r2.model_dump(), "command": r2.binary_path}),
         )
-        provider = cls(
-            handle,
-            label="radare2 MCP",
-            prompt_fragment_text=cls.R2_PROMPT_FRAGMENT,
-        )
+        provider = cls(handle, label="radare2 MCP", prompt_lead_text=cls.R2_LEAD)
         provider._mirror_dir = r2.mirror_dir
         return provider
 
@@ -493,6 +468,43 @@ class R2StaticProvider(GenericMCPStaticProvider):
         super().open(job)
         self.tools = self.get_tools()
 
+    async def probe(self) -> ProviderProbe:
+        """Find r2mcp as a job finds it, then hold an MCP handshake with it.
+
+        A stdio handshake is the only honest test of a subprocess-backed
+        server: a binary that exists but cannot serve MCP is exactly the
+        failure an operator needs named before a job fails on it.
+        """
+        import time
+
+        from maljan.core.config import MCPServerConfig
+        from maljan.providers.server_probe import PROBE_BUDGET_SECONDS, handshake
+
+        t0 = time.perf_counter()
+
+        def _ms() -> int:
+            return int((time.perf_counter() - t0) * 1000)
+
+        configured = str(self._handle.config.command or "r2mcp")
+        binary = resolve_r2_binary(configured)
+        if binary.path is None:
+            return ProviderProbe(
+                False, f"{configured!r} was not found; looked in: {binary.described()}", _ms()
+            )
+        command = binary.path
+        config = MCPServerConfig(enabled=True, transport="stdio", command=command)
+        try:
+            names, _capabilities = await handshake(config, "r2")
+        except TimeoutError:
+            return ProviderProbe(
+                False, f"no MCP handshake within {PROBE_BUDGET_SECONDS:.0f} s", _ms()
+            )
+        except FileNotFoundError:
+            return ProviderProbe(False, f"{command!r} not found on PATH", _ms())
+        except Exception as exc:  # noqa: BLE001 — reported to the operator, never raised
+            return ProviderProbe(False, f"{type(exc).__name__}: {exc}", _ms())
+        return ProviderProbe(True, f"{len(names)} tools offered by {command!r}", _ms(), names)
+
     def get_tools(self) -> list[BaseTool]:
         tools = super().get_tools()
         runner = next((t for t in tools if t.name == _R2_RUN_COMMAND), None)
@@ -502,6 +514,7 @@ class R2StaticProvider(GenericMCPStaticProvider):
                 tool,
                 self._held_path,
                 run_command if tool.name in _R2_FUNCTION_TOOLS else None,
+                self._error_patterns(),
             )
             for tool in tools
         ]
@@ -535,9 +548,8 @@ class R2StaticProvider(GenericMCPStaticProvider):
             return False
         from maljan.agents.base_agent import run_coro_blocking
         from maljan.core.config import get_settings
-        from maljan.providers.server_guard import deployment_call_budget
 
-        budget = deployment_call_budget(get_settings())
+        budget = self.call_budget(get_settings())
         try:
             reply = run_coro_blocking(
                 coroutine(file_path=target),
@@ -558,4 +570,12 @@ class R2StaticProvider(GenericMCPStaticProvider):
         return True
 
     def mirror_spec(self) -> MirrorSpec:
-        return MirrorSpec(work_subdir=Path(self._mirror_dir).name, container_prefix="")
+        """r2's own mirror directory (``mirror_dir``), seen at its block's ``sample_mount``.
+
+        A stdio r2mcp shares the worker's filesystem, which the shipped empty
+        mount says; a block that declares a mount is handed the path under it.
+        """
+        return MirrorSpec(
+            work_subdir=Path(self._mirror_dir).name,
+            container_prefix=str(self._cfg.sample_mount or ""),
+        )

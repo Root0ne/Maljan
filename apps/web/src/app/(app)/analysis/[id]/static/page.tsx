@@ -47,7 +47,7 @@ export default function StaticTab() {
   // tables draw underneath them, and only where a section has not already
   // said the same thing.
   const reportSections = report?.malware_report?.sections;
-  const evidenceSections = sectionsForTab(reportSections, "static");
+  const evidenceSections = sectionsForTab(reportSections, "static", report?.section_tabs);
   /* The YARA and Sigma rules that fired are DETECTION's, where each Sigma
    * rule's level sits on the severity ladder. This page points there rather
    * than drawing the same table a second time. */

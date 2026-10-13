@@ -50,12 +50,24 @@ export function runFailure(
   return { sentence, errorId: found[1] };
 }
 
+/** The job statuses a run does not leave: nothing more will happen to it. */
+export const FINISHED_JOB_STATUSES: ReadonlySet<string> = new Set([
+  "completed",
+  "failed",
+  "cancelled",
+]);
+
+/** Whether a job has ended, however it ended. A cancelled run has ended too. */
+export function jobFinished(status: string | null | undefined): boolean {
+  return FINISHED_JOB_STATUSES.has(String(status ?? ""));
+}
+
 /**
  * The failure a job row states, and nothing for a job that did not fail.
  *
  * A cancelled run is not a failed one. The operator stopped it, the worker
- * writes `cancelled` on a session of its own and records no message, and
- * `mark_job_failed` leaves a cancelled row alone — so a cancel outranks
+ * writes on the row why and where the run stopped (`jobStopNote` reads it),
+ * and `mark_job_failed` leaves a cancelled row alone — so a cancel outranks
  * whatever the run was raising on its way down, and there is no failure here
  * to report. A run still going has not failed either, and one that completed
  * least of all.
@@ -67,4 +79,21 @@ export function jobFailure(
   if (status !== "failed") return null;
   const failure = runFailure(message);
   return failure.sentence || failure.errorId ? failure : null;
+}
+
+/**
+ * What a cancelled job's row says about the stop, or nothing.
+ *
+ * The worker writes why and where the run stopped on the row when the
+ * operator cancels it, beside the partial report it keeps. It is a stop, not
+ * a failure, so it is read here rather than by `jobFailure`. A row cancelled
+ * before its run started carries none.
+ */
+export function jobStopNote(
+  status: string | null | undefined,
+  message: string | null | undefined,
+): string | null {
+  if (status !== "cancelled") return null;
+  const text = (message ?? "").trim();
+  return text || null;
 }

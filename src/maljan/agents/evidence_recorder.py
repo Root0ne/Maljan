@@ -24,9 +24,11 @@ import time
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
+from maljan.agents.mcp_client import structured_content_of
 from maljan.agents.tool_fence import fenced
 from maljan.core.exceptions import SampleNotOpened
 from maljan.core.logger import logger
+from maljan.core.undeclared_tools import entry_decompiles
 from maljan.llm.context_window import answering_for
 from maljan.llm.stream_watch import watching
 from maljan.pipeline.events import (
@@ -53,6 +55,26 @@ if TYPE_CHECKING:
 # The servers whose ``resolve_api_hashes`` is this platform's own: the triage
 # pack (recorded as ``pipeline``) and the analysis server.
 _RESOLVING_SERVERS = frozenset({"pipeline", "analysis"})
+
+
+def _platforms_own_resolution(entry: Any) -> bool:
+    """Whether ``entry`` is an API hash resolution the platform's own resolver answered.
+
+    By its declared kind, from a source that declares ``platform_owned``; an
+    entry with no stored facts by the legacy reading and the server it was
+    made to (``_RESOLVING_SERVERS``).
+    """
+    from maljan.core.declared_reading import declarations, kind_of, read_by_name
+    from maljan.core.tool_declarations import ToolDeclarations
+
+    if kind_of(entry) != "api_hash_resolution":
+        return False
+    if read_by_name(entry):
+        return str(getattr(entry, "server", "") or "") in _RESOLVING_SERVERS
+    ref = ToolDeclarations.source_of(entry)
+    held = declarations().source(ref) if ref is not None else None
+    return bool(held is not None and held.platform_owned)
+
 
 # The closers a repair may append, and nothing else. A repair that deleted a
 # character, changed one or inserted one anywhere but the end would be this
@@ -190,8 +212,12 @@ def result_text(value: Any) -> str:
     if isinstance(value, str):
         return value
     if isinstance(value, dict | list):
+        from maljan.core.safe_json import dumps
+
         try:
-            return json.dumps(value, default=str)
+            # Depth-safe: a value nested past the guard is written with a
+            # marked placeholder there, never a raise (``core.safe_json``).
+            return dumps(value, default=str)
         except (TypeError, ValueError):
             return str(value)
     return str(value)
@@ -218,8 +244,15 @@ class EvidenceRecorder:
         sink: EventSink | None = None,
         corpus: Any = None,
         model: str = "",
+        agent_role: str | None = None,
+        agent_tab: str | None = None,
     ) -> None:
         self.agent = agent
+        self.agent_tab = agent_tab or None
+        # The role the agent's definition declares, written on every entry
+        # (``LedgerEntry.agent_role``); ``None`` for the pack and an agent
+        # running outside a container.
+        self.agent_role = agent_role or None
         # The model whose turn the next calls answer: the agent's first model
         # until a turn says otherwise (``note_turn``). A fallback list stamps
         # every answer with the model that gave it, and the calls a turn asks
@@ -280,6 +313,10 @@ class EvidenceRecorder:
             wanted = str(by_id[wanted].repeated_of)
         return wanted
 
+    def filed(self, entry_id: str) -> bool:
+        """Whether this loop filed an entry under this id."""
+        return str(entry_id or "").strip() in self._by_id
+
     def entry_failed(self, entry_id: str) -> bool:
         """Whether the entry with this id recorded a failure.
 
@@ -311,6 +348,8 @@ class EvidenceRecorder:
         not_shown: int | None = None,
         cut: int | None = None,
         guard_answer: bool = False,
+        source: str | None = None,
+        structured_content: dict[str, Any] | None = None,
     ) -> LedgerEntry:
         """Append one entry and return it, so the caller can quote its id.
 
@@ -323,7 +362,12 @@ class EvidenceRecorder:
         and ``output``, what the model was handed instead, is what the run's
         corpus remembers. ``cut`` is the characters the tool-output guardrail
         dropped from an answer it cut to fit: the entry keeps what the model
-        read and is marked ``truncated`` with ``chars_dropped``.
+        read and is marked ``truncated`` with ``chars_dropped``. ``source`` is
+        where the tool's declaration lives (``mcp:<key>``, ``provider:<id>``,
+        ``sandbox``, ``pack``), as the caller knows it; it is never guessed
+        later from the tool's name. ``structured_content`` is the structured
+        answer the tool's server returned beside its text (MCP
+        ``structuredContent``), filed on the entry as returned.
         """
         if repeated_of:
             repeated_of = self.holder_of(repeated_of)
@@ -350,19 +394,19 @@ class EvidenceRecorder:
             model=self.model or None,
             not_shown=not_shown is not None,
             chars_dropped=int(cut or 0) if not_shown is None else 0,
+            source=source,
+            structured_content=structured_content,
+            agent_role=self.agent_role,
+            agent_tab=self.agent_tab,
         )
         self.entries.append(entry)
         self._by_id[entry.id] = entry
         # The function names a hash resolution read are names, and the event
         # and transcript scrub keeps them as written for the rest of the job.
-        # Only this platform's own resolver answers them: the pack's call and
-        # the analysis server's tool. Another server's tool of that name is not.
-        if (
-            tool == "resolve_api_hashes"
-            and entry.ok
-            and server in _RESOLVING_SERVERS
-            and not repeated_of
-        ):
+        # Only this platform's own resolver answers them: an API hash
+        # resolution (its declared kind) from a source the platform owns (the
+        # pack, the analysis server). Another server's tool of that name is not.
+        if entry.ok and not repeated_of and _platforms_own_resolution(entry):
             remember_resolved_names(output)
         # ``output``, the text the model was handed, and not ``entry.output``,
         # which the ledger has already trimmed and the byte budget may blank
@@ -411,6 +455,7 @@ class EvidenceRecorder:
         first: str,
         said: str,
         ok: bool = True,
+        source: str | None = None,
     ) -> LedgerEntry:
         """File a call the repeat guard answered without running, as a repeat of ``first``.
 
@@ -434,10 +479,17 @@ class EvidenceRecorder:
             started_at=time.time(),
             duration_ms=0,
             repeated_of=str(first),
+            source=source,
         )
 
     def record_guard_answer(
-        self, *, tool: str, args: dict[str, Any] | None, server: str | None, said: str
+        self,
+        *,
+        tool: str,
+        args: dict[str, Any] | None,
+        server: str | None,
+        said: str,
+        source: str | None = None,
     ) -> LedgerEntry:
         """File a call a guard answered without running any tool, as the guard's answer.
 
@@ -462,6 +514,7 @@ class EvidenceRecorder:
             started_at=time.time(),
             duration_ms=0,
             guard_answer=True,
+            source=source,
         )
 
 
@@ -527,7 +580,6 @@ class RepeatGuard:
         # can shape (a forged or a shared name), so a call is a repeat only
         # when its listing is the held one, or a prefix of it.
         self._functions: dict[tuple[str, Any], list[tuple[str, str]]] = {}
-        self._seeded_functions: dict[tuple[str, Any], list[tuple[str, str]]] = {}
 
     def _seeded_count(self, key: str) -> int:
         """Where a seeded call's count starts: one served retry for a failure or an unkept result."""
@@ -594,16 +646,12 @@ class RepeatGuard:
         self._told.add(key)
         return True
 
-    def note_function(
-        self, key: tuple[str, Any] | None, entry_id: str, listing: str, *, seeded: bool = False
-    ) -> None:
+    def note_function(self, key: tuple[str, Any] | None, entry_id: str, listing: str) -> None:
         """Record that ``entry_id`` holds ``listing``, a listing of the function ``key`` names."""
         body = listing_body(listing)
         if key is None or not entry_id or not body:
             return
         self._functions.setdefault(key, []).append((str(entry_id), body))
-        if seeded:
-            self._seeded_functions.setdefault(key, []).append((str(entry_id), body))
 
     def function_entry(self, key: tuple[str, Any] | None, listing: str) -> str | None:
         """The entry whose listing already holds all of ``listing``, or ``None``.
@@ -671,20 +719,6 @@ class RepeatGuard:
         """
         self.served_repeats += 1
 
-    def reset(self) -> None:
-        """Forget this loop's calls, for a conversation that is starting again.
-
-        A connection error replays the whole conversation from the first
-        message, and the model then re-makes the calls it already made. Those
-        are not repeats: from the model's point of view it is asking for the
-        first time, and counting them ended an analyst for a dropped socket.
-        """
-        self._first = dict(self._seeded)
-        self._count = {key: self._seeded_count(key) for key in self._seeded}
-        self._told = set()
-        self._functions = {key: list(rows) for key, rows in self._seeded_functions.items()}
-        self.served_repeats = 0
-
     def ending_the_loop(self) -> bool:
         """Whether this loop has repeated itself often enough to be ended."""
         return self.served_repeats >= self.ENDS_AT
@@ -734,8 +768,8 @@ def seeded_repeat_guard(entries: Sequence[Any] | None) -> RepeatGuard:
             continue
         output = str(getattr(entry, "output", "") or "")
         guard.seed(tool, args, entry_id, recorded=output)
-        if decompiles(tool):
-            guard.note_function(listed_function(output), entry_id, output, seeded=True)
+        if entry_decompiles(entry):
+            guard.note_function(listed_function(output), entry_id, output)
     return guard
 
 
@@ -750,9 +784,15 @@ def listing_body(listing: str) -> str:
     return text[: -len(_CUT_MARKER)] if text.endswith(_CUT_MARKER) else text
 
 
-def decompiles(tool: str) -> bool:
-    """Whether a tool's name says it decompiles, the way the decompiled-function list reads it."""
-    return "decompil" in str(tool or "").lower()
+def decompiles(tool: str, facts: Any = None) -> bool:
+    """Whether a tool lists decompiled code, the way the decompiled-function list reads it.
+
+    By the kind its declaration (``facts``) gives, else, for a tool that
+    declares nothing, by its name (``core.undeclared_tools``).
+    """
+    from maljan.core.undeclared_tools import decompiles as by_declaration
+
+    return by_declaration(facts, tool)
 
 
 def _function_label(text: str, key: tuple[str, Any] | None) -> str:
@@ -1020,7 +1060,7 @@ def _record_tool(
     from langchain_core.tools import StructuredTool
 
     from maljan.agents.output_shortening import narrowing_arguments
-    from maljan.agents.tool_pinning import server_of
+    from maljan.agents.tool_pinning import declared_facts_of, declared_source_of, server_of
 
     func = getattr(tool, "func", None)
     coroutine = getattr(tool, "coroutine", None)
@@ -1030,6 +1070,11 @@ def _record_tool(
 
     name = str(getattr(tool, "name", "") or "unknown")
     server = server_of(tool) or None
+    # Where the tool's declaration lives (``core.tool_declarations``), read
+    # from the tool itself as it was built and written on every entry.
+    source = declared_source_of(tool)
+    # What the tool declares about itself, read once for every call it makes.
+    facts = declared_facts_of(tool)
     accepted = tuple(getattr(args_schema, "model_fields", {}) or {})
 
     # The arguments of this tool that reach a part its answer left out, read
@@ -1040,6 +1085,11 @@ def _record_tool(
     # is being given two accounts of the same tool. The guardrail that shortens
     # an answer reserves room for the sentence naming exactly these.
     narrowing = narrowing_arguments(accepted)
+    # The read-again tool (``agents.tool_answer_clearing``): its answer is
+    # another entry's, filed as a repeat of it.
+    from maljan.agents.tool_answer_clearing import READS_EVIDENCE
+
+    reads_evidence = bool((getattr(tool, "metadata", None) or {}).get(READS_EVIDENCE))
 
     def _the_room_is_gone(kwargs: dict[str, Any]) -> str | None:
         """The line a call gets once this agent's conversation has no room left.
@@ -1069,7 +1119,9 @@ def _record_tool(
         else:
             context_budget.charge(len(TOOL_PHASE_ENDED_NOTICE), recorder.agent)
             said = TOOL_PHASE_ENDED_NOTICE
-        recorder.record_guard_answer(tool=name, args=kwargs, server=server, said=said)
+        recorder.record_guard_answer(
+            tool=name, args=kwargs, server=server, source=source, said=said
+        )
         return said
 
     # How often each self-named call has been asked about in this loop. The
@@ -1104,7 +1156,9 @@ def _record_tool(
             except Exception as exc:  # noqa: BLE001 — a count never costs a call
                 logger.debug("the question was not counted (%s).", exc)
         notice = self_named_notice(name, found)
-        recorder.record_guard_answer(tool=name, args=kwargs, server=server, said=notice)
+        recorder.record_guard_answer(
+            tool=name, args=kwargs, server=server, source=source, said=notice
+        )
         return notice
 
     def _already_answered(kwargs: dict[str, Any]) -> str | None:
@@ -1124,6 +1178,7 @@ def _record_tool(
                 tool=name,
                 args=kwargs,
                 server=server,
+                source=source,
                 first=earlier,
                 said=earlier_chunk_sentence(name, earlier),
             )
@@ -1142,7 +1197,13 @@ def _record_tool(
         # is handed the notice with no id of its own: an id here would be one
         # a report could cite for evidence that does not exist.
         recorder.record_repeat(
-            tool=name, args=kwargs, server=server, first=first, said=notice, ok=not failed
+            tool=name,
+            args=kwargs,
+            server=server,
+            source=source,
+            first=first,
+            said=notice,
+            ok=not failed,
         )
         return notice
 
@@ -1197,6 +1258,46 @@ def _record_tool(
         """The arguments as the model wrote them, when this call was closed off."""
         return repairs.take(name, kwargs) if repairs is not None else None
 
+    def _read_again(
+        kwargs: dict[str, Any],
+        started: float,
+        wall_clock: float,
+        text: str,
+        repeated: str | None,
+        cut: int | None,
+    ) -> str | None:
+        """A read-again answer, filed and shown as a repeat of the entry it reads; ``None`` if unfiled.
+
+        The way a repeated decompilation is filed: the entry is a repeat of
+        the one that holds the answer, keeping only a note, so the ledger, the
+        byte budget and the run's corpus hold the answer once and no second
+        citable id exists; the model reads the answer under the original id.
+        """
+        from maljan.agents.tool_answer_clearing import read_again_note
+
+        wanted = str(kwargs.get("evidence_id") or "").strip().lower()
+        holder = recorder.holder_of(wanted)
+        if not recorder.filed(holder):
+            return None
+        recorder.record(
+            tool=name,
+            args=kwargs,
+            server=server,
+            source=source,
+            output=read_again_note(holder),
+            ok=not recorder.entry_failed(holder),
+            started_at=wall_clock,
+            duration_ms=int((time.monotonic() - started) * 1000),
+            repeated_of=holder,
+            cut=cut,
+        )
+        _note(kwargs, holder)
+        shortened = shortened_notice(text, narrowing=narrowing)
+        failed = recorder.entry_failed(holder)
+        return f"[{holder}]\n{fenced(holder, text)}{shortened}" + _steering(
+            kwargs, repeated, failed=failed
+        )
+
     def _stamp(
         kwargs: dict[str, Any],
         started: float,
@@ -1208,6 +1309,10 @@ def _record_tool(
     ) -> str:
         text = result_text(value)
         raw = _was_repaired(kwargs)
+        if reads_evidence and not_shown is None:
+            read = _read_again(kwargs, started, wall_clock, text, repeated, cut)
+            if read is not None:
+                return read
         # The function a decompile answered with, and the entry that already
         # holds it: a call given an address inside a function an earlier call
         # read is answered with that same function, and is a repeat of it
@@ -1216,7 +1321,7 @@ def _record_tool(
         # Not for an answer the conversation had no room for.
         function = (
             listed_function(text)
-            if repeats is not None and decompiles(name) and not_shown is None
+            if repeats is not None and decompiles(name, facts) and not_shown is None
             else None
         )
         holder = repeats.function_entry(function, text) if repeats is not None else None
@@ -1234,6 +1339,7 @@ def _record_tool(
             tool=name,
             args=kwargs,
             server=server,
+            source=source,
             # A repeat keeps the note, not a second copy of the listing the
             # entry it names already holds.
             output=same or text,
@@ -1244,6 +1350,7 @@ def _record_tool(
             args_raw=raw,
             not_shown=not_shown,
             cut=cut,
+            structured_content=None if same else structured_content_of(value),
         )
         # A repeat is noted under the entry that holds its answer, so a later
         # served or refused identical call names that entry, never the repeat.
@@ -1292,6 +1399,7 @@ def _record_tool(
             tool=name,
             args=sent if sent is not None else kwargs,
             server=server,
+            source=source,
             output=message,
             ok=False,
             error=message,

@@ -65,8 +65,27 @@ class TestMinimalBuild:
         # No judge assessment means no severity. It is not defaulted to a
         # rating the run never established.
         assert report.severity is None
-        # References include VT + MalwareBazaar even with no TTPs
-        assert any(r.source == "VirusTotal" for r in report.references)
+        # The shipped lookups (``reporting.reference_urls``), as every report
+        # linked them before they were data.
+        assert [(r.source, r.url, r.note) for r in report.references] == [
+            (
+                "VirusTotal",
+                f"https://www.virustotal.com/gui/file/{'a' * 64}",
+                "VT detection summary",
+            ),
+            ("MalwareBazaar", f"https://bazaar.abuse.ch/sample/{'a' * 64}/", "Sample lookup"),
+        ]
+
+    def test_an_operator_who_removed_the_shipped_lookups_gets_none(self) -> None:
+        from maljan.core.config import get_settings
+
+        settings = get_settings()
+        kept = list(settings.reporting.reference_urls)
+        settings.reporting.reference_urls = []
+        try:
+            assert _build().references == []
+        finally:
+            settings.reporting.reference_urls = kept
 
 
 class TestRansomwareFixture:

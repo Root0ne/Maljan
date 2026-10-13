@@ -28,7 +28,9 @@ from app.services.agent_map import (
     validate_agent_map,
 )
 from maljan.agents.composition import aresolve_agent, reachable_agents, reads_static_provider
+from maljan.agents.prompt_fragments import resolve_attached
 from maljan.agents.prompts import REVERSER_PROMPT
+from maljan.core.model_assignments import assignments_for
 from maljan.core.settings_overrides import build_settings
 from maljan.providers.static.ghidra import GHIDRA_GUIDANCE, GHIDRA_WORKFLOW
 from maljan.providers.static.r2 import R2StaticProvider
@@ -159,7 +161,9 @@ class _Container:
         self.config = settings
         self._providers: dict[str, Any] = {}
         self._ledger = TruncationLedger()
-        self._budget = budget_for_settings(settings, ["static"], probe=False)
+        self._budget = budget_for_settings(
+            settings, assignments_for(settings, ["static"]), probe=False
+        )
         self._registry = ServerRegistry(settings, truncation_ledger=self._ledger)
 
     def get_static_provider(self, provider_id: str | None = None) -> Any:
@@ -302,7 +306,8 @@ class TestEveryAgentResolves:
         assert {"knowledge_read", "virustotal_read"} <= names
         assert resolved.static_provider_id == "ghidra"
         assert resolved.prompt.startswith(REVERSER_PROMPT)
-        assert GHIDRA_WORKFLOW in resolved.prompt
+        # The workflow as resolved for the servers this agent is handed.
+        assert resolve_attached(GHIDRA_WORKFLOW, resolved.tools) in resolved.prompt
         assert GHIDRA_GUIDANCE in resolved.prompt
         assert resolved.degradation_reasons == ()
 
@@ -318,7 +323,7 @@ class TestEveryAgentResolves:
         resolved = _resolve(container, "all_tools_reverser_ghidra")
         assert "open_file" in {tool.name for tool in resolved.tools}
         assert R2StaticProvider.R2_PROMPT_FRAGMENT in resolved.prompt
-        assert GHIDRA_WORKFLOW not in resolved.prompt
+        assert resolve_attached(GHIDRA_WORKFLOW, resolved.tools) not in resolved.prompt
 
     @pytest.mark.parametrize(
         ("key", "servers"),

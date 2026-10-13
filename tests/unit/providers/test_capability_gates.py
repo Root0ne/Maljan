@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 ALLOWED = {
     "src/maljan/core/config.py",  # the read-only compatibility view on MCPConfig
-    "src/maljan/providers/static/ghidra.py",
+    "src/maljan/providers/static/ghidra/provider.py",
     "src/maljan/providers/sandbox/cape2.py",
     # A released migration carries its own frozen copy of the 2026-09-03 renames.
     "apps/api/alembic/versions/20260903000000_rename_provider_setting_keys.py",
@@ -37,4 +37,5 @@ def test_the_mirror_gate_is_a_capability_read():
         encoding="utf-8"
     )
     assert "needs_sample_mirror" in source
-    assert "ghidra_container_samples_path" in source, "the compose bind mount is still the path"
+    assert "ghidra_container_samples_path" not in source
+    assert "path_in_server" in source, "each server is handed the sample under its own mount"

@@ -11,6 +11,8 @@ import { ApiError } from "@/lib/errors";
 import { SettingsValidationError } from "@/types/settings";
 import type {
   ContextWindow,
+  CredentialBootstrapResult,
+  EffortOptions,
   ImportRequest,
   MappingPreview,
   PatchResult,
@@ -18,7 +20,6 @@ import type {
   SettingsSchema,
   SettingsValues,
   TeamLintResult,
-  VirustotalRegistration,
 } from "@/types/settings";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -71,6 +72,9 @@ export interface SandboxReportDTO {
   sample_sha256_match: boolean;
   warning: string | null;
   uploaded_at: string;
+  /** For a report accepted unread: a proposed format declaration read from its
+   *  shape, for an admin to accept or edit. */
+  proposal?: unknown;
 }
 
 export interface ReportSummaryDTO {
@@ -143,6 +147,11 @@ export interface ReportDetailDTO {
    * back to rebuilding what it can from ``agent_findings`` for those. */
   transcript?: TranscriptRow[];
   malware_report: MalwareReport | null;
+  /** The tab each section an operator's tool produced is drawn on, by section
+   *  key, as the API placed it (by the kind its tool declared, else the
+   *  analyst whose call it cites). Absent or `null` when no section is
+   *  placed; every section is then placed by its key. */
+  section_tabs?: Record<string, string> | null;
   /** Set on a report kept from a run that failed after the report was built:
    *  where the run failed and the error id. Absent or `null` on a report of a
    *  completed run. */
@@ -192,8 +201,18 @@ export interface SystemStatusDTO {
    *  absent, `unknown` when the queue could not be read. Absent from an API
    *  older than the field. */
   enrichment_worker?: string;
-  has_virustotal_key: boolean;
-  has_abuseipdb_key: boolean;
+  /** How many enrichment sources are configured; absent when unknown. */
+  enrichment_configured?: number;
+  /** Every enrichment source in force, in the order they are asked, and
+   *  whether each is configured. Signed-in callers only; absent otherwise, or
+   *  when the sources could not be read. */
+  enrichment_sources?: EnrichmentSourceStatusDTO[];
+}
+
+export interface EnrichmentSourceStatusDTO {
+  key: string;
+  label: string;
+  configured: boolean;
 }
 
 export interface AuditLogDTO {
@@ -358,8 +377,8 @@ const _SYSTEM_STATUS_SCHEMA: Record<string, ExpectedShape> = {
   // Optional: an API older than the field answers without it, and the console
   // draws nothing rather than warning about a shape nobody broke.
   enrichment_worker: "string?",
-  has_virustotal_key: "boolean",
-  has_abuseipdb_key: "boolean",
+  enrichment_configured: "number?",
+  enrichment_sources: "array?",
 };
 
 /* ── API Client ───────────────────────────────────────── */
@@ -649,6 +668,13 @@ class ApiClient {
     return this.request<ContextWindow>("/api/v1/settings/context-window");
   }
 
+  /** The reasoning-effort levels a per-agent entry may name for one provider
+   *  and model. Read-only, and costs no tokens. */
+  getEffortOptions(provider: string, model: string) {
+    const query = new URLSearchParams({ provider, model });
+    return this.request<EffortOptions>(`/api/v1/settings/effort-options?${query}`);
+  }
+
   testSettingsProbe(probe: string, values: Record<string, unknown>) {
     return this.request<ProbeResult>(`/api/v1/settings/test/${probe}`, {
       method: "POST",
@@ -656,25 +682,35 @@ class ApiClient {
     });
   }
 
-  /** Probe one entry of the tool-server map, staged values included. */
-  testMcpServer(server: string, values: Record<string, unknown>) {
+  /** Probe one entry of the tool-server map, staged values included.
+   *  `confirmedCalls` names the planned harmless calls the admin confirmed
+   *  after the previous probe listed them; none: nothing is called. */
+  testMcpServer(server: string, values: Record<string, unknown>, confirmedCalls: string[] = []) {
     return this.request<ProbeResult>(
       `/api/v1/settings/test/mcp?server=${encodeURIComponent(server)}`,
-      { method: "POST", body: JSON.stringify({ values }) }
+      {
+        method: "POST",
+        body: JSON.stringify(
+          confirmedCalls.length ? { values, confirmed_calls: confirmedCalls } : { values }
+        ),
+      }
     );
   }
 
   /**
-   * Register this deployment with VirusTotal and store the agent token.
+   * Obtain tool server `server`'s credential by the request it declares, and
+   * store it.
    *
-   * Takes nothing: the agent family and version are constants of the build,
-   * and the token the call returns is stored server-side, encrypted, and
-   * never sent to the browser. What comes back is the server's new state.
+   * Takes nothing but the server's key: the address and the body are the
+   * server's declaration, and the credential the call returns is stored
+   * server-side, encrypted, and never sent to the browser. What comes back is
+   * the server's new state.
    */
-  registerVirustotal() {
-    return this.request<VirustotalRegistration>("/api/v1/settings/virustotal/register", {
-      method: "POST",
-    });
+  obtainServerCredential(server: string) {
+    return this.request<CredentialBootstrapResult>(
+      `/api/v1/settings/servers/${encodeURIComponent(server)}/credential`,
+      { method: "POST" }
+    );
   }
 
   /** Resolve one agent definition, staged values included. Spends no tokens. */
@@ -830,6 +866,25 @@ class ApiClient {
     return this.request<{ items: SandboxReportDTO[]; total: number }>(
       `/api/v1/samples/${sampleId}/sandbox-reports`
     );
+  }
+
+  /** An unread upload with its proposed declaration, read again from the stored report. */
+  getSandboxReportProposal(sampleId: string, reportId: string) {
+    return this.request<SandboxReportDTO>(
+      `/api/v1/samples/${sampleId}/sandbox-reports/${reportId}/proposal`
+    );
+  }
+
+  /** Save an admin-accepted format declaration and read the unread upload as it. */
+  acceptSandboxReportFormat(
+    sampleId: string,
+    reportId: string,
+    declaration: Record<string, unknown>
+  ) {
+    return this.request<SandboxReportDTO>(`/api/v1/sandbox-report-formats/accept`, {
+      method: "POST",
+      body: JSON.stringify({ declaration, sample_id: sampleId, report_id: reportId }),
+    });
   }
 
   deleteSandboxReport(sampleId: string, reportId: string) {

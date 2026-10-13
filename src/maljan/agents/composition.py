@@ -35,7 +35,7 @@ stage agent.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -103,6 +103,78 @@ def analyst_keys(settings: Settings) -> list[str]:
     it is the one caller that needs to know which stage an agent belongs to.
     """
     return list(active_profile(settings).analysis_agents)
+
+
+def called_assignments(settings: Settings, stages: Sequence[Any] | None = None) -> list[Any]:
+    """Every model a job of ``stages`` calls, each read as its builder reads it.
+
+    The one answer to "what will this run call", which the job-start probe
+    gate checks whole and the context window is taken over
+    (:func:`window_assignments`):
+
+    * every agent of the analysis stages and every agent they can ask, and so
+      on (:func:`reachable_agents`) — a lead's specialists sit in no stage —
+      each on the expert role (``get_agent_llm``);
+    * the mediator whenever a debate stage exists, and the function summariser
+      whenever ``preprocessing.use_function_summarizer`` is on, each on the
+      expert role with or without an entry of its own (``get_mediator_llm``,
+      ``get_summarizer_llm``) — with none they call the global expert model;
+    * the judge on the judge role (``get_judge_llm``): its own entry, or else
+      the global judge model, never the expert one — every team has exactly
+      one verdict stage;
+    * the reporter on the judge role whenever a report stage exists and
+      ``reporting.enabled`` is on (``get_reporter_llm``, the narrative and the
+      composer); with reporting off the report stage is not planned.
+
+    Each agent's fallbacks are in, because a model the run falls back to is a
+    model the run calls (``assignment_chain_for``). ``stages`` defaults to the
+    active profile's.
+    """
+    from maljan.core.config import (
+        JUDGE_AGENT_KEY,
+        MEDIATOR_AGENT_KEY,
+        REPORTER_AGENT_KEY,
+        SUMMARIZER_AGENT_KEY,
+    )
+    from maljan.core.model_assignments import assignment_chain_for, assignments_for
+
+    run_stages = list(active_profile(settings).stages if stages is None else stages)
+    kinds = {str(getattr(stage, "kind", "")) for stage in run_stages}
+    analysts = [
+        str(agent)
+        for stage in run_stages
+        if getattr(stage, "kind", "") == "analysis"
+        for agent in stage.agents
+    ]
+    agents = reachable_agents(settings, analysts)
+    if "debate" in kinds:
+        agents.append(MEDIATOR_AGENT_KEY)
+    if settings.preprocessing.use_function_summarizer:
+        agents.append(SUMMARIZER_AGENT_KEY)
+    called = [
+        *assignments_for(settings, agents),
+        *assignment_chain_for(settings, JUDGE_AGENT_KEY, role="judge"),
+    ]
+    if "report" in kinds and bool(getattr(settings.reporting, "enabled", True)):
+        called += assignment_chain_for(settings, REPORTER_AGENT_KEY, role="judge")
+    return called
+
+
+def window_assignments(settings: Settings, stages: Sequence[Any] | None = None) -> list[Any]:
+    """Every model the job's one context window is taken over: the called set but the reporter.
+
+    One window sizes every tool answer of the job, the judge's own tool calls
+    included, so it has to fit the tightest model any agent that takes a tool
+    answer under it calls (:func:`called_assignments`). The reporter is the one
+    called role it leaves out: the narrative and the composer make no tool
+    call under the job's budget, the composer sizes each section's evidence on
+    its own models' windows (``ServiceContainer.get_report_composer``), and the
+    triage pack they read is cut on the smaller of the job's window and the
+    reporter's own (``pipeline.nodes.pack_text``).
+    """
+    from maljan.core.config import REPORTER_AGENT_KEY
+
+    return [a for a in called_assignments(settings, stages) if a.agent != REPORTER_AGENT_KEY]
 
 
 def stages(settings: Settings) -> list[Any]:
@@ -236,13 +308,15 @@ def reachable_agents(settings: Settings, named: Sequence[str]) -> list[str]:
     """
     definitions = settings.agents.definitions
     reached = list(dict.fromkeys(str(key) for key in named))
+    seen = set(reached)
     pending = list(reached)
     while pending:
         definition = definitions.get(pending.pop())
         for ref in getattr(definition, "tools", None) or []:
             callee = str(getattr(ref, "agent", "") or "")
-            if getattr(ref, "kind", "") != "agent" or not callee or callee in reached:
+            if getattr(ref, "kind", "") != "agent" or not callee or callee in seen:
                 continue
+            seen.add(callee)
             reached.append(callee)
             pending.append(callee)
     return reached
@@ -330,12 +404,12 @@ def builtin_prompt(
             for_a_clone=for_a_clone,
         )
     if role == "dynamic":
-        from maljan.agents.dynamic_analyst import assemble_dynamic_prompt
+        from maljan.agents.dynamic_analyst import assemble_dynamic_prompt, sandbox_server_label
 
         sandbox = _sandbox_provider(container)
         workflow = str(sandbox.dynamic_prompt_fragment() or "") if sandbox is not None else ""
         offers_tools = sandbox is not None and bool(sandbox.capabilities.provides_tools)
-        label = f"the {sandbox.id} sandbox's own tool server" if sandbox is not None else ""
+        label = sandbox_server_label(sandbox)
         return assemble_dynamic_prompt(
             fragment,
             tools,
@@ -420,14 +494,14 @@ def _provider_parts(
             provider_expected=provider_expected and definition.role == "static" and offers,
         )
     if definition.role == "dynamic":
-        from maljan.agents.dynamic_analyst import sandbox_provider_parts
+        from maljan.agents.dynamic_analyst import sandbox_provider_parts, sandbox_server_label
 
         sandbox = _sandbox_provider(container)
         offers = sandbox is not None and bool(sandbox.capabilities.provides_tools)
         return sandbox_provider_parts(
             tools,
             provider_fragment=str(sandbox.dynamic_prompt_fragment() or "") if sandbox else "",
-            provider_label=f"the {sandbox.id} sandbox's own tool server" if sandbox else "",
+            provider_label=sandbox_server_label(sandbox),
             provider_expected=provider_expected and offers,
         )
     return (tools_statement(tools),)
@@ -518,9 +592,9 @@ def _provider_tools(container: Any, definition: AgentDefinition, provider_id: st
             context_budget=container.get_context_budget(),
         )
     )
-    from maljan.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
+    from maljan.agents.prompt_fragments import PROVIDER_FAMILY, provider_source, stamp_source
 
-    return stamp_source(provider.get_tools(), PROVIDER_FAMILY)
+    return stamp_source(provider.get_tools(), PROVIDER_FAMILY, declared=provider_source(provider))
 
 
 def _sandbox_tools(container: Any, definition: AgentDefinition) -> list[Any]:
@@ -540,7 +614,7 @@ def _sandbox_tools(container: Any, definition: AgentDefinition) -> list[Any]:
     from maljan.agents.prompt_fragments import SANDBOX_FAMILY, stamp_source
     from maljan.providers.sandbox_tools import sandbox_tools
 
-    return stamp_source(sandbox_tools(container), SANDBOX_FAMILY)
+    return stamp_source(sandbox_tools(container), SANDBOX_FAMILY, declared="sandbox")
 
 
 def _agent_tools(container: Any, definition: AgentDefinition, key: str) -> list[Any]:
@@ -604,6 +678,69 @@ def _withheld_servers(settings: Settings, key: str) -> set[str]:
     return excluded
 
 
+def capability_servers(settings: Settings, capability: str) -> list[str]:
+    """The servers a ``ToolRef(kind="capability")`` stands for, in their configured order.
+
+    A capability reference never reaches more than a definition could reach
+    before it: it stands for the built-in servers whose shipped seed declares
+    a tool of kind ``capability`` and leaves its binding to the definitions
+    (an empty ``agents`` list in the seed), which is the set the built-in
+    definitions named by key. Each is then referenced exactly as a
+    ``kind="mcp"`` reference to it by key was: a disabled server gives
+    nothing, its tick list and allow-list narrow what it gives, and its stored
+    ``agents`` list binds it to further agents as it always did, never taking
+    it away from a definition. A server an operator adds is never reached
+    through a capability; it is bound by its own ``agents`` list or a
+    reference to it by key, as every server of its own is.
+    """
+    return servers_of_capability(settings.mcp.servers, capability)
+
+
+def servers_of_capability(server_keys: Iterable[str], capability: str) -> list[str]:
+    """``capability_servers`` over a list of server keys, in their order.
+
+    The settings API serves it on the agent definitions' catalogue entry, so
+    the console draws which servers a capability reference stands for
+    without a rule of its own.
+    """
+    from maljan.core.builtin_declarations import server_declaration
+    from maljan.core.config import _builtin_servers
+    from maljan.core.reputation import kinds_of_capability
+
+    kinds = kinds_of_capability(capability)
+    seeds = _builtin_servers()
+    out: list[str] = []
+    for name in server_keys:
+        seed = seeds.get(str(name))
+        if seed is None or list(seed.agents or []):
+            continue
+        shipped = server_declaration(str(name)).get("tool_facts") or {}
+        if any(str((facts or {}).get("kind") or "") in kinds for facts in shipped.values()):
+            out.append(str(name))
+    return out
+
+
+def _server_refs(settings: Settings, definition: AgentDefinition) -> list[ToolRef]:
+    """The definition's server references, a capability reference as one per server it names.
+
+    A server a capability names that the definition already references whole
+    (by key, or by an earlier capability) is not referenced twice.
+    """
+    from maljan.core.config import ToolRef
+
+    whole = {str(ref.server) for ref in definition.tools if ref.kind == "mcp" and not ref.name}
+    out: list[ToolRef] = []
+    for ref in definition.tools:
+        if ref.kind == "mcp":
+            out.append(ref)
+        elif ref.kind == "capability" and ref.capability:
+            for server in capability_servers(settings, ref.capability):
+                if server not in whole:
+                    whole.add(server)
+                    out.append(ToolRef(kind="mcp", server=server))
+    return out
+
+
 def _mcp_refs(settings: Settings, definition: AgentDefinition, key: str) -> list[ToolRef]:
     """The definition's server references, minus the ones the profile excludes."""
     from maljan.core.config import ALL_SERVERS
@@ -611,9 +748,24 @@ def _mcp_refs(settings: Settings, definition: AgentDefinition, key: str) -> list
     excluded = _withheld_servers(settings, key)
     if ALL_SERVERS in excluded:
         return []
-    return [
-        ref for ref in definition.tools if ref.kind == "mcp" and str(ref.server) not in excluded
-    ]
+    return [ref for ref in _server_refs(settings, definition) if str(ref.server) not in excluded]
+
+
+def _definition_of(settings: Any, key: str) -> Any:
+    definitions = getattr(getattr(settings, "agents", None), "definitions", None) or {}
+    return definitions.get(key) if hasattr(definitions, "get") else None
+
+
+def role_of(settings: Any, key: str) -> str | None:
+    """The role agent ``key``'s definition declares, or ``None`` when it has none."""
+    role = getattr(_definition_of(settings, key), "role", None)
+    return str(role) if role else None
+
+
+def tab_of(settings: Any, key: str) -> str | None:
+    """The console tab agent ``key``'s definition declares, or ``None`` when it declares none."""
+    tab = getattr(_definition_of(settings, key), "tab", None)
+    return str(tab) if tab else None
 
 
 def mcp_refs_for(settings: Settings, key: str) -> list[ToolRef]:
@@ -781,6 +933,26 @@ def _has_remote_server(registry: Any, tools: list[Any]) -> bool:
     return False
 
 
+def _mounted(container: Any, tools: list[Any], staged: dict[str, str]) -> dict[str, str]:
+    """``staged``, and for each other server behind ``tools`` its copy under its declared mount.
+
+    The worker copies the sample for every tool server that declares a
+    ``sample_mount`` (``container.server_sample_paths``), and the path the
+    server opens is that copy under its mount, as a static provider's is. A
+    server the sample was staged to keeps the path its own staging answered.
+    """
+    from maljan.agents.tool_pinning import server_of
+
+    mounted = getattr(container, "server_sample_paths", None) or {}
+    if not isinstance(mounted, dict) or not mounted:
+        return staged
+    out = dict(staged)
+    for key in dict.fromkeys(server_of(tool) for tool in tools):
+        if key and key not in out and mounted.get(key):
+            out[key] = str(mounted[key])
+    return out
+
+
 def _stage(container: Any, tools: list[Any], job_key: str) -> tuple[dict[str, str], list[str]]:
     """``_astage`` for the synchronous resolver, on the shared agent loop.
 
@@ -832,21 +1004,28 @@ def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAge
         tools,
         seen,
     )
-    _claim_in_process_tools(_sandbox_tools(container, definition), "sandbox", tools, seen)
-    _claim_in_process_tools(_agent_tools(container, definition, key), "team", tools, seen)
-    registry = container.get_server_registry()
-    bound, bound_reasons = registry.tools_for(
-        key, job_key, exclude=_excluded_servers(settings, key), seen=seen
+    _claim_in_process_tools(
+        _sandbox_tools(container, definition), "in-process:sandbox", tools, seen
     )
-    tools.extend(bound)
-    reasons.extend(bound_reasons)
-    for ref in _mcp_refs(settings, definition, key):
-        referenced, ref_reasons = registry.tools_for_ref(ref, job_key, seen=seen)
-        tools.extend(referenced)
-        reasons.extend(ref_reasons)
+    _claim_in_process_tools(
+        _agent_tools(container, definition, key), "in-process:team", tools, seen
+    )
+    registry = container.get_server_registry()
+    # The built-in servers and the definition's own claim their names before
+    # an operator's server bound by ``agents`` (``ServerRegistry.agent_tools``).
+    served, served_reasons = registry.agent_tools(
+        key,
+        job_key,
+        _mcp_refs(settings, definition, key),
+        exclude=_excluded_servers(settings, key),
+        seen=seen,
+    )
+    tools.extend(served)
+    reasons.extend(served_reasons)
 
     deduped = _dedupe(tools)
     staged, staging_reasons = _stage(container, deduped, job_key)
+    staged = _mounted(container, deduped, staged)
     reasons.extend(staging_reasons)
     return ResolvedAgent(
         key=key,
@@ -900,23 +1079,28 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
     # above returns nothing, so without this the registry below would be the
     # first builder — on the caller's own loop.
     await asyncio.to_thread(container.get_context_budget)
-    _claim_in_process_tools(_sandbox_tools(container, definition), "sandbox", tools, seen)
-    _claim_in_process_tools(_agent_tools(container, definition, key), "team", tools, seen)
-    registry = container.get_server_registry()
-    bound, bound_reasons = await registry.atools_for(
-        key, job_key, exclude=_excluded_servers(settings, key), seen=seen
+    _claim_in_process_tools(
+        _sandbox_tools(container, definition), "in-process:sandbox", tools, seen
     )
-    tools.extend(bound)
-    reasons.extend(bound_reasons)
-    for ref in _mcp_refs(settings, definition, key):
-        referenced, ref_reasons = await registry.atools_for_ref(ref, job_key, seen=seen)
-        tools.extend(referenced)
-        reasons.extend(ref_reasons)
+    _claim_in_process_tools(
+        _agent_tools(container, definition, key), "in-process:team", tools, seen
+    )
+    registry = container.get_server_registry()
+    served, served_reasons = await registry.aagent_tools(
+        key,
+        job_key,
+        _mcp_refs(settings, definition, key),
+        exclude=_excluded_servers(settings, key),
+        seen=seen,
+    )
+    tools.extend(served)
+    reasons.extend(served_reasons)
 
     deduped = _dedupe(tools)
     staged, staging_reasons = await _astage(
         container.get_server_registry(), container, deduped, job_key
     )
+    staged = _mounted(container, deduped, staged)
     reasons.extend(staging_reasons)
     return ResolvedAgent(
         key=key,

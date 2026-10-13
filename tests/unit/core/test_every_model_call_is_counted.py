@@ -36,7 +36,7 @@ from maljan.agents.network_analyst import NetworkAnalyst
 from maljan.agents.static_analyst import StaticAnalyst
 from maljan.analysis.function_summarizer import FunctionSummarizer
 from maljan.core.config import REPORTER_AGENT_KEY, Settings
-from maljan.core.model_assignments import global_model_label, model_label_for
+from maljan.core.model_assignments import model_label_for
 from maljan.core.token_ledger import TokenLedger
 from maljan.llm.fallback import FallbackChatModel
 from maljan.pipeline.mediation_models import MediatorVerdict
@@ -121,19 +121,19 @@ MEDIATION = "CONTRADICTIONS: NONE\nagreement_confidence: 0.95"
 
 
 class TestTheJudge:
-    def test_the_mediator_s_fast_path_is_counted_against_the_expert_model(self) -> None:
+    def test_the_mediator_s_fast_path_is_counted_against_the_mediator_s_model(self) -> None:
         llm, ledger = _model(MEDIATION), TokenLedger()
-        judge = _judge(llm, ledger, runs_on="expert")
+        judge = _judge(llm, ledger, runs_on="mediator")
 
         asyncio.run(judge.mediate(reports={"static": "text"}, history=[]))
 
         assert len(llm.asked) == 1
         assert _calls(ledger, "judge") == 1
-        assert _models(ledger, "judge") == {global_model_label(SETTINGS, "expert"): 1}
+        assert _models(ledger, "judge") == {model_label_for(SETTINGS, "mediator"): 1}
 
     def test_the_question_for_a_missing_contradictions_block_is_counted(self) -> None:
         llm, ledger = _model(), TokenLedger()
-        judge = _judge(llm, ledger, runs_on="expert")
+        judge = _judge(llm, ledger, runs_on="mediator")
 
         asyncio.run(judge.mediate(reports={"static": "text"}, history=[]))
 
@@ -144,7 +144,7 @@ class TestTheJudge:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         llm, ledger = _model(MEDIATION), TokenLedger()
-        judge = _judge(llm, ledger, runs_on="expert")
+        judge = _judge(llm, ledger, runs_on="mediator")
         monkeypatch.setattr(judge, "_supports_structured_output", lambda: True)
 
         asyncio.run(judge.mediate(reports={"static": "text"}, history=[]))
@@ -256,7 +256,7 @@ def test_the_ledger_is_the_sum_of_every_path(monkeypatch: pytest.MonkeyPatch) ->
         return served[-1]
 
     asyncio.run(
-        _judge(model(), ledger, runs_on="expert").mediate(reports={"static": "t"}, history=[])
+        _judge(model(), ledger, runs_on="mediator").mediate(reports={"static": "t"}, history=[])
     )
     asyncio.run(_judge(model("x"), ledger).give_verdict(reports={"static": "t"}, history=[]))
     for cls, name in ((StaticAnalyst, "static"), (DynamicAnalyst, "dynamic")):
@@ -572,18 +572,27 @@ class TestEveryLoopEndingCountsWhatWasServed:
         assert _calls(ledger, "static") == 1 + len(llm.served)
         assert ledger.snapshot()["unreported_calls"] == 0
 
-    def test_an_attempt_abandoned_on_a_connection_error_counts_what_it_was_served(
+    def test_a_turn_asked_again_on_a_connection_error_counts_what_it_was_served(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        from maljan.llm.transient import with_transient_retries
+
         monkeypatch.setattr(asyncio, "sleep", _no_wait)
-        agent, llm, ledger = _scripted_analyst(
-            ["tool", _connection_error(), "tool", "CLAIM: x\nEVIDENCE: ev_0001"]
+        llm = with_transient_retries(_Scripted)(
+            script=["tool", _connection_error(), "tool", "CLAIM: x\nEVIDENCE: ev_0001"],
+            served=[],
         )
+        ledger = TokenLedger()
+        agent = _Analyst(llm=llm, name="static", tools=[_peek_tool()])
+        agent.token_ledger = ledger
+        agent._container = MagicMock()
+        agent._model_label = lambda: "openai/static-model"
 
         agent.execute_tool_loop([("system", "s"), ("human", "h")])
 
-        assert len(llm.served) == 3, "one turn before the drop, two in the replay"
+        assert len(llm.served) == 3, "one turn before the drop, the turn asked again, the answer"
         assert _calls(ledger, "static") == 3
+        assert len(agent.drain_evidence_entries()) == 2, "no tool call is made twice"
 
     def test_a_loop_that_raised_an_analyst_error_counts_what_it_was_served(self) -> None:
         from maljan.core.exceptions import AnalystError

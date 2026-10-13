@@ -24,7 +24,7 @@ export default function NetworkTab() {
     (s) => s.kind === "domain" || s.kind === "ip" || s.kind === "url",
   );
   const reportSections = mr?.sections;
-  const evidenceSections = sectionsForTab(reportSections, "network");
+  const evidenceSections = sectionsForTab(reportSections, "network", report?.section_tabs);
   // The observed-traffic tables and the static-string list each have one
   // section that says the same thing; where it exists, the typed table stands
   // down rather than printing the same endpoints a second time.
@@ -245,6 +245,12 @@ function DomainCard({ domain }: { domain: NetworkDomain }) {
             <div className="text-xs text-text-secondary mt-1">
               <span className="text-text-muted">Resolved: </span>
               {domain.resolved_ips.join(", ")}
+            </div>
+          )}
+          {domain.resolved_ips_partial && (
+            <div className="text-xs text-text-muted mt-1">
+              Some addresses withheld for size ({domain.resolved_ips_withheld ?? 0} of its DNS
+              request&apos;s answers not read).
             </div>
           )}
           {/* Sandbox telemetry only, so usually absent — but when a dropped

@@ -1,0 +1,790 @@
+[
+ {
+  "columns": [
+   "Field",
+   "Value"
+  ],
+  "evidence_ids": [
+   "ev_0005",
+   "ev_0006"
+  ],
+  "items": [],
+  "key": "identity",
+  "kind": "kv",
+  "rows": [
+   [
+    "md5",
+    "44d88612fea8a8f36de82e1278abb02f"
+   ],
+   [
+    "sha1",
+    "3395856ce81f2b7382dee72602f798b642f14140"
+   ],
+   [
+    "sha256",
+    "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f"
+   ],
+   [
+    "imphash",
+    "f34d5f2d4577ed6d9ceec516c1f5a744"
+   ],
+   [
+    "file type",
+    "PE"
+   ],
+   [
+    "platform",
+    "windows"
+   ],
+   [
+    "mime",
+    "application/x-dosexec"
+   ],
+   [
+    "size",
+    "204800"
+   ],
+   [
+    "magic hex",
+    "4d5a90000300000004000000ffff0000"
+   ],
+   [
+    "category",
+    "executable"
+   ]
+  ],
+  "source": "routing",
+  "text": "",
+  "title": "Sample identity"
+ },
+ {
+  "columns": [],
+  "evidence_ids": [
+   "ev_0001"
+  ],
+  "items": [],
+  "key": "apk_header",
+  "kind": "kv",
+  "rows": [
+   [
+    "package",
+    "com.example.evil"
+   ],
+   [
+    "version name",
+    "1.2"
+   ],
+   [
+    "min sdk",
+    "21"
+   ]
+  ],
+  "source": "tool:apk_info",
+  "text": "",
+  "title": "APK header"
+ },
+ {
+  "columns": [],
+  "evidence_ids": [
+   "ev_0001"
+  ],
+  "items": [
+   "android.permission.INTERNET",
+   "android.permission.READ_SMS"
+  ],
+  "key": "apk_permissions",
+  "kind": "list",
+  "rows": [],
+  "source": "tool:apk_info",
+  "text": "",
+  "title": "Declared permissions"
+ },
+ {
+  "columns": [
+   "Kind",
+   "Name"
+  ],
+  "evidence_ids": [
+   "ev_0001"
+  ],
+  "items": [],
+  "key": "apk_components",
+  "kind": "table",
+  "rows": [
+   [
+    "activitie",
+    "com.example.evil.MainActivity"
+   ],
+   [
+    "service",
+    "com.example.evil.Beacon"
+   ]
+  ],
+  "source": "tool:apk_info",
+  "text": "",
+  "title": "Declared components"
+ },
+ {
+  "columns": [
+   "Namespace",
+   "Rule",
+   "ATT&CK",
+   "MBC"
+  ],
+  "evidence_ids": [
+   "ev_0002"
+  ],
+  "items": [],
+  "key": "capa_capabilities",
+  "kind": "table",
+  "rows": [
+   [
+    "host-interaction/process/inject",
+    "inject code",
+    "Defense Evasion::Process Injection [T1055]",
+    ""
+   ]
+  ],
+  "source": "tool:capa",
+  "text": "",
+  "title": "capa capabilities"
+ },
+ {
+  "columns": [],
+  "evidence_ids": [
+   "ev_0003"
+  ],
+  "items": [],
+  "key": "elf_header",
+  "kind": "kv",
+  "rows": [
+   [
+    "size",
+    "51200"
+   ],
+   [
+    "bitness",
+    "64"
+   ],
+   [
+    "endianness",
+    "little"
+   ],
+   [
+    "interpreter",
+    "/lib64/ld-linux-x86-64.so.2"
+   ]
+  ],
+  "source": "tool:elf_info",
+  "text": "",
+  "title": "ELF header"
+ },
+ {
+  "columns": [
+   "Name",
+   "Virtual address",
+   "Virtual size",
+   "Raw size",
+   "Entropy"
+  ],
+  "evidence_ids": [
+   "ev_0003"
+  ],
+  "items": [],
+  "key": "elf_sections",
+  "kind": "table",
+  "rows": [
+   [
+    ".text",
+    "4096",
+    "8192",
+    "8192",
+    "6.1"
+   ]
+  ],
+  "source": "tool:elf_info",
+  "text": "",
+  "title": "ELF sections"
+ },
+ {
+  "columns": [
+   "Library",
+   "Function"
+  ],
+  "evidence_ids": [
+   "ev_0003"
+  ],
+  "items": [],
+  "key": "elf_imports",
+  "kind": "table",
+  "rows": [
+   [
+    "libc.so.6",
+    "execve"
+   ]
+  ],
+  "source": "tool:elf_info",
+  "text": "",
+  "title": "ELF imports"
+ },
+ {
+  "columns": [
+   "Field",
+   "Value"
+  ],
+  "evidence_ids": [
+   "ev_0004"
+  ],
+  "items": [],
+  "key": "tool_get_file_report",
+  "kind": "kv",
+  "rows": [
+   [
+    "status",
+    "found"
+   ],
+   [
+    "source",
+    "VirusTotal via VTAI"
+   ],
+   [
+    "retrieved at",
+    "2026-09-23T00:19:34.235957+00:00"
+   ],
+   [
+    "analysis date",
+    "2026-08-23T08:03:36Z"
+   ],
+   [
+    "report url",
+    "https://www.virustotal.com/gui/file/6091f2589fef42e0ab3d7975806cd8a0da012b519637c03b73f702f7586b21ef"
+   ],
+   [
+    "coverage",
+    "engines=75, categories=failure, malicious, timeout, type-unsupported, undetected"
+   ],
+   [
+    "data",
+    "source=VirusTotal, analysis_date=2026-08-23T08:03:36Z, report_url=https://www.virustotal.com/gui/file/6091f2589fef42e0ab3d7975806cd8a0da012b519637c03b73f702f7586b21ef, coverage=engines=75, categories=failure, malicious, timeout, type-unsupported, undetected, id=6091f2589fef42e0ab3d7975806cd8a0da012b519637c03b73f702f7586b21ef, last_analysis_stats=malicious=52, suspicious=0, undetected=15, harmless\u2026"
+   ],
+   [
+    "engines malicious",
+    "52"
+   ],
+   [
+    "engines suspicious",
+    "0"
+   ],
+   [
+    "engines undetected",
+    "15"
+   ],
+   [
+    "engines harmless",
+    "0"
+   ],
+   [
+    "engines",
+    "75"
+   ]
+  ],
+  "source": "tool:get_file_report",
+  "text": "",
+  "title": "Get file report"
+ },
+ {
+  "columns": [
+   "Kind",
+   "Value",
+   "Notes",
+   "Evidence"
+  ],
+  "evidence_ids": [
+   "ev_0007"
+  ],
+  "items": [],
+  "key": "iocs",
+  "kind": "table",
+  "rows": [
+   [
+    "domain",
+    "c2.evil.tld",
+    "hard-coded",
+    "ev_0007"
+   ],
+   [
+    "url",
+    "http://c2.evil.tld/gate.php",
+    "",
+    "ev_0007"
+   ]
+  ],
+  "source": "tool:iocs_from_file",
+  "text": "",
+  "title": "Indicators recovered from the sample"
+ },
+ {
+  "columns": [],
+  "evidence_ids": [
+   "ev_0008"
+  ],
+  "items": [],
+  "key": "pcap_summary",
+  "kind": "text",
+  "rows": [],
+  "source": "tool:pcap_summary",
+  "text": "12 conversations, 3 SNI values, beacon interval 60.0s +/- 1.2s",
+  "title": "Capture summary"
+ },
+ {
+  "columns": [],
+  "evidence_ids": [
+   "ev_0009"
+  ],
+  "items": [],
+  "key": "pe_header",
+  "kind": "kv",
+  "rows": [
+   [
+    "machine",
+    "332"
+   ],
+   [
+    "timestamp",
+    "1614556800"
+   ],
+   [
+    "subsystem",
+    "2"
+   ],
+   [
+    "entry point",
+    "4096"
+   ],
+   [
+    "is dll",
+    "no"
+   ],
+   [
+    "size",
+    "204800"
+   ],
+   [
+    "pdb path",
+    "C:\\build\\loader.pdb"
+   ]
+  ],
+  "source": "tool:pe_info",
+  "text": "",
+  "title": "PE header"
+ },
+ {
+  "columns": [
+   "Name",
+   "Virtual address",
+   "Virtual size",
+   "Raw size",
+   "Entropy"
+  ],
+  "evidence_ids": [
+   "ev_0009"
+  ],
+  "items": [],
+  "key": "pe_sections",
+  "kind": "table",
+  "rows": [
+   [
+    ".text",
+    "4096",
+    "12288",
+    "12800",
+    "6.4213"
+   ],
+   [
+    ".rsrc",
+    "20480",
+    "4096",
+    "4096",
+    "7.9012"
+   ]
+  ],
+  "source": "tool:pe_info",
+  "text": "",
+  "title": "PE sections"
+ },
+ {
+  "columns": [
+   "Library",
+   "Function"
+  ],
+  "evidence_ids": [
+   "ev_0009"
+  ],
+  "items": [],
+  "key": "pe_imports",
+  "kind": "table",
+  "rows": [
+   [
+    "KERNEL32.dll",
+    "VirtualAllocEx"
+   ],
+   [
+    "WS2_32.dll",
+    "connect"
+   ]
+  ],
+  "source": "tool:pe_info",
+  "text": "",
+  "title": "PE imports"
+ },
+ {
+  "columns": [],
+  "evidence_ids": [
+   "ev_0009"
+  ],
+  "items": [
+   "StartService"
+  ],
+  "key": "pe_exports",
+  "kind": "list",
+  "rows": [],
+  "source": "tool:pe_info",
+  "text": "",
+  "title": "PE exports"
+ },
+ {
+  "columns": [
+   "Packer",
+   "Sections"
+  ],
+  "evidence_ids": [
+   "ev_0009"
+  ],
+  "items": [],
+  "key": "packer_signatures",
+  "kind": "table",
+  "rows": [
+   [
+    "UPX",
+    ".text"
+   ]
+  ],
+  "source": "tool:pe_info",
+  "text": "",
+  "title": "Packer section matches"
+ },
+ {
+  "columns": [
+   "API",
+   "Calls",
+   "Processes",
+   "First arguments"
+  ],
+  "evidence_ids": [
+   "ev_0010"
+  ],
+  "items": [],
+  "key": "sandbox_api_calls",
+  "kind": "table",
+  "rows": [
+   [
+    "VirtualAllocEx",
+    "4",
+    "",
+    "{'ProcessHandle': '0x1a4', 'Size': 4096}"
+   ],
+   [
+    "RegSetValueExA",
+    "3",
+    "",
+    ""
+   ]
+  ],
+  "source": "tool:sandbox_api_calls",
+  "text": "",
+  "title": "API calls observed"
+ },
+ {
+  "columns": [
+   "Name",
+   "Path",
+   "Size",
+   "SHA-256"
+  ],
+  "evidence_ids": [
+   "ev_0011"
+  ],
+  "items": [],
+  "key": "sandbox_dropped_files",
+  "kind": "table",
+  "rows": [
+   [
+    "svchost.exe",
+    "C:\\Users\\admin\\AppData\\svchost.exe",
+    "51200",
+    "aa"
+   ]
+  ],
+  "source": "tool:sandbox_dropped_files",
+  "text": "",
+  "title": "Files written"
+ },
+ {
+  "columns": [],
+  "evidence_ids": [
+   "ev_0012"
+  ],
+  "items": [
+   "Global\\LockBitMutex"
+  ],
+  "key": "sandbox_mutexes",
+  "kind": "list",
+  "rows": [],
+  "source": "tool:sandbox_mutexes",
+  "text": "",
+  "title": "Mutexes"
+ },
+ {
+  "columns": [
+   "Kind",
+   "Endpoint",
+   "Detail"
+  ],
+  "evidence_ids": [
+   "ev_0013"
+  ],
+  "items": [],
+  "key": "sandbox_network",
+  "kind": "table",
+  "rows": [
+   [
+    "dns",
+    "c2.evil.tld",
+    "type=A"
+   ],
+   [
+    "http",
+    "http://c2.evil.tld/gate.php",
+    "method=POST"
+   ],
+   [
+    "tcp",
+    "185.220.101.5",
+    "dport=443, sample_process_tree=yes"
+   ]
+  ],
+  "source": "tool:sandbox_network",
+  "text": "",
+  "title": "Network activity observed"
+ },
+ {
+  "columns": [
+   "PID",
+   "Parent",
+   "Name",
+   "Command line"
+  ],
+  "evidence_ids": [
+   "ev_0014"
+  ],
+  "items": [],
+  "key": "sandbox_processes",
+  "kind": "table",
+  "rows": [
+   [
+    "1234",
+    "800",
+    "evil.exe",
+    "evil.exe -install"
+   ]
+  ],
+  "source": "tool:sandbox_processes",
+  "text": "",
+  "title": "Processes observed"
+ },
+ {
+  "columns": [
+   "Key",
+   "Operation",
+   "Value"
+  ],
+  "evidence_ids": [
+   "ev_0015"
+  ],
+  "items": [],
+  "key": "sandbox_registry",
+  "kind": "table",
+  "rows": [
+   [
+    "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+    "modify",
+    "C:\\Users\\Public\\lockbit.exe"
+   ],
+   [
+    "HKCU\\Software\\Evil\\Config",
+    "create",
+    ""
+   ]
+  ],
+  "source": "tool:sandbox_registry_ops",
+  "text": "",
+  "title": "Registry activity"
+ },
+ {
+  "columns": [
+   "Field",
+   "Value"
+  ],
+  "evidence_ids": [
+   "ev_0016"
+  ],
+  "items": [],
+  "key": "sandbox_target",
+  "kind": "kv",
+  "rows": [
+   [
+    "category",
+    "file"
+   ],
+   [
+    "file",
+    "name=evil.exe, size=204800"
+   ]
+  ],
+  "source": "tool:sandbox_report_section",
+  "text": "",
+  "title": "Sandbox: target"
+ },
+ {
+  "columns": [
+   "Kind",
+   "Value"
+  ],
+  "evidence_ids": [
+   "ev_0017"
+  ],
+  "items": [],
+  "key": "sandbox_services_and_tasks",
+  "kind": "table",
+  "rows": [
+   [
+    "service",
+    "EvilUpdater"
+   ],
+   [
+    "task",
+    "schtasks /create /tn EvilTask /tr C:\\evil.exe"
+   ],
+   [
+    "command",
+    "schtasks /create /tn EvilTask /tr C:\\evil.exe"
+   ],
+   [
+    "command",
+    "vssadmin delete shadows /all"
+   ]
+  ],
+  "source": "tool:sandbox_services_and_tasks",
+  "text": "",
+  "title": "Services, tasks and commands"
+ },
+ {
+  "columns": [
+   "Name",
+   "Severity",
+   "Description"
+  ],
+  "evidence_ids": [
+   "ev_0018"
+  ],
+  "items": [],
+  "key": "sandbox_signatures",
+  "kind": "table",
+  "rows": [
+   [
+    "injection_runpe",
+    "3",
+    "Injects into a suspended process"
+   ]
+  ],
+  "source": "tool:sandbox_signatures",
+  "text": "",
+  "title": "Sandbox signature hits"
+ },
+ {
+  "columns": [
+   "Rule",
+   "Level",
+   "Technique",
+   "Matched fields"
+  ],
+  "evidence_ids": [
+   "ev_0019"
+  ],
+  "items": [],
+  "key": "sigma_matches",
+  "kind": "table",
+  "rows": [
+   [
+    "Suspicious Run Key",
+    "high",
+    "T1547.001",
+    "TargetObject"
+   ]
+  ],
+  "source": "tool:sigma_match",
+  "text": "",
+  "title": "Sigma rule matches"
+ },
+ {
+  "columns": [
+   "Offset",
+   "Encoding",
+   "Text"
+  ],
+  "evidence_ids": [
+   "ev_0020"
+  ],
+  "items": [],
+  "key": "strings",
+  "kind": "table",
+  "rows": [
+   [
+    "4160",
+    "ascii",
+    "http://c2.evil.tld/gate.php"
+   ],
+   [
+    "4224",
+    "utf16le",
+    "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"
+   ]
+  ],
+  "source": "tool:strings",
+  "text": "",
+  "title": "Printable strings"
+ },
+ {
+  "columns": [
+   "Rule",
+   "Tags",
+   "Where"
+  ],
+  "evidence_ids": [
+   "ev_0021"
+  ],
+  "items": [],
+  "key": "yara_matches",
+  "kind": "table",
+  "rows": [
+   [
+    "Win32_Loader_Generic",
+    "loader",
+    "$a at 0x1040"
+   ]
+  ],
+  "source": "tool:yara_scan",
+  "text": "",
+  "title": "YARA rule matches"
+ }
+]

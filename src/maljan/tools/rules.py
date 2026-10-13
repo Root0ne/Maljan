@@ -326,7 +326,10 @@ def sigma_match(events: list[dict[str, Any]], ruleset: str = "default") -> dict[
 
 
 def sandbox_events(report: dict[str, Any] | None) -> list[dict[str, str]]:
-    """The sandbox report as Sysmon-shaped events, ready for ``sigma_match``.
+    """The sandbox report's document as Sysmon-shaped events, ready for ``sigma_match``.
+
+    ``report`` is the neutral sandbox report's document
+    (``schemas.sandbox_document``), whichever sandbox produced it.
 
     Kept next to ``sigma_match`` rather than inside the sandbox tools: the
     event shape exists to satisfy Sigma's field vocabulary, so the two move

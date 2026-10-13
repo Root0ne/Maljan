@@ -25,7 +25,7 @@ Design:
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -35,9 +35,11 @@ from maljan.analysis.corroboration import (
     published_count,
     technique_label,
 )
+from maljan.core.token_ledger import CALL_PARTS
 from maljan.pipeline.mediation_models import (
     CONTRADICTIONS_BLOCK_MISSING_NOTE,
     CONTRADICTIONS_BLOCK_MIXED_NOTE,
+    MEDIATOR_NO_ANSWER,
 )
 
 # ---------------------------------------------------------------------------
@@ -68,8 +70,11 @@ class NegotiationMetrics:
         max_rounds:          Hard limit configured at startup.
         termination_reason:  Why the loop stopped (consensus / hard_limit /
                              converged / convergence / not_applicable /
-                             mediation_failed), read from the router's own
-                             rules (``pipeline.routing.debate_route``).
+                             mediation_failed / not_mediated / not_revised /
+                             no_contested_point / contested_points_unchanged),
+                             read
+                             from the router's own rules
+                             (``pipeline.routing.debate_route``).
         sycophancy_events:   Number of rounds where sycophancy was detected.
         confidence_history:  Per-round mediator confidence scores.
         final_confidence:    Last recorded confidence value; ``None`` when
@@ -90,8 +95,9 @@ class NegotiationMetrics:
     # it replaced (``nodes.revision_replacement_sentence``).
     revision_replacements: list[str] = field(default_factory=list)
     # The platform's sentences about the mediation rounds, once each: a
-    # mediation that gave no final ``CONTRADICTIONS:`` block when asked, and one
-    # whose block listed contradictions and also said none stands.
+    # mediation that gave no final ``CONTRADICTIONS:`` block when asked, one
+    # whose block listed contradictions and also said none stands, and one
+    # whose mediator wrote no answer.
     mediation_notes: list[str] = field(default_factory=list)
     # The lines the mediator marked [not blocking: <reason>], round by round,
     # as it wrote them: they did not stand against consensus.
@@ -357,6 +363,161 @@ def spend_blocks(snapshot: dict[str, Any] | None) -> dict[str, Any]:
     summary = RunSummaryBuilder(start_time=time.time()).set_token_usage(snapshot).build()
     stored = summary.to_dict()
     return {"tokens": stored["tokens"], "models": stored["models"]}
+
+
+# The figures of a ``model_usage`` record that are the call's usage, as
+# ``TokenLedger.add`` and ``SpendMeter.settle`` take it: the parts the record
+# was written with, so a part recorded is a part read back.
+_USAGE_KEYS: tuple[str, ...] = CALL_PARTS
+
+
+def _figure(value: Any) -> float | None:
+    """``value`` as a number, or ``None`` when it is not one."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value)
+
+
+class _SpendTotal:
+    """What a set of records cost: the charges they carry, and a repricing of those without one.
+
+    A record written since the ledger kept the meter's charge carries
+    ``priced_usd`` — what the job's meter charged when the call was settled,
+    at the prices then in force, a charge by stated estimate included — and
+    that figure is summed as it is. An older record carries none and is
+    priced again by ``meter`` (``SpendMeter.settle``, the code that settles a
+    run) at the prices in force now; it is counted in ``repriced_calls``.
+    """
+
+    def __init__(self, meter: Callable[[], Any]) -> None:
+        self._make = meter
+        self._meter: Any = None
+        self.spent = 0.0
+        self.prices_from: dict[str, set[str]] = {}
+        self.unreported = 0
+        self.unpriced: dict[str, int] = {}
+        self.estimated_calls = 0
+        self.estimated_usd = 0.0
+        self.repriced_calls = 0
+        self.repriced_usd = 0.0
+
+    def add(
+        self,
+        record: dict[str, Any],
+        usage: dict[str, Any] | None,
+        estimated: dict[str, Any] | None,
+    ) -> None:
+        from maljan.core.spend import price_key
+
+        model = str(record.get("model") or "")
+        name = price_key(model)
+        cost = _figure(record.get("priced_usd"))
+        if cost is not None:
+            source = str(record.get("price_source") or "")
+            by_estimate = _figure(record.get("estimated_usd"))
+        else:
+            if self._meter is None:
+                self._meter = self._make()
+            charged = self._meter.settle(
+                usage, model, str(record.get("call") or ""), estimated=estimated
+            )
+            if not isinstance(charged, dict) or _figure(charged.get("priced_usd")) is None:
+                if usage is None and not estimated:
+                    self.unreported += 1
+                else:
+                    self.unpriced[name] = self.unpriced.get(name, 0) + 1
+                return
+            cost = float(charged["priced_usd"])
+            source = str(charged.get("price_source") or "")
+            by_estimate = _figure(charged.get("estimated_usd"))
+            self.repriced_calls += 1
+            self.repriced_usd += cost
+        self.spent += cost
+        self.prices_from.setdefault(name, set()).add(source)
+        if by_estimate is not None:
+            self.estimated_calls += 1
+            self.estimated_usd += by_estimate
+
+    def as_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "spent_usd": round(self.spent, 6),
+            "prices_from": {
+                name: "; ".join(sorted(sources))
+                for name, sources in sorted(self.prices_from.items())
+            },
+            "repriced_calls": self.repriced_calls,
+        }
+        if self.repriced_calls:
+            out["repriced_usd"] = round(self.repriced_usd, 6)
+        if self.estimated_calls:
+            out["estimated_calls"] = self.estimated_calls
+            out["estimated_usd"] = round(self.estimated_usd, 6)
+        if self.unreported:
+            out["unreported_calls"] = self.unreported
+        if self.unpriced:
+            out["unpriced_models"] = dict(sorted(self.unpriced.items()))
+        if self.unreported or self.unpriced:
+            out["spent_is_at_least"] = True
+        return out
+
+
+def usage_totals(calls: Iterable[Any], meter: Callable[[], Any]) -> dict[str, Any]:
+    """A job's usage totals from its ``model_usage`` records (``token_ledger.call_record``).
+
+    ``tokens``: the answered calls are replayed through a fresh
+    ``TokenLedger`` and the run summary's own ``spend_blocks``, so it is the
+    block a run summary built from the same calls stores, per agent included.
+    A retry record (a failed attempt a provider was asked again after) and a
+    failed attempt's charge are not calls and move no count there, as in the
+    run's own ledger; they are counted as ``retries`` and ``failed_attempts``.
+
+    ``spend``: the charges the records carry, summed, the job's and each
+    agent's, failed attempts included; a record that carries none is priced
+    again by the meters ``meter`` makes (see ``_SpendTotal``). Readable while
+    the run is going and after a worker that died before its summary: the
+    records are committed call by call.
+    """
+    from maljan.core.token_ledger import RETRY_RECORD, TokenLedger
+    from maljan.llm.transient import FAILED_ATTEMPT_CALL
+
+    ledger = TokenLedger()
+    total = _SpendTotal(meter)
+    agents: dict[str, _SpendTotal] = {}
+    calls_made = retries = failed = 0
+    for record in calls:
+        if not isinstance(record, dict):
+            continue
+        agent = str(record.get("agent") or "")
+        model = str(record.get("model") or "")
+        call = str(record.get("call") or "")
+        if call == RETRY_RECORD:
+            retries += 1
+            ledger.add_retry(agent=agent, model=model, reason=str(record.get("reason") or ""))
+            continue
+        usage: dict[str, Any] | None = None
+        if record.get("reported"):
+            usage = {
+                key: record[key] for key in _USAGE_KEYS if _figure(record.get(key)) is not None
+            }
+        raw_estimate = record.get("estimated")
+        estimated = dict(raw_estimate) if isinstance(raw_estimate, dict) else None
+        if call == FAILED_ATTEMPT_CALL:
+            failed += 1
+        else:
+            calls_made += 1
+            ledger.add(usage, agent=agent, model=model, call=call)
+        total.add(record, usage, estimated)
+        if agent:
+            agents.setdefault(agent, _SpendTotal(meter)).add(record, usage, estimated)
+    spend = total.as_dict()
+    spend["per_agent"] = {name: agents[name].as_dict() for name in sorted(agents)}
+    return {
+        "calls": calls_made,
+        "retries": retries,
+        "failed_attempts": failed,
+        "tokens": spend_blocks(ledger.snapshot()).get("tokens", {}),
+        "spend": spend,
+    }
 
 
 def server_rest_sentence(row: dict[str, Any]) -> str:
@@ -801,8 +962,16 @@ def spend_lines(spend: Any) -> list[str]:
 
 
 def _sandbox_name(provider: str) -> str:
-    """A sandbox provider's name as a reader knows it."""
-    return {"triage": "Triage", "cape2": "CAPE", "cuckoo": "Cuckoo"}.get(provider, provider)
+    """A sandbox's name as a reader knows it: the display name its report format declares.
+
+    The report format declared under the provider's name gives it
+    (``core.report_formats``: ``Triage``, ``CAPE``, ``Cuckoo``); a provider no
+    format is named after is named as written.
+    """
+    from maljan.core.report_formats import format_named
+
+    declared = format_named(provider)
+    return (declared.display_name or provider) if declared is not None else provider
 
 
 def tool_latency_lines(latency: Any) -> list[str]:
@@ -833,8 +1002,9 @@ def _attribution_layers() -> list[str]:
 
     Was the literal ``("static", "dynamic", "network", "yara", "sigma")``,
     which named three analysts that a custom profile may not run and missed
-    every analyst it does. The two rule layers stay appended: they are
-    deterministic passes, not analysts, and they run whatever the profile says.
+    every analyst it does. The rule layers follow: deterministic passes, not
+    analysts, which run whatever the profile says, each named as its
+    corroboration rows name it (:func:`_rule_layers`).
     """
     from maljan.agents.composition import current_analyst_keys
 
@@ -842,7 +1012,21 @@ def _attribution_layers() -> list[str]:
         analysts = current_analyst_keys()
     except Exception:  # noqa: BLE001 — a report renders even without settings
         analysts = ["static", "dynamic", "network"]
-    return [*analysts, "yara", "sigma"]
+    return [*analysts, *_rule_layers()]
+
+
+def _rule_layers() -> list[str]:
+    """The rule layers the platform ships: the corroboration name of each asserting tool.
+
+    Read from the shipped declarations, never from settings, so a stored
+    summary renders the same anywhere. A layer the run's own corroboration
+    rows name (an operator's rule matcher under its stored ``source``) is
+    listed after these, from the summary itself.
+    """
+    from maljan.core.declared_reading import shipped_by_name
+
+    shipped = shipped_by_name().items()
+    return sorted({facts.source or name for name, facts in shipped if facts.asserts_techniques})
 
 
 # ---------------------------------------------------------------------------
@@ -939,7 +1123,10 @@ class RunSummary:
     # Which model answered each agent's turns: ``{agent: {turns: {model:
     # count}, fallbacks: [{model, reason}]}}``. A fallback row is a turn
     # another model answered because the one before it failed as a provider,
-    # with that failure in words. ``None`` on a run that recorded no turn.
+    # with that failure in words. ``retries: [{model, reason}]`` is present
+    # only for an agent whose provider was asked again after a transient
+    # failure (``llm.transient``), one row per failed attempt. ``None`` on a
+    # run that recorded no turn.
     models: dict[str, Any] | None = None
     # The tool servers this run rested after a run of calls they did not answer:
     # ``[{server, failures, cooldown_s, reason}]`` in the order they opened.
@@ -1216,6 +1403,23 @@ class RunSummary:
             lines += ["## Model Fallbacks", ""]
             for agent, row in fallbacks:
                 lines.append(f"- `{agent}`: {row.get('reason', '')}")
+            lines.append("")
+
+        retried = [
+            (agent, row)
+            for agent, block in sorted((self.models or {}).items())
+            for row in (block.get("retries") or [])
+        ]
+        if retried:
+            lines += [
+                "## Provider Retries",
+                "",
+                f"{count_label(len(retried), 'model request')} failed at the provider "
+                f"for a moment and {'was' if len(retried) == 1 else 'were'} made again:",
+                "",
+            ]
+            for agent, row in retried:
+                lines.append(f"- `{agent}` ({row.get('model', '')}): {row.get('reason', '')}")
             lines.append("")
 
         if self.server_rests:
@@ -1680,12 +1884,15 @@ class RunSummaryBuilder:
         prompts, and the ledger holds the entries themselves.
         """
         if facts and "entries" in facts:
+            from maljan.core.pack_steps import step_schedules
+
             self._triage = {
                 "entries": int(facts.get("entries") or 0),
                 "failed": int(facts.get("failed") or 0),
                 "duration_ms": int(facts.get("duration_ms") or 0),
-                # How FLOSS ran: beside capa, or in turn and why.
-                **({"floss": str(facts["floss"])} if facts.get("floss") else {}),
+                # How each step that may run beside the pack ran, by step id:
+                # beside which steps, or in turn and why.
+                **step_schedules(facts),
             }
         return self
 
@@ -1699,7 +1906,9 @@ class RunSummaryBuilder:
             if found.status == OBSERVED
             else {"status": found.status, "statement": found.statement}
         )
-        limit = report.get("run_limit") if isinstance(report, dict) else None
+        from maljan.schemas.sandbox_document import place
+
+        limit = place(report, "run_limit")
         seconds = limit.get("seconds") if isinstance(limit, dict) else None
         self._sandbox_run_limit = (
             {
@@ -1731,7 +1940,18 @@ class RunSummaryBuilder:
         model counts and the fallbacks come out of the same snapshot, because
         the call that is counted is the call whose model is named.
         """
-        if not snapshot or not snapshot.get("llm_calls"):
+        if not snapshot:
+            return self
+        if not snapshot.get("llm_calls"):
+            # No call answered, and a provider may still have been asked
+            # again: those retries are counted even so.
+            lost: dict[str, Any] = {}
+            for row in snapshot.get("retries") or []:
+                block = lost.setdefault(str(row.get("agent") or ""), {"turns": {}, "fallbacks": []})
+                block.setdefault("retries", []).append(
+                    {"model": str(row.get("model") or ""), "reason": str(row.get("reason") or "")}
+                )
+            self._models = lost or None
             return self
         raw_agents = snapshot.get("agents")
         agents: dict[str, Any] = raw_agents if isinstance(raw_agents, dict) else {}
@@ -1768,6 +1988,12 @@ class RunSummaryBuilder:
             agent = str(row.get("agent") or "")
             block = models.setdefault(agent, {"turns": {}, "fallbacks": []})
             block["fallbacks"].append(
+                {"model": str(row.get("model") or ""), "reason": str(row.get("reason") or "")}
+            )
+        for row in snapshot.get("retries") or []:
+            agent = str(row.get("agent") or "")
+            block = models.setdefault(agent, {"turns": {}, "fallbacks": []})
+            block.setdefault("retries", []).append(
                 {"model": str(row.get("model") or ""), "reason": str(row.get("reason") or "")}
             )
         self._models = models or None
@@ -1980,7 +2206,11 @@ class RunSummaryBuilder:
                     for arg in discussion_history
                     if getattr(arg, "agent_name", "") == "Mediator"
                     and getattr(arg, "note", "")
-                    in (CONTRADICTIONS_BLOCK_MISSING_NOTE, CONTRADICTIONS_BLOCK_MIXED_NOTE)
+                    and (
+                        getattr(arg, "note", "")
+                        in (CONTRADICTIONS_BLOCK_MISSING_NOTE, CONTRADICTIONS_BLOCK_MIXED_NOTE)
+                        or getattr(arg, "status", "complete") == MEDIATOR_NO_ANSWER
+                    )
                 )
             ),
             not_blocking=[

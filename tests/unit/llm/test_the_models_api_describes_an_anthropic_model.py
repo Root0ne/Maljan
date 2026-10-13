@@ -17,6 +17,7 @@ import pytest
 
 from maljan.core.config import Settings
 from maljan.core.exceptions import LLMError
+from maljan.core.model_assignments import assignments_for
 from maljan.llm import context_window as cw
 from maljan.llm import model_capabilities, model_output_limits
 from maljan.llm.anthropic_provider import AnthropicProvider
@@ -116,7 +117,7 @@ def _settings(**anthropic: Any) -> Settings:
 class TestTheDescription:
     def test_the_window_is_read_and_its_source_said(self, monkeypatch: pytest.MonkeyPatch) -> None:
         seen = _answering(monkeypatch, 200, DESCRIPTION)
-        fact = cw.window_for_settings(_settings(), ["static"])
+        fact = cw.window_for_settings(_settings(), assignments_for(_settings(), ["static"]))
         assert (fact.tokens, fact.source) == (1_000_000, cw.PROBED)
         assert fact.detail == "the Anthropic Models API reported 1,000,000 tokens"
         assert [str(r.url) for r in seen] == [f"https://api.anthropic.com/v1/models/{MODEL}"]
@@ -126,7 +127,7 @@ class TestTheDescription:
     ) -> None:
         _answering(monkeypatch, 200, DESCRIPTION)
         settings = _settings()
-        cw.window_for_settings(settings, ["static"])
+        cw.window_for_settings(settings, assignments_for(settings, ["static"]))
         assert model_output_limits.declared_output(MODEL) == (128_000, "the Anthropic Models API")
         cap = cw.output_cap_for(settings, "expert_max_tokens", "static")
         assert cap.tokens == 128_000
@@ -134,7 +135,7 @@ class TestTheDescription:
 
     def test_the_effort_levels_are_kept(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _answering(monkeypatch, 200, DESCRIPTION)
-        cw.window_for_settings(_settings(), ["static"])
+        cw.window_for_settings(_settings(), assignments_for(_settings(), ["static"]))
         assert model_capabilities.takes_effort(MODEL, "max") is True
         assert model_capabilities.takes_effort("another-model", "max") is None
 
@@ -150,7 +151,7 @@ class TestTheDescription:
         }
         _answering(monkeypatch, 200, narrower)
         settings = _settings(effort="max")
-        cw.window_for_settings(settings, ["static"])
+        cw.window_for_settings(settings, assignments_for(settings, ["static"]))
         with pytest.raises(LLMError, match="does not take"):
             AnthropicProvider(settings).build_model(MODEL, 0.1, max_tokens=1024)
 
@@ -161,7 +162,7 @@ class TestWhenItCannotBeAsked:
     ) -> None:
         _answering(monkeypatch, 401, {"type": "error"})
         settings = _settings()
-        fact = cw.window_for_settings(settings, ["static"])
+        fact = cw.window_for_settings(settings, assignments_for(settings, ["static"]))
         assert (fact.tokens, fact.source) == (1_000_000, cw.TABLE)
         assert "'claude-haiku-5-5' row" in fact.detail
         tokens, where = model_output_limits.declared_output(MODEL)
@@ -174,5 +175,5 @@ class TestWhenItCannotBeAsked:
             _env_file=None,
             llm={"provider": "anthropic", "anthropic": {"expert_model": MODEL}},
         )
-        cw.window_for_settings(settings, ["static"])
+        cw.window_for_settings(settings, assignments_for(settings, ["static"]))
         assert seen == []

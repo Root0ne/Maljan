@@ -134,7 +134,7 @@ class TestBothPromptsCarryIt:
                 reports={"static": "text"},
                 history=[],
                 isr_reports=_isr(),
-                ledger_servers={"analysis"},
+                reputation_asked=False,
                 sample=SAMPLE,
             )
         )
@@ -183,7 +183,7 @@ class TestBothPromptsCarryIt:
                 reports={"static": "text"},
                 history=[],
                 isr_reports=_isr(),
-                ledger_servers={"analysis"},
+                reputation_asked=False,
                 sample=SAMPLE,
             )
         )
@@ -214,7 +214,7 @@ class TestBothPromptsCarryIt:
                 reports={"static": "text"},
                 history=[],
                 isr_reports=_isr(),
-                ledger_servers={"analysis"},
+                reputation_asked=False,
                 sample=None,
             )
         )
@@ -247,7 +247,7 @@ class TestBothPromptsCarryIt:
                 reports={"static": "text"},
                 history=[],
                 isr_reports=_isr(),
-                ledger_servers={"analysis"},
+                reputation_asked=False,
                 sample=SAMPLE,
             )
         )

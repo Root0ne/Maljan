@@ -13,10 +13,10 @@ const SECTIONS: { title: string; prefix: string }[] = [
   { title: "Report", prefix: "core.sandbox.rest.report." },
 ];
 const MAPPING_PREFIX = "core.sandbox.rest.mapping.";
-// Mirrors `MAX_ROWS_PER_CHANNEL` in `providers/sandbox/rest_mapping.py` — the
-// preview reports `truncated` as a bare bool, so the row that shows it names
-// the ceiling the server actually applied.
-const MAX_ROWS_PER_CHANNEL = 5000;
+// A channel is read whole; `truncated` says a path matched more values than
+// the report holds (its matches repeat) and was cut at the report's own size
+// (`providers/sandbox/rest_mapping.py`).
+const TRUNCATED_NOTE = " · cut at the report's size: the path's matches repeat";
 
 /** What both the mapping table and the whole REST editor need: the catalog
  *  rows they draw and the four callbacks every field on this screen stages
@@ -205,7 +205,7 @@ export function RestMappingTable({
                       ? stats.error
                         ? stats.error
                         : `${stats.matched} / ${stats.kept} / ${stats.dropped}${
-                            stats.truncated ? ` · truncated at ${MAX_ROWS_PER_CHANNEL}` : ""
+                            stats.truncated ? TRUNCATED_NOTE : ""
                           }`
                       : "—"}
                 </td>

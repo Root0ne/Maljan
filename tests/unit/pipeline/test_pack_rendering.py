@@ -274,7 +274,8 @@ class TestTheLines:
             server="threatintel",
         )
         line = render_pack([entry], 0)
-        assert line.startswith("[ev_0001] reputation: threatintel 55 malicious (")
+        # Named by the lookup's declared display name.
+        assert line.startswith("[ev_0001] reputation: Threat intelligence 55 malicious (")
 
     def test_a_skipped_reputation_says_why(self) -> None:
         entry = _entry(

@@ -169,10 +169,10 @@ class TestAClonesMissingToolListIsItsRoleSeeds:
             {"static_r2": {"role": "static", "static_provider": "r2"}},
             servers={"analysis": None, "knowledge": None, "virustotal": None},
         )
-        assert [ref["server"] for ref in stored["static_r2"]["tools"]] == [
-            "analysis",
-            "knowledge",
-            "virustotal",
+        assert stored["static_r2"]["tools"] == [
+            {"kind": "mcp", "server": "analysis", "name": None},
+            {"kind": "mcp", "server": "knowledge", "name": None},
+            {"kind": "capability", "server": None, "name": None, "capability": "reputation"},
         ]
 
     def test_the_helper_only_fills_a_missing_list(self) -> None:
@@ -184,9 +184,9 @@ def test_the_team_preview_reads_a_staged_clone_as_the_save_will() -> None:
     from app.services.agent_map import staged_definitions
 
     staged = staged_definitions({"static_r2": {"role": "static", "static_provider": "r2"}})
-    assert [ref["server"] for ref in staged["static_r2"]["tools"]] == [
+    assert [ref["server"] or ref.get("capability") for ref in staged["static_r2"]["tools"]] == [
         "analysis",
         "knowledge",
-        "virustotal",
+        "reputation",
     ]
     assert staged_definitions({"bare": {"role": "static", "tools": []}})["bare"]["tools"] == []

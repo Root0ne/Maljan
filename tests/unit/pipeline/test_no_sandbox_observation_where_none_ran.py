@@ -123,13 +123,11 @@ class TestThePack:
 
 class TestTheProviderMarksAFixture:
     def _run(self, raw: dict[str, Any], provider: str, source_format: str) -> dict[str, Any]:
-        from maljan.providers.cape_view import to_cape_shaped_dict
-        from maljan.schemas.sandbox_report import cape_report_to_sandbox_report
+        from maljan.providers.sandbox.readers import required_reader
+        from maljan.schemas.sandbox_document import sandbox_document
 
-        report = cape_report_to_sandbox_report(
-            raw, provider=provider, source_format=source_format, task_id="1"
-        )
-        return to_cape_shaped_dict(report)
+        report = required_reader(source_format).read(raw, provider=provider, task_id="1")
+        return sandbox_document(report)
 
     def test_the_mock_s_fixture_is_marked_as_one(self) -> None:
         shaped = self._run(dict(SANDBOX_REPORT), "mock", "mock")

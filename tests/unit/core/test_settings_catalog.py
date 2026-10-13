@@ -21,8 +21,8 @@ def test_types_and_choices():
     by_path = {e.path: e for e in cat.core_catalog()}
     assert by_path["llm.openai.api_key"].type == "secret" and by_path["llm.openai.api_key"].secret
     assert (
-        by_path["memory.qdrant_api_key"].type == "secret"
-        and by_path["memory.qdrant_api_key"].secret
+        by_path["memory.qdrant.api_key"].type == "secret"
+        and by_path["memory.qdrant.api_key"].secret
     )
     assert by_path["reporting.default_tlp"].type == "enum"
     expected_tlp_choices = ["CLEAR", "GREEN", "AMBER", "AMBER_STRICT", "RED"]
@@ -191,7 +191,7 @@ def test_subgroup_and_advanced_assignments_follow_the_design() -> None:
     assert e["core.preprocessing.packer_signatures_path"].subgroup == "Reference data"
     assert e["core.preprocessing.max_tool_output_chars"].subgroup == "Thresholds and limits"
     assert e["core.preprocessing.family_rag_min_score"].advanced
-    assert e["core.preprocessing.summarizer_model"].subgroup == "Function summarizer"
+    assert e["core.preprocessing.summarizer_max_words"].subgroup == "Function summarizer"
     assert e["core.react_agent_max_steps_overrides"].advanced
     assert e["core.react_agent_timeout"].subgroup == "Limits"
     assert e["core.reporting.default_tlp"].subgroup == "Document metadata"

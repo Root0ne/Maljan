@@ -62,10 +62,10 @@ class TestTheRouterRespectsWhicheverProfileIsRunning:
 
         assert _routes_to(cfg, is_consensus=False) == "revision"
 
-    def test_sycophancy_overrides_a_premature_consensus(self) -> None:
+    def test_sycophancy_never_overrides_a_consensus(self) -> None:
         cfg = _install()
 
-        assert _routes_to(cfg, is_consensus=True, sycophancy_detected=True) == "revision"
+        assert _routes_to(cfg, is_consensus=True, sycophancy_detected=True) == "judge"
 
     def test_the_hard_iteration_limit_wins(self) -> None:
         cfg = _install()
@@ -162,7 +162,16 @@ class TestTheRunSummaryRecordsTheProfileThatRan:
         )
         from maljan.analysis.run_summary import _attribution_layers
 
-        assert _attribution_layers() == ["network", "strings", "yara", "sigma"]
+        # The rule layers are every declared asserting tool's corroboration name.
+        assert _attribution_layers() == [
+            "network",
+            "strings",
+            "capa",
+            "lolbin",
+            "sandbox",
+            "sigma",
+            "yara",
+        ]
 
     def test_the_judges_empty_analyst_check_covers_exactly_the_profile(self) -> None:
         _install(profiles={"lean": {"analysts": ["network"]}}, profile="lean")

@@ -1,0 +1,53 @@
+{
+  "analysis_report": {
+    "general": {
+      "task_id": "4471",
+      "version": "37.0.1",
+      "target": {
+        "file_name": "invoice-q3.exe",
+        "sha256": "4f6a1d2c9e8b7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a21"
+      }
+    },
+    "behaviour": {
+      "system": {
+        "processes": {
+          "process": [
+            {
+              "pid": 2148,
+              "parent_pid": 1012,
+              "image": "C:\\Users\\analyst\\Desktop\\invoice-q3.exe",
+              "cmdline": "\"C:\\Users\\analyst\\Desktop\\invoice-q3.exe\" /q"
+            },
+            {
+              "pid": 2290,
+              "parent_pid": 2148,
+              "image": "C:\\Windows\\System32\\cmd.exe",
+              "cmdline": "cmd.exe /c ping -n 3 192.0.2.44"
+            }
+          ]
+        }
+      }
+    },
+    "network": {
+      "connections": [
+        {"protocol": "TCP", "dest_ip": "203.0.113.10", "dest_port": 443, "src_port": 49712},
+        {"protocol": "UDP", "dest_ip": "198.51.100.7", "dest_port": 53, "src_port": 61022}
+      ],
+      "dns_queries": [
+        {"query": "relay-q1.example", "qtype": "A", "answers": [{"data": "203.0.113.10"}]}
+      ]
+    },
+    "dropped": {
+      "file": [
+        {
+          "sha256": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b",
+          "path": "C:\\Users\\analyst\\AppData\\Roaming\\svc\\helper.dll",
+          "size": 40960
+        }
+      ]
+    },
+    "detections": [
+      {"rule": "Connects over an uncommon pairing", "level": 3}
+    ]
+  }
+}

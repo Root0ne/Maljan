@@ -1,0 +1,146 @@
+[
+ {
+  "messages": [
+   {
+    "content": "You are a static analyst.",
+    "role": "system"
+   },
+   {
+    "content": "Analyse.\n\n=== RUN STATE (derived from the ledger; regenerated each turn) ===\nsample: c\nbudget remaining: no step limit, no time limit\n=== END RUN STATE ===",
+    "role": "user"
+   }
+  ],
+  "tools": [
+   "lookup"
+  ]
+ },
+ {
+  "messages": [
+   {
+    "content": "You are a static analyst.",
+    "role": "system"
+   },
+   {
+    "content": "Analyse.",
+    "role": "user"
+   },
+   {
+    "content": "The file looks like a loader; it reads its configuration from a resource.",
+    "role": "assistant"
+   },
+   {
+    "content": "Your answer above was written without calling any tool. The tools you have in this loop are: lookup. If you want to call any of them, call them now and then write your final answer. If you do not want to call any, reply with the single word KEEP and your answer above stands as written; or write a new final answer, which then stands.\n\n=== RUN STATE (derived from the ledger; regenerated each turn) ===\nsample: c\nbudget remaining: no step limit, no time limit\n=== END RUN STATE ===",
+    "role": "user"
+   }
+  ],
+  "tools": [
+   "lookup"
+  ]
+ },
+ {
+  "messages": [
+   {
+    "content": "You are a static analyst.",
+    "role": "system"
+   },
+   {
+    "content": "Analyse.",
+    "role": "user"
+   },
+   {
+    "content": "The file looks like a loader; it reads its configuration from a resource.",
+    "role": "assistant"
+   },
+   {
+    "content": "Your answer above was written without calling any tool. The tools you have in this loop are: lookup. If you want to call any of them, call them now and then write your final answer. If you do not want to call any, reply with the single word KEEP and your answer above stands as written; or write a new final answer, which then stands.",
+    "role": "user"
+   },
+   {
+    "content": "",
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": "{\"what\": \"w0\"}",
+       "name": "lookup"
+      },
+      "id": "c0",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "[ev_0001]\n<<tool output [ev_0001] e99ca0e2d59c>>\nanswer for w0 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n<<end of tool output [ev_0001] e99ca0e2d59c>>\n\n=== RUN STATE (derived from the ledger; regenerated each turn) ===\nsample: c\nbudget remaining: no step limit, no time limit\n=== END RUN STATE ===",
+    "name": "lookup",
+    "role": "tool",
+    "tool_call_id": "c0"
+   }
+  ],
+  "tools": [
+   "lookup"
+  ]
+ },
+ {
+  "messages": [
+   {
+    "content": "You are a static analyst.",
+    "role": "system"
+   },
+   {
+    "content": "Analyse.",
+    "role": "user"
+   },
+   {
+    "content": "The file looks like a loader; it reads its configuration from a resource.",
+    "role": "assistant"
+   },
+   {
+    "content": "Your answer above was written without calling any tool. The tools you have in this loop are: lookup. If you want to call any of them, call them now and then write your final answer. If you do not want to call any, reply with the single word KEEP and your answer above stands as written; or write a new final answer, which then stands.",
+    "role": "user"
+   },
+   {
+    "content": "",
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": "{\"what\": \"w0\"}",
+       "name": "lookup"
+      },
+      "id": "c0",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "[ev_0001]\n<<tool output [ev_0001] e99ca0e2d59c>>\nanswer for w0 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n<<end of tool output [ev_0001] e99ca0e2d59c>>",
+    "name": "lookup",
+    "role": "tool",
+    "tool_call_id": "c0"
+   },
+   {
+    "content": "",
+    "role": "assistant",
+    "tool_calls": [
+     {
+      "function": {
+       "arguments": "{\"what\": \"w1\"}",
+       "name": "lookup"
+      },
+      "id": "c1",
+      "type": "function"
+     }
+    ]
+   },
+   {
+    "content": "[ev_0002]\n<<tool output [ev_0002] 2c09ca3436ce>>\nanswer for w1 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n<<end of tool output [ev_0002] 2c09ca3436ce>>\n\n=== RUN STATE (derived from the ledger; regenerated each turn) ===\nsample: c\nbudget remaining: no step limit, no time limit\n=== END RUN STATE ===",
+    "name": "lookup",
+    "role": "tool",
+    "tool_call_id": "c1"
+   }
+  ],
+  "tools": [
+   "lookup"
+  ]
+ }
+]

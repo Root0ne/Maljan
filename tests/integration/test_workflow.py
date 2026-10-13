@@ -269,6 +269,8 @@ class TestAnalystNodeChunkedWiring:
             for i in range(3)
         ]
         container = self._make_mock_container(chunks=chunks)
+        # Chunks that do not fit one: an operator's figure under their joined size.
+        container.config.chunking = ChunkingConfig(max_tokens_per_chunk=1)
         node_fn = make_stage_agent_node(ANALYSIS_STAGE, "static", container)
         result = node_fn(self._make_state())
 

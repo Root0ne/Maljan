@@ -131,3 +131,24 @@ def safe_parse_json(text: str) -> Any:
         return json.loads(cleaned)
     except json.JSONDecodeError:
         return None
+
+
+def json_decode_error(text: str) -> tuple[str, int, str] | None:
+    """Why :func:`safe_parse_json` reads nothing from ``text``: ``(complaint, position, json)``.
+
+    The decoder's own complaint about the JSON this reader found in ``text``
+    (fence and surrounding words taken off by :func:`extract_json`, as the
+    reader takes them off), the 0-based position it stopped at in that JSON,
+    and the JSON itself, before the repair pass, which is what the writer
+    wrote. ``None`` when the reader reads ``text``, or when the JSON it found
+    decodes and only the reader's own rules took nothing from it. Linear in
+    ``text``.
+    """
+    if safe_parse_json(text) is not None:
+        return None
+    cleaned = extract_json(text)
+    try:
+        json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        return exc.msg, exc.pos, cleaned
+    return None

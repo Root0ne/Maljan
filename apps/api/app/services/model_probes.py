@@ -28,11 +28,13 @@ can wave away is not a gate.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from maljan.core.model_assignments import (
     ModelAssignment,
-    assignments_for,
+    assignment_chain_for,
+    builder_role,
     endpoint_label,
 )
 from sqlalchemy import select
@@ -121,8 +123,12 @@ def _sentence(assignment: ModelAssignment, detail: str) -> str:
     # A fallback is gated exactly as the first model is, and the sentence
     # says which one it is, so an operator knows which entry of the list to fix.
     names = "falls back to" if getattr(assignment, "position", 0) else "names"
+    # An entry's own effort is part of what was looked for, so a passing probe
+    # of the same model at another effort does not read as a contradiction.
+    effort = getattr(assignment, "effort", None)
+    at_effort = f" at effort {effort!r}" if effort else ""
     return (
-        f"agent {assignment.agent!r} {names} model {assignment.model!r} at "
+        f"agent {assignment.agent!r} {names} model {assignment.model!r}{at_effort} at "
         f"{endpoint_label(assignment.endpoint)}: {detail}"
     )
 
@@ -143,9 +149,9 @@ async def unprobed_models_being_saved(
     on every save; asking about all of them would refuse a change to agent B's
     temperature because agent A carries an untested model, which is a refusal
     about something the operator did not touch. Each entry is compared with
-    the stored leaf and only the ones that differ in ``provider``, ``model`` or
-    ``base_url`` are asked about; an entry that is new is asked about, because
-    everything about it is a change.
+    the stored leaf and only the ones that differ in ``provider``, ``model``,
+    ``base_url`` or the model's own ``effort`` are asked about; an entry that
+    is new is asked about, because everything about it is a change.
 
     The settings the pairs are read against are the ones being written, so an
     operator moving an agent to a new endpoint and a new model in one save is
@@ -179,21 +185,45 @@ def _points_somewhere_new(now: Any, was: Any) -> bool:
     return _calls(now) != _calls(was)
 
 
-def _calls(entry: dict[str, Any]) -> list[tuple[Any, Any, Any]]:
-    """``(provider, model, base_url)`` for each model of an entry's list, in order."""
+def _calls(entry: dict[str, Any]) -> list[tuple[Any, Any, Any, Any]]:
+    """``(provider, model, base_url, effort)`` for each model of an entry's list, in order.
+
+    An effort that is absent, ``None`` or blank reads the same, so an entry
+    stored before the field existed is not a change.
+    """
     rows = [entry, *[row for row in (entry.get("fallbacks") or []) if isinstance(row, dict)]]
-    return [(row.get("provider"), row.get("model"), row.get("base_url")) for row in rows]
+    return [
+        (
+            row.get("provider"),
+            row.get("model"),
+            row.get("base_url"),
+            str(row.get("effort") or "").strip() or None,
+        )
+        for row in rows
+    ]
 
 
-async def unprobed_models(db: AsyncSession, settings: Any, agents: list[str]) -> list[str]:
+async def unprobed_models(
+    db: AsyncSession, settings: Any, agents: Sequence[str | ModelAssignment]
+) -> list[str]:
     """Every agent whose model has no passing probe, as sentences, or nothing.
 
-    Empty when the gate is off, when the profile names no agent, and — the
-    ordinary case — when every model an agent would call has been reached.
+    ``agents`` holds models already read (``composition.called_assignments``)
+    or agent names, each read with every model it may call on the role its
+    builder reads it on (``builder_role``: the judge's and the reporter's
+    global model is the judge model). Empty when the gate is off, when the
+    profile names no agent, and — the ordinary case — when every model an
+    agent would call has been reached.
     """
     if not getattr(settings.llm, "require_probe", True):
         return []
-    assignments = [a for a in assignments_for(settings, agents) if a.model and a.endpoint]
+    read: list[ModelAssignment] = []
+    for item in agents:
+        if isinstance(item, str):
+            read.extend(assignment_chain_for(settings, item, role=builder_role(item)))
+        else:
+            read.append(item)
+    assignments = [a for a in read if a.model and a.endpoint]
     stored = await _results(db, {a.key for a in assignments})
     refusals: list[str] = []
     for assignment in assignments:

@@ -28,11 +28,59 @@ class Annotation(TypedDict):
     applies_when: NotRequired[dict[str, list[str]]]  # key -> values that reveal this entry
     order: NotRequired[int]  # within the group; default 0
     choices_from: NotRequired[
-        Literal["static_providers", "sandbox_providers", "mcp_servers", "agent_roles", "profiles"]
+        Literal[
+            "static_providers",
+            "sandbox_providers",
+            "mcp_servers",
+            "agent_roles",
+            "profiles",
+            "memory_backends",
+            "llm_providers",
+            "sandbox_report_readers",
+        ]
     ]
-    editor: NotRequired[Literal["server_map", "rest_sandbox", "agent_definitions", "stages"]]
+    editor: NotRequired[
+        Literal["server_map", "rest_sandbox", "agent_definitions", "stages", "tool_facts"]
+    ]
     subgroup: NotRequired[str]  # heading inside the group; absent = top of the group
     advanced: NotRequired[bool]  # folded into the group's closed "Advanced" disclosure
+
+
+# Settings that moved to another key, each with the key that now holds it. An
+# export written before the move still carries the old key; the import reads
+# it as the new one (the new one wins when a file carries both).
+RENAMED_SETTINGS: dict[str, str] = {
+    "core.memory.qdrant_url": "core.memory.qdrant.url",
+    "core.memory.qdrant_collection": "core.memory.qdrant.collection",
+    "core.memory.qdrant_function_hash_collection": "core.memory.qdrant.function_hash_collection",
+    "core.memory.qdrant_api_key": "core.memory.qdrant.api_key",
+}
+
+
+# Process environment variables a setting replaced, each with the settings key
+# that now holds its value. The revision that retired a variable reads it once
+# into that key where the store holds nothing for it; a process that still has
+# one set says at start which key holds it now, and reads it no more.
+RETIRED_ENVIRONMENT: dict[str, str] = {
+    "GHIDRA_CONTAINER_SAMPLES_PATH": "core.static.ghidra.sample_mount",
+}
+
+
+# Settings that were retired with no effect, each with what replaces it. An
+# export written before a retirement still carries the key; the import refuses
+# it like any key the catalogue no longer knows, and says it is this one, so
+# the operator knows which key to delete from the file.
+RETIRED_SETTINGS: dict[str, str] = {
+    "core.preprocessing.summarizer_provider": (
+        "the function summariser's model is the llm.agents.summarizer entry"
+    ),
+    "core.preprocessing.summarizer_model": (
+        "the function summariser's model is the llm.agents.summarizer entry"
+    ),
+    "core.reporting.narrative_max_tokens": (
+        "the report stage's output budget is llm.judge_max_tokens or derived"
+    ),
+}
 
 
 GROUP_ORDER: list[tuple[str, str]] = [
@@ -42,7 +90,7 @@ GROUP_ORDER: list[tuple[str, str]] = [
     ("static", "Static analysis provider"),
     ("sandbox", "Sandbox provider"),
     ("mcp", "Tool servers (MCP)"),
-    ("memory", "Memory / LTM (Qdrant)"),
+    ("memory", "Memory / LTM"),
     ("analysis", "Analysis layers"),
     ("negotiation", "Negotiation"),
     ("chunking", "Chunking"),
@@ -138,9 +186,13 @@ ANNOTATIONS: dict[str, Annotation] = {
     "chunking.max_tokens_per_chunk": {
         "title": "Max tokens per chunk",
         "description": (
-            "Maximum tokens per chunk when splitting oversized analyst input for the "
-            "LLM. Raise it on a larger-context model to produce fewer, richer chunks; "
-            "lowering it produces more, smaller chunks."
+            "Tokens per chunk when an analyst's input is split, at four characters a "
+            "token. Empty, the default, sizes a chunk from the analyst's own window: "
+            "what its prompt holds before the reply, less the system prompt, the pack, "
+            "the tool definitions and one tool answer's share. Sources that fit a chunk "
+            "together are joined, so an input that fits runs one loop; with no window "
+            "learned a chunk is the 20,000 tokens this setting shipped with. A number "
+            "set here wins. Every chunk is a full tool loop run after the one before it."
         ),
     },
     "chunking.overlap_tokens": {
@@ -153,9 +205,10 @@ ANNOTATIONS: dict[str, Annotation] = {
     "chunking.skip_if_fits": {
         "title": "Skip chunking if it fits",
         "description": (
-            "When true, input smaller than max_tokens_per_chunk is sent as a single "
-            "chunk instead of always being split. Set false to force chunking even on "
-            "small input — useful for testing the chunked code path."
+            "When true, input inside the chunk size is sent as a single chunk, and "
+            "sources that fit it together are joined into one, instead of always being "
+            "split. Set false to force chunking even on small input — useful for "
+            "testing the chunked code path."
         ),
     },
     "google_api_key": {
@@ -202,6 +255,16 @@ ANNOTATIONS: dict[str, Annotation] = {
             "explicitly to keep the verdict call deterministic. A per-agent base URL "
             "applies to openai and ollama entries only and lets different agents use "
             "different local servers, while the provider's API key stays shared. "
+            "A per-agent effort (each fallback may name its own) is sent where the "
+            "provider's global effort is sent: Anthropic output_config.effort, one of "
+            "the levels the Models API says the model takes, or the OpenAI-compatible "
+            "reasoning_effort as written. Left empty it inherits llm.anthropic.effort "
+            "or llm.openai.reasoning_effort; ollama and gemini entries take none. The "
+            "reporter entry sets the narrative and composer calls, the judge entry the "
+            "verdict calls, the mediator entry the debate stage's mediation and the "
+            "summarizer entry the function summariser. With no mediator or summarizer "
+            "entry those two run on the global expert model; a judge entry does not "
+            "move the mediator. "
             "An entry may list fallbacks, models tried in order only when the one "
             "before fails as a provider (a refused connection, a timeout, a server "
             "error, a model the server does not have) and never because of what a "
@@ -283,6 +346,21 @@ ANNOTATIONS: dict[str, Annotation] = {
         "probe": "llm",
         "subgroup": "Anthropic",
     },
+    "llm.anthropic.base_url": {
+        "title": "Anthropic base URL",
+        "description": (
+            "Sends every Anthropic request — a job's calls, the Models API question and the "
+            "connection test — to this address instead of the Anthropic API: a proxy, or the "
+            "loopback stub a rehearsal runs against. The API key is sent to this address with "
+            "every request. https is required unless the host is loopback (127.0.0.0/8, ::1, "
+            "localhost), or a Docker host gateway when "
+            "llm.anthropic.allow_plain_http_to_docker_host is set; written without /v1, with "
+            "no user name, query or fragment. Leave empty for the Anthropic API."
+        ),
+        "probe": "llm",
+        "subgroup": "Anthropic",
+        "advanced": True,
+    },
     "llm.anthropic.expert_model": {
         "title": "Anthropic expert model",
         "description": (
@@ -308,6 +386,19 @@ ANNOTATIONS: dict[str, Annotation] = {
             "connection test asks with it."
         ),
         "probe": "llm",
+        "subgroup": "Anthropic",
+        "advanced": True,
+    },
+    "llm.anthropic.allow_plain_http_to_docker_host": {
+        "title": "Plain http to a Docker host gateway",
+        "description": (
+            "Off by default: a plain-http Anthropic base URL is taken for loopback only. On, it "
+            "is also taken for a Docker host gateway (host.docker.internal, "
+            "gateway.docker.internal, 172.17.0.0-172.31.255.255), the address a containerised "
+            "worker reaches a stub or proxy on the host by. The API key is then sent in clear "
+            "text over that hop, and those names and addresses can be another machine on a LAN "
+            "that uses 172.16.0.0/12: turn it on only for a rehearsal stub on this host."
+        ),
         "subgroup": "Anthropic",
         "advanced": True,
     },
@@ -726,12 +817,12 @@ ANNOTATIONS: dict[str, Annotation] = {
     "llm.provider": {
         "title": "Provider",
         "description": (
-            "Selects which LLM backend serves both the expert and judge roles: openai, "
-            "anthropic, ollama, or gemini. Switching providers routes every LLM call in "
-            "the pipeline to that provider's endpoint and picks up its model settings "
-            "below."
+            "Selects which registered LLM provider serves both the expert and judge "
+            "roles. Switching providers routes every LLM call in the pipeline to that "
+            "provider's endpoint and picks up its model settings below."
         ),
         "probe": "llm",
+        "choices_from": "llm_providers",
     },
     "llm.view_decomposition_mode": {
         "title": "View-decomposition mode",
@@ -769,12 +860,15 @@ ANNOTATIONS: dict[str, Annotation] = {
     "memory.backend": {
         "title": "Memory backend",
         "description": (
-            "Long-term-memory store used for past-case retrieval. qdrant persists cases "
-            "in a real Qdrant instance; memory keeps them in an in-process, ephemeral "
-            "store with no external dependency."
+            "Long-term-memory store used for past-case retrieval: one of the registered "
+            "memory backends. qdrant persists cases in a real Qdrant instance; memory "
+            "keeps them in an in-process, ephemeral store with no external dependency. "
+            "Each backend's own settings are the keys under memory.<backend>."
         ),
+        "order": -1,
+        "choices_from": "memory_backends",
     },
-    "memory.qdrant_collection": {
+    "memory.qdrant.collection": {
         "title": "Qdrant case collection",
         "description": (
             "Qdrant collection name storing semantic case embeddings for few-shot "
@@ -783,28 +877,30 @@ ANNOTATIONS: dict[str, Annotation] = {
             "incompatible old collection."
         ),
         "probe": "qdrant",
+        "applies_when": {"core.memory.backend": ["qdrant"]},
     },
-    "memory.qdrant_function_hash_collection": {
+    "memory.qdrant.function_hash_collection": {
         "title": "Qdrant function-hash collection",
         "description": (
             "Separate Qdrant collection storing per-function normalized-opcode hashes "
             "for the exact-match function-hash attribution tier, independent of the "
             "fuzzy semantic case collection above."
         ),
+        "applies_when": {"core.memory.backend": ["qdrant"]},
     },
-    "memory.qdrant_url": {
+    "memory.qdrant.url": {
         "title": "Qdrant URL",
-        "description": (
-            "URL of the Qdrant server backing long-term memory when memory.backend is qdrant."
-        ),
+        "description": ("URL of the Qdrant server backing long-term memory."),
         "probe": "qdrant",
+        "applies_when": {"core.memory.backend": ["qdrant"]},
     },
-    "memory.qdrant_api_key": {
+    "memory.qdrant.api_key": {
         "title": "Qdrant API key",
         "description": (
             "API key sent with every Qdrant request when the server enforces one (compose "
             "does); empty means no authentication, which is fine for a loopback-only server."
         ),
+        "applies_when": {"core.memory.backend": ["qdrant"]},
     },
     "memory.top_k": {
         "title": "Memory top-K",
@@ -963,20 +1059,6 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "subgroup": "Function summarizer",
     },
-    "preprocessing.summarizer_model": {
-        "title": "Summarizer model",
-        "description": ("Model identifier for the summarizer LLM, e.g. a small Ollama model tag."),
-        "subgroup": "Function summarizer",
-    },
-    "preprocessing.summarizer_provider": {
-        "title": "Summarizer provider",
-        "description": (
-            "LLM provider used for the function summarizer when use_function_summarizer "
-            "is enabled. Prefer a small, cheap local model since this runs as a "
-            "pre-pass, not the main analysis."
-        ),
-        "subgroup": "Function summarizer",
-    },
     "preprocessing.use_api_attck_map": {
         "title": "Use API-to-ATT&CK map",
         "description": (
@@ -1013,18 +1095,20 @@ ANNOTATIONS: dict[str, Annotation] = {
     "preprocessing.use_function_hash_attribution": {
         "title": "Use function-hash attribution",
         "description": (
-            "Enables a deterministic pre-pass that computes per-function "
-            "normalized-opcode hashes and matches them against past samples in the "
-            "function-hash store, injecting a high-precision family-attribution hint. "
-            "The judge also writes the current sample's hashes back to grow the corpus."
+            "Enables a deterministic pre-pass that asks a static provider that hashes "
+            "functions (Ghidra over http does) for per-function normalized-opcode hashes "
+            "and matches them against past samples in the function-hash store, injecting "
+            "a high-precision family-attribution hint. The judge also writes the current "
+            "sample's hashes back to grow the corpus."
         ),
         "subgroup": "Feature switches",
     },
     "preprocessing.use_function_summarizer": {
         "title": "Use function summarizer",
         "description": (
-            "Enables a small/local LLM pre-summarization pass over large function lists "
-            "or decompiled blocks before they reach the expensive expert LLM. Off by "
+            "Enables an LLM pre-summarization pass over large function lists or "
+            "decompiled blocks before they reach the analysts. Its model is the "
+            "llm.agents.summarizer entry, else the global expert model. Off by "
             "default — it adds latency and only pays off on huge inputs."
         ),
         "subgroup": "Feature switches",
@@ -1050,22 +1134,24 @@ ANNOTATIONS: dict[str, Annotation] = {
     "preprocessing.use_sink_reachability": {
         "title": "Use sink-reachability triage",
         "description": (
-            "Enables a deterministic pre-pass over the Ghidra call graph that finds "
-            "functions reaching security-sensitive sink APIs and injects a 'priority "
-            "functions' hint, focusing the static analyst's decompilation on the likely "
-            "malicious core. Fails safe to no hint on error or a stripped binary."
+            "Enables a deterministic pre-pass over the call graph of a static provider "
+            "that gives one (Ghidra over http does) that finds functions reaching "
+            "security-sensitive sink APIs and injects a 'priority functions' hint, "
+            "focusing the analyst's decompilation on the likely malicious core. Fails "
+            "safe to no hint on error, a stripped binary or a provider with no call graph."
         ),
         "subgroup": "Feature switches",
     },
     "triage.enabled": {
         "title": "Run the triage pack",
         "description": (
-            "Before any analyst starts, the pipeline runs the deterministic tools "
-            "over the sample (identification, hashes, signature, format facts, "
-            "strings, IoCs, YARA, capa, Sigma, catalogue lookups, the sandbox "
-            "summary, one reputation lookup) and writes each result to the "
-            "evidence ledger as facts of the run. Off leaves the stage in every "
-            "team and makes it decline with that reason."
+            "Before any analyst starts, the pipeline runs the deterministic steps "
+            "over the sample (as shipped: identification, hashes, signature, format "
+            "facts, strings, IoCs, signature and capability rules, event rules, "
+            "catalogue lookups, the sandbox summary, one reputation lookup, decoded "
+            "strings and the readings of a PE's bytes; your own in triage.steps) and "
+            "writes each result to the evidence ledger as facts of the run. Off "
+            "leaves the stage in every team and makes it decline with that reason."
         ),
         "subgroup": "Triage pack",
     },
@@ -1081,19 +1167,21 @@ ANNOTATIONS: dict[str, Annotation] = {
     "triage.reputation": {
         "title": "Triage reputation lookup",
         "description": (
-            "'auto' asks the enabled reputation server once for the sample hash: "
-            "VirusTotal's own server when it is enabled, else the threat-intel "
-            "sidecar. 'off' records a skipped entry instead. The call goes through "
-            "the tool server like any agent's call and is recorded under that "
-            "server."
+            "'auto' asks one enabled reputation server once for the sample hash: "
+            "the first server whose tool declares kind 'reputation' and a hash "
+            "argument, lowest declared rank first (VirusTotal's own server before "
+            "the threat-intel sidecar, as shipped). 'off' records a skipped entry "
+            "instead. The call goes through the tool server like any agent's call "
+            "and is recorded under that server."
         ),
         "subgroup": "Triage pack",
     },
     "triage.budget_seconds": {
         "title": "Triage pack budget (seconds)",
         "description": (
-            "How long the whole triage pack may take. capa and YARA carry their own "
-            "budgets; this one is checked between steps, and a step that would start "
+            "How long the whole triage pack may take. A step with a wall clock of its "
+            "own keeps it (its budget_seconds in triage.steps, else its tool's declared "
+            "timeout); this one is checked between steps, and a step that would start "
             "after it is spent is recorded as not run rather than started."
         ),
         "subgroup": "Triage pack",
@@ -1101,11 +1189,30 @@ ANNOTATIONS: dict[str, Annotation] = {
     "triage.memory_floor_mb": {
         "title": "Triage memory floor (MiB)",
         "description": (
-            "What running FLOSS beside capa must leave of the host's available "
-            "memory. The pack runs the two together only when the available memory, "
-            "less capa's measured peak and FLOSS's own bound, stays at or above this, "
-            "and the worker's memory limit, where it has one, holds both; otherwise it "
-            "runs them one after the other and records why."
+            "What running a step beside the others must leave of the host's available "
+            "memory (as shipped: the decoded-strings step beside the capability rules). "
+            "The pack runs a step that declares starts_after beside the steps its "
+            "beside names only when the available memory, less their peaks and its "
+            "own (each measured in this worker, else declared as peak_mb), stays at or "
+            "above this, and the worker's memory limit, where it has one, holds them "
+            "all; otherwise it runs it at its place and records why."
+        ),
+        "subgroup": "Triage pack",
+    },
+    "triage.steps": {
+        "title": "Triage pack steps",
+        "description": (
+            "Your own steps, as JSON, laid over the shipped list: each one's id, the "
+            "tool and server it calls (no server: one of the platform's own steps, "
+            "named by its shipped id), its argument template ({sample_path}, {sha256}, "
+            "{file_type}; none: the arguments its tool declares for the path and hash "
+            "roles), the routed formats it runs for, its budget_seconds, peak_mb, "
+            "starts_after and beside, the renderer its pack line uses (none: the "
+            "generic line), the kind of answer it records, its display_name and "
+            "enabled. A shipped id is changed in its place, and enabled false drops "
+            "it; naming another tool or server replaces it there; a new id is added "
+            "after the step its after names, else at the end. Empty runs the shipped "
+            "list."
         ),
         "subgroup": "Triage pack",
     },
@@ -1235,6 +1342,19 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "subgroup": "Limits",
     },
+    "job_timeout": {
+        "title": "Seconds per job",
+        "description": (
+            "How long one analysis job may run, in seconds, before the worker stops it, "
+            "counted from when the worker starts the job (setup and the pipeline both count). "
+            "Empty, the default, is no limit. A number set here applies to every job started "
+            "after it is saved, with no worker restart; a job already running keeps the value "
+            "it started with. A job stopped by it keeps its run summary and a partial report "
+            "built from what the run produced, marked partial, and its status says it was "
+            "stopped by the job timeout."
+        ),
+        "subgroup": "Limits",
+    },
     "react_agent_timeout_overrides": {
         "title": "Seconds per loop, by agent name (deprecated)",
         "description": (
@@ -1290,12 +1410,25 @@ ANNOTATIONS: dict[str, Annotation] = {
         "title": "Composer section max tokens",
         "description": (
             "Output-token cap per report section when composer_enabled is true. 0 takes the "
-            "judge's max tokens where set, else the model's declared maximum output, else a "
-            "quarter of the context window the model serves; never more than the model's "
-            "maximum. A positive value gets the reporter's own cap on top for reasoning where "
-            "thinking is left on, held at the model's maximum; with no judge's max tokens set "
-            "that resolves to the model's maximum. The run summary and the worker log show "
-            "the derivation."
+            "judge's max tokens where set, else the judge's own derivation: the smaller of a "
+            "quarter of the context window the model serves and the model's declared maximum "
+            "output, so the section's prompt keeps the rest of the window. Never more than the "
+            "model's maximum. A positive value gets the reporter's own cap on top for reasoning "
+            "where thinking is left on, held at the model's maximum. The run summary and the "
+            "worker log show the derivation."
+        ),
+        "subgroup": "Report content",
+    },
+    "reporting.reference_urls": {
+        "title": "Sample lookups every report links to",
+        "description": (
+            "Each a URL template naming {sha256}, {md5} or {sha1} and starting with "
+            "https:// (url), the name it is linked under (source), its note, and whether "
+            "the Sigma draft lists it too (sigma), as JSON, linked under References on "
+            "every report. Shipped with VirusTotal's and "
+            "MalwareBazaar's lookups; remove one and it is no longer linked. A tool "
+            "server's own lookups (its declared reference URLs) are linked only on a run "
+            "that asked that server."
         ),
         "subgroup": "Report content",
     },
@@ -1392,6 +1525,99 @@ ANNOTATIONS: dict[str, Annotation] = {
 }
 
 
+# The declaration fields of a server block beside ``sample_open``
+# (``maljan.core.tool_declarations``), described once for every block. The
+# console's server editor shows the same words for an ``mcp.servers`` entry.
+DECLARATION_LEAVES: tuple[tuple[str, str, str], ...] = (
+    (
+        "sample_mount",
+        "sample mount",
+        "Where the server sees the job's sample: the absolute path inside the server "
+        "that the worker's sample copy is mounted at. Empty when the server reads the "
+        "worker's own filesystem.",
+    ),
+    (
+        "error_patterns",
+        "error patterns",
+        "How the server's answers say error instead of answering: a list of {match, code, "
+        "remediation, remediation_with_path, tools, applies_to, multiline, message_group}. "
+        "match is a regular expression (run by RE2, so no back-references or lookarounds) "
+        "held against the whole stripped answer, or the protocol error's message where "
+        "applies_to names protocol_error; code the error code; remediation_with_path names "
+        "the sample's path as {sample_path}; tools the tools it applies to, empty for all.",
+    ),
+    (
+        "roles",
+        "roles",
+        "What the server is for, as lowercase words: reputation, decompiler, disassembler, "
+        "sandbox, rule_scanner, strings, or any word of your own.",
+    ),
+    (
+        "prompt_fragment",
+        "workflow text",
+        "The workflow text shown to an agent only while this server's tools are attached. "
+        "Empty: a server that offers tools it declares nothing for is introduced by its own "
+        "served instructions and tool descriptions, quoted as its data; otherwise none.",
+    ),
+    (
+        "required_env_allow",
+        "required environment names",
+        "The environment variable names the server cannot run without.",
+    ),
+    (
+        "work_dir",
+        "work directory",
+        "The directory under the worker's samples directory the sample is copied into for "
+        "this server; empty when it makes no copy of its own.",
+    ),
+    (
+        "variable_names",
+        "non-secret variable names",
+        "Environment variable names of this server's that are not secrets, so a remediation "
+        "naming one is shown as written.",
+    ),
+    (
+        "platform_owned",
+        "platform's own server",
+        "Whether the server is the platform's own, whose answers are the platform's code.",
+    ),
+    (
+        "auto_name_prefixes",
+        "auto-name prefixes",
+        "The prefixes the server's decompiler writes before an address when it names a "
+        "function itself, such as FUN_ or fcn.",
+    ),
+    (
+        "reference_urls",
+        "reference URLs",
+        "Reference URL templates for a sample, naming {sha256}, {md5} or {sha1}.",
+    ),
+    (
+        "reads_staged_sample",
+        "reads the staged sample",
+        "Whether the server's path-taking tools read the sample the platform staged for it: "
+        "their sample argument is hidden from the model and filled, and their capture "
+        "argument filled when the job has one capture.",
+    ),
+    (
+        "tool_facts",
+        "tool declarations",
+        "Per tool name: what kind of fact its answer is (kind; none keeps every reading an "
+        "undeclared tool gets) and where its facts sit "
+        "(rows, places, values, techniques, reputation), as JSON. See the configuration "
+        "guide's tool declarations section for every field.",
+    ),
+    (
+        "credential_bootstrap",
+        "credential bootstrap",
+        "How the server's credential is obtained by one request, as JSON: an https url, "
+        "the JSON body posted (every {family} replaced by family), token_json_path (where "
+        "the token sits in the answer), token_prefix, facts (the answer's other values "
+        "shown to the operator, by path) and note. Empty when the token is typed in.",
+    ),
+)
+
+
 def mcp_server_annotations(
     prefix: str,
     label: str,
@@ -1401,11 +1627,13 @@ def mcp_server_annotations(
     order: int = 0,
     provider_owned: bool = False,
 ) -> dict[str, Annotation]:
-    """The fourteen leaves of an ``MCPServerConfig`` block, described for ``label``.
+    """The thirty-five leaves of an ``MCPServerConfig`` block, described for ``label``.
 
     Every MCP server in the settings has the same nine transport/tool-selection
-    knobs, plus five tool-server fields (``cwd``, ``env_allow``, ``tools``,
-    ``agents``, ``label``); writing them out six times invites drift between
+    knobs, plus six tool-server fields (``cwd``, ``env_allow``, ``tools``,
+    ``agents``, ``label``, ``call_timeout_seconds``), the seven of
+    ``sample_open`` and the thirteen other declaration fields
+    (``DECLARATION_LEAVES``); writing them out six times invites drift between
     blocks that must behave identically. The per-field wording is fixed, the
     server's name is the only variable.
 
@@ -1497,6 +1725,18 @@ def mcp_server_annotations(
             "Working directory for the stdio subprocess; empty means the repository root.",
             subgroup="Connection",
         ),
+        f"{prefix}.call_timeout_seconds": ann(
+            f"{label} call budget (seconds)",
+            "How long one call of this server's tools may go unanswered before it counts "
+            "as a server that did not answer, before thirty seconds of grace. A tool the "
+            "server's capabilities manifest gives a longer budget gets that one. Zero sends "
+            "its calls with no deadline of their own. Empty (every built-in) takes the "
+            "deployment's floor: the longest of core.static.capa.timeout_seconds and "
+            "core.static.yara.timeout_seconds. mcp.breaker.call_timeout_seconds, where "
+            "set, applies to every server instead.",
+            subgroup="Connection",
+            advanced=True,
+        ),
         f"{prefix}.env_allow": ann(
             f"{label} inherited environment names",
             "Names copied out of the API process's own environment into the "
@@ -1506,7 +1746,64 @@ def mcp_server_annotations(
         ),
     }
 
+    sample_open = f"{prefix}.sample_open"
+    for leaf, title, description in (
+        (
+            "open_tool",
+            "open tool",
+            "The tool that opens a sample, for a server whose open resets what it has "
+            "analysed when called again. Set, a job opens each path once on this "
+            "server and answers a later open of it from the job's note. Empty "
+            "declares nothing.",
+        ),
+        ("path_argument", "open tool's path argument", "The argument the path goes in."),
+        (
+            "name_field",
+            "opened name field",
+            "The field of the open's JSON answer that names what was opened, given to "
+            "the select and analysis tools; empty means the path itself.",
+        ),
+        (
+            "select_tool",
+            "select tool",
+            "The tool that selects a sample already open. Sent before a later open is "
+            "answered from the note; a select the server refuses opens it afresh. "
+            "Empty answers from the note directly.",
+        ),
+        ("select_argument", "select tool's argument", "The argument the opened name goes in."),
+        (
+            "analyse_tool",
+            "analysis tool",
+            "The tool that runs or awaits the server's analysis after the first open; "
+            "an open is noted only once it answered. Empty runs none.",
+        ),
+        (
+            "analyse_argument",
+            "analysis tool's argument",
+            "The argument the opened name goes in; empty calls the tool with none.",
+        ),
+    ):
+        entries[f"{sample_open}.{leaf}"] = ann(
+            f"{label} {title}", description, subgroup="Opening the sample", advanced=True
+        )
+
+    for leaf, title, description in DECLARATION_LEAVES:
+        entries[f"{prefix}.{leaf}"] = ann(
+            f"{label} {title}", description, subgroup="Declaration", advanced=True
+        )
+    # The tool declarations are edited as they are in force, and stored as the
+    # changes over what the block ships, one tool at a time; the console's
+    # editor shows which tools carry a change and resets one to shipped.
+    entries[f"{prefix}.tool_facts"]["editor"] = "tool_facts"
+
     if provider_owned:
+        # Only a tool server of ``mcp.servers`` has the route that performs a
+        # bootstrap; on a provider's block the field is refused on save.
+        entries[f"{prefix}.credential_bootstrap"] = owned_ann(
+            f"{label} credential bootstrap",
+            f"Refused: {label} is a provider-owned server; a credential bootstrap is "
+            "declared on a tool server of mcp.servers, whose route performs it.",
+        )
         entries[f"{prefix}.tools"] = owned_ann(
             f"{label} tool allow-list",
             f"Ignored: {label} is a provider-owned server and computes its own tool exposure.",
@@ -1805,9 +2102,29 @@ ANNOTATIONS.update(
             "title": "Accepted report formats",
             "description": (
                 "Formats the sniffer may accept for an uploaded report: cape2, "
-                "cuckoo, triage. A file that sniffs as anything else is refused."
+                "cuckoo, triage, the name of any format declared in "
+                "sandbox.report_formats, and the id of any report reader "
+                "registered at run time or by an installed package. A file "
+                "that sniffs as anything else is refused, unless the list holds "
+                "unread: then a report no format recognises is kept unread (its "
+                "blocks reach the analyst raw, no fact is drawn from them) and "
+                "the upload proposes a format declaration for it to accept."
             ),
             "applies_when": _SANDBOX_UPLOAD,
+        },
+        "sandbox.report_formats": {
+            "title": "Declared report formats",
+            "description": (
+                "Your own sandbox report formats, as JSON, read by every sandbox "
+                "provider and by report upload: each one's name (at most 32 "
+                "characters), how it is recognised (detect: groups of field tests), "
+                "where its task id and target sha256 sit (field paths), which reader "
+                "reads it (cape2, cuckoo, triage, generic, or empty), its own "
+                "JSONPath mapping for the generic reader (mapping, as "
+                "sandbox.rest.mapping; absent, that one is read), and its signature "
+                "severity scale. A new name is tried before the built-ins; a "
+                "built-in's name is merged over that built-in, field by field."
+            ),
         },
     }
 )
@@ -1883,9 +2200,11 @@ ANNOTATIONS.update(
                 "did not answer — a transport failure the breaker counts. A tool whose server "
                 "declares a longer budget in its capabilities manifest gets that one, and "
                 "thirty seconds of grace are added either way, so a tool that gives up at its "
-                "own budget answers with its own timeout error first. Zero, the default, "
-                "derives it from the longest tool budget this deployment configures: "
-                "core.static.capa.timeout_seconds (300, and 900 on a slow host, still fits). "
+                "own budget answers with its own timeout error first. Set, it applies to "
+                "every server. Zero, the default, gives each server the budget its own "
+                "block declares (its call_timeout_seconds), and a server that declares none "
+                "the longest of core.static.capa.timeout_seconds and "
+                "core.static.yara.timeout_seconds (300, and 900 on a slow host, still fits). "
                 "A call cut short by its caller's own budget while it waited on the server "
                 "counts as unanswered too."
             ),
@@ -2072,14 +2391,30 @@ ANNOTATIONS.update(
         "sandbox.rest.report.path": _rest(
             "Report path", "Path the finished report is fetched from; {task_id} is substituted."
         ),
-        "sandbox.rest.report.format": _rest(
-            "Report format",
-            "Shape of the fetched report. cape2, cuckoo and triage reuse the mappers the "
-            "report-upload provider already uses; generic maps the response with the "
-            "JSONPaths below.",
-        ),
+        "sandbox.rest.report.format": {
+            **_rest(
+                "Report format",
+                "The registered report reader that reads the fetched report: each one is "
+                "the reader the report-upload provider uses for that format, and an "
+                "installed package can register more; generic maps the response with the "
+                "JSONPaths below.",
+            ),
+            "choices_from": "sandbox_report_readers",
+        },
         "sandbox.rest.report.pcap_path": _rest(
             "PCAP path", "Optional capture path; empty means this sandbox publishes no PCAP."
+        ),
+        "sandbox.rest.report.signature_scale_rungs": _rest(
+            "Signature scale",
+            "For a generic report: the severity rung each signature score from 1 up "
+            "means, one per line (Informational, Low, Medium, High, Critical). Empty "
+            "draws the scores unrated.",
+            generic_only=True,
+        ),
+        "sandbox.rest.report.signature_scale_name": _rest(
+            "Signature scale name",
+            "The scale's name as the console shows it; empty names it 1–N.",
+            generic_only=True,
         ),
         "sandbox.rest.mapping.target_sha256": _rest(
             "Mapping: sample hash", "JSONPath to the detonated sample's SHA-256.", generic_only=True
@@ -2142,6 +2477,13 @@ ANNOTATIONS.update(
             "Mapping: open channels",
             "Extra channels this schema has no field for, as name/JSONPath pairs; "
             "namespace the name by platform, e.g. android.permissions.",
+            generic_only=True,
+        ),
+        "sandbox.rest.mapping.places": _rest(
+            "Mapping: report places",
+            "The report's places with no channel above, as place/JSONPath pairs: "
+            "process_tree, resolved_apis, extracted, procdumps, memory or ids_alerts, "
+            "each match kept as the sandbox published it.",
             generic_only=True,
         ),
         "sandbox.rest.mapping.field_names": _rest(

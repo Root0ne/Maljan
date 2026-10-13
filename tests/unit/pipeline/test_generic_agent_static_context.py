@@ -81,7 +81,7 @@ def _container(agent: MagicMock, *, role: str, load_chunked_return: list[TextChu
     # definition map means every agent takes its role's historical default,
     # which is what these tests are about.
     container.config.agents.definitions = {}
-    container.loader.chunk_text.side_effect = lambda _name, text: [_chunk(text)]
+    container.loader.chunk_text.side_effect = lambda _name, text, **_: [_chunk(text)]
     container.parser_registry.create.side_effect = KeyError("no parser in this double")
     for name in (
         "load_data_for_agent",
@@ -122,7 +122,8 @@ class TestGenericFirstPassGetsStaticContext:
 
     def test_with_sandbox_report_carries_both_static_context_and_sandbox_slice(self) -> None:
         """(b) With sandbox data present, the generic agent's data contains
-        both the static sample context and the sandbox slice."""
+        both the static sample context and the sandbox slice — one loop over
+        both, since together they fit what the agent's prompt holds."""
         agent = _agent()
         container = _container(agent, role="generic", load_chunked_return=_placeholder("strings"))
         sandbox_report = {"target": {"sha256": "abc123"}, "marker": "sandbox-slice-here"}
@@ -130,9 +131,8 @@ class TestGenericFirstPassGetsStaticContext:
         node = make_stage_agent_node(ANALYSIS_STAGE, "strings", container)
         node(_base_state(sandbox_report=sandbox_report))
 
-        agent.safe_analyze_isr_chunked.assert_called_once()
-        chunks_arg = agent.safe_analyze_isr_chunked.call_args[0][0]
-        contents = [c.content for c in chunks_arg]
+        agent.safe_analyze_isr_chunked.assert_not_called()
+        contents = [agent.safe_analyze_isr.call_args[0][0]]
         assert any("/work/mirror/abc123.exe" in c for c in contents), (
             "static sample context must survive alongside the sandbox slice"
         )
@@ -166,9 +166,9 @@ class TestGenericRevisionIsNotSkipped:
         container.agent_role.side_effect = lambda _n: "generic"
         container.is_mock = False
         container.config.llm.parallel_analysts = False
-        container.load_chunked.side_effect = lambda _h, _n: _placeholder("strings")
+        container.load_chunked.side_effect = lambda _h, _n, **_: _placeholder("strings")
         container.config.agents.definitions = {}
-        container.loader.chunk_text.side_effect = lambda _name, text: [_chunk(text)]
+        container.loader.chunk_text.side_effect = lambda _name, text, **_: [_chunk(text)]
         container.load_data_for_agent = MethodType(ServiceContainer.load_data_for_agent, container)
         container._legacy_role_data = MethodType(ServiceContainer._legacy_role_data, container)
 

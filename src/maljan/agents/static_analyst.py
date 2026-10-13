@@ -28,13 +28,19 @@ from maljan.agents.prompt_fragments import (
     has_decompiler,
     has_xrefs,
     offered,
+    provider_source,
+    resolve_attached,
     stamp_source,
     tool_families,
     tool_names,
     tools_statement,
 )
 from maljan.agents.registry import register_agent
-from maljan.providers.base import StaticJobContext, absent_provider_fragment
+from maljan.providers.base import (
+    StaticJobContext,
+    absent_provider_fragment,
+    holding_the_discipline,
+)
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
 # The provider- and platform-independent head of the static system prompt.
@@ -120,7 +126,12 @@ def static_provider_parts(
         provider_label=f"the {label} static provider",
         provider_expected=attached,
     )
-    return body.rstrip(), statement
+    # Every static analyst is held to the verification discipline, whatever
+    # its provider wrote: a provider that writes its whole fragment itself
+    # gets it after that fragment.
+    # A part of the provider's declared workflow that names another server's
+    # tool reads as that server's being attached or not.
+    return resolve_attached(holding_the_discipline(body), tools).rstrip(), statement
 
 
 def _static_prompt(provider: Any | None = None, tools: Sequence[Any] = ()) -> str:
@@ -237,15 +248,23 @@ class StaticAnalyst(BaseAnalyst):
             raise
         # Marked as the provider's, so the prompt names them as such rather
         # than inferring it from the absence of a server key.
-        pool = stamp_source(provider.get_tools(), PROVIDER_FAMILY)
+        pool = stamp_source(
+            provider.get_tools(), PROVIDER_FAMILY, declared=provider_source(provider)
+        )
         # No ``self.toolkit`` assignment here: the provider holds its own client
         # privately and closes it itself (``ServiceContainer.aclose`` calls
         # ``get_static_provider().close()``), so there is nothing for this
         # analyst's ``close_tools()`` to release on the static path.
+        # The provider's tools are the agent's own: a server tool of the same
+        # name is offered as ``<server>__<tool>`` beside them, never in their
+        # place.
         self.tools = [
             *pool,
             *self._attach_registry_tools(
-                "static", exclude=str(getattr(provider, "server_name", ""))
+                "static",
+                exclude=str(getattr(provider, "server_name", "")),
+                claimed=pool,
+                claimed_by=f"provider:{provider.id}",
             ),
         ]
         self.logger.info("Static provider '%s': %d tools attached.", provider.id, len(self.tools))
@@ -302,63 +321,45 @@ class StaticAnalyst(BaseAnalyst):
         """The provider's degrade policy: Ghidra's is loud, others may differ."""
         return self._provider().capabilities
 
-    def _open_on_provider(self, file_path: str) -> None:
-        """Have this agent's provider open the sample in its session, where it opens one.
+    def _compute_sink_priority_hint(self, file_path: str) -> str:
+        """Open the sample on this agent's provider, then rank functions reachable to sinks.
 
-        The path is the agent's pinned mirror when one is pinned, else the
-        chunk's. Never raises: the model's own open is still there.
+        The pre-pass every analyst on a static provider runs
+        (``providers.base.prepare_sample``), on *this agent's* provider,
+        whatever the globally configured one is. The open is the provider's
+        (``open_sample``) on the agent's pinned mirror when one is pinned, else
+        the chunk's path: a sample the provider knows it cannot open raises
+        :class:`SampleNotOpened` before the loop starts. The ranking is the
+        provider's call graph's, where it gives one, and fail-safe: any error
+        in it, or a stripped binary with no named sink APIs, returns an empty
+        string.
+        """
+        from maljan.providers.base import prepare_sample
+
+        path = getattr(self, "_analysis_file_path", None) or file_path
+        return prepare_sample(self._provider(), path, self.logger)
+
+    def _sample_open(self) -> Any:
+        """What this agent's provider declares opens a sample (its ``sample_open``), or ``None``.
+
+        Read from the provider's declaration (``core.declared_reading``), so
+        the load line names whichever tool the provider's block declares.
         """
         try:
-            provider = self._provider()
-            opener = getattr(provider, "open_sample", None)
-            if callable(opener):
-                opener(getattr(self, "_analysis_file_path", None) or file_path)
-        except Exception as exc:  # noqa: BLE001 — an early open is never worth a lost loop
-            self.logger.debug("the provider did not open the sample early: %s", exc)
+            from maljan.core.declared_reading import declarations
 
-    def _compute_sink_priority_hint(self, file_path: str) -> str:
-        """Open the sample on Ghidra, then rank functions reachable to sensitive sinks.
-
-        Runs when *this agent's* static provider is Ghidra, whatever the
-        globally configured one is: a clone of the static analyst on Ghidra in
-        a team whose global provider is r2 is as much a Ghidra run as the
-        default one. Both halves are the Ghidra provider module's
-        (``providers.static.ghidra.prepare_sample``), shared with a generic
-        agent that reads Ghidra. The load is a precondition: a sample Ghidra
-        cannot open raises :class:`SampleNotOpened` before the loop starts.
-        The ranking is fail-safe: any error in it, or a stripped binary with no
-        named sink APIs, returns an empty string.
-        """
-        from maljan.core.config import get_settings
-        from maljan.providers.static.ghidra import prepare_sample
-
-        return prepare_sample(
-            get_settings(),
-            self._provider_id(),
-            file_path,
-            self.logger,
-            provider=self._own_static_provider(),
-        )
-
-    def _provider_id(self) -> str:
-        """This agent's own static provider id: its resolution's, else the global one.
-
-        Read without building the provider, so a bare analyst in a test or a
-        script answers from the settings alone.
-        """
-        resolved = getattr(self, "_resolved", None)
-        provider_id = getattr(resolved, "static_provider_id", None) if resolved else None
-        if provider_id:
-            return str(provider_id)
-        from maljan.core.config import get_settings
-
-        return str(get_settings().static.provider)
+            held = declarations().source(self._provider().declaration_source)
+        except Exception as exc:  # noqa: BLE001 — no declaration, no tool named
+            self.logger.debug("no sample-open declaration to read (%s)", type(exc).__name__)
+            return None
+        return getattr(held, "sample_open", None) if held is not None else None
 
     def _compute_function_hash_hint(self, file_path: str, sample_hash: str) -> str:
         """Pre-pass: surface known-family code reuse via exact opcode-hash match.
 
         Computes per-function normalized-opcode hashes for the binary, asks the
-        FunctionHashStore which known samples share them, and renders an
+        configured memory backend's function-hash store which known samples
+        share them, and renders an
         "attribution prior" hint. Deterministic and fail-safe: any error (or an
         empty corpus / no overlap) returns an empty string and the analyst
         proceeds normally. ``get_bulk_function_hashes`` is deliberately NOT in
@@ -368,42 +369,38 @@ class StaticAnalyst(BaseAnalyst):
         from maljan.core.config import get_settings
 
         cfg = get_settings()
-        if not cfg.preprocessing.use_function_hash_attribution:
+        from maljan.providers.base import preprocessing_of
+
+        pre = preprocessing_of(self._provider())
+        if not pre.use_function_hash_attribution:
             return ""
         if not self._provider().capabilities.provides_function_hashes:
             return ""  # this static provider cannot produce function hashes
-        if cfg.memory.backend != "qdrant":
-            return ""  # the function-hash store needs the Qdrant backend
 
         try:
             from maljan.analysis.function_hash_attribution import (
                 aggregate_matches,
                 build_attribution_hint,
             )
-            from maljan.memory.function_hash_store import FunctionHashStore
+            from maljan.memory.store_factory import leased_function_hash_store
 
-            functions = self._provider().function_hashes(
-                StaticJobContext(mirror_sample_path=file_path)
-            )
-            if not functions:
-                return ""
+            # Held for the read: a settings change meanwhile closes this store
+            # only once the read has let go of it.
+            with leased_function_hash_store(cfg) as store:
+                if store is None:
+                    return ""  # the configured memory backend keeps no function hashes
 
-            store = FunctionHashStore(
-                url=cfg.memory.qdrant_url,
-                collection=cfg.memory.qdrant_function_hash_collection,
-                api_key=(
-                    cfg.memory.qdrant_api_key.get_secret_value()
-                    if cfg.memory.qdrant_api_key
-                    else None
-                ),
-            )
-            matches = store.match(
-                [fh for _name, fh in functions],
-                exclude_sample_id=sample_hash or None,
-            )
-            results = aggregate_matches(
-                matches, max_families=cfg.preprocessing.function_hash_max_matches
-            )
+                functions = self._provider().function_hashes(
+                    StaticJobContext(mirror_sample_path=file_path)
+                )
+                if not functions:
+                    return ""
+
+                matches = store.match(
+                    [fh for _name, fh in functions],
+                    exclude_sample_id=sample_hash or None,
+                )
+            results = aggregate_matches(matches, max_families=pre.function_hash_max_matches)
             hint = build_attribution_hint(results)
             if hint:
                 self.logger.info(
@@ -630,7 +627,13 @@ class StaticAnalyst(BaseAnalyst):
         # ``analysis_file_path`` on the chunk JSON. When present we hoist
         # it to a separate "Load using" line so the model can't miss it,
         # even on a degraded local 8-9B run.
-        load_hint = _extract_load_hint(data, tool_names(self.tools))
+        # The provider's own declaration, else a declaration an operator-bound
+        # server's offered open tool carries (``sample_open.mark_open_tool``).
+        from maljan.providers.sample_open import declared_open
+
+        load_hint = _extract_load_hint(
+            data, tool_names(self.tools), self._sample_open() or declared_open(self.tools)
+        )
 
         # Maltracker-style sink-reachability triage: when we have a
         # container-visible path, run a deterministic call-graph pre-pass and
@@ -642,9 +645,8 @@ class StaticAnalyst(BaseAnalyst):
         rag_hint = ""
         analysis_path = _extract_analysis_path(data)
         if analysis_path:
-            # A provider whose session must open the file first opens its own
-            # mirror now, as Ghidra loads its program below.
-            self._open_on_provider(analysis_path)
+            # The provider opens the sample where its session needs it, then
+            # ranks the functions its call graph shows reaching sinks.
             sink_hint = self._compute_sink_priority_hint(analysis_path)
             # Function-hash attribution prior: exact opcode-hash matches against
             # previously analysed samples. Hoisted ABOVE the sink hint so a known
@@ -727,8 +729,9 @@ class StaticAnalyst(BaseAnalyst):
             [
                 (
                     "system",
-                    # A revision is one tools-free call: the prompt says so.
-                    self._system_prompt(self._fallback_prompt, tools=()) + "\n\n"
+                    # A revision is one tools-free call unless it may read a
+                    # function the ledger never listed: the prompt says which.
+                    self._system_prompt(self._fallback_prompt, tools=self.revision_tools()) + "\n\n"
                     "You are in a negotiation round. You MUST:\n"
                     "1. List any peer claims you still DISPUTE in a DISPUTES section.\n"
                     "2. Revise your own claims based on new evidence.\n"
@@ -758,9 +761,7 @@ class StaticAnalyst(BaseAnalyst):
         # that obeys it puts a JSON fence into the revised report, and nothing
         # downstream of here — the claim parser, the transcript, the Composer —
         # should ever see it.
-        content = self._capture_findings(
-            self.ask_the_model(self.frame_messages(messages), what="revision")
-        )
+        content = self._capture_findings(self.revision_answer(messages))
 
         parsed = self._read_claims(content, revision_round)
         # Drop defeatist meta-claims ("could not be performed / missing
@@ -822,12 +823,7 @@ def _tool_use_line(tools: Sequence[Any]) -> str:
     return "You may use the tools in your tool list to gather more information.\n"
 
 
-# The tool the load line names. Only a provider that opens the sample in a
-# program database (Ghidra) has it; a request without it gets the path alone.
-_LOAD_TOOL = "load_program"
-
-
-def _extract_load_hint(data: str, offered: frozenset[str]) -> str:
+def _extract_load_hint(data: str, offered: frozenset[str], sample_open: Any = None) -> str:
     """Return a one-line sample-path hint when the chunk carries a path.
 
     The analyst-node wrapper splices the
@@ -838,31 +834,26 @@ def _extract_load_hint(data: str, offered: frozenset[str]) -> str:
     isn't JSON (the legacy raw-bytes path) or when no path is present,
     keeping the prompt verbatim with the pre-Wave-6 behaviour.
 
-    ``offered`` is the tool names the request carries. The ``load_program`` line
-    is written only when that tool is among them; without it the line gives
-    the path and names no tool, so a provider with no program database is
-    not told to call one.
+    ``offered`` is the tool names the request carries. ``sample_open`` is
+    what the provider's declaration says opens a sample (``open_tool`` and its
+    ``path_argument``): the load line names that tool and argument only when
+    the tool is among those offered; without one the line gives the path and
+    names no tool, so a provider that opens no sample is not told to call one.
     """
-    import json as _json
+    from maljan.loaders.binary_chunker import head_object
 
-    stripped = data.strip()
-    if not stripped or not stripped.startswith("{"):
-        return ""
-    try:
-        parsed = _json.loads(stripped)
-    except (_json.JSONDecodeError, ValueError):
-        return ""
-    if not isinstance(parsed, dict):
+    parsed = head_object(data)
+    if parsed is None:
         return ""
     path = parsed.get("analysis_file_path")
     if not isinstance(path, str) or not path:
         return ""
-    if _LOAD_TOOL in offered:
-        return (
-            f'LOAD THIS BINARY FIRST: call ``load_program(file="{path}")``.\n'
-            "All subsequent analysis tools operate on the program loaded by "
-            "that call. Do not invent a path — use the one above verbatim.\n\n"
-        )
+    tool = str(getattr(sample_open, "open_tool", "") or "")
+    argument = str(getattr(sample_open, "path_argument", "") or "")
+    if tool and argument and tool in offered:
+        from maljan.providers.sample_open import load_line
+
+        return load_line(tool, argument, path)
     if offered:
         return f"Sample path (use exactly this string wherever a tool asks for a file): {path}\n\n"
     return f"Sample path: {path}\n\n"
@@ -872,19 +863,13 @@ def _extract_analysis_path(data: str) -> str | None:
     """Return the ``analysis_file_path`` from a chunk JSON, or None.
 
     Mirrors ``_extract_load_hint``'s parse but exposes the raw container path
-    so the sink-reachability pre-pass can drive Ghidra directly. Best-effort:
+    so the sink-reachability pre-pass can hand it to the provider. Best-effort:
     non-JSON or pathless chunks return None.
     """
-    import json as _json
+    from maljan.loaders.binary_chunker import head_object
 
-    stripped = data.strip()
-    if not stripped or not stripped.startswith("{"):
-        return None
-    try:
-        parsed = _json.loads(stripped)
-    except (_json.JSONDecodeError, ValueError):
-        return None
-    if not isinstance(parsed, dict):
+    parsed = head_object(data)
+    if parsed is None:
         return None
     path = parsed.get("analysis_file_path")
     return path if isinstance(path, str) and path else None
@@ -898,16 +883,10 @@ def _extract_sample_hash(data: str) -> str | None:
     ``sample_id``, so a re-analysis can exclude its own prior matches. Falls
     back to the short ``sample_hash`` fingerprint. Best-effort: None on any miss.
     """
-    import json as _json
+    from maljan.loaders.binary_chunker import head_object
 
-    stripped = data.strip()
-    if not stripped or not stripped.startswith("{"):
-        return None
-    try:
-        parsed = _json.loads(stripped)
-    except (_json.JSONDecodeError, ValueError):
-        return None
-    if not isinstance(parsed, dict):
+    parsed = head_object(data)
+    if parsed is None:
         return None
     for key in ("sha256", "sample_hash"):
         val = parsed.get(key)

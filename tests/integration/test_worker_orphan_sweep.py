@@ -80,6 +80,19 @@ async def test_a_job_with_a_live_heartbeat_is_left_alone() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_job_running_for_days_with_its_worker_alive_is_left_alone() -> None:
+    """The sweep reads ownership, never age: no length of run makes a live job an orphan."""
+    long_run = uuid.uuid4()
+    factory = _factory([_row(long_run, age_seconds=3 * 86400)])
+
+    await _sweep_orphan_jobs(factory, _redis({job_owner_key(str(long_run)): WORKER_ID}))
+    _OWNED_JOBS.add(str(long_run))
+    await _sweep_orphan_jobs(factory, _redis({}))
+
+    assert updates_to(factory, "analysis_jobs") == []
+
+
+@pytest.mark.asyncio
 async def test_a_job_another_worker_is_holding_is_left_alone() -> None:
     """The heartbeat names its writer, and any writer but nobody means owned."""
     theirs = uuid.uuid4()

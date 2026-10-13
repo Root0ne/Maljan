@@ -5,9 +5,10 @@ from __future__ import annotations
 import pytest
 
 from maljan.core.config import Settings
-from maljan.providers.cape_view import to_cape_shaped_dict
 from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
+from maljan.schemas.sandbox_document import sandbox_document
 from tests.unit.providers._cape_fixture import first_cape_report
+from tests.unit.providers._document import as_published
 
 
 class _FakeClient:
@@ -70,7 +71,7 @@ def test_fetch_keeps_the_raw_report_by_identity(raw_report):
     provider._client = _FakeClient(raw_report)
     run = provider.fetch("42")
     assert run.raw is raw_report
-    assert to_cape_shaped_dict(run.report) is raw_report
+    assert as_published(sandbox_document(run.report), raw_report)
     assert run.report.source_format == "cape2"
     # Real CAPE reports nest sample identity under target.file.sha256, not a
     # flat target.sha256 (empirically confirmed against data/cape_reports/;
@@ -90,15 +91,12 @@ def test_the_configured_timeout_and_interval_reach_the_client(raw_report):
     assert client.waited == [("42", 1200, 15)]
 
 
-def test_notable_apis_survives_the_identity_short_circuit():
+def test_notable_apis_survives_as_a_block_with_no_place():
     """Carried finding: ``behavior.notable_apis`` is where a Linux LD_PRELOAD
-    shows up, and neither ``SandboxReport`` nor ``to_cape_shaped_dict``'s full
-    render names that key — but this provider never takes the full-render path
-    with a real report: ``fetch()`` always sets ``raw`` to the client's
-    untouched dict and ``source_format="cape2"``, so ``to_cape_shaped_dict``
-    short-circuits to ``raw`` by identity and carries the key through
-    byte-for-byte. Proved through the call an agent makes to read it rather
-    than asserted in prose.
+    shows up, and the neutral form has no place named for it — the CAPE reader
+    keeps it under its own name (``SandboxReport.extras``) and the document
+    lays it out where the report put it. Proved through the call an agent
+    makes to read it rather than asserted in prose.
     """
     from maljan.providers.sandbox_tools import sandbox_report_section
 
@@ -112,8 +110,8 @@ def test_notable_apis_survives_the_identity_short_circuit():
     provider._client = _FakeClient(raw)
     run = provider.fetch("1")
 
-    rendered = to_cape_shaped_dict(run.report)
-    assert rendered is raw
+    rendered = sandbox_document(run.report)
+    assert as_published(rendered, raw)
 
     behavior = sandbox_report_section(rendered, "behavior")["value"]
     assert behavior["notable_apis"] == [{"api": "setenv", "arguments": "LD_PRELOAD=/tmp/x.so"}]

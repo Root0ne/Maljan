@@ -82,6 +82,7 @@ function AdminNav({ pathname }: { pathname: string }) {
   const configured = llmLooksConfigured(
     ctx.effectiveValue,
     (key) => ctx.values[key]?.is_set === true,
+    ctx.schema,
   );
   const items = [...ACCOUNT_ITEMS, SETUP_ITEM, ...(configured ? [CONSOLE_ITEM] : [])];
   return <Nav items={items} pathname={pathname} />;

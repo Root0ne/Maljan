@@ -266,7 +266,8 @@ class TestTheReplyReserveIsNeverSpentOnSayingTheRoomRanOut:
             logging.disable(logging.NOTSET)
 
     def test_the_marker_comes_out_of_the_limit_rather_than_after_it(self) -> None:
-        from maljan.agents import ghidra_http_client, mcp_client
+        from maljan.agents import mcp_client
+        from maljan.providers.static.ghidra import http_client as ghidra_http_client
 
         for module in (mcp_client, ghidra_http_client):
             assert module.truncation_target(4000) == 4000 - len(module.TRUNCATION_MARKER)

@@ -2,6 +2,20 @@ from typing import Any
 
 from maljan.parsers.base_parser import BaseParser
 from maljan.parsers.registry import register_parser
+from maljan.schemas.sandbox_document import DnsAnswers, dns_row_name
+
+# The column a flow or host table names each destination's ASN and country
+# under, and the heading of the paragraph about reputation records; the
+# network analyst's evidence line reads them to name those annotations.
+ASN_COUNTRY_COLUMN = "ASN / Country"
+REPUTATION_HEADING = "#### Reputation:"
+# Where an indicator's reputation is kept: the record a declared reputation
+# source writes, whichever sources the deployment declares.
+REPUTATION_PARAGRAPH = (
+    "Each public IP/domain above may carry a reputation record in the structured report "
+    "(``network.ips[].reputation`` / ``network.domains[].reputation``), written by the "
+    "declared reputation sources — pivot for third-party verdicts."
+)
 
 
 @register_parser("network")
@@ -12,7 +26,7 @@ class NetworkParser(BaseParser):
         """Sifts through network JSON logs for C2 and exfiltration indicators.
 
         Supports two shapes:
-          * dict — CAPEv2 ``network`` block (dns/http/tcp/hosts/domains keys)
+          * dict — the sandbox report document's ``network`` section (dns/http/tcp/hosts/domains)
           * list — Zeek (Bro) connection log
         """
         if isinstance(raw_data, dict):
@@ -40,8 +54,8 @@ class NetworkParser(BaseParser):
         and UDP flows (annotated with each destination's ASN/country from the
         ``hosts`` block), contacted hosts (IP/ASN/country/ports) and domains,
         the raw PCAP path (so the analyst's PCAP MCP can deep-inspect it), and a
-        pointer to the per-IOC VirusTotal permalinks carried in the structured
-        report.
+        pointer to the per-indicator reputation records the declared reputation
+        sources write into the structured report.
         """
         dns_rows: list[list[str]] = []
         http_rows: list[list[str]] = []
@@ -55,12 +69,14 @@ class NetworkParser(BaseParser):
             if isinstance(h, dict) and h.get("ip"):
                 host_meta[str(h["ip"])] = h
 
-        # DNS
-        for entry in raw_data.get("dns", []):
+        # DNS: a later question of a request reads the request's answers.
+        dns_entries = raw_data.get("dns", [])
+        resolved = DnsAnswers(dns_entries)
+        for entry in dns_entries:
             if not isinstance(entry, dict):
                 continue
-            query = entry.get("request", entry.get("query", "N/A"))
-            answers = entry.get("answers") or []
+            query = dns_row_name(entry) or "N/A"
+            answers = resolved.of(entry)
             ans = answers[0] if answers else "N/A"
             if isinstance(ans, dict):
                 ans = ans.get("data") or ans.get("ip") or "N/A"
@@ -123,11 +139,11 @@ class NetworkParser(BaseParser):
 
         dns_table = self._format_as_table(headers=["Target Domain", "IP Address"], rows=dns_rows)
         http_table = self._format_as_table(headers=["Host", "Request", "Status"], rows=http_rows)
-        flow_hdr = ["Destination", "Port", "ASN / Country"]
+        flow_hdr = ["Destination", "Port", ASN_COUNTRY_COLUMN]
         tcp_table = self._format_as_table(headers=flow_hdr, rows=tcp_rows)
         udp_table = self._format_as_table(headers=flow_hdr, rows=udp_rows)
         host_table = self._format_as_table(
-            headers=["Host/Domain", "ASN / Country", "Ports"], rows=host_rows
+            headers=["Host/Domain", ASN_COUNTRY_COLUMN, "Ports"], rows=host_rows
         )
 
         # Deterministic FULL-PCAP analysis folded in as text. We read every
@@ -146,12 +162,7 @@ class NetworkParser(BaseParser):
             summary = summarize_pcap(pcap)
             if summary:
                 extras += "\n\n" + summary
-        extras += (
-            "\n\n#### Reputation:\nEvery public IP/domain above carries a VirusTotal "
-            "permalink in the structured report "
-            "(``network.ips[].reputation.virustotal_url`` / "
-            "``network.domains[].reputation.virustotal_url``) — pivot for third-party verdicts."
-        )
+        extras += f"\n\n{REPUTATION_HEADING}\n{REPUTATION_PARAGRAPH}"
 
         return (
             "### Network Traffic Intelligence (Sandbox)\n\n"

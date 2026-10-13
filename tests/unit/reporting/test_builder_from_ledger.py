@@ -179,6 +179,24 @@ class TestTypedBlocks:
             "scheduled_task",
         }
 
+    def test_only_a_create_or_modify_of_an_autostart_key_is_persistence(self) -> None:
+        run = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+        rows = [
+            {"key": f"{run}\\Created", "operation": "create", "value": None},
+            {"key": f"{run}\\Written", "operation": "modify", "value": "C:\\evil.exe"},
+            {"key": f"{run}\\FailedDelete", "operation": "access", "value": None},
+            {"key": f"{run}\\Deleted", "operation": "delete", "value": None},
+            {"key": f"{run}\\Read", "operation": "query", "value": "C:\\other.exe"},
+        ]
+        ledger = [entry("sandbox_registry_ops", {"registry": rows}, EvidenceCounter())]
+
+        report = _build(ledger)
+
+        assert sorted(p.target for p in report.persistence if p.kind == "registry_run") == [
+            f"{run}\\Created",
+            f"{run}\\Written",
+        ]
+
     def test_a_run_that_gathered_nothing_leaves_every_block_empty(self) -> None:
         report = _build([])
         assert report.static is None

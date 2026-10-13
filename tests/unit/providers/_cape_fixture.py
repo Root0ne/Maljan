@@ -22,13 +22,13 @@ ROOT = Path(__file__).resolve().parents[3]
 FIXTURE_PATH = ROOT / "tests" / "fixtures" / "sandbox" / "cape2_report.json"
 
 
-def _no_real_reports_forced() -> bool:
+def no_real_reports_forced() -> bool:
     return os.environ.get("MALJAN_TEST_NO_CAPE_REPORTS") == "1"
 
 
 def first_cape_report_path() -> Path:
     """Return a path to a CAPE2-shaped report: real if available, else the fixture."""
-    if not _no_real_reports_forced():
+    if not no_real_reports_forced():
         candidates = sorted((ROOT / "data" / "cape_reports").glob("*.json"))
         if candidates:
             return candidates[0]

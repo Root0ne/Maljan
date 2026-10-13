@@ -17,13 +17,17 @@ than fabricate — see other/docs/report-reference/ ("state absence explicitly")
 from __future__ import annotations
 
 import ipaddress
-from collections.abc import Callable
+import re
+import weakref
+from collections.abc import Callable, Iterable, Iterator
 from typing import Any
+from urllib.parse import urlsplit
 
-from maljan.analysis.sandbox_sections import ITEMS_TOOL, SECTIONS_TOOL, ItemIndex
+from maljan.analysis.sandbox_sections import ItemIndex
+from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import distinct_processes
 from maljan.reporting.models import MalwareReport
-from maljan.schemas.sandbox_report import SAMPLE_TREE_KEY
+from maljan.schemas.sandbox_report import SAMPLE_TREE_KEY, section_id
 
 # Section keys the Composer authors. Kept as plain strings (not an enum) so the
 # Composer can iterate a config-driven subset per malware type.
@@ -47,67 +51,76 @@ SECTIONS = (
     "mitigations",
 )
 
-# The ledger tools a sandbox answers through. An execution step the report
-# model marks ``observed`` has to cite one of their entries.
-SANDBOX_TOOL_PREFIXES = ("sandbox_", "pcap_summary")
+# The ledger tools a sandbox answers through, by their declared kinds
+# (``CONSUMER_KINDS``). An execution step the report model marks ``observed``
+# has to cite one of their entries.
+_SANDBOX_TOOLS = "evidence_bundles.SANDBOX_TOOL_PREFIXES"
 
 # The sandbox answers about the network: a flow table and a capture. Either
 # holds the guest's traffic as well as the sample's, so it shows a step was
 # observed only when the sandbox attributed a flow to the sample's own tree.
-_NETWORK_SANDBOX_TOOLS = frozenset({"sandbox_network", "pcap_summary"})
+_NETWORK_SANDBOX_TOOLS = "evidence_bundles._NETWORK_SANDBOX_TOOLS"
 
-# Tool names whose captured output is relevant to each technical section. Used
-# to filter ``technical_evidence`` so e.g. the encryption bundle never sees
-# network tool output.
-_SECTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
-    "packing_obfuscation": ("list_segments", "find_anti_analysis", "detect_malware_behaviors"),
-    "cli_flags": ("decompile_function", "analyze_function_complete", "list_strings"),
-    "encryption_scheme": (
-        "detect_crypto_constants",
-        "emulate_function",
-        "emulate_hash_batch",
-        "analyze_dataflow",
-    ),
-    "discovery": ("list_imports", "analyze_api_call_chains", "decompile_function"),
-    "persistence_detail": ("list_strings", "decompile_function", "analyze_api_call_chains"),
-    "evasion_antiforensics": (
-        "find_anti_analysis_techniques",
-        "detect_malware_behaviors",
-        "decompile_function",
-    ),
-    "ransom_note": ("list_strings", "extract_iocs_with_context"),
-    "communications": ("list_strings", "extract_iocs_with_context", "analyze_api_call_chains"),
-    "command_and_control": (
-        "list_strings",
-        "extract_iocs_with_context",
-        "analyze_api_call_chains",
-        "decompile_function",
-    ),
-    "string_resolution": (
-        "emulate_hash_batch",
-        "emulate_function",
-        "analyze_api_call_chains",
-        "decompile_function",
-        "list_strings",
-    ),
-    "configuration": (
-        "emulate_function",
-        "emulate_hash_batch",
-        "analyze_dataflow",
-        "detect_crypto_constants",
-        "extract_iocs_with_context",
-        "decompile_function",
-    ),
-    "commands": ("decompile_function", "analyze_function_complete", "analyze_api_call_chains"),
-    "payloads": ("list_segments", "decompile_function", "extract_iocs_with_context"),
-    "host_identifiers": ("list_strings", "extract_iocs_with_context"),
+# The kinds of captured output each technical section is shown, so e.g. the
+# encryption bundle never sees network tool output. A tool of one of these
+# kinds reaches the section from any server; a tool may also name the sections
+# it is shown to in its own declaration (``report_sections``). A function's
+# code is shown as decompiled source or as its disassembly, whichever the
+# reverser gives. A captured output with no recorded source is routed by its
+# tool's name, as it always was (``legacy_tool_names.SECTION_TOOL_HINTS``).
+_CODE = ("decompile", "function_disassembly")
+_SECTION_KINDS: dict[str, tuple[str, ...]] = {
+    "packing_obfuscation": ("segments", "anti_analysis_scan", "behaviour_scan"),
+    "cli_flags": (*_CODE, "function_analysis", "documentation_completeness", "listing_strings"),
+    "encryption_scheme": ("crypto_constants", "emulation", "dataflow"),
+    "discovery": ("import_listing", "call_chains", *_CODE),
+    "persistence_detail": ("listing_strings", *_CODE, "call_chains"),
+    "evasion_antiforensics": ("anti_analysis_scan", "behaviour_scan", *_CODE),
+    "ransom_note": ("listing_strings", "iocs_with_context"),
+    "communications": ("listing_strings", "iocs_with_context", "call_chains"),
+    "command_and_control": ("listing_strings", "iocs_with_context", "call_chains", *_CODE),
+    "string_resolution": ("emulation", "call_chains", *_CODE, "listing_strings"),
+    "configuration": ("emulation", "dataflow", "crypto_constants", "iocs_with_context", *_CODE),
+    "commands": (*_CODE, "function_analysis", "documentation_completeness", "call_chains"),
+    "payloads": ("segments", *_CODE, "iocs_with_context"),
+    "host_identifiers": ("listing_strings", "iocs_with_context"),
 }
+
+
+def shown_to_section(section: str, output: dict[str, Any]) -> bool:
+    """Whether one captured tool output belongs in a technical section's bundle.
+
+    By the output's recorded source: its tool's declared kind is one the
+    section reads, or its declaration names the section. A tool its source
+    declares nothing for reaches the sections that read a function's code
+    when its name says it lists one (``tool_kinds.undeclared_code_kind``), as
+    the function map reads it. With no source, by the tool's name, as before.
+    """
+    by_name = tool_kinds.shown_by_name(section, output)
+    if by_name is not None:
+        return by_name
+    facts = tool_kinds.facts_of(output)
+    if facts is None:
+        kind = tool_kinds.undeclared_code_kind(output)
+        return kind in _CODE and kind in _SECTION_KINDS.get(section, ())
+    return facts.kind in _SECTION_KINDS.get(section, ()) or section in facts.report_sections
+
 
 # Keyword hints to pull the relevant ISR claims into a technical section.
 _SECTION_CLAIM_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "packing_obfuscation": ("pack", "obfuscat", "entropy", "encoded", "dynamic api"),
+    "packing_obfuscation": ("pack", "unpack", "obfuscat", "entropy", "encoded", "dynamic api"),
     "cli_flags": ("argument", "command-line", "command line", "flag", "parameter", "argv"),
-    "encryption_scheme": ("encrypt", "aes", "rsa", "rc4", "xor", "crypto", "cipher", "key"),
+    "encryption_scheme": (
+        "encrypt",
+        "aes",
+        "rsa",
+        "rc4",
+        "xor",
+        "crypto",
+        "crypt",
+        "cipher",
+        "key",
+    ),
     "discovery": ("enumerate", "discovery", "drive", "registry query", "system info"),
     "persistence_detail": ("persist", "run key", "scheduled task", "startup", "service", "autorun"),
     "evasion_antiforensics": ("evasion", "anti-", "unhook", "masquerad", "syslog", "shadow"),
@@ -200,27 +213,181 @@ def _claims_text(report: MalwareReport, isr_reports: dict[str, Any] | None) -> l
     ]
 
 
+def _word_starts(text: str) -> Iterator[int]:
+    """Where each word of ``text`` starts, in order, one at a time.
+
+    A word starts at a letter or digit that follows anything else, and inside
+    a run of letters where the case says a new word begins: ``CryptEncrypt``
+    is two words, ``HTTPRequest`` is ``HTTP`` and ``Request``. One pass, and
+    nothing kept beside the text: the reader stops at its first match.
+    """
+    prev = ""
+    for index, char in enumerate(text):
+        if char.isalnum() and (
+            not prev.isalnum()
+            or (prev.islower() and char.isupper())
+            or (
+                prev.isupper()
+                and char.isupper()
+                and index + 1 < len(text)
+                and text[index + 1].islower()
+            )
+        ):
+            yield index
+        prev = char
+
+
+# A keyword this long is a stem that names its subject inside a compound
+# word too (``obfuscat`` in ``deobfuscation``, ``string`` in ``stackstrings``);
+# a shorter one turns up inside unrelated words by chance (``rsa`` in
+# ``rehearsal``, ``c2`` in ``0xc2c4``) and matches only where a word begins or
+# ends.
+_STEM_LENGTH = 6
+
+# A run of letters and digits (no underscore): the unit a word end is read in.
+_RUN = re.compile(r"[^\W_]+")
+# A run that is a number written in hex: ``0xc2c4``, ``0C2C4h``, or a bare run
+# of eight or more hex digits holding both a digit and a letter. No keyword
+# starts or ends inside one.
+_HEX_RUN = re.compile(
+    r"0x[0-9a-f]+|[0-9][0-9a-f]*h|(?=[0-9a-f]*[0-9])(?=[0-9a-f]*[a-f])[0-9a-f]{8,}",
+    re.IGNORECASE,
+)
+# What may follow a short keyword that ends a word: a plural, a verb's
+# ending, an agent noun, or an API name's character-set or extended suffix
+# (``schtasks``, ``apihashing``, ``repacked``, ``createmutexw``).
+_END_SUFFIXES = ("", "s", "es", "d", "ed", "ing", "er", "ers", "w", "a", "ex", "exw", "exa")
+# Ordinary words that end with a short keyword by chance: a keyword at their
+# end names nothing (``key`` in ``monkey``, ``rsa`` in ``versa``).
+_NOT_COMPOUNDS = frozenset(
+    {
+        "monkey",
+        "donkey",
+        "turkey",
+        "hockey",
+        "jockey",
+        "whiskey",
+        "lackey",
+        "versa",
+        "footnote",
+    }
+)
+
+
+def _ends_with_keyword(run: str, keywords: tuple[str, ...]) -> bool:
+    """Whether a lowered run ends with one of ``keywords`` and one of ``_END_SUFFIXES``."""
+    for suffix in _END_SUFFIXES:
+        if suffix and not run.endswith(suffix):
+            continue
+        stem = run[: len(run) - len(suffix)] if suffix else run
+        if stem in _NOT_COMPOUNDS:
+            continue
+        if any(stem.endswith(k) for k in keywords):
+            return True
+    return False
+
+
+def mentions(text: str, keywords: tuple[str, ...]) -> bool:
+    """Whether ``text`` holds one of ``keywords`` as a word, a word's prefix or a word's end.
+
+    A keyword shorter than ``_STEM_LENGTH`` matches where a word begins, as a
+    whole word or its prefix (``rsa`` in ``RSA1`` and ``rsaenh``, ``key`` in
+    ``KeyBlob``), or where a word ends, a plural, verb, agent or API suffix
+    allowed after it (``rc4`` in ``ARC4``, ``key`` in ``pubkey``, ``http`` in
+    ``winhttp``, ``task`` in ``schtasks``, ``hash`` in ``apihashing``,
+    ``mutex`` in ``createmutexw``); never inside a word (``rsa`` in
+    ``rehearsal``, ``aes`` in ``caesar``), never in an ordinary word that
+    ends with it by chance (``key`` in ``monkey``), and never starting or
+    ending inside a number written in hex (``c2`` in ``0xC2C4``). A longer
+    one matches anywhere, as it always did. Case is ignored. Linear in the
+    text for a given keyword list.
+    """
+    if not keywords:
+        return False
+    # Lowered one character at a time, so every index still names the same
+    # character (a few characters lower to two).
+    lowered = "".join(c.lower() if len(c.lower()) == 1 else c for c in text)
+    stems = [k for k in keywords if len(k) >= _STEM_LENGTH]
+    if any(k in lowered for k in stems):
+        return True
+    short = tuple(k for k in keywords if len(k) < _STEM_LENGTH)
+    if not short:
+        return False
+    # A keyword written with a space or a dash spans runs: read where a word starts.
+    words = tuple(k for k in short if k.isalnum())
+    for found in _RUN.finditer(text):
+        run = found.group(0)
+        if _HEX_RUN.fullmatch(run):
+            continue
+        at = found.start()
+        if any(lowered.startswith(short, at + offset) for offset in _word_starts(run)):
+            return True
+        if words and _ends_with_keyword(lowered[at : found.end()], words):
+            return True
+    return False
+
+
 def _filter_claims(claims: list[dict[str, str]], keywords: tuple[str, ...]) -> list[dict[str, str]]:
     if not keywords:
         return []
-    picked = []
-    for c in claims:
-        hay = f"{c['claim']} {c['evidence_ref']}".lower()
-        if any(k in hay for k in keywords):
-            picked.append(c)
-    return picked
+    return [c for c in claims if mentions(f"{c['claim']} {c['evidence_ref']}", keywords)]
+
+
+def cited_entry_ids(claims: list[dict[str, str]]) -> set[str]:
+    """The ledger entry ids the claims cite, in their text or their evidence."""
+    from maljan.schemas.evidence import entry_ids_in
+
+    cited: set[str] = set()
+    for claim in claims:
+        cited |= entry_ids_in(f"{claim.get('claim', '')} {claim.get('evidence_ref', '')}")
+    return cited
+
+
+def cited_undeclared_output(
+    output: dict[str, Any], cited: set[str], index: dict[str, Any] | None
+) -> bool:
+    """Whether a captured output of a tool its source declares nothing for is cited.
+
+    The analysts' citation decides where such an output goes: a section whose
+    claims cite its entry is shown it, as a section is shown a declared kind
+    it reads. Routing only. The output's entry is the job-wide call number
+    the capture carries (``LedgerEntry.to_captured``), and it is held to the
+    report's evidence index: the indexed entry must name the same tool and
+    agent, or the output is not routed. A declared tool, and an output with no
+    recorded source, are routed by :func:`shown_to_section` alone.
+    """
+    if not cited or index is None:
+        return False
+    if tool_kinds.source_of(output) is None or tool_kinds.facts_of(output) is not None:
+        return False
+    from maljan.schemas.evidence import format_entry_id
+
+    seq = output.get("seq")
+    # An output that carries no call number names no entry.
+    if not isinstance(seq, int) or isinstance(seq, bool) or seq < 0:
+        return False
+    entry_id = format_entry_id(seq + 1)
+    row = index.get(entry_id)
+    if entry_id not in cited or row is None:
+        return False
+    return str(getattr(row, "tool", "")) == str(output.get("tool_name") or "") and str(
+        getattr(row, "agent", "")
+    ) == str(output.get("agent_id") or "")
 
 
 def _filter_tool_outputs(
-    technical_evidence: dict[str, list[dict[str, Any]]] | None, hints: tuple[str, ...]
+    technical_evidence: dict[str, list[dict[str, Any]]] | None,
+    section: str,
+    cited: set[str] | None = None,
+    index: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
-    if not technical_evidence or not hints:
+    if not technical_evidence:
         return []
     picked: list[dict[str, str]] = []
     for outputs in technical_evidence.values():
         for o in outputs or []:
             name = str(o.get("tool_name", ""))
-            if any(h in name for h in hints):
+            if shown_to_section(section, o) or cited_undeclared_output(o, cited or set(), index):
                 picked.append(
                     {
                         "tool": name,
@@ -304,9 +471,13 @@ def bundle_for(
 ) -> dict[str, Any]:
     """Return the isolated evidence slice for ``section``.
 
-    Keys: ``claims`` (relevant ISR claims), ``tool_outputs`` (relevant captured
-    Ghidra output), ``facts`` (deterministic report data for the section), and
-    ``binary`` (what the file demonstrably is — see :func:`binary_facts`).
+    Keys: ``claims`` (relevant ISR claims), ``tool_outputs`` (the captured tool
+    outputs of the kinds the section reads, from any server:
+    :func:`shown_to_section`; and the output of a tool its source declares
+    nothing for when a claim of the section cites its entry:
+    :func:`cited_undeclared_output`), ``facts`` (deterministic report data for the
+    section), and ``binary`` (what the file demonstrably is — see
+    :func:`binary_facts`).
 
     ``binary`` is separate from ``facts`` on purpose. :func:`is_empty` keys off
     ``facts``, and it is what makes the Composer skip a section instead of
@@ -391,15 +562,19 @@ def bundle_for(
         }
     if section in ("communications", "command_and_control"):
         net = report.network
+        claims = _filter_claims(all_claims, _SECTION_CLAIM_KEYWORDS[section])
         return {
-            "claims": _filter_claims(all_claims, _SECTION_CLAIM_KEYWORDS[section]),
-            "tool_outputs": _filter_tool_outputs(tech_ev, _SECTION_TOOL_HINTS[section]),
+            "claims": claims,
+            "tool_outputs": _filter_tool_outputs(
+                tech_ev, section, cited_entry_ids(claims), _index_of(report)
+            ),
             "binary": base,
             "facts": {
                 "domains": [d.fqdn for d in (net.domains if net else [])],
                 "ips": [f"{i.address}:{i.port}" for i in (net.ips if net else [])],
                 "urls": [u.url for u in (net.urls if net else [])],
                 "user_agents": (net.user_agents if net else []),
+                "entries_holding": _network_holders(report),
             },
         }
 
@@ -409,12 +584,20 @@ def bundle_for(
     # A section describing packing that cannot see ``packer_matches`` has only
     # analyst claims to go on, and that is the same failure mode as the
     # conclusion's.
+    claims = _filter_claims(all_claims, _SECTION_CLAIM_KEYWORDS.get(section, ()))
     return {
-        "claims": _filter_claims(all_claims, _SECTION_CLAIM_KEYWORDS.get(section, ())),
-        "tool_outputs": _filter_tool_outputs(tech_ev, _SECTION_TOOL_HINTS.get(section, ())),
+        "claims": claims,
+        "tool_outputs": _filter_tool_outputs(
+            tech_ev, section, cited_entry_ids(claims), _index_of(report)
+        ),
         "binary": base,
         "facts": _technical_facts(section, report),
     }
+
+
+def _index_of(report: MalwareReport) -> dict[str, Any]:
+    """The report's evidence index by entry id."""
+    return {row.id: row for row in report.evidence_index}
 
 
 def _assessed_persistence(report: MalwareReport) -> list[str]:
@@ -439,7 +622,7 @@ def _assessed_persistence(report: MalwareReport) -> list[str]:
 def sandbox_watched_persistence(report: MalwareReport) -> bool:
     """Whether a sandbox report is held whose registry and file views were not unavailable."""
     dyn = report.dynamic
-    blind = {str(name).strip().lower() for name in (dyn.unavailable if dyn else [])}
+    blind = {section_id(name) for name in (dyn.unavailable if dyn else [])}
     return dyn is not None and not blind.intersection(
         {"registry", "files", "file", "file_operations", "filesystem"}
     )
@@ -474,25 +657,29 @@ def sandbox_entry_ids(report: MalwareReport) -> list[str]:
     # The pack's sandbox-status entry states what the sandbox report is, and
     # its section index how many items each section holds; neither records
     # behaviour, and neither is an observation to cite.
-    tools = {
-        row.id: str(row.tool or "")
+    rows = {
+        row.id: row
         for row in report.evidence_index
-        if str(row.tool or "").startswith(SANDBOX_TOOL_PREFIXES)
-        and row.tool not in _NOT_OBSERVATIONS
+        if tool_kinds.is_of(row, _SANDBOX_TOOLS) and not _states_the_report(row)
     }
     holding: set[str] = set()
     for section in report.sections:
-        cited = set(tools).intersection(section.evidence_ids)
+        cited = set(rows).intersection(section.evidence_ids)
         if not cited or not section_holds_something(section):
             continue
         if not sample_flow:
-            cited = {eid for eid in cited if not _answers_about_the_network(tools[eid], section)}
+            cited = {eid for eid in cited if not _answers_about_the_network(rows[eid], section)}
         holding.update(cited)
     return [row.id for row in report.evidence_index if row.id in holding]
 
 
-# The sandbox entries that state what the report is or holds, not what it saw.
-_NOT_OBSERVATIONS = frozenset({"sandbox_status", SECTIONS_TOOL})
+# The kinds of the sandbox entries that state what the report is or holds, not what it saw.
+_REPORT_STATE_KINDS = frozenset({"sandbox_status", "sandbox_sections"})
+
+
+def _states_the_report(row: Any) -> bool:
+    """Whether a sandbox entry states what the report is or holds (by its kind)."""
+    return tool_kinds.kind_of(row) in _REPORT_STATE_KINDS
 
 
 def sandbox_item_observation(
@@ -534,14 +721,14 @@ _NETWORK_REPORT_SECTIONS = frozenset(
 )
 
 
-def _answers_about_the_network(tool: str, section: Any) -> bool:
+def _answers_about_the_network(row: Any, section: Any) -> bool:
     """Whether a sandbox answer records traffic: the flow table, the capture, a network section."""
-    if tool in _NETWORK_SANDBOX_TOOLS:
+    if tool_kinds.is_of(row, _NETWORK_SANDBOX_TOOLS):
         return True
     name = str(getattr(section, "key", "") or "").removeprefix("sandbox_").lower()
-    if tool == ITEMS_TOOL:
+    if tool_kinds.is_kind(row, "sandbox_items"):
         return name == "items_network"
-    return tool == "sandbox_report_section" and name in _NETWORK_REPORT_SECTIONS
+    return tool_kinds.is_kind(row, "sandbox_report_section") and name in _NETWORK_REPORT_SECTIONS
 
 
 def sample_flow_fact(report: MalwareReport) -> Any:
@@ -637,11 +824,202 @@ def _process_lines(node: Any, depth: int) -> list[str]:
     return out
 
 
-# The tools whose answers are the sample's own strings, read or decoded.
-_STRING_TOOLS = frozenset({"strings", "floss", "iocs_from_file", "list_strings"})
+# The tools whose answers are the sample's own strings, read or decoded, by
+# their declared kinds (``CONSUMER_KINDS``).
+_STRING_TOOLS = "evidence_bundles._STRING_TOOLS"
 
 # The string-sweep kinds a responder searches a host for.
 _HOST_STRING_KINDS = frozenset({"path", "registry", "mutex", "command"})
+
+
+# A token of an answer's text when it is read for the values it holds: a run
+# of characters none of which ends a token. One character class, no
+# alternation: the scan cannot backtrack.
+_TOKEN = re.compile(r"[^\s\"'`<>()\[\]{},;|]+")
+
+
+def _token_forms(token: str) -> Iterator[str]:
+    """The values one token of an answer names: itself, trimmed, its host, its address."""
+    trimmed = token.rstrip(".:/")
+    yield token
+    if trimmed != token:
+        yield trimmed
+    if "://" in trimmed:
+        try:
+            host = urlsplit(trimmed).hostname
+        except ValueError:
+            host = None
+        if host:
+            yield host
+    address, sep, port = trimmed.rpartition(":")
+    if sep and port.isdigit() and address.count(".") == 3:
+        yield address
+
+
+def _value_holders(report: MalwareReport, wanted: frozenset[str]) -> dict[str, list[str]]:
+    """The answered entries holding each of the ``wanted`` values.
+
+    Read from two places, each naming the entry exactly: a captured tool
+    output (its call number names its entry, held to the evidence index by
+    tool, as :func:`cited_undeclared_output` holds it), and a report section
+    built from one entry, or a table row that names its own entry. A section
+    built from several entries whose rows name none is not read: which entry
+    holds a value there is not known. Only entries the index files as
+    answered count.
+
+    Each text is scanned once, token by token, and only a token naming a
+    wanted value is kept: what is held grows with the wanted values and
+    their holders, never with the size of an answer, which the sample
+    controls.
+    """
+    from maljan.schemas.evidence import entry_ids_in, format_entry_id
+
+    index = _index_of(report)
+    held: dict[str, dict[str, None]] = {}
+
+    def add(text: str, entry_ids: Iterable[str]) -> None:
+        ids = [i for i in entry_ids if (row := index.get(i)) is not None and row.ok]
+        if not ids or not text:
+            return
+        for match in _TOKEN.finditer(text):
+            for form in _token_forms(match.group(0)):
+                if form in wanted:
+                    held.setdefault(form, {}).update(dict.fromkeys(ids))
+
+    for outputs in (report.technical_evidence or {}).values():
+        for output in outputs:
+            seq = output.get("seq")
+            if not isinstance(seq, int) or isinstance(seq, bool) or seq < 0:
+                continue
+            entry_id = format_entry_id(seq + 1)
+            row = index.get(entry_id)
+            tool = str(output.get("tool_name") or output.get("tool") or "")
+            if row is not None and str(getattr(row, "tool", "")) == tool:
+                add(str(output.get("output") or ""), (entry_id,))
+    for section in report.sections:
+        if len(section.evidence_ids) == 1:
+            for row in section.rows:
+                for cell in row:
+                    add(cell, section.evidence_ids)
+            for item in section.items:
+                add(item, section.evidence_ids)
+            add(section.text, section.evidence_ids)
+            continue
+        own = set(section.evidence_ids)
+        for row in section.rows:
+            named = sorted(set().union(*(entry_ids_in(cell) for cell in row)) & own)
+            for cell in row if named else ():
+                add(cell, named)
+    return {form: sorted(ids) for form, ids in held.items()}
+
+
+def _lookups(value: str) -> tuple[str, ...]:
+    """The forms ``value`` is looked up by: itself, and an ``address:port``'s address."""
+    address, sep, port = value.rpartition(":")
+    if sep and (port.isdigit() or port == "None"):
+        return (value, address)
+    return (value,)
+
+
+# The holders read per report, so the sections of one report scan its texts
+# once: keyed by the report object (held weakly) and the values asked for.
+# A report model is not hashable, so it is keyed by its identity, and its
+# entry leaves when the report is collected.
+_HOLDERS_READ: dict[int, tuple[weakref.ref[Any], dict[tuple[str, ...], list[str]]]] = {}
+
+
+def _holders_read(report: MalwareReport) -> dict[tuple[str, ...], list[str]]:
+    """What was read of ``report`` so far, by value list."""
+    key = id(report)
+    held = _HOLDERS_READ.get(key)
+    if held is not None and held[0]() is report:
+        return held[1]
+    try:
+        ref = weakref.ref(report)
+    except TypeError:
+        return {}
+    weakref.finalize(report, _HOLDERS_READ.pop, key, None)
+    _HOLDERS_READ[key] = (ref, {})
+    return _HOLDERS_READ[key][1]
+
+
+def _read_fingerprint(report: MalwareReport) -> int:
+    """A fingerprint of everything :func:`_value_holders` reads of ``report``.
+
+    Each index row's id and outcome, each captured output's call number, tool
+    and text, and each section's entries, text, rows and items, by their
+    hashes. A string caches its own hash, so after the first reading this
+    costs one step per item, never a pass over the answers' text: the
+    answers are scanned once per report while they stay as they were, and
+    again as soon as any of them changes.
+    """
+    parts: list[int] = [hash(tuple((row.id, row.ok, row.tool) for row in report.evidence_index))]
+    for outputs in (report.technical_evidence or {}).values():
+        for output in outputs:
+            parts.append(
+                hash(
+                    (
+                        repr(output.get("seq")),
+                        str(output.get("tool_name") or output.get("tool") or ""),
+                        str(output.get("output") or ""),
+                    )
+                )
+            )
+    for section in report.sections:
+        parts.append(
+            hash(
+                (
+                    tuple(section.evidence_ids),
+                    section.text,
+                    tuple(tuple(row) for row in section.rows),
+                    tuple(section.items),
+                )
+            )
+        )
+    return hash(tuple(parts))
+
+
+def value_entries(report: MalwareReport, values: Iterable[str]) -> list[str]:
+    """``<value>: ev_0006, ev_0030`` for each of ``values`` an answered entry holds, in order.
+
+    A value no entry is known to hold is left out rather than given an entry
+    that may not hold it. An ``address:port`` value is looked up by its
+    address too. Read once per report and value list while what is read stays
+    as it was (``_HOLDERS_READ``, keyed by :func:`_read_fingerprint`).
+    """
+    asked = tuple(v for v in dict.fromkeys(values) if v)
+    if not asked:
+        return []
+    cached = _holders_read(report)
+    # What was read changes the key: a report whose entries, outcomes,
+    # captured outputs or sections changed since, in place or not, is read
+    # again (``_read_fingerprint``).
+    key = (*asked, f"\0{_read_fingerprint(report)}")
+    if key in cached:
+        return list(cached[key])
+    held = _value_holders(report, frozenset(f for v in asked for f in _lookups(v)))
+    out: list[str] = []
+    for value in asked:
+        ids = next((held[form] for form in _lookups(value) if held.get(form)), None)
+        if ids:
+            out.append(f"{value}: {', '.join(ids)}")
+    cached[key] = out
+    return list(out)
+
+
+def _network_holders(report: MalwareReport) -> list[str]:
+    """The entries holding each url, domain and ip of the report's network block."""
+    net = report.network
+    if net is None:
+        return []
+    return value_entries(
+        report,
+        [
+            *(u.url for u in net.urls),
+            *(d.fqdn for d in net.domains),
+            *(f"{i.address}:{i.port}" for i in net.ips),
+        ],
+    )
 
 
 def _string_entries(report: MalwareReport) -> list[str]:
@@ -649,8 +1027,39 @@ def _string_entries(report: MalwareReport) -> list[str]:
     return [
         f"{row.id} ({row.tool})"
         for row in report.evidence_index
-        if str(row.tool or "") in _STRING_TOOLS and row.ok
+        if row.ok and tool_kinds.is_of(row, _STRING_TOOLS)
     ]
+
+
+# The kinds whose answered entry is a crypto finding in the file itself,
+# whichever server or pack step wrote it: the encryption section is shown the
+# entries, so a run that measured a published constant set asks the section
+# on that measurement.
+_CRYPTO_FINDING_KINDS = frozenset({"crypto_constants"})
+
+
+def is_crypto_finding(row: Any) -> bool:
+    """Whether an evidence index row is an answered entry of a crypto-finding kind."""
+    return bool(getattr(row, "ok", False)) and tool_kinds.kind_of(row) in _CRYPTO_FINDING_KINDS
+
+
+def crypto_finding_entries(report: MalwareReport) -> list[str]:
+    """``ev_0021 (find_crypto_constants)`` for every answered entry of a crypto-finding kind."""
+    return [f"{row.id} ({row.tool})" for row in report.evidence_index if is_crypto_finding(row)]
+
+
+def section_keywords(section: str) -> tuple[str, ...]:
+    """The keywords that pick a section's claims (empty for a section that reads every claim)."""
+    return _SECTION_CLAIM_KEYWORDS.get(section, ())
+
+
+# The catalogue categories of the sandbox-called APIs each section is shown,
+# beside the import profile's count of the same category.
+_SANDBOX_CALLED_CATEGORIES: dict[str, tuple[str, ...]] = {
+    "encryption_scheme": ("crypto",),
+    "discovery": ("discovery",),
+    "evasion_antiforensics": ("anti_debug", "evasion"),
+}
 
 
 def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
@@ -679,6 +1088,7 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
             "domains": [d.fqdn for d in (net.domains if net else [])],
             "user_agents": (net.user_agents if net else []),
             "string_entries": _string_entries(report),
+            "entries_holding": _network_holders(report),
         }
     if section == "host_identifiers":
         static = report.static
@@ -699,9 +1109,28 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
         # only when an analyst claim or a captured tool output speaks to it.
         return {}
 
+    # What the sandbox recorded the sample calling, by the catalogue's
+    # categories (``DynamicBehavior.api_capabilities``): counted beside the
+    # import profile, so a run whose imports name no crypto API but whose
+    # sandbox saw one still shows the encryption section a measurement.
+    called = (report.dynamic.api_capabilities if report.dynamic else None) or {}
+    # Only a category the sandbox saw called is named: a section's facts are
+    # what they were on every run whose sandbox called none.
+    observed: dict[str, dict[str, Any]] = {
+        section_key: {
+            f"sandbox_called_{c}_api_count": called[c] for c in categories if called.get(c)
+        }
+        for section_key, categories in _SANDBOX_CALLED_CATEGORIES.items()
+    }
+    # The crypto findings' entries, named only where there are some: the
+    # section's facts are what they were on every run that found none.
+    crypto_entries = crypto_finding_entries(report) if section == "encryption_scheme" else []
+    if crypto_entries:
+        observed["encryption_scheme"]["crypto_finding_entries"] = crypto_entries
+
     static = report.static
     if static is None:
-        return {}
+        return observed.get(section, {})
 
     caps = static.api_capabilities or {}
     # Distinct ids, in first-seen order. A row is a rule and two rules can
@@ -737,17 +1166,19 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
     # aggregated. The per-import lists that sat beside them were that table
     # read back one import at a time, and they are gone.
     if section == "encryption_scheme":
-        return {"crypto_api_count": caps.get("crypto", 0)}
+        return {"crypto_api_count": caps.get("crypto", 0), **observed[section]}
     if section == "discovery":
         return {
             "discovery_api_count": caps.get("discovery", 0),
             "discovery_techniques": [t for t in techniques if t in _DISCOVERY_TECHNIQUES],
+            **observed[section],
         }
     if section == "evasion_antiforensics":
         return {
             "anti_debug_api_count": caps.get("anti_debug", 0),
             "evasion_api_count": caps.get("evasion", 0),
             "evasion_techniques": [t for t in techniques if t in _EVASION_TECHNIQUES],
+            **observed[section],
         }
     if section == "cli_flags":
         return {"capability_profile": dict(sorted(caps.items(), key=lambda kv: -kv[1]))}

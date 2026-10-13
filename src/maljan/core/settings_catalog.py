@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import types
 import typing
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any, Literal, get_args, get_origin
 
@@ -23,12 +24,19 @@ from maljan.core.settings_annotations import ANNOTATIONS, GROUP_ORDER, group_for
 FieldType = Literal["bool", "int", "float", "str", "secret", "enum", "list", "dict", "json"]
 Applies = Literal["next_job", "live", "restart"]
 ChoicesFrom = Literal[
-    "static_providers", "sandbox_providers", "mcp_servers", "agent_roles", "profiles"
+    "static_providers",
+    "sandbox_providers",
+    "mcp_servers",
+    "agent_roles",
+    "profiles",
+    "memory_backends",
+    "llm_providers",
+    "sandbox_report_readers",
 ]
-Editor = Literal["server_map", "rest_sandbox", "agent_definitions", "stages"]
+Editor = Literal["server_map", "rest_sandbox", "agent_definitions", "stages", "tool_facts"]
 
 # Field names that are secrets although typed as plain str.
-_SECRET_NAMES = {"auth_token", "api_key", "cape2_api_token"}
+_SECRET_NAMES = {"auth_token", "api_key"}
 
 
 @dataclass(frozen=True)
@@ -84,6 +92,26 @@ class CatalogEntry:
     # reason ``choices`` is: the rule lives in ``REQUIRED_ENV_ALLOW`` and a
     # second copy of it in the console is a copy that drifts.
     required_env: dict[str, list[str]] | None = None
+    # The short phrase each choice declares for the console to show beside it
+    # (a registry's own labels), keyed by choice; ``None`` when none declares one.
+    choice_labels: dict[str, str] | None = None
+    # For a provider selector, filled by the API from each registered
+    # provider's own declaration: the title the console shows for a choice,
+    # its one-line description, and the facts the console reads about it
+    # (credential keys, hosted or run locally, its connection test, whether an
+    # agent may give it an endpoint of its own, its effort setting).
+    choice_titles: dict[str, str] | None = None
+    choice_descriptions: dict[str, str] | None = None
+    choice_facts: dict[str, dict[str, Any]] | None = None
+    # For the tool-server map: the keys of the built-in servers and the keys no
+    # operator's server may take, served so the console never keeps a copy.
+    builtin_servers: list[str] | None = None
+    reserved_servers: list[str] | None = None
+    # For the agent definitions: per capability a seeded definition references
+    # (``ToolRef(kind="capability")``), the servers it stands for
+    # (``agents.composition.capability_servers``), served so the console draws
+    # a capability reference with the servers it reaches, never a copy of the rule.
+    capability_servers: dict[str, list[str]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -105,10 +133,12 @@ def _is_model(tp: Any) -> bool:
 def _walk(model: type[BaseModel], prefix: str, defaults: Any) -> list[Leaf]:
     out: list[Leaf] = []
     for name, field in model.model_fields.items():
-        tp, _ = _unwrap_optional(field.annotation)
+        tp, nullable = _unwrap_optional(field.annotation)
         path = f"{prefix}{name}"
         default = getattr(defaults, name) if defaults is not None else None
-        if _is_model(tp):
+        # A model that may be absent is one value: its fields are valid only
+        # together, so it is one leaf rather than a key per field.
+        if _is_model(tp) and not nullable:
             out.extend(_walk(tp, path + ".", default))
         else:
             out.append(Leaf(path=path, annotation=field.annotation, default=default, field=field))
@@ -116,14 +146,106 @@ def _walk(model: type[BaseModel], prefix: str, defaults: Any) -> list[Leaf]:
 
 
 def core_leaves() -> list[Leaf]:
-    """Leaves of ``Settings`` with the *code* defaults (env ignored)."""
+    """Leaves of ``Settings`` with the *code* defaults (env ignored).
+
+    Beside the declared fields: the settings of each memory backend an
+    installed package registered with a settings model, under ``memory.<id>.``,
+    so the catalogue lists and the store saves them like any other key.
+    """
     defaults = Settings.model_construct()  # no env, no validation: declared defaults only
     # model_construct leaves nested models unbuilt; build them from their own defaults
     for name, field in Settings.model_fields.items():
         tp, _ = _unwrap_optional(field.annotation)
         if _is_model(tp) and not isinstance(getattr(defaults, name, None), BaseModel):
             object.__setattr__(defaults, name, tp())
-    return _walk(Settings, "", defaults)
+    leaves = _walk(Settings, "", defaults)
+    for backend_id, backend in _undeclared_memory_backends().items():
+        model = backend.settings_model
+        if model is not None:
+            leaves.extend(_walk(model, f"memory.{backend_id}.", model()))
+    for provider_id, model in _undeclared_llm_providers().items():
+        leaves.extend(_walk(model, f"llm.{provider_id}.", model()))
+    return leaves
+
+
+def _undeclared_llm_providers() -> dict[str, Any]:
+    """Registered LLM providers whose settings are not a declared field of ``llm``."""
+    from maljan.llm.provider_base import undeclared_settings_models
+
+    return undeclared_settings_models()
+
+
+def _undeclared_memory_backends() -> dict[str, Any]:
+    """Registered memory backends whose settings are not a declared field of ``memory``."""
+    from maljan.core.config import MemoryConfig
+    from maljan.memory.store_factory import registered_backends
+
+    return {
+        backend_id: backend
+        for backend_id, backend in registered_backends().items()
+        if backend_id not in MemoryConfig.model_fields
+    }
+
+
+def _annotation(path: str, undeclared: Mapping[str, Any] | None = None) -> Any:
+    """``path``'s annotation: the shared table's, else the one its memory backend or LLM
+    provider declares for the leaves of its own settings."""
+    found = ANNOTATIONS.get(path)
+    if found is not None:
+        return found
+    if path.startswith("llm."):
+        provider_id, _, leaf = path[len("llm.") :].partition(".")
+        providers = _undeclared_llm_providers() if undeclared is None else undeclared
+        if leaf and provider_id in providers:
+            from maljan.llm.provider_base import facts_of
+
+            return facts_of(provider_id).settings_annotations.get(leaf)
+        return None
+    if not path.startswith("memory."):
+        return found
+    backend_id, _, leaf = path[len("memory.") :].partition(".")
+    backend = _undeclared_memory_backends().get(backend_id)
+    return backend.annotations.get(leaf) if backend is not None and leaf else None
+
+
+def _registry_choices(source: str | None) -> list[str] | None:
+    """The choices a core registry holds for ``source``, or ``None`` when it is not one."""
+    if source == "memory_backends":
+        from maljan.memory.store_factory import memory_backends
+
+        return list(memory_backends())
+    if source == "llm_providers":
+        from maljan.llm.provider_base import provider_names
+
+        return provider_names()
+    if source == "sandbox_report_readers":
+        from maljan.providers.sandbox.readers import choosable_reader_ids
+
+        return choosable_reader_ids()
+    if source in ("static_providers", "sandbox_providers"):
+        from maljan.providers.registry import (
+            sandbox_provider_class,
+            sandbox_provider_ids,
+            static_provider_class,
+            static_provider_ids,
+        )
+
+        static = source == "static_providers"
+        ids = static_provider_ids() if static else sandbox_provider_ids()
+        cls_of = static_provider_class if static else sandbox_provider_class
+        # In the order each provider declares, then by id.
+        return sorted(ids, key=lambda i: (getattr(cls_of(i), "choice_order", 100), i))
+    return None
+
+
+def _registry_labels(source: str | None) -> dict[str, str] | None:
+    """The labels a core registry's choices declare for ``source``, or ``None``."""
+    if source == "memory_backends":
+        from maljan.memory.store_factory import registered_backends
+
+        labels = {key: b.label for key, b in registered_backends().items() if b.label}
+        return labels or None
+    return None
 
 
 def _field_type(leaf: Leaf) -> tuple[FieldType, list[str] | None, bool]:
@@ -143,7 +265,10 @@ def _field_type(leaf: Leaf) -> tuple[FieldType, list[str] | None, bool]:
         return "str", None, nullable
     origin = get_origin(tp)
     if origin in (list, set, tuple):
-        return "list", None, nullable
+        # A list of objects (a server's error patterns) is edited as JSON; the
+        # list widget is one string per line.
+        items = get_args(tp)
+        return ("json" if items and _is_model(items[0]) else "list"), None, nullable
     if origin is dict:
         _, val = get_args(tp) or (None, None)
         return ("json" if _is_model(val) else "dict"), None, nullable
@@ -183,9 +308,14 @@ def core_catalog() -> list[CatalogEntry]:
     from the annotation, so an unannotated credential field is still redacted.
     """
     entries: list[CatalogEntry] = []
+    undeclared = _undeclared_llm_providers()
     for leaf in core_leaves():
-        ann = ANNOTATIONS.get(leaf.path)
+        ann = _annotation(leaf.path, undeclared)
         ftype, choices, nullable = _field_type(leaf)
+        # A str leaf whose choices a core registry holds is an enum of them.
+        registry = _registry_choices(ann.get("choices_from") if ann else None)
+        if registry is not None and ftype == "str":
+            ftype, choices = "enum", registry
         lo, hi = _bounds(leaf.field)
         entries.append(
             CatalogEntry(
@@ -209,6 +339,7 @@ def core_catalog() -> list[CatalogEntry]:
                 applies_when=(ann.get("applies_when") if ann else None),
                 order=(ann.get("order", 0) if ann else 0),
                 choices_from=(ann.get("choices_from") if ann else None),
+                choice_labels=_registry_labels(ann.get("choices_from") if ann else None),
                 editor=(ann.get("editor") if ann else None),
                 subgroup=(ann.get("subgroup") if ann else None),
                 advanced=bool(ann.get("advanced", False)) if ann else False,

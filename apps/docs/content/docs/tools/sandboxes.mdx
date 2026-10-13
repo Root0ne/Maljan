@@ -19,6 +19,81 @@ whole set where its definition asks for the sandbox tools); a claim cites an
 item by its id, in brackets or in its evidence field. See
 [the triage pack](/architecture/#the-triage-pack).
 
+## One neutral report
+
+Whichever sandbox produced it, a report is read into one neutral form
+(`SandboxReport`, `maljan.schemas.sandbox_report`) and every consumer reads
+that form's document (`maljan.schemas.sandbox_document`): the analysts'
+inputs, the sandbox tools, the triage pack's sections and rule events, the
+report and the run summary. A consumer reads each part by its name, never by a
+sandbox's own key. The form holds:
+
+| Part | In the document |
+| :-- | :-- |
+| The target and its hashes (SHA-256, MD5, SHA-1, SHA-512, ssdeep, name, type, size) | `target` |
+| The processes, and their tree as the sandbox nests it | `behavior.processes`, `behavior.processtree` |
+| The behaviour: API calls, per-process API counts, generic events, the resolved API names | `behavior.calls`, `behavior.apistats`, `behavior.generic`, `behavior.summary.resolved_apis` |
+| The file, registry, mutex, command and service lists | `behavior.summary.*` |
+| The signatures, with the scale their format declares | `signatures` (the scale is recorded on the run) |
+| The network: DNS, HTTP, TCP, UDP, hosts, domains, TLS, ICMP, the capture | `network.*` |
+| The dropped files and the screenshots | `dropped`, `screenshots` |
+| What the sandbox extracted: configurations and payloads | `extracted` |
+| The process dumps and the recorded process memory | `procdumps`, `memory` |
+| The alerts an intrusion detection engine raised, beside its other logs | `ids.alerts`, `ids` |
+| The sections the sandbox cannot produce | `unavailable` |
+| Namespaced platform rows (`linux.systemd`, `android.permissions`, ...) | `channels` |
+| Every block with no place above, under the source's own name | its own name |
+
+Nothing a reader reads is dropped: a field of a process or a signature that no
+part names is kept on the row under `extra`, and a block with no part of its
+own is kept under its own name. A CAPE, Cuckoo or mock report keeps its own
+arrangement: its document is the report itself, key for key and in order, with
+the four blocks CAPE names otherwise under the document's words in the same
+place (`CAPE` is `extracted`, `procdump` is `procdumps`, `procmemory` is
+`memory`, `suricata` is `ids`). A document laid out before those words were
+declared is still read under its own. A Triage report keeps its target's other
+digests, each process's guest pid and parent and the sample mark, each
+signature's tags and label, what Triage extracted (overview and task reports),
+the overview's analysis, task and target blocks, each flow's and request's
+other fields under `extra` (source, times, bytes, the name and TLS facts, every
+header), and each task report's blocks with no part of their own (its
+signatures with their per-process indicators, the task, its other network
+logs) as `task.<block>` channels. The document holds each such block once per
+task, by reference (`{"task_report": ..., "block_rows": <block>}`), and every
+reader reads it as the block's items: each signature, flow or other item is its
+own row naming its task, built when it is read, so `offset` and `limit` page
+it and a claim cites one item by its id. A DNS request's answers and other
+fields sit on its first question's row; where the request asks several names,
+that row carries the request's id (`@dns_request`) and each later question's row
+names it (`@same_request_as`). These two keys are the platform's own and no reader
+writes them: where the document is built, they are removed from the rows of
+each declared network kind (`dns`, `http`, `tcp`, `udp`, `hosts`, `domains`,
+`tls`, `icmp`) any reader filled, and written only on the DNS rows of the
+requests a reader expresses in the structural form (below). A list under any
+other `network` key keeps what its source wrote, and no reader reads a link
+there. A link is honoured
+only in that exact form and only on a DNS row; a `domains` row, or a row of any
+other kind, reads its own answers whatever key it carries, so a report can
+never make one name read another's answers; each answer keeps the name it answers and its
+type. Every reader of the DNS rows (the network analyst's input, the IOC
+block's resolved addresses, the attribution sentence, the published IOCs and
+the export) gives each question the answers for its own name and the names its
+alias (CNAME) chain leads to, and every answer that names no name, as dev gave
+a request's answers to each of its questions; each address once per name, and
+only an A or AAAA answer counts as an address. What
+a request's questions are given together is bounded by the request's own size,
+so a request whose many names share many answers gives later names fewer
+addresses, never a wrong one, and the network block stays linear in the report.
+Such a name's IOC row says so (`resolved_ips_partial`, with how many of its
+request's answers were not read in `resolved_ips_withheld`), and the IOC table
+and the console's Network page show that some addresses were withheld for size. A report read through the JSONPath mapping keeps
+every top-level block no path starts in as a `report.<block>` channel, whole: a
+list's items are its rows as they are, any other block is one row. The analyst
+reads these through `sandbox_channels` and the pack's channels section, and
+nothing is concluded from them for the analyst. A kept block is held once, by
+reference to the parsed report, never copied or wrapped row by row, and the
+document writes each value out once.
+
 | Provider | Detonates | Reached at |
 | :-- | :-- | :-- |
 | `mock` (default) | nothing | — |
@@ -87,6 +162,318 @@ provider. CAPEv2, Cuckoo and Triage formats are accepted by default
 Only a report attached to the job's own sample is read. See [Running an
 analysis](/usage/running-an-analysis/).
 
+A report is read at any nesting depth. A body too deeply nested for the JSON
+reader is read again by an iterative one, and every container nested more than
+160 levels down is read as the marked text `[nested deeper than 160 levels: not
+kept]`. No consumer ever holds a deeper value, and everything that writes a
+report or a part of it out (the analysts' slices, the tool answers, the pack,
+the stored ledger) writes the same bytes as before for anything shallower.
+The deepest stored report nests 112 levels.
+
+### A report no format recognises
+
+By default an upload no declared format and no registered reader recognises is
+refused (415). Add `unread` to `sandbox.upload.allowed_formats` to keep such a
+report instead:
+
+1. It is stored with the format `unread`, and the upload answers with a
+   *proposed format declaration* read from the report's shape. The proposal
+   holds the JSONPath `mapping` of its processes, connections, DNS questions and
+   dropped files (lists of objects whose keys say so), with the renames from the
+   report's key names to the consumers', its task id and target hash where their
+   names say so, and detect tests, by type, on the blocks those paths start in
+   (each path's first two named blocks). Each field carries its value, where in
+   the report it was read (`evidence`, a path, never report text) and how sure
+   the reading is (`high`, `medium`, `low`), as a tool's proposed declaration
+   does. Each top-level block a proposed path starts in is also kept whole as
+   the raw `report.<block>` channel the unread read gave it, so nothing the
+   analyst read unread is lost; its evidence counts the blocks in it no path
+   reads. The proposal's size follows the declaration's own fields, never the
+   report's block count. Where no list reads as one of those parts, no
+   declaration is proposed (it would read nothing the unread read does not).
+
+   A list reads as DNS questions only with DNS-specific evidence: a key only
+   DNS rows write (`qname`, `qtype`, `rrtype` ...), question types that are DNS
+   record types, or the DNS row's structure (a question, its type and its
+   answers under `answers`); a name it sits under saying so (`dns`, `lookups`)
+   alone reads with low confidence, and not where its type values are seen to
+   be no record types. A question under `request` or `query` is no evidence on
+   its own, since HTTP, WMI, LDAP, registry and database logs write those
+   keys too: it reads as DNS only beside a second DNS signal (one of the
+   above, a name saying `dns`, `lookups` or `resolutions`, a key saying `dns`,
+   or question values shaped like host names), and never with `high`
+   confidence on that spelling and one signal alone. Question values read as
+   host names when most of them do: at least three in four hold no white
+   space, slash, backslash, bracket, quote or query punctuation, and at least
+   half of those hold a dot, so one odd lookup (a wildcard, a value with a
+   space) never decides a list. A list whose question values are no host
+   names reads as no DNS unless a key only DNS rows write says otherwise, or
+   record types do beside the DNS row's structure (its answers under
+   `answers`) or beside a name saying `dns`, `lookups` or `resolutions`: a
+   `dns` list of typed lookups of `wpad` and `localhost` is proposed, while
+   names typed `A` and nothing more, as an import table writes, are not. A
+   list whose rows carry another protocol's or an endpoint's keys (`method`,
+   `url`, `uri`, `path`, `status`, `user_agent`, `port` ...) reads as no DNS
+   unless a key only DNS rows write, or record types, say otherwise. A name
+   and a type alone are what function, section, rule and
+   classification lists hold, and a name with its addresses (`addresses`,
+   `ips`, `resolved`) what interfaces, hosts files and embedded configurations
+   hold. Likewise a digest, a name and a size read as dropped files only under
+   a name saying so (`dropped`, `written`), not as an archive's or a resource
+   listing's members. Each mapping slot goes to the list with the strongest
+   evidence (its confidence, the evidence of its own kind, then the parts it
+   names), not to the first one found, so a list that only resembles a kind
+   never takes the slot from one that plainly is of it. A mapping holds one
+   path per slot, so every other list read as the same slot is named in the
+   proposal's `notes`, for the admin to map instead.
+2. A run reads it *unread*: every top-level block is a raw `report.<block>`
+   channel the dynamic analyst reads, every section is listed as unavailable,
+   and no observed fact (process, flow, DNS name, indicator) is drawn from it.
+   The run records that it read the report unread.
+3. The upload dialog shows the proposal. An admin edits the declaration if
+   needed and accepts it (`POST /api/v1/sandbox-report-formats/accept`, with
+   `declaration`, `sample_id` and `report_id`), for any stored report. The
+   declaration is saved only if it validates, is the format that recognises
+   that report, and a trial read of the report with it reads a fact: one of
+   its consumer channel paths (processes, calls, signatures, DNS, HTTP, TCP,
+   UDP, hosts, domains, dropped files, registry) or place paths keeps a row,
+   or its target hash path names a hash. Its own `channels` are not counted:
+   a kept raw `report.<block>` channel keeps a row from any report, so a
+   mapping whose fact paths all miss is refused. A format read through a
+   mapping is tried after every built-in format and every registered reader,
+   so it never takes a report a built-in reads; a declaration a built-in or
+   another declared format also recognises for that report is refused, naming
+   that format. Accepts, and the settings writes of `sandbox.report_formats`
+   and `sandbox.upload.allowed_formats` (a save, an import, a reset), run one
+   at a time under one lock, so none drops another's declaration. Across API
+   processes only PostgreSQL serialises them (a transaction-scoped advisory
+   lock); on another database only the writes of one process are.
+   It is saved through the settings path every declaration takes, its name is
+   added to `allowed_formats`, and the upload's row records the format, task id
+   and target match. From then on the report, and every report shaped like it,
+   reads as a built-in format does. Until then it stays unread.
+
+`GET /api/v1/samples/{sample_id}/sandbox-reports/{report_id}/proposal` reads
+the proposal again from the stored report (the uploader's own reports, and any
+for an admin). The proposer walks the report once, with a stack and no
+recursion; it copies no report text but key names, and its memory and time
+stay linear in the report. It has two reading horizons: it looks for lists to
+16 path segments below the top, and writes into a path only keys of at most
+128 characters with no quote, slash, star or control character. They bound
+what the proposer reads, not what a run reads: an accepted declaration's paths
+are read at any depth, and you may name any key in them. Where a horizon
+leaves something unread, the proposal's `notes` say how much.
+
+A body nested deeper than 160 levels is logged once as it is read, with the
+number of containers read as the marked placeholder. The upload is read in a
+worker thread, so a large body never holds the API's event loop.
+
+### A sandbox served over MCP
+
+A sandbox reached through an MCP server you add is read through its tools'
+declarations. Declare the server a sandbox source with `roles: [sandbox]` on
+its block (the console's declaration "roles" box, or the API) before its
+connection test: only then are its undeclared tools proposed sandbox kinds
+(`sandbox_processes`, `sandbox_network`, `sandbox_dropped_files`) from the
+shape of their rows, since rows shaped like a run's are also what a memory
+image, a capture or a lookup answers with. The shipped CAPE MCP block carries
+the role. A connection test of a server without it, some of whose tools' rows
+read like a sandbox run's, proposes no sandbox kind and says so in the
+proposals' notes, naming those tools. See
+[proposed declarations](/configuration/) for what each kind reads.
+
+### Report formats are declarations
+
+Each report format is declared as data. Every sandbox provider and the upload
+route read the declaration, never a format's name:
+
+| Field | What it says |
+| :-- | :-- |
+| `name` | The format's name: a lowercase word of at most 32 characters, the width of the upload row's column (`unknown` and `unread` are reserved). It is what the upload row records and what `allowed_formats` lists. |
+| `detect` | How a payload is recognised: a list of groups of field tests, and the format matches when every test of any one group holds. A test is `{path, types, non_empty, contains}`: the value at `path` must be one of `types` (`object`, `array`, `string`, `number`, `boolean`, `null`), non-empty, or hold `contains` in its text (a string, number or boolean, compared without regard to case). |
+| `task_id_paths` | Where the source sandbox's task id sits; the first string or number (not empty text) a path names wins. Any other value (an object, a list, a boolean, null) counts as absent. |
+| `target_sha256_paths` | Where the report's claimed target sha256 sits; the first non-empty string or number wins. It is compared with the sample's hash, and a mismatch is a warning, not a refusal. |
+| `reader` | The id of the registered report reader that reads the format into the neutral report: `cape2`, `cuckoo`, `triage`, `generic` or one an operator registers ([report readers](#report-readers-are-registered)), or empty for a format no reader reads yet. An upload of a format whose reader is not registered is refused (422) with a message saying so. |
+| `mapping` | For a format read by the JSONPath mapping reader (`generic`): where each part of its reports sits, in the shape of `sandbox.rest.mapping` (channels, `field_names`, `channels`, `places`). Each path is checked when the setting is saved. Absent, the format reads through `sandbox.rest.mapping`. A format that declares a mapping must name a reader that reads one; otherwise its upload is refused in words. |
+| `signature_scale` | What a signature's severity number means: `{name, rungs}`, the rung of the severity ladder (Informational, Low, Medium, High, Critical) each score from 1 up names. Absent where the format documents no scale. |
+| `display_name` | The name published text gives the sandbox whose report this is, such as the sentence that says a process the sandbox marks as the sample's is disputed (`Triage`, `CAPE`, `Cuckoo` for the built-ins); empty uses the format's `name`. |
+
+Field paths are the tool declarations' JSON-pointer-like paths (`/` keys and
+`*` for every item), read in time linear in the report. `**` (any depth) is
+refused when the setting is saved: recognising a report and finding its id
+need only anchored places, and a whole-tree walk per test would make every
+upload cost a multiple of the report's size. The upload route runs the reads
+in a worker thread, off the API's event loop. The built-in declarations
+reproduce what the platform always recognised:
+
+| Format | Recognised by | Task id | Target sha256 | Signature scale |
+| :-- | :-- | :-- | :-- | :-- |
+| `triage` | `/analysis` an object and `/tasks` a non-empty object or array | `/sample/id` | `/sample/sha256` | Triage 1–10: 1 Informational, 2–5 Low, 6–7 Medium, 8–9 High, 10 Critical |
+| `cape2` | `/CAPE` an object or array, or `/info/version` naming "cape" | `/info/id` | `/target/file/sha256`, then `/target/sha256` | CAPE 1–3: Low, Medium, High |
+| `cuckoo` | `/behavior` an object and `/info` a non-empty object | `/info/id` | `/target/file/sha256`, then `/target/sha256` | Cuckoo 1–3: Low, Medium, High |
+
+Declare your own in `sandbox.report_formats` (a JSON list), and add each new
+name to `sandbox.upload.allowed_formats` to accept its uploads. A new format
+must say how it is recognised (`detect`), and it is tried before the built-ins,
+so a report shaped like Cuckoo but carrying your marker is yours. A new format
+read through a mapping (`reader: generic`, an accepted proposal among them) is
+the exception: it is tried after every built-in and every registered reader,
+so it never takes a report one of them reads. Saving such a format whose
+detect overlaps a built-in's returns a warning beside its `detect` (the save
+is kept): a built-in recognises the plainest report one of its detect groups
+describes, it recognises the plainest report one of a built-in's groups
+describes, or (a partial overlap) one of its groups and one of a built-in's
+test a shared place (the same path, or one below the other) and one report can
+pass both, as every report of a built-in's family carrying the paths the
+format tests does. Groups that share no place are not compared, since nearly
+any two groups can hold on one report; try a format whose paths are all its
+own with a real report. A format carries no stored sample report, so the check
+reads those plainest reports, built from the tests themselves. The warning
+names the built-in that overlaps most closely: the one whose own tests on the
+paths both test pass only what the format's do, then the one sharing the most
+paths, then a whole overlap over a partial one; ties go to the built-in listed
+first. A partial overlap is cleared by a test on a place the built-in tests
+that its plainest report fails (another type, or text its value never holds,
+such as your sandbox's name under `/info`); a test on a place of your own does
+not clear it, since the built-in's reports may carry that place too. The
+warning is said by the save that adds the format or changes its detect, not
+by later saves that leave the detect as it was. A
+declaration under a built-in's name is merged over that built-in field by
+field: a field you set replaces the shipped value, a field you leave out keeps
+it. So `{"name": "cape2", "signature_scale": {...}}` changes CAPE's scale alone,
+for live CAPE runs, REST reports in the CAPE format and uploads alike. For
+example, a CAPE-shaped export whose ticket and digest sit elsewhere:
+
+```json
+[
+  {
+    "name": "acme",
+    "detect": [[{"path": "/producer/name", "contains": "acme"}, {"path": "/run", "types": ["object"]}]],
+    "task_id_paths": ["/run/ticket"],
+    "target_sha256_paths": ["/subject/digests/sha256"],
+    "reader": "cape2",
+    "signature_scale": {"name": "Acme 1–4", "rungs": ["Low", "Medium", "High", "Critical"]}
+  }
+]
+```
+
+`GET /api/v1/sandbox-report-formats` serves every format in the order a
+payload is tried against them, with the declaration in effect and its scale.
+Each item also carries `declared`: your own declaration as you wrote it, or
+`null` for a built-in served as shipped. Declare only the fields you change:
+copy `declared` back, never the whole item, or every field of a built-in is
+pinned and stops following the shipped declaration. A run's settings snapshot
+records each declaration as it ran, merged over its built-in.
+
+An uploaded report's format is recorded on its row when it is accepted, and the
+run reads the report as that format; it is never sniffed again. If the
+recorded format has since been removed from the declarations or from
+`sandbox.upload.allowed_formats`, or names no registered reader, the job stops
+with a message saying so.
+
+### Report readers are registered
+
+A report reader declares an `id`, `sniff(payload)` (whether a payload is a
+report it reads) and `read(payload)` (the payload as the neutral report), and
+what its reports can fill. The shipped readers are `cape2`, `cuckoo`, `triage`,
+`mock` (the mock sandbox's fixtures) and `generic` (the JSONPath mapping of
+`sandbox.rest.mapping`). An operator's own reader is a subclass of
+`maljan.providers.sandbox.readers.ReportReader`, registered at run time with
+`register_report_reader` or by an installed package's entry point in the
+`maljan.sandbox_report_readers` group:
+
+```python
+from maljan.providers.sandbox.readers import ReportReader
+from maljan.schemas.sandbox_report import SandboxReport, SandboxTarget
+
+
+class AcmeBoxReader(ReportReader):
+    id = "acmebox"
+    display_name = "Acme Box"
+
+    def sniff(self, payload):
+        return isinstance(payload.get("acmebox"), dict)
+
+    def read(self, payload, *, provider, task_id="", fmt=None, **context):
+        report = SandboxReport(
+            provider=provider,
+            source_format=self.id,
+            target=SandboxTarget(sha256=payload["subject"]["sha256"]),
+            # ... processes, signatures, network, extracted, unavailable ...
+        )
+        return self._scaled(report, fmt)
+```
+
+```toml
+[project.entry-points."maljan.sandbox_report_readers"]
+acmebox = "acme_maljan.reader:AcmeBoxReader"
+```
+
+A reader whose source already uses the document's arrangement sets
+`keeps_source_arrangement`, names the source's words for blocks the document
+calls otherwise in `renames`, and keeps the source with `keep_source(report,
+payload)`: the report's document is then the source itself, the renamed blocks
+under the document's words in place, and any platform link key removed from its
+DNS rows.
+
+A reader that saw one DNS message ask several names expresses it structurally:
+one `SandboxDnsRequest` in `SandboxNetwork.dns_requests`, holding the asked names
+(`questions`, each `{"request": name, "type": record type}`), the request's
+answers (each `data`, with the `name` it answers and its `type` where the
+sandbox says) and the request's other fields (`extra`). The platform writes the
+request's rows, its answers once on the first name's row, and links them; each
+name then reads the answers for its own name and alias chain, so a request
+grouped wrongly can never credit a named answer to another name. A request with
+one name needs no link and is written as one row, with the request's other
+fields under `extra` where a plain row carries them flat. The rows a reader fills in
+`network.dns` come first and the structural requests' rows follow, in the order
+the reader listed them; a reader that wants its sandbox's recorded order kept
+expresses every DNS message structurally, a one-name message included. A source
+kept with `keep_source` that has no `network` block gets one to hold the
+requests' rows. A source `network.dns` that is not a list stays as the source
+wrote it where there is no structural request. Where there is one, an object
+that names a name (under `request`, `query`, `hostname`, `domain` or `name`) is
+kept as the first row before the requests' rows; any other value (a status word
+such as `N/A`, a number, a boolean, an object naming no name) is no row and no
+indicator, and is kept as written under `network.@dns_as_written`. No view,
+parser or projection reads it; the raw section tool shows it as written. A null
+is no value and is not kept. `network.@dns_as_written` is the platform's own key,
+reserved as the link keys are: a value a source writes under it is removed
+wherever the document is built, so the key holds only what the platform put
+there. A source whose `network` is not an
+object has no place for the requests' rows: the document keeps the source's
+value, a warning is logged, and the report does not count `network.dns` as
+filled.
+
+A reader built from the JSONPath mapping (`generic`) has no structural form: its
+DNS path names rows, and each row is one name with its own answers, as before.
+A sandbox whose report asks several names in one DNS message reads each name's
+answers only where the report writes them on that name's row; a code reader
+(above) is the way to express a multi-name request.
+
+The formats a payload is tried against are the registry's: the declared
+formats above, then each registered reader no declaration names, recognised by
+its own `sniff`. `GET /api/v1/sandbox-report-formats` lists both, and
+`sandbox.upload.allowed_formats` names them by id. A registered reader is read
+by the upload route, the upload provider and the REST provider
+(`sandbox.rest.report.format`) alike, and its report reaches the analysts, the
+triage pack, the report and the console's Dynamic tab as a built-in's does.
+
+### Signature scales on the run
+
+The scale a run's signatures are read on is the one its sandbox provider
+declares for the report it read: the `signature_scale` of the report's format
+among the declarations (a live CAPE or Triage run and a REST report in a
+built-in format take that format's, merged with any declaration under its name;
+an uploaded report takes its recorded format's), for a REST report whose reader
+no format declares (the `generic` mapping's)
+`sandbox.rest.report.signature_scale_rungs` and `signature_scale_name`, and
+otherwise the scale the report's registered reader declares. The
+worker records it on the run summary as `sandbox_signature_scale` (`null` where
+none is declared), and the console's Dynamic tab colours and names each
+signature's number by it. A run recorded before scales were has no such key and
+is drawn as it always was, from the sandbox provider in its settings snapshot.
+
 ## Any REST sandbox
 
 The `rest` provider describes a sandbox Maljan has never heard of, rather than
@@ -97,12 +484,15 @@ coding it:
 | `sandbox.rest.auth` | The header, scheme and token the API takes. |
 | `sandbox.rest.submit` | The multipart submission (`method`, `path`, `file_field`, `extra_fields`, `submit_fields`) and the JSONPath of the task id in its answer. |
 | `sandbox.rest.status` | The poll path, the JSONPath of the state, and the done and failed values. |
-| `sandbox.rest.report` | Where the report is, its format (`cape2`, `cuckoo`, `triage` or `generic`) and an optional capture path. |
-| `sandbox.rest.mapping` | For a `generic` report, an RFC 9535 JSONPath per channel: processes, calls, signatures, DNS, HTTP, TCP, UDP, hosts, domains, dropped files, registry. |
+| `sandbox.rest.report` | Where the report is, the registered reader or declared format that reads it (`cape2`, `cuckoo`, `triage`, `generic`, one an operator registers, or a format declared in `sandbox.report_formats`, read through its own `mapping` and on its own scale as an upload of it is), an optional capture path, and for a `generic` report its signature scale (`signature_scale_rungs`, `signature_scale_name`). |
+| `sandbox.rest.mapping` | For a `generic` report, an RFC 9535 JSONPath per channel: processes, calls, signatures, DNS, HTTP, TCP, UDP, hosts, domains, dropped files, registry; and per report place with no channel (`places`): `process_tree`, `resolved_apis`, `extracted`, `procdumps`, `memory`, `ids_alerts`, each match kept as the sandbox published it and read whole. Every channel and place is read whole, as a built-in reader reads its lists: no row count cuts it. A path is bounded only by the report's own size: a channel's matches never outnumber the values the report holds, and an operator channel's or a place's matches, each counted with everything nested in it, never hold more values than the report does, so a path whose matches repeat or nest (`$..children[*]` over a nested tree) is cut there, and the cut is logged and counted as truncated. A path with more than one descendant segment (`$..a..b`) walks the report again under every node the first reached, and a filter holding any absolute query (`$.a[?count($.b[*]) > 0]`, `$.a[?@.v == $.b[0]]`) runs it from the report's root for every candidate; saving one returns a warning beside it (never a refusal), so anchor it, or test the candidate (`@`), where you can. |
 
 An empty path in `mapping` says the sandbox does not publish that channel, and
 the report lists it as unavailable rather than reading like a clean sample by
-omission. `mapping.channels` maps a channel name of your own to a JSONPath for
+omission. The list names the platform's own section ids (`api_calls`,
+`events`, `apistats`, `registry`, `screenshots`, and the mapping's other
+channel names as written); a report stored when the list said `calls` or
+`generic_events` is printed as stored and read as the ids those words meant. `mapping.channels` maps a channel name of your own to a JSONPath for
 anything the schema has no field for; namespace it by platform, e.g.
 `{"android.permissions": "$.apk.permissions[*]"}`. See [Format routing and the
 sandbox](/configuration/#format-routing-and-the-sandbox).

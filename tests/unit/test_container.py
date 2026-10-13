@@ -21,7 +21,7 @@ class TestServiceContainer:
     def test_container_raises_on_llm_in_mock_mode(self) -> None:
         container = ServiceContainer(config=Settings(), mock=True)
         with pytest.raises(ConfigurationError, match="mock"):
-            container.get_expert_llm()
+            container.get_mediator_llm()
 
     def test_container_raises_on_judge_llm_in_mock_mode(self) -> None:
         container = ServiceContainer(config=Settings(), mock=True)
@@ -200,7 +200,7 @@ class TestTheCapAModelWasBuiltWithIsKeptOnIt:
         assert cap is not None and cap.tokens == 12_345
         assert "llm.expert_max_tokens is set to 12345" in cap.sentence
 
-    def test_the_expert_and_judge_models_carry_theirs(self) -> None:
+    def test_the_mediator_and_judge_models_carry_theirs(self) -> None:
         from maljan.llm.context_window import built_output_cap
 
         config = Settings()
@@ -208,8 +208,8 @@ class TestTheCapAModelWasBuiltWithIsKeptOnIt:
         config.llm.judge_max_tokens = 5_000
         container = self._container(config)
 
-        expert = built_output_cap(container.get_expert_llm())
+        mediator = built_output_cap(container.get_mediator_llm())
         judge = built_output_cap(container.get_judge_llm())
 
-        assert expert is not None and expert.tokens == 3_000
+        assert mediator is not None and mediator.tokens == 3_000
         assert judge is not None and judge.tokens == 5_000

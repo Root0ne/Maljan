@@ -1,135 +1,92 @@
 import { describe, expect, it } from "vitest";
 
-import type { EvidenceEntry } from "@/types/evidence";
-import { reputationFromEntry, reputationFromLedger } from "../reputation";
+import type { ReputationAnswer } from "@/types/malware-report";
+import {
+  carriesReputationRecords,
+  reputationFromRecord,
+  reputationFromReport,
+} from "../reputation";
 
-function entry(over: Partial<EvidenceEntry> = {}): EvidenceEntry {
+/** A record as the report carries it, from a server no built-in names. */
+function answer(over: Partial<ReputationAnswer> = {}): ReputationAnswer {
   return {
-    id: "1",
-    entry_id: "ev_0002",
-    stage: "triage",
-    agent: "pipeline",
-    server: "virustotal",
-    tool: "get_file_report",
-    ok: true,
-    duration_ms: 420,
-    seq: 2,
-    args: { hash: "a".repeat(64) },
-    output: "",
-    structured: null,
-    created_at: "2026-09-17T10:00:00Z",
+    v: 1,
+    entry_id: "ev_0003",
+    tool: "lookup_digest",
+    service: "HashRep",
+    malicious: 9,
+    total: 40,
+    labels: ["Stealer", "Loader"],
+    first_seen: "2023-11-14T22:13:20Z",
+    last_seen: "2026-01-02T03:04:05Z",
+    link: "https://rep.invalid/s/abc",
+    summary: "",
     ...over,
   };
 }
 
-/** What VirusTotal's own server answers, nested the way its API nests it. */
-const VT_ANSWER = {
-  data: {
-    id: "a".repeat(64),
-    attributes: {
-      last_analysis_stats: { malicious: 42, suspicious: 3, undetected: 20, harmless: 6 },
-      popular_threat_classification: {
-        suggested_threat_label: "trojan.formbook/injector",
-        popular_threat_name: [{ value: "formbook", count: 30 }],
-        popular_threat_category: [{ value: "trojan", count: 44 }],
-      },
-      first_submission_date: 1_600_000_000,
-      last_analysis_date: 1_700_000_000,
-      gui_url: "https://www.virustotal.com/gui/file/aaaa",
-    },
-  },
-};
-
-describe("a VirusTotal answer", () => {
-  it("reads the engines, the detections, the labels, the dates and the link", () => {
-    const reputation = reputationFromEntry(entry({ structured: VT_ANSWER }));
-    expect(reputation).not.toBeNull();
-    expect(reputation?.service).toBe("VirusTotal");
-    expect(reputation?.engines).toBe(71);
-    expect(reputation?.malicious).toBe(42);
-    expect(reputation?.suspicious).toBe(3);
-    expect(reputation?.labels).toEqual(["trojan.formbook/injector", "formbook", "trojan"]);
-    expect(reputation?.firstSeen).toBe(new Date(1_600_000_000 * 1000).toISOString());
-    expect(reputation?.lastSeen).toBe(new Date(1_700_000_000 * 1000).toISOString());
-    expect(reputation?.link).toBe("https://www.virustotal.com/gui/file/aaaa");
-    expect(reputation?.entryId).toBe("ev_0002");
+describe("a recorded reputation answer", () => {
+  it("is drawn from the record alone, named by its declared service", () => {
+    const reputation = reputationFromRecord(answer());
+    expect(reputation).toEqual({
+      service: "HashRep",
+      entryId: "ev_0003",
+      engines: 40,
+      malicious: 9,
+      suspicious: null,
+      labels: ["Stealer", "Loader"],
+      firstSeen: "2023-11-14T22:13:20Z",
+      lastSeen: "2026-01-02T03:04:05Z",
+      link: "https://rep.invalid/s/abc",
+      summary: "",
+    });
   });
 
-  it("links nowhere when the answer carried no link", () => {
-    const structured = {
-      data: { attributes: { last_analysis_stats: { malicious: 0, undetected: 70 } } },
-    };
-    expect(reputationFromEntry(entry({ structured }))?.link).toBeNull();
-  });
-});
-
-describe("a threat-intel answer, which is a sentence", () => {
-  const prose =
-    "Hash aaa (sample.exe, Win32 EXE, 1024 bytes): malicious — 42/71 malicious, 3/71 suspicious.";
-
-  it("is named after the service that gave it and keeps its words", () => {
-    const reputation = reputationFromEntry(
-      entry({ tool: "check_hash", server: "threatintel", output: prose }),
-    );
-    expect(reputation?.service).toBe("Threat intelligence");
-    expect(reputation?.summary).toBe(prose);
+  it("counts the engines the service gave when it gave no total", () => {
+    expect(reputationFromRecord(answer({ total: null, engines: 75 }))?.engines).toBe(75);
   });
 
-  it("lifts the counts out of the sentence so both services read alike", () => {
-    const reputation = reputationFromEntry(
-      entry({ tool: "check_hash", server: "threatintel", output: prose }),
-    );
-    expect(reputation?.engines).toBe(71);
-    expect(reputation?.malicious).toBe(42);
-    expect(reputation?.suspicious).toBe(3);
+  it("states the engines the service counted over its counts' total, as the report does", () => {
+    expect(reputationFromRecord(answer({ total: 72, engines: 70 }))?.engines).toBe(70);
   });
 
-  it("keeps a sentence that carries no counts at all", () => {
-    const reputation = reputationFromEntry(
-      entry({
-        tool: "check_hash",
-        server: "threatintel",
-        output: "Hash aaa not found in VirusTotal database.",
-      }),
+  it("keeps the service's words when there are no counts", () => {
+    const reputation = reputationFromRecord(
+      answer({ malicious: null, total: null, labels: [], summary: "hash not known" }),
     );
     expect(reputation?.engines).toBeNull();
-    expect(reputation?.summary).toBe("Hash aaa not found in VirusTotal database.");
+    expect(reputation?.summary).toBe("hash not known");
   });
-});
 
-describe("what is not a reputation finding", () => {
-  it("ignores a call that failed", () => {
+  it("draws nothing for a record that established nothing", () => {
     expect(
-      reputationFromEntry(entry({ ok: false, error: "not run: no reputation server" })),
+      reputationFromRecord(answer({ malicious: null, total: null, labels: [], summary: "" })),
     ).toBeNull();
+    expect(reputationFromRecord(null)).toBeNull();
   });
 
-  it("ignores a call that returned nothing", () => {
-    expect(reputationFromEntry(entry({ structured: null, output: "   " }))).toBeNull();
-  });
-
-  it("ignores an entry for any other tool", () => {
-    expect(reputationFromEntry(entry({ tool: "capa", output: "two capabilities" }))).toBeNull();
-  });
-
-  it("ignores nothing at all", () => {
-    expect(reputationFromEntry(null)).toBeNull();
+  it("links nowhere when the link is not a web address", () => {
+    expect(reputationFromRecord(answer({ link: "javascript:alert(1)" }))?.link).toBeNull();
   });
 });
 
-describe("reading one page of the ledger", () => {
-  it("prefers VirusTotal's own answer when both services answered", () => {
-    const entries = [
-      entry({ tool: "check_hash", server: "threatintel", output: "10/70 malicious." }),
-      entry({ entry_id: "ev_0009", structured: VT_ANSWER }),
-    ];
-    const reputation = reputationFromLedger(entries);
-    expect(reputation?.service).toBe("VirusTotal");
-    expect(reputation?.entryId).toBe("ev_0009");
+describe("a report", () => {
+  it("is read by its records when it carries them, the first that says something", () => {
+    const report = {
+      reputation: [answer({ entry_id: "ev_0001", malicious: null, total: null, labels: [] }), answer()],
+    };
+    expect(carriesReputationRecords(report)).toBe(true);
+    expect(reputationFromReport(report)?.entryId).toBe("ev_0003");
   });
 
-  it("answers nothing for a ledger that holds no lookup", () => {
-    expect(reputationFromLedger([entry({ tool: "capa", output: "x" })])).toBeNull();
-    expect(reputationFromLedger(null)).toBeNull();
+  it("with an empty list draws nothing and is not read from its ledger", () => {
+    expect(carriesReputationRecords({ reputation: [] })).toBe(true);
+    expect(reputationFromReport({ reputation: [] })).toBeNull();
+  });
+
+  it("stored before the records is left to the legacy reader", () => {
+    expect(carriesReputationRecords({})).toBe(false);
+    expect(carriesReputationRecords({ reputation: null })).toBe(false);
+    expect(carriesReputationRecords(null)).toBe(false);
   });
 });

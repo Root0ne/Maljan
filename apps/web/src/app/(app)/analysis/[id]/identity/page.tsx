@@ -37,7 +37,7 @@ export default function IdentityTab() {
   /* The `identity` section is the one that overlaps this tab's own blocks: its
    * hashes are the File hashes block and its three signing rows are one fact
    * about one format. It is split rather than drawn as it arrives. */
-  const tabSections = sectionsForTab(reportSections, "identity");
+  const tabSections = sectionsForTab(reportSections, "identity", report?.section_tabs);
   const identitySection = tabSections.find((section) => section.key === "identity") ?? null;
   const {
     section: splitIdentity,
@@ -87,7 +87,7 @@ export default function IdentityTab() {
       <div className="space-y-4">
         <ArtifactSections sections={evidenceSections} />
         {hashes}
-        <ReputationSection jobId={jobId} enabled={!loading} />
+        <ReputationSection jobId={jobId} report={report?.malware_report} enabled={!loading} />
         {evidenceSections.length === 0 && !hashes && (
           <div className="p-8 text-center text-sm text-text-secondary">
             No identifying tool answered for this sample.
@@ -178,7 +178,7 @@ export default function IdentityTab() {
         * inapplicable one. */}
       {hashes}
 
-      <ReputationSection jobId={jobId} enabled={!loading} />
+      <ReputationSection jobId={jobId} report={report?.malware_report} enabled={!loading} />
 
       {identity.signing.is_signed && (
         <div className="bg-bg-surface border border-border rounded">

@@ -84,8 +84,9 @@ def classify_lolbin(command_line: str) -> tuple[str, str] | None:
 
 
 def _iter_command_lines(sandbox_report: dict[str, Any]) -> list[str]:
-    behavior = sandbox_report.get("behavior") or {}
-    procs = behavior.get("processes") if isinstance(behavior, dict) else None
+    from maljan.schemas.sandbox_document import place
+
+    procs = place(sandbox_report, "processes")
     out: list[str] = []
     if isinstance(procs, list):
         for proc in procs:

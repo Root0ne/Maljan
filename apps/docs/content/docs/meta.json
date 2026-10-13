@@ -8,6 +8,7 @@
     "./usage/running-an-analysis",
     "./usage/teams",
     "./usage/reports-and-exports",
+    "./usage/rehearsal",
     "---LLM providers---",
     "./providers/index",
     "./providers/openai-compatible",

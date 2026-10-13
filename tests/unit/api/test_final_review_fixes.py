@@ -38,12 +38,21 @@ async def test_http_probe_errors_are_redacted(monkeypatch):
     def _raise(request):
         raise httpx.ConnectError(f"failed to connect to {request.url}", request=request)
 
-    transport = httpx.MockTransport(_raise)
-    monkeypatch.setattr(
-        probes, "_client", lambda *_a, **_k: httpx.AsyncClient(transport=transport, timeout=1)
-    )
-    r = await probes.probe_ghidra(
-        {"url": _dsn("http", "ghidra:s3cret", "ghidra:8089"), "auth_token": "t"}
+    real = httpx.AsyncClient
+
+    class _Refusing(real):  # type: ignore[misc, valid-type]
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(_raise)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Refusing)
+    r = await probes.run_probe(
+        "ghidra",
+        {
+            "core.static.ghidra.url": _dsn("http", "ghidra:s3cret", "ghidra:8089"),
+            "core.static.ghidra.auth_token": "t",
+        },
+        {},
     )
     assert r.ok is False
     assert "s3cret" not in r.detail

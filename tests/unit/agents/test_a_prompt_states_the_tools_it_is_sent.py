@@ -31,6 +31,7 @@ from typing import Any
 import pytest
 
 from maljan.agents.composition import aresolve_agent, prompt_for
+from maljan.agents.network_analyst import UNDECLARED_TOOLS_LINE
 from maljan.agents.prompt_fragments import (
     NO_TOOLS_STATEMENT,
     PROVIDER_FAMILY,
@@ -168,6 +169,19 @@ class _Registry:
 
     async def atools_for_ref(self, *args: Any, **kwargs: Any) -> tuple[list[Any], list[str]]:
         return self.tools_for_ref(*args, **kwargs)
+
+    def agent_tools(
+        self, key: str, job_key: str, refs: Any, exclude: str = "", seen: Any = None, **_: Any
+    ) -> tuple[list[Any], list[str]]:
+        tools, reasons = self.tools_for(key, job_key, exclude=exclude, seen=seen)
+        for ref in refs:
+            picked, ref_reasons = self.tools_for_ref(ref, job_key, seen=seen)
+            tools.extend(picked)
+            reasons.extend(ref_reasons)
+        return tools, reasons
+
+    async def aagent_tools(self, *args: Any, **kwargs: Any) -> tuple[list[Any], list[str]]:
+        return self.agent_tools(*args, **kwargs)
 
 
 def _container(static_provider: str, sandbox_provider: str, profile: str) -> ServiceContainer:
@@ -369,12 +383,23 @@ class TestTheHumanTurnSaysWhatTheListHolds:
 
     def test_the_static_turn_names_the_decompiler_it_has(self) -> None:
         agent = _static_agent(
-            [_Tool("load_program"), _Tool("decompile_function"), _Tool("get_xrefs_to")]
+            [_Tool("load_program"), _Tool("decompile_function"), _Tool("get_xrefs_to")],
+            provider="ghidra",
         )
         turns = _turns(agent, "analyze_isr", _CHUNK)
 
         assert "decompile, xrefs" in turns["human"]
-        assert "LOAD THIS BINARY FIRST" in turns["human"]
+        assert (
+            'LOAD THIS BINARY FIRST: call ``load_program(file="/samples/ab.bin")``'
+            in (turns["human"])
+        )
+
+    def test_the_load_line_names_only_the_open_tool_the_provider_declares(self) -> None:
+        agent = _static_agent([_Tool("load_program"), _Tool("decompile_function")])
+        turns = _turns(agent, "analyze_isr", _CHUNK)
+
+        assert "LOAD THIS BINARY FIRST" not in turns["human"]
+        assert "use exactly this string wherever a tool asks for a file" in turns["human"]
 
     def test_a_decompiler_without_an_xref_tool_is_not_promised_xrefs(self) -> None:
         agent = _static_agent([_Tool("decompile_function")])
@@ -402,11 +427,18 @@ class TestTheHumanTurnSaysWhatTheListHolds:
 
     def test_a_pcap_turn_names_only_the_packet_tools_it_has(self) -> None:
         agent = _container("none", "mock", "default").get_agent("network")
-        agent.tools = [_Tool("x", "knowledge")]
+        agent.tools = [_Tool("attck_lookup", "knowledge")]
         turns = _turns(agent, "analyze_isr", "flows here, capture at /tmp/run/dump.pcap")
 
         assert "read_pcap_summary" not in turns["human"]
         assert "No packet tool is in your tool list" in turns["human"]
+
+        # A tool its server declares nothing for may read the capture: the
+        # turn does not say there is no packet tool.
+        agent.tools = [_Tool("x", "knowledge")]
+        turns = _turns(agent, "analyze_isr", "flows here, capture at /tmp/run/dump.pcap")
+        assert "No packet tool is in your tool list" not in turns["human"]
+        assert UNDECLARED_TOOLS_LINE in turns["human"]
 
         agent.tools = [_Tool("read_pcap_summary", "network"), _Tool("x", "knowledge")]
         turns = _turns(agent, "analyze_isr", "flows here, capture at /tmp/run/dump.pcap")

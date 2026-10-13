@@ -191,7 +191,7 @@
   "task_id": "xyz-1",
   "unavailable": [
     "domains",
-    "generic_events",
+    "events",
     "hosts",
     "http",
     "screenshots",

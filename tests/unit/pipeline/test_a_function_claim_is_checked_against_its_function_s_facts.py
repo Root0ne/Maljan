@@ -440,7 +440,8 @@ class TestWhereAValueHolds:
         found = _check(f'{MAIN_VA} matches "PEB access" at its start.', pack=[capa])
         assert found.violations == []
         assert found.not_checked == [
-            f"claim 1: {fc.NOT_A_SAMPLE_STRING.format(value='PEB access')}"
+            'claim 1: no: "PEB access" is no string a strings tool, FLOSS, the blob decoder '
+            "or the function index holds"
         ]
 
     def test_a_string_a_strings_tool_holds_is_read(self) -> None:

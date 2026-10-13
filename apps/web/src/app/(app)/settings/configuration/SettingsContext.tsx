@@ -41,6 +41,14 @@ export type SettingsContextValue = ReturnType<typeof useSettings> & {
   probeValues: (probeId: string) => Record<string, unknown>;
   onlyChanged: boolean;
   setOnlyChanged: (v: boolean) => void;
+  /** Boxes whose typed text does not yet read as a value, by box id, with
+   *  what is wrong. Apply is held while any is listed: the staged map holds
+   *  the last value that read, which is not what the box shows. */
+  unreadInputs: Record<string, string>;
+  noteUnreadInput: (id: string, error: string | null) => void;
+  /** Counts the unstages (a discard, a reset): a box holding text that never
+   *  read shows the staged value again when this moves. */
+  discardGeneration: number;
 };
 
 const SettingsCtx = createContext<SettingsContextValue | null>(null);
@@ -69,6 +77,27 @@ export function SettingsProvider({
   const pathname = usePathname() ?? "";
   const [models, setModels] = useState<string[]>([]);
   const [onlyChanged, setOnlyChanged] = useState(false);
+  const [unreadInputs, setUnreadInputs] = useState<Record<string, string>>({});
+  const [discardGeneration, setDiscardGeneration] = useState(0);
+  const { unstage: unstageKey } = s;
+  const unstage = useCallback(
+    (key: string) => {
+      unstageKey(key);
+      setDiscardGeneration((n) => n + 1);
+    },
+    [unstageKey]
+  );
+  const noteUnreadInput = useCallback((id: string, error: string | null) => {
+    setUnreadInputs((current) => {
+      if (error === null) {
+        if (!(id in current)) return current;
+        const next = { ...current };
+        delete next[id];
+        return next;
+      }
+      return current[id] === error ? current : { ...current, [id]: error };
+    });
+  }, []);
 
   useEffect(() => {
     const dirty = Object.keys(s.pending).length > 0;
@@ -120,8 +149,24 @@ export function SettingsProvider({
       probeValues,
       onlyChanged,
       setOnlyChanged,
+      unreadInputs,
+      noteUnreadInput,
+      unstage,
+      discardGeneration,
     }),
-    [s, models, hiddenKeys, effectiveValue, isVisible, probeValues, onlyChanged]
+    [
+      s,
+      models,
+      hiddenKeys,
+      effectiveValue,
+      isVisible,
+      probeValues,
+      onlyChanged,
+      unreadInputs,
+      noteUnreadInput,
+      unstage,
+      discardGeneration,
+    ]
   );
 
   const gated = gatesOnSchema(pathname);
@@ -163,6 +208,12 @@ export function SettingsProvider({
   if (gated && !s.schema) return wrap(null);
 
   return wrap(children);
+}
+
+/** The context where there is one (the console), else null (a guide step that
+ *  draws a server form outside the console's provider). */
+export function useOptionalSettingsContext(): SettingsContextValue | null {
+  return useContext(SettingsCtx);
 }
 
 export function useSettingsContext(): SettingsContextValue {

@@ -123,6 +123,18 @@ TOOL_SERVER_RESTED = "tool_server_rested"
 # An agent's model list moved on to its next model because the one before it
 # failed as a provider (``maljan.llm.fallback``). Once per switch.
 MODEL_FALLBACK = "model_fallback"
+# One model call as the job's token ledger recorded it: the agent, the model
+# that answered and the figures its provider reported (``token_ledger.call_record``).
+# The worker writes each one to the job's event record as it arrives, so what a
+# run spent survives a process that dies before its run summary is built.
+MODEL_USAGE = "model_usage"
+# A tool loop cleared its oldest tool answers to ledger references
+# (``agents.tool_answer_clearing``): the agent, the model turn, how many
+# answers, what the request weighed before and after in characters, and why —
+# ``refused`` (the provider refused the request as over its window and the
+# turn is sent again) or ``window`` (the prompt alone is past the agent's own
+# window). Telemetry; the clear itself is what the model reads.
+TOOL_ANSWERS_CLEARED = "tool_answers_cleared"
 BUDGET_TICK_EVERY = 5
 CAPS: tuple[str, ...] = ("steps", "time", "repeats", "no_room", "spend", "budget_seconds")
 
@@ -164,6 +176,33 @@ def emit_budget_tick(
             "ledger_entries": max(0, int(ledger_entries)),
             "tool_definition_chars": max(0, int(tool_definition_chars)),
             "final": bool(final),
+        },
+    )
+
+
+def emit_tool_answers_cleared(
+    sink: EventSink | None,
+    *,
+    agent: str,
+    stage: str,
+    turn: int,
+    answers: int,
+    chars_before: int,
+    chars_after: int,
+    why: str,
+) -> None:
+    """One clear of a tool loop's oldest answers, as ``TOOL_ANSWERS_CLEARED`` describes it."""
+    emit(
+        sink,
+        TOOL_ANSWERS_CLEARED,
+        {
+            "agent": str(agent),
+            "stage": str(stage),
+            "turn": max(0, int(turn)),
+            "answers": max(0, int(answers)),
+            "chars_before": max(0, int(chars_before)),
+            "chars_after": max(0, int(chars_after)),
+            "why": str(why),
         },
     )
 
@@ -546,9 +585,23 @@ _CREDENTIAL_RUN = re.compile(r"(?:[A-Fa-f0-9]{24,}|[A-Za-z0-9+/_\-]{24,}={0,2})\
 # The environment variables the platform's own sentences name, which the rule
 # above takes for keys by their length. Named one by one rather than by shape:
 # an upper-case run with underscores in it is also what a key can look like,
-# and the remedy "check GHIDRA_CONTAINER_SAMPLES_PATH" read "check ***" on the
-# console, for the one failure whose remedy is that variable.
-_OWN_VARIABLE_NAMES = frozenset({"GHIDRA_CONTAINER_SAMPLES_PATH"})
+# and a remedy naming a provider's path variable read "check ***" on the
+# console. Each server and provider declares the variable names its sentences
+# use (``variable_names``), read from the shipped declarations
+# (``builtin_declarations.shipped_variable_names``) and from each provider class
+# registered at runtime (``registry.registered_variable_names``), never from a
+# run's settings, so the rule does not depend on which run publishes; a retired
+# variable stays declared while stored runs still name it.
+
+
+def _own_variable_name(token: str) -> bool:
+    """Whether ``token`` is a variable name a shipped declaration says is not a secret."""
+    from maljan.core.builtin_declarations import shipped_variable_names
+    from maljan.providers.registry import registered_variable_names
+
+    return token in shipped_variable_names() or token in registered_variable_names()
+
+
 # A JSON Web Token, which no length rule can see: it is three base64url runs
 # with dots between them, and this project's own access token is one. The
 # segments are held to a floor so that a dotted module name or a hostname is
@@ -802,7 +855,7 @@ def _looks_like_a_credential(token: str, *, whole: bool = False, alphabet: bool 
     on the worker, and a redaction rule whose answer depended on which run was
     publishing would not be a redaction rule.
     """
-    if _DIGEST.match(token) or _IDENTIFIER.match(token) or token in _OWN_VARIABLE_NAMES:
+    if _DIGEST.match(token) or _IDENTIFIER.match(token) or _own_variable_name(token):
         return False
     lowered = token.lower()
     if any(lowered.startswith(prefix) for prefix in _CREDENTIAL_PREFIXES):
@@ -1455,7 +1508,7 @@ def _readable(token: str, *, path: bool = True) -> bool:
     """Whether the whole run is a name the scrub keeps: a digest, an identifier, one of
     the platform's own variable names, a MIME type, a path (unless ``path`` is false),
     words, or a catalogue name."""
-    if _DIGEST.match(token) or _IDENTIFIER.match(token) or token in _OWN_VARIABLE_NAMES:
+    if _DIGEST.match(token) or _IDENTIFIER.match(token) or _own_variable_name(token):
         return True
     if _MIME_TYPE.match(token) and not _looks_like_a_credential(token.split("/", 1)[1]):
         return True

@@ -5,7 +5,7 @@
         "api": "CreateServiceA",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'ServiceControlHandle', 'value': '0x005575b0'}, {'name': 'ServiceName', 'value': 'Windows_upnphostWindows'}, {'name': 'DisplayName', 'value': 'UPnP Device HostWindows'}, {'name': 'DesiredAccess', 'value': '0x000f01ff', 'pretty_value': 'SERVICE_ALL_ACCESS'}, {'name': 'ServiceType', 'value': '16', 'pretty_value': 'SERVICE_WIN32_OWN_PROCESS|SERVICE_INTERACTIVE_PROCESS'}, {'name': 'StartTyp\u2026",
+        "first_args": "[{'name': 'ServiceControlHandle', 'value': '0x005575b0'}, {'name': 'ServiceName', 'value': 'Windows_upnphostWindows'}, {'name': 'DisplayName', 'value': 'UPnP Device HostWindows'}, {'name': 'DesiredAccess', 'value': '0x000f01ff', 'pretty_value': 'SERVICE_ALL_ACCESS'}, {'name': 'ServiceType', 'value': '16', 'pretty_value': 'SERVICE_WIN32_OWN_PROCESS|SERVICE_INTERACTIVE_PROCESS'}, {'name': 'StartTyp…",
         "first_seen": "2026-08-10 20:41:07,399",
         "process_count": 0,
         "processes": []
@@ -122,7 +122,7 @@
         "api": "NtCreateFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x0000028c'}, {'name': 'DesiredAccess', 'value': '0x40100080', 'pretty_value': 'GENERIC_WRITE|FILE_READ_ATTRIBUTES|SYNCHRONIZE'}, {'name': 'FileName', 'value': 'C:\\\\Program Files (x86)\\\\Darksart.dll'}, {'name': 'CreateDisposition', 'value': '5', 'pretty_value': 'FILE_OVERWRITE_IF'}, {'name': 'ShareAccess', 'value': '3', 'pretty_value': 'FILE_SHARE_READ|FILE_SHARE\u2026",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x0000028c'}, {'name': 'DesiredAccess', 'value': '0x40100080', 'pretty_value': 'GENERIC_WRITE|FILE_READ_ATTRIBUTES|SYNCHRONIZE'}, {'name': 'FileName', 'value': 'C:\\\\Program Files (x86)\\\\Darksart.dll'}, {'name': 'CreateDisposition', 'value': '5', 'pretty_value': 'FILE_OVERWRITE_IF'}, {'name': 'ShareAccess', 'value': '3', 'pretty_value': 'FILE_SHARE_READ|FILE_SHARE…",
         "first_seen": "2026-08-10 20:41:07,118",
         "process_count": 0,
         "processes": []
@@ -158,7 +158,7 @@
         "api": "NtOpenKey",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000254'}, {'name': 'DesiredAccess', 'value': '0x00020019', 'pretty_value': 'KEY_READ'}, {'name': 'ObjectAttributesHandle', 'value': '0x00000000'}, {'name': 'ObjectAttributesName', 'value': '\\\\Registry\\\\Machine\\\\System\\\\CurrentControlSet\\\\Control\\\\Nls\\\\CustomLocale'}, {'name': 'ObjectAttributes', 'value': 'HKEY_LOCAL_MACHINE\\\\System\\\\CurrentControlSet\\\\Control\\\u2026",
+        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000254'}, {'name': 'DesiredAccess', 'value': '0x00020019', 'pretty_value': 'KEY_READ'}, {'name': 'ObjectAttributesHandle', 'value': '0x00000000'}, {'name': 'ObjectAttributesName', 'value': '\\\\Registry\\\\Machine\\\\System\\\\CurrentControlSet\\\\Control\\\\Nls\\\\CustomLocale'}, {'name': 'ObjectAttributes', 'value': 'HKEY_LOCAL_MACHINE\\\\System\\\\CurrentControlSet\\\\Control\\…",
         "first_seen": "2026-08-10 20:41:07,384",
         "process_count": 0,
         "processes": []
@@ -167,7 +167,7 @@
         "api": "NtProtectVirtualMemory",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x10001000'}, {'name': 'NumberOfBytesProtected', 'value': '0x00001000'}, {'name': 'MemoryType', 'value': '0x00000000'}, {'name': 'NewAccessProtection', 'value': '0x00000020', 'pretty_value': 'PAGE_EXECUTE_READ'}, {'name': 'OldAccessProtection', 'value': '0x00000004', 'pretty_value': 'PAGE_READWRITE'}, {'name': 'S\u2026",
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x10001000'}, {'name': 'NumberOfBytesProtected', 'value': '0x00001000'}, {'name': 'MemoryType', 'value': '0x00000000'}, {'name': 'NewAccessProtection', 'value': '0x00000020', 'pretty_value': 'PAGE_EXECUTE_READ'}, {'name': 'OldAccessProtection', 'value': '0x00000004', 'pretty_value': 'PAGE_READWRITE'}, {'name': 'S…",
         "first_seen": "2026-08-10 20:41:07,212",
         "process_count": 0,
         "processes": []
@@ -230,7 +230,7 @@
         "api": "NtWriteFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x0000028c'}, {'name': 'HandleName', 'value': 'C:\\\\Program Files (x86)\\\\Darksart.dll'}, {'name': 'Buffer', 'value': 'MZ\\\\x90\\\\x00\\\\x03\\\\x00\\\\x00\\\\x00\\\\x04\\\\x00\\\\x00\\\\x00\\\\xff\\\\xff\\\\x00\\\\x00\\\\xb8\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00@\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\u2026",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x0000028c'}, {'name': 'HandleName', 'value': 'C:\\\\Program Files (x86)\\\\Darksart.dll'}, {'name': 'Buffer', 'value': 'MZ\\\\x90\\\\x00\\\\x03\\\\x00\\\\x00\\\\x00\\\\x04\\\\x00\\\\x00\\\\x00\\\\xff\\\\xff\\\\x00\\\\x00\\\\xb8\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00@\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00…",
         "first_seen": "2026-08-10 20:41:07,118",
         "process_count": 0,
         "processes": []
@@ -275,7 +275,7 @@
         "api": "RegCreateKeyExA",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'Registry', 'value': '0x80000002', 'pretty_value': 'HKEY_LOCAL_MACHINE'}, {'name': 'SubKey', 'value': 'SYSTEM\\\\CurrentControlSet\\\\Services\\\\Windows_upnphostWindows'}, {'name': 'Class', 'value': ''}, {'name': 'Access', 'value': '0x000f003f', 'pretty_value': 'KEY_ALL_ACCESS'}, {'name': 'Handle', 'value': '0x0000029c'}, {'name': 'FullName', 'value': 'HKEY_LOCAL_MACHINE\\\\SYSTEM\\\\CurrentCont\u2026",
+        "first_args": "[{'name': 'Registry', 'value': '0x80000002', 'pretty_value': 'HKEY_LOCAL_MACHINE'}, {'name': 'SubKey', 'value': 'SYSTEM\\\\CurrentControlSet\\\\Services\\\\Windows_upnphostWindows'}, {'name': 'Class', 'value': ''}, {'name': 'Access', 'value': '0x000f003f', 'pretty_value': 'KEY_ALL_ACCESS'}, {'name': 'Handle', 'value': '0x0000029c'}, {'name': 'FullName', 'value': 'HKEY_LOCAL_MACHINE\\\\SYSTEM\\\\CurrentCont…",
         "first_seen": "2026-08-10 20:41:07,399",
         "process_count": 0,
         "processes": []
@@ -293,7 +293,7 @@
         "api": "RegQueryValueExA",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'Handle', 'value': '0x0000025c'}, {'name': 'ValueName', 'value': 'netsvcs'}, {'name': 'Data', 'value': '\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00'}, {'name': 'FullName', 'value': 'HKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\WOW6432Node\\\\Microsoft\\\\Windows NT\\\\CurrentVe\u2026",
+        "first_args": "[{'name': 'Handle', 'value': '0x0000025c'}, {'name': 'ValueName', 'value': 'netsvcs'}, {'name': 'Data', 'value': '\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00'}, {'name': 'FullName', 'value': 'HKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\WOW6432Node\\\\Microsoft\\\\Windows NT\\\\CurrentVe…",
         "first_seen": "2026-08-10 20:41:07,368",
         "process_count": 0,
         "processes": []
@@ -302,7 +302,7 @@
         "api": "RegSetValueExA",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'Handle', 'value': '0x00000258'}, {'name': 'ValueName', 'value': 'netsvcs'}, {'name': 'Type', 'value': '7', 'pretty_value': 'REG_MULTI_SZ'}, {'name': 'Buffer', 'value': '\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00'}, {'name': 'BufferLength', 'value': '\u2026",
+        "first_args": "[{'name': 'Handle', 'value': '0x00000258'}, {'name': 'ValueName', 'value': 'netsvcs'}, {'name': 'Type', 'value': '7', 'pretty_value': 'REG_MULTI_SZ'}, {'name': 'Buffer', 'value': '\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00'}, {'name': 'BufferLength', 'value': '…",
         "first_seen": "2026-08-10 20:41:07,384",
         "process_count": 0,
         "processes": []
@@ -2400,7 +2400,7 @@
     "registry": [
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Svchost",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -2415,7 +2415,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\CustomLocale\\en-US",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -2425,13 +2425,13 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\ExtendedLocale\\en-US",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\Sorting\\Versions\\000603xx",
-        "operation": "access",
-        "value": null
+        "operation": "query",
+        "value": "kernel32.dll"
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Nls\\Sorting\\Ids",
@@ -2440,17 +2440,17 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\Sorting\\Ids\\en-US",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Control\\Nls\\Sorting\\Ids\\en",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\Windows_upnphostWindows",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
@@ -2460,7 +2460,7 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\Windows_upnphostWindows\\Parameters",
-        "operation": "access",
+        "operation": "create",
         "value": null
       },
       {
@@ -2475,21 +2475,16 @@
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\GRE_Initialize\\DisableMetaFiles",
-        "operation": "access",
+        "operation": "query",
         "value": null
       },
       {
         "key": "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\GRE_Initialize\\DisableUmpdBufferSizeCheck",
-        "operation": "access",
-        "value": null
-      },
-      {
-        "key": "0x80000002",
         "operation": "query",
         "value": null
       }
     ],
-    "total": 18
+    "total": 17
   },
   "sandbox_services_and_tasks": {
     "commands": [],

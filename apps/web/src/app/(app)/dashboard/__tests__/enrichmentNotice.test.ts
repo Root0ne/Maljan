@@ -35,4 +35,18 @@ describe("the enrichment worker notice", () => {
     expect(notice?.setting).toBe(ENRICHMENT_WORKER_SETTING);
     expect(ENRICHMENT_WORKER_SETTING).toBe("api.enrichment_dedicated_worker");
   });
+
+  it("names the configured sources the status lists, in their order", () => {
+    const sources = [
+      { key: "virustotal", label: "VirusTotal", configured: true },
+      { key: "abuseipdb", label: "AbuseIPDB", configured: true },
+      { key: "domainrep", label: "Domain reputation", configured: false },
+    ];
+    expect(enrichmentWorkerNotice("down", sources)?.detail).toContain(
+      "keeps its VirusTotal and AbuseIPDB lookups queued"
+    );
+    expect(enrichmentWorkerNotice("down", sources.slice(2))?.detail).toContain(
+      "keeps its reputation lookups queued"
+    );
+  });
 });

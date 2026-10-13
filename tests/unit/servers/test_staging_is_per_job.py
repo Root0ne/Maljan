@@ -1357,9 +1357,9 @@ class TestAProbeLeafIsPerCall:
         """One operator's cleanup must not take away another's directory."""
         import inspect
 
-        from apps.api.app.services import settings_probes
+        from maljan.providers import server_probe
 
-        source = inspect.getsource(settings_probes.handshake)
+        source = inspect.getsource(server_probe.handshake)
         assert 'probe_key = f"probe-{name}-{uuid.uuid4().hex[:8]}"' in source
         assert source.count("probe_key") >= 4, "the same key opens, detaches and is removed"
 
@@ -1368,9 +1368,9 @@ class TestAProbeLeafIsPerCall:
         import ast
         import inspect
 
-        from apps.api.app.services import settings_probes
+        from maljan.providers import server_probe
 
-        tree = ast.parse(inspect.getsource(settings_probes.handshake).lstrip())
+        tree = ast.parse(inspect.getsource(server_probe.handshake).lstrip())
         guarded = [
             node
             for node in ast.walk(tree)

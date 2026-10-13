@@ -14,7 +14,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, ClassVar
 
 from maljan.providers.base import (
-    STATIC_EVIDENCE_INSTRUCTIONS,
+    CLAIM_GUIDANCE,
+    NO_STATIC_PROVIDER,
+    STATIC_EVIDENCE_LEAD,
     StaticCapabilities,
     StaticProvider,
 )
@@ -24,7 +26,7 @@ if TYPE_CHECKING:
     from maljan.core.config import Settings
 
 
-@register_static_provider("none")
+@register_static_provider(NO_STATIC_PROVIDER)
 class NullStaticProvider(StaticProvider):
     """No static tool at all.
 
@@ -32,10 +34,20 @@ class NullStaticProvider(StaticProvider):
     analyst reasons over the deterministic extraction it already receives and
     over whatever tool servers its definition binds. Its prompt fragment keeps
     the provider-neutral instructions (cite a concrete artifact, the four
-    ATT&CK techniques), says no disassembler or decompiler comes with it, and
+    ATT&CK techniques, the verification discipline), says no disassembler or
+    decompiler comes with it, and
     says nothing about the agent's other tools: that sentence is built from
     the tool list the request carries.
     """
+
+    # What the console calls this provider and says about it, and its test's label.
+    choice_label = "No static provider"
+    choice_order = 4
+    title = "No static analyser"
+    description = "The static analyst works from the pre-extracted data only."
+    settings_intro = (
+        "No static provider: the static analyst works from the pre-extracted data only."
+    )
 
     # What the provider is, and nothing about the agent's tools: the static
     # analyst is bound to tool servers of its own under every provider, and the
@@ -43,7 +55,8 @@ class NullStaticProvider(StaticProvider):
     # (``prompt_fragments.tools_statement``). The fragment this replaced told
     # the model it had no tools while the same request carried 36.
     NO_PROVIDER_FRAGMENT: ClassVar[str] = (
-        STATIC_EVIDENCE_INSTRUCTIONS
+        STATIC_EVIDENCE_LEAD
+        + CLAIM_GUIDANCE
         + "\n\n"
         + "No static provider is attached, so no disassembler or decompiler comes with "
         "this analyst."

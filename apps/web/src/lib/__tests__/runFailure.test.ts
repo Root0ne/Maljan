@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { jobFailure, runFailure } from "@/lib/runFailure";
+import { jobFailure, jobFinished, jobStopNote, runFailure } from "@/lib/runFailure";
 
 const ID = "5f3a9c1d4e2b48f7a0c6d8e1b3f5a7c9";
 const OTHER = "0011223344556677889900aabbccddee";
@@ -71,7 +71,7 @@ describe("what a job row says about its ending", () => {
   });
 
   it("is nothing for a run an operator cancelled", () => {
-    /* The cancel is the operator's decision, recorded with no message and
+    /* The cancel is the operator's decision, recorded as a stop and
      * outranking whatever the run was raising as it went down. Drawing a
      * failure over it would report the stop as a fault. */
     expect(jobFailure("cancelled", null)).toBeNull();
@@ -87,5 +87,31 @@ describe("what a job row says about its ending", () => {
   it("is nothing for a failed row that recorded no message at all", () => {
     expect(jobFailure("failed", null)).toBeNull();
     expect(jobFailure("failed", "   ")).toBeNull();
+  });
+});
+
+describe("a cancelled run", () => {
+  const STOP =
+    "Cancelled by the operator 412 s into the run, while node report was running. " +
+    "The report kept is partial.";
+
+  it("has ended, like a completed or a failed one", () => {
+    for (const status of ["completed", "failed", "cancelled"]) {
+      expect(jobFinished(status)).toBe(true);
+    }
+    for (const status of ["pending", "running", "", null, undefined]) {
+      expect(jobFinished(status)).toBe(false);
+    }
+  });
+
+  it("says why and where it stopped, as its row says it", () => {
+    expect(jobStopNote("cancelled", STOP)).toBe(STOP);
+  });
+
+  it("says nothing when its row carries no reason, and never for another status", () => {
+    expect(jobStopNote("cancelled", null)).toBeNull();
+    expect(jobStopNote("cancelled", "  ")).toBeNull();
+    expect(jobStopNote("failed", STOP)).toBeNull();
+    expect(jobStopNote("running", STOP)).toBeNull();
   });
 });

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.settings_probes import PROBES, handshake_tools, probe_mcp, run_mcp_probe
+from app.services.settings_probes import handshake_tools, known_probe, probe_mcp, run_mcp_probe
 
 
 class _Handle:
@@ -172,41 +172,60 @@ async def test_an_unknown_server_is_a_legible_failure():
 
 
 def test_the_probe_is_registered_under_its_own_name():
-    assert "mcp" in PROBES
+    assert known_probe("mcp")
 
 
 @pytest.mark.asyncio
 async def test_the_r2_probe_speaks_the_same_handshake(monkeypatch):
-    from app.services.settings_probes import probe_r2
+    from maljan.core.settings_overrides import build_settings
+    from maljan.providers import servers
     from maljan.providers.static import r2
 
+    provider = r2.R2StaticProvider.from_settings(build_settings({}))
+    _Handle.made = []
+    monkeypatch.setattr(servers, "ServerHandle", _Handle)
     monkeypatch.setattr(
         r2, "resolve_r2_binary", lambda configured, env=None: r2.R2Binary(configured, ())
     )
-    result = await probe_r2({"binary_path": "r2mcp"})
+    result = await provider.probe()
     assert result.ok is True and result.tools == ["open_file", "analyze", "list_imports"]
     assert _Handle.made[-1].config.command == "r2mcp"
     assert handshake_tools is not None
 
 
-class TestTheVirustotalServer:
-    """The probe names the one state a fresh VirusTotal built-in is in.
+class TestAServerThatDeclaresHowItsCredentialIsObtained:
+    """The probe names the one state such a server is in before it is set up.
 
-    An unauthenticated handshake against VirusTotal's endpoint fails as a
+    An unauthenticated handshake against such an endpoint can fail as a
     transport error whose text says nothing about credentials, so the probe
     answers the question the operator is actually asking before it dials.
     """
 
     @pytest.mark.asyncio
-    async def test_without_a_token_it_reports_that_no_agent_is_registered(self):
+    async def test_without_a_token_it_reports_that_no_credential_was_obtained(self):
         from maljan.core.config import Settings
 
         entry = Settings(_env_file=None).mcp.servers["virustotal"].model_dump(mode="json")
         result = await probe_mcp({"name": "virustotal", "entry": entry})
 
         assert result.ok is False
-        assert "no agent token" in result.detail
+        assert "no credential" in result.detail
         assert not _Handle.made, "nothing is dialled without a credential"
+
+    @pytest.mark.asyncio
+    async def test_an_invented_server_with_a_declaration_is_told_the_same(self):
+        host = ".".join(["issuer", "example"])
+        entry = {
+            "enabled": True,
+            "transport": "streamable-http",
+            "url": f"https://{host}/mcp",
+            "credential_bootstrap": {"url": f"https://{host}/register", "token_json_path": "/t"},
+        }
+        result = await probe_mcp({"name": "invented", "entry": entry})
+
+        assert result.ok is False
+        assert "no credential" in result.detail
+        assert not _Handle.made
 
     @pytest.mark.asyncio
     async def test_with_a_token_it_dials_the_endpoint_like_any_other_server(self):

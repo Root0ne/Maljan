@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 from tests.unit.core.test_every_model_call_is_counted import SETTINGS, _judge, _model
 
-from maljan.core.model_assignments import global_model_label
+from maljan.core.model_assignments import model_label_for
 from maljan.core.spend import Price, SpendMeter, _clean
 from maljan.core.token_ledger import TokenLedger
 
@@ -327,10 +327,10 @@ MEDIATION = "CONTRADICTIONS: NONE\nagreement_confidence: 0.95"
 def _priced_judge(ceiling: float, answered: str = "agreement_confidence: 0.95"):
     llm, ledger = _model(answered), TokenLedger()
     meter = SpendMeter(ceiling, table={})
-    label = global_model_label(SETTINGS, "expert")
+    label = model_label_for(SETTINGS, "mediator")
     meter._operator[_clean(label)] = Price(1.0, 1.0, source="test")
     ledger.spend = meter
-    judge = _judge(llm, ledger, runs_on="expert")
+    judge = _judge(llm, ledger, runs_on="mediator")
     kinds: list[str] = []
     admit = meter.admit
 

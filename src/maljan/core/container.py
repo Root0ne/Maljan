@@ -40,7 +40,13 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from maljan.agents.registry import AgentRegistry
 from maljan.agents.run_evidence_corpus import RunEvidenceCorpus
 from maljan.core.cancellation import Cancellation
-from maljan.core.config import PROMPT_ROLES, REPORTER_AGENT_KEY, Settings
+from maljan.core.config import (
+    MEDIATOR_AGENT_KEY,
+    PROMPT_ROLES,
+    REPORTER_AGENT_KEY,
+    SUMMARIZER_AGENT_KEY,
+    Settings,
+)
 from maljan.core.exceptions import ConfigurationError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger
@@ -48,6 +54,7 @@ from maljan.core.truncation_ledger import TruncationLedger
 from maljan.llm.context_window import record_built_cap
 from maljan.llm.generation_rate import GenerationRates, attach_rate_meter
 from maljan.llm.registry import LLMProviderRegistry
+from maljan.llm.transient import attach_retry_recorder
 from maljan.loaders.file_loader import FileDataLoader
 from maljan.parsers.registry import ParserRegistry
 from maljan.schemas.evidence import EvidenceCounter
@@ -55,7 +62,7 @@ from maljan.schemas.evidence import EvidenceCounter
 if TYPE_CHECKING:
     from maljan.agents.base_agent import BaseAnalyst
     from maljan.analysis.function_summarizer import FunctionSummarizer
-    from maljan.loaders.binary_chunker import TextChunk
+    from maljan.loaders.binary_chunker import Room, TextChunk
     from maljan.memory.long_term_memory import MemoryStore
     from maljan.pipeline.events import EventSink
     from maljan.providers.base import SandboxProvider, StaticProvider
@@ -113,7 +120,7 @@ def _drop_llm_caches_on_retirement(loop: object) -> None:
     for container in list(_LIVE_CONTAINERS):
         with container._lock:
             for cache in (
-                container._expert_llm_cache,
+                container._mediator_llm_cache,
                 container._judge_llm_cache,
                 container._reporter_llm_cache,
                 container._summarizer_llm_cache,
@@ -135,19 +142,18 @@ def _drop_llm_caches_on_retirement(loop: object) -> None:
 def _reporter_reasons(config: Settings, provider: str) -> bool:
     """Whether the reporter's ``provider`` was left free to reason inside its cap.
 
-    Ollama's ``num_predict`` and llama.cpp's ``n_predict`` count the reasoning
-    channel with the answer, and a reasoning model left thinking spends its
-    budget there: a 900-token section cap came back as an empty section. The
-    platform cannot tell a reasoning model from its tag; what it knows is
-    whether it asked the provider to keep reasoning out
-    (``llm.ollama.disable_thinking`` / ``llm.openai.disable_thinking``). Not
-    asked, an operator's section budget is given the reporter's own cap on top
-    for the reasoning, rather than the model being asked not to reason: a
-    ``think: false`` a model does not understand is an error on Ollama, and the
-    setting that sends it is the operator's.
+    Some providers count the reasoning channel with the answer, and a
+    reasoning model left thinking spends its budget there: a 900-token section
+    cap came back as an empty section. The provider's adapter answers
+    (``LLMProvider.reasoning_counts_against_cap``), from whether it was asked
+    to keep reasoning out. Not asked, an operator's section budget is given the
+    reporter's own cap on top for the reasoning, rather than the model being
+    asked not to reason: a switch a model does not understand is an error on
+    some runtimes, and the setting that sends it is the operator's.
     """
-    block = getattr(config.llm, provider, None)
-    return provider in ("ollama", "openai") and not bool(getattr(block, "disable_thinking", False))
+    from maljan.llm.provider_base import facts_of
+
+    return bool(facts_of(provider).reasoning_counts_against_cap(config))
 
 
 def _known_window(window: Any) -> int:
@@ -169,9 +175,10 @@ def report_stage_budget(config: Settings, assignment: Any, *, probe: bool = True
     the operator's cap it follows is ``llm.judge_max_tokens`` — the cap
     :meth:`ServiceContainer.get_reporter_llm` has always been built with; the
     analysts' ``llm.expert_max_tokens`` is not the reporter's. Above 0 it is
-    used as set; at 0 the model's declared maximum output; with none declared,
-    the analysts' derivation (``context_window.report_output_budget``). Never
-    more than the model's maximum.
+    used as set; at 0 the derivation every role's cap follows: the smaller of
+    a quarter of the window and the model's declared maximum output
+    (``context_window.report_output_budget``). Never more than the model's
+    maximum.
     """
     from maljan.llm.context_window import report_output_budget
 
@@ -188,9 +195,10 @@ def composer_output_budget(config: Settings, assignment: Any) -> tuple[int, str,
     section budget, plus the reporter's own cap as room for reasoning where the
     provider was not asked to keep reasoning out (:func:`_reporter_reasons`);
     else the operator's ``llm.judge_max_tokens``, the reporter's cap; else the
-    model's declared maximum output; else the analysts' derivation, a quarter
-    of the window. Never more than the model's maximum output, the reasoning
-    room included (``context_window.report_output_budget``). A section was
+    derivation every role's cap follows, the smaller of a quarter of the window
+    and the model's declared maximum output. Never more than the model's
+    maximum output, the reasoning room included
+    (``context_window.report_output_budget``). A section was
     dropped from a live report when its answer outgrew a fixed budget.
 
     Returns the tokens, the sentence that says how they were reached, which
@@ -226,7 +234,7 @@ def _swap_healed_llm(replaced: object, healed: object) -> None:
     for container in list(_LIVE_CONTAINERS):
         with container._lock:
             for cache in (
-                container._expert_llm_cache,
+                container._mediator_llm_cache,
                 container._judge_llm_cache,
                 container._reporter_llm_cache,
                 container._summarizer_llm_cache,
@@ -403,7 +411,7 @@ class ServiceContainer:
         # to both is the "bound to a different event loop" failure that cost
         # the judge its first verdict request and the narrative round its
         # first attempt on every run.
-        self._expert_llm_cache = PerLoopModels()
+        self._mediator_llm_cache = PerLoopModels()
         self._judge_llm_cache = PerLoopModels()
         self._reporter_llm_cache = PerLoopModels()
         self._summarizer_llm_cache = PerLoopModels()
@@ -419,9 +427,18 @@ class ServiceContainer:
         # The function-hash corpus write the judge decided on, as
         # ``(store, sample_id, family, functions)``, held for the same reason.
         self.pending_function_hashes: Any = None
+        # Set by ``aclose``: a hold handed over after teardown (a judge thread a
+        # timeout abandoned) is let go of at once.
+        self._closed = False
         self._sandbox_provider_cache: SandboxProvider | None = None
         self._static_provider_cache: dict[str, StaticProvider] = {}
         self._server_registry_cache: ServerRegistry | None = None
+        # The paths this job opened on each server that declares its open tool
+        # (``providers.sample_open``): one note for the job, shared by its
+        # static providers, its tool servers and the deterministic passes.
+        from maljan.providers.sample_open import SampleNotes
+
+        self.sample_notes = SampleNotes()
         self._function_summarizer_cache: FunctionSummarizer | None = None
         self._narrative_agent_cache: Any | None = None
         # The analyst run mode this job resolved (``pipeline.analyst_mode``),
@@ -450,6 +467,11 @@ class ServiceContainer:
         # it (``schemas.sandbox_report.reader_of``), set by ``app.arun`` beside
         # it; read by the sandbox sections.
         self.sandbox_normalised: tuple[str, str, str] | None = None
+        # The signature severity scale the job's sandbox provider declares for
+        # that report (``SignatureScale.record()``), ``None`` where it declares
+        # none; set by ``app.arun`` beside it and recorded on the run summary
+        # (``report_formats.recorded_signature_scale``).
+        self.sandbox_signature_scale: dict[str, Any] | None = None
 
         # The job's sample, for the one step that needs the bytes rather than
         # a report: staging the sample to a tool server that does not share
@@ -457,6 +479,9 @@ class ServiceContainer:
         # outside a job, and staging is then a no-op.
         self.sample_path: str | None = None
         self.sample_sha256: str = ""
+        # The path each tool server that declares a ``sample_mount`` opens the
+        # worker's copy of the sample at, by server key; empty outside a job.
+        self.server_sample_paths: dict[str, str] = {}
 
         # Per-run LLM token/cost ledger (findings-log §4 Item 1). Agents and the
         # judge add each call's usage; the judge node snapshots it into RunSummary.
@@ -466,6 +491,20 @@ class ServiceContainer:
 
         self._token_ledger = TokenLedger(spend=SpendMeter.from_settings(config))
         self._plan_the_verdict_and_report(self._token_ledger.spend)
+        # Each call, as it is recorded, on the job's event feed: the durable
+        # trail of what the run spent, kept call by call by the worker.
+        if event_sink is not None:
+            from maljan.pipeline.events import MODEL_USAGE, emit
+
+            self._token_ledger.on_call = lambda row: emit(event_sink, MODEL_USAGE, row)
+
+        # What the report node has built so far, while it is still building
+        # it: the deterministic report, then the narrative on it, with the
+        # composer writing its sections into the same object as each one is
+        # written. A run stopped part-way through its report keeps this as its
+        # partial report (``pipeline.stopped_run``). ``None`` until the report
+        # node has built one.
+        self.report_in_progress: Any = None
 
         # Per-run generation rate of each model, read off every call's answer
         # by a meter attached where the model is built. The judge and the
@@ -506,6 +545,7 @@ class ServiceContainer:
         # window costs a metadata request to the operator's own endpoint, and a
         # container that never attaches a tool server should never make it.
         self._context_budget: Any | None = None
+        self._reporter_context_budget: Any | None = None
 
         _LIVE_CONTAINERS.add(self)
         _register_retirement_hook()
@@ -549,7 +589,7 @@ class ServiceContainer:
     # LLM accessors
     # ------------------------------------------------------------------
 
-    def _expert_token_cap(self, agent: str = "") -> Any:
+    def _expert_token_cap(self, agent: str) -> Any:
         """The output cap an analyst-role model is built with: the operator's, or derived.
 
         The analyst path was the only unbounded LLM call in the system while
@@ -557,7 +597,7 @@ class ServiceContainer:
         a 19-tool-call static loop produced a forced-synthesis call that ran 19+
         minutes against its 25-minute wall clock. Mirrors ``get_judge_llm``.
         """
-        return self._built_cap("expert_max_tokens", agent or "expert")
+        return self._built_cap("expert_max_tokens", agent)
 
     def _output_cap(self, setting: str, agent: str, *, role: str = "expert") -> int:
         """The output cap one agent's model is built with, in tokens (``_built_cap``)."""
@@ -569,14 +609,18 @@ class ServiceContainer:
         ``llm.expert_max_tokens`` / ``llm.judge_max_tokens`` above 0 are the
         operator's; at 0 the cap is derived from the window the agent's model
         serves (``context_window.output_cap_for``), learned once per endpoint.
-        A mock container asks no endpoint. The builder keeps it on the model it
-        builds (``context_window.record_built_cap``), which is where every
-        consumer of the cap reads it from.
+        The models are the chain the agent's model is built from
+        (``assignment_chain_for(config, agent, role=role)``, the reading
+        ``build_model_for_agent`` makes): its own entry with its fallbacks, or
+        the global model of ``role`` — for the judge its ``llm.agents.judge``
+        entry before the global judge model. A mock container asks no endpoint.
+        The builder keeps it on the model it builds
+        (``context_window.record_built_cap``), which is where every consumer
+        of the cap reads it from.
         """
         from maljan.llm.context_window import output_cap_for
 
-        named = "" if agent in ("expert", "judge") and role == agent else agent
-        cap = output_cap_for(self.config, setting, named, role=role, probe=not self.mock)
+        cap = output_cap_for(self.config, setting, agent, role=role, probe=not self.mock)
         rates = getattr(self, "_generation_rates", None)
         if rates is not None:
             rates.note_output_cap(agent, cap.tokens, cap.sentence)
@@ -586,10 +630,10 @@ class ServiceContainer:
     def _report_output_cap(self) -> int:
         """The output cap the reporter's model is built with, its derivation logged and recorded.
 
-        The report stage's own order (:func:`report_stage_budget`): the
-        operator's ``llm.judge_max_tokens``, else the model's declared maximum
-        output, else the analysts' derivation. Over a fallback list, the
-        smallest of its models, as every other agent's cap is.
+        The report stage's budget (:func:`report_stage_budget`): the
+        operator's ``llm.judge_max_tokens``, else the derivation every role's
+        cap follows. Over a fallback list, the smallest of its models, as every
+        other agent's cap is.
         """
         from maljan.core.model_assignments import assignment_chain_for
 
@@ -601,18 +645,14 @@ class ServiceContainer:
                     best = budget
         except Exception as exc:  # noqa: BLE001 — an unreadable assignment takes the derived cap
             logger.warning(
-                "Report stage: the reporter's list could not be budgeted (%s); its model "
-                "takes the analysts' derived cap instead of the report stage's order.",
+                "Report stage: the reporter's list could not be budgeted per model (%s); "
+                "its model takes the judge role's cap (llm.judge_max_tokens, or derived).",
                 exc,
             )
         if best is None:
-            tokens = self._output_cap("judge_max_tokens", REPORTER_AGENT_KEY, role="judge")
-            self._reporter_output_budget = (
-                tokens,
-                f"{tokens} tokens — the analysts' derivation",
-                0,
-            )
-            return tokens
+            cap = self._built_cap("judge_max_tokens", REPORTER_AGENT_KEY, role="judge")
+            self._reporter_output_budget = (int(cap.tokens), cap.sentence, 0)
+            return int(cap.tokens)
         rates = getattr(self, "_generation_rates", None)
         if rates is not None:
             rates.note_output_cap(REPORTER_AGENT_KEY, best.tokens, best.sentence())
@@ -624,18 +664,31 @@ class ServiceContainer:
         )
         return int(best.tokens)
 
-    def get_expert_llm(self) -> BaseChatModel:
+    def get_mediator_llm(self) -> BaseChatModel:
+        """The model the debate stage's mediator runs on.
+
+        Through the per-agent path, like the judge and the reporter: a
+        configured ``llm.agents.mediator`` decides provider, model,
+        temperature, fallbacks and effort, and with no such entry the expert
+        role picks the model exactly as it did before the entry existed. A
+        judge entry does not move it. Its output cap is derived from the
+        model it calls and recorded under its own name.
+        """
         if self._llm_registry is None:
             raise ConfigurationError("Cannot build LLM in mock mode.")
         loop = _current_loop()
         with self._lock:
-            cached = self._expert_llm_cache.lookup(loop)
+            cached = self._mediator_llm_cache.lookup(loop)
             if cached is None:
-                cap = self._expert_token_cap()
-                cached = self._llm_registry.build_model(role="expert", max_tokens=cap.tokens)
+                cap = self._expert_token_cap(MEDIATOR_AGENT_KEY)
+                cached = self._llm_registry.build_model_for_agent(
+                    MEDIATOR_AGENT_KEY, fallback_role="expert", max_tokens=cap.tokens
+                )
                 record_built_cap(cached, cap)
                 attach_rate_meter(cached, getattr(self, "_generation_rates", None))
-                self._expert_llm_cache.put(loop, "", cached)
+                # Its calls are recorded under the judge agent that runs on it.
+                attach_retry_recorder(cached, getattr(self, "_token_ledger", None), "judge")
+                self._mediator_llm_cache.put(loop, "", cached)
             return cached
 
     def get_judge_llm(self) -> BaseChatModel:
@@ -662,6 +715,7 @@ class ServiceContainer:
                 )
                 record_built_cap(cached, cap)
                 attach_rate_meter(cached, getattr(self, "_generation_rates", None))
+                attach_retry_recorder(cached, getattr(self, "_token_ledger", None), "judge")
                 self._judge_llm_cache.put(loop, "", cached)
             return cached
 
@@ -684,15 +738,20 @@ class ServiceContainer:
                     REPORTER_AGENT_KEY, fallback_role="judge", **extra
                 )
                 attach_rate_meter(cached, getattr(self, "_generation_rates", None))
+                attach_retry_recorder(
+                    cached, getattr(self, "_token_ledger", None), REPORTER_AGENT_KEY
+                )
                 self._reporter_llm_cache.put(loop, "", cached)
             return cached
 
     def get_summarizer_llm(self) -> BaseChatModel:
         """The model the function summariser runs on, per loop like the rest.
 
-        It has its own provider/model overrides, so it is its own accessor
-        rather than the expert one with arguments; what it shares with the
-        others is that its pool belongs to the loop that first awaits it.
+        Through the per-agent path: a configured ``llm.agents.summarizer``
+        decides provider, model, temperature, fallbacks and effort, and with
+        no such entry it is the global expert model, which is what it always
+        ran on. It is built with no output cap, as it always was; each call
+        is held to what its window leaves (``generation_rate``).
         """
         if self._llm_registry is None:
             raise ConfigurationError("Cannot build FunctionSummarizer LLM in mock mode.")
@@ -700,12 +759,11 @@ class ServiceContainer:
         with self._lock:
             cached = self._summarizer_llm_cache.lookup(loop)
             if cached is None:
-                cached = self._llm_registry.build_model(
-                    role="expert",
-                    provider_override=self.config.preprocessing.summarizer_provider,
-                    model_override=self.config.preprocessing.summarizer_model,
+                cached = self._llm_registry.build_model_for_agent(
+                    SUMMARIZER_AGENT_KEY, fallback_role="expert"
                 )
                 attach_rate_meter(cached, getattr(self, "_generation_rates", None))
+                attach_retry_recorder(cached, getattr(self, "_token_ledger", None), "summarizer")
                 self._summarizer_llm_cache.put(loop, "", cached)
             return cached
 
@@ -723,6 +781,7 @@ class ServiceContainer:
                 cached = self._llm_registry.build_model_for_agent(agent_name, max_tokens=cap.tokens)
                 record_built_cap(cached, cap)
                 attach_rate_meter(cached, getattr(self, "_generation_rates", None))
+                attach_retry_recorder(cached, getattr(self, "_token_ledger", None), agent_name)
                 self._agent_llm_cache.put(loop, agent_name, cached)
             return cached
 
@@ -731,31 +790,17 @@ class ServiceContainer:
     # ------------------------------------------------------------------
 
     def get_memory_store(self) -> MemoryStore:
+        """The store ``memory.backend`` selects, built once by the factory every caller uses."""
         with self._lock:
             if self._memory_store_cache is None:
-                backend = self.config.memory.backend
-                if backend == "qdrant":
-                    from maljan.memory.qdrant_store import QdrantStore
+                from maljan.memory.store_factory import build_memory_store, configured_backend
 
-                    self._memory_store_cache = QdrantStore(
-                        url=self.config.memory.qdrant_url,
-                        collection=self.config.memory.qdrant_collection,
-                        api_key=(
-                            self.config.memory.qdrant_api_key.get_secret_value()
-                            if self.config.memory.qdrant_api_key
-                            else None
-                        ),
-                    )
-                    logger.info(
-                        "LTM backend: QdrantStore (url=%s, collection=%s)",
-                        self.config.memory.qdrant_url,
-                        self.config.memory.qdrant_collection,
-                    )
-                else:
-                    from maljan.memory.in_memory_store import InMemoryStore
-
-                    self._memory_store_cache = InMemoryStore()
-                    logger.info("LTM backend: InMemoryStore (in-process, non-persistent).")
+                self._memory_store_cache = build_memory_store(self.config)
+                logger.info(
+                    "LTM backend: %s (%s).",
+                    configured_backend(self.config),
+                    type(self._memory_store_cache).__name__,
+                )
             return self._memory_store_cache
 
     def remember_the_run(self) -> bool:
@@ -789,11 +834,33 @@ class ServiceContainer:
         )
         return True
 
+    def hold_function_hashes(
+        self, store: Any, sample_id: str, family: str, functions: list
+    ) -> None:
+        """Take over the judge's hold on ``store`` with the corpus write it decided on.
+
+        The hold ends with the write (``remember_the_run``) or at teardown. A
+        write it replaces lets go of its own store; one handed over after
+        teardown is let go of at once, never written.
+        """
+        from maljan.memory.store_factory import release_function_hash_store
+
+        with self._lock:
+            if self._closed:
+                replaced, self.pending_function_hashes = (store,), None
+            else:
+                replaced = self.pending_function_hashes
+                self.pending_function_hashes = (store, sample_id, family, list(functions))
+        if replaced is not None:
+            release_function_hash_store(replaced[0])
+
     def _remember_the_function_hashes(self) -> bool:
         held, self.pending_function_hashes = self.pending_function_hashes, None
         if held is None:
             return False
         store, sample_id, family, functions = held
+        from maljan.memory.store_factory import release_function_hash_store
+
         try:
             written = int(store.upsert_sample(sample_id, family, functions) or 0)
         except Exception as exc:  # noqa: BLE001 — the corpus never costs a completed job
@@ -801,6 +868,10 @@ class ServiceContainer:
                 "Function-hash corpus write failed (%s). The completed job is unaffected.", exc
             )
             return False
+        finally:
+            # The judge's hold ends with the write: a store a settings change
+            # replaced meanwhile is closed now, not under this job.
+            release_function_hash_store(store)
         logger.info(
             "Function-hash corpus: filed %d function(s) of '%s' under %s.",
             written,
@@ -858,6 +929,8 @@ class ServiceContainer:
                     cfg.static.provider = wanted  # type: ignore[assignment]
                 cached = build(cfg)
                 logger.info("Static provider: %s.", cached.id)
+                if hasattr(cached, "sample_notes"):
+                    cached.sample_notes = self.sample_notes
                 self._static_provider_cache[wanted] = cached
             return cached
 
@@ -884,6 +957,7 @@ class ServiceContainer:
 
                 self._server_registry_cache = ServerRegistry(
                     self.config,
+                    sample_notes=self.sample_notes,
                     truncation_ledger=self._truncation_ledger,
                     context_budget=budget,
                     event_sink=self.event_sink,
@@ -928,6 +1002,11 @@ class ServiceContainer:
     def get_context_budget(self) -> Any:
         """The window this job's models serve, and what one tool answer may take.
 
+        The window is the smallest any model the job's tool-calling agents
+        call serves (``composition.window_assignments``): every analyst, the
+        mediator of a debate and the function summariser while it is on, and
+        the judge with the models it really calls, read on the judge role.
+
         Built once, on first use, because learning the window means asking the
         operator's own endpoint for its metadata — free, but a request, and a
         container that attaches no tool server never makes it. A mock container
@@ -948,12 +1027,13 @@ class ServiceContainer:
         held = self._context_budget
         if held is not None:
             return held
-        from maljan.agents.composition import analyst_keys
+        from maljan.agents.composition import window_assignments
         from maljan.llm.context_window import budget_for_settings
 
-        agents = [*analyst_keys(self.config), "judge"]
         budget = budget_for_settings(
-            self.config, agents, probe=self._cap_is_derived() and not self.mock
+            self.config,
+            window_assignments(self.config),
+            probe=self._cap_is_derived() and not self.mock,
         )
         with self._lock:
             if self._context_budget is None:
@@ -971,6 +1051,32 @@ class ServiceContainer:
             budget.cap_without_recording(),
         )
         return budget
+
+    def get_reporter_context_budget(self) -> Any:
+        """The window the reporter's own models serve, as a budget, built once.
+
+        The reporter is left out of the job's window
+        (``composition.window_assignments``), so what it reads before it starts
+        — the triage pack — is cut on the smaller of the two
+        (``pipeline.nodes.pack_text``). Its models are the chain
+        ``get_reporter_llm`` builds, fallbacks included; learned as the job's
+        window is, and never asked of an endpoint by a mock container.
+        """
+        held = self._reporter_context_budget
+        if held is not None:
+            return held
+        from maljan.core.model_assignments import assignment_chain_for
+        from maljan.llm.context_window import budget_for_settings
+
+        budget = budget_for_settings(
+            self.config,
+            assignment_chain_for(self.config, REPORTER_AGENT_KEY, role="judge"),
+            probe=self._cap_is_derived() and not self.mock,
+        )
+        with self._lock:
+            if self._reporter_context_budget is None:
+                self._reporter_context_budget = budget
+            return self._reporter_context_budget
 
     def _cap_is_derived(self) -> bool:
         """Whether the tool-output cap comes from the window rather than a setting."""
@@ -1212,7 +1318,7 @@ class ServiceContainer:
             if cached is None:
                 from maljan.agents.judge_agent import JudgeAgent
 
-                llm = self.get_judge_llm() if role == "judge" else self.get_expert_llm()
+                llm = self.get_judge_llm() if role == "judge" else self.get_mediator_llm()
                 cached = JudgeAgent(
                     llm=llm,
                     # Without this the judge's structured-output capability
@@ -1221,9 +1327,10 @@ class ServiceContainer:
                     config=self.config,
                 )
                 cached._job_id = self.job_key()
-                # The mediator's instance is built on the expert model, and its
+                # The mediator's instance is built on the mediator's model
+                # (``llm.agents.mediator``, else the expert model), and its
                 # calls are recorded under that model.
-                cached._runs_on = "judge" if role == "judge" else "expert"
+                cached._runs_on = "judge" if role == "judge" else MEDIATOR_AGENT_KEY
                 cached.token_ledger = getattr(self, "_token_ledger", None)
                 cached.generation_rates = getattr(self, "_generation_rates", None)
                 cached.truncation_ledger = getattr(self, "_truncation_ledger", None)
@@ -1255,6 +1362,15 @@ class ServiceContainer:
         plain ``await`` on the graph's loop. Each stack has to unwind where it
         was wound.
         """
+        # A job that ended before its corpus write (failed, cancelled, or never
+        # told to remember) lets go of the function-hash store its judge held.
+        with self._lock:
+            self._closed = True
+            unwritten, self.pending_function_hashes = self.pending_function_hashes, None
+        if unwritten is not None:
+            from maljan.memory.store_factory import release_function_hash_store
+
+            release_function_hash_store(unwritten[0])
         with self._lock:
             analysts = list(self._agent_cache.values())
             judges = list(self._judge_agent_cache.values())
@@ -1500,16 +1616,10 @@ class ServiceContainer:
         return model_label_for(self.config, REPORTER_AGENT_KEY, role="judge")
 
     def _summarizer_model_label(self) -> str:
-        """The label of the model ``get_summarizer_llm`` builds, or ``""``."""
-        from maljan.core.model_assignments import endpoint_for, model_label
+        """The label of the model ``get_summarizer_llm`` builds first, or ``""``."""
+        from maljan.core.model_assignments import model_label_for
 
-        try:
-            pre = self.config.preprocessing
-            provider = str(pre.summarizer_provider or self.config.llm.provider)
-            model = str(pre.summarizer_model or self.config.llm.expert_model)
-            return model_label(provider, model, endpoint_for(self.config, provider))
-        except Exception:  # noqa: BLE001 — a label is never worth a lost summary
-            return ""
+        return model_label_for(self.config, SUMMARIZER_AGENT_KEY)
 
     def get_report_composer(self) -> Any | None:
         """Return the singleton section-wise ReportComposer, or ``None``.
@@ -1581,6 +1691,9 @@ class ServiceContainer:
                     max_tokens_for=lambda provider: by_provider.get(provider, output_cap),
                 )
                 attach_rate_meter(composer_llm, getattr(self, "_generation_rates", None))
+                attach_retry_recorder(
+                    composer_llm, getattr(self, "_token_ledger", None), REPORTER_AGENT_KEY
+                )
                 self._report_composer_cache = ReportComposer(
                     llm=composer_llm,
                     section_max_tokens=rc.composer_section_max_tokens,
@@ -1593,6 +1706,9 @@ class ServiceContainer:
                     turn_share=float(config.llm.fallback_turn_share),
                     budget_note=budget_note,
                     window_tokens=window_tokens,
+                    windows_by_model={
+                        label: window for label, (_tokens, _why, window) in budgets.items()
+                    },
                 )
                 self._report_composer_cache.event_sink = self.event_sink
             return self._report_composer_cache
@@ -1610,18 +1726,22 @@ class ServiceContainer:
                 self._data_cache[key] = cached
             return cached
 
-    def load_chunked(self, sample_id: str, data_type: str) -> list[TextChunk]:
+    def load_chunked(
+        self, sample_id: str, data_type: str, room: Room | None = None
+    ) -> list[TextChunk]:
         """Return a list of TextChunk objects for a sample and data type.
 
         Re-uses the parsed-text cache when available; chunking itself is cheap
-        and stateless so the chunk list is not cached.
+        and stateless so the chunk list is not cached. ``room`` is the
+        analyst's input room (``BaseAnalyst._input_room_chars``), which sizes
+        a chunk where ``chunking.max_tokens_per_chunk`` is unset.
         """
         key = (sample_id, data_type)
         with self._lock:
             cached_text = self._data_cache.get(key)
         if cached_text is not None:
-            return self.loader.chunk_text(data_type, cached_text)
-        return self.loader.load_chunked(sample_id, data_type)
+            return self.loader.chunk_text(data_type, cached_text, room=room)
+        return self.loader.load_chunked(sample_id, data_type, room=room)
 
     def load_data_for_agent(
         self,
@@ -1630,8 +1750,16 @@ class ServiceContainer:
         file_hash: str,
         sandbox_report: dict[str, Any] | None = None,
         sample_path: str | None = None,
+        room: Room | None = None,
+        head_room: Room | None = None,
     ) -> list[TextChunk]:
         """The input text agent ``agent_name`` is handed, as chunks.
+
+        Each source is chunked on its own at ``room``, the agent's input room
+        (``None``: the operator's chunk size, or the unknown-window size). The
+        source the first chunk comes from is chunked at ``head_room`` where it
+        is given: the room its chunk has once the node adds to it
+        (``binary_chunker.head_room``).
 
         Driven by ``AgentDefinition.data_sources``. An empty list means the
         slice the agent's *role* used to get, which is spelled out in
@@ -1648,12 +1776,20 @@ class ServiceContainer:
         definition = self.config.agents.definitions.get(agent_name)
         sources = list(definition.data_sources) if definition is not None else []
         if not sources:
-            return self._legacy_role_data(agent_name, file_hash, sandbox_report)
+            return self._legacy_role_data(agent_name, file_hash, sandbox_report, room, head_room)
 
+        head = head_room if head_room is not None else room
         chunks: list[TextChunk] = []
         for source in sources:
             chunks.extend(
-                self._data_source_chunks(agent_name, source, file_hash, sandbox_report, sample_path)
+                self._data_source_chunks(
+                    agent_name,
+                    source,
+                    file_hash,
+                    sandbox_report,
+                    sample_path,
+                    room if chunks else head,
+                )
             )
         return chunks
 
@@ -1664,6 +1800,7 @@ class ServiceContainer:
         file_hash: str,
         sandbox_report: dict[str, Any] | None,
         sample_path: str | None,
+        room: Room | None = None,
     ) -> list[TextChunk]:
         """One vocabulary entry, resolved. A source with nothing behind it is empty.
 
@@ -1676,39 +1813,63 @@ class ServiceContainer:
             path = sample_path or ""
             if not path:
                 return []
-            return self.loader.chunk_text(agent_name, f"analysis_file_path: {path}")
+            return self.loader.chunk_text(agent_name, f"analysis_file_path: {path}", room=room)
         if source == "sample.chunks":
-            return self.load_chunked(file_hash, agent_name)
+            return self.load_chunked(file_hash, agent_name, room=room)
         if not sandbox_report:
             return []
-        return self._sandbox_slice(agent_name, source, sandbox_report)
+        return self._sandbox_slice(agent_name, source, sandbox_report, room)
 
     def _sandbox_slice(
-        self, agent_name: str, source: str, sandbox_report: dict[str, Any]
+        self,
+        agent_name: str,
+        source: str,
+        sandbox_report: dict[str, Any],
+        room: Room | None = None,
     ) -> list[TextChunk]:
-        import json
+        """One slice of the sandbox report as the agent reads it, chunked at ``room``.
+
+        ``sandbox_report`` is the neutral sandbox report's document
+        (``schemas.sandbox_document``), each slice one of its parts by name.
+        A slice handed over as JSON is compact — the same document without the
+        indentation, which was characters of whitespace in every model request
+        and nowhere else. It is model input only; the report the run stores is
+        not this text.
+        """
+        from maljan.core.safe_json import dumps
+        from maljan.schemas.sandbox_document import place
+
+        def compact(document: Any) -> str:
+            # Depth-safe: a report nested past the guard is written with a
+            # marked placeholder there, never a raise (``core.safe_json``).
+            return dumps(document, separators=(",", ":"), default=str)
 
         if source == "sandbox.target":
             return self.loader.chunk_text(
-                agent_name, json.dumps(sandbox_report.get("target", {}), indent=2, default=str)
+                agent_name, compact(place(sandbox_report, "target", {})), room=room
             )
         if source == "sandbox.network":
             network = sandbox_report.get("network", {})
             try:
                 text = self.parser_registry.create("network").parse(network)
             except KeyError:
-                text = json.dumps(network, indent=2, default=str)
-            return self.loader.chunk_text(agent_name, text)
+                text = compact(network)
+            return self.loader.chunk_text(agent_name, text, room=room)
         if source == "sandbox.behavior":
             try:
                 text = self.parser_registry.create("dynamic").parse(sandbox_report)
             except KeyError:
-                text = json.dumps(sandbox_report, indent=2, default=str)
-            return self.loader.chunk_text(agent_name, text)
-        return self.loader.chunk_text(agent_name, json.dumps(sandbox_report, indent=2, default=str))
+                text = compact(sandbox_report)
+            return self.loader.chunk_text(agent_name, text, room=room)
+        return self.loader.chunk_text(agent_name, compact(sandbox_report), room=room)
 
     def _legacy_role_data(
-        self, agent_name: str, file_hash: str, sandbox_report: dict[str, Any] | None
+        self,
+        agent_name: str,
+        file_hash: str,
+        sandbox_report: dict[str, Any] | None,
+        room: Room | None = None,
+        head_room: Room | None = None,
     ) -> list[TextChunk]:
         """What the agent's role read before ``data_sources`` existed.
 
@@ -1718,11 +1879,14 @@ class ServiceContainer:
         "sample.chunks"]`` would hand a detonated sample both instead of one.
         """
         role = self.agent_role(agent_name)
+        head = head_room if head_room is not None else room
         if role in PROMPT_ROLES:
-            static_context = self.load_chunked(file_hash, agent_name)
+            static_context = self.load_chunked(file_hash, agent_name, room=head)
             sandbox_chunks: list[TextChunk] = []
             if sandbox_report:
-                sandbox_chunks = self._sandbox_slice(agent_name, "sandbox.full", sandbox_report)
+                sandbox_chunks = self._sandbox_slice(
+                    agent_name, "sandbox.full", sandbox_report, room
+                )
             return [*static_context, *sandbox_chunks]
         if sandbox_report:
             slice_name = {
@@ -1730,8 +1894,8 @@ class ServiceContainer:
                 "network": "sandbox.network",
                 "dynamic": "sandbox.behavior",
             }.get(role, "sandbox.full")
-            return self._sandbox_slice(agent_name, slice_name, sandbox_report)
-        return self.load_chunked(file_hash, agent_name)
+            return self._sandbox_slice(agent_name, slice_name, sandbox_report, head)
+        return self.load_chunked(file_hash, agent_name, room=head)
 
     def _prompt_room_chars(self) -> int | None:
         """What one prompt may carry before the reply room, or ``None`` with no window learned."""
@@ -1764,9 +1928,8 @@ class ServiceContainer:
                     truncation_ledger=getattr(self, "_truncation_ledger", None),
                 )
                 logger.info(
-                    "FunctionSummarizer initialized (%s / %s, max_words=%d).",
-                    self.config.preprocessing.summarizer_provider,
-                    self.config.preprocessing.summarizer_model,
+                    "FunctionSummarizer initialized (%s, max_words=%d).",
+                    self._summarizer_model_label(),
                     self.config.preprocessing.summarizer_max_words,
                 )
             return self._function_summarizer_cache

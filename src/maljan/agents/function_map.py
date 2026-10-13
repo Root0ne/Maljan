@@ -31,14 +31,20 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from maljan.core.declared_reading import kind_free_facts, kind_of, reads_as
+from maljan.core.undeclared_tools import (
+    entry_address_arguments,
+    entry_lists_a_function,
+    entry_lists_any_code,
+    entry_lists_code,
+)
 from maljan.pipeline.validation import (
-    _ADDRESS_ARGUMENTS,
     _DIGIT_RUN,
-    _GENERIC_FUNCTION_NAME,
     _NAME_ARGUMENTS,
     _address_value,
     _addresses_written,
     decompiled_functions,
+    generic_function_name,
     image_bases_in,
 )
 from maljan.schemas.evidence import answer_not_shown
@@ -62,20 +68,47 @@ FUNCTION_MAP_HEAD = (
     "write to it):"
 )
 
-# The analysis server's tools whose answers tie an artefact to a function.
-_HASH_TOOL = "resolve_api_hashes"
-_BLOB_TOOL = "decode_string_blobs"
-_FLOSS_TOOL = "floss"
-_INDEX_TOOL = "function_index"
+# The kinds of answer that tie an artefact to a function, by the tool's declared
+# kind (``core.declared_reading``; ``builtin_declarations.CONSUMER_KINDS``
+# ``function_map``): an API hash resolution, a static string decoder, an
+# emulator's recovered strings, the function index.
+_HASH_KIND = "api_hash_resolution"
+_BLOB_KIND = "decoded_strings"
+_FLOSS_KIND = "emulated_strings"
+_INDEX_KIND = "function_index"
+
+
+def _map_kind(entry: Any) -> str:
+    """The kind of an entry the map reads, ``""`` for any other entry."""
+    return kind_of(entry) if reads_as(entry, "function_map") else ""
+
 
 # How each kind of artefact is counted in the block, singular and plural.
 _KIND_WORDS: dict[str, tuple[str, str]] = {
     "name": ("resolved name", "resolved names"),
     "text": ("decoded text", "decoded texts"),
     "call": ("call-site fact", "call-site facts"),
-    "decoded": ("string FLOSS decoded", "strings FLOSS decoded"),
+    # Named by the emulator's declared display name where one names them all
+    # (:func:`_kind_words`); these words where none does.
+    "decoded": ("string decoded by emulation", "strings decoded by emulation"),
 }
 _KIND_ORDER = tuple(_KIND_WORDS)
+
+
+def _kind_words(kind: str, artefacts: Sequence[Artefact]) -> tuple[str, str]:
+    """How a count of ``kind`` is worded, singular and plural.
+
+    A decoded string is counted under the display name the tool that placed
+    it declares, where every one of them was placed by tools of one name.
+    """
+    if kind != "decoded":
+        return _KIND_WORDS[kind]
+    names = {a.by for a in artefacts if a.kind == kind}
+    name = next(iter(names)) if len(names) == 1 else ""
+    if name:
+        return f"string {name} decoded", f"strings {name} decoded"
+    return _KIND_WORDS[kind]
+
 
 # Why the run holds no whole function index, when an index entry is there.
 INDEX_FAILED = "no: [{entry}] the function index failed"
@@ -89,6 +122,9 @@ class Artefact:
     kind: str
     value: str
     entry: str
+    # The declared display name of the tool whose answer placed it, where
+    # the count names it (a decoded string); empty for none.
+    by: str = ""
 
 
 @dataclass
@@ -187,6 +223,11 @@ def _count(n: int, one: str, many: str) -> str:
     return f"{n} {one if n == 1 else many}"
 
 
+def _display_name(entry: Any) -> str:
+    """The display name ``entry``'s tool declares, ``""`` for none."""
+    return str(kind_free_facts(entry).display_name or "")
+
+
 def _parsed(entry: Any) -> Any:
     structured = getattr(entry, "structured", None)
     if isinstance(structured, dict | list):
@@ -222,7 +263,7 @@ def function_artefacts(entries: Iterable[Any]) -> FunctionArtefacts:
     rows = [e for e in entries if getattr(e, "ok", True)]
     found = FunctionArtefacts()
     for entry in entries:
-        if str(getattr(entry, "tool", "") or "") != _INDEX_TOOL:
+        if _map_kind(entry) != _INDEX_KIND:
             continue
         data = _parsed(entry) if getattr(entry, "ok", True) else None
         if isinstance(data, dict) and isinstance(data.get("rows"), list):
@@ -239,13 +280,13 @@ def function_artefacts(entries: Iterable[Any]) -> FunctionArtefacts:
     bases: list[int] = list(image_bases_in(rows))
     parsed: list[tuple[Any, str, Any]] = []
     for entry in rows:
-        tool = str(getattr(entry, "tool", "") or "")
-        if tool not in (_HASH_TOOL, _BLOB_TOOL, _FLOSS_TOOL, _INDEX_TOOL):
+        kind = _map_kind(entry)
+        if not kind:
             continue
         data = _parsed(entry)
         if not isinstance(data, dict):
             continue
-        if tool == _INDEX_TOOL:
+        if kind == _INDEX_KIND:
             _index_rows(found, data, str(getattr(entry, "id", "") or ""), entry)
             base = _stated_base(data)
             if base and base not in bases:
@@ -254,16 +295,16 @@ def function_artefacts(entries: Iterable[Any]) -> FunctionArtefacts:
         base = _stated_base(data)
         if base and base not in bases:
             bases.append(base)
-        parsed.append((entry, tool, data))
+        parsed.append((entry, kind, data))
     found.image_bases = tuple(bases)
-    for entry, tool, data in parsed:
+    for entry, kind, data in parsed:
         entry_id = str(getattr(entry, "id", "") or "")
-        if tool == _HASH_TOOL:
+        if kind == _HASH_KIND:
             _hash_artefacts(found, data, entry_id)
-        elif tool == _BLOB_TOOL:
+        elif kind == _BLOB_KIND:
             _blob_artefacts(found, data, entry_id)
         else:
-            _floss_artefacts(found, data, entry_id)
+            _floss_artefacts(found, data, entry_id, _display_name(entry))
     return found
 
 
@@ -343,7 +384,9 @@ def _call_fact(text: str, passed: Any) -> str:
     return f"{text}: {said} at {passed['call_at']}" + (f" to {target}" if target else "")
 
 
-def _floss_artefacts(found: FunctionArtefacts, data: Mapping[str, Any], entry_id: str) -> None:
+def _floss_artefacts(
+    found: FunctionArtefacts, data: Mapping[str, Any], entry_id: str, by: str = ""
+) -> None:
     for row in data.get("strings") or []:
         if not isinstance(row, dict) or not row.get("string"):
             continue
@@ -360,7 +403,7 @@ def _floss_artefacts(found: FunctionArtefacts, data: Mapping[str, Any], entry_id
                 address -= bases[0]
             else:
                 virtual = True
-        found.add(address, Artefact("decoded", str(row["string"]), entry_id), virtual=virtual)
+        found.add(address, Artefact("decoded", str(row["string"]), entry_id, by), virtual=virtual)
 
 
 def keeps_for_the_map(entry: Any) -> bool:
@@ -368,29 +411,14 @@ def keeps_for_the_map(entry: Any) -> bool:
     one of the analysis server's tools that tie artefacts to functions."""
     if getattr(entry, "repeated_of", None):
         return False
-    tool = str(getattr(entry, "tool", "") or "").lower()
-    return (
-        "decompil" in tool
-        or _lists_code(tool)
-        or tool in (_HASH_TOOL, _BLOB_TOOL, _FLOSS_TOOL, _INDEX_TOOL)
-    )
-
-
-# A tool whose name says it disassembles, and one of those whose name says the
-# whole function is what it lists.
-def _lists_code(tool: str) -> bool:
-    return "disassembl" in tool.lower()
-
-
-def _lists_a_function(tool: str) -> bool:
-    return _lists_code(tool) and "function" in tool.lower()
+    return entry_lists_any_code(entry) or bool(_map_kind(entry))
 
 
 def _listed_at(entry: Any) -> tuple[int | None, list[str]]:
     """The address and the names a listing call was given, from its arguments alone."""
     args = getattr(entry, "args", None) or {}
     address: int | None = None
-    for argument in _ADDRESS_ARGUMENTS:
+    for argument in entry_address_arguments(entry):
         if argument in args and address is None:
             address = _address_value(args[argument])
     names: list[str] = []
@@ -398,7 +426,7 @@ def _listed_at(entry: Any) -> tuple[int | None, list[str]]:
         value = str(args.get(argument) or "").strip()
         if value:
             names.append(value)
-            generic = _GENERIC_FUNCTION_NAME.fullmatch(value)
+            generic = generic_function_name().fullmatch(value)
             if generic is not None and address is None:
                 address = int(generic.group(1), 16)
     return address, names
@@ -511,13 +539,12 @@ def build_function_map(
     )
     known = [e.address for e in visited if e.address is not None] + list(found.by_function)
     for entry in entries:
-        tool = str(getattr(entry, "tool", "") or "")
-        if not _lists_code(tool):
+        if not entry_lists_code(entry):
             continue
         address, names = _listed_at(entry)
         if address is None:
             continue
-        if not _lists_a_function(tool) and not any(_same(address, k, bases) for k in known):
+        if not entry_lists_a_function(entry) and not any(_same(address, k, bases) for k in known):
             continue
         entry_id = str(getattr(entry, "id", "") or "")
         into = next((e for e in visited if _same(e.address, address, bases)), None)
@@ -596,14 +623,14 @@ def _claim_names(text: str, entry: MapEntry, bases: Sequence[int]) -> bool:
         ):
             return True
     for name in entry.names:
-        if _GENERIC_FUNCTION_NAME.fullmatch(name):
+        if generic_function_name().fullmatch(name):
             continue
         # A dotted name (``sym.entry``, ``fcn.main``) written whole names it;
         # its last label is read by the same rule as a plain name.
         if "." in name and _written_bare(text, name):
             return True
         last = name.rsplit(".", 1)[-1]
-        if len(last) < 3 or _GENERIC_FUNCTION_NAME.fullmatch(last):
+        if len(last) < 3 or generic_function_name().fullmatch(last):
             continue
         if _WORD_NAME.fullmatch(last):
             if _named_as_a_function(text, last):
@@ -681,7 +708,7 @@ def _where(address: int | None, names: Sequence[str]) -> str:
 def _folded(entry: MapEntry) -> str:
     """A bare visit on the "also visited" line: its address, with the names that are not
     a decompiler's generic ``FUN_``/``sub_``/``fcn.`` name."""
-    kept = [n for n in entry.names if not _GENERIC_FUNCTION_NAME.fullmatch(n)]
+    kept = [n for n in entry.names if not generic_function_name().fullmatch(n)]
     if entry.address is None:
         return _where(None, kept or list(entry.names))
     return _where(entry.address, kept)
@@ -698,7 +725,8 @@ def _visited_line(entry: MapEntry) -> str:
         parts.append(
             "reaches "
             + ", ".join(
-                f"{_count(n, *_KIND_WORDS[kind])} ({', '.join(ids)})" for kind, n, ids in kinds
+                f"{_count(n, *_kind_words(kind, entry.artefacts))} ({', '.join(ids)})"
+                for kind, n, ids in kinds
             )
         )
     if entry.summary:
@@ -714,7 +742,7 @@ def _unvisited_item(found: FunctionMap, address: int, artefacts: Sequence[Artefa
     else:
         where = f"offset {hex(address)}"
     kinds = _kinds(artefacts)
-    counts = ", ".join(_count(n, *_KIND_WORDS[kind]) for kind, n, _ in kinds)
+    counts = ", ".join(_count(n, *_kind_words(kind, artefacts)) for kind, n, _ in kinds)
     ids = list(dict.fromkeys(i for _, _, entry_ids in kinds for i in entry_ids))
     return f"{where} ({counts}; {', '.join(ids)})" if ids else f"{where} ({counts})"
 

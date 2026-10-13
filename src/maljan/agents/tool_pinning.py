@@ -41,6 +41,15 @@ if TYPE_CHECKING:
 # The metadata key ``ServerRegistry`` stamps a tool with. Read here, written
 # there, and named once so the two cannot drift.
 SERVER_METADATA_KEY = "maljan_server"
+# And the workflow text the server declares (its ``prompt_fragment``), carried
+# with each of its tools so a prompt built from the tool list shows it exactly
+# where the server's tools are (``prompt_fragments.tools_statement``).
+SERVER_FRAGMENT_METADATA_KEY = "maljan_server_fragment"
+# What a server that declares no workflow text says about itself and its tools
+# (``prompt_fragments.undeclared_server_text``), carried the same way: shown
+# only while the server's tools are in the request, and never read as a
+# template, being the server's words and not a declaration.
+SERVER_OWN_WORDS_METADATA_KEY = "maljan_server_own_words"
 
 # An argument whose *name* looks like it takes a file. Substring matches cover
 # ``file``, ``file_path``, ``filepath``, ``filename``, ``path``, ``target_file``;
@@ -86,10 +95,6 @@ SAMPLE_ARG_NAMES = frozenset(
     }
 )
 
-# The servers whose path-taking tools read the sample the platform staged for
-# them. The other built-ins take a hash or a name, and a server an operator
-# added is theirs: this project does not narrow what its tools advertise.
-PINNED_SERVERS = frozenset({"analysis", "knowledge", "network"})
 
 # How the worker hands a server that cannot see this filesystem the sample's
 # bytes. It is the platform's delivery primitive and never an analysis step, so
@@ -116,6 +121,71 @@ def server_of(tool: Any) -> str:
     """The server key a tool came from, or ``""`` for an in-process tool."""
     metadata = getattr(tool, "metadata", None) or {}
     return str(metadata.get(SERVER_METADATA_KEY, "") or "")
+
+
+def declared_source_of(tool: Any) -> str | None:
+    """Where a tool's declaration lives (``core.tool_declarations``), as the tool was built.
+
+    A registry server's tool is ``mcp:<key>``; a provider's or the sandbox
+    report's tool carries the source it was stamped with when it was attached
+    (``prompt_fragments.stamp_source``). A team ``ask_`` tool, or a tool
+    nothing stamped, has none: it is never guessed from the tool's name.
+    """
+    from maljan.agents.delegation import TEAM_SERVER
+    from maljan.agents.prompt_fragments import DECLARED_SOURCE_METADATA_KEY
+
+    metadata = getattr(tool, "metadata", None) or {}
+    stamped = str(metadata.get(DECLARED_SOURCE_METADATA_KEY, "") or "")
+    if stamped:
+        return stamped
+    server = server_of(tool)
+    if server and server != TEAM_SERVER:
+        return f"mcp:{server}"
+    return None
+
+
+def reads_staged_sample(tool: Any) -> bool:
+    """Whether ``tool``'s source declares that its tools read the sample the platform staged.
+
+    The declaration's ``reads_staged_sample`` (``core.tool_declarations``),
+    read by the source the tool was built under (:func:`declared_source_of`)
+    from the live declarations. Such a source's sample argument is hidden from
+    the model and filled, and its capture argument filled when the job has one
+    capture; any other source's tools advertise what they advertise. A tool
+    nothing stamped, or whose source declares nothing, reads no staged sample.
+    """
+    source = declared_source_of(tool)
+    if source is None:
+        return False
+    try:
+        from maljan.core.declared_reading import declarations
+
+        held = declarations().source(source)
+    except Exception as exc:  # noqa: BLE001 — an unreadable declaration declares nothing
+        logger.debug("staged-sample declaration of a tool not read (%s).", type(exc).__name__)
+        return False
+    return bool(held is not None and held.reads_staged_sample)
+
+
+def declared_facts_of(tool: Any) -> Any:
+    """What a tool declares about itself (``core.tool_declarations.ToolFacts``), or ``None``.
+
+    Read by the source the tool was built under (:func:`declared_source_of`)
+    and the name it is offered under, from the live declarations: what the
+    request is about to offer, never a persisted record. A tool nothing
+    stamped, or whose source declares nothing for it, has none; it is never
+    guessed from the tool's name.
+    """
+    source = declared_source_of(tool)
+    if source is None:
+        return None
+    try:
+        from maljan.core.declared_reading import declarations
+
+        return declarations().declaration_for((source, str(getattr(tool, "name", "") or "")))
+    except Exception as exc:  # noqa: BLE001 — an unreadable declaration declares nothing
+        logger.debug("declared facts of a tool not read (%s).", type(exc).__name__)
+        return None
 
 
 def _spellings(
@@ -177,8 +247,9 @@ def pin_paths(
 ) -> list[BaseTool]:
     """Every tool, each guarded against a path argument this sample's own name.
 
-    ``captures`` is the job's packet captures. With exactly one, a built-in
-    server's capture argument is hidden from the model and filled with it, the
+    ``captures`` is the job's packet captures. With exactly one, the capture
+    argument of a server that declares it reads the staged sample
+    (:func:`reads_staged_sample`) is hidden from the model and filled with it, the
     way the sample's own path is: the network analyst of one live run spent
     eight of its twenty calls on capture names it had to invent, because
     nothing it was shown named the capture. With several the argument stays
@@ -201,7 +272,7 @@ def pin_paths(
     for tool in offered:
         server = server_of(tool)
         target = per_server.get(server) or default_path or ""
-        pinned_server = server in PINNED_SERVERS
+        pinned_server = reads_staged_sample(tool)
         hidden = _sample_arguments(tool) if pinned_server and target else ()
         filled = (
             dict.fromkeys(_capture_arguments(tool), capture) if pinned_server and capture else {}
@@ -316,7 +387,8 @@ def _pin_tool(
 ) -> Any:
     """Rebuild one tool with its path arguments corrected.
 
-    ``hidden`` is the arguments that name the sample on a built-in server, and
+    ``hidden`` is the arguments that name the sample on a server that declares
+    it reads the staged sample (:func:`reads_staged_sample`), and
     ``filled`` the other arguments the platform supplies, each with its value
     (the job's one capture). Both are taken out of the schema the model binds
     to and filled here, so the model neither sees nor types them; everything

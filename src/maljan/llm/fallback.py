@@ -27,8 +27,10 @@ conversation event and the run summary.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import threading
 import time
+from contextvars import ContextVar
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -76,15 +78,22 @@ _TIMEOUT_NAMES = frozenset(
 _REFUSAL_CODES = ("content_filter", "content_policy", "safety", "refusal")
 
 
-# The packages whose exceptions carry an HTTP status a provider answered with.
-# An integer ``.code`` on anything else says nothing about a provider: a
-# library's own error code, an errno, a validator's number.
-_PROVIDER_PACKAGES = frozenset({"openai", "anthropic", "httpx", "ollama", "google"})
+# The packages whose exceptions carry an HTTP status a provider answered with:
+# every registered adapter's SDK packages (``provider_base.provider_error_packages``)
+# and the transport they share. An integer ``.code`` on anything else says
+# nothing about a provider: a library's own error code, an errno, a
+# validator's number.
+_TRANSPORT_PACKAGES = frozenset({"httpx"})
 
 
 def _status_of(exc: BaseException) -> int | None:
-    package = (type(exc).__module__ or "").split(".", 1)[0]
-    if package not in _PROVIDER_PACKAGES:
+    # The whole class line: LangChain raises its own subclasses of the SDK's
+    # errors (a 503 from ``ChatOpenAI`` is ``langchain_openai``'s
+    # ``OpenAIAPIError``), whose own module names no provider.
+    packages = {(klass.__module__ or "").split(".", 1)[0] for klass in type(exc).__mro__}
+    from maljan.llm.provider_base import provider_error_packages
+
+    if not packages & (provider_error_packages() | _TRANSPORT_PACKAGES):
         return None
     candidates: list[Any] = [getattr(exc, "status_code", None), getattr(exc, "code", None)]
     response = getattr(exc, "response", None)
@@ -102,6 +111,12 @@ def _one(exc: BaseException) -> str | None:
         return str(exc)
     if name in _TIMEOUT_NAMES or isinstance(exc, TimeoutError):
         return "the provider timed out"
+    from maljan.llm.transient import STREAM_ERROR_KIND, transient_failure
+
+    # An error the provider sent inside a stream that had begun is the provider
+    # failing, as a 5xx is.
+    if transient_failure(exc) == STREAM_ERROR_KIND:
+        return "the provider failed inside its answer"
     status = _status_of(exc)
     if status is not None:
         if status >= 500:
@@ -162,6 +177,32 @@ class ModelStalled(TimeoutError):
     """A model on a list that did not answer within its turn deadline."""
 
 
+def _retries_spent(exc: BaseException) -> bool:
+    """Whether the model already asked again after ``exc`` (``maljan.llm.transient``).
+
+    Its ``Retry-After`` was honoured there; waiting on the same model once more
+    would be a second retry policy, so the list moves on.
+    """
+    from maljan.llm.transient import RETRIED_ATTRIBUTE
+
+    return bool(getattr(exc, RETRIED_ATTRIBUTE, False))
+
+
+def _retries_given_up(exc: BaseException) -> list[str]:
+    from maljan.llm.transient import retries_given_up
+
+    return retries_given_up(exc)
+
+
+def _carry_retries(exc: BaseException, retried: list[str]) -> None:
+    """Every model's given-up retries on the error the list raises at its end."""
+    if not retried:
+        return
+    # Written by its name (``transient.RETRIES_ATTRIBUTE``), never a computed one.
+    with contextlib.suppress(Exception):
+        exc.maljan_retries = list(retried)  # type: ignore[attr-defined]
+
+
 def retry_after_seconds(exc: BaseException) -> float | None:
     """The provider's own ``Retry-After`` when it is at most thirty seconds, else ``None``.
 
@@ -206,6 +247,12 @@ def _duration(seconds: float) -> str:
 # one second, so a model near the end of a loop is still given a turn to
 # answer in rather than none.
 MIN_TURN_DEADLINE_SECONDS = 1.0
+
+# A loop clock one task keeps for itself on a list several tasks call at once
+# (the report composer's sections): ``[list id, ends, share, whole-loop
+# deadline]``. A list, so a clock that grows reaches the call already waiting
+# on it, which runs in a copy of the task's context.
+_TASK_LOOP: ContextVar[list[Any] | None] = ContextVar("maljan_fallback_task_loop", default=None)
 
 
 class FallbackChatModel(BaseChatModel):
@@ -315,6 +362,22 @@ class FallbackChatModel(BaseChatModel):
             self._share = float(share)
         self.turn_deadline = float(loop_seconds) * float(share)
 
+    def enter_task_loop(self, loop_seconds: float, share: float) -> None:
+        """Measure this task's turns against its own loop of ``loop_seconds`` starting now.
+
+        For a list several tasks call at once, each with a clock of its own:
+        another task's longer loop never stretches this task's turn deadline
+        past its own wait, and this task's shorter one never cuts another's.
+        Called again in the same task, the clock is moved, and a call already
+        waiting on it reads the new one.
+        """
+        ends = time.monotonic() + float(loop_seconds)
+        clock = _TASK_LOOP.get()
+        if clock is not None and clock[0] == id(self):
+            clock[1:] = [ends, float(share), float(loop_seconds) * float(share)]
+            return
+        _TASK_LOOP.set([id(self), ends, float(share), float(loop_seconds) * float(share)])
+
     def _deadline(self, index: int) -> float | None:
         """This turn's deadline, or ``None`` for the last model on the list.
 
@@ -328,6 +391,11 @@ class FallbackChatModel(BaseChatModel):
         """
         if index + 1 >= len(self.models):
             return None
+        own = _TASK_LOOP.get()
+        if own is not None and own[0] == id(self) and own[2] > 0:
+            _owner, ends, share, whole = own
+            floor = min(MIN_TURN_DEADLINE_SECONDS, whole)
+            return float(max(floor, share * max(0.0, ends - time.monotonic())))
         with self._lock:
             ends, share = self._loop_ends, self._share
         if ends is not None and share > 0:
@@ -353,10 +421,18 @@ class FallbackChatModel(BaseChatModel):
         )
         return f"{self._label(index)}: {reason}"
 
-    def _stamp(self, message: Any, index: int, failures: list[str]) -> ChatResult:
+    def _stamp(
+        self, message: Any, index: int, failures: list[str], retried: list[str] | None = None
+    ) -> ChatResult:
         if not isinstance(message, BaseMessage):
             message = AIMessage(content=str(getattr(message, "content", message)))
         metadata = dict(getattr(message, "response_metadata", None) or {})
+        if retried:
+            # The retries a model before this one gave up after, where no
+            # recorder of the job took them: carried by the answer that came.
+            from maljan.llm.transient import RETRIES_KEY
+
+            metadata[RETRIES_KEY] = [*retried, *list(metadata.get(RETRIES_KEY) or [])]
         metadata[MODEL_KEY] = self._label(index) if index < len(self.labels) else ""
         if failures:
             metadata[FALLBACK_KEY] = (
@@ -420,6 +496,7 @@ class FallbackChatModel(BaseChatModel):
     ) -> ChatResult:
         tools, tool_kwargs, call = self._split(kwargs)
         failures: list[str] = []
+        retried: list[str] = []
         index = self.answering
         waited = False
         while index < len(self.models):
@@ -429,17 +506,19 @@ class FallbackChatModel(BaseChatModel):
             except Exception as exc:
                 if provider_failure(exc) is None:
                     raise
-                pause = None if waited else retry_after_seconds(exc)
+                pause = None if waited or _retries_spent(exc) else retry_after_seconds(exc)
                 if pause is not None:
                     waited = True
                     time.sleep(pause)
                     continue
                 failures.append(self._failed(index, exc))
+                retried.extend(_retries_given_up(exc))
                 if index + 1 >= len(self.models):
+                    _carry_retries(exc, retried)
                     raise
                 index, waited = index + 1, False
                 continue
-            return self._stamp(answer, index, failures)
+            return self._stamp(answer, index, failures, retried)
         raise RuntimeError(f"{self.agent or 'agent'} has no model to call")
 
     async def _agenerate(
@@ -451,6 +530,7 @@ class FallbackChatModel(BaseChatModel):
     ) -> ChatResult:
         tools, tool_kwargs, call = self._split(kwargs)
         failures: list[str] = []
+        retried: list[str] = []
         index = self.answering
         waited = False
         while index < len(self.models):
@@ -460,17 +540,19 @@ class FallbackChatModel(BaseChatModel):
             except Exception as exc:
                 if provider_failure(exc) is None:
                     raise
-                pause = None if waited else retry_after_seconds(exc)
+                pause = None if waited or _retries_spent(exc) else retry_after_seconds(exc)
                 if pause is not None:
                     waited = True
                     await asyncio.sleep(pause)
                     continue
                 failures.append(self._failed(index, exc))
+                retried.extend(_retries_given_up(exc))
                 if index + 1 >= len(self.models):
+                    _carry_retries(exc, retried)
                     raise
                 index, waited = index + 1, False
                 continue
-            return self._stamp(answer, index, failures)
+            return self._stamp(answer, index, failures, retried)
         raise RuntimeError(f"{self.agent or 'agent'} has no model to call")
 
 

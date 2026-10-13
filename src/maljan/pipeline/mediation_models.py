@@ -31,6 +31,20 @@ CONTRADICTIONS_BLOCK_MIXED_NOTE = (
     "stands; the contradictions it listed were read and the line saying none was not."
 )
 
+# ``AgentArgument.status`` of a mediation round whose mediator wrote no answer:
+# an empty answer, or one the output cap cut before any text. No agreement was
+# measured and no contradiction was stated; the router sends the analysts'
+# answers in force on to the judge (``pipeline.routing.NOT_MEDIATED``).
+MEDIATOR_NO_ANSWER = "no_answer"
+
+
+def mediator_no_answer_note(reason: str) -> str:
+    """The platform's sentence on a mediation round whose mediator wrote no answer."""
+    return (
+        f"The mediator wrote no answer ({reason}); the round was not mediated, and the "
+        "analysts' answers in force went on to the judge."
+    )
+
 
 def analysts_with_claims(names: Iterable[str], isr_reports: Mapping[str, Any] | None) -> list[str]:
     """The debate's participants whose report carries at least one claim.

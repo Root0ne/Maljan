@@ -7,6 +7,9 @@ import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import type { CatalogEntry, McpServerEntry, ProbeResult, SettingValue } from "@/types/settings";
 import { unavailableTools } from "@/types/settings";
+import DeclarationFields from "./DeclarationFields";
+import DeclarationProposals from "./DeclarationProposals";
+import { readProposals } from "./declarationProposals";
 import Dot from "./Dot";
 import {
   addedEnvNames,
@@ -22,21 +25,7 @@ import { capabilityCells } from "./toolTableRows";
 const input =
   "w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent";
 
-/** Built-ins are re-seeded by the settings model, so they disable rather than delete. */
-const BUILTIN = new Set(["network", "threatintel", "virustotal"]);
 const ROLES = ["static", "dynamic", "network", "judge"] as const;
-/** Mirrors `RESERVED_SERVER_KEYS` in `src/maljan/core/config.py`. Three of
- *  these (`network`, `threatintel`, `virustotal`) are also pre-populated
- *  built-ins and never reach `add()`; `ghidra` and `cape` are reserved but not
- *  pre-populated, so without this check they would pass client validation and
- *  fail only on apply. */
-export const RESERVED_SERVER_KEYS = new Set([
-  "network",
-  "threatintel",
-  "virustotal",
-  "ghidra",
-  "cape",
-]);
 /** What a set token looks like from outside; identical to the API's mask. */
 const TOKEN_MASK = "**********";
 
@@ -209,9 +198,15 @@ function EnvAllowField({
 
 /** Which blocks of the detail pane to draw. The console editor draws all of
  *  them; a guide step draws the one its step is about. */
-export type ServerSection = "header" | "connection" | "tools" | "agents";
+export type ServerSection = "header" | "connection" | "tools" | "agents" | "declaration";
 
-const ALL_SERVER_SECTIONS: ServerSection[] = ["header", "connection", "tools", "agents"];
+const ALL_SERVER_SECTIONS: ServerSection[] = [
+  "header",
+  "connection",
+  "tools",
+  "agents",
+  "declaration",
+];
 
 /**
  * What a probe knows about one server map, and about the one server whose
@@ -229,7 +224,8 @@ export interface ServerProbeApi {
   result: ProbeResult | "running" | undefined;
   /** The focused server's result was dropped by an edit to what it dialled. */
   stale: boolean;
-  probe: (key: string) => Promise<void>;
+  /** `confirmedCalls`: the planned harmless calls the admin confirmed. */
+  probe: (key: string, confirmedCalls?: string[]) => Promise<void>;
   /** Called before an edit is staged: drops a result the edit invalidates. */
   noteEdit: (key: string, next: Partial<McpServerEntry>) => void;
 }
@@ -256,11 +252,11 @@ export function useServerProbe(
     setStaleProbe((s) => ({ ...s, [key]: true }));
   };
 
-  const probe = async (key: string) => {
+  const probe = async (key: string, confirmedCalls: string[] = []) => {
     setStaleProbe((s) => ({ ...s, [key]: false }));
     setProbes((p) => ({ ...p, [key]: "running" }));
     try {
-      const result = await api.testMcpServer(key, { "core.mcp.servers": value });
+      const result = await api.testMcpServer(key, { "core.mcp.servers": value }, confirmedCalls);
       setProbes((p) => ({ ...p, [key]: result }));
     } catch (e) {
       setProbes((p) => ({
@@ -280,8 +276,8 @@ export function useServerProbe(
 }
 
 /**
- * One server's form: the header, the connection fields, the tool list and the
- * agent bindings, in that order.
+ * One server's form: the header, the connection fields, the tool list, the
+ * agent bindings and the server's declaration, in that order.
  *
  * The console renders every section of it beside its server list; a guide step
  * renders one section at a time for the server the guide is building, staging
@@ -297,6 +293,7 @@ export function ServerDetail({
   errors = {},
   entryKey = "core.mcp.servers",
   requiredEnv = {},
+  builtinServers = new Set<string>(),
   editable = true,
   sections = ALL_SERVER_SECTIONS,
 }: {
@@ -313,6 +310,10 @@ export function ServerDetail({
   /** Per built-in, the environment names the API always passes, as the
    *  server-map catalog entry reports them. */
   requiredEnv?: RequiredEnv;
+  /** The built-in server keys, as the server-map catalog entry reports them:
+   *  a built-in is re-seeded by the settings model, so it disables rather
+   *  than deletes. */
+  builtinServers?: ReadonlySet<string>;
   /** Whether the token may be replaced — the leaf's own `editable`. */
   editable?: boolean;
   sections?: ServerSection[];
@@ -338,6 +339,7 @@ export function ServerDetail({
   const unavailable =
     result && result !== "running" ? unavailableTools(result) : [];
   const allowed = server.tools;
+  const proposals = has("tools") && result && result !== "running" ? readProposals(result) : null;
   const tableShown = has("tools") && !!manifest && manifest.length > 0;
   const detailError = Object.entries(errors).find(
     ([k]) => k === `${entryKey}.${serverKey}` || k.startsWith(`${entryKey}.${serverKey}.`)
@@ -427,7 +429,7 @@ export function ServerDetail({
               </button>
               {/* A built-in server has no Remove, and the switch two
                   controls to the left is already how it is turned off. */}
-              {!BUILTIN.has(serverKey) && (
+              {!builtinServers.has(serverKey) && (
                 <button
                   type="button"
                   className="text-xs text-text-secondary"
@@ -604,6 +606,17 @@ export function ServerDetail({
         </fieldset>
       )}
 
+      {has("tools") && manifest && manifest.length > 0 && proposals && (
+        <DeclarationProposals
+          serverKey={serverKey}
+          server={server}
+          proposals={proposals}
+          busy={result === "running"}
+          put={(next) => put(serverKey, next)}
+          onConfirmCalls={(tools) => void probe.probe(serverKey, tools)}
+        />
+      )}
+
       {has("agents") && (
         <fieldset className="border border-border rounded p-2">
           <legend className="text-xs text-text-muted px-1">Agents</legend>
@@ -627,6 +640,14 @@ export function ServerDetail({
             ))}
           </div>
         </fieldset>
+      )}
+
+      {has("declaration") && (
+        <DeclarationFields
+          serverKey={serverKey}
+          server={server}
+          put={(next) => put(serverKey, next)}
+        />
       )}
     </section>
   );
@@ -687,7 +708,9 @@ export default function ServerMapEditor({
 
   const add = () => {
     const key = newKey.trim();
-    const problem = mapKeyError(key, value, "server", RESERVED_SERVER_KEYS);
+    // The keys core reserves for provider-owned servers, as the catalog entry
+    // reports them, so an add is refused here rather than only on apply.
+    const problem = mapKeyError(key, value, "server", new Set(entry.reserved_servers ?? []));
     if (problem) {
       setKeyError(problem);
       return;
@@ -804,6 +827,7 @@ export default function ServerMapEditor({
           errors={errors}
           entryKey={entry.key}
           requiredEnv={entry.required_env ?? {}}
+          builtinServers={new Set(entry.builtin_servers ?? [])}
           editable={entry.editable}
         />
       )}

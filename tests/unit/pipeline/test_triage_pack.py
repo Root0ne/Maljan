@@ -30,10 +30,9 @@ from maljan.pipeline.triage_pack import (
     PIPELINE,
     CapaSettings,
     PackInputs,
-    malicious_count,
     run_pack,
 )
-from maljan.schemas.evidence import EvidenceCounter
+from maljan.schemas.evidence import EvidenceCounter, LedgerEntry, parse_structured
 from maljan.tools import rules
 from tests.unit.pipeline.test_stage_events import _state
 from tests.unit.tools.test_binary import _elf, _elf_with_imports, _pe
@@ -457,7 +456,8 @@ class TestTheReputationStep:
         result = run_pack(
             self._recorder(), _inputs(_write(tmp_path, "s.exe", _pe()), "pe"), reputation=lookup
         )
-        assert result.degradation_reasons == ["triage.check_hash_failed"]
+        # The pack's reputation step failed, whichever server's lookup it asked.
+        assert result.degradation_reasons == ["triage.reputation_failed"]
         assert result.facts.reputation_malicious is None
 
     def test_a_lookup_that_raised_is_an_entry_under_the_pipeline(self, tmp_path: Path) -> None:
@@ -474,18 +474,35 @@ class TestTheReputationStep:
         assert result.degradation_reasons == ["triage.reputation_failed"]
 
     @pytest.mark.parametrize(
-        ("output", "expected"),
+        ("tool", "output", "expected"),
         [
-            ('{"data": {"attributes": {"last_analysis_stats": {"malicious": 7}}}}', 7),
-            ('{"last_analysis_stats": {"malicious": 0, "undetected": 60}}', 0),
-            ("Hash abc identified as Ransomware (LockBit) with 55/70 detections.", 55),
-            ("Hash abc not found in VirusTotal database.", None),
-            ("", None),
-            ('{"tool_error": "exception"}', None),
+            (
+                "get_file_report",
+                '{"data": {"attributes": {"last_analysis_stats": {"malicious": 7}}}}',
+                7,
+            ),
+            ("get_file_report", '{"last_analysis_stats": {"malicious": 0, "undetected": 60}}', 0),
+            (
+                "check_hash",
+                "Hash abc identified as Ransomware (LockBit) with 55/70 detections.",
+                55,
+            ),
+            ("check_hash", "Hash abc: malicious — 42/71 malicious, 3/71 suspicious.", 42),
+            ("check_hash", "Hash abc not found in VirusTotal database.", None),
+            ("check_hash", "", None),
+            ("get_file_report", '{"tool_error": "exception"}', None),
         ],
     )
-    def test_the_count_is_read_from_both_answer_shapes(self, output: str, expected) -> None:
-        assert malicious_count(output) == expected
+    def test_the_count_is_read_from_both_answer_shapes(
+        self, tool: str, output: str, expected: int | None
+    ) -> None:
+        from maljan.core.reputation import reputation_of
+
+        entry = LedgerEntry(id="ev_0001", tool=tool, output=output)
+        entry.structured = parse_structured(output)
+        answer = reputation_of(entry)
+        assert answer is not None
+        assert answer.malicious == expected
 
 
 class TestTheFactsAConditionReads:
@@ -514,8 +531,15 @@ class TestTheFactsAConditionReads:
 
     def test_the_facts_are_read_off_the_tools_answers(self, tmp_path: Path) -> None:
         result = _pack(_apk(tmp_path), "apk")
+        # The capability rule counts under its kind and its declared source
+        # name, and the legacy field keeps the pack's own count.
         assert result.facts == TriageFacts(
-            has_signature=True, reputation_malicious=None, yara_hits=0, capa_hits=1
+            has_signature=True,
+            reputation_malicious=None,
+            yara_hits=0,
+            capa_hits=1,
+            rule_hits=1,
+            hits={"capability_rules": 1, "capa": 1},
         )
 
     def test_a_condition_names_only_the_four_fields(self) -> None:
@@ -839,11 +863,11 @@ class TestWhichPackFailuresDegradeTheRun:
         assert is_pack_reason("triage.capa_failed") and not is_pack_reason("analyst failures: x")
         assert reason_sentence("triage.capa_failed") == "the triage pack could not run capa"
         assert reason_sentence("no sandbox report") == "no sandbox report"
-        # A lookup that failed under either server's tool name is one sentence.
-        for tool in ("reputation", "get_file_report", "check_hash"):
-            assert reason_sentence(f"triage.{tool}_failed") == (
-                "the triage pack's reputation lookup did not answer"
-            )
+        # A lookup that failed, whichever server's tool answered, is the pack's
+        # reputation step failing: one sentence.
+        assert reason_sentence("triage.reputation_failed") == (
+            "the triage pack's reputation lookup did not answer"
+        )
 
     def test_the_run_is_degraded_only_by_what_degrades_it(self) -> None:
         from maljan.pipeline.triage_pack import run_is_degraded

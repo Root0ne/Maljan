@@ -14,6 +14,9 @@ import AgentDefinitionsEditor, {
 } from "./AgentDefinitionsEditor";
 import StagesEditor from "./StagesEditor";
 import ServerMapEditor from "./ServerMapEditor";
+import ToolFactsLeafEditor from "./ToolFactsLeafEditor";
+import PackStepsLeftOutNote from "./PackStepsLeftOutNote";
+import { PACK_STEPS_KEY } from "./packStepsLeftOut";
 import { APPLIES_LABEL, SOURCE_LABEL } from "./vocabulary";
 import { Widget } from "./widgets";
 
@@ -197,6 +200,13 @@ export default function FieldRow({
             errors={errors ?? {}}
             onChange={onChange}
           />
+        ) : entry.editor === "tool_facts" ? (
+          <ToolFactsLeafEditor
+            entry={entry}
+            current={current}
+            staged={staged}
+            onChange={onChange}
+          />
         ) : entry.editor === "stages" ? (
           <StagesEditor
             entry={entry}
@@ -305,6 +315,9 @@ export default function FieldRow({
           "work it out from something the operator cannot see on this page".
           The window it is worked out from belongs beside it. */}
       {entry.key === TOOL_OUTPUT_KEY && <ContextWindowNote />}
+      {/* The stored steps the API leaves out run nowhere; the mark says so
+          beside the value the row shows. */}
+      {entry.key === PACK_STEPS_KEY && <PackStepsLeftOutNote />}
       {!entry.editable && entry.reason && (
         <p className="text-[11px] text-text-muted mt-1">{entry.reason}</p>
       )}

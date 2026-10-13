@@ -35,7 +35,6 @@ this environment via ``uv sync --extra capa``); a few names moved since the
 
 from __future__ import annotations
 
-import json
 import multiprocessing as mp
 import threading
 import time
@@ -44,7 +43,16 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from maljan.core.logger import logger
 from maljan.core.paths import resolve_data
-from maljan.providers.base import StaticCapabilities, StaticEvidenceBundle, StaticProvider
+from maljan.providers.base import (
+    VERIFICATION_DISCIPLINE,
+    EvidenceAnswer,
+    ProviderProbe,
+    StaticCapabilities,
+    StaticEvidenceBundle,
+    StaticProvider,
+    declared_tool_of_kind,
+    evidence_entries,
+)
 from maljan.providers.registry import register_static_provider
 
 if TYPE_CHECKING:
@@ -302,6 +310,14 @@ def run_capa_document(
 class CapaYaraStaticProvider(StaticProvider):
     """capa and YARA: evidence for the analyst, not tools for the model."""
 
+    # What the console calls this provider and says about it, and its test's label.
+    choice_label = "capa + YARA"
+    choice_order = 2
+    title = "capa + YARA"
+    description = "Rule sets on disk name the capabilities and match the file; no server to run."
+    probe_label = "Test capa + YARA rules"
+    settings_intro = "The rule directories to load. Both are read at the start of every analysis."
+
     def __init__(self, capa: StaticCapaConfig, yara: StaticYaraConfig) -> None:
         self._capa = capa
         self._yara = yara
@@ -310,6 +326,56 @@ class CapaYaraStaticProvider(StaticProvider):
     @classmethod
     def from_settings(cls, cfg: Settings) -> CapaYaraStaticProvider:
         return cls(cfg.static.capa, cfg.static.yara)
+
+    async def probe(self) -> ProviderProbe:
+        """Count capa and YARA rule files without touching a sample.
+
+        No live handshake exists for either (both are local libraries reading
+        local rule directories), so the connection test is the check the
+        provider makes before a run: is the library importable, and does each
+        configured directory hold rule files. Naming which is missing stops an
+        operator from discovering an evidence-free run only after it finishes.
+        """
+        import importlib.util
+
+        t0 = time.perf_counter()
+        parts: list[str] = []
+        capa_ok = False
+        if importlib.util.find_spec("capa") is None:
+            parts.append("capa library is not installed (uv sync --extra capa)")
+        else:
+            capa_dir = Path(resolve_data(str(self._capa.rules_dir or "")))
+            capa_rules = list(capa_dir.rglob("*.yml")) if capa_dir.is_dir() else []
+            if not capa_dir.is_dir():
+                parts.append(f"capa rules directory {capa_dir} does not exist")
+            elif not capa_rules:
+                parts.append(f"capa rules directory {capa_dir} has no *.yml rules")
+            else:
+                capa_ok = True
+                parts.append(f"{len(capa_rules)} rules under {capa_dir}")
+        yara_dir = Path(resolve_data(str(self._yara.rules_dir or "")))
+        yara_files = (
+            [*yara_dir.glob("*.yml"), *yara_dir.glob("*.yaml")] if yara_dir.is_dir() else []
+        )
+        if not yara_dir.is_dir():
+            parts.append(f"YARA rules directory {yara_dir} does not exist")
+        elif not yara_files:
+            parts.append(f"YARA rules directory {yara_dir} has no rule file")
+        else:
+            parts.append(f"{len(yara_files)} YARA rule file(s) under {yara_dir}")
+        return ProviderProbe(capa_ok, "; ".join(parts), int((time.perf_counter() - t0) * 1000))
+
+    def prompt_fragment(self) -> str:
+        """The verification discipline every static analyst carries, and nothing else.
+
+        This provider's fragment was empty before the discipline was shared;
+        it gains the discipline and no sentence of the citation's, so its
+        prompt carries no technique id it did not carry.
+        """
+        return VERIFICATION_DISCIPLINE
+
+    def guidance_fragment(self) -> str:
+        return VERIFICATION_DISCIPLINE
 
     @property
     def capabilities(self) -> StaticCapabilities:
@@ -371,12 +437,24 @@ class CapaYaraStaticProvider(StaticProvider):
         if yara_hits:
             evidence["yara"] = _render_yara(yara_hits)
 
+        answers: list[EvidenceAnswer] = []
+        for kind, payload in (
+            ("capability_rules", {"capabilities": capa_rows} if capa_rows else None),
+            (
+                "signature_rules",
+                {"matches": list(yara_hits), "rule_count": len(yara_hits), "filtered": 0}
+                if yara_hits
+                else None,
+            ),
+        ):
+            tool = declared_tool_of_kind(self.declaration_source, kind)
+            if payload is not None and tool:
+                answers.append(EvidenceAnswer(tool=tool, kind=kind, payload=payload))
         return StaticEvidenceBundle(
             technique_hits=hits,
             strings=[],
             technical_evidence=evidence,
-            capa_rules=capa_rows,
-            yara_matches=list(yara_hits),
+            entries=tuple(answers),
         )
 
     # ------------------------------------------------------------------
@@ -511,48 +589,10 @@ def _render_yara(hits: list[dict[str, Any]]) -> str:
 
 
 def ledger_entries(
-    bundle: StaticEvidenceBundle, counter: Any, stage: str = "analysis"
+    bundle: StaticEvidenceBundle,
+    counter: Any,
+    stage: str = "analysis",
+    source: str = "provider:capa_yara",
 ) -> list[Any]:
-    """The bundle as evidence-ledger entries, one per pass that found anything.
-
-    A provider without a tool loop has no seam that records its calls, so it
-    records them itself. Timing is not available after the fact and is left at
-    zero rather than invented; what matters is that the rows are citable and
-    reach the report's sections through the same path a tool call does.
-
-    ``stage`` is the team stage the entries were recorded in. These are written
-    by the report node, so it is that stage's key; the default is what a caller
-    outside a staged run gets.
-    """
-    from maljan.schemas.evidence import build_entry
-
-    out: list[Any] = []
-    for tool, payload in (
-        ("capa", {"capabilities": bundle.capa_rules} if bundle.capa_rules else None),
-        (
-            "yara_scan",
-            {
-                "matches": bundle.yara_matches,
-                "rule_count": len(bundle.yara_matches),
-                "filtered": 0,
-            }
-            if bundle.yara_matches
-            else None,
-        ),
-    ):
-        if payload is None:
-            continue
-        entry_id, seq = counter.next_id()
-        out.append(
-            build_entry(
-                entry_id=entry_id,
-                seq=seq,
-                agent="capa_yara",
-                tool=tool,
-                args={},
-                server=None,
-                output=json.dumps(payload),
-                stage=stage,
-            )
-        )
-    return out
+    """The bundle as evidence-ledger entries (``providers.base.evidence_entries``)."""
+    return evidence_entries(bundle, counter, stage, source=source, agent="capa_yara")

@@ -23,7 +23,7 @@ import asyncio
 import sys
 import threading
 import weakref
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -274,11 +274,33 @@ class ServerHandle:
         # from its ``capabilities`` tool when it offers one; ``None`` for a
         # server that does not, or whose answer could not be read.
         self.capabilities: ServerCapabilities | None = None
+        # Whether the next attach keeps each tool's definition as the server
+        # listed it (``tool_definitions``). Only the settings probe asks, to
+        # propose declarations; a run's handle keeps none.
+        self.keeps_tool_definitions = False
         # The job's breaker and call cap for this server, set by the registry
         # that owns the handle (``maljan.providers.server_guard``). A handle
         # built outside a registry — a probe, a test — has none and sends
         # every call as it always did.
         self.guard: Any = None
+        # The job's note of the paths this server opened
+        # (``providers.sample_open``), set by the registry that owns the
+        # handle; a handle built outside one has none and offers its open tool
+        # as it is.
+        self.sample_notes: Any = None
+        # How this server's answers say "error" is its declaration
+        # (``error_patterns``), read by one function for every server
+        # (``providers.declared_errors``). An adapter that reads them itself,
+        # with a step of its own around a failure, sets ``reads_own_errors``;
+        # ``error_sample_path`` answers the path the server can open for the
+        # job's sample, which a remediation may name.
+        self.reads_own_errors = False
+        self.error_sample_path: Callable[[], str | None] | None = None
+        # This handle's own process, for a local server's note key; a number
+        # never reused, unlike an object's id.
+        from maljan.providers.sample_open import new_instance
+
+        self._note_instance = new_instance()
         _LIVE_HANDLES.add(self)
         _register_retirement_hook()
 
@@ -287,8 +309,23 @@ class ServerHandle:
         return self._toolkit is not None
 
     @property
+    def note_key(self) -> str:
+        """The server this handle's opens are noted under (``sample_open.server_note_key``):
+        its address for a remote server, shared by every handle to it; its command and
+        this handle's own process for a local one."""
+        from maljan.providers.sample_open import server_note_key
+
+        return server_note_key(self.config, self._note_instance)
+
+    @property
     def label(self) -> str:
         return self.config.label or self.name
+
+    @property
+    def server_instructions(self) -> str:
+        """What the server said about itself when this attach initialised it (MCP
+        ``instructions``), as served; "" when it said nothing or is not attached."""
+        return str(getattr(self._toolkit, "server_instructions", "") or "")
 
     def _resolve_cwd(self) -> str | None:
         """The child's working directory, refused when it escapes the project.
@@ -383,6 +420,7 @@ class ServerHandle:
         ways of running the coroutine it returns.
         """
         from maljan.agents.mcp_client import MCPLangChainToolkit
+        from maljan.core.undeclared_tools import categories_of
 
         if self.config.transport == "stdio":
             from mcp import StdioServerParameters
@@ -419,6 +457,8 @@ class ServerHandle:
                 truncation_ledger=truncation_ledger,
                 context_budget=context_budget,
                 guard=self.guard,
+                categories=categories_of(getattr(self.config, "tool_facts", None)),
+                keep_tool_definitions=self.keeps_tool_definitions,
             )
         # An http/sse transport has no child of ours to reap.
         self._launch_argv = ()
@@ -433,6 +473,8 @@ class ServerHandle:
             truncation_ledger=truncation_ledger,
             context_budget=context_budget,
             guard=self.guard,
+            categories=categories_of(getattr(self.config, "tool_facts", None)),
+            keep_tool_definitions=self.keeps_tool_definitions,
         )
 
     def open(
@@ -898,6 +940,22 @@ class ServerHandle:
         """Every tool the server advertises, allow-list ignored."""
         return [str(getattr(t, "name", "")) for t in self._all_tools]
 
+    def tool_definitions(self) -> list[Any]:
+        """Each tool's definition as the server listed it (MCP ``Tool``), allow-list ignored.
+
+        For the settings probe's declaration proposals; empty before an
+        attach and for a handle that did not ask to keep them
+        (``keeps_tool_definitions``).
+        """
+        return list(getattr(self._toolkit, "tool_definitions", None) or [])
+
+    def advertised_tool(self, name: str) -> Any | None:
+        """The tool the server advertises under ``name``, allow-list ignored, or ``None``."""
+        for tool in self._all_tools:
+            if str(getattr(tool, "name", "")) == name:
+                return tool
+        return None
+
     def _capabilities_tool(self) -> Any | None:
         for tool in self._all_tools:
             if str(getattr(tool, "name", "")) == CAPABILITIES_TOOL:
@@ -969,15 +1027,49 @@ class ServerHandle:
         it, so the reason and the remedy reach the operator and the degraded
         block. A server that answered no manifest is offered whole, as before.
         """
+        from maljan.providers.sample_open import mark_open_tool, wrap_open_tool
+
         allowed = self.config.tools
         withheld = self.capabilities.unusable() if self.capabilities else frozenset()
         keep = None if allowed is None else set(allowed)
-        return [
+        offered = [
             tool
             for tool in self._all_tools
             for name in (str(getattr(tool, "name", "")),)
             if name not in withheld and (keep is None or name in keep)
         ]
+        every_tool = list(self._all_tools)
+        if not self.reads_own_errors:
+            from maljan.providers.declared_errors import with_declared_errors
+
+            # Every answer, the open, select and analyse calls the opener
+            # makes included, is held against the declared error patterns.
+            reading = {
+                id(tool): wrapped
+                for tool, wrapped in zip(
+                    every_tool,
+                    with_declared_errors(
+                        every_tool, self.config.error_patterns, self.error_sample_path
+                    ),
+                    strict=True,
+                )
+            }
+            offered = [reading.get(id(tool), tool) for tool in offered]
+            every_tool = [reading[id(tool)] for tool in every_tool]
+        # A server that declares its open tool has that tool answered through
+        # the job's note: a path opened once is not opened again.
+        spec = getattr(self.config, "sample_open", None)
+        return mark_open_tool(
+            wrap_open_tool(
+                offered,
+                every_tool,
+                server=self.note_key,
+                spec=spec,
+                notes=self.sample_notes,
+            ),
+            spec,
+            every_tool,
+        )
 
     def withheld_reasons(self) -> list[str]:
         """The degradation reasons for the tools this host cannot run.
@@ -1082,6 +1174,58 @@ class ServerHandle:
             self._forget_attachment()
 
 
+def _declared_fragment(handle: Any) -> str:
+    """The workflow text a handle's server declares (``prompt_fragment``); "" for none."""
+    return str(getattr(getattr(handle, "config", None), "prompt_fragment", "") or "")
+
+
+def offered_name(server: str, name: str, seen: dict[str, str]) -> str:
+    """The name ``server``'s tool ``name`` is offered under, given the names ``seen`` claimed.
+
+    The collision rule of :meth:`ServerRegistry.merge_tools`: a name another
+    server claimed is taken as ``<server>__<name>``.
+    """
+    owner = seen.get(name)
+    return name if owner is None or owner == server else f"{server}__{name}"
+
+
+def _own_words(handle: Any, tools: list[BaseTool], seen: dict[str, str] | None = None) -> str:
+    """What a server that declares no workflow text says about itself, for ``tools``.
+
+    Only for a server whose block declares no ``prompt_fragment`` and that
+    offers a tool its block declares nothing for (``tool_facts``): its served
+    MCP ``instructions`` and its offered tools' own descriptions
+    (``prompt_fragments.undeclared_server_text``), each tool named as the
+    request offers it (:func:`offered_name` over ``seen``, before the merge
+    claims anything). A server whose every offered tool is declared says what
+    its declaration says, and nothing more. "" otherwise.
+    """
+    if _declared_fragment(handle).strip():
+        return ""
+    from maljan.agents.prompt_fragments import undeclared_server_text
+    from maljan.agents.tool_pinning import DELIVERY_TOOLS
+    from maljan.core.undeclared_tools import declares_a_kind
+
+    declared = getattr(getattr(handle, "config", None), "tool_facts", None) or {}
+    undeclared = [
+        tool
+        for tool in tools
+        for name in (str(getattr(tool, "name", "") or ""),)
+        if name not in DELIVERY_TOOLS and not declares_a_kind(declared.get(name))
+    ]
+    if not undeclared:
+        return ""
+    server = str(getattr(handle, "name", "") or "")
+    claimed = dict(seen or {})
+    names = {
+        name: offered_name(server, name, claimed)
+        for tool in tools
+        for name in (str(getattr(tool, "name", "") or ""),)
+    }
+    instructions = str(getattr(handle, "server_instructions", "") or "")
+    return undeclared_server_text(server, instructions, tools, names=names)
+
+
 class ServerRegistry:
     """The tool servers one job may attach, built from ``cfg.mcp.servers``."""
 
@@ -1092,12 +1236,19 @@ class ServerRegistry:
         truncation_ledger: Any | None = None,
         context_budget: Any | None = None,
         event_sink: Any | None = None,
+        sample_notes: Any | None = None,
     ) -> None:
+        from maljan.providers.sample_open import SampleNotes
         from maljan.providers.server_guard import guard_from_settings
 
         self._handles = {
             name: ServerHandle(name, config) for name, config in cfg.mcp.servers.items()
         }
+        # The job's note of the paths each server opened, for the servers
+        # that declare their open tool; one per job, given to every handle.
+        self.sample_notes = sample_notes if sample_notes is not None else SampleNotes()
+        for handle in self._handles.values():
+            handle.sample_notes = self.sample_notes
         # Every rest this job gave a server, in the order the breakers opened;
         # the judge node reads it into the run summary. Written from whichever
         # loop's call tripped the breaker, so appended under the lock.
@@ -1115,7 +1266,13 @@ class ServerRegistry:
                 method(record)
 
         for name, handle in self._handles.items():
-            handle.guard = guard_from_settings(name, cfg, on_open=_on_open)
+            handle.guard = guard_from_settings(
+                name,
+                cfg,
+                on_open=_on_open,
+                sample_open=getattr(handle.config, "sample_open", None),
+                block=handle.config,
+            )
         # The job's own bound-hit ledger and the job's own tool-output limit,
         # put on every toolkit this registry opens. Both used to be left to the
         # caller: every attach but the static provider's passed neither, so the
@@ -1233,6 +1390,9 @@ class ServerRegistry:
                 # The same server to the job: a rest one loop's calls earned
                 # is a rest for every loop's.
                 replica.guard = handle.guard
+                # The job's note: a remote server's opens are noted under its
+                # address, a local process's under its own handle.
+                replica.sample_notes = handle.sample_notes
                 self._loop_handles[key] = replica
                 logger.info(
                     "mcp server '%s' is attached on another loop; the caller gets "
@@ -1265,13 +1425,21 @@ class ServerRegistry:
             )
         return handle
 
-    def for_agent(self, role: str, *, exclude: str = "") -> list[ServerHandle]:
+    def for_agent(
+        self, role: str, *, exclude: str = "", builtin: bool | None = None
+    ) -> list[ServerHandle]:
         """Enabled servers bound to ``role``, built-ins first then by key.
 
         Order is what makes the collision rule predictable: a built-in is
         attached before any custom server, so a custom server that happens to
         name a tool ``extract_dns`` is the one that gets renamed, and the
-        pinned built-in tool names never move.
+        pinned built-in tool names never move. Across an agent's whole tool
+        set the same holds through :meth:`agent_tools`, which claims the bound
+        built-ins, then the servers the agent's own definition names, and only
+        then the operator's servers bound by ``agents``.
+
+        ``builtin`` keeps only the built-in servers (``True``) or only the
+        others (``False``); ``None`` keeps both, in the order above.
 
         ``exclude`` drops handles by name — the server a provider already
         opened itself, so the registry does not hand the same tools out twice,
@@ -1293,6 +1461,7 @@ class ServerRegistry:
             if handle.config.enabled
             and role in handle.config.agents
             and handle.name not in excluded
+            and (builtin is None or (handle.name in BUILTIN_SERVER_KEYS) is builtin)
         ]
         return sorted(bound, key=lambda h: (h.name not in BUILTIN_SERVER_KEYS, h.name))
 
@@ -1302,6 +1471,9 @@ class ServerRegistry:
         incoming: list[BaseTool],
         tools: list[BaseTool],
         seen: dict[str, str],
+        *,
+        fragment: str = "",
+        own_words: str = "",
     ) -> int:
         """Append ``incoming`` to ``tools`` under the collision rule.
 
@@ -1319,6 +1491,14 @@ class ServerRegistry:
         the bytes at a path of its own, and a wrapper that pinned one path for
         every tool would send the local one to the remote server.
 
+        ``fragment`` is the workflow text the server declares (its
+        ``prompt_fragment``); it rides with each tool
+        (``metadata["maljan_server_fragment"]``), so the prompt built from the
+        list shows it only while the server's tools are there. ``own_words``
+        is what a server that declares none says about itself
+        (:func:`_own_words`), carried the same way
+        (``metadata["maljan_server_own_words"]``).
+
         Returns how many tools were renamed, so the caller can log it once
         per server instead of per tool.
         """
@@ -1328,11 +1508,15 @@ class ServerRegistry:
             owner = seen.get(name)
             if owner == server:
                 continue
-            update: dict[str, Any] = {
-                "metadata": {**(getattr(tool, "metadata", None) or {}), "maljan_server": server}
-            }
-            if owner is not None:
-                name = f"{server}__{name}"
+            offered = offered_name(server, name, seen)
+            metadata = {**(getattr(tool, "metadata", None) or {}), "maljan_server": server}
+            if fragment.strip():
+                metadata["maljan_server_fragment"] = fragment
+            elif own_words.strip():
+                metadata["maljan_server_own_words"] = own_words
+            update: dict[str, Any] = {"metadata": metadata}
+            if offered != name:
+                name = offered
                 if seen.get(name) == server:
                     continue
                 update["name"] = name
@@ -1348,7 +1532,15 @@ class ServerRegistry:
         # It is reported here instead, where it is withheld, and reaches the
         # degraded block exactly as it did before.
         self._record(handle.withheld_reasons())
-        return self.merge_tools(handle.name, handle.tools(), tools, seen)
+        offered = handle.tools()
+        return self.merge_tools(
+            handle.name,
+            offered,
+            tools,
+            seen,
+            fragment=_declared_fragment(handle),
+            own_words=_own_words(handle, offered, seen),
+        )
 
     def tools_for(
         self,
@@ -1357,6 +1549,7 @@ class ServerRegistry:
         *,
         exclude: str = "",
         seen: dict[str, str] | None = None,
+        builtin: bool | None = None,
         **context: Any,
     ) -> tuple[list[BaseTool], list[str]]:
         """Open every server bound to ``role`` and concatenate their tools.
@@ -1375,7 +1568,7 @@ class ServerRegistry:
         # ``open`` hands ``initialize`` to the shared agent loop, so that is
         # the loop this caller is really attaching on.
         agent_loop = _get_agent_loop()
-        for bound in self.for_agent(role, exclude=exclude):
+        for bound in self.for_agent(role, exclude=exclude, builtin=builtin):
             handle = self._handle_for(bound, agent_loop)
             try:
                 handle.open(job_id, **context)
@@ -1408,6 +1601,7 @@ class ServerRegistry:
         *,
         exclude: str = "",
         seen: dict[str, str] | None = None,
+        builtin: bool | None = None,
         **context: Any,
     ) -> tuple[list[BaseTool], list[str]]:
         """``tools_for``, but ``await``ed on the caller's own loop.
@@ -1422,7 +1616,7 @@ class ServerRegistry:
         seen = {} if seen is None else seen
         context = self._attach(context)
         loop = asyncio.get_running_loop()
-        for bound in self.for_agent(role, exclude=exclude):
+        for bound in self.for_agent(role, exclude=exclude, builtin=builtin):
             handle = self._handle_for(bound, loop)
             try:
                 await handle.aopen(job_id, **context)
@@ -1501,7 +1695,15 @@ class ServerRegistry:
         picked, reasons = self._ref_tools(handle, ref)
         self._record(reasons)
         tools: list[BaseTool] = []
-        renamed = self.merge_tools(handle.name, picked, tools, {} if seen is None else seen)
+        claimed: dict[str, str] = {} if seen is None else seen
+        renamed = self.merge_tools(
+            handle.name,
+            picked,
+            tools,
+            claimed,
+            fragment=_declared_fragment(handle),
+            own_words=_own_words(handle, picked, claimed),
+        )
         if renamed:
             logger.info(
                 "mcp server '%s': %d referenced tool name(s) already taken, prefixed with '%s__'.",
@@ -1535,7 +1737,15 @@ class ServerRegistry:
         picked, reasons = self._ref_tools(handle, ref)
         self._record(reasons)
         tools: list[BaseTool] = []
-        renamed = self.merge_tools(handle.name, picked, tools, {} if seen is None else seen)
+        claimed: dict[str, str] = {} if seen is None else seen
+        renamed = self.merge_tools(
+            handle.name,
+            picked,
+            tools,
+            claimed,
+            fragment=_declared_fragment(handle),
+            own_words=_own_words(handle, picked, claimed),
+        )
         if renamed:
             logger.info(
                 "mcp server '%s': %d referenced tool name(s) already taken, prefixed with '%s__'.",
@@ -1543,6 +1753,72 @@ class ServerRegistry:
                 renamed,
                 handle.name,
             )
+        return tools, reasons
+
+    def agent_tools(
+        self,
+        role: str,
+        job_id: str,
+        refs: Iterable[Any],
+        *,
+        exclude: str = "",
+        seen: dict[str, str] | None = None,
+        **context: Any,
+    ) -> tuple[list[BaseTool], list[str]]:
+        """An agent's server tools under one collision rule: its own names never move.
+
+        Three halves under one ``seen`` map, claimed in this order: the
+        built-in servers bound to ``role`` by ``MCPServerConfig.agents``, the
+        servers the agent's own definition names (``refs``, its ``ToolRef``
+        servers), then every other server bound to ``role`` by ``agents``. A
+        server an operator binds to a role is an addition to the agent: where
+        one of its tool names is taken by a built-in or by a server the agent
+        names itself, it is the operator's tool that is offered as
+        ``<server>__<tool>``, and the tool names the agent's prompt and
+        workflow text were written against stay bare. ``seen`` may arrive
+        holding the names the agent's in-process tools claimed (its provider's,
+        its sandbox's), which therefore never move either. A server both bound
+        and named contributes one copy.
+        """
+        seen = {} if seen is None else seen
+        tools, reasons = self.tools_for(
+            role, job_id, exclude=exclude, seen=seen, builtin=True, **context
+        )
+        for ref in refs:
+            picked, ref_reasons = self.tools_for_ref(ref, job_id, seen=seen, **context)
+            tools.extend(picked)
+            reasons.extend(ref_reasons)
+        added, added_reasons = self.tools_for(
+            role, job_id, exclude=exclude, seen=seen, builtin=False, **context
+        )
+        tools.extend(added)
+        reasons.extend(added_reasons)
+        return tools, reasons
+
+    async def aagent_tools(
+        self,
+        role: str,
+        job_id: str,
+        refs: Iterable[Any],
+        *,
+        exclude: str = "",
+        seen: dict[str, str] | None = None,
+        **context: Any,
+    ) -> tuple[list[BaseTool], list[str]]:
+        """:meth:`agent_tools`, awaited on the caller's own loop."""
+        seen = {} if seen is None else seen
+        tools, reasons = await self.atools_for(
+            role, job_id, exclude=exclude, seen=seen, builtin=True, **context
+        )
+        for ref in refs:
+            picked, ref_reasons = await self.atools_for_ref(ref, job_id, seen=seen, **context)
+            tools.extend(picked)
+            reasons.extend(ref_reasons)
+        added, added_reasons = await self.atools_for(
+            role, job_id, exclude=exclude, seen=seen, builtin=False, **context
+        )
+        tools.extend(added)
+        reasons.extend(added_reasons)
         return tools, reasons
 
     def still_open(self) -> list[ServerHandle]:

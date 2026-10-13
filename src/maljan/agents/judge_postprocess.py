@@ -76,7 +76,9 @@ PROPERTY_NOT_CARRIED_CODE = "stix.property_not_carried"
 # Properties the platform's models declare because the export writes them from
 # the run's record, and which a judge object therefore never carries: the
 # judge's copy is recorded as not carried, like an undeclared key, and dropped.
-PLATFORM_ONLY_PROPERTIES: frozenset[str] = frozenset({"x_maljan_evidence_refs"})
+PLATFORM_ONLY_PROPERTIES: frozenset[str] = frozenset(
+    {"x_maljan_evidence_refs", "x_maljan_support", "x_maljan_support_note"}
+)
 
 
 def _not_carried(obj: dict[str, Any]) -> list[str]:
@@ -769,9 +771,10 @@ def build_evidence_corpus(
             corpus.add(v.lower())
 
     if isinstance(sandbox_report, dict):
-        network = sandbox_report.get("network") or {}
+        from maljan.schemas.sandbox_document import place
+
         for kind in ("dns", "http", "tcp", "udp"):
-            for entry in network.get(kind) or []:
+            for entry in place(sandbox_report, f"network.{kind}") or []:
                 if isinstance(entry, str):
                     corpus.add(entry.lower())
                 elif isinstance(entry, dict):

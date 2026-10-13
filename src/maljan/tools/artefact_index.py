@@ -2,10 +2,12 @@
 
 A reverser on a local model decompiles the functions it happens to pick. The
 facts that say which functions hold the run's artefacts are already on the
-ledger, spread over five answers: FLOSS's rows name the call site of each
-decoded string, the hash resolution and the blob decoder name the function
-around each place, capa names where each rule matched, and the file's own
-tables list the functions. This module joins them per function, and adds what
+ledger, spread over the answers of several kinds: an emulator's recovered
+strings name the call site of each decoded string, the hash resolution and the
+blob decoder name the function around each place, a rule matcher names where
+each rule matched, a tool that lists functions names their starts, and the
+file's own tables list the functions. Each comes in by its kind, never by the
+tool that answered it. This module joins them per function, and adds what
 the platform's x86 decoder (``tools.call_sites``) reads in each function: the
 calls it makes, and the data it loads the address of.
 
@@ -13,9 +15,9 @@ What it states, and nothing else:
 
 * **The functions.** The starts of the file's exception directory (x64, a
   chained fragment counted for the function it belongs to), its exports, its
-  entry point, the function starts capa listed, and every direct call target
-  the decoder reaches in an executable section. Ghidra's and radare2's lists
-  are not read here: the pack runs before any analyst opens them, and the
+  entry point, the function starts a listing answer gave, and every direct call target
+  the decoder reaches in an executable section. A disassembler's function
+  list is not read here: the pack runs before any analyst opens one, and the
   answer says so.
 * **What a function calls.** Every function start is collected first (a walk
   that adds each direct call target it reaches), then each function is read
@@ -38,12 +40,12 @@ What it states, and nothing else:
   their terminator, and the address is where that text starts: a plain
   string. A reference into the middle of a text reads nothing, so texts are
   disjoint and all of them are read in one pass of the section. A decoded
-  string is one the blob decoder states this function refers to, or one
-  FLOSS decoded at a call site inside it (a stack or tight string: in the
-  function FLOSS names).
+  string is one the blob decoder states this function refers to, or one an
+  emulator decoded at a call site inside it (a stack or tight string: in the
+  function the emulator names).
 * **The names its hashes resolve to** where the hash resolution states the
-  place inside it, and **the capa rules** that matched at its start or at an
-  address inside it.
+  place inside it, and **the rules** that matched at its start or at an
+  address inside it, under the name of the tool that matched them.
 * **The calls it makes through slots the hash resolution fills.** In the
   straight-line run of code holding a hashed value (up to a transfer of
   control), the slot that value's name is stored to: after a call exactly one
@@ -129,7 +131,7 @@ SELF = "this entry"
 
 # Said in every answer for the function lists the pack does not read.
 FUNCTION_LISTS_ABSENT = (
-    "Ghidra's and radare2's function lists: no: the pack runs before any analyst opens them"
+    "a disassembler's function list: no: the pack runs before any analyst opens one"
 )
 
 # The shortest run of characters taken as a plain string, as the pack's strings head reads one.
@@ -139,8 +141,9 @@ TEXT_MIN_CHARS = 6
 _EXCEPTION_DIRECTORY = "exception directory"
 _EXPORTS = "exports"
 _ENTRY_POINT = "entry point"
-_CAPA = "capa function starts"
 _CALL_TARGETS = "call targets the decoder reached"
+# How the answer names the functions a listed source gave: by the source's name.
+LISTED_STARTS = "{label} function starts"
 
 _HEX = re.compile(r"\s*0x([0-9a-fA-F]{1,16})\s*")
 
@@ -174,6 +177,13 @@ class _Function:
     # directly, or through a register a load from the slot set in straight-line
     # code. Named after the walk where the hash resolution fills the slot.
     slot_calls: dict[int, int] = field(default_factory=dict)
+    # The code addresses an instruction of this function takes as a value
+    # (``lea``, an x86 immediate), never a call's target.
+    taken: set[int] = field(default_factory=set)
+    # Each call through an import or a slot made with a code address in an
+    # argument: ``(call site, ("import", name) or ("slot", slot), {argument: address})``,
+    # the argument counted from 1.
+    passes: list[tuple[int, tuple[str, Any], dict[int, int]]] = field(default_factory=list)
 
 
 @dataclass
@@ -186,6 +196,11 @@ class _Graph:
     # Each straight-line run of code that holds a hashed name, as its events
     # (``_SlotReading``), for the slots the resolution fills.
     runs: list[list[tuple[Any, ...]]] = field(default_factory=list)
+    # The thread starts the code shows, ``(starter, started, API name, call site)``,
+    # and, by function, the function starts it takes the address of otherwise.
+    # Filled once the slots' names are known (``_relations``).
+    thread_starts: list[tuple[int, int, str, int]] = field(default_factory=list)
+    taken: dict[int, set[int]] = field(default_factory=dict)
 
 
 # -- reading the code -------------------------------------------------------
@@ -356,6 +371,11 @@ class _Reader:
         # The registers that hold an address taken in the run, for a store of
         # one to a frame slot.
         self.addressed: dict[int, int] = {}
+        # The registers that hold a code address taken in the run, and (x86)
+        # what each word pushed since the last call holds: a code address, or
+        # ``None`` for anything else. A call's arguments are read from them.
+        self.code_held: dict[int, int] = {}
+        self.code_pushed: list[int | None] = []
         # The bytes pushed (less those popped) since the run began: an
         # ``[rsp+x]`` store's offset is read against the stack pointer the run
         # began with.
@@ -462,10 +482,12 @@ class _Reader:
                         self.add(target, _CALL_TARGETS)
             elif callee is not None and self.attributing:
                 function.imports.add(str(callee[1]))
+                self._passed(function, rva, ("import", str(callee[1])))
             if self.attributing and callee is None:
                 slot = self._through(code, at, rva, ins)
                 if slot is not None:
                     function.slot_calls[slot] = function.slot_calls.get(slot, 0) + 1
+                    self._passed(function, rva, ("slot", slot))
                 else:
                     function.unnamed_calls += 1
             elif self.attributing and callee is not None and callee[0] == "function":
@@ -494,13 +516,39 @@ class _Reader:
                         self.events.append(("hash", names, place))
                         self.holds_hash = True
                         hashed.append((names, place))
-        self._read_events(code, at, rva, ins, hashed)
+        taken = self._read_events(code, at, rva, ins, hashed)
+        if taken is not None and taken != function.start and taken in self.known:
+            function.taken.add(taken)
         if ins.kind != "call":
             data_target = _data_address(self.image, code, at, ins, rva + ins.length)
             if data_target is not None:
                 function.data_refs.add(data_target)
         if ins.kind == "stop":
             self._end_run()
+
+    def _passed(self, function: _Function, rva: int, callee: tuple[str, Any]) -> None:
+        """Record a call through an import or a slot that carries a code address as an argument.
+
+        x64: the address taken into ``rcx``, ``rdx``, ``r8`` or ``r9`` in the
+        straight-line run before the call (arguments 1 to 4). x86: a word
+        pushed since the last call, the last pushed being argument 1. An
+        argument placed any other way is not read, and the call is recorded
+        with what was read, or not at all.
+        """
+        if self.image.is64:
+            arguments = {
+                number: self.code_held[register]
+                for number, register in enumerate(_ARGUMENT_REGISTERS, start=1)
+                if register in self.code_held
+            }
+        else:
+            arguments = {
+                number: value
+                for number, value in enumerate(reversed(self.code_pushed), start=1)
+                if value is not None
+            }
+        if arguments:
+            function.passes.append((rva, callee, arguments))
 
     def _slot_of(self, code: bytes, at: int, rva: int, ins: Instruction) -> int | None:
         """The slot an instruction's memory operand names, by offset, or ``None``."""
@@ -536,7 +584,7 @@ class _Reader:
         rva: int,
         ins: Instruction,
         hashed: Sequence[tuple[tuple[str, ...], int]] = (),
-    ) -> None:
+    ) -> int | None:
         """What one instruction adds to the straight-line run.
 
         A call, tied to the one function-name hash live in an argument (x64:
@@ -545,9 +593,16 @@ class _Reader:
         taken, unless the instruction holds a hashed value; a store or an
         overwrite of the return register; the slot a register is loaded from;
         and where each hashed value is live.
+
+        Returns the code address the instruction takes as a value (``lea``,
+        or an x86 ``push``/``mov`` of an immediate in an executable section),
+        or ``None``; the register it lands in (or, pushed, the word) holds it
+        for the call's arguments.
         """
         is64 = self.image.is64
         if ins.kind == "call":
+            self.code_held.clear()
+            self.code_pushed.clear()
             arguments = (
                 [self.live[r] for r in _ARGUMENT_REGISTERS if r in self.live] if is64 else []
             )
@@ -566,7 +621,7 @@ class _Reader:
             # A call may overwrite every volatile register: an address one held
             # is no longer known to be there.
             self.addressed.clear()
-            return
+            return None
         shape = _slot_shape(code, at, is64, ins.length)
         slot = None
         if shape is not None:
@@ -578,13 +633,47 @@ class _Reader:
             )
         moved = _register_copy(code, at, is64)
         carried = self.live.get(moved[1]) if moved is not None else None
+        # A code address is carried only by a copy of the whole pointer: on x64
+        # a 32-bit copy (``mov r8d, eax``) holds a cut one.
+        carried_code = (
+            self.code_held.get(moved[1])
+            if moved is not None and (not is64 or _rex_w(code, at))
+            else None
+        )
         frame = self._frame_events(code, at, rva, ins, hashed)
         for register in ins.writes:
             self.loaded.pop(register, None)
             self.live.pop(register, None)
             self.addressed.pop(register, None)
+            self.code_held.pop(register, None)
         if carried is not None and moved is not None:
             self.live[moved[0]] = carried
+        if carried_code is not None and moved is not None:
+            self.code_held[moved[0]] = carried_code
+        taken: int | None = None
+        if (
+            shape is not None
+            and shape[0] == "address"
+            and slot is not None
+            and self._section(slot) is not None
+        ):
+            taken = slot
+            if shape[1] is not None:
+                self.code_held[shape[1]] = slot
+        # The words pushed since the last call are the call's arguments only
+        # while nothing else moves the stack or writes into it: a push adds
+        # one, a ``pop r32`` takes the last off, and any other stack move
+        # (``add``/``sub esp``, ``pushad``, ``popad``, ``pop [mem]``, a ``lea``
+        # into the stack pointer) or a store to ``[esp+x]`` leaves positions
+        # that cannot be read, so the words are dropped and the call's
+        # arguments are absent rather than misread.
+        if ins.kind == "push":
+            self.code_pushed.append(taken if shape is not None and shape[1] is None else None)
+        elif not is64 and 0x58 <= code[at] <= 0x5F:
+            if self.code_pushed:
+                self.code_pushed.pop()
+        elif ins.moves_stack or 4 in ins.writes or _stack_pointer_store(code, at):
+            self.code_pushed.clear()
         for held in hashed:
             if ins.kind == "push" or (not is64 and _stack_store(code, at)):
                 self.stacked.append(held)
@@ -603,6 +692,7 @@ class _Reader:
         self._move_frame(code, at, ins)
         if 0 in ins.writes:
             self.events.append(("overwrite",))
+        return taken
 
     def _move_frame(self, code: bytes, at: int, ins: Instruction) -> None:
         """Follow what one instruction does to the frame's base registers.
@@ -710,6 +800,8 @@ class _Reader:
         self.live.clear()
         self.stacked.clear()
         self.addressed.clear()
+        self.code_held.clear()
+        self.code_pushed.clear()
         self.pushed = 0
 
     def _tail_call(self, function: _Function, target: int) -> bool:
@@ -829,6 +921,18 @@ def _register_copy(code: bytes, at: int, is64: bool) -> tuple[int, int] | None:
     reg = ((modrm >> 3) & 7) | (((rex >> 2) & 1) << 3)
     rm = (modrm & 7) | ((rex & 1) << 3)
     return (rm, reg) if op == 0x89 else (reg, rm)
+
+
+def _rex_w(code: bytes, at: int) -> bool:
+    """Whether an x64 instruction carries REX.W (a 64-bit operand)."""
+    found = _operand_bytes(code, at, True)
+    return found is not None and bool(found[1] & 8)
+
+
+def _stack_pointer_store(code: bytes, at: int) -> bool:
+    """Whether the instruction stores to ``[esp+x]``/``[rsp+x]``, by ``call_sites._frame_store``."""
+    stored = _frame_store(code, at)
+    return stored is not None and stored[0] == 4
 
 
 def _stack_store(code: bytes, at: int) -> bool:
@@ -1165,7 +1269,7 @@ def _printable(byte: int) -> bool:
 class _Cell:
     """One artefact of one function, and the entries that state it."""
 
-    kind: str  # "import", "slot", "name", "decoded", "plain" or "capa"
+    kind: str  # "import", "slot", "name", "decoded", "plain" or "rule"
     value: str
     sources: list[str] = field(default_factory=list)
     # For a call through a slot the hash resolution fills: the slot, and the
@@ -1210,8 +1314,60 @@ _GROUP = {
     "slot": "slot",
     "plain": "text",
     "decoded": "text",
-    "capa": "capa",
+    "rule": "rule",
 }
+
+# The field of a row that holds the rules matched in a function, where any
+# rule came from a tool other than the shipped rule matcher (``rules_field``).
+RULES_FIELD_NEUTRAL = "rules"
+
+
+def rules_field(shipped: bool = True) -> str:
+    """The field of a row that holds the rules matched in a function.
+
+    The name rows have always used for it (the shipped rule matcher's) where
+    every rule came from that matcher as the platform runs it, or none came;
+    :data:`RULES_FIELD_NEUTRAL` where any came from another tool, so a row
+    never names a matcher that did not run (``core.pack_steps.answer_field``).
+    """
+    from maljan.core.pack_steps import answer_field
+
+    return answer_field("{}", RULES_KIND, RULES_FIELD_NEUTRAL, shipped=shipped)
+
+
+def rule_cells(row: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """The rule cells of an index row, under whichever name :func:`rules_field` gave them."""
+    from maljan.core.pack_steps import read_answer_field
+
+    held = read_answer_field(row, "{}", RULES_KIND, RULES_FIELD_NEUTRAL)
+    return [cell for cell in held or [] if isinstance(cell, Mapping)]
+
+
+def rule_count_words(row: Mapping[str, Any]) -> tuple[str, str]:
+    """How a count of ``row``'s rule cells is worded, one and many.
+
+    Named by the shipped matcher only where the row holds its rules under
+    that matcher's name (every rule came from it); else a neutral word, so a
+    count never names a matcher that did not run.
+    """
+    shipped = rules_field(shipped=True)
+    if shipped != RULES_FIELD_NEUTRAL and shipped in row:
+        return f"{shipped} rule", f"{shipped} rules"
+    return "rule", "rules"
+
+
+# A function start list from an answer that lists starts: ``(the source's
+# name, the entry's id, the starts as offsets from the image base)``.
+StartSource = tuple[str, str, Sequence[Any]]
+# Rule hits from an answer of rule matches: ``(the tool that answered, the
+# entry's id, [(rule, the addresses it matched at)])``.
+RuleSource = tuple[str, str, Sequence[tuple[str, Sequence[Any]]]]
+# Strings recovered with the place that produced each: ``(the tool that
+# answered, the entry's id, rows)``, each row a mapping with ``string``,
+# ``kind`` (``decoded`` for a string placed by its call site) and the offsets
+# ``called_at_rva`` / ``function_rva`` (or the virtual addresses
+# ``called_at`` / ``function``).
+SiteSource = tuple[str, str, Sequence[Mapping[str, Any]]]
 
 
 def _source(pair: tuple[str, Mapping[str, Any]] | None) -> tuple[str, Mapping[str, Any]]:
@@ -1222,20 +1378,21 @@ def _source(pair: tuple[str, Mapping[str, Any]] | None) -> tuple[str, Mapping[st
 
 
 def _places_wanted(
-    capa: Mapping[str, Any],
-    floss: Mapping[str, Any],
+    rule_hits: Sequence[RuleSource],
+    site_strings: Sequence[SiteSource],
     hashes: Mapping[str, Any],
     blobs: Mapping[str, Any],
     base: int,
 ) -> set[int]:
     wanted: set[int] = set()
-    for row in capa.get("capabilities") or []:
-        if isinstance(row, Mapping):
-            wanted.update(a for a in map(_hex, row.get("addresses") or []) if a is not None)
-    for row in floss.get("strings") or []:
-        if isinstance(row, Mapping):
-            for place in _floss_places(row, base):
-                wanted.add(place)
+    for _tool, _entry, rules in rule_hits:
+        for _rule, addresses in rules:
+            wanted.update(a for a in map(_hex, addresses or []) if a is not None)
+    for _tool, _entry, rows in site_strings:
+        for row in rows:
+            if isinstance(row, Mapping):
+                for place in _site_places(row, base):
+                    wanted.add(place)
     for hit in hashes.get("hits") or []:
         for place in (hit.get("occurrences") or []) if isinstance(hit, Mapping) else []:
             rva = _hex(place.get("rva")) if isinstance(place, Mapping) else None
@@ -1249,8 +1406,8 @@ def _places_wanted(
     return wanted
 
 
-def _floss_places(row: Mapping[str, Any], base: int) -> list[int]:
-    """The offset a FLOSS row is placed by: a decoded string's call site, another's routine."""
+def _site_places(row: Mapping[str, Any], base: int) -> list[int]:
+    """Where a recovered string is placed: a decoded string's call site, else its routine."""
     if str(row.get("kind") or "") == "decoded":
         keys = ("called_at_rva", "called_at")
     else:
@@ -1293,19 +1450,33 @@ def index_image(
     image: Image,
     *,
     pe_info: tuple[str, Mapping[str, Any]] | None = None,
-    capa: tuple[str, Mapping[str, Any]] | None = None,
-    floss: tuple[str, Mapping[str, Any]] | None = None,
+    function_starts: Sequence[StartSource] = (),
+    rule_hits: Sequence[RuleSource] = (),
+    site_strings: Sequence[SiteSource] = (),
     hashes: tuple[str, Mapping[str, Any]] | None = None,
     blobs: tuple[str, Mapping[str, Any]] | None = None,
     absent: Mapping[str, str] | None = None,
     addresses: Sequence[tuple[str, int]] = (),
     function_lists: str = FUNCTION_LISTS_ABSENT,
     ranges_into: dict[str, list[list[str]]] | None = None,
+    rules_under: str = "",
+    rule_sources: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """The index of ``image`` joined with the run's answers, each given as ``(entry id, data)``.
 
     ``ranges_into``, when given, is filled with :func:`function_ranges`: a
-    fact the caller keeps beside the answer, never in it.
+    fact the caller keeps beside the answer, never in it. ``rules_under`` is
+    the field each row holds its rules under (empty: :func:`rules_field`'s
+    shipped name), and ``rule_sources`` names, by entry id, the tool each
+    rule's entry is from; stated under ``rule_sources`` when given.
+
+    The run's answers come in by what they are, never by the tool that gave
+    them: ``function_starts`` from any answer that lists function starts,
+    named by its source; ``rule_hits`` from any answer of rule matches with
+    the addresses each matched at; ``site_strings`` from any answer of
+    recovered strings with the place that produced each. A place one of them
+    states that no function holds is counted under ``unplaced`` by the tool
+    that answered it.
 
     ``absent`` is the ``no: <reason>`` of each source the caller could not
     join, by source; the answer and its head state each. ``addresses`` are
@@ -1318,8 +1489,6 @@ def index_image(
     holds none; with no reading answering, ``function`` is a ``no:`` sentence.
     """
     _, info = _source(pe_info)
-    capa_id, capa_data = _source(capa)
-    floss_id, floss_data = _source(floss)
     hash_id, hash_data = _source(hashes)
     blob_id, blob_data = _source(blobs)
     base = image.image_base
@@ -1339,11 +1508,17 @@ def index_image(
     if isinstance(entry, int) and entry > 0:
         seeds[_ENTRY_POINT] = [entry]
         entry_points = {entry}
-    starts = [s for s in map(_hex, capa_data.get("function_starts") or []) if s is not None]
-    if starts:
-        seeds[_CAPA] = starts
+    listed: list[str] = []
+    for label, _entry, given in function_starts:
+        starts = [s for s in map(_hex, given or []) if s is not None]
+        if starts:
+            key = LISTED_STARTS.format(label=label)
+            seeds.setdefault(key, []).extend(starts)
+            if key not in listed:
+                listed.append(key)
+    order = (_EXCEPTION_DIRECTORY, _EXPORTS, _ENTRY_POINT, *listed, _CALL_TARGETS)
 
-    wanted = _places_wanted(capa_data, floss_data, hash_data, blob_data, base)
+    wanted = _places_wanted(rule_hits, site_strings, hash_data, blob_data, base)
     wanted.update(offset for _, offset in addresses)
     graph = _read_code(image, seeds, wanted, _hashed_places(hash_data))
     placer = _Placer(image, graph)
@@ -1361,6 +1536,7 @@ def index_image(
                 rows.add(start, "slot", name, hash_id, (slot, named_at))
             else:
                 function.unnamed_calls += count
+    _relations(graph, filled)
 
     def place(where: list[int], kind: str, value: str, source: str, what: str) -> None:
         if not where:
@@ -1412,22 +1588,29 @@ def index_image(
             )
             place(where, "decoded", str(result["text"]), blob_id, "decode_string_blobs")
 
-    for row in floss_data.get("strings") or []:
-        if not isinstance(row, Mapping) or not row.get("string"):
-            continue
-        where = [h for rva in _floss_places(row, base) for h in placer.holders(rva)]
-        place(where, "decoded", str(row["string"]), floss_id, "floss")
-
-    for capability in capa_data.get("capabilities") or []:
-        if not isinstance(capability, Mapping) or not capability.get("rule"):
-            continue
-        for address in map(_hex, capability.get("addresses") or []):
-            if address is None:
+    for tool, entry_id, recovered in site_strings:
+        for row in recovered:
+            if not isinstance(row, Mapping) or not row.get("string"):
                 continue
-            where = placer.stated(hex(address)) or placer.holders(address)
-            place(where, "capa", str(capability["rule"]), capa_id, "capa")
+            where = [h for rva in _site_places(row, base) for h in placer.holders(rva)]
+            place(where, "decoded", str(row["string"]), entry_id, tool)
 
-    data = _answer(image, graph, rows, names, unplaced, entry_points)
+    for tool, entry_id, rules in rule_hits:
+        for rule, matched in rules:
+            if not rule:
+                continue
+            for address in map(_hex, matched or []):
+                if address is None:
+                    continue
+                where = placer.stated(hex(address)) or placer.holders(address)
+                place(where, "rule", str(rule), entry_id, tool)
+
+    field_name = rules_under or rules_field()
+    data = _answer(
+        image, graph, rows, names, unplaced, entry_points, order=order, rules_under=field_name
+    )
+    if rule_sources:
+        data["rule_sources"] = dict(rule_sources)
     # Only the slots some code calls or jumps through are stated.
     data["resolved_slots"] = {
         hex(base + slot): name for slot, (name, _w) in sorted(filled.items()) if slot in called
@@ -1441,13 +1624,75 @@ def index_image(
         for start, function in sorted(graph.functions.items())
         if start not in rows.cells and function.callees
     }
+    # The relations that are no call, whole: every thread start the code shows
+    # and every function start taken as a value, rows or not.
+    if graph.thread_starts:
+        data["thread_starts"] = [
+            {
+                "starter": hex(base + starter),
+                "started": hex(base + started),
+                "through": name,
+                "call": hex(base + site),
+            }
+            for starter, started, name, site in graph.thread_starts
+        ]
+    if graph.taken:
+        data["addresses_taken"] = {
+            hex(base + taker): [hex(base + t) for t in sorted(targets)]
+            for taker, targets in sorted(graph.taken.items())
+        }
     if ranges_into is not None:
         ranges_into.update(function_ranges(image, graph.functions))
     data["function_lists"] = function_lists
     data["absent"] = dict(absent or {})
     if addresses:
-        data.update(_asked(image, graph, placer, rows, names, entry_points, addresses))
+        data.update(
+            _asked(image, graph, placer, rows, names, entry_points, addresses, order, field_name)
+        )
     return data
+
+
+# The APIs that start a thread at a routine they are given, with the argument
+# (counted from 1) that routine travels in, as each API's documentation states it.
+THREAD_START_ARGUMENT: dict[str, int] = {
+    "CreateThread": 3,
+    "CreateRemoteThread": 4,
+    "CreateRemoteThreadEx": 4,
+    "_beginthreadex": 3,
+    "_beginthread": 1,
+    "SHCreateThread": 1,
+}
+
+# The thread-starting APIs whose thread runs in another process: the routine's
+# address is one in that process, and the row says so.
+REMOTE_THREAD_APIS = frozenset({"CreateRemoteThread", "CreateRemoteThreadEx"})
+
+
+def _relations(graph: _Graph, filled: Mapping[int, tuple[str, int]]) -> None:
+    """The thread starts and the addresses taken, once the slots' names are known.
+
+    A thread start is a call of a thread-starting API (an import, or a slot the
+    hash resolution fills) whose start-routine argument the code set to a code
+    address. Any other function start an instruction takes as a value is an
+    address taken. Neither is a call, and neither is a callee.
+    """
+    for start, function in graph.functions.items():
+        started: set[int] = set()
+        for site, (kind, value), arguments in function.passes:
+            if kind == "import":
+                name = _short_import(str(value))
+            else:
+                named = filled.get(int(value))
+                name = named[0] if named else ""
+            position = THREAD_START_ARGUMENT.get(name)
+            target = arguments.get(position) if position is not None else None
+            if target is not None:
+                graph.thread_starts.append((start, target, name, site))
+                started.add(target)
+        taken = function.taken - started
+        if taken:
+            graph.taken[start] = taken
+    graph.thread_starts.sort()
 
 
 def function_ranges(image: Image, starts: Iterable[int]) -> dict[str, list[list[str]]]:
@@ -1457,7 +1702,7 @@ def function_ranges(image: Image, starts: Iterable[int]) -> dict[str, list[list[
     offsets from the image base, end exclusive: where a place inside a
     function is that function (``analysis.evidence_roots``). ``starts`` are
     every function start the index knows (the exception directory, exports,
-    the entry point, capa, call targets); a range holding one other than its
+    the entry point, a listed source's starts, call targets); a range holding one other than its
     own function's is left out, since the table that states it does not
     agree with the code.
     """
@@ -1484,6 +1729,8 @@ def _asked(
     names: Mapping[int, list[str]],
     entry_points: Iterable[int],
     addresses: Sequence[tuple[str, int]],
+    order: Sequence[str] = (),
+    rules_under: str = "",
 ) -> dict[str, Any]:
     """The function an asked address names, by the first reading that names one."""
     base = image.image_base
@@ -1495,7 +1742,17 @@ def _asked(
             if not holders:
                 continue
             start, where = holders[0], "inside"
-        row = _answer(image, graph, rows, names, {}, entry_points, only=start)["function"]
+        row = _answer(
+            image,
+            graph,
+            rows,
+            names,
+            {},
+            entry_points,
+            only=start,
+            order=order,
+            rules_under=rules_under,
+        )["function"]
         asked = hex(base + offset) if how == _AS_VIRTUAL else hex(offset)
         said = f"{asked} read as {how}: {where} the function at {hex(base + start)}"
         return {"function": row, "address_read": said}
@@ -1506,7 +1763,7 @@ def _asked(
     return {
         "function": (
             f"no: no function the run knows starts at or holds the address (read {tried}; "
-            f"{_SOURCES_SAID})"
+            f"functions come from {', '.join(order or _SOURCE_ORDER)})"
         )
     }
 
@@ -1519,17 +1776,42 @@ def _answer(
     unplaced: Mapping[str, int],
     entry_points: Iterable[int] = (),
     only: int | None = None,
+    order: Sequence[str] = (),
+    rules_under: str = "",
 ) -> dict[str, Any]:
     base = image.image_base
+    rules_key = rules_under or rules_field()
     entries = set(entry_points)
     callers: dict[int, set[int]] = {}
     for start, function in graph.functions.items():
         for callee in function.callees:
             if callee != start:
                 callers.setdefault(callee, set()).add(start)
+    starts_of: dict[int, list[tuple[int, int, str, int]]] = {}
+    started_by: dict[int, list[tuple[int, int, str, int]]] = {}
+    for pair in graph.thread_starts:
+        starts_of.setdefault(pair[0], []).append(pair)
+        started_by.setdefault(pair[1], []).append(pair)
+    taken_by: dict[int, set[int]] = {}
+    for taker, targets in graph.taken.items():
+        for target in targets:
+            taken_by.setdefault(target, set()).add(taker)
 
     def va(rva: int) -> str:
         return hex(base + rva)
+
+    def thread(other: int, name: str, site: int) -> dict[str, str]:
+        return {"function": va(other), "through": name, "call": va(site)}
+
+    def relations(start: int, row: dict[str, Any]) -> None:
+        if starts_of.get(start):
+            row["starts_threads"] = [thread(t, n, s) for _f, t, n, s in starts_of[start]]
+        if started_by.get(start):
+            row["started_as_thread_by"] = [thread(f, n, s) for f, _t, n, s in started_by[start]]
+        if graph.taken.get(start):
+            row["takes_address_of"] = [va(t) for t in sorted(graph.taken[start])]
+        if taken_by.get(start):
+            row["address_taken_by"] = [va(t) for t in sorted(taken_by[start])]
 
     def row_of(start: int, cells: Mapping[tuple[str, str], _Cell]) -> dict[str, Any]:
         held = graph.functions.get(start)
@@ -1550,11 +1832,12 @@ def _answer(
             "resolved": [_cell(c, base) for c in listed if c.kind == "name"],
             "decoded_strings": [_cell(c, base) for c in listed if c.kind == "decoded"],
             "plain_strings": [_cell(c, base) for c in listed if c.kind == "plain"],
-            "capa": [_cell(c, base) for c in listed if c.kind == "capa"],
+            rules_key: [_cell(c, base) for c in listed if c.kind == "rule"],
             "callers": [va(c) for c in sorted(callers.get(start, ()))],
             "callees": [va(c) for c in sorted(held.callees if held else ())],
             "indirect": {"artefacts": reached, "through": through},
         }
+        relations(start, row)
         if names.get(start):
             row["names"] = list(dict.fromkeys(names[start]))
         if start in entries:
@@ -1574,7 +1857,7 @@ def _answer(
         "tool": TOOL,
         "image_base": hex(base),
         "functions_known": len(graph.functions),
-        "function_sources": {s: sources[s] for s in _SOURCE_ORDER if s in sources},
+        "function_sources": {s: sources[s] for s in (order or _SOURCE_ORDER) if s in sources},
         "function_lists": FUNCTION_LISTS_ABSENT,
         "undecoded_functions": sum(1 for f in graph.functions.values() if f.undecoded),
         # Per function, by address: which the decoder stopped in, and how many
@@ -1590,13 +1873,13 @@ def _answer(
     }
 
 
-_SOURCE_ORDER = (_EXCEPTION_DIRECTORY, _EXPORTS, _ENTRY_POINT, _CAPA, _CALL_TARGETS)
-_SOURCES_SAID = "functions come from " + ", ".join(_SOURCE_ORDER)
-_KIND_ORDER = {"import": 0, "slot": 1, "name": 2, "decoded": 3, "plain": 4, "capa": 5}
+# The sources when no answer listed function starts.
+_SOURCE_ORDER = (_EXCEPTION_DIRECTORY, _EXPORTS, _ENTRY_POINT, _CALL_TARGETS)
+_KIND_ORDER = {"import": 0, "slot": 1, "name": 2, "decoded": 3, "plain": 4, "rule": 5}
 
 
 def _cell(cell: _Cell, base: int = 0) -> dict[str, Any]:
-    key = "rule" if cell.kind == "capa" else "text" if cell.kind in ("plain", "decoded") else "name"
+    key = "rule" if cell.kind == "rule" else "text" if cell.kind in ("plain", "decoded") else "name"
     out: dict[str, Any] = {key: cell.value, "sources": list(cell.sources)}
     if cell.slot is not None and cell.named_at is not None:
         out["slot"] = hex(base + cell.slot)
@@ -1634,16 +1917,20 @@ def function_index(
     path: str | Path,
     *,
     pe_info: tuple[str, Mapping[str, Any]] | None = None,
-    capa: tuple[str, Mapping[str, Any]] | None = None,
-    floss: tuple[str, Mapping[str, Any]] | None = None,
+    function_starts: Sequence[StartSource] = (),
+    rule_hits: Sequence[RuleSource] = (),
+    site_strings: Sequence[SiteSource] = (),
     hashes: tuple[str, Mapping[str, Any]] | None = None,
     blobs: tuple[str, Mapping[str, Any]] | None = None,
     absent: Mapping[str, str] | None = None,
     ranges_into: dict[str, list[list[str]]] | None = None,
+    rules_under: str = "",
+    rule_sources: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """The function index of the PE at ``path`` (see the module docstring).
 
-    ``ranges_into`` is filled as :func:`index_image` says.
+    ``ranges_into``, ``rules_under`` and ``rule_sources`` are as
+    :func:`index_image` says.
     """
     try:
         image = pe_image.load(path)
@@ -1654,12 +1941,15 @@ def function_index(
     return index_image(
         image,
         pe_info=pe_info,
-        capa=capa,
-        floss=floss,
+        function_starts=function_starts,
+        rule_hits=rule_hits,
+        site_strings=site_strings,
         hashes=hashes,
         blobs=blobs,
         absent=absent,
         ranges_into=ranges_into,
+        rules_under=rules_under,
+        rule_sources=rule_sources,
     )
 
 
@@ -1678,6 +1968,9 @@ PER_CALLEE = "counted per callee"
 
 # How a row names the calls it makes through slots the hash resolution fills.
 SLOT_CALLS_SAID = "calls through slots the hash resolution fills"
+
+# Said after a thread start or an address taken: neither is counted as a caller or a callee.
+NOT_A_CALL = "(no call: not counted among the callers or callees)"
 
 _ADDRESS = re.compile(r"0x[0-9a-f]{1,16}")
 
@@ -1712,8 +2005,8 @@ def head_text(data: Mapping[str, Any], rows: int) -> str:
     if not rows:
         return said
     return (
-        f"{said}; address = image base {data.get('image_base')} + offset, as Ghidra and radare2 "
-        "take it; ranked by distinct artefacts of their own, then by address:"
+        f"{said}; address = image base {data.get('image_base')} + offset, as a disassembler "
+        "takes it; ranked by distinct artefacts of their own, then by address:"
     )
 
 
@@ -1727,12 +2020,13 @@ def _ids(cells: Any, entry_id: str) -> list[str]:
     return ids
 
 
-def row_line(row: Mapping[str, Any], entry_id: str) -> str:
-    """``- 0x…: calls "A" (ev_…); refers to 2 decoded strings (ev_…); capa: r (ev_…); …``.
+def row_line(row: Mapping[str, Any], entry_id: str, labels: Mapping[str, str] | None = None) -> str:
+    """``- 0x…: calls "A" (ev_…); refers to 2 decoded strings (ev_…); <rules>: r (ev_…); …``.
 
     Names the sample wrote (imports, resolved names, exports) are quoted with
     the pack's escaping, as every recovered string is, so they read as data;
-    the strings a function refers to are counted, never shown.
+    the strings a function refers to are counted, never shown. ``labels``
+    names the entries the rules come from (:func:`row_parts`).
     """
     said = [f"export {sample_text(n)}" for n in row.get("names") or []]
     if row.get("entry_point"):
@@ -1741,11 +2035,22 @@ def row_line(row: Mapping[str, Any], entry_id: str) -> str:
     where = stated if _ADDRESS.fullmatch(stated) else sample_text(stated)
     if said:
         where += f" ({', '.join(said)})"
-    return f"- {where}: {row_parts(row, entry_id)}"
+    return f"- {where}: {row_parts(row, entry_id, labels)}"
 
 
-def row_parts(row: Mapping[str, Any], entry_id: str) -> str:
-    """What :func:`row_line` says a function holds, after its address."""
+# What a row calls rules whose entry ``labels`` does not name.
+RULES_UNLABELLED = "rules"
+
+
+def row_parts(
+    row: Mapping[str, Any], entry_id: str, labels: Mapping[str, str] | None = None
+) -> str:
+    """What :func:`row_line` says a function holds, after its address.
+
+    The rules matched in the function are said under the name of the entry
+    they come from (``labels``: entry id to the name of the tool that
+    answered), one group per name, in the order the row lists them.
+    """
     parts: list[str] = []
 
     def named(key: str, verb: str, field: str) -> None:
@@ -1768,14 +2073,20 @@ def row_parts(row: Mapping[str, Any], entry_id: str) -> str:
             texts.append(f"{len(cells)} {noun} ({', '.join(_ids(cells, entry_id))})")
     if texts:
         parts.append("refers to " + ", ".join(texts))
-    capa = [c for c in row.get("capa") or [] if isinstance(c, Mapping)]
-    if capa:
-        rules = ", ".join(str(c.get("rule") or "") for c in capa)
-        parts.append(f"capa: {rules} ({', '.join(_ids(capa, entry_id))})")
+    named_by = dict(labels or {})
+    grouped: dict[str, list[Mapping[str, Any]]] = {}
+    for cell in rule_cells(row):
+        cited = [str(source) for source in cell.get("sources") or []]
+        label = next((named_by[s] for s in cited if s in named_by), RULES_UNLABELLED)
+        grouped.setdefault(label, []).append(cell)
+    for label, cells in grouped.items():
+        rules = ", ".join(str(c.get("rule") or "") for c in cells)
+        parts.append(f"{label}: {rules} ({', '.join(_ids(cells, entry_id))})")
     callers, callees = len(row.get("callers") or []), len(row.get("callees") or [])
     parts.append(
         f"called by {callers}, calls {callees} {'function' if callees == 1 else 'functions'}"
     )
+    parts.extend(relation_parts(row))
     indirect = row.get("indirect") or {}
     reached, through = int(indirect.get("artefacts") or 0), int(indirect.get("through") or 0)
     if reached:
@@ -1786,26 +2097,72 @@ def row_parts(row: Mapping[str, Any], entry_id: str) -> str:
     return "; ".join(parts)
 
 
+def _threads_said(cells: Any, verb: str, remote_verb: str) -> str | None:
+    """The thread starts of one direction, each with its own verb: a thread an API
+    starts in another process (``REMOTE_THREAD_APIS``) is said as such."""
+    said = [
+        f"{remote_verb if c.get('through') in REMOTE_THREAD_APIS else verb} {c.get('function')} "
+        f"through {sample_text(c.get('through'))} (call at {c.get('call')})"
+        for c in cells or []
+        if isinstance(c, Mapping)
+    ]
+    return f"{', '.join(said)} {NOT_A_CALL}" if said else None
+
+
+def relation_parts(row: Mapping[str, Any]) -> list[str]:
+    """What a row says of the relations that are no call: thread starts and addresses taken.
+
+    Nothing for a row that holds none, so a row built before these were read
+    reads as it did.
+    """
+    parts = [
+        said
+        for said in (
+            _threads_said(
+                row.get("started_as_thread_by"),
+                "started as a thread by",
+                "started as a thread in another process by",
+            ),
+            _threads_said(
+                row.get("starts_threads"),
+                "starts a thread at",
+                "starts a thread in another process at",
+            ),
+        )
+        if said
+    ]
+    for key, verb in (
+        ("address_taken_by", "its address is taken as a value by"),
+        ("takes_address_of", "takes as a value the address of"),
+    ):
+        listed = [str(a) for a in row.get(key) or [] if isinstance(a, str)]
+        if listed:
+            parts.append(f"{verb} {', '.join(listed)} {NOT_A_CALL}")
+    return parts
+
+
 # -- the analysis server's tool --------------------------------------------------
 
-# What the served index says of capa, which it never runs.
-CAPA_NOT_JOINED = (
-    "no: this tool does not run capa, which takes minutes; the triage pack's function_index "
-    "entry joins capa's answer"
+# What the served index says of rule matches, which it never runs a matcher for;
+# the key it says it under is the kind of answer it lacks.
+RULES_NOT_JOINED = (
+    "no: this tool runs no rule matcher, which takes minutes; the triage pack's function_index "
+    "entry joins the rule matches the pack recorded"
 )
+RULES_KIND = "capability_rules"
 
 # What the served index says of a source it ran that raised, or answered an error.
 FAILED_HERE = "no: it failed here ({})"
 ERROR_HERE = "no: it answered an error here ({})"
-# What it says when FLOSS's remembered rows for the file could not be read.
+# What it says when this server's own emulated strings for the file could not be read.
 FLOSS_UNREADABLE = "no: FLOSS's rows for this file could not be read ({})"
 
-# What the served index says of FLOSS when this server holds no FLOSS answer for the file.
+# What the served index says when this server's emulated strings tool has not run on the file.
 FLOSS_NOT_REMEMBERED = "no: FLOSS has not run on this file in this server"
 
 # Why the served index has no disassembler's function list.
 SERVED_FUNCTION_LISTS = (
-    "Ghidra's and radare2's function lists: no: the analysis server has no disassembler of its own"
+    "a disassembler's function list: no: the analysis server has no disassembler of its own"
 )
 
 # The name a cell of the served answer gives its own decoding.
@@ -1852,9 +2209,9 @@ def served_index(path: str | Path, address: Any = None) -> dict[str, Any]:
     Joined with the server's own answers for the file: ``pe_info`` for the
     exports and the entry point, ``resolve_api_hashes`` and
     ``decode_string_blobs`` run here in-process (they read only the bytes),
-    and the rows FLOSS answered for the file in this server when it ran on
-    it. Each source not joined is stated with its reason under ``absent``;
-    capa is never run here (``CAPA_NOT_JOINED``). With no address, the whole
+    and the rows this server's emulated strings tool answered for the file
+    when it ran on it. Each source not joined is stated with its reason under
+    ``absent``; no rule matcher is run here (``RULES_NOT_JOINED``). With no address, the whole
     table in the pack's row form; with one, read as ``address_readings`` says,
     that function's row with its callers and callees and the reading that
     answered.
@@ -1897,20 +2254,25 @@ def served_index(path: str | Path, address: Any = None) -> dict[str, Any]:
             if isinstance(said, dict):
                 said = said.get("message") or said
             absent[name] = ERROR_HERE.format(said)
+    # This server's own emulated strings tool, remembered for the file: its
+    # rows are cited by the tool's name, as no ledger entry exists here.
+    emulated = emulated_strings.TOOL
+    sites: list[SiteSource] = []
     try:
-        floss_rows = emulated_strings.remembered_rows(str(path))
+        recovered = emulated_strings.remembered_rows(str(path))
     except Exception as exc:  # noqa: BLE001 - stated under ``absent``, never lost
-        floss_rows = []
-        absent["floss"] = FLOSS_UNREADABLE.format(exc)
-    if floss_rows:
-        answers["floss"] = ("floss", {"strings": floss_rows})
-    elif "floss" not in absent:
-        absent["floss"] = FLOSS_NOT_REMEMBERED
-    absent["capa"] = CAPA_NOT_JOINED
+        recovered = []
+        absent[emulated] = FLOSS_UNREADABLE.format(exc)
+    if recovered:
+        answers[emulated] = (emulated, {"strings": recovered})
+        sites.append((emulated, emulated, recovered))
+    elif emulated not in absent:
+        absent[emulated] = FLOSS_NOT_REMEMBERED
+    absent[RULES_KIND] = RULES_NOT_JOINED
     data = index_image(
         image,
         pe_info=answers.get("pe_info"),
-        floss=answers.get("floss"),
+        site_strings=sites,
         hashes=answers.get("resolve_api_hashes"),
         blobs=answers.get("decode_string_blobs"),
         absent=absent,
@@ -1929,10 +2291,16 @@ def served_index(path: str | Path, address: Any = None) -> dict[str, Any]:
         out["row"] = row_line(asked, THIS_ANSWER)
         out["callers"] = list(asked.get("callers") or [])
         out["callees"] = list(asked.get("callees") or [])
+        for key in _RELATION_KEYS:
+            if asked.get(key):
+                out[key] = list(asked[key])
     else:
         out["row"] = str(asked)
     return out
 
+
+# A row's relations that are no call, each present only where the code shows one.
+_RELATION_KEYS = ("started_as_thread_by", "starts_threads", "address_taken_by", "takes_address_of")
 
 _SERVED_KEYS = (
     "tool",

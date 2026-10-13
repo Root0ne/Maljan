@@ -15,7 +15,7 @@ import os
 import re
 import threading
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
@@ -37,13 +37,22 @@ from maljan.agents.run_evidence_corpus import (
     parts_of,
     state_of,
 )
-from maljan.analysis.corroboration import corroboration_row
+from maljan.analysis.corroboration import corroborated, corroboration_row
 from maljan.analysis.run_summary import RunSummaryBuilder, summary_counts_line, tool_asks_of
 from maljan.core.config import BUILTIN_AGENTS, JUDGE_AGENT_KEY, PROMPT_ROLES
 from maljan.core.container import ServiceContainer
+from maljan.core.declared_reading import kinds_declared_by
 from maljan.core.exceptions import AnalystError, LLMError, SampleNotOpened
 from maljan.core.logger import logger
 from maljan.core.spend import SpendCeilingStop
+from maljan.loaders.binary_chunker import (
+    SOURCE_SEPARATOR,
+    ChunkStrategy,
+    Room,
+    TextChunk,
+    head_room,
+    joined_when_it_fits,
+)
 from maljan.memory.long_term_memory import build_stored_case
 from maljan.pipeline import triage_pack
 from maljan.pipeline.claim_drops import (
@@ -57,8 +66,21 @@ from maljan.pipeline.conditions import (
     StageResult,
     TriageFacts,
     evaluate,
+    rule_match_hits,
 )
-from maljan.pipeline.debate_facts import facts_naming, ledger_count_facts, with_ledger_facts
+from maljan.pipeline.debate_facts import (
+    BLOCK_NOT_READ_NOTE,
+    analysts_to_revise,
+    contested_input,
+    facts_naming,
+    ledger_count_facts,
+    names_an_unlisted_place,
+    place_facts,
+    place_facts_for,
+    tools_taking_an_address,
+    with_ledger_facts,
+    with_place_facts,
+)
 from maljan.pipeline.events import (
     claims_to_payload,
     describe_exception,
@@ -69,7 +91,11 @@ from maljan.pipeline.events import (
 )
 from maljan.pipeline.evidence_summary import collect as collect_technique_sources
 from maljan.pipeline.evidence_summary import summarise, technique_evidence
-from maljan.pipeline.mediation_models import consensus_applies
+from maljan.pipeline.mediation_models import (
+    CONTRADICTIONS_BLOCK_MISSING_NOTE,
+    MEDIATOR_NO_ANSWER,
+    consensus_applies,
+)
 from maljan.pipeline.outcome import (
     VERDICT_READ_FALLBACK,
     corrected_reasons,
@@ -79,11 +105,19 @@ from maljan.pipeline.outcome import (
     verdict_for_run,
     verdict_reading,
 )
+from maljan.pipeline.routing import (
+    revised_in,
+    revision_round_before,
+)
 from maljan.pipeline.run_state import render_run_state
 from maljan.pipeline.sandbox_status import NOT_RUN as SANDBOX_NOT_RUN
 from maljan.pipeline.sandbox_status import sandbox_status
 from maljan.pipeline.state import AgentArgument, AnalysisState, _merge_stage_results
-from maljan.pipeline.sycophancy_detector import build_revision_directive, detect_sycophancy
+from maljan.pipeline.sycophancy_detector import (
+    convergence_flags,
+    convergence_sentence,
+    detect_sycophancy,
+)
 from maljan.pipeline.triage_pack import (
     NOT_RUN_PREFIX,
     PIPELINE,
@@ -104,7 +138,6 @@ from maljan.pipeline.validation import (
     ValidationTally,
     Violation,
     corroboration,
-    corroboration_sources,
     not_run_sentence,
     partial_grounding_reason,
     technique_check_note,
@@ -113,8 +146,13 @@ from maljan.pipeline.validation import (
     validity_check_available,
 )
 from maljan.reporting.ledger_report import section_is_grounded
-from maljan.schemas.evidence import LedgerEntry, apply_budget, is_guard_answer
-from maljan.schemas.isr_models import ABSENCE_TECHNIQUE_MARKER, AgentISR
+from maljan.schemas.evidence import (
+    LedgerEntry,
+    apply_budget,
+    fit_structures_to_budget,
+    is_guard_answer,
+)
+from maljan.schemas.isr_models import ABSENCE_TECHNIQUE_MARKER, FAILED_CALLS_MARKER, AgentISR
 from maljan.schemas.stix_models import Bundle
 from maljan.schemas.tool_evidence import trim_output
 
@@ -968,6 +1006,10 @@ def _augment_static_chunks_with_path(
 # single round trip; a server that has not answered in this long is one the
 # run goes on without, and the entry says so.
 REPUTATION_TIMEOUT_S = 60.0
+# Why the pack made no reputation lookup: the servers declaring one are all
+# disabled (named, in the order the pack would ask them), or none declares one.
+NO_LOOKUP_ENABLED = "no reputation server is enabled ({servers}); no lookup was made"
+NO_LOOKUP_DECLARED = "no server declares a reputation lookup; no lookup was made"
 
 
 def _withheld_servers(container: ServiceContainer) -> set[str] | None:
@@ -989,18 +1031,22 @@ def _reputation_lookup(container: ServiceContainer, sha256: str) -> Any:
     """The pack's reputation step, bound to this job's servers and settings.
 
     Returns a callable the pack invokes with its recorder. The callable makes
-    at most one call: ``get_file_report`` on VirusTotal's own server when it
-    is enabled, else ``check_hash`` on the threat-intel sidecar when it is, and
-    otherwise writes the entry that says why there was none — no server
-    enabled, the setting off, the team withholding the server, no hash to ask
-    about. The call goes through the tool server registry exactly as an
-    agent's does and is recorded under that server, so a run's ledger says
-    which service was asked, not only that something was. A server the active
-    team lists in ``exclude_servers`` is never asked, for the same reason its
-    agents never see it.
+    at most one call: to the first enabled server's tool that declares
+    ``kind: reputation`` and the argument it takes a hash in
+    (``core.reputation.pack_lookups``: the lowest declared rank first, then
+    the servers' configured order; the built-in declarations ask VirusTotal's
+    own server before the threat-intel sidecar), and otherwise writes the
+    entry that says why there was none — no lookup enabled, the setting off,
+    the team withholding the server, no hash to ask about. The call goes
+    through the tool server registry exactly as an agent's does and is
+    recorded under that server, so a run's ledger says which service was
+    asked, not only that something was. A server the active team lists in
+    ``exclude_servers`` is never asked, for the same reason its agents never
+    see it.
     """
-    from maljan.core import virustotal
     from maljan.core.config import ALL_SERVERS, ToolRef
+    from maljan.core.declared_reading import declarations
+    from maljan.core.reputation import pack_lookups
 
     def _skip(recorder: Any, why: str) -> Any:
         # The prefix is what tells the pack's rendering a call that was never
@@ -1010,6 +1056,7 @@ def _reputation_lookup(container: ServiceContainer, sha256: str) -> Any:
             tool="reputation",
             args={"sha256": sha256},
             server=PIPELINE,
+            source="pack",
             output=message,
             ok=False,
             error=message,
@@ -1021,17 +1068,17 @@ def _reputation_lookup(container: ServiceContainer, sha256: str) -> Any:
             return _skip(recorder, "core.triage.reputation is off; no lookup was made")
         if not sha256:
             return _skip(recorder, "the run has no sha256 to look up; no lookup was made")
-        servers = container.config.mcp.servers
-        candidates: list[tuple[str, str, dict[str, Any]]] = [
-            (virustotal.SERVER_KEY, "get_file_report", {"hash": sha256}),
-            ("threatintel", "check_hash", {"file_hash": sha256}),
+        lookups = pack_lookups(container.config.mcp.servers, declarations(container.config))
+        enabled: list[tuple[str, str, dict[str, Any]]] = [
+            (lookup.server, lookup.tool, {lookup.hash_argument: sha256})
+            for lookup in lookups
+            if lookup.enabled
         ]
-        enabled = [c for c in candidates if getattr(servers.get(c[0]), "enabled", False)]
         if not enabled:
+            declared = ", ".join(dict.fromkeys(lookup.server for lookup in lookups))
             return _skip(
                 recorder,
-                f"no reputation server is enabled ({virustotal.SERVER_KEY}, threatintel); "
-                "no lookup was made",
+                NO_LOOKUP_ENABLED.format(servers=declared) if declared else NO_LOOKUP_DECLARED,
             )
         withheld = _withheld_servers(container)
         usable = (
@@ -1063,6 +1110,7 @@ def _reputation_lookup(container: ServiceContainer, sha256: str) -> Any:
                 tool=tool_name,
                 args=args,
                 server=server,
+                source=f"mcp:{server}",
                 output=why,
                 ok=False,
                 error=why,
@@ -1081,6 +1129,7 @@ def _reputation_lookup(container: ServiceContainer, sha256: str) -> Any:
                 tool=tool_name,
                 args=args,
                 server=server,
+                source=f"mcp:{server}",
                 output=message,
                 ok=False,
                 error=message,
@@ -1095,12 +1144,127 @@ def _reputation_lookup(container: ServiceContainer, sha256: str) -> Any:
             tool=tool_name,
             args=args,
             server=server,
+            source=f"mcp:{server}",
             output=output,
             started_at=wall_clock,
             duration_ms=int((time.monotonic() - started) * 1000),
         )
 
     return lookup
+
+
+# Why a server step was not asked, by case. Each starts with the prefix the
+# pack reads a call that was never made by (``triage_pack._was_not_made``).
+STEP_WITHHELD = "{server} withheld by the team's exclude_servers; {tool} was not asked"
+STEP_WITHHELD_UNREAD = "{server} withheld because the team's exclusions could not be read"
+STEP_NO_SERVER = "no enabled tool server is configured as {server}; {tool} was not asked"
+
+
+def _step_arguments(step: Any, facts: Any, values: dict[str, str]) -> dict[str, Any]:
+    """A server step's arguments: its template filled, else read from its tool's declaration.
+
+    With no template, the argument the tool declares for the ``path`` role
+    takes the sample's path and the one for ``hash`` its sha256.
+    """
+    from maljan.core.pack_steps import placeholder_values
+
+    if step.arguments:
+        return placeholder_values(step.arguments, values)
+    roles = dict(getattr(facts, "arguments", None) or {})
+    args: dict[str, Any] = {}
+    if roles.get("path"):
+        args[roles["path"]] = values["sample_path"]
+    if roles.get("hash") and values.get("sha256"):
+        args[roles["hash"]] = values["sha256"]
+    return args
+
+
+def _server_step_call(container: ServiceContainer) -> Any:
+    """The pack's call of a step a tool server answers, bound to this job's servers and settings.
+
+    Returns the callable the pack hands each server step to
+    (``triage_pack.ServerStepCall``). The call goes through the tool server
+    registry exactly as an agent's does, to the sample's path as that server
+    opens it (staged to a remote server, or its declared mount), and is
+    answered for the pack to record under that server at the step's place. A
+    server the active team withholds, or that is not configured, is not asked,
+    and the answer says why; one that cannot be attached or whose call fails
+    answers its failure. The call's wall clock is the step's budget, else the
+    tool's declared ``timeout_seconds``, else what is left of the pack's
+    budget, else none. Never raises.
+    """
+    from maljan.agents.base_agent import run_coro_blocking
+    from maljan.agents.composition import _mounted, _stage
+    from maljan.core.config import ALL_SERVERS, ToolRef
+    from maljan.core.declared_reading import declarations
+    from maljan.pipeline.triage_pack import ServerAnswer
+
+    def call(step: Any, values: Any, left: float | None) -> Any:
+        server, tool_name = str(step.server), str(step.called)
+        started, wall_clock = time.monotonic(), time.time()
+        held = {str(k): str(v) for k, v in dict(values or {}).items()}
+        facts: Any = None
+        try:
+            facts = declarations(container.config).declaration_for((f"mcp:{server}", tool_name))
+        except Exception as exc:  # noqa: BLE001 — an unread declaration declares nothing
+            logger.debug("triage pack: %s's declaration was not read (%s).", tool_name, exc)
+        args = _step_arguments(step, facts, held)
+
+        def answer(output: str, *, ok: bool = True, made: bool = True) -> Any:
+            said = output if made or ok else f"{NOT_RUN_PREFIX} {output}"
+            return ServerAnswer(
+                tool=tool_name,
+                args=args,
+                server=server,
+                output=said,
+                ok=ok,
+                error=None if ok else said,
+                started_at=wall_clock,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+
+        withheld = _withheld_servers(container)
+        if withheld is None:
+            return answer(STEP_WITHHELD_UNREAD.format(server=server), ok=False, made=False)
+        if ALL_SERVERS in withheld or server in withheld:
+            return answer(STEP_WITHHELD.format(server=server, tool=tool_name), ok=False, made=False)
+        configured = container.config.mcp.servers.get(server)
+        if configured is None or not getattr(configured, "enabled", True):
+            return answer(
+                STEP_NO_SERVER.format(server=server, tool=tool_name), ok=False, made=False
+            )
+        registry = container.get_server_registry()
+        tools, reasons = registry.tools_for_ref(
+            ToolRef(kind="mcp", server=server, name=tool_name),
+            container.job_key(),
+            truncation_ledger=container.get_truncation_ledger(),
+        )
+        if not tools:
+            return answer(
+                "; ".join(reasons) or f"{server} offered no tool named {tool_name}", ok=False
+            )
+        staged, _reasons = _stage(container, tools[:1], container.job_key())
+        staged = _mounted(container, tools[:1], staged)
+        target = staged.get(server)
+        if target:
+            held["sample_path"] = target
+            args = _step_arguments(step, facts, held)
+        budget = step.budget_seconds or getattr(facts, "timeout_seconds", None) or left
+        try:
+            output = str(
+                run_coro_blocking(
+                    tools[0].ainvoke(args),
+                    float(budget) if budget else None,
+                    label=f"triage:{tool_name}",
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — a failed step is an entry
+            return answer(f"{type(exc).__name__}: {exc}", ok=False)
+        # Handed in as a success and left to ``build_entry`` to read, as the
+        # reputation lookup's answer is.
+        return answer(output)
+
+    return call
 
 
 # Held while a degradation reason is added, so a parallel stage fan-out cannot
@@ -1235,18 +1399,97 @@ def with_verdict_fallback(validation: Any, failure: str) -> dict[str, Any]:
     return block
 
 
+def _function_hash_attribution(
+    container: ServiceContainer, state: AnalysisState, bundle: Any
+) -> list[dict[str, Any]]:
+    """The judge's function-hash read, and the write it holds for a completed job.
+
+    Read side: which known families this sample shares code with (threaded
+    into the report). Write side: this sample's function hashes, held on the
+    container under its assessed family until the job has completed
+    (``remember_the_run``). Runs only where attribution is on, the static
+    provider hashes functions, there is a mirror to read, and the configured
+    memory backend keeps a function-hash store. Fail-safe; never affects the
+    verdict.
+    """
+    try:
+        from maljan.core.config import get_settings
+
+        cfg = get_settings()
+        provider = container.get_static_provider()
+        from maljan.providers.base import preprocessing_of
+
+        pre = preprocessing_of(provider)
+        static_path = state.get("static_sample_path")
+        if not (
+            pre.use_function_hash_attribution
+            and provider.capabilities.provides_function_hashes
+            and static_path
+        ):
+            return []
+        from maljan.memory.store_factory import (
+            acquire_function_hash_store,
+            release_function_hash_store,
+        )
+
+        store = acquire_function_hash_store(cfg)
+        if store is None:
+            return []  # the configured memory backend keeps no function hashes
+        handed_on = False
+        try:
+            from maljan.analysis.function_hash_attribution import (
+                aggregate_matches,
+                to_report_dicts,
+            )
+            from maljan.providers.base import StaticJobContext
+
+            sample_id = state.get("file_hash", "") or ""
+            functions = provider.function_hashes(
+                StaticJobContext(mirror_sample_path=str(static_path))
+            )
+            if not functions:
+                return []
+            report = to_report_dicts(
+                aggregate_matches(
+                    store.match([h for _n, h in functions], exclude_sample_id=sample_id or None),
+                    max_families=pre.function_hash_max_matches,
+                ),
+                source=str(getattr(provider, "id", "") or ""),
+            )
+            # Only under a grounded family, so an UNKNOWN verdict cannot pollute
+            # the attribution corpus; held, not written, so a job that fails after
+            # its judge files nothing under a family nobody kept. The container
+            # takes over the hold and lets go once it has written, or at teardown.
+            family = _assessed_family(bundle)
+            if family:
+                container.hold_function_hashes(store, sample_id, family, functions)
+                handed_on = True
+            return report
+        finally:
+            if not handed_on:
+                release_function_hash_store(store)
+    except Exception as exc:
+        logger.warning("Function-hash attribution skipped (%s). Verdict unaffected.", exc)
+        return []
+
+
 def _function_matches_step(container: ServiceContainer, state: AnalysisState) -> Any:
     """The pack's exact-match attribution step, or ``None`` when it cannot run.
 
-    Three things have to be there: a Qdrant memory backend, a static provider
-    that can hash functions, and a mirror path for it to read. Without any
-    one of them there is no entry, because there is nothing that could have
-    been asked; with all three the step is the judge's function-hash read,
-    made before the analysts instead of after them.
+    Three things have to be there: a memory backend that keeps function
+    hashes, a static provider that can hash functions, and a mirror path for
+    it to read. Without any one of them there is no entry, because there is
+    nothing that could have been asked; with all three the step is the
+    judge's function-hash read, made before the analysts instead of after
+    them. A backend whose store could not be built still gets its entry,
+    saying why it found nothing.
     """
+    from maljan.core.settings_overrides import redact_url
+    from maljan.memory.store_factory import build_function_hash_store, configured_backend
+
     cfg = container.config
     static_path = state.get("static_sample_path")
-    if str(getattr(cfg.memory, "backend", "")) != "qdrant" or not static_path:
+    if not static_path:
         return None
     try:
         provider = container.get_static_provider()
@@ -1254,6 +1497,16 @@ def _function_matches_step(container: ServiceContainer, state: AnalysisState) ->
         logger.debug("triage pack: no static provider for function hashes (%s)", exc)
         return None
     if not provider.capabilities.provides_function_hashes:
+        return None
+    unavailable = ""
+    try:
+        store = build_function_hash_store(cfg)
+    except Exception as exc:  # noqa: BLE001 — said in the entry, never raised
+        store = None
+        # The entry reaches the models and the report; a URL in a builder's
+        # error may carry a password.
+        unavailable = redact_url(f"the function-hash store is unavailable: {exc}")
+    if store is None and not unavailable:
         return None
     sha256 = str(state.get("file_hash") or "")
 
@@ -1265,62 +1518,66 @@ def _function_matches_step(container: ServiceContainer, state: AnalysisState) ->
         hashes = [h for _name, h in provider.function_hashes(job)]
         args = {
             "func_hashes": hashes,
-            "qdrant_url": cfg.memory.qdrant_url,
-            "collection": cfg.memory.qdrant_function_hash_collection,
+            "backend": configured_backend(cfg),
             "exclude_sample_id": sha256,
         }
-        api_key = (
-            cfg.memory.qdrant_api_key.get_secret_value() if cfg.memory.qdrant_api_key else None
-        )
-        return args, knowledge.function_matches(
-            hashes,
-            cfg.memory.qdrant_url,
-            collection=cfg.memory.qdrant_function_hash_collection,
-            api_key=api_key,
-            exclude_sample_id=sha256,
-        )
+        if unavailable and hashes:
+            return args, {"matches": [], "reason": unavailable}
+        from maljan.memory.store_factory import leased_function_hash_store
+
+        # Held for the read: a settings change meanwhile closes this store only
+        # once the read has let go of it.
+        with leased_function_hash_store(cfg) as held:
+            return args, knowledge.function_matches(hashes, held, exclude_sample_id=sha256)
 
     return step
 
 
-def _ghidra_passes_step(container: ServiceContainer, state: AnalysisState) -> Any:
-    """The Ghidra the pack's passes call, or the sentence saying why there is none.
+def _anti_analysis_step(container: ServiceContainer, state: AnalysisState) -> Any:
+    """The anti-analysis scan the pack's pass makes, or ``None`` when no provider has one.
 
-    Ghidra has to be switched on, reached over its REST API (``http``: Ghidra
-    over stdio serves no endpoint the pack can call), and holding a copy of
-    this job's sample where it reads: the mirror the worker made for Ghidra as
-    a static provider of the run's profile. Each request waits what one tool
-    call of this deployment may take, as the sink pre-pass's do.
+    Asked of the run's static providers through the provider interface
+    (``StaticProvider.anti_analysis_scan``): the configured one first, then
+    each other provider of the run's profile, each with the copy of this job's
+    sample the worker mirrored for it. The first that can scan is the pass's;
+    when none can, the first sentence saying why it cannot is; a provider with
+    no scan answers ``None``, and with none the pack makes no anti-analysis
+    entry. Each
+    request waits what one call to that provider's server may take
+    (``StaticProvider.call_budget``), as the sink pre-pass's do.
     """
-    from maljan.analysis.ghidra_passes import (
-        GHIDRA_HAS_NO_COPY,
-        GHIDRA_NOT_OVER_HTTP,
-        GHIDRA_SWITCHED_OFF,
-        GhidraPasses,
-    )
-    from maljan.providers.server_guard import deployment_call_budget
+    from maljan.providers.base import StaticJobContext
 
     cfg = container.config
-    ghidra = cfg.static.ghidra
     paths = state.get("static_sample_paths") or {}
-    path = paths.get("ghidra") or (
-        state.get("static_sample_path") if cfg.static.provider == "ghidra" else None
-    )
-    if not bool(getattr(ghidra, "enabled", True)):
-        reason = GHIDRA_SWITCHED_OFF
-    elif ghidra.transport != "http":
-        reason = GHIDRA_NOT_OVER_HTTP.format(transport=ghidra.transport)
-    elif not path:
-        reason = GHIDRA_HAS_NO_COPY
-    else:
-        budget = deployment_call_budget(cfg)
-        return GhidraPasses(
-            base_url=str(ghidra.url),
-            token=ghidra.auth_token.get_secret_value(),
-            sample_path=str(path),
-            call_timeout=budget if budget > 0 else None,
-        )
-    return GhidraPasses(unavailable=reason)
+    configured = str(cfg.static.provider)
+    unavailable: Any = None
+    for provider_id in dict.fromkeys([configured, *paths]):
+        own = paths.get(provider_id)
+        path = own or (state.get("static_sample_path") if provider_id == configured else None)
+        try:
+            provider = container.get_static_provider(provider_id)
+            scan = provider.anti_analysis_scan(
+                StaticJobContext(mirror_sample_path=str(path) if path else None),
+                notes=getattr(container, "sample_notes", None),
+                call_budget=provider.call_budget(cfg),
+            )
+        except Exception as exc:  # noqa: BLE001 — a provider that cannot say is not asked
+            logger.debug(
+                "triage pack: a static provider gave no scan to make (%s)", type(exc).__name__
+            )
+            continue
+        if scan is None:
+            continue
+        if not getattr(scan, "unavailable", ""):
+            if unavailable is not None:
+                unavailable.close()
+            return scan
+        if unavailable is None:
+            unavailable = scan
+        else:
+            scan.close()
+    return unavailable
 
 
 def _pack_left_out(entries: list[Any], container: ServiceContainer) -> dict[str, Any] | None:
@@ -1346,24 +1603,147 @@ def _pack_left_out(entries: list[Any], container: ServiceContainer) -> dict[str,
     }
 
 
-def _analysis_server_environ(container: ServiceContainer) -> dict[str, str]:
-    """This process's environment with the analysis server's own ``env`` map over it.
+# The renderers of the pack's decoded-strings step and of its UPX carve. The
+# in-process decoder reads the environment of the server declaring the
+# decoder's tool (``FlossSettings.environ``); the carve writes where the
+# server declaring the unpack tool's kind reads (``PackInputs.carve_environ``).
+_DECODER_RENDERER = "emulated_strings"
+_CARVE_RENDERER = "unpacked_image"
 
-    What the pack's FLOSS step reads ``MALJAN_FLOSS_PATH`` and the staging base
-    from, so an operator who named the build or the base in the server's
-    settings gets the same build and the same directory from the pack as from
-    the tool. Never raises: a server entry that cannot be read leaves this
-    process's environment.
+
+def _pack_step_of(renderer: str, steps: Sequence[Any]) -> Any:
+    """The step of ``renderer`` in ``steps``, else its shipped declaration, else ``None``."""
+    from maljan.core.pack_steps import default_steps
+
+    def _of(held: Sequence[Any]) -> Any:
+        return next((s for s in held if getattr(s, "renderer", "") == renderer), None)
+
+    return _of(steps) or _of(default_steps())
+
+
+def _declared_kind(called: str) -> str:
+    """The kind the platform ships for a step's ``called`` tool, ``""`` for none."""
+    from maljan.core.declared_reading import shipped_by_name
+
+    facts = shipped_by_name().get(called)
+    return str(getattr(facts, "kind", "") or "")
+
+
+def _declaring_server_key(servers: Mapping[str, Any], called: str, *, purpose: str) -> str:
+    """The key of the server declaring a step's ``called`` tool or its kind, ``""`` for none.
+
+    The in-process step stands in for that server's tool whether the server
+    is switched on or not, so a switched-off server still lends its ``env``.
+    Among several, enabled servers come first: those declaring ``called`` by
+    name, then those declaring a tool of the same declared kind, each in
+    ``mcp.servers`` order; switched-off servers follow in the same order, a
+    last resort. When more than one qualifies, or the one read is switched
+    off, the choice is logged at info (the node resolves each purpose once
+    per run).
+    """
+    kind = _declared_kind(called)
+    by_name: dict[bool, list[str]] = {True: [], False: []}
+    by_kind: dict[bool, list[str]] = {True: [], False: []}
+    for key, server in servers.items():
+        enabled = bool(getattr(server, "enabled", True))
+        facts = getattr(server, "tool_facts", None) or {}
+        if called in facts:
+            by_name[enabled].append(str(key))
+        elif kind and any(getattr(f, "kind", None) == kind for f in facts.values()):
+            by_kind[enabled].append(str(key))
+    qualified = by_name[True] + by_kind[True] + by_name[False] + by_kind[False]
+    if not qualified:
+        return ""
+    chosen = qualified[0]
+    switched_off = chosen in by_name[False] or chosen in by_kind[False]
+    if len(qualified) > 1 or switched_off:
+        declared = repr(called)
+        if by_kind[True] or by_kind[False]:
+            declared = f"{called!r} or its kind {kind!r}"
+        also = ""
+        if len(qualified) > 1:
+            also = f"; {', '.join(repr(k) for k in qualified[1:])} also declare {declared}"
+        off = " (switched off; its env is still read)" if switched_off else ""
+        logger.info("triage pack: %s reads server %r%s%s.", purpose, chosen, off, also)
+    return chosen
+
+
+def _decoder_server_key(servers: Mapping[str, Any], steps: Sequence[Any]) -> str:
+    """The key of the server the pack's decoded-strings step declares, ``""`` for none.
+
+    The step's own ``server`` when it is enabled, else the server declaring
+    the tool the step calls (:func:`_declaring_server_key`): the
+    server whose tool the in-process step stands in for. With the step left
+    out of ``steps`` (switched off), its shipped declaration is read.
+    """
+    step = _pack_step_of(_DECODER_RENDERER, steps)
+    if step is None:
+        return ""
+    if step.server:
+        named = servers.get(step.server)
+        if named is not None and getattr(named, "enabled", True):
+            return str(step.server)
+    return _declaring_server_key(servers, step.called, purpose="the decoder")
+
+
+def _carve_server_key(servers: Mapping[str, Any]) -> str:
+    """The key of the server whose file tools read what the pack's UPX carve writes.
+
+    The carve is the platform's own step, so its shipped declaration names
+    the tool it stands in for; the server declaring that tool or its kind
+    (:func:`_declaring_server_key`) is the one whose staging base the
+    carve writes under. Independent of the decoded-strings step: an operator
+    who moves that step to another server leaves the carve where it was.
+    """
+    step = _pack_step_of(_CARVE_RENDERER, ())
+    if step is None:
+        return ""
+    return _declaring_server_key(servers, step.called, purpose="the unpack carve")
+
+
+def _server_environ(
+    container: ServiceContainer, pick: Callable[[Mapping[str, Any]], str], what: str
+) -> dict[str, str]:
+    """This process's environment with the picked server's own ``env`` map over it.
+
+    Never raises: a server entry that cannot be read, or no server picked,
+    leaves this process's environment, and is logged.
     """
     environ = dict(os.environ)
     try:
-        server = container.config.mcp.servers.get("analysis")
+        servers = container.config.mcp.servers
+        key = pick(servers)
+        server = servers.get(key) if key else None
         extra = dict(getattr(server, "env", None) or {})
     except Exception as exc:  # noqa: BLE001 — an unreadable entry adds nothing
-        logger.debug("triage pack: the analysis server's env could not be read (%s).", exc)
+        logger.debug("triage pack: the %s server's env could not be read (%s).", what, exc)
         return environ
+    if not key:
+        logger.debug("triage pack: no server declares the %s's tool; own env read.", what)
     environ.update({str(k): str(v) for k, v in extra.items()})
     return environ
+
+
+def _decoder_server_environ(container: ServiceContainer, steps: Sequence[Any]) -> dict[str, str]:
+    """The environment the pack's decoded-strings step reads its build path from.
+
+    The decoder step's server's own ``env`` over this process's
+    (:func:`_decoder_server_key`), so an operator who named the build in the
+    server's settings gets the same build from the pack as from the tool.
+    """
+    return _server_environ(
+        container, lambda servers: _decoder_server_key(servers, steps), "decoder"
+    )
+
+
+def _carve_server_environ(container: ServiceContainer) -> dict[str, str]:
+    """The environment the pack's UPX carve reads its staging base from.
+
+    The unpack-declaring server's own ``env`` over this process's
+    (:func:`_carve_server_key`), so the ``carved_path`` the entry gives is
+    one that server's file tools open.
+    """
+    return _server_environ(container, _carve_server_key, "unpack carve")
 
 
 def _knowledge_module() -> Any:
@@ -1428,8 +1808,10 @@ def make_triage_node(
         )
         cfg = container.config
         capa_cfg = cfg.static.capa
+        from maljan.core.pack_steps import effective_steps
         from maljan.providers import sandbox_tools
 
+        steps = effective_steps(getattr(cfg.triage, "steps", None) or ())
         inputs = PackInputs(
             sample_path=path,
             sha256=str(state.get("file_hash") or ""),
@@ -1447,8 +1829,10 @@ def make_triage_node(
             budget_s=float(cfg.triage.budget_seconds),
             memory_floor_bytes=int(cfg.triage.memory_floor_mb) * 1024 * 1024,
             floss=FlossSettings(
-                environ=_analysis_server_environ(container), job_id=container.job_key()
+                environ=_decoder_server_environ(container, steps), job_id=container.job_key()
             ),
+            carve_environ=_carve_server_environ(container),
+            steps=steps,
         )
 
         def _elapsed_ms() -> int:
@@ -1461,7 +1845,8 @@ def make_triage_node(
                 inputs,
                 reputation=_reputation_lookup(container, inputs.sha256),
                 function_matches=_function_matches_step(container, state),
-                ghidra=_ghidra_passes_step(container, state),
+                anti_analysis=_anti_analysis_step(container, state),
+                server_step=_server_step_call(container),
             )
         except Exception as exc:  # noqa: BLE001 — the pack never fails the job
             logger.warning(
@@ -1568,19 +1953,15 @@ def _sample_identity(state: AnalysisState) -> dict[str, Any]:
     return {key: value for key, value in identity.items() if str(value or "").strip()}
 
 
-def _ledger_servers(state: AnalysisState) -> set[str]:
-    """Every server the run has recorded a tool call against, by key.
+def _reputation_asked(state: AnalysisState) -> bool:
+    """Whether the run has recorded a call to a reputation lookup, from any server.
 
-    Read off the raw rows rather than through ``LedgerEntry``: the question is
-    which servers were asked, one malformed row must not cost the answer, and
-    a row written by an in-process tool carries no server at all.
+    By each entry's declared kind (``core.reputation.asked``), read off the
+    raw rows: one malformed row must not cost the answer.
     """
-    servers: set[str] = set()
-    for row in state.get("evidence_ledger") or []:
-        name = row.get("server") if isinstance(row, dict) else getattr(row, "server", None)
-        if name:
-            servers.add(str(name))
-    return servers
+    from maljan.core.reputation import asked
+
+    return asked(state.get("evidence_ledger") or [])
 
 
 # ---------------------------------------------------------------------------
@@ -1588,18 +1969,26 @@ def _ledger_servers(state: AnalysisState) -> set[str]:
 # ---------------------------------------------------------------------------
 
 
-def pack_text(state: AnalysisState, container: ServiceContainer) -> str:
+def pack_text(
+    state: AnalysisState, container: ServiceContainer, *, for_reporter: bool = False
+) -> str:
     """The triage pack as every agent is shown it, or ``""`` on a run without one.
 
     Cut at the same bound the upstream findings block has
     (:func:`upstream_chars`): both are what a stage is told before it starts,
     and one budget for the two keeps a long pack from spending a late stage's
-    context.
+    context. The reporter's models are not among the job's window
+    (``composition.window_assignments``), so for the narrative and the
+    composer (``for_reporter``) the pack is cut at the smaller of the job's
+    bound and the one the reporter's own models' window derives.
     """
-    return pack_block(pack_entries(state.get("evidence_ledger") or []), upstream_chars(container))
+    chars = upstream_chars(container)
+    if for_reporter:
+        chars = min(chars, upstream_chars(container, reporter=True))
+    return pack_block(pack_entries(state.get("evidence_ledger") or []), chars)
 
 
-def upstream_chars(container: ServiceContainer) -> int:
+def upstream_chars(container: ServiceContainer, *, reporter: bool = False) -> int:
     """How many characters the upstream findings block and the triage pack may take.
 
     ``reporting.upstream_findings_max_chars`` above 0 is the operator's; at 0,
@@ -1615,7 +2004,11 @@ def upstream_chars(container: ServiceContainer) -> int:
     budget: Any = None
     if configured <= 0:
         try:
-            budget = container.get_context_budget()
+            budget = (
+                container.get_reporter_context_budget()
+                if reporter
+                else container.get_context_budget()
+            )
         except Exception as exc:  # noqa: BLE001 — no window is the documented fallback
             logger.debug("upstream findings: no context budget (%s)", exc)
     chars, how = upstream_block_chars(configured, budget)
@@ -1765,7 +2158,11 @@ def stage_context(state: AnalysisState) -> StageContext:
         has_pcap=bool(isinstance(network, dict) and network),
         has_sandbox_report=bool(report),
         stages=results,
-        triage=TriageFacts.from_dict(state.get("triage_facts") or {}),
+        # The rule matches every answer recorded so far holds, the pack's and
+        # earlier stages' alike, whichever server answered.
+        triage=TriageFacts.from_dict(state.get("triage_facts") or {}).with_hits(
+            *rule_match_hits(state.get("evidence_ledger") or [])
+        ),
     )
 
 
@@ -1921,6 +2318,8 @@ def upstream_findings(stage: Any, state: AnalysisState, container: ServiceContai
             ):
                 technique = f"{technique} — {ABSENCE_TECHNIQUE_MARKER}"
             reference = getattr(claim, "evidence_ref", "") or "—"
+            if getattr(claim, "cites_only_failed_calls", False):
+                reference = f"{reference}, {FAILED_CALLS_MARKER}"
             confidence = float(getattr(claim, "confidence", 0.0) or 0.0)
             text = " ".join(str(getattr(claim, "claim", "") or "").split())
             lines.append(f"- {text} [{technique}, confidence {confidence:.2f}, {reference}]")
@@ -1939,6 +2338,81 @@ def upstream_findings(stage: Any, state: AnalysisState, container: ServiceContai
     if limit and len(block) > limit:
         block = block[:limit].rstrip() + "\n\n[upstream findings truncated]"
     return block
+
+
+def input_room_of(agent: Any) -> Room:
+    """The characters of input ``agent``'s prompt has room for, as the chunker asks it.
+
+    The analyst's own measure (``BaseAnalyst._input_room_chars``): the room its
+    window leaves before the reply, less the prompt around the input and one
+    tool answer's share, or the operator's ``max_token_limit``. The same bound
+    an input is shortened at, so a chunk of this size reaches the model whole.
+    An agent that cannot say has no room to give: ``None``, and the chunker
+    uses the unknown-window size (``UNKNOWN_WINDOW_CHUNK_TOKENS``).
+    """
+    measure = getattr(agent, "_input_room_chars", None)
+
+    def room(text: str) -> int | None:
+        if not callable(measure):
+            return None
+        try:
+            chars = measure(text)
+        except Exception as exc:  # noqa: BLE001 — no measure is no bound, never a lost analyst
+            logger.debug("input room: not measured (%s)", exc)
+            return None
+        return chars if isinstance(chars, int) and not isinstance(chars, bool) else None
+
+    return room
+
+
+def agent_input_room(container: Any, agent_name: str) -> Room:
+    """The input room of agent ``agent_name``, for a caller that holds only its name.
+
+    What a revision path hands ``container.load_chunked`` and
+    ``container.load_data_for_agent`` (``room=``) so its input is chunked
+    where the agent's first analysis chunked it. An agent that cannot be built
+    has no room to give, and the chunker uses the unknown-window size.
+    """
+    try:
+        agent = container.get_agent(agent_name)
+    except Exception as exc:  # noqa: BLE001 — no agent is no measure, never a lost revision
+        logger.debug("input room: agent %r not built (%s)", agent_name, exc)
+        agent = None
+    return input_room_of(agent)
+
+
+def added_to_head(
+    state: AnalysisState, block: str, *, sample_fed: bool, provider_id: str | None
+) -> Callable[[str], int]:
+    """How many characters the node adds to a head chunk of a source's text, asked before chunking.
+
+    The head is measured as it will be shown: the sample path written in for a
+    role whose tools open the sample (``_augment_static_chunks_with_path``, a
+    JSON head written out again indented), then the upstream block
+    (``_with_upstream``). At least the block and its break, which is what a
+    piece of a split source gains: it is no JSON head and takes the block in
+    front of it.
+    """
+    in_front = len(block) + len(SOURCE_SEPARATOR) if block else 0
+
+    def added(text: str) -> int:
+        shown: list = [
+            TextChunk(
+                index=0,
+                total=1,
+                strategy=ChunkStrategy.SLIDING_WINDOW,
+                content=text,
+                char_count=len(text),
+                token_estimate=len(text) // 4,
+                domain="head",
+            )
+        ]
+        if sample_fed:
+            shown = _augment_static_chunks_with_path(shown, state, provider_id=provider_id)
+        shown = _with_upstream(shown, block)
+        return max(len(str(shown[0].content)) - len(text), in_front)
+
+    return added
 
 
 def _with_upstream(chunks: list, block: str) -> list:
@@ -2084,7 +2558,7 @@ def _remember_the_published_techniques(
     applied to the claimed set is applied again to the published one, and a
     case thin in what was published is not stored.
     """
-    from maljan.analysis.corroboration import corroboration_sources
+    from maljan.analysis.corroboration import corroborated as stands_on_two
     from maljan.memory.long_term_memory import (
         StoredCase,
         is_thin_case,
@@ -2100,9 +2574,7 @@ def _remember_the_published_techniques(
             for mapping in (getattr(report, "ttp_mappings", None) or [])
         ]
         corroborated = [
-            str(tid)
-            for tid, row in (corroboration or {}).items()
-            if len(corroboration_sources(row)) > 1
+            str(tid) for tid, row in (corroboration or {}).items() if stands_on_two(row)
         ]
         moved = with_published_techniques(case, published, isr_reports, corroborated)
         if is_thin_case(moved):
@@ -2489,7 +2961,9 @@ def make_join_node(stage: Any, container: ServiceContainer, finishes: tuple[str,
 # sample's format never calls on is not something this run lost: a missing
 # Mach-O library on a PE sample said nothing about the PE and still reached
 # the report's first page as a degradation. A tool not named here, or a sample
-# whose format is unknown, keeps its reason.
+# whose format is unknown, keeps its reason. The table names the platform's own
+# parsers: it is read only for a built-in server that ships the tool, never for
+# an operator's server whose tool shares a name with one of them.
 _FORMAT_TOOLS: dict[str, frozenset[str]] = {
     "pe_info": frozenset({"pe"}),
     "elf_info": frozenset({"elf"}),
@@ -2499,7 +2973,7 @@ _FORMAT_TOOLS: dict[str, frozenset[str]] = {
 }
 
 
-_UNAVAILABLE_TOOL_RE = re.compile(r"^server\.[^.]+\.(?P<tool>[^.(]+)_unavailable\(")
+_UNAVAILABLE_TOOL_RE = re.compile(r"^server\.(?P<server>[^.]+)\.(?P<tool>[^.(]+)_unavailable\(")
 
 
 def reason_applies_to_format(reason: str, file_type: str) -> bool:
@@ -2510,11 +2984,19 @@ def reason_applies_to_format(reason: str, file_type: str) -> bool:
     format-specific parser the routed format never needs is left out.
     """
     match = _UNAVAILABLE_TOOL_RE.match(str(reason or ""))
-    return match is None or _needed_for(match.group("tool"), file_type)
+    return match is None or _needed_for(match.group("tool"), file_type, match.group("server"))
 
 
-def _needed_for(tool: str, file_type: str) -> bool:
-    """Whether a missing ``tool`` costs this sample anything, by its routed format."""
+def _needed_for(tool: str, file_type: str, server: str) -> bool:
+    """Whether ``server``'s missing ``tool`` costs this sample anything, by its routed format.
+
+    Only a built-in server's own parser is read by the format table; any other
+    server's tool keeps its reason whatever it is called.
+    """
+    from maljan.core.declared_reading import ships_tool
+
+    if not ships_tool(f"mcp:{server}", tool):
+        return True
     formats = _FORMAT_TOOLS.get(tool)
     routed = str(file_type or "").strip().lower()
     if formats is None or not routed or routed == "unknown":
@@ -2555,7 +3037,7 @@ def note_unavailable_tools(
         if manifest is None:
             continue
         for missing in manifest.unavailable(names):
-            if not _needed_for(missing.tool, file_type):
+            if not _needed_for(missing.tool, file_type, key):
                 continue
             reason = missing.degradation_reason
             noted.append(reason)
@@ -2715,11 +3197,30 @@ def make_stage_agent_node(
             if role in SAMPLE_FED_ROLES:
                 _pin_sample_path(agent, state)
 
+            # A chunk is what this analyst's prompt has room for, measured
+            # by the analyst from its own window once the pack is on it.
+            room = input_room_of(agent)
+            # What goes into the head chunk after it is sized — the sample
+            # path and the upstream block — is kept out of the head source's
+            # room before it is chunked, never below the shipped size.
+            upstream_block = upstream_findings(stage, state, container)
             chunks = container.load_data_for_agent(
                 agent_name,
                 file_hash=state["file_hash"],
                 sandbox_report=sandbox_report,
                 sample_path=_absolute_host_sample_path(state) or None,
+                room=room,
+                head_room=head_room(
+                    room,
+                    added_to_head(
+                        state,
+                        upstream_block,
+                        sample_fed=role in SAMPLE_FED_ROLES,
+                        provider_id=(
+                            agent._resolved.static_provider_id if role in SAMPLE_FED_ROLES else None
+                        ),
+                    ),
+                ),
             )
 
             if role in SAMPLE_FED_ROLES:
@@ -2800,7 +3301,9 @@ def make_stage_agent_node(
                     }
                 )
 
-            chunks = _with_upstream(chunks, upstream_findings(stage, state, container))
+            chunks = _with_upstream(chunks, upstream_block)
+            # Sources that fit the room together are one chunk, and one loop.
+            chunks = joined_when_it_fits(chunks, container.config.chunking, room)
 
             if len(chunks) == 1:
                 # View-decomposition pilot (findings-log §3.6): when enabled,
@@ -3106,12 +3609,16 @@ def _revision_input_is_absent(
     if _sandbox_fed(container.agent_role(agent_name)) and _sandbox_report_is_synthetic(state):
         return True
     sandbox_report = state.get("sandbox_report")
+    # The data is chunked at the agent's own input room, as its first
+    # analysis chunked it.
+    room = agent_input_room(container, agent_name)
     if isinstance(sandbox_report, dict) and sandbox_report:
         try:
             sandbox_chunks = container.load_data_for_agent(
                 agent_name,
                 file_hash=str(state.get("file_hash") or ""),
                 sandbox_report=sandbox_report,
+                room=room,
             )
         except Exception as exc:  # noqa: BLE001 — fails open, same as the loader below
             logger.debug(
@@ -3123,7 +3630,7 @@ def _revision_input_is_absent(
         if sandbox_chunks:
             return False
     try:
-        chunks = container.load_chunked(state.get("file_hash", ""), agent_name)
+        chunks = container.load_chunked(state.get("file_hash", ""), agent_name, room=room)
     except Exception as exc:  # noqa: BLE001
         logger.debug(
             "_revision_input_is_absent: load_chunked failed for '%s' (%s); revising anyway.",
@@ -3149,7 +3656,11 @@ def _build_revision_context(
     file_hash = state.get("file_hash", "")
 
     try:
-        chunks = container.load_chunked(file_hash, agent_name)
+        # Chunked at the agent's own input room, as its first analysis was:
+        # an input that fits that room is one chunk and is revised whole.
+        chunks = container.load_chunked(
+            file_hash, agent_name, room=agent_input_room(container, agent_name)
+        )
     except Exception as exc:
         logger.warning(
             "_build_revision_context: load_chunked failed for '%s/%s' (%s). "
@@ -3340,6 +3851,13 @@ _NO_CONSENSUS_MEASURED: dict[str, Any] = {
     "consensus_applicable": False,
     "confidence_history": [],
 }
+# What a round whose mediator wrote no answer writes: consensus applies and is
+# neither reached nor refused; the router reads the argument's status.
+_NOT_MEDIATED: dict[str, Any] = {
+    "is_consensus": None,
+    "consensus_applicable": True,
+    "confidence_history": [],
+}
 
 
 def _ledger_counts(state: AnalysisState, agent_names: Sequence[str], argument: Any) -> list[str]:
@@ -3359,6 +3877,23 @@ def _ledger_counts(state: AnalysisState, agent_names: Sequence[str], argument: A
         )
     except Exception as exc:  # noqa: BLE001 — no fact is stated
         logger.debug("negotiation: the ledger counts were not read (%s).", exc)
+        return []
+
+
+def _place_facts(state: AnalysisState, agent_names: Sequence[str], argument: Any) -> list[str]:
+    """The functions the blocking lines name and whether each was listed. Never raises."""
+    lines = list(getattr(argument, "contradictions", None) or [])
+    if not lines:
+        return []
+    try:
+        return place_facts(
+            lines,
+            dict(state.get("isr_reports") or {}),
+            list(state.get("evidence_ledger") or []),
+            list(agent_names),
+        )
+    except Exception as exc:  # noqa: BLE001 — no fact is stated
+        logger.debug("negotiation: the places the lines name were not read (%s).", exc)
         return []
 
 
@@ -3471,8 +4006,39 @@ def make_negotiation_node(
                 **_debate_record(stage, started),
             }
 
-        # Sycophancy detector skips the first round internally.
-        syco = detect_sycophancy(current_isrs, iteration=iteration) if current_isrs else False
+        # Sycophancy detector skips the first round internally. It judges only
+        # pairs with an answer revised in the round right before this
+        # mediation: an analyst whose revision was not made, or not asked,
+        # holds the answer it held before that round.
+        round_before = revision_round_before(state, mediations=iteration + 1)
+        revised_names = revised_in(round_before)
+        # The convergence the round before recorded: a revision that moved
+        # towards a peer beyond the sources both cite. Told to the mediator as
+        # a fact where the stage asks for the check; it decides nothing.
+        converged = (
+            list(round_before.get("converged") or [])
+            if isinstance(round_before, dict) and isinstance(round_before.get("converged"), list)
+            else None
+        )
+        if not bool(getattr(getattr(stage, "debate", None), "sycophancy_check", True)):
+            converged = []
+        syco = (
+            detect_sycophancy(
+                current_isrs,
+                iteration=iteration,
+                revised=None
+                if revised_names is None
+                else {
+                    isr.agent_id
+                    for name, isr in (state.get("isr_reports") or {}).items()
+                    if name in revised_names
+                },
+                converged=converged,
+            )
+            if current_isrs
+            else False
+        )
+        convergence_said = convergence_sentence(converged or []) if syco else ""
 
         def _judge_evidence() -> list[dict[str, Any]]:
             """The judges' tool calls, drained from every cached role.
@@ -3513,26 +4079,31 @@ def make_negotiation_node(
             #
             # ``mediate`` budgets itself internally (the judge's own loop
             # budget for the reasoning call, then the bounded structured-output
-            # retries), so the outer cap covers both phases plus the house +30s
+            # retries), so the outer cap covers every phase plus the house +30s
             # of decode headroom rather than truncating a mediation that is
             # still working. A judge with no time limit has no outer cap: each
             # of its calls waits as long as its answer takes at the model's
             # measured pace.
             from maljan.agents.base_agent import loop_limits
+            from maljan.agents.judge_agent import MEDIATION_CALL_SPANS
 
             judge_timeout, _judge_steps = loop_limits("judge")
-            mediation_timeout = None if judge_timeout is None else float(judge_timeout) * 2 + 30
+            # Every call the mediation can make one after another
+            # (``MEDIATION_CALL_SPANS``), each within the judge's own limit.
+            mediation_timeout = (
+                None if judge_timeout is None else float(judge_timeout) * MEDIATION_CALL_SPANS + 30
+            )
             argument, is_consensus = await run_on_agent_loop(
                 judge.mediate(
                     reports=active_reports,
                     history=state.get("discussion_history") or [],
                     isr_reports=state.get("isr_reports") or {},
-                    # Which servers the run has actually called. The mediator
-                    # opens its tool loop to ask who this sample is only when
-                    # nothing has asked a reputation server yet, and that is a
+                    # Whether the run has called a reputation lookup. The
+                    # mediator opens its tool loop to ask who this sample is
+                    # only when nothing has asked one yet, and that is a
                     # question about the ledger rather than about the
                     # analysts' prose.
-                    ledger_servers=_ledger_servers(state),
+                    reputation_asked=_reputation_asked(state),
                     # The sample's own facts. The mediator tells the judge to
                     # look a hash up, and until now no message in the
                     # conversation carried one.
@@ -3544,7 +4115,8 @@ def make_negotiation_node(
                     # The same facts the analysts were given, so the mediator
                     # weighs their reports against the record rather than
                     # against each other alone.
-                    facts_block=pack_text(state, container),
+                    facts_block=pack_text(state, container)
+                    + (f"\n\n{convergence_said}" if convergence_said else ""),
                     run_state=render_run_state(state),
                 ),
                 hard_timeout=mediation_timeout,
@@ -3565,7 +4137,9 @@ def make_negotiation_node(
                 container.event_sink,
                 speaker=ROOM_SPEAKER,
                 role="negotiator",
-                text=f"Mediator: {argument.finding}",
+                # A mediator that wrote no answer has no words: the room is
+                # told the platform's sentence saying so.
+                text=f"Mediator: {argument.finding or argument.note}",
                 round_index=iteration + 1,
                 status="complete",
                 confidence=argument.confidence_score,
@@ -3579,6 +4153,33 @@ def make_negotiation_node(
             # analysts each line names and on the next mediation's prompt, and
             # a debate that ends here spends nothing on them.
             platform_said = _ledger_counts(state, agent_names, argument)
+            # Who the mediation asks to revise: the analysts its blocking lines
+            # name in their [analysts: ...] field, read and never guessed.
+            if measured and argument.status == "complete":
+                if argument.note == CONTRADICTIONS_BLOCK_MISSING_NOTE:
+                    argument.revise, argument.revise_note = None, BLOCK_NOT_READ_NOTE
+                else:
+                    argument.revise, argument.revise_note = analysts_to_revise(
+                        list(argument.contradictions or []), agent_names
+                    )
+                if argument.revise_note:
+                    logger.info("negotiation: %s", argument.revise_note)
+            # The functions the blocking lines name, and whether the ledger
+            # holds a listing of each: told to the analysts each line names in
+            # the next revision, with no call made for them.
+            places = _place_facts(state, agent_names, argument)
+            if places:
+                argument.place_facts = list(places)
+                emit_agent_message(
+                    container.event_sink,
+                    speaker=ROOM_SPEAKER,
+                    role="system",
+                    text="\n".join(str(sentence) for sentence in places),
+                    round_index=iteration + 1,
+                    status="complete",
+                    stage=stage_key_of(stage, "debate"),
+                    kind="system",
+                )
             if platform_said:
                 argument.ledger_facts = list(platform_said)
                 emit_agent_message(
@@ -3592,15 +4193,15 @@ def make_negotiation_node(
                     kind="system",
                 )
             if syco:
+                argument.converged = list(converged or [])
                 emit_agent_message(
                     container.event_sink,
                     speaker=ROOM_SPEAKER,
                     role="system",
-                    text=(
-                        "Sycophancy detector: agents converged without new evidence — "
-                        "flagged as sycophantic agreement. The next revision round "
-                        "carries a directive to re-argue from evidence rather than "
-                        "defer to peers."
+                    text=convergence_said
+                    or (
+                        "Sycophancy detector: agents converged without new evidence. "
+                        "The mediator was told; it decides nothing."
                     ),
                     round_index=iteration + 1,
                     status="complete",
@@ -3619,6 +4220,11 @@ def make_negotiation_node(
                         "confidence_history": [mean_conf],
                     }
                     if measured
+                    # A mediator that wrote no answer measured nothing while
+                    # consensus still applies: like a failed round, it is
+                    # neither agreement nor disagreement.
+                    else _NOT_MEDIATED
+                    if applies and argument.status == MEDIATOR_NO_ANSWER
                     else _NO_CONSENSUS_MEASURED
                 ),
                 "sycophancy_detected": syco,
@@ -3711,8 +4317,41 @@ def _home_stage(container: ServiceContainer, name: str) -> Any:
     return None
 
 
+# Why an analyst's answer in force stood through a revision round it was not
+# asked to revise in.
+NOT_ASKED_TO_REVISE = "not asked: no data to revise"
+NOT_NAMED_BY_MEDIATOR = "not asked: not named by the mediator"
+
+
+def _round_convergence(
+    state: AnalysisState,
+    before: Mapping[str, Any],
+    after: Mapping[str, Any],
+    revised: Sequence[str],
+    round_ledger: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """The round's convergence flags (``sycophancy_detector.convergence_flags``). Never raises."""
+    try:
+        texts: dict[str, str] = {}
+        for row in [*(state.get("evidence_ledger") or []), *round_ledger]:
+            entry_id = str(
+                (row.get("id") if isinstance(row, Mapping) else getattr(row, "id", "")) or ""
+            ).lower()
+            output = row.get("output") if isinstance(row, Mapping) else getattr(row, "output", "")
+            if entry_id:
+                texts[entry_id] = str(output or "")
+        calls: dict[str, int] = {}
+        for row in round_ledger:
+            agent = str(row.get("agent") or "")
+            calls[agent] = calls.get(agent, 0) + 1
+        return convergence_flags(before, after, revised, calls, texts)
+    except Exception as exc:  # noqa: BLE001 — a reading not made is no flag
+        logger.debug("revision: the round's convergence was not read (%s).", exc)
+        return []
+
+
 def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any:
-    """Factory: creates the revision node where all agents revise concurrently."""
+    """Factory: the revision node, where the analysts the mediation names revise."""
 
     async def node_fn(state: AnalysisState) -> dict[str, Any]:
         started = time.monotonic()
@@ -3722,14 +4361,29 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         history = state.get("discussion_history") or []
         mediator_feedback = ""
         ledger_facts: list[str] = []
+        places: list[str] = []
+        mediation: Any = None
         for arg in reversed(history):
             if arg.agent_name == "Mediator":
                 mediator_feedback = arg.finding
                 ledger_facts = list(getattr(arg, "ledger_facts", None) or [])
+                places = list(getattr(arg, "place_facts", None) or [])
+                mediation = arg
                 break
 
-        syco_detected = state.get("sycophancy_detected", False)
-        revision_directive = build_revision_directive(syco_detected, mediator_feedback)
+        # A convergence flag reached the mediator as a fact and nothing else:
+        # no analyst is told it, and it never widens who is asked.
+        revision_directive = mediator_feedback
+
+        # Whom the round asks: the analysts the mediation named in a contested
+        # point (``AgentArgument.revise``). Names not read ask every analyst,
+        # as before, and the round's record says why.
+        named = getattr(mediation, "revise", None)
+        asked_all = ""
+        if named is None:
+            asked_all = str(getattr(mediation, "revise_note", "") or "")
+        asked = list(agent_names) if named is None else [n for n in agent_names if n in named]
+        contested = list(getattr(mediation, "contradictions", None) or [])
 
         original_reports = state.get("reports") or {}
         # The answer each analyst has in force before this round: its last
@@ -3756,6 +4410,9 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 **_debate_record(stage, started),
             }
 
+        # The analysts this round did not ask: they had no data to revise.
+        not_asked: set[str] = set()
+
         async def _revise_one(name: str) -> tuple[str, AgentISR]:
             # Same guard the analyst node applies before the initial pass. It
             # was missing here, so every negotiation round re-ran the analysts
@@ -3770,6 +4427,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
             # Measured 2026-07-29 with CAPE unreachable: the sycophancy
             # detector flagged static vs dynamic at sim=1.000.
             if _revision_input_is_absent(state, container, name):
+                not_asked.add(name)
                 # Declining to revise is the point; deleting is not (BUG 12).
                 # An analyst that made claims on round 0 keeps them — whatever
                 # the guard now says about round 1, those claims were made
@@ -3800,14 +4458,38 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
             brief_agent(agent, state, container)
             own_report = reports_in_force.get(name, "")
             peer_reports = {k: v for k, v in reports_in_force.items() if k != name}
+            directive = revision_directive
+            if named is not None:
+                # A named analyst is shown the contested points that name it
+                # and the peers those points name, not every peer's answer.
+                feedback, peer_reports = contested_input(
+                    name,
+                    mediator_feedback,
+                    contested,
+                    agent_names,
+                    reports_in_force,
+                    {n: label_of(container, n) for n in [*agent_names, *reports_in_force]},
+                )
+                directive = feedback
+            # The functions the lines naming this analyst name, and whether
+            # each was listed. An analyst with tools is told it can read one
+            # the ledger never listed, and its revision is given its tools.
+            mine = place_facts_for(name, places, agent_names)
+            can_read = bool(tools_taking_an_address(getattr(agent, "tools", None) or ()))
+            reads = can_read and names_an_unlisted_place(mine)
             return await asyncio.to_thread(
                 agent.safe_revise_isr,
                 data,
                 own_report,
                 peer_reports,
                 # The ledger counts of the lines that name this analyst.
-                with_ledger_facts(revision_directive, facts_naming(name, ledger_facts)),
+                with_place_facts(
+                    with_ledger_facts(directive, facts_naming(name, ledger_facts)),
+                    mine,
+                    can_read=can_read,
+                ),
                 iteration,
+                **({"read_places": True} if reads else {}),
             )
 
         # Slot-topology parity with the initial fan-out (builder.py). On a
@@ -3835,10 +4517,10 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
 
         results: list[Any] = []
         if parallel:
-            tasks = [_revise_one(name) for name in agent_names]
+            tasks = [_revise_one(name) for name in asked]
             results = list(await asyncio.gather(*tasks, return_exceptions=True))
         else:
-            for name in agent_names:
+            for name in asked:
                 try:
                     results.append(await _revise_one(name))
                 except Exception as exc:  # noqa: BLE001 — parity with gather()
@@ -3866,11 +4548,16 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         # answer in force again, word for word: the router's convergence test.
         made = 0
         identical = True
+        # Who was revised in this round, and why each other analyst was not:
+        # the sycophancy check judges only the answers revised in the round.
+        revised_names: list[str] = []
+        not_revised: dict[str, str] = {}
 
         def _keep_the_answer_in_force(
-            name: str, why: str, status: str = "", report: str = ""
+            name: str, why: str, status: str = "", report: str = "", *, was_asked: bool = True
         ) -> None:
             """A revision that was not made leaves the answer in force standing, whole."""
+            not_revised[name] = NOT_ASKED_TO_REVISE if name in not_asked else why
             kept = kept_isrs.get(name)
             if kept is None:
                 kept = _empty_isr(name, revision_round=iteration)
@@ -3879,7 +4566,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
             label = label_of(container, name)
             spoken = spoken_name(container, name, _home_stage(container, name))
             source = claims_source(container, name, _home_stage(container, name))
-            logger.warning(
+            (logger.warning if was_asked else logger.info)(
                 "%s: the round-%d revision was not made (%s); its answer in force stands with "
                 "%d claim(s).",
                 name,
@@ -3906,9 +4593,14 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 display_name=label,
             )
 
-        # strict=True: agent_names and results MUST be equal length; mismatch
+        # An analyst the mediation did not name keeps its answer in force.
+        for name in agent_names:
+            if name not in asked:
+                _keep_the_answer_in_force(name, NOT_NAMED_BY_MEDIATOR, was_asked=False)
+
+        # strict=True: asked and results MUST be equal length; mismatch
         # is a programming error and must surface, not be silently truncated.
-        for name, result in zip(agent_names, results, strict=True):
+        for name, result in zip(asked, results, strict=True):
             if isinstance(result, BaseException):
                 logger.error("%s revision failed: %s", name, result)
                 # The class of the failure and nothing else, as the judge and
@@ -3964,8 +4656,14 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 in_force_text = kept_texts.get(name) or original_reports.get(name, "")
                 revised[name] = revised_text
                 revised_isrs[name] = isr
-                made += 1
-                identical = identical and answer_unchanged(in_force_text, revised_text)
+                if name in not_asked:
+                    # Its answer from before the round, handed back unasked:
+                    # not a revision, and not counted as one.
+                    not_revised[name] = NOT_ASKED_TO_REVISE
+                else:
+                    made += 1
+                    revised_names.append(name)
+                    identical = identical and answer_unchanged(in_force_text, revised_text)
                 dropped_here = dropped_values(
                     kept_isrs.get(name), isr, revised_text, revision_round=iteration
                 )
@@ -4029,15 +4727,30 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         if dropped_rows:
             out["dropped_claims"] = dropped_rows
         # What this round did, for the router: how many revisions stood, and
-        # whether each is the answer in force again after whitespace.
+        # whether each is the answer in force again after whitespace; and the
+        # revisions that moved towards a peer beyond the sources both cite,
+        # with no citation added and no tool call (the next mediation is told).
         out["revision_rounds"] = [
             {
                 "round": int(iteration),
                 "stage": stage_key_of(stage, "debate"),
                 "made": made,
                 "identical": bool(made) and identical,
+                "revised": revised_names,
+                "not_revised": not_revised,
+                "converged": _round_convergence(
+                    state, kept_isrs, revised_isrs, revised_names, revision_ledger
+                ),
+                **({"asked_all": asked_all} if asked_all else {}),
             }
         ]
+        if not made:
+            logger.warning(
+                "The round-%d revision round made no change: no analyst was revised (%s); "
+                "the answers in force stand.",
+                int(iteration),
+                "; ".join(f"{name}: {why}" for name, why in not_revised.items()) or "none asked",
+            )
         # The round's own time, added to the debate stage's.
         out.update(_debate_record(stage, started))
         return out
@@ -4241,6 +4954,12 @@ def make_judge_node(
                 except Exception as exc:  # noqa: BLE001 — one bad row is not a lost verdict
                     logger.debug("judge_node: unreadable ledger row skipped (%s).", exc)
 
+            # A claim resting only on calls that failed is flagged before the
+            # judge reads the claims, and kept as written.
+            from maljan.pipeline.validation import mark_claims_citing_only_failed_calls
+
+            mark_claims_citing_only_failed_calls(isr_reports, _ledger)
+
             # Who named which technique, and how sure each of them was. This is
             # what the judge weighs; nothing here combines the numbers.
             _corroboration = corroboration(isr_reports, _ledger)
@@ -4256,10 +4975,11 @@ def make_judge_node(
                 if corroboration_row(row)["asserted_by"]
                 and not corroboration_row(row)["claimed_by"]
             )
-            _corroborated = sum(
-                1 for row in _corroboration.values() if len(corroboration_sources(row)) > 1
-            )
-            evidence_summary = summarise(isr_reports, _ledger)
+            # A technique stands on two sources of its own: one ledger entry
+            # is one source however many agents cite it, and a technique only
+            # names and strings in the file stand behind is a capability.
+            _corroborated = sum(1 for row in _corroboration.values() if corroborated(row))
+            evidence_summary = summarise(isr_reports, _ledger, _corroboration)
             # What the technique check questioned and the analysts kept, put
             # in front of the judge beside the evidence summary: the domain,
             # the platforms, the index's candidates, in the analysts' own rows.
@@ -4402,7 +5122,9 @@ def make_judge_node(
                 re.IGNORECASE,
             )
             _anti_emu_hits: list[str] = []
-            for sig in (state.get("sandbox_report") or {}).get("signatures") or []:
+            from maljan.schemas.sandbox_document import place as _place
+
+            for sig in _place(state.get("sandbox_report"), "signatures") or []:
                 if not isinstance(sig, dict):
                     continue
                 _haystack = f"{sig.get('name', '')} {sig.get('description', '')}"
@@ -4910,9 +5632,7 @@ def make_judge_node(
                             )
                         else:
                             _agreed = [
-                                str(tid)
-                                for tid, row in _corroboration.items()
-                                if len(corroboration_sources(row)) > 1
+                                str(tid) for tid, row in _corroboration.items() if corroborated(row)
                             ]
                             held, how = case_for_the_judge_alone(case, bundle, isr_reports, _agreed)
                             container.pending_memory_case = held
@@ -4928,67 +5648,8 @@ def make_judge_node(
             # (threaded into the report). Write side: upsert this sample's
             # function hashes under its inferred family so the corpus grows.
             # Fully gated + fail-safe; never affects the verdict.
-            _func_hash_report: list[dict[str, Any]] = []
+            _func_hash_report = _function_hash_attribution(container, state, bundle)
             _family_rag_report: list[dict[str, Any]] = []
-            try:
-                from maljan.core.config import get_settings
-
-                _cfg = get_settings()
-                _provider = container.get_static_provider()
-                _static_path = state.get("static_sample_path")
-                if (
-                    _cfg.preprocessing.use_function_hash_attribution
-                    and _provider.capabilities.provides_function_hashes
-                    and _cfg.memory.backend == "qdrant"
-                    and _static_path
-                ):
-                    from maljan.analysis.function_hash_attribution import (
-                        aggregate_matches,
-                        to_report_dicts,
-                    )
-                    from maljan.memory.function_hash_store import FunctionHashStore
-                    from maljan.providers.base import StaticJobContext
-
-                    _sample_id = state.get("file_hash", "") or ""
-                    _funcs = _provider.function_hashes(
-                        StaticJobContext(mirror_sample_path=str(_static_path))
-                    )
-                    if _funcs:
-                        _fh_store = FunctionHashStore(
-                            url=_cfg.memory.qdrant_url,
-                            collection=_cfg.memory.qdrant_function_hash_collection,
-                            api_key=(
-                                _cfg.memory.qdrant_api_key.get_secret_value()
-                                if _cfg.memory.qdrant_api_key
-                                else None
-                            ),
-                        )
-                        # Read side: surface prior family overlap in the report.
-                        _func_hash_report = to_report_dicts(
-                            aggregate_matches(
-                                _fh_store.match(
-                                    [h for _n, h in _funcs],
-                                    exclude_sample_id=_sample_id or None,
-                                ),
-                                max_families=_cfg.preprocessing.function_hash_max_matches,
-                            )
-                        )
-                        # Write side: only persist under a grounded family so an
-                        # UNKNOWN verdict cannot pollute the attribution corpus.
-                        # Held, not written: the corpus learns this sample once
-                        # the job has completed (``remember_the_run``), so a job
-                        # that fails after its judge files nothing under a
-                        # family nobody kept.
-                        _family = _assessed_family(bundle)
-                        if _family:
-                            container.pending_function_hashes = (
-                                _fh_store,
-                                _sample_id,
-                                _family,
-                                list(_funcs),
-                            )
-            except Exception as _e:
-                logger.warning("Function-hash attribution skipped (%s). Verdict unaffected.", _e)
 
             # Family-feature RAG (read side): record the families retrieved by
             # static-feature similarity as report evidence. Reads the HOST binary
@@ -5042,7 +5703,7 @@ def make_judge_node(
                         + "; ".join(_degradation_reasons)
                         + ". The judge was told this and set its confidence knowing it."
                         if _degraded_mode
-                        else f" {_corroborated} technique(s) named by more than one source."
+                        else f" {_corroborated} technique(s) corroborated by more than one source."
                     )
                 ),
                 round_index=state.get("iteration_count", 0),
@@ -5154,6 +5815,19 @@ def make_judge_node(
 # ---------------------------------------------------------------------------
 
 
+def hold_the_report_in_progress(container: Any, report: Any) -> None:
+    """Keep the report being built on the container, for a run stopped before it is done.
+
+    The report node returns its report only once every round has run; a run
+    stopped inside the narrative or the composer would otherwise lose the
+    deterministic report and every section already written. Never raises.
+    """
+    try:
+        container.report_in_progress = report
+    except Exception as exc:  # noqa: BLE001 — a stand-in container may refuse it
+        logger.debug("report_node: the report in progress was not held (%s).", exc)
+
+
 def make_report_node(
     container: ServiceContainer,
     *,
@@ -5253,13 +5927,17 @@ def make_report_node(
         try:
             _static_provider = container.get_static_provider()
             _sample_for_evidence = state.get("sample_path")
-            # When the triage pack ran capa or YARA, their entries are already
-            # in the ledger under the pipeline; running the provider again
-            # would pay capa's budget twice and record the pair twice.
-            if rules_already_recorded(state.get("evidence_ledger") or []):
+            # When the triage pack recorded answers of the kinds the provider
+            # answers, they are already in the ledger under the pipeline;
+            # running the provider again would pay its budget twice and record
+            # the answers twice.
+            if _static_provider.capabilities.provides_evidence and rules_already_recorded(
+                state.get("evidence_ledger") or [],
+                kinds_declared_by(_static_provider.declaration_source),
+            ):
                 logger.info(
-                    "report_node: the triage pack recorded capa/YARA; the static provider is "
-                    "not run again."
+                    "report_node: the triage pack recorded the static provider's answers; it "
+                    "is not run again."
                 )
             elif _static_provider.capabilities.provides_evidence and _sample_for_evidence:
                 # capa is a subprocess with a 900s budget and YARA is a corpus
@@ -5291,17 +5969,24 @@ def make_report_node(
         _capa_entries: list[LedgerEntry] = []
         if _static_bundle is not None:
             try:
-                from maljan.providers.static.capa_yara import ledger_entries
+                from maljan.providers.base import evidence_entries
 
-                _capa_entries = ledger_entries(
+                _capa_entries = evidence_entries(
                     _static_bundle,
                     container.get_evidence_counter(),
                     stage.key if stage is not None else "analysis",
+                    source=_static_provider.declaration_source,
+                    agent=_static_provider.id,
                 )
             except Exception as exc:  # noqa: BLE001
-                logger.warning("report_node: capa/YARA evidence not recorded (%s).", exc)
+                logger.warning("report_node: static provider evidence not recorded (%s).", exc)
         _ledger.extend(_capa_entries)
         _ledger.sort(key=lambda entry: entry.seq)
+        # The last pass before the report is built from it: each agent's kept
+        # bytes within its budget, structures dropped first, texts untouched.
+        fit_structures_to_budget(
+            _ledger, int(getattr(container.config.reporting, "evidence_budget_bytes", 0) or 0)
+        )
 
         try:
             builder = MalwareReportBuilder(
@@ -5396,6 +6081,7 @@ def make_report_node(
             1 for section in report.sections if not section_is_grounded(section)
         )
         report.run_summary = _summary
+        hold_the_report_in_progress(container, report)
         if _summary["sections_without_evidence"]:
             logger.warning(
                 "report_node: %d report section(s) carry no evidence id and no source.",
@@ -5434,7 +6120,7 @@ def make_report_node(
         # starts at its first model again, with turn deadlines measured against
         # the narrative's own clock, sized from its output budget and the
         # model's measured pace.
-        _narrative_facts = pack_text(state, container)
+        _narrative_facts = pack_text(state, container, for_reporter=True)
         _narrative_state = render_run_state(state)
         narrative_seconds = (
             _narrative_timeout(
@@ -5505,6 +6191,8 @@ def make_report_node(
             )
         else:
             report = MalwareReportBuilder.apply_fallback_narrative(report, no_summary_because)
+        # The composer writes its sections into this object, one by one.
+        hold_the_report_in_progress(container, report)
         # What the narrative's prompt could not hold, said where the report says
         # what it is missing.
         for _reason in getattr(narrative_agent, "degradations", None) or []:
@@ -5530,15 +6218,37 @@ def make_report_node(
                 getattr(container.config.reporting, "composer_per_section_timeout", None),
                 container,
             )
+            # The sections run at once as far as the reporter's models serve
+            # concurrent requests, decided as the analysts' mode is
+            # (``llm.parallel_analysts``): a hosted API every section, a local
+            # server as many as its reported slots, a single-slot server one
+            # after another. Resolving a name is a network round trip, so it
+            # runs on a thread.
+            from maljan.pipeline.analyst_mode import resolve_reporter_mode
+
+            _reporter_mode = await asyncio.to_thread(resolve_reporter_mode, container.config)
+            logger.info(
+                "report_node: the composer's sections run %s: %s.",
+                (
+                    "one after another"
+                    if not _reporter_mode.parallel
+                    else "at once"
+                    if _reporter_mode.at_once is None
+                    else f"{_reporter_mode.at_once} at a time"
+                ),
+                _reporter_mode.reason,
+            )
             try:
                 await composer.compose(
                     report,
                     state.get("isr_reports"),
-                    facts_block=pack_text(state, container),
+                    facts_block=pack_text(state, container, for_reporter=True),
                     run_state=render_run_state(state),
                     citable_ids=ledger_ids(state),
                     items=_items,
                     evidence=_entry_texts,
+                    concurrent=_reporter_mode.parallel,
+                    at_once=_reporter_mode.at_once,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(

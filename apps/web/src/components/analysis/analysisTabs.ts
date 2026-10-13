@@ -116,21 +116,22 @@ export function tabHasContent(key: string, report: ReportDetailDTO | null): bool
 
   const mr = report.malware_report;
   const sections = mr?.sections;
+  const placed = report.section_tabs;
 
   switch (key) {
     case "/identity":
       // The sample's own facts: the identity block, or a header table from
       // whichever binary-info tool ran.
-      return Boolean(mr?.identity) || sectionsForTab(sections, "identity").length > 0;
+      return Boolean(mr?.identity) || sectionsForTab(sections, "identity", placed).length > 0;
     case "/static":
-      return Boolean(mr?.static) || sectionsForTab(sections, "static").length > 0;
+      return Boolean(mr?.static) || sectionsForTab(sections, "static", placed).length > 0;
     case "/dynamic":
       // A sandbox report, what the ledger's sandbox tools returned, or the
       // dynamic analyst's own conclusion about a detonation that produced
       // nothing — a run where the analyst worked is not an empty run.
       return (
         Boolean(mr?.dynamic) ||
-        sectionsForTab(sections, "dynamic").length > 0 ||
+        sectionsForTab(sections, "dynamic", placed).length > 0 ||
         // The same reading the tab draws from, so the tab and its rule cannot
         // disagree about whether the analyst concluded anything.
         dynamicAnalystClaims(report.agent_findings).length > 0
@@ -140,13 +141,13 @@ export function tabHasContent(key: string, report: ReportDetailDTO | null): bool
       // of the binary's own strings when neither ran.
       return (
         Boolean(mr?.network) ||
-        sectionsForTab(sections, "network").length > 0 ||
+        sectionsForTab(sections, "network", placed).length > 0 ||
         (mr?.static?.interesting_strings ?? []).some(
           (s) => s.kind === "domain" || s.kind === "ip" || s.kind === "url",
         )
       );
     case "/persistence":
-      return nonEmpty(mr?.persistence) || sectionsForTab(sections, "persistence").length > 0;
+      return nonEmpty(mr?.persistence) || sectionsForTab(sections, "persistence", placed).length > 0;
     case "/capabilities":
       /* The techniques the run named: the tab builds its matrix from the
        * capability matrix, which holds a cell for every one of them with the

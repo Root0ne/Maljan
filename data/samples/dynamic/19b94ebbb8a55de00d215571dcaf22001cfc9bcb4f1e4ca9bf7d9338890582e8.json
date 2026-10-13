@@ -1,0 +1,48 @@
+{
+  "target": {
+    "md5": "d41d8cd98f00b204e9800998ecf8427e",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "name": "sample_1.exe"
+  },
+  "behavior": {
+    "apistats": {
+      "2572": {
+        "CreateProcessInternalW": 2,
+        "RegSetValueExW": 3,
+        "HttpSendRequestW": 12,
+        "WriteProcessMemory": 1,
+        "CreateRemoteThread": 1,
+        "VirtualAllocEx": 1,
+        "CryptAcquireContextW": 2,
+        "ShellExecuteExW": 1
+      }
+    },
+    "generic": [
+      {
+        "category": "persistence",
+        "description": "Sets HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run registry key for autostart on user login."
+      },
+      {
+        "category": "injection",
+        "description": "Allocates RWX memory in explorer.exe (PID 1234) and writes shellcode via WriteProcessMemory, then triggers via CreateRemoteThread."
+      },
+      {
+        "category": "evasion",
+        "description": "Queries system uptime via GetTickCount before executing payload — likely sandbox timing check."
+      },
+      {
+        "category": "crypto",
+        "description": "Initializes CryptAcquireContext with PROV_RSA_AES, suggesting encrypted C2 communication or payload decryption."
+      }
+    ],
+    "network": [
+      {
+        "dst_ip": "185.220.101.45",
+        "dst_port": 443,
+        "protocol": "HTTPS",
+        "bytes_sent": 256,
+        "bytes_recv": 1024
+      }
+    ]
+  }
+}

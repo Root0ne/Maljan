@@ -11,7 +11,11 @@ from typing import TYPE_CHECKING, Any
 
 from maljan.providers.base import ProviderProbe, SandboxCapabilities, SandboxProvider
 from maljan.providers.registry import register_sandbox_provider
-from maljan.schemas.sandbox_report import cape_report_to_sandbox_report
+from maljan.providers.sandbox.readers import required_reader
+
+# The registered report reader (``providers.sandbox.readers``) this provider's
+# fixtures are read by.
+_READER = "mock"
 
 if TYPE_CHECKING:
     from maljan.core.config import Settings
@@ -27,6 +31,13 @@ class MockSandboxProvider(SandboxProvider):
     the settings UI) can point it at a different directory any time before
     the first ``submit``/``fetch`` and have it take effect.
     """
+
+    # What the console calls this provider and says about it, and its test's label.
+    choice_label = "Mock sandbox"
+    choice_order = 0
+    title = "Mock sandbox"
+    description = "Built-in fixture reports stand in for a detonation; nothing is executed."
+    settings_intro = "Mock sandbox: built-in fixture reports stand in for a detonation."
 
     def __init__(self, fixtures_dir: str) -> None:
         self.fixtures_dir = fixtures_dir
@@ -44,7 +55,7 @@ class MockSandboxProvider(SandboxProvider):
             can_submit=True,
             can_poll=True,
             can_fetch_report=True,
-            report_format="mock",
+            report_format=_READER,
         )
 
     def _get_client(self) -> Any:
@@ -75,8 +86,8 @@ class MockSandboxProvider(SandboxProvider):
         from maljan.schemas.sandbox_report import SandboxRun
 
         result = self._get_client().fetch_report(task_id)
-        report = cape_report_to_sandbox_report(
-            result.report, provider="mock", source_format="mock", task_id=str(task_id)
+        report = required_reader(_READER).read(
+            result.report, provider=self.id, task_id=str(task_id)
         )
         return SandboxRun(
             task_id=str(task_id),

@@ -1,0 +1,219 @@
+{
+ "_about": "Tool declarations and whether an operator's edit of each is accepted, and whether the no-kind word in it names no kind. The API (tests/unit/api/test_the_console_reads_tool_declarations_as_the_api_does.py) and the console's declaration box (declarationFields.test.ts) are both held to this one table.",
+ "cases": [
+  {
+   "name": "a kind and its rows",
+   "declaration": {
+    "kind": "rule_match",
+    "rows": "/hits/*"
+   },
+   "accepted": true,
+   "reads_no_kind": false
+  },
+  {
+   "name": "the no-kind word with rows, as a dev-era server stored it",
+   "declaration": {
+    "kind": "unclassified",
+    "rows": "/m/*"
+   },
+   "accepted": true,
+   "reads_no_kind": false
+  },
+  {
+   "name": "the no-kind word with rows, places and techniques",
+   "declaration": {
+    "kind": "unclassified",
+    "rows": "/matches/*",
+    "places": {
+     "offset": "/offset"
+    },
+    "techniques": [
+     {
+      "path": "/tid"
+     }
+    ]
+   },
+   "accepted": true,
+   "reads_no_kind": false
+  },
+  {
+   "name": "the no-kind word alone",
+   "declaration": {
+    "kind": "unclassified"
+   },
+   "accepted": false,
+   "reads_no_kind": true
+  },
+  {
+   "name": "the no-kind word with a name",
+   "declaration": {
+    "kind": "unclassified",
+    "display_name": "Scanner"
+   },
+   "accepted": true,
+   "reads_no_kind": true
+  },
+  {
+   "name": "the no-kind word with rows at the default",
+   "declaration": {
+    "kind": "unclassified",
+    "rows": ""
+   },
+   "accepted": false,
+   "reads_no_kind": true
+  },
+  {
+   "name": "the no-kind word with an argument role",
+   "declaration": {
+    "kind": "unclassified",
+    "arguments": {
+     "report": "task_report"
+    }
+   },
+   "accepted": true,
+   "reads_no_kind": true
+  },
+  {
+   "name": "no kind with a name",
+   "declaration": {
+    "display_name": "Scanner"
+   },
+   "accepted": true,
+   "reads_no_kind": false
+  },
+  {
+   "name": "no kind with a name and rows at the default",
+   "declaration": {
+    "display_name": "Scanner",
+    "rows": ""
+   },
+   "accepted": true,
+   "reads_no_kind": false
+  },
+  {
+   "name": "an accepted kindless proposal stored with every field at its default",
+   "declaration": {
+    "kind": "",
+    "asserts_techniques": false,
+    "source": "",
+    "long_running": false,
+    "timeout_seconds": null,
+    "memory_peak_mb": null,
+    "discloses_sample": false,
+    "holds_strings": false,
+    "rows": "",
+    "places": {},
+    "values": {},
+    "techniques": [],
+    "reputation": null,
+    "arguments": {},
+    "reader": "",
+    "report_sections": [],
+    "words": [],
+    "display_name": "Scanner",
+    "category": ""
+   },
+   "accepted": true,
+   "reads_no_kind": false
+  },
+  {
+   "name": "an empty kind and every field at its default",
+   "declaration": {
+    "kind": "",
+    "asserts_techniques": false,
+    "source": "",
+    "long_running": false,
+    "timeout_seconds": null,
+    "memory_peak_mb": null,
+    "discloses_sample": false,
+    "holds_strings": false,
+    "rows": "",
+    "places": {},
+    "values": {},
+    "techniques": [],
+    "reputation": null,
+    "arguments": {},
+    "reader": "",
+    "report_sections": [],
+    "words": [],
+    "display_name": "",
+    "category": ""
+   },
+   "accepted": false,
+   "reads_no_kind": false
+  },
+  {
+   "name": "nothing at all",
+   "declaration": {},
+   "accepted": false,
+   "reads_no_kind": false
+  },
+  {
+   "name": "no kind with rows",
+   "declaration": {
+    "rows": "/m/*",
+    "places": {
+     "offset": "/o"
+    }
+   },
+   "accepted": false,
+   "reads_no_kind": false
+  },
+  {
+   "name": "an empty kind with techniques",
+   "declaration": {
+    "kind": "",
+    "techniques": [
+     {
+      "path": "/tid"
+     }
+    ]
+   },
+   "accepted": false,
+   "reads_no_kind": false
+  },
+  {
+   "name": "no kind with only empty kind-dependent values",
+   "declaration": {
+    "techniques": [],
+    "places": {},
+    "asserts_techniques": false
+   },
+   "accepted": false,
+   "reads_no_kind": false
+  },
+  {
+   "name": "an unknown field",
+   "declaration": {
+    "knd": "decompile"
+   },
+   "accepted": false,
+   "reads_no_kind": false
+  },
+  {
+   "name": "a kind that is not a word",
+   "declaration": {
+    "kind": "Rule Match"
+   },
+   "accepted": false,
+   "reads_no_kind": false
+  },
+  {
+   "name": "a kind that is not text",
+   "declaration": {
+    "kind": 3
+   },
+   "accepted": false,
+   "reads_no_kind": false
+  },
+  {
+   "name": "the no-kind word with a reputation object",
+   "declaration": {
+    "kind": "unclassified",
+    "reputation": {}
+   },
+   "accepted": true,
+   "reads_no_kind": false
+  }
+ ]
+}

@@ -13,27 +13,39 @@ id the analysts, the judge and the report cite exactly as they cite a call the
 model made, it renders on the console's ledger tab like any other entry, and
 the tools stay callable on demand for anyone who wants more than the head.
 
+The steps are declared as data (``core.pack_steps``): each one's tool and
+server, its argument template, the formats it runs for, its budget, whether it
+runs beside the others and beside which, the renderer its line uses and the
+kind of answer it records. The shipped list is what follows below; an
+operator's ``triage.steps`` adds a step (any server's tool: a step whose
+server is set is called through the tool server registry exactly as an
+agent's call is, and recorded under that server), drops one, or swaps one for
+a tool of their own that answers the same kind. A later step reads an earlier
+answer by its declared kind, never by the tool that gave it.
+
 Three rules hold throughout. The pack states facts and draws no conclusion:
 a tool's output is recorded as the tool returned it, and nothing here rewrites
-what a model later says. The order is fixed, so the ids a given sample produces
-are the same from one run to the next and a golden can pin them. And nothing
-in the pack can fail the job: a tool that raises, answers with an error or is
-unavailable becomes an entry with ``ok=False`` and a degradation reason, and
-the next tool runs.
+what a model later says. The order is the declared one, so the ids a given
+sample produces are the same from one run to the next and a golden can pin
+them. And nothing in the pack can fail the job: a tool that raises, answers
+with an error or is unavailable becomes an entry with ``ok=False`` and a
+degradation reason, and the next step runs.
 
 The in-process calls go straight to ``maljan.tools``, the same code the
 analysis sidecar serves, rather than through a subprocess of it. The one
 network call — the reputation lookup — goes through the tool server exactly as
 an agent's call does, and is recorded under that server rather than under the
-pipeline, because which server a ledger entry came from is how the rest of the
-pipeline knows the question was asked.
+pipeline, so the ledger says which service was asked; the tool's declared kind
+(``reputation``) is how the rest of the pipeline knows the question was asked,
+and its answer is read once, through the tool's declared paths, into the
+record every reader reads (``core.reputation``).
 
 A PE's decoded strings come after every other tool. FLOSS runs through
 ``maljan.tools.emulated_strings`` — the function the sidecar's ``floss`` tool
 serves, with its pinned build, its wall clock and its memory limit — with the
-analysis server's ``env`` over this process's environment — a build named
-there is the one both find — and a directory inside this job's staging
-directory, so nothing is left that the job's teardown does not remove. It
+``env`` of the server whose tool the step stands in for over this process's
+environment — a build named there is the one both find — and a directory inside
+this job's staging directory, so nothing is left that the job's teardown does not remove. It
 comes after them so that every id issued before it is the id it was before
 the step existed.
 
@@ -45,21 +57,23 @@ addresses where it stands and the functions around them.
 
 After them, the deobfuscation passes, last for the same reason. The
 platform's scan of an executable's bytes for the published constants of
-ciphers, hash functions and checksums (``maljan.tools.crypto_constants``;
-Ghidra's ``detect_crypto_constants`` answers "not yet implemented"), then
-Ghidra's anti-analysis scan over the sample (``maljan.analysis.ghidra_passes``),
-of which only the exact part is stated. The node hands the pack the Ghidra it
-may call, or the sentence saying why there is none; a pass that cannot run is
-one entry saying ``no:`` and why, and is not a failure. A call directly to
-``run_pack`` with no Ghidra handed over makes no Ghidra entry.
+ciphers, hash functions and checksums (``maljan.tools.crypto_constants``),
+then a static provider's anti-analysis scan over the sample
+(``maljan.analysis.anti_analysis``), of which only the exact part is stated.
+The node hands the pack the scan the run's static provider offers
+(``StaticProvider.anti_analysis_scan``), or the sentence saying why it cannot
+scan; a pass that cannot run is one entry saying ``no:`` and why, and is not a
+failure. With no provider offering a scan, and in a call directly to
+``run_pack`` with none handed over, there is no anti-analysis entry.
 
 Last of all, for a PE, the function index (``maljan.tools.function_index``):
-every function the run knows, from the file's own tables, capa's starts and
-the call targets the platform's decoder reaches, each with the imports it
-calls, the names its hashes resolve to, the strings it refers to, the capa
-rules matched in it, its callers and callees and how many artefacts its
-callees hold, each cell naming the entry it comes from. It joins the
-pack's own answers above, so it comes after them.
+every function the run knows, from the file's own tables, the starts any
+answer of a listing kind gives and the call targets the platform's decoder
+reaches, each with the imports it calls, the names its hashes resolve to, the
+strings it refers to, the rules matched in it, its callers and callees and how
+many artefacts its callees hold, each cell naming the entry it comes from. It
+joins the pack's own answers above by their declared kinds, so it comes after
+them.
 
 Last, where a sandbox produced a report, the report's section index
 (``maljan.analysis.sandbox_sections``): each section's item count, or the
@@ -72,7 +86,7 @@ before it keeps its value; its line takes room as any other line does.
 When the pack does not fit its room, every pass line takes only the room the
 earlier lines leave, a pass with a fact no other line carries first; a pass
 entry with no room is counted in the trailer, which takes only free room or
-room from capa's addresses. With neither, the pack
+room from the rule line's addresses. With neither, the pack
 stays as it is and the triage node records the entry in its pack record,
 "no pack room" (``render_pack``, ``pack_unsaid``). The function index takes
 only the room the whole rendered pack leaves after that, its rows in rank
@@ -84,11 +98,11 @@ the pack record, and the run-state block names it and the analysis server's
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from functools import partial
@@ -97,20 +111,42 @@ from typing import Any, cast
 
 from maljan.agents.evidence_recorder import EvidenceRecorder, result_text
 from maljan.analysis import sandbox_sections
-from maljan.analysis.ghidra_passes import (
-    ANTI_ANALYSIS_TOOL,
-    CAPA_RULE_KINDS,
-    GHIDRA_FORMATS,
-    GhidraPasses,
-    capa_agrees,
+from maljan.analysis.anti_analysis import (
+    PASS_FAILED_PREFIX,
+    RULE_KIND,
+    SCAN_KIND,
+    SCAN_TOOL,
+    AntiAnalysisScan,
+    may_agree,
+    rule_agrees,
     run_pass,
     scan_kind,
 )
 from maljan.analysis.pcap_summary import conversation_line
 from maljan.analysis.technique_ids import technique_ids_in
+from maljan.core.declared_reading import (
+    FACTS_VERSION,
+    consumer_kinds,
+    facts_of,
+    kind_free_facts,
+    kind_of,
+)
 from maljan.core.logger import logger
-from maljan.extractors.sample_identity import ARCHIVE_FILE_TYPES, DOCUMENT_FILE_TYPES
-from maljan.pipeline.conditions import TriageFacts
+from maljan.core.pack_steps import (
+    PackStep,
+    answer_field,
+    effective_steps,
+    placeholder_values,
+    read_answer_field,
+    runs_shipped,
+    shipped_label,
+    shipped_renderer,
+    shipped_step,
+    written_for,
+)
+from maljan.core.reputation import ReputationRecord, is_lookup_entry, reputation_of
+from maljan.core.tool_declarations import PACK, ToolFacts, first, select
+from maljan.pipeline.conditions import TriageFacts, rule_match_hits
 from maljan.pipeline.sandbox_status import (
     OBSERVED,
     STATUS_TOOL,
@@ -147,21 +183,27 @@ __all__ = [
     "PackInputs",
     "PackResult",
     "ReputationLookup",
+    "ServerAnswer",
+    "ServerStepCall",
     "degrades_run",
     "degradation_reason_for",
     "failure_reason",
+    "index_inputs",
     "is_pack_reason",
-    "malicious_count",
     "run_is_degraded",
     "reason_sentence",
     "pack_block",
     "pack_entries",
     "render_pack",
+    "renderer_of",
+    "room_beside",
     "run_pack",
 ]
 
 # The agent and server every in-process entry of the pack is recorded under.
 PIPELINE = "pipeline"
+# The source every pack entry records (``core.tool_declarations``).
+PACK_SOURCE = "pack"
 
 # The shortest printable run the strings head keeps. Six characters is where
 # a run stops being an accident of the byte stream and starts being a token
@@ -227,55 +269,60 @@ def cgroup_headroom_bytes(root: Path = Path("/sys/fs/cgroup")) -> int | None:
     return None
 
 
-def floss_beside_capa(
+def _joined(names: Iterable[str]) -> str:
+    """``a``, ``a and b``, ``a, b and c``."""
+    held = [str(name) for name in names if str(name)]
+    if len(held) <= 1:
+        return "".join(held)
+    return f"{', '.join(held[:-1])} and {held[-1]}"
+
+
+def room_beside(
     *,
     host_available: int | None,
     cgroup_left: int | None,
-    capa_peak: int | None,
+    peaks: Sequence[tuple[str, int | None, str]],
     floor: int,
 ) -> str:
-    """``""`` when FLOSS may run while capa does, else why the two run in turn.
+    """``""`` when a step may run beside the others, else why the steps run in turn.
 
-    Running them together adds FLOSS to capa's peak, so what is needed is
-    capa's peak as this worker measured it and FLOSS's own address-space bound
-    (``emulated_strings.FLOSS_ADDRESS_SPACE_BYTES``). The host must still have
-    ``floor`` available after both, and the worker's cgroup, where it has a
-    limit, must hold both. A worker that has not run capa yet has nothing to
-    size from and runs them in turn, measuring capa as it does.
+    ``peaks`` are, for each step it would run beside and then for the step
+    itself, ``(the tool's name, its peak in bytes, how the peak is known)``:
+    ``measured`` by this worker, else ``declared``. Running them together adds
+    their peaks, so the host must still have ``floor`` available after all of
+    them, and the worker's cgroup, where it has a limit, must hold all of
+    them. A peak known neither way leaves nothing to size from, and the steps
+    run in turn, the measure taken as they do.
     """
     mib = 1024 * 1024
-    if capa_peak is None:
-        return "capa's memory has not been measured in this worker yet"
-    need = capa_peak + emulated_strings.FLOSS_ADDRESS_SPACE_BYTES
+    for name, peak, how in peaks:
+        if peak is None:
+            if how == MEASURED:
+                return f"{name}'s memory has not been measured in this worker yet"
+            return f"{name} declares no memory peak"
+    need = sum(int(peak or 0) for _name, peak, _how in peaks)
     if host_available is None:
         return "the host does not report its available memory"
+    names = [name for name, _peak, _how in peaks]
     if host_available - need < floor:
+        parts = [
+            f"{name}'s measured {int(peak or 0) // mib} MiB"
+            if how == MEASURED
+            else f"{name}'s {int(peak or 0) // mib} MiB bound"
+            for name, peak, how in peaks
+        ]
         return (
-            f"{host_available // mib} MiB available, less capa's measured {capa_peak // mib} MiB "
-            f"and FLOSS's {emulated_strings.FLOSS_ADDRESS_SPACE_BYTES // mib} MiB bound, "
+            f"{host_available // mib} MiB available, less {_joined(parts)}, "
             f"is under the {floor // mib} MiB floor"
         )
     if cgroup_left is not None and cgroup_left < need:
+        verb = "need together" if len(names) > 1 else "needs"
         return (
             f"the worker's memory limit leaves {cgroup_left // mib} MiB, under the "
-            f"{need // mib} MiB capa and FLOSS need together"
+            f"{need // mib} MiB {_joined(names)} {verb}"
         )
     return ""
 
-
-# The format tool for each routed file type. A type this table does not name
-# gets no format entry: the identity entry already says what the sample is,
-# and a guess at a parser would be a guess.
-_FORMAT_TOOLS: dict[str, tuple[str, Callable[..., dict[str, Any]]]] = {
-    "pe": ("pe_info", binary.pe_info),
-    "elf": ("elf_info", binary.elf_info),
-    "mach-o": ("macho_info", binary.macho_info),
-    "apk": ("apk_info", binary.apk_info),
-    "dex": ("apk_info", binary.apk_info),
-    **{name: ("document_info", binary.document_info) for name in DOCUMENT_FILE_TYPES},
-    **{name: ("archive_list", binary.archive_list) for name in ARCHIVE_FILE_TYPES},
-    "jar": ("archive_list", binary.archive_list),
-}
 
 # Which block of the API catalogue a routed format's imports belong to. A
 # format this table does not name is not asked at all: a Mach-O's symbols are
@@ -287,10 +334,12 @@ _BEHAVIOUR_PLATFORM_BY_FORMAT: dict[str, str] = {
     "elf": "linux",
 }
 
-# How a reputation answer says how many engines flagged the hash. The
-# structured form is VirusTotal's own ``last_analysis_stats``; the prose form
-# is what the threat-intel sidecar writes ("55/70 detections").
-_DETECTIONS_RE = re.compile(r"\b(\d+)\s*/\s*\d+\s+detections?\b", re.IGNORECASE)
+# The pack's reputation step. A lookup it could not make is recorded under this
+# name (no enabled lookup, the budget already spent, the call itself raising),
+# and a lookup that was made and failed, whichever server's tool answered, is
+# this step's failure: ``triage.reputation_failed``, one sentence about the
+# lookup (``reason_sentence``).
+REPUTATION_STEP = "reputation"
 
 
 def failure_reason(tool: str) -> str:
@@ -374,16 +423,6 @@ def run_is_degraded(reasons: Sequence[str], informational: Sequence[str] = ()) -
     )
 
 
-# The reputation tools, whichever server answered: their failure is one
-# sentence, about the lookup. ``reputation`` is not a tool any server has: it
-# is what the pack records a lookup it could not make under — no enabled
-# server, the budget already spent, the call itself raising — so an entry
-# under that name never carries a service's answer. That is why the console's
-# own list of reputation tools has only the two real ones: an entry it would
-# draw an IDENTITY section from is always one of those.
-_REPUTATION_TOOLS: frozenset[str] = frozenset({"reputation", "get_file_report", "check_hash"})
-
-
 def reason_sentence(reason: str) -> str:
     """A pack reason as a sentence for a prompt; any other reason as it is.
 
@@ -406,7 +445,7 @@ def reason_sentence(reason: str) -> str:
         )
     if tool == "pack":
         return "the triage pack itself failed before it finished"
-    if tool in _REPUTATION_TOOLS:
+    if tool == REPUTATION_STEP:
         return "the triage pack's reputation lookup did not answer"
     return f"the triage pack could not run {tool}"
 
@@ -425,7 +464,7 @@ class CapaSettings:
 class FlossSettings:
     """What the decoded-strings step runs FLOSS with.
 
-    ``environ`` is the analysis server's environment — this process's
+    ``environ`` is the decoder step's server's environment — this process's
     overlaid with the server's own ``env`` map — so ``MALJAN_FLOSS_PATH`` and
     ``MALJAN_STAGING_DIR`` mean here what they mean to the server; ``None``
     reads this process's. ``job_id`` names the staging directory the run's
@@ -460,8 +499,15 @@ class PackInputs:
     evidence_budget_bytes: int = 0
     budget_s: float = 0.0
     floss: FlossSettings = field(default_factory=FlossSettings)
-    # What running FLOSS beside capa must leave of the host's memory.
+    # What running a step beside the others must leave of the host's memory.
     memory_floor_bytes: int = 10240 * 1024 * 1024
+    # The steps to run, in order (``core.pack_steps``); ``None`` runs the
+    # shipped list.
+    steps: tuple[PackStep, ...] | None = None
+    # The environment the UPX carve reads its staging base from: the server
+    # declaring the unpack tool's kind, kept apart from the decoder's server.
+    # ``None`` reads ``floss.environ``.
+    carve_environ: Mapping[str, str] | None = None
 
 
 # The one reputation call, made by the node through the tool server. It takes
@@ -488,9 +534,9 @@ class PackResult:
     stopped_by_budget: list[str] = field(default_factory=list)
     # The reasons of tools that answered a smaller set than they wanted to.
     degraded: list[str] = field(default_factory=list)
-    # How FLOSS was run: "beside capa", or "in turn: <why>". Empty when it did
-    # not run at all.
-    floss_schedule: str = ""
+    # How each step that may run beside the pack ran, by step id: "beside
+    # <steps>", or "in turn" and why. A step that did not run at all has none.
+    schedules: dict[str, str] = field(default_factory=dict)
 
     @property
     def degradation_reasons(self) -> list[str]:
@@ -504,50 +550,41 @@ class PackResult:
             "failed": len(self.failed),
             "duration_ms": self.duration_ms,
             "degradation_reasons": self.degradation_reasons,
-            **({"floss": self.floss_schedule} if self.floss_schedule else {}),
+            **self.schedules,
         }
 
 
-def malicious_count(output: str) -> int | None:
-    """How many engines a reputation answer says flagged the hash, or ``None``.
-
-    ``None`` is the honest answer for a hash the service does not know, a
-    lookup that failed and an answer in a shape this does not read. Zero
-    means the service answered and counted nothing, which is a different
-    fact and the one a condition wants to tell apart.
-    """
-    text = (output or "").strip()
-    if not text:
-        return None
-    parsed: Any = None
-    if text[0] in "{[":
-        try:
-            parsed = json.loads(text)
-        except (ValueError, TypeError):
-            parsed = None
-    found = _stats_malicious(parsed)
-    if found is not None:
-        return found
-    match = _DETECTIONS_RE.search(text)
-    return int(match.group(1)) if match else None
+# A step started beside the rest of the pack: its work's future and when it began.
+_Early = tuple["Future[tuple[Any, BaseException | None, float]]", float]
 
 
-# How deep a server's answer is walked for one key. A reputation answer nests
-# its facts a handful of levels down; a walk with no bound is a walk a hostile
-# answer decides the length of.
-_WALK_DEPTH = 8
+@dataclass(frozen=True)
+class ServerAnswer:
+    """What one server step's call answered, for the pack to record at the step's place."""
+
+    tool: str
+    args: dict[str, Any]
+    server: str
+    output: str
+    ok: bool = True
+    error: str | None = None
+    started_at: float = 0.0
+    duration_ms: int = 0
+    structured_content: dict[str, Any] | None = None
 
 
-def _stats_malicious(value: Any, depth: int = _WALK_DEPTH) -> int | None:
-    """``last_analysis_stats.malicious`` wherever it sits in a VirusTotal answer."""
-    stats = _find_key(value, "last_analysis_stats", depth)
-    if isinstance(stats, dict) and isinstance(stats.get("malicious"), int):
-        return int(stats["malicious"])
-    return None
+# The node's call of one server step (``nodes._server_step_call``): the step, the
+# values its argument template names, and what is left of the pack's budget
+# (``None``: no budget). It never raises: a call that could not be made answers
+# ``ok=False``, its error starting ``not run:`` when no call was made at all.
+ServerStepCall = Callable[[PackStep, Mapping[str, str], float | None], ServerAnswer]
+
+# Why a server step of a pack run with no tool server registry was not called.
+NO_SERVER_CALLS = "this run calls no tool server, so {server}'s {tool} was not asked"
 
 
 class _Pack:
-    """One run of the pack over one sample, step by step, in the fixed order."""
+    """One run of the pack over one sample, step by step, in the declared order."""
 
     def __init__(
         self,
@@ -556,30 +593,35 @@ class _Pack:
         *,
         reputation: ReputationLookup | None,
         function_matches: FunctionMatches | None,
-        ghidra: GhidraPasses | None = None,
+        anti_analysis: AntiAnalysisScan | None = None,
+        server_step: ServerStepCall | None = None,
     ) -> None:
         self.recorder = recorder
         self.inputs = inputs
         self.reputation = reputation
         self.function_matches = function_matches
-        self.ghidra = ghidra
+        self.anti_analysis = anti_analysis
+        self.server_step = server_step
+        self.steps = tuple(inputs.steps) if inputs.steps is not None else effective_steps()
         self.result = PackResult()
         self.started = time.monotonic()
         self.steps_run = 0
         self.has_signature = False
-        self.yara_hits = 0
-        self.capa_hits = 0
-        # Where capa found functions, for the readers of an image with no
-        # function table of its own.
-        self.capa_function_starts: list[str] = []
-        # capa's rules as it answered them, which the constant scan's answer
-        # is compared with; empty when capa gave no answer.
-        self.capa_rows: list[dict[str, Any]] = []
         self.reputation_malicious: int | None = None
-        # FLOSS, started beside the rest of the pack when it can be. Recorded
-        # in its own place at the end, so every id keeps its value.
-        self._floss: tuple[Future[tuple[Any, BaseException | None, float]], float] | None = None
-        self._floss_pool: ThreadPoolExecutor | None = None
+        # What the earlier steps established that a later one reads.
+        self.identity: dict[str, Any] | None = None
+        self.routed = (inputs.file_type or "").strip().lower()
+        self.format_facts: dict[str, Any] | None = None
+        self.resolved: dict[str, Any] | None = None
+        # The steps started beside the rest of the pack, by id; each is
+        # recorded in its own place at the end, so every id keeps its value.
+        self._early: dict[str, _Early] = {}
+        self._pools: list[ThreadPoolExecutor] = []
+        self._done: set[str] = set()
+        # An answer whose step can give its rows whole where its entry holds a
+        # page of them, by entry id.
+        self._whole_rows: dict[str, Callable[[], list[dict[str, Any]]]] = {}
+        self._clocks: dict[str, int | None] = {}
 
     # -- recording --------------------------------------------------------
 
@@ -594,6 +636,13 @@ class _Pack:
         if self.steps_run and budget > 0 and time.monotonic() - self.started > budget:
             return budget
         return None
+
+    def _budget_left(self) -> float | None:
+        """What is left of the pack's budget, in seconds; ``None`` with no budget."""
+        budget = float(self.inputs.budget_s or 0)
+        if budget <= 0:
+            return None
+        return max(1.0, budget - (time.monotonic() - self.started))
 
     def record(
         self,
@@ -628,6 +677,7 @@ class _Pack:
                 tool=tool,
                 args=args,
                 server=PIPELINE,
+                source=PACK_SOURCE,
                 output=message,
                 ok=False,
                 error=message,
@@ -651,6 +701,7 @@ class _Pack:
             tool=tool,
             args=args,
             server=PIPELINE,
+            source=PACK_SOURCE,
             output=result_text(value),
             ok=not error,
             error=str(error) if error else None,
@@ -675,6 +726,7 @@ class _Pack:
             tool=tool,
             args=args,
             server=PIPELINE,
+            source=PACK_SOURCE,
             output=message,
             ok=False,
             error=message,
@@ -686,62 +738,71 @@ class _Pack:
         self.result.failed.append(tool)
         logger.warning("triage pack: %s failed (%s).", tool, entry.error)
 
+    def _record_absent(self, tool: str, args: dict[str, Any], reason: str) -> None:
+        """The entry for a step that could not run: why, with no call made and no failure."""
+        message = f"{NOT_RUN_PREFIX} {reason}"
+        self.recorder.record(
+            tool=tool,
+            args=args,
+            server=PIPELINE,
+            source=PACK_SOURCE,
+            output=message,
+            ok=False,
+            error=message,
+            started_at=time.time(),
+        )
+        logger.info("triage pack: %s %s", tool, message)
+
     # -- the steps --------------------------------------------------------
 
     def run(self) -> PackResult:
         started = time.monotonic()
-        path = self.inputs.sample_path
-        identity = self.record(
-            "identify_file", {"path": path}, lambda: identify.identify_file(path)
-        )
-        self.record("hashes", {"path": path}, lambda: identify.hashes(path))
-        # The routed format decides which signing scheme is about this sample.
-        # Resolved before the call rather than sniffed inside it, so the pack
-        # and the format tool below answer for the same format.
-        routed = self._routed_format(identity)
-        signing = self.record(
-            "signing_info",
-            {"path": path, "file_type": routed},
-            lambda: identify.signing_info(path, file_type=routed),
-        )
-        self.has_signature = _carries_signature(signing)
-
-        # FLOSS reads the file and nothing the pack writes, so it can run
-        # while capa and the rest do: on PuTTY the two took 185 s and 132 s
-        # one after the other. Its entry is still written last.
-        self._start_decoded_strings(routed)
+        ran = {step.id for step in self.steps}
+        starting: dict[str, list[PackStep]] = {}
+        for early in self.steps:
+            if early.starts_after:
+                # A step started beside the pack after a step that does not
+                # run starts before the first one.
+                anchor = early.starts_after if early.starts_after in ran else ""
+                starting.setdefault(anchor, []).append(early)
         try:
-            format_facts = self._format_facts(routed)
-            self._strings_and_iocs()
-            self._rules()
-            self._catalogue_lookups(format_facts, routed)
-            self._sandbox_summary()
-            self._reputation()
-            self._function_matches()
-            self._decoded_strings(routed)
-            self._resolved_values(routed, format_facts)
-            self._crypto_constants(routed)
-            self._ghidra_passes(routed)
-            self._function_index(routed)
-            self._unpacked_upx(routed, format_facts)
-            self._sandbox_sections()
+            for early in starting.get("", ()):
+                self._start_early(early)
+            for step in self.steps:
+                self._run_step(step)
+                for early in starting.get(step.id, ()):
+                    self._start_early(early)
         finally:
-            if self._floss_pool is not None:
-                self._floss_pool.shutdown(wait=False)
-            if self.ghidra is not None:
-                self.ghidra.close()
+            for pool in self._pools:
+                pool.shutdown(wait=False)
+            if self.anti_analysis is not None:
+                self.anti_analysis.close()
 
         # The recorder holds every entry in the order the ids were issued,
         # the reputation call's included, so it is the one list to publish.
         self.result.entries = list(self.recorder.entries)
         self.result.duration_ms = int((time.monotonic() - started) * 1000)
+        hits, rule_hits = rule_match_hits(self.result.entries)
         self.result.facts = TriageFacts(
             has_signature=self.has_signature,
             reputation_malicious=self.reputation_malicious,
-            yara_hits=self.yara_hits,
-            capa_hits=self.capa_hits,
+            yara_hits=hits.get(SIGNATURE_RULES_KIND, 0),
+            capa_hits=hits.get(RULE_KIND, 0),
+            rule_hits=rule_hits,
+            hits=hits,
         )
         return self.result
+
+    def _run_step(self, step: PackStep) -> None:
+        """One step at its place: the platform's own, or a server's tool."""
+        held = len(self.recorder.entries)
+        if not step.formats or self.routed in step.formats:
+            if step.builtin:
+                _BUILTIN_STEPS[step.id](self, step)
+            else:
+                self._server(step)
+        self._done.add(step.id)
+        _annotate(step, self.recorder.entries[held:])
 
     def _routed_format(self, identity: dict[str, Any] | None) -> str:
         """What this run routed the sample as, falling back to what identity saw."""
@@ -750,54 +811,251 @@ class _Pack:
             routed = str(identity.get("file_type") or "").strip().lower()
         return routed
 
-    def _format_facts(self, routed: str) -> dict[str, Any] | None:
-        """The header facts for the routed format."""
-        selected = _FORMAT_TOOLS.get(routed)
-        if selected is None:
-            return None
-        tool, call = selected
-        path = self.inputs.sample_path
-        return self.record(tool, {"path": path}, lambda: call(path))
+    # -- a step beside the rest of the pack ---------------------------------
 
-    def _strings_and_iocs(self) -> None:
+    def _start_early(self, step: PackStep) -> None:
+        """Start ``step`` beside the rest of the pack when it will run and the host has room.
+
+        Only a step that its own place would start anyway: its format routed,
+        its tool there to call, the budget not spent. The work runs on a
+        thread of its own and touches nothing the pack writes; its entry is
+        recorded in its usual place, with its own clock. Where the host has no
+        room for it beside the steps it names (``beside``), it runs in turn
+        and the pack's facts say why.
+        """
+        if step.id in self._done or step.id in self._early:
+            return
+        if step.formats and self.routed not in step.formats:
+            return
+        if self._over_budget() is not None:
+            return
+        work = self._early_work(step)
+        if work is None:
+            return
+        name = self._tool_name(step)
+        why = self._no_room_beside(step)
+        if why:
+            self.result.schedules[step.id] = f"in turn: {why}"
+            logger.info("triage pack: %s runs in turn; %s.", name, why)
+            return
+        pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"triage-{step.id}")
+        self._pools.append(pool)
+
+        def timed() -> tuple[Any, BaseException | None, float]:
+            began = time.monotonic()
+            try:
+                return work(), None, time.monotonic() - began
+            except Exception as exc:  # noqa: BLE001 — handed to the recording like any failure
+                return None, exc, time.monotonic() - began
+
+        future = pool.submit(timed)
+
+        # The thread is let go as soon as its work is done, so a long list of
+        # steps started beside the pack holds only the threads still working.
+        def release(_done: Any, held: ThreadPoolExecutor = pool) -> None:
+            held.shutdown(wait=False)
+
+        future.add_done_callback(release)
+        self._early[step.id] = (future, time.monotonic())
+        beside = _joined(self._tool_name(other) for other in self._beside(step))
+        self.result.schedules[step.id] = f"beside {beside}" if beside else "beside the pack"
+        logger.info("triage pack: %s started beside %s.", name, beside or "the pack")
+
+    def _early_work(self, step: PackStep) -> Callable[[], Any] | None:
+        """The work ``step`` would do at its place, ready to start; ``None`` if it would not run."""
+        if step.builtin:
+            starter = _EARLY_BUILTINS.get(step.id)
+            return starter(self, step) if starter is not None else None
+        if self.server_step is None:
+            return None
+        call, values, left = self.server_step, self._template_values(), self._budget_left()
+        return lambda: call(step, values, left)
+
+    def _beside(self, step: PackStep) -> list[PackStep]:
+        """The steps of this run ``step`` names to run beside, in the order it names them."""
+        by_id = {other.id: other for other in self.steps}
+        return [by_id[name] for name in step.beside if name in by_id]
+
+    def _no_room_beside(self, step: PackStep) -> str:
+        peaks = [(self._tool_name(other), *self._peak(other)) for other in self._beside(step)]
+        peaks.append((self._tool_name(step), *self._peak(step)))
+        return room_beside(
+            host_available=available_memory_bytes(),
+            cgroup_left=cgroup_headroom_bytes(),
+            peaks=peaks,
+            floor=int(self.inputs.memory_floor_bytes),
+        )
+
+    def _peak(self, step: PackStep) -> tuple[int | None, str]:
+        """A step's peak memory and how it is known: this worker's measure, else its declaration.
+
+        Its declaration is the step's ``peak_mb``, else its tool's declared
+        ``memory_peak_mb`` (the pack's own, or its server's block).
+
+        ``(None, "measured")`` for a step that measures its peak and has not
+        yet in this worker; ``(None, "declared")`` for one with neither.
+        """
+        measure = _MEASURED_PEAKS.get(step.id) if step.builtin else None
+        if measure is not None:
+            value = measure()
+            if value is not None:
+                return int(value), MEASURED
+        if step.peak_mb:
+            return int(step.peak_mb) * _MIB, DECLARED
+        declared = _pack_facts(step) if step.builtin else _server_facts(step)
+        if declared is not None and declared.memory_peak_mb:
+            return int(declared.memory_peak_mb) * _MIB, DECLARED
+        return None, MEASURED if measure is not None else DECLARED
+
+    def _tool_name(self, step: PackStep) -> str:
+        """The name a sentence about the step's tool gives it: its declared display name."""
+        if not step.builtin:
+            return step.display_name or step.called
+        facts = _pack_facts(step)
+        return (facts.display_name if facts is not None else "") or step.called
+
+    # -- a server's tool as a step ------------------------------------------
+
+    def _template_values(self) -> dict[str, str]:
+        return {
+            "sample_path": self.inputs.sample_path,
+            "sha256": self.inputs.sha256,
+            "file_type": self.routed,
+        }
+
+    def _server(self, step: PackStep) -> None:
+        """A server's tool, called through the server registry and recorded under that server."""
+        early = self._early.pop(step.id, None)
+        if early is not None:
+            value, error, took = early[0].result()
+            if error is not None or not isinstance(value, ServerAnswer):
+                said = f"{type(error).__name__}: {error}" if error is not None else "no answer"
+                value = ServerAnswer(
+                    tool=step.called,
+                    args=placeholder_values(step.arguments, self._template_values()),
+                    server=step.server,
+                    output=said,
+                    ok=False,
+                    error=said,
+                    started_at=time.time() - took,
+                    duration_ms=int(took * 1000),
+                )
+            self._record_answer(value)
+            return
+        values = self._template_values()
+        shown = placeholder_values(step.arguments, values)
+        spent = self._over_budget()
+        if spent is not None:
+            self._record_not_run(step.called, shown, spent)
+            return
+        if self.server_step is None:
+            self._record_absent(
+                step.called, shown, NO_SERVER_CALLS.format(server=step.server, tool=step.called)
+            )
+            return
+        if step.starts_after and step.id not in self.result.schedules:
+            self.result.schedules[step.id] = "in turn"
+        self.steps_run += 1
+        self._record_answer(self.server_step(step, values, self._budget_left()))
+
+    def _record_answer(self, answer: ServerAnswer) -> None:
+        entry = self.recorder.record(
+            tool=answer.tool,
+            args=answer.args,
+            server=answer.server,
+            source=f"mcp:{answer.server}",
+            output=answer.output,
+            ok=answer.ok,
+            error=answer.error,
+            started_at=answer.started_at,
+            duration_ms=answer.duration_ms,
+            structured_content=answer.structured_content,
+        )
+        # A call that was never made is an absence, as a lookup with no
+        # server to ask is; one that was made and failed is a failure.
+        if not entry.ok and not _was_not_made(entry):
+            self._failed(answer.tool, entry)
+
+    # -- the platform's own steps -------------------------------------------
+
+    def _identify_file(self, step: PackStep) -> None:
+        path = self.inputs.sample_path
+        self.identity = self.record(
+            "identify_file", {"path": path}, lambda: identify.identify_file(path)
+        )
+        # The routed format decides which signing scheme and which format
+        # reader are about this sample. Resolved here rather than sniffed
+        # inside them, so every later step answers for the same format.
+        self.routed = self._routed_format(self.identity)
+
+    def _hashes(self, step: PackStep) -> None:
+        path = self.inputs.sample_path
+        self.record("hashes", {"path": path}, lambda: identify.hashes(path))
+
+    def _signing_info(self, step: PackStep) -> None:
+        path, routed = self.inputs.sample_path, self.routed
+        signing = self.record(
+            "signing_info",
+            {"path": path, "file_type": routed},
+            lambda: identify.signing_info(path, file_type=routed),
+        )
+        self.has_signature = _carries_signature(signing)
+
+    def _format_info(self, step: PackStep) -> None:
+        """The header facts of the format the step reads, for a sample routed as one."""
+        call = _FORMAT_CALLS[step.called]
+        path = self.inputs.sample_path
+        self.format_facts = self.record(step.called, {"path": path}, lambda: call(path))
+
+    def _strings(self, step: PackStep) -> None:
         path = self.inputs.sample_path
         head = max(1, int(self.inputs.strings_head))
         args = {"path": path, "min_len": STRINGS_MIN_LEN, "limit": head}
         self.record(
             "strings", args, lambda: strings.strings(path, min_len=STRINGS_MIN_LEN, limit=head)
         )
+
+    def _iocs_from_file(self, step: PackStep) -> None:
+        path = self.inputs.sample_path
         self.record("iocs_from_file", {"path": path}, lambda: strings.iocs_from_file(path))
 
-    def _rules(self) -> None:
+    def _yara_scan(self, step: PackStep) -> None:
         path = self.inputs.sample_path
-        scanned = self.record("yara_scan", {"path": path}, lambda: rules.yara_scan(path=path))
-        if scanned is not None:
-            self.yara_hits = len(scanned.get("matches") or [])
+        if step.budget_seconds is None:
+            self.record("yara_scan", {"path": path}, lambda: rules.yara_scan(path=path))
+            return
+        seconds = max(1, int(step.budget_seconds))
+        self.record(
+            "yara_scan",
+            {"path": path, "timeout_s": seconds},
+            lambda: rules.yara_scan(path=path, timeout_s=seconds),
+        )
+
+    def _capa(self, step: PackStep) -> None:
+        path = self.inputs.sample_path
         capa = self.inputs.capa
+        # The step's own budget, else the operator's capa setting (``CapaSettings``).
+        timeout = max(1, int(step.budget_seconds)) if step.budget_seconds else capa.timeout_s
         capa_args = {
             "path": path,
-            "timeout_s": capa.timeout_s,
+            "timeout_s": timeout,
             "backend": capa.backend,
             "rules_dir": capa.rules_dir,
             "signatures_dir": capa.signatures_dir,
         }
-        found = self.record(
+        self.record(
             "capa",
             capa_args,
             lambda: rules.capa(
                 path,
-                timeout_s=capa.timeout_s,
+                timeout_s=timeout,
                 backend=capa.backend,
                 rules_dir=capa.rules_dir,
                 signatures_dir=capa.signatures_dir,
             ),
         )
-        if found is not None:
-            self.capa_hits = len(found.get("capabilities") or [])
-            self.capa_function_starts = list(found.get("function_starts") or [])
-            self.capa_rows = [
-                row for row in found.get("capabilities") or [] if isinstance(row, dict)
-            ]
+
+    def _sigma_match_sandbox(self, step: PackStep) -> None:
         report = observed_report(self.inputs.sandbox_report)
         if report:
             self.record(
@@ -806,8 +1064,10 @@ class _Pack:
                 lambda: rules.sigma_match_sandbox(report),
             )
 
-    def _catalogue_lookups(self, format_facts: dict[str, Any] | None, routed: str) -> None:
-        names = _imported_names(format_facts)
+    def _api_capability(self, step: PackStep) -> None:
+        """The API catalogue asked about the imported names, in the routed format's vocabulary."""
+        names = _imported_names(self.format_facts)
+        routed = self.routed
         # The routed format picks the catalogue's vocabulary. The two blocks
         # overlap by name — ``connect``, ``send``, ``system`` — so asking the
         # Windows block about an ELF's libc symbols gave them Win32 categories
@@ -827,6 +1087,8 @@ class _Pack:
                 {"api_names": names, "platform": platform},
                 lambda: knowledge.api_capability(names, platform=platform),
             )
+
+    def _lolbin_lookup(self, step: PackStep) -> None:
         report = observed_report(self.inputs.sandbox_report)
         if report:
             commands = _command_lines(report)
@@ -836,8 +1098,8 @@ class _Pack:
                 lambda: knowledge.lolbin_lookup(commands),
             )
 
-    def _sandbox_summary(self) -> None:
-        """The sandbox views, after the one sentence that says what the report is.
+    def _sandbox_status(self, step: PackStep) -> None:
+        """The one sentence that says what the report is, where no live sandbox observed the run.
 
         Where no sandbox ran — no report, or the mock sandbox's empty stand-in
         — that sentence is all there is: a stand-in's empty sections rendered
@@ -848,18 +1110,15 @@ class _Pack:
         found = sandbox_status(self.inputs.sandbox_report)
         if found.status != OBSERVED:
             self.record(STATUS_TOOL, {}, found.as_entry)
+
+    def _sandbox_view(self, step: PackStep) -> None:
         report = observed_report(self.inputs.sandbox_report)
-        if not report:
-            return
-        for tool, call in (
-            ("sandbox_processes", sandbox_tools.sandbox_processes),
-            ("sandbox_network", sandbox_tools.sandbox_network),
-            ("sandbox_signatures", sandbox_tools.sandbox_signatures),
-            ("sandbox_dropped_files", sandbox_tools.sandbox_dropped_files),
-            ("sandbox_channels", sandbox_tools.sandbox_channels),
-        ):
-            self.record(tool, {}, partial(call, report))
-        capture = _capture_path(report)
+        if report:
+            self.record(step.called, {}, partial(_SANDBOX_VIEWS[step.called], report))
+
+    def _pcap_summary(self, step: PackStep) -> None:
+        report = observed_report(self.inputs.sandbox_report)
+        capture = _capture_path(report) if report else ""
         if capture:
             # Recorded under the name the job's own sidecars resolve, never the
             # host path: the entry's arguments reach the evidence index a model
@@ -870,7 +1129,7 @@ class _Pack:
                 lambda: pcap.pcap_summary(capture),
             )
 
-    def _reputation(self) -> None:
+    def _reputation(self, step: PackStep) -> None:
         """The one network call, or the entry that says why there was none.
 
         A skip — no reputation server enabled, or the setting off — is an
@@ -883,30 +1142,35 @@ class _Pack:
             return
         spent = self._over_budget()
         if spent is not None:
-            self._record_not_run("reputation", {"sha256": self.inputs.sha256}, spent)
+            self._record_not_run(REPUTATION_STEP, {"sha256": self.inputs.sha256}, spent)
             return
         try:
             entry = self.reputation(self.recorder)
         except Exception as exc:  # noqa: BLE001 — the lookup degrades, the pack goes on
             message = f"{type(exc).__name__}: {exc}"
             entry = self.recorder.record(
-                tool="reputation",
+                tool=REPUTATION_STEP,
                 args={"sha256": self.inputs.sha256},
                 server=PIPELINE,
+                source=PACK_SOURCE,
                 output=message,
                 ok=False,
                 error=message,
                 started_at=time.time(),
             )
-            self._failed("reputation", entry)
+            self._failed(REPUTATION_STEP, entry)
             return
         if not entry.ok:
             if entry.server != PIPELINE:
-                self._failed(entry.tool, entry)
+                self._failed(REPUTATION_STEP, entry)
             return
-        self.reputation_malicious = malicious_count(entry.output)
+        # The count the lookup's declaration read from its answer when the
+        # entry was written (``core.reputation``); ``None`` for an answer that
+        # gave none, which a condition tells apart from zero.
+        answer = reputation_of(entry)
+        self.reputation_malicious = answer.malicious if answer is not None else None
 
-    def _function_matches(self) -> None:
+    def _function_matches(self, step: PackStep) -> None:
         if self.function_matches is None:
             return
         spent = self._over_budget()
@@ -924,6 +1188,7 @@ class _Pack:
                 tool="function_matches",
                 args={"exclude_sample_id": self.inputs.sha256},
                 server=PIPELINE,
+                source=PACK_SOURCE,
                 output=message,
                 ok=False,
                 error=message,
@@ -934,36 +1199,41 @@ class _Pack:
             return
         self.record("function_matches", args, lambda: value, started=started)
 
-    def _floss_timeout(self) -> int | None:
-        """FLOSS's wall clock: the caller's, else what is left of the pack's budget, else none.
+    # -- the emulated strings step --------------------------------------------
+
+    def _floss_timeout(self, step: PackStep) -> int | None:
+        """The emulator's wall clock: the step's, else the caller's, else what is left of the
+        pack's budget, else none.
 
         Worked out once, when the step first asks, so the entry's arguments
         say the clock the call was given.
         """
-        cached = getattr(self, "_floss_seconds", ())
-        if cached != ():
-            return cast("int | None", cached)
-        timeout = self.inputs.floss.timeout_s
-        if timeout is None:
+        if step.id in self._clocks:
+            return self._clocks[step.id]
+        timeout: int | None
+        if step.budget_seconds is not None:
+            timeout = max(1, int(step.budget_seconds))
+        elif self.inputs.floss.timeout_s is not None:
+            timeout = max(1, int(self.inputs.floss.timeout_s))
+        else:
+            timeout = None
             budget = float(self.inputs.budget_s or 0)
             if budget > 0:
                 timeout = max(1, int(budget - (time.monotonic() - self.started)))
-        else:
-            timeout = max(1, int(timeout))
-        self._floss_seconds = timeout
+        self._clocks[step.id] = timeout
         return timeout
 
-    def _floss_args(self) -> dict[str, Any]:
+    def _floss_args(self, step: PackStep) -> dict[str, Any]:
         return {
             "path": self.inputs.sample_path,
             "limit": DECODED_STRINGS_ROWS,
-            "timeout_s": self._floss_timeout(),
+            "timeout_s": self._floss_timeout(step),
         }
 
-    def _floss_call(self) -> Callable[[], dict[str, Any]]:
+    def _floss_call(self, step: PackStep) -> Callable[[], dict[str, Any]]:
         settings = self.inputs.floss
         path = self.inputs.sample_path
-        timeout = self._floss_timeout()
+        timeout = self._floss_timeout(step)
 
         def call() -> dict[str, Any]:
             scratch = (
@@ -981,46 +1251,14 @@ class _Pack:
 
         return call
 
-    def _start_decoded_strings(self, routed: str) -> None:
-        """Start FLOSS beside the rest of the pack when it will run and the host has room.
-
-        Only a run that ``_decoded_strings`` would start anyway: a routed PE,
-        an installed build, the budget not spent. The work runs on a thread of
-        its own and touches nothing the pack writes; its entry is recorded in
-        its usual place, with its own start clock.
-        """
-        if routed != "pe" or self._over_budget() is not None:
-            return
+    def _floss_early(self, step: PackStep) -> Callable[[], Any] | None:
+        """The emulator's work, when its build is installed; ``None`` otherwise."""
         if emulated_strings.floss_unavailable(self.inputs.floss.environ):
-            return
-        from maljan.providers.static.capa_yara import measured_capa_peak_bytes
+            return None
+        return self._floss_call(step)
 
-        why = floss_beside_capa(
-            host_available=available_memory_bytes(),
-            cgroup_left=cgroup_headroom_bytes(),
-            capa_peak=measured_capa_peak_bytes(),
-            floor=int(self.inputs.memory_floor_bytes),
-        )
-        if why:
-            self.result.floss_schedule = f"in turn: {why}"
-            logger.info("triage pack: FLOSS runs after capa; %s.", why)
-            return
-        self._floss_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="triage-floss")
-        call = self._floss_call()
-
-        def timed() -> tuple[Any, BaseException | None, float]:
-            began = time.monotonic()
-            try:
-                return call(), None, time.monotonic() - began
-            except Exception as exc:  # noqa: BLE001 — handed to ``record`` like any failure
-                return None, exc, time.monotonic() - began
-
-        self._floss = (self._floss_pool.submit(timed), time.monotonic())
-        self.result.floss_schedule = "beside capa"
-        logger.info("triage pack: FLOSS started beside capa.")
-
-    def _decoded_strings(self, routed: str) -> None:
-        """FLOSS over a PE, or the entry that says why it did not run.
+    def _floss(self, step: PackStep) -> None:
+        """The emulator over the sample, or the entry that says why it did not run.
 
         An absent build is said the way a lookup with no server to ask is: an
         entry that was never a call, with the remedy, and no degradation
@@ -1029,11 +1267,12 @@ class _Pack:
         comes to say which of the two it hit. A run started beside the pack is
         waited for here and recorded with its own clock.
         """
-        if routed != "pe":
-            return
-        args = self._floss_args()
-        if self._floss is not None:
-            running, _submitted = self._floss
+        args = self._floss_args(step)
+        path = self.inputs.sample_path
+        held = len(self.recorder.entries)
+        early = self._early.pop(step.id, None)
+        if early is not None:
+            running, _submitted = early
             value, error, took = running.result()
 
             def outcome() -> Any:
@@ -1041,67 +1280,122 @@ class _Pack:
                     raise error
                 return value
 
-            # The clock the entry is given is FLOSS's own run, not the time it
-            # then waited for the rest of the pack.
+            # The clock the entry is given is the emulator's own run, not the
+            # time it then waited for the rest of the pack.
             self.record("floss", args, outcome, started=time.monotonic() - took)
-            return
-        settings = self.inputs.floss
-        spent = self._over_budget()
-        if spent is not None:
-            self._record_not_run("floss", args, spent)
-            return
-        missing = emulated_strings.floss_unavailable(settings.environ)
-        if missing:
-            message = f"{NOT_RUN_PREFIX} {missing}"
-            self.recorder.record(
-                tool="floss",
-                args=args,
-                server=PIPELINE,
-                output=message,
-                ok=False,
-                error=message,
-                remediation=emulated_strings.FLOSS_REMEDIATION,
-                started_at=time.time(),
-            )
-            logger.info("triage pack: %s", message)
-            return
+        else:
+            settings = self.inputs.floss
+            spent = self._over_budget()
+            if spent is not None:
+                self._record_not_run("floss", args, spent)
+                return
+            missing = emulated_strings.floss_unavailable(settings.environ)
+            if missing:
+                message = f"{NOT_RUN_PREFIX} {missing}"
+                self.recorder.record(
+                    tool="floss",
+                    args=args,
+                    server=PIPELINE,
+                    source=PACK_SOURCE,
+                    output=message,
+                    ok=False,
+                    error=message,
+                    remediation=emulated_strings.FLOSS_REMEDIATION,
+                    started_at=time.time(),
+                )
+                logger.info("triage pack: %s", message)
+                return
+            if step.id not in self.result.schedules:
+                self.result.schedules[step.id] = "in turn"
+            self.record("floss", args, self._floss_call(step))
+        # Its entry holds a page of the rows; the whole document stays with
+        # the emulator in this process, for the readers that compare with it.
+        for entry in self.recorder.entries[held:]:
+            if entry.ok:
+                self._whole_rows[entry.id] = partial(emulated_strings.remembered_rows, path)
 
-        if not self.result.floss_schedule:
-            self.result.floss_schedule = "in turn"
-        self.record("floss", args, self._floss_call())
+    # -- the readings of a PE's bytes -----------------------------------------
 
-    def _resolved_values(self, routed: str, format_facts: dict[str, Any] | None = None) -> None:
-        """A PE's hash values named and its encoded strings decoded, by the platform.
+    def _function_starts(self) -> tuple[str, list[Any]]:
+        """The function starts the pack's answers list, and the name of their source.
 
-        Both read the file's bytes and nothing else, in seconds. After FLOSS,
-        so the decoder can say which of its texts FLOSS recovered too, and
-        last, so every id issued before them is the id it was before they
-        existed. Then, where the resolution named functions the import table
-        lacks, the capability lookup is asked about those names as resolved at
-        runtime (``resolved_names``), under the same platform the import-set
-        lookup was asked under, and recorded last for the same reason.
+        From every ok answer of a kind that lists starts (``FUNCTION_START_KINDS``),
+        through its declared path, in the order they were recorded, each start
+        once.
         """
-        if routed != "pe":
-            return
+        sources = start_sources(self.recorder.entries)
+        label = _joined(dict.fromkeys(name for name, _entry, _starts in sources))
+        starts = list(dict.fromkeys(s for _name, _entry, given in sources for s in given))
+        return label, starts
+
+    def _starts_args(self) -> tuple[dict[str, Any], str, list[Any]]:
         path = self.inputs.sample_path
-        starts = self.capa_function_starts
+        label, starts = self._function_starts()
         # The starts are an input the entry's arguments name by count, not by
         # value: a large sample has thousands of them.
         args: dict[str, Any] = {"path": path}
         if starts:
-            args["function_starts"] = f"capa's {len(starts)} function starts"
-        resolved = self.record(
+            args["function_starts"] = f"{label}'s {len(starts)} function starts"
+        return args, label, starts
+
+    def _resolve_api_hashes(self, step: PackStep) -> None:
+        """A PE's hash values named by the platform, from its bytes alone, in seconds."""
+        path = self.inputs.sample_path
+        args, label, starts = self._starts_args()
+        self.resolved = self.record(
             "resolve_api_hashes",
             args,
-            lambda: api_hashes.resolve_api_hashes(path, function_starts=starts),
+            lambda: api_hashes.resolve_api_hashes(
+                path, function_starts=starts, function_source=label
+            ),
         )
+
+    def _decode_string_blobs(self, step: PackStep) -> None:
+        """A PE's encoded strings decoded by the platform, compared with any decoder's strings.
+
+        After the decoders the pack ran, so the answer says which of its texts
+        an answer of a call-site strings kind recovered too.
+        """
+        path = self.inputs.sample_path
+        args, label, starts = self._starts_args()
+        recovered, decoder = self._recovered_rows()
         self.record(
             "decode_string_blobs",
             args,
-            lambda: string_blobs.decode_string_blobs(path, function_starts=starts),
+            lambda: string_blobs.decode_string_blobs(
+                path,
+                function_starts=starts,
+                function_source=label,
+                recovered=recovered,
+                decoder=decoder,
+            ),
         )
-        platform = _BEHAVIOUR_PLATFORM_BY_FORMAT.get(routed)
-        names = _resolved_not_imported(resolved, _imported_names(format_facts))
+
+    def _recovered_rows(self) -> tuple[list[Mapping[str, Any]], str]:
+        """The rows of every ok call-site strings answer, whole where its step keeps them whole.
+
+        And the word the decoder's answer names their source by: the shipped
+        emulator's name where every row came from it (``string_blobs.decoder_word``).
+        """
+        rows: list[Mapping[str, Any]] = []
+        sources = site_sources(self.recorder.entries)
+        for _tool, entry, given in sources:
+            whole = self._whole_rows.get(entry.id)
+            held = whole() if whole is not None else []
+            rows.extend(held or given)
+        shipped = _from_shipped(
+            (entry for _tool, entry, _rows in sources), DECODER_RENDERER, self.steps
+        )
+        return rows, string_blobs.decoder_word(shipped)
+
+    def _resolved_api_capability(self, step: PackStep) -> None:
+        """The catalogue asked about the names the resolution read that the import table lacks.
+
+        As resolved at runtime (``resolved_names``), under the same platform
+        the import-set lookup was asked under.
+        """
+        platform = _BEHAVIOUR_PLATFORM_BY_FORMAT.get(self.routed)
+        names = _resolved_not_imported(self.resolved, _imported_names(self.format_facts))
         if names and platform is not None:
             self.record(
                 "api_capability",
@@ -1109,107 +1403,105 @@ class _Pack:
                 lambda: knowledge.api_capability([], platform=platform, resolved_names=names),
             )
 
+    def _sandbox_api_capability(self, step: PackStep) -> None:
+        """The catalogue asked about the APIs the sandbox recorded the sample calling.
+
+        The names are the sandbox's own API reading of the job's report
+        (``sandbox_tools.sandbox_api_calls``), asked under the routed format's
+        vocabulary; the entry is recorded under the step's own kind
+        (``called_api_catalogue``), so the import profile and the technique
+        rules of the import-set lookup are never read from it. Nothing is
+        asked without an observed report, API calls in it or a vocabulary.
+        """
+        report = observed_report(self.inputs.sandbox_report)
+        platform = _BEHAVIOUR_PLATFORM_BY_FORMAT.get(self.routed)
+        if not report or platform is None:
+            return
+        rows = sandbox_tools.sandbox_api_calls(report).get("apis") or []
+        names = list(
+            dict.fromkeys(
+                str(row.get("api")) for row in rows if isinstance(row, dict) and row.get("api")
+            )
+        )
+        if names:
+            self.record(
+                step.called,
+                {"api_names": names, "platform": platform},
+                lambda: knowledge.api_capability(names, platform=platform),
+            )
+
     # -- the deobfuscation passes -------------------------------------------
 
-    def _record_absent(self, tool: str, args: dict[str, Any], reason: str) -> None:
-        """The entry for a pass that could not run: why, with no call made and no failure."""
-        message = f"{NOT_RUN_PREFIX} {reason}"
-        self.recorder.record(
-            tool=tool,
-            args=args,
-            server=PIPELINE,
-            output=message,
-            ok=False,
-            error=message,
-            started_at=time.time(),
-        )
-        logger.info("triage pack: %s %s", tool, message)
-
-    def _crypto_constants(self, routed: str) -> None:
+    def _crypto_constants(self, step: PackStep) -> None:
         """The platform's scan of an executable for published constants, read from its bytes.
 
-        Given capa's function starts, as the other readings of the bytes are,
-        and compared with capa's own rules afterwards (``_with_capa``).
+        Given the pack's listed function starts, as the other readings of the
+        bytes are, and compared with the rules of the answers of declared kind
+        ``capability_rules`` afterwards (``_with_rules``, ``_rule_rows``).
         """
-        if routed not in CONSTANT_FORMATS:
-            return
         path = self.inputs.sample_path
-        starts = list(self.capa_function_starts)
-        args: dict[str, Any] = {"path": path}
-        if starts:
-            args["function_starts"] = f"capa's {len(starts)} function starts"
-        rows = self.capa_rows
+        args, label, starts = self._starts_args()
+        rows = _rule_rows(self.recorder.entries)
+        mark = _rules_mark(_rule_sources(self.recorder.entries), self.steps)
         self.record(
             crypto_constants.TOOL,
             args,
-            lambda: _with_capa(
-                crypto_constants.find_crypto_constants(path, function_starts=starts), rows
+            lambda: _with_rules(
+                crypto_constants.find_crypto_constants(
+                    path, function_starts=starts, function_source=label
+                ),
+                rows,
+                mark,
             ),
         )
 
-    def _ghidra_passes(self, routed: str) -> None:
-        """Ghidra's anti-analysis scan, or the one entry saying why there is none.
+    def _anti_analysis_pass(self, step: PackStep) -> None:
+        """The static provider's anti-analysis scan, or the one entry saying why there is none.
 
-        Only with a Ghidra handed over by the caller. A reason that holds for
-        the whole deployment is one entry; a scan Ghidra did not complete is a
-        failed entry with Ghidra's words.
+        Only with a scan handed over by the caller, and for a format the scan
+        reads. A reason that holds for the whole deployment is one entry; a
+        scan that did not complete is a failed entry with the scanner's words.
+        Each entry's arguments name the provider that scans, which its line
+        names. A stated match is compared with the rules of every answer of
+        declared kind ``capability_rules`` the pack recorded before it.
         """
-        passes = self.ghidra
-        if passes is None or routed not in GHIDRA_FORMATS:
+        scan = self.anti_analysis
+        if scan is None or self.routed not in scan.formats:
             return
-        args = {"program": passes.sample_path or "the job's sample"}
-        if passes.unavailable:
-            self._record_absent(ANTI_ANALYSIS_TOOL, args, passes.unavailable)
+        args = {"program": scan.sample_path or "the job's sample", "provider": scan.provider}
+        if scan.unavailable:
+            self._record_absent(SCAN_TOOL, args, scan.unavailable)
             return
         path = self.inputs.sample_path
-        starts = list(self.capa_function_starts)
-        rows = self.capa_rows
+        starts = self._function_starts()[1]
+        rows = _rule_rows(self.recorder.entries)
+        mark = _rules_mark(_rule_sources(self.recorder.entries), self.steps)
         self.record(
-            ANTI_ANALYSIS_TOOL,
+            SCAN_TOOL,
             args,
             lambda: _anti_analysis_with_capa(
-                run_pass(lambda: passes.anti_analysis(path, starts), ANTI_ANALYSIS_TOOL),
+                run_pass(lambda: scan.anti_analysis(path, starts), SCAN_TOOL),
                 rows,
                 starts,
+                mark,
             ),
         )
 
     # -- the function index -------------------------------------------------
 
-    def _function_index(self, routed: str) -> None:
+    def _function_index(self, step: PackStep) -> None:
         """Every function of a PE with the artefacts the run's answers place in it.
 
         Last, so every id issued before it keeps its value. Joined from the
-        pack's own ok answers (``pe_info``, ``capa``, ``floss``,
-        ``resolve_api_hashes``, ``decode_string_blobs``) and the decoder's
-        reading of the file; the arguments name the entries it read.
+        pack's own ok answers by their declared kind or reader (``_INDEX_INPUTS``,
+        ``index_inputs``) and the decoder's reading of the file; the arguments
+        name the entries it read.
         """
-        if routed != "pe":
-            return
         path = self.inputs.sample_path
-        latest: dict[str, LedgerEntry] = {}
-        for recorded in self.recorder.entries:
-            if recorded.agent == PIPELINE and recorded.tool in _INDEX_SOURCES:
-                latest[recorded.tool] = recorded
-        joined: dict[str, tuple[str, dict[str, Any]]] = {}
-        absent: dict[str, str] = {}
-        for tool in _INDEX_SOURCES:
-            entry = latest.get(tool)
-            if entry is None:
-                absent[tool] = INDEX_SOURCE_NOT_IN_PACK
-            elif entry.ok and isinstance(entry.structured, dict):
-                joined[tool] = (entry.id, entry.structured)
-            elif entry.ok:
-                absent[tool] = INDEX_SOURCE_UNREADABLE.format(entry=entry.id)
-            elif _was_not_made(entry):
-                said = str(entry.error or entry.output or "")[len(NOT_RUN_PREFIX) :].strip()
-                absent[tool] = f"no: [{entry.id}] {_one_line(said)}"
-            else:
-                failed = _one_line(entry.error or entry.output)
-                absent[tool] = f"no: [{entry.id}] failed: {failed}"
+        joined = index_inputs(self.recorder.entries, self.steps)
         args: dict[str, Any] = {"path": path}
-        if joined:
-            args["joined"] = [f"{entry_id} {tool}" for tool, (entry_id, _) in joined.items()]
+        if joined.named:
+            args["joined"] = list(joined.named)
         # The exception directory's ranges are kept beside the answer, never in
         # it (``LedgerEntry.function_ranges``): the answer is what it was, and
         # the evidence byte budget charges the answer alone, so the ranges
@@ -1221,54 +1513,58 @@ class _Pack:
             args,
             lambda: artefact_index.function_index(
                 path,
-                pe_info=joined.get("pe_info"),
-                capa=joined.get("capa"),
-                floss=joined.get("floss"),
-                hashes=joined.get("resolve_api_hashes"),
-                blobs=joined.get("decode_string_blobs"),
-                absent=absent,
+                pe_info=joined.pe_info,
+                function_starts=joined.function_starts,
+                rule_hits=joined.rule_hits,
+                site_strings=joined.site_strings,
+                hashes=joined.hashes,
+                blobs=joined.blobs,
+                absent=joined.absent,
                 ranges_into=ranges,
+                rules_under=joined.rules_under,
+                rule_sources=joined.rule_sources or None,
             ),
         )
         made = self.recorder.entries[held:]
-        if ranges and made and made[-1].tool == artefact_index.TOOL and made[-1].ok:
+        if ranges and made and made[-1].ok:
             made[-1].function_ranges = ranges
 
     # -- UPX unpacking -------------------------------------------------------
 
-    def _unpacked_upx(self, routed: str, format_facts: dict[str, Any] | None) -> None:
+    def _unpacked_upx(self, step: PackStep) -> None:
         """Unpack a PE the packer reader names UPX, once, beside the files the server carves.
 
         After the function index, so every id issued before it keeps its value,
         and only when ``pe_info``'s packer signatures name UPX or a pack header
         with a true checksum byte stands where UPX writes one (renamed sections
         keep their header; a UPX-named file with none gets its ``no:``). The unpacked
-        program is written where the analysis server's ``carve_payloads``
-        writes for this job and sample, so the ``carved_path`` the answer gives
-        is one every file tool of the server reads. The pack is not run again
+        program is written under the staging base of the server declaring the
+        unpack tool's kind (``PackInputs.carve_environ``), for this job and
+        sample, so the ``carved_path`` the answer gives is one every file
+        tool of that server reads. The pack is not run again
         on it: the entry states it exists and where, and the models decide
         what to open. A run with no job directory to write in is one entry
         saying so.
         """
         path = self.inputs.sample_path
-        if routed != "pe" or not (_names_upx(format_facts) or _holds_a_pack_header(path)):
+        if not (_names_upx(self.format_facts) or _holds_a_pack_header(path)):
             return
         args: dict[str, Any] = {"path": path}
         settings = self.inputs.floss
         if not settings.job_id:
             self._record_absent(upx.TOOL, args, UPX_NO_JOB)
             return
+        carve_environ = self.inputs.carve_environ
+        environ = settings.environ if carve_environ is None else carve_environ
 
         def call() -> dict[str, Any]:
-            carved = staging.open_job_directory(
-                settings.job_id, staging.CARVED_DIRECTORY, settings.environ
-            )
+            carved = staging.open_job_directory(settings.job_id, staging.CARVED_DIRECTORY, environ)
             destination = staging.private_dir(carved / _file_digest(path))
             return upx.unpack_upx(path, destination)
 
         self.record(upx.TOOL, args, call)
 
-    def _sandbox_sections(self) -> None:
+    def _sandbox_sections(self, step: PackStep) -> None:
         """The sandbox report's section index, once, where a sandbox produced a report.
 
         Read in memory from the report in hand, in time linear in its size, so
@@ -1286,6 +1582,80 @@ class _Pack:
         )
 
 
+# How a step's peak memory is known.
+MEASURED = "measured"
+DECLARED = "declared"
+_MIB = 1024 * 1024
+
+# The platform's own steps that measure their peak memory in this worker, by
+# id: the in-process adapter of each knows where its measure is kept.
+_MEASURED_PEAKS: dict[str, Callable[[], int | None]] = {
+    "capa": lambda: _capa_peak(),
+}
+
+
+def _capa_peak() -> int | None:
+    from maljan.providers.static.capa_yara import measured_capa_peak_bytes
+
+    return measured_capa_peak_bytes()
+
+
+# The platform's own format readers, by the tool each step calls.
+_FORMAT_CALLS: dict[str, Callable[..., dict[str, Any]]] = {
+    "pe_info": binary.pe_info,
+    "elf_info": binary.elf_info,
+    "macho_info": binary.macho_info,
+    "apk_info": binary.apk_info,
+    "document_info": binary.document_info,
+    "archive_list": binary.archive_list,
+}
+
+# The platform's own sandbox views, by the tool each step calls.
+_SANDBOX_VIEWS: dict[str, Callable[..., dict[str, Any]]] = {
+    "sandbox_processes": sandbox_tools.sandbox_processes,
+    "sandbox_network": sandbox_tools.sandbox_network,
+    "sandbox_signatures": sandbox_tools.sandbox_signatures,
+    "sandbox_dropped_files": sandbox_tools.sandbox_dropped_files,
+    "sandbox_channels": sandbox_tools.sandbox_channels,
+}
+
+# Each of the platform's own steps, by its shipped id (``core.pack_steps``).
+_BUILTIN_STEPS: dict[str, Callable[[_Pack, PackStep], None]] = {
+    "identify_file": _Pack._identify_file,
+    "hashes": _Pack._hashes,
+    "signing_info": _Pack._signing_info,
+    **dict.fromkeys(_FORMAT_CALLS, _Pack._format_info),
+    "strings": _Pack._strings,
+    "iocs_from_file": _Pack._iocs_from_file,
+    "yara_scan": _Pack._yara_scan,
+    "capa": _Pack._capa,
+    "sigma_match_sandbox": _Pack._sigma_match_sandbox,
+    "lolbin_lookup": _Pack._lolbin_lookup,
+    "api_capability": _Pack._api_capability,
+    STATUS_TOOL: _Pack._sandbox_status,
+    **dict.fromkeys(_SANDBOX_VIEWS, _Pack._sandbox_view),
+    "pcap_summary": _Pack._pcap_summary,
+    REPUTATION_STEP: _Pack._reputation,
+    "function_matches": _Pack._function_matches,
+    "floss": _Pack._floss,
+    "resolve_api_hashes": _Pack._resolve_api_hashes,
+    "decode_string_blobs": _Pack._decode_string_blobs,
+    "resolved_api_capability": _Pack._resolved_api_capability,
+    "sandbox_api_capability": _Pack._sandbox_api_capability,
+    crypto_constants.TOOL: _Pack._crypto_constants,
+    SCAN_TOOL: _Pack._anti_analysis_pass,
+    artefact_index.TOOL: _Pack._function_index,
+    upx.TOOL: _Pack._unpacked_upx,
+    sandbox_sections.SECTIONS_TOOL: _Pack._sandbox_sections,
+}
+
+
+# The platform's own steps that can start beside the rest of the pack, by id.
+_EARLY_BUILTINS: dict[str, Callable[[_Pack, PackStep], Callable[[], Any] | None]] = {
+    "floss": _Pack._floss_early,
+}
+
+
 def budgeted_entries(entries: list[LedgerEntry]) -> list[LedgerEntry]:
     """The pack's entries the evidence byte budget charges: all but the section index.
 
@@ -1293,7 +1663,7 @@ def budgeted_entries(entries: list[LedgerEntry]) -> list[LedgerEntry]:
     citation is checked against it, so it is never blanked; it is the pack's
     last entry, so leaving it out charges every other entry as before.
     """
-    return [entry for entry in entries if entry.tool != sandbox_sections.SECTIONS_TOOL]
+    return [entry for entry in entries if renderer_of(entry) != "sandbox_sections"]
 
 
 # Why the pack did not unpack a sample the packer reader names UPX.
@@ -1326,8 +1696,328 @@ def _file_digest(path: str) -> str:
     return hasher.hexdigest()
 
 
-# The pack's answers the function index joins, by tool.
-_INDEX_SOURCES = ("pe_info", "capa", "floss", "resolve_api_hashes", "decode_string_blobs")
+# ---------------------------------------------------------------------------
+# The answers a later step reads, by what they are
+# ---------------------------------------------------------------------------
+
+# The kind of a signature rule matcher's answer (YARA's, as shipped).
+SIGNATURE_RULES_KIND = "signature_rules"
+# The kinds of answer that list where functions start: a tool that lists
+# functions, and a rule matcher that names the functions it analysed.
+FUNCTION_START_KINDS = frozenset({"function_list", RULE_KIND})
+# The kinds of answer that hold strings a decoder recovered, each with the
+# place that produced it: an emulator's, and any decoder's that declares a
+# call site.
+CALL_SITE_KINDS = frozenset({"emulated_strings", "decoded_strings"})
+# The reader of the answer shape whose rows carry the call site and the
+# routine of each recovered string, and where that shape keeps its rows when a
+# declaration names none.
+CALL_SITE_READER = "emulated_strings_with_call_sites"
+_CALL_SITE_ROWS = "/strings/*"
+
+
+def display_name(entry: LedgerEntry) -> str:
+    """The name a sentence gives the tool behind ``entry``: its declared display name, else its."""
+    return kind_free_facts(entry).display_name or str(entry.tool or "")
+
+
+def _first(values: Any) -> Any:
+    return values[0] if isinstance(values, list) and values else None
+
+
+def _starts_of(facts: ToolFacts, data: Any) -> list[Any]:
+    """The function starts an answer lists, through its declared path.
+
+    A ``function_list`` answer that declares no path gives each row's
+    ``start`` place (else ``function``, else ``address``).
+    """
+    if facts.function_starts:
+        out: list[Any] = []
+        for value in select(data, facts.function_starts):
+            out.extend(value if isinstance(value, list) else [value])
+        return [value for value in out if isinstance(value, str | int) and value != ""]
+    if facts.kind != "function_list" or not facts.rows:
+        return []
+    starts: list[Any] = []
+    for read in facts.row_values(data):
+        for name in ("start", "function", "address"):
+            found = _first(read.get(name))
+            if found not in (None, ""):
+                starts.append(found)
+                break
+    return starts
+
+
+def start_sources(entries: Iterable[LedgerEntry]) -> list[tuple[str, LedgerEntry, list[Any]]]:
+    """Every ok pack answer that lists function starts: its tool's name, the entry, the starts."""
+    out: list[tuple[str, LedgerEntry, list[Any]]] = []
+    for entry in entries:
+        if not entry.ok or entry.agent != PIPELINE or entry.structured is None:
+            continue
+        facts = facts_of(entry)
+        if facts is None or facts.kind not in FUNCTION_START_KINDS:
+            continue
+        starts = _starts_of(facts, entry.structured)
+        if starts:
+            out.append((display_name(entry), entry, starts))
+    return out
+
+
+def _is_site_source(facts: ToolFacts | None) -> bool:
+    """Whether an answer holds recovered strings with the place that produced each."""
+    if facts is None or facts.kind not in CALL_SITE_KINDS:
+        return False
+    return (
+        facts.kind == "emulated_strings"
+        or facts.reader == CALL_SITE_READER
+        or "call_site" in facts.places
+    )
+
+
+def _site_rows(facts: ToolFacts, data: Any) -> list[Mapping[str, Any]]:
+    """An answer's recovered strings, each as the call-site reader's row.
+
+    An answer of that reader's shape (declared so, or an emulator's answer that
+    declares no places) is read as it is; any other through its declared
+    ``text``, ``call_site``, ``function`` and ``scheme``.
+    """
+    if facts.reader == CALL_SITE_READER or (facts.kind == "emulated_strings" and not facts.places):
+        return [row for row in select(data, facts.rows or _CALL_SITE_ROWS) if isinstance(row, dict)]
+    rows: list[Mapping[str, Any]] = []
+    for read in facts.row_values(data):
+        text = _first(read.get("text"))
+        if text in (None, ""):
+            continue
+        row: dict[str, Any] = {"string": str(text)}
+        site, routine = _first(read.get("call_site")), _first(read.get("function"))
+        if site not in (None, ""):
+            row["kind"] = "decoded"
+            row["called_at_rva"] = str(site)
+        else:
+            row["kind"] = str(_first(read.get("scheme")) or "")
+        if routine not in (None, ""):
+            row["function_rva"] = str(routine)
+        rows.append(row)
+    return rows
+
+
+def site_sources(
+    entries: Iterable[LedgerEntry],
+) -> list[tuple[str, LedgerEntry, list[Mapping[str, Any]]]]:
+    """Every ok pack answer of recovered strings with their call sites: tool, entry, rows."""
+    out: list[tuple[str, LedgerEntry, list[Mapping[str, Any]]]] = []
+    for entry in entries:
+        if not entry.ok or entry.agent != PIPELINE or entry.structured is None:
+            continue
+        facts = facts_of(entry)
+        if not _is_site_source(facts):
+            continue
+        out.append((str(entry.tool), entry, _site_rows(cast("ToolFacts", facts), entry.structured)))
+    return out
+
+
+def _rule_hits_of(entry: LedgerEntry) -> list[tuple[str, list[Any]]]:
+    """The rules one answer of rule matches names, each with the addresses it matched at."""
+    return [(row["rule"], row["addresses"]) for row in _rule_rows([entry])]
+
+
+# The single answers the function index joins, by its input: the latest pack
+# entry of the declared reader or kind (``core.declared_reading``): the PE
+# header, an API hash resolution, a static string decoder whose answer names
+# no call sites.
+_INDEX_INPUTS: tuple[tuple[str, str, str], ...] = (
+    ("pe_header", "", "pe_header"),
+    ("hashes", "api_hash_resolution", ""),
+    ("blobs", "decoded_strings", ""),
+)
+
+
+def _index_slot(entry: Any) -> str:
+    """The function index input an entry fills, by its declared kind or reader; ``""`` for none.
+
+    ``rules`` and ``call_sites`` take every answer of their kind;
+    ``pe_header``, ``hashes`` and ``blobs`` the latest.
+    """
+    facts = facts_of(entry)
+    if facts is None:
+        return ""
+    if facts.kind == RULE_KIND:
+        return "rules"
+    if _is_site_source(facts):
+        return "call_sites"
+    for slot, kind, reader in _INDEX_INPUTS:
+        if (kind and facts.kind == kind) or (reader and facts.reader == reader):
+            return slot
+    return ""
+
+
+@dataclass
+class IndexInputs:
+    """What the function index joins from the pack's answers, and what it could not."""
+
+    pe_info: tuple[str, dict[str, Any]] | None = None
+    function_starts: list[tuple[str, str, list[Any]]] = field(default_factory=list)
+    rule_hits: list[tuple[str, str, list[tuple[str, list[Any]]]]] = field(default_factory=list)
+    site_strings: list[tuple[str, str, list[Mapping[str, Any]]]] = field(default_factory=list)
+    hashes: tuple[str, dict[str, Any]] | None = None
+    blobs: tuple[str, dict[str, Any]] | None = None
+    absent: dict[str, str] = field(default_factory=dict)
+    # ``<entry id> <tool>`` of each answer joined, in the order of the inputs.
+    named: list[str] = field(default_factory=list)
+    # The field each row holds its rules under (``artefact_index.rules_field``),
+    # and, where any rule came from a tool other than the shipped matcher, the
+    # display name of each rule entry's tool by entry id.
+    rules_under: str = ""
+    rule_sources: dict[str, str] = field(default_factory=dict)
+
+
+def _absence(entry: LedgerEntry) -> str:
+    """Why an entry of an input's kind could not be joined, in the index's ``no:`` words."""
+    if entry.ok:
+        return INDEX_SOURCE_UNREADABLE.format(entry=entry.id)
+    if _was_not_made(entry):
+        said = str(entry.error or entry.output or "")[len(NOT_RUN_PREFIX) :].strip()
+        return f"no: [{entry.id}] {_one_line(said)}"
+    return f"no: [{entry.id}] failed: {_one_line(entry.error or entry.output)}"
+
+
+def index_inputs(
+    entries: Iterable[LedgerEntry], steps: Iterable[PackStep] | None = None
+) -> IndexInputs:
+    """The pack's answers the function index joins, each by its declared kind or reader.
+
+    In order: the PE header, the rule matches (every answer of declared kind
+    ``capability_rules``), the strings recovered with their call sites (every
+    answer of a call-site kind), the hash resolution, the static decoder. An
+    input no answer fills is stated under ``absent`` by the kind it lacks;
+    an answer that failed, was not made or holds nothing readable, by its
+    tool, with why. The function starts are joined from every answer that
+    lists them. ``steps`` is the effective step list (the shipped one for
+    ``None``); with no rule answer it decides the name rows give rules under.
+    """
+    out = IndexInputs()
+    pack = [entry for entry in entries if entry.agent == PIPELINE]
+    latest: dict[str, LedgerEntry] = {}
+    every: dict[str, list[LedgerEntry]] = {"rules": [], "call_sites": []}
+    for entry in pack:
+        slot = _index_slot(entry)
+        if slot in every:
+            every[slot].append(entry)
+        elif slot:
+            latest[slot] = entry
+
+    def single(slot: str, missing: str) -> tuple[str, dict[str, Any]] | None:
+        entry = latest.get(slot)
+        if entry is None:
+            out.absent[missing] = INDEX_SOURCE_NOT_IN_PACK
+            return None
+        if entry.ok and isinstance(entry.structured, dict):
+            out.named.append(f"{entry.id} {entry.tool}")
+            return entry.id, entry.structured
+        out.absent[str(entry.tool)] = _absence(entry)
+        return None
+
+    out.pe_info = single("pe_header", "pe_header")
+    named: set[str] = set()
+    for slot, missing in (("rules", RULE_KIND), ("call_sites", "emulated_strings")):
+        if not every[slot]:
+            out.absent[missing] = INDEX_SOURCE_NOT_IN_PACK
+        for entry in every[slot]:
+            if not (entry.ok and isinstance(entry.structured, dict)):
+                out.absent[str(entry.tool)] = _absence(entry)
+                continue
+            out.named.append(f"{entry.id} {entry.tool}")
+            named.add(entry.id)
+            if slot == "rules":
+                out.rule_hits.append((str(entry.tool), entry.id, _rule_hits_of(entry)))
+            else:
+                facts = cast("ToolFacts", facts_of(entry))
+                out.site_strings.append(
+                    (str(entry.tool), entry.id, list(_site_rows(facts, entry.structured)))
+                )
+    for label, entry, starts in start_sources(pack):
+        out.function_starts.append((label, entry.id, starts))
+        if entry.id not in named:
+            out.named.append(f"{entry.id} {entry.tool}")
+            named.add(entry.id)
+    out.hashes = single("hashes", "api_hash_resolution")
+    out.blobs = single("blobs", "decoded_strings")
+    rule_entries = [entry for entry in every["rules"] if entry.id in named]
+    shipped = _from_shipped(rule_entries, RULES_RENDERER, steps)
+    out.rules_under = artefact_index.rules_field(shipped)
+    if not shipped:
+        out.rule_sources = {entry.id: display_name(entry) for entry in rule_entries}
+    return out
+
+
+def _pack_facts(step: PackStep) -> ToolFacts | None:
+    """What the pack's shipped declaration says of the tool a shipped step calls, or ``None``."""
+    from maljan.core.builtin_declarations import in_process_declarations
+
+    held = in_process_declarations().get(PACK)
+    return held.tool_facts.get(step.called) if held is not None else None
+
+
+def _server_facts(step: PackStep) -> ToolFacts | None:
+    """What a server step's tool declares now (its server's block): read for scheduling alone.
+
+    A live declaration, read where nothing persisted depends on it beyond the
+    schedule this run states (``core.declared_reading``); ``None`` when it
+    cannot be read.
+    """
+    from maljan.core.declared_reading import declarations
+
+    try:
+        return declarations().declaration_for((f"mcp:{step.server}", step.called))
+    except Exception as exc:  # noqa: BLE001 — an unread declaration declares nothing
+        logger.debug("triage pack: %s's declaration was not read (%s).", step.called, exc)
+        return None
+
+
+def _shipped_kind_name(kinds: Iterable[str]) -> str:
+    """The display name of the pack's shipped tool of one of ``kinds``, for a line read alone.
+
+    From the pack's shipped declaration: the pack is the platform's own code.
+    """
+    from maljan.core.builtin_declarations import in_process_declarations
+
+    wanted = frozenset(kinds)
+    held = in_process_declarations().get(PACK)
+    for name, facts in held.tool_facts.items() if held is not None else ():
+        if facts.kind in wanted:
+            return facts.display_name or name
+    return ""
+
+
+def _annotate(step: PackStep, entries: Sequence[LedgerEntry]) -> None:
+    """Stamp the entries an operator's step wrote with what the step declares.
+
+    A step as shipped is read back by its shipped declaration and is stamped
+    with nothing, so its entries dump as they always did. Any other step's
+    entries carry the step (``LedgerEntry.pack_step``): its id, the label its
+    line gives it and its renderer. Its declared ``kind`` is laid over the
+    entry's recorded facts, and so is its ``display_name`` for a server's
+    tool, which other lines name it by.
+    """
+    if not entries:
+        return
+    mark: dict[str, Any] | None = None
+    if shipped_step(step.id) != step:
+        mark = {"v": 1, "id": step.id}
+        if step.display_name:
+            mark["label"] = step.display_name
+        if step.renderer:
+            mark["renderer"] = step.renderer
+    over: dict[str, Any] = {}
+    if step.kind:
+        over["kind"] = step.kind
+    if step.display_name and not step.builtin:
+        over["display_name"] = step.display_name
+    for entry in entries:
+        if mark is not None:
+            entry.pack_step = dict(mark)
+        if over:
+            entry.facts = {**(entry.facts or {"v": FACTS_VERSION}), **over}
 
 
 # Why the index could not join one of the pack's answers, by case.
@@ -1340,30 +2030,30 @@ def _one_line(text: str | None) -> str:
     return " ".join(str(text or "").split())
 
 
-# The formats the constant scan reads: the executable images.
-CONSTANT_FORMATS = frozenset({"pe", "elf", "macho"})
-
-
 def run_pack(
     recorder: EvidenceRecorder,
     inputs: PackInputs,
     *,
     reputation: ReputationLookup | None = None,
     function_matches: FunctionMatches | None = None,
-    ghidra: GhidraPasses | None = None,
+    anti_analysis: AntiAnalysisScan | None = None,
+    server_step: ServerStepCall | None = None,
 ) -> PackResult:
     """Run the whole pack over ``inputs``, recording every step on ``recorder``.
 
-    Synchronous on purpose: every in-process tool is synchronous and capa
-    spawns a subprocess, so the node runs this on a worker thread the way the
-    report node runs the evidence-only provider.
+    Synchronous on purpose: every in-process tool is synchronous and a rule
+    engine may spawn a subprocess, so the node runs this on a worker thread
+    the way the report node runs the evidence-only provider. ``server_step``
+    calls a step a tool server answers (``ServerStepCall``); with none, such a
+    step is recorded as not run.
     """
     result = _Pack(
         recorder,
         inputs,
         reputation=reputation,
         function_matches=function_matches,
-        ghidra=ghidra,
+        anti_analysis=anti_analysis,
+        server_step=server_step,
     ).run()
     budget = int(inputs.evidence_budget_bytes or 0)
     trimmed, _ = apply_budget(budgeted_entries(result.entries), budget)
@@ -1540,19 +2230,23 @@ def _detail() -> PackDetail:
     return _DETAIL.get()
 
 
-RULE_TOOLS = ("capa", "yara_scan")
+# The kinds of answer whose pack entries mean an evidence-only static provider
+# that answers them need not run (``builtin_declarations.CONSUMER_KINDS``).
+RULE_ANSWERS = "triage_pack.RULE_TOOLS"
 
 
-def rules_already_recorded(rows: Any) -> bool:
-    """Whether the pack recorded an ``ok`` capa or YARA entry in this run.
+def rules_already_recorded(rows: Any, kinds: Iterable[str] | None = None) -> bool:
+    """Whether the pack recorded an ``ok`` entry of a kind the static provider answers.
 
-    The report node asks before running an evidence-only static provider
-    (``capa_yara``): when the pack ran the two tools, the pack is the
-    producer, and the report reads its entries rather than paying the
-    budget again.
+    The report node asks before running an evidence-only static provider:
+    when the pack recorded an answer of a kind that provider's declaration
+    names (``kinds``; the rule kinds when none is given), the pack is the
+    producer, and the report reads its entries rather than paying the budget
+    again. An entry's kind is its tool's declared one (``core.declared_reading``).
     """
+    wanted = frozenset(kinds) if kinds is not None else consumer_kinds(RULE_ANSWERS)
     return any(
-        entry.ok and entry.tool in RULE_TOOLS and entry.agent == PIPELINE
+        entry.ok and entry.agent == PIPELINE and kind_of(entry) in wanted
         for entry in pack_entries(rows)
     )
 
@@ -1598,19 +2292,131 @@ def render_pack(entries: list[LedgerEntry], max_chars: int) -> str:
     lines are and the uncounted entries are the triage node's to record
     (``pack_unsaid``).
 
-    The function index (``INDEX_TOOL``) comes after all of that and takes only
-    the room the rendered pack leaves: the pack is rendered without it exactly
-    as it would be, and the index is placed in what is left (``_with_index``).
+    The function index (renderer ``function_table``) comes after all of that
+    and takes only the room the rendered pack leaves: the pack is rendered
+    without it exactly as it would be, and the index is placed in what is left
+    (``_with_index``).
+
+    Each line is shown by the renderer its step declared (``renderer_of``) and
+    named by the label its step gave it (``_label_of``); a line that names
+    another tool's answer (the rule matcher a constant set agrees with, the
+    decoder that recovered a text too) names it by its declared display name,
+    read from the entries rendered with it.
     """
-    if any(entry.tool == INDEX_TOOL for entry in entries):
-        return _with_index(entries, max_chars)[0]
-    whole = _render_lines(entries, WHOLE)
-    if max_chars <= 0 or _joined_len(whole) <= max_chars:
-        return "\n".join(whole)
-    passes = [entry for entry in entries if entry.tool in PASS_TOOLS]
-    if not passes:
-        return _render_fitted(entries, max_chars)
-    return _render_with_passes(entries, max_chars)[0]
+    with _viewing(entries):
+        if any(_is_index(entry) for entry in entries):
+            return _with_index(entries, max_chars)[0]
+        whole = _render_lines(entries, WHOLE)
+        if max_chars <= 0 or _joined_len(whole) <= max_chars:
+            return "\n".join(whole)
+        passes = [entry for entry in entries if _is_pass(entry)]
+        if not passes:
+            return _render_fitted(entries, max_chars)
+        return _render_with_passes(entries, max_chars)[0]
+
+
+@dataclass
+class _View:
+    """The entries rendered together, read once: the tools a line may name, by position.
+
+    ``rules`` and ``decoders`` are the display names of the rule matchers and
+    of the decoders of call-site strings, each once, in the order first
+    recorded; ``before[id]`` is how many of each were recorded before that
+    entry. A line names those before it in time linear in what it names.
+    """
+
+    rules: list[str] = field(default_factory=list)
+    decoders: list[str] = field(default_factory=list)
+    before: dict[str, tuple[int, int]] = field(default_factory=dict)
+    labels: dict[str, str] = field(default_factory=dict)
+
+    @classmethod
+    def of(cls, entries: Sequence[LedgerEntry]) -> _View:
+        view = cls()
+        seen_rules: set[str] = set()
+        seen_decoders: set[str] = set()
+        for entry in entries:
+            view.before.setdefault(entry.id, (len(view.rules), len(view.decoders)))
+            name = display_name(entry)
+            if kind_of(entry) == RULE_KIND:
+                view.labels[entry.id] = name
+                if name not in seen_rules:
+                    seen_rules.add(name)
+                    view.rules.append(name)
+            if _is_site_source(facts_of(entry)) and name not in seen_decoders:
+                seen_decoders.add(name)
+                view.decoders.append(name)
+        return view
+
+    def counts(self) -> tuple[int, int]:
+        current = _CURRENT.get()
+        if current is None or current.id not in self.before:
+            return len(self.rules), len(self.decoders)
+        return self.before[current.id]
+
+
+# The entries rendered together, and the one whose line is being written: a
+# line that names another tool's answer reads its name from those before it.
+_IN_VIEW: ContextVar[_View | None] = ContextVar("pack_in_view", default=None)
+_CURRENT: ContextVar[LedgerEntry | None] = ContextVar("pack_current", default=None)
+
+
+@contextmanager
+def _viewing(entries: Sequence[LedgerEntry]) -> Iterator[None]:
+    """Render with ``entries`` in view, unless an outer rendering already holds its own."""
+    if _IN_VIEW.get() is not None:
+        yield
+        return
+    token = _IN_VIEW.set(_View.of(entries))
+    try:
+        yield
+    finally:
+        _IN_VIEW.reset(token)
+
+
+def _rules_in_view() -> str:
+    """The rule matchers recorded before the line being rendered, by display name.
+
+    ``""`` when there were none; a line rendered alone names the pack's shipped
+    rule matcher (``_shipped_kind_name``).
+    """
+    view = _IN_VIEW.get()
+    if view is None:
+        return _shipped_kind_name((RULE_KIND,))
+    return _joined(view.rules[: view.counts()[0]])
+
+
+def _rules_named() -> str:
+    """Who a rule mark on the line names: the rule matchers in view, else the shipped one."""
+    return _rules_in_view() or _shipped_kind_name((RULE_KIND,))
+
+
+def _decoders_in_view() -> str:
+    """The decoders of call-site strings recorded before the line, by name (``""``: none)."""
+    view = _IN_VIEW.get()
+    if view is None:
+        return _shipped_kind_name(("emulated_strings",))
+    return _joined(view.decoders[: view.counts()[1]])
+
+
+def _current_names(kind: str) -> tuple[str, str]:
+    """The line's own tool: its name and its display name; the shipped tool of ``kind`` alone."""
+    current = _CURRENT.get()
+    if current is not None:
+        return str(current.tool), display_name(current)
+    from maljan.core.builtin_declarations import in_process_declarations
+
+    held = in_process_declarations().get(PACK)
+    for name, facts in held.tool_facts.items() if held is not None else ():
+        if facts.kind == kind:
+            return name, facts.display_name or name
+    return kind, kind
+
+
+def _rule_labels() -> dict[str, str]:
+    """Every rule matcher's entry in view, by id, with its display name."""
+    view = _IN_VIEW.get()
+    return dict(view.labels) if view is not None else {}
 
 
 # Why a pass entry is in neither the pack nor its trailer, as the pack record says it.
@@ -1637,13 +2443,13 @@ def _with_index(entries: list[LedgerEntry], max_chars: int) -> tuple[str, list[L
     would be room the other lines did not leave; the run-state block names
     the entry and the tool that serves it.
     """
-    others = [entry for entry in entries if entry.tool != INDEX_TOOL]
+    others = [entry for entry in entries if not _is_index(entry)]
     text = render_pack(others, max_chars) if others else ""
     unsaid = [] if max_chars <= 0 else pack_unsaid(others, max_chars)
     lines = text.split("\n") if text else []
     said = _LEFT_OUT_LINE.match(lines[-1]) if lines else None
     trailer = lines.pop() if said else None
-    for entry in (e for e in entries if e.tool == INDEX_TOOL):
+    for entry in (e for e in entries if _is_index(e)):
         used = _joined_len([*lines, *([trailer] if trailer else [])])
         room = max_chars - used - (1 if used else 0) if max_chars > 0 else None
         block = _index_block(entry, room)
@@ -1664,10 +2470,11 @@ def _index_block(entry: LedgerEntry, room: int | None) -> str | None:
         return line if room is None or len(line) <= room else None
     data = entry.structured
     rows = list(artefact_index.rows_of(data))
-    head = f"[{entry.id}] {_GROUP_LABELS[INDEX_TOOL]}: {artefact_index.head_text(data, len(rows))}"
+    head = f"[{entry.id}] {_label_of(entry)}: {artefact_index.head_text(data, len(rows))}"
     if room is not None and len(head) > room:
         return None
-    every = [artefact_index.row_line(row, entry.id) for row in rows]
+    labels = _rule_labels()
+    every = [artefact_index.row_line(row, entry.id, labels) for row in rows]
     if room is None or _joined_len([head, *every]) <= room:
         return "\n".join([head, *every])
     # Not every row fits: room is kept for the last line at its longest, and
@@ -1700,24 +2507,25 @@ def pack_unsaid(entries: list[LedgerEntry], max_chars: int) -> list[LedgerEntry]
     addresses had none to give: the pack then stays as the earlier lines are,
     and the triage node records them in its pack record (``NO_PACK_ROOM``).
     """
-    if any(entry.tool == INDEX_TOOL for entry in entries):
-        return _with_index(entries, max_chars)[1]
-    if max_chars <= 0 or not any(entry.tool in PASS_TOOLS for entry in entries):
-        return []
-    if _joined_len(_render_lines(entries, WHOLE)) <= max_chars:
-        return []
-    return _render_with_passes(entries, max_chars)[1]
+    with _viewing(entries):
+        if any(_is_index(entry) for entry in entries):
+            return _with_index(entries, max_chars)[1]
+        if max_chars <= 0 or not any(_is_pass(entry) for entry in entries):
+            return []
+        if _joined_len(_render_lines(entries, WHOLE)) <= max_chars:
+            return []
+        return _render_with_passes(entries, max_chars)[1]
 
 
 def _render_with_passes(
     entries: list[LedgerEntry], max_chars: int
 ) -> tuple[str, list[LedgerEntry]]:
     """The pack with its pass lines, and the pass entries it could neither show nor count."""
-    earlier = [entry for entry in entries if entry.tool not in PASS_TOOLS]
+    earlier = [entry for entry in entries if not _is_pass(entry)]
     # Every pass line takes only the room the earlier lines leave, so no line
     # dev prints gives way to a pass. A pass with a fact no other line carries
     # is offered that room first.
-    passes = [entry for entry in entries if entry.tool in PASS_TOOLS]
+    passes = [entry for entry in entries if _is_pass(entry)]
     leftover = [e for e in passes if _novel_view(e) is not None] + [
         e for e in passes if _novel_view(e) is None
     ]
@@ -1748,8 +2556,8 @@ def _render_with_passes(
 def _without_rule_addresses_for(
     entries: list[LedgerEntry], kept: list[str], max_chars: int, need: int
 ) -> list[str] | None:
-    """``kept`` with capa's line showing fewer addresses, ``need`` characters shorter."""
-    capa = next((entry for entry in entries if entry.tool == "capa"), None)
+    """``kept`` with the rule line showing fewer addresses, ``need`` characters shorter."""
+    capa = next((entry for entry in entries if _shown(entry)[0] == RULES_RENDERER), None)
     if capa is None:
         return None
     index = next((i for i, line in enumerate(kept) if line.startswith(f"[{capa.id}] ")), None)
@@ -1763,7 +2571,7 @@ def _without_rule_addresses_for(
     token = _DETAIL.set(detail)
     try:
         target = len(kept[index]) - need
-        data = capa.structured if isinstance(capa.structured, dict) else {}
+        data = _shown(capa)[1] or {}
         rows = [r for r in data.get("capabilities") or [] if isinstance(r, dict)]
         low, high = 0, max((len(r.get("addresses") or []) for r in rows), default=0)
         best: str | None = None
@@ -1820,18 +2628,18 @@ def _novel_view(entry: LedgerEntry) -> LedgerEntry | None:
     pack's leftover room before the other pass entries; it never takes room
     from a line that is not a pass.
     """
-    data = entry.structured if isinstance(entry.structured, dict) else None
+    renderer, data = _shown(entry)
     if not entry.ok or data is None:
         return None
-    if entry.tool == crypto_constants.TOOL:
+    if renderer == "crypto_constants":
         rows = [r for r in data.get("found") or [] if isinstance(r, dict)]
-        new = [r for r in rows if not r.get("capa")]
+        new = [r for r in rows if not _rule_marks(r)]
         if not new:
             return None
         view = {**data, "found": new, "agreeing": len(rows) - len(new)}
-    elif entry.tool == ANTI_ANALYSIS_TOOL:
+    elif renderer == "anti_analysis_scan":
         rows = [r for r in data.get("stated") or [] if isinstance(r, dict)]
-        new = [r for r in rows if not r.get("capa")]
+        new = [r for r in rows if not _rule_marks(r)]
         if not new:
             return None
         view = {**data, "stated": new, "also_stated": len(rows) - len(new)}
@@ -1875,9 +2683,12 @@ def _with_rule_addresses(entries: list[LedgerEntry], max_chars: int) -> list[str
     lines = [_rule_line(entry, 0) for entry in entries]
     room = max_chars - _joined_len(lines)
     for index, entry in enumerate(entries):
-        if entry.tool != "capa" or room <= 0:
+        if room <= 0:
             continue
-        data = entry.structured if isinstance(entry.structured, dict) else {}
+        shown, shaped = _shown(entry)
+        if shown != RULES_RENDERER:
+            continue
+        data = shaped or {}
         rows = [r for r in data.get("capabilities") or [] if isinstance(r, dict)]
         most = max((len(r.get("addresses") or []) for r in rows), default=0)
         low, high, best = 1, most, lines[index]
@@ -1967,12 +2778,13 @@ def _fit_lines(entries: list[LedgerEntry], lines: list[str], max_chars: int) -> 
 
 def _within_room(entry: LedgerEntry, room: int) -> str | None:
     """``entry``'s line in ``room`` characters, when it can say less and still say something."""
-    shorter = _SHORTER_RENDERERS.get(entry.tool)
-    if shorter is None or not entry.ok or not isinstance(entry.structured, dict):
+    shown, data = _shown(entry)
+    shorter = _SHORTER_RENDERERS.get(shown)
+    if shorter is None or not entry.ok or data is None:
         return None
-    head = f"[{entry.id}] {_GROUP_LABELS.get(entry.tool, entry.tool)}: "
+    head = f"[{entry.id}] {_label_of(entry)}: "
     try:
-        body = shorter(entry.structured, room - len(head))
+        body = shorter(data, room - len(head))
     except Exception:  # noqa: BLE001 — a renderer must never cost the block
         return None
     line = head + body
@@ -1988,15 +2800,26 @@ def pack_block(entries: list[LedgerEntry], max_chars: int) -> str:
 
 def _pack_line(entry: LedgerEntry) -> str:
     """One entry as one line. Never raises: an unreadable answer is named as such."""
-    label = _GROUP_LABELS.get(entry.tool, entry.tool)
-    if not entry.ok and entry.tool in PASS_TOOLS:
+    token = _CURRENT.set(entry)
+    try:
+        return _line_of(entry)
+    finally:
+        _CURRENT.reset(token)
+
+
+def _line_of(entry: LedgerEntry) -> str:
+    # A reputation lookup, from whichever server answered, reads as the pack's
+    # reputation step: answered, failed or not made.
+    lookup = is_lookup_entry(entry)
+    label = REPUTATION_STEP if lookup else _label_of(entry)
+    if not entry.ok and _is_pass(entry):
         # A deobfuscation pass that did not run, or ran and broke, is one
         # ``no:`` line with the reason, as a pass that found nothing is.
         said = str(entry.error or entry.output or "")
         if _was_not_made(entry):
             return f"[{entry.id}] {label}: no: {_short(said[len(NOT_RUN_PREFIX) :].strip())}"
-        # The failure is Ghidra's own words; the class they travelled in is not.
-        said = said.removeprefix("GhidraPassFailed: ")
+        # The failure is the scanner's own words; the class they travelled in is not.
+        said = PASS_FAILED_PREFIX.sub("", said, count=1)
         return f"[{entry.id}] {label}: no: the pass failed: {_short(said)}"
     if not entry.ok:
         # A call the pipeline did not make — a lookup with no server to ask,
@@ -2004,15 +2827,17 @@ def _pack_line(entry: LedgerEntry) -> str:
         # a call that was made and broke is.
         verb = "not done" if _was_not_made(entry) else "failed"
         return f"[{entry.id}] {label}: {verb} ({_short(entry.error or entry.output)})"
-    data = entry.structured if isinstance(entry.structured, dict) else None
-    render = _RENDERERS.get(entry.tool)
-    if entry.tool in ("get_file_report", "check_hash"):
-        return f"[{entry.id}] reputation: {_reputation_facts(entry)}"
+    shown, data = _shown(entry)
+    render = _RENDERERS.get(shown)
+    answer = reputation_of(entry) if lookup else None
+    if answer is not None:
+        return f"[{entry.id}] {REPUTATION_STEP}: {_reputation_facts(entry, answer)}"
     if getattr(entry, "truncated", False) and not entry.output:
         # apply_budget dropped the result; "recorded" would read as one.
         return f"[{entry.id}] {label}: output dropped (evidence byte budget); call the tool for it"
     if render is None or data is None:
-        return f"[{entry.id}] {label}: {_short(entry.output) or 'recorded'}"
+        declared = _declared_rows(entry)
+        return f"[{entry.id}] {label}: {declared or _short(entry.output) or 'recorded'}"
     try:
         return f"[{entry.id}] {label}: {render(data)}"
     except Exception as exc:  # noqa: BLE001 — a renderer must never cost the block
@@ -2478,7 +3303,7 @@ DECODED_STRINGS_ROWS = 200
 # What the line says when the pack's room holds only some of the strings.
 DECODED_STRINGS_ROOM_SENTENCE = (
     "{shown} of {total} shown (every agent reads the pack, and this is what fits its "
-    "room); the rest are one floss call away at offset {offset}"
+    "room); the rest are one {tool} call away at offset {offset}"
 )
 
 # Said in the line itself, before the strings: they are the sample's words,
@@ -2529,12 +3354,14 @@ def _decoded_groups(rows: list[dict[str, Any]]) -> str:
 
 
 def _decoded_strings(data: dict[str, Any], max_chars: int | None = None) -> str:
-    """FLOSS's answer as counts, then the strings, the bound said when it cut.
+    """An emulator's answer as counts, then the strings, the bound said when it cut.
 
     Every string, whole, with no ``max_chars`` and the pack's whole detail;
     otherwise as many as fit ``max_chars`` and the pack's detail level.
-    ``""`` when not even the counts fit in ``max_chars``.
+    ``""`` when not even the counts fit in ``max_chars``. The emulator is
+    named by its declared display name, and the call for the rest by its tool.
     """
+    tool, name = _current_names("emulated_strings")
     rows = [r for r in (data.get("strings") or []) if isinstance(r, dict)]
     counts = data.get("counts") or {}
     meta = data.get("meta") or {}
@@ -2545,7 +3372,7 @@ def _decoded_strings(data: dict[str, Any], max_chars: int | None = None) -> str:
             f"{_n(meta.get('functions_emulated_for_decoding'))} emulated for decoding"
         )
     if not rows:
-        text = "FLOSS recovered no decoded, stack or tight strings"
+        text = f"{name} recovered no decoded, stack or tight strings"
         return f"{text} ({looked})" if looked else text
     total = max(int(data.get("total") or 0), len(rows))
     kinds = ", ".join(f"{_n(counts.get(kind, 0))} {kind}" for kind in emulated_strings.KINDS)
@@ -2572,7 +3399,7 @@ def _decoded_strings(data: dict[str, Any], max_chars: int | None = None) -> str:
                 )
         else:
             said = DECODED_STRINGS_ROOM_SENTENCE.format(
-                shown=_n(shown), total=_n(total), offset=shown
+                shown=_n(shown), total=_n(total), offset=shown, tool=tool
             )
         if not shown:
             return f"{head}; {said}"
@@ -2617,7 +3444,10 @@ def _around(place: dict[str, Any]) -> str:
         return f" (in {function})"
     before = place.get("after_function_start")
     if before:
-        return f" (after {place.get('function_source') or 'a listed'}'s function start {before})"
+        source = place.get("function_source")
+        if source:
+            return f" (after {source}'s function start {before})"
+        return f" (after a listed function start {before})"
     return ""
 
 
@@ -2774,11 +3604,12 @@ def _blob_item(row: dict[str, Any]) -> str:
     item = f"{text}@{where} [{scheme}]"
     if refs:
         item += f" referred to at {refs}"
-    floss = row.get("floss")
+    # The decoder's own row, under the answer's field for it.
+    floss = string_blobs.decoder_row(row)
     if isinstance(floss, dict):
         item += (
-            f" (FLOSS too: routine {floss.get('function_rva')}, call site "
-            f"{floss.get('called_at_rva')})"
+            f" ({_decoders_in_view() or _shipped_kind_name(('emulated_strings',))} too: "
+            f"routine {floss.get('function_rva')}, call site {floss.get('called_at_rva')})"
         )
     return item
 
@@ -2807,9 +3638,12 @@ def _decoded_blobs(data: dict[str, Any], max_chars: int | None = None) -> str:
     rows = [r for r in (data.get("results") or []) if isinstance(r, dict)]
     total = max(int(data.get("total") or 0), len(rows))
     unreferenced = int(data.get("unreferenced") or 0)
-    also = int(data.get("also_recovered_by_floss") or 0)
+    # Under the answer's field for it, whichever decoder's strings it compared.
+    also = int(string_blobs.also_recovered(data) or 0)
+    decoders = _decoders_in_view()
     counts = (
-        f"{_n(also)} also recovered by FLOSS; {_n(unreferenced)} more decodings no code refers "
+        f"{f'{_n(also)} also recovered by {decoders}; ' if decoders else ''}"
+        f"{_n(unreferenced)} more decodings no code refers "
         "to, not shown, one decode_string_blobs call away with include_unreferenced"
     )
     if not rows:
@@ -2843,23 +3677,36 @@ def _decoded_blobs(data: dict[str, Any], max_chars: int | None = None) -> str:
 # The deobfuscation passes' lines
 # ---------------------------------------------------------------------------
 
-PASS_TOOLS = frozenset({crypto_constants.TOOL, ANTI_ANALYSIS_TOOL, upx.TOOL})
+# The renderers of the deobfuscation passes: their lines take only the room the
+# others leave.
+PASS_RENDERERS = frozenset({"crypto_constants", "anti_analysis_scan", "unpacked_image"})
+# The renderer of a rule matcher's answer, whose addresses take what room is left.
+RULES_RENDERER = "capability_rules"
+# What a pass's row calls the rules that agree with it where any came from a
+# tool other than the shipped rule matcher (``_rules_mark``).
+RULES_MARK_NEUTRAL = "rules"
+# The renderer of an emulator's recovered strings: the decoder the static
+# decoder's answer compares with.
+DECODER_RENDERER = "emulated_strings"
 
 # What a pass line says when the room cut its list: how many it shows, and
 # where the rest are.
 PASS_ROOM_SENTENCE = "{shown} of {total} shown; the rest are in this entry's full output"
 
-# What Ghidra's scan looks at, as the pack line says it.
-SCAN_CHECKS_SHORT = "listed API calls, listed x86 instructions, FS:[0x30] and FS:[0x18]"
 
+def _with_rules(
+    answer: dict[str, Any], capa_rows: list[dict[str, Any]], mark: str = ""
+) -> dict[str, Any]:
+    """The constant scan's answer, each found set marked where a rule names the same algorithm.
 
-def _with_capa(answer: dict[str, Any], capa_rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """The constant scan's answer, each found set marked where capa names the same algorithm.
-
-    A set agrees with capa when a capa rule whose namespace ends in the set's
-    algorithm matched at the start of a function one of the set's places
-    stands in (``function``, or ``after_function_start`` for an image with no
-    table of its own). The mark is ``capa``: each rule and the address.
+    ``capa_rows`` are the rule rows of the pack's answers of declared kind
+    ``capability_rules`` (``_rule_rows``). A set agrees with a rule whose
+    namespace ends in one of the set's algorithm names
+    (``ConstantSet.capa``) and that matched at the start of a function one of
+    the set's places stands in (``function``, or ``after_function_start`` for
+    an image with no table of its own). The mark is each rule and the
+    address, under ``mark`` (empty: the shipped rule matcher's name, which it
+    has always been stored under; ``_rules_mark``).
     """
     if not isinstance(answer, dict) or not capa_rows or "found" not in answer:
         return answer
@@ -2886,24 +3733,97 @@ def _with_capa(answer: dict[str, Any], capa_rows: list[dict[str, Any]]) -> dict[
                     agree.append({"rule": str(capa.get("rule") or ""), "at": str(address)})
         row = dict(row)
         if agree:
-            row["capa"] = agree
+            row[mark or _rules_mark(())] = agree
         rows.append(row)
     marked["found"] = rows
     return marked
 
 
-def _anti_analysis_with_capa(
-    answer: dict[str, Any], capa_rows: list[dict[str, Any]], starts: list[str]
-) -> dict[str, Any]:
-    """The anti-analysis answer, each match marked where a capa rule agrees.
+def _rule_rows(entries: Iterable[LedgerEntry]) -> list[dict[str, Any]]:
+    """Every rule row of the ok answers of declared kind ``capability_rules``, in order.
 
-    A match agrees with capa when a capa rule that states the match's kind
-    matched in the same function (``ghidra_passes.capa_agrees``: an
-    anti-analysis rule of the row's kind or of no kind, or ``PEB access`` for
-    a TEB/PEB read): the nearest capa function start at or before the match
-    is the nearest one at or before a capa address. An exact TEB/PEB read
-    (``beside_capa``) is stated only with such a rule in its function;
-    without one it is counted.
+    Read through each answer's declared rows (``ToolFacts.row_values``): its
+    ``rule``, its ``namespace`` and the ``addresses`` it matched at.
+    """
+    rows: list[dict[str, Any]] = []
+    for entry in _rule_sources(entries):
+        facts = cast("ToolFacts", facts_of(entry))
+        for read in facts.row_values(entry.structured):
+            addresses = read.get("addresses") or []
+            first = addresses[0] if addresses else []
+            rows.append(
+                {
+                    "rule": str((read.get("rule") or [""])[0] or ""),
+                    "namespace": str((read.get("namespace") or [""])[0] or ""),
+                    "addresses": list(first) if isinstance(first, list) else list(addresses),
+                }
+            )
+    return rows
+
+
+def _rule_sources(entries: Iterable[LedgerEntry]) -> list[LedgerEntry]:
+    """The ok answers of declared kind ``capability_rules`` whose rules can be read."""
+    return [
+        entry
+        for entry in entries
+        if entry.ok
+        and kind_of(entry) == RULE_KIND
+        and facts_of(entry) is not None
+        and isinstance(entry.structured, dict)
+    ]
+
+
+def _from_shipped(
+    entries: Iterable[LedgerEntry], renderer: str, steps: Iterable[PackStep] | None = None
+) -> bool:
+    """Whether every one of ``entries`` is the answer of the tool ``renderer`` was shipped for.
+
+    With no entry, whether ``steps`` (the shipped list for ``None``) run that
+    tool (``core.pack_steps.runs_shipped``): an operator who swapped it out
+    gets the neutral names even when the tool of their own failed.
+    """
+    held = list(entries)
+    if not held:
+        return runs_shipped(renderer, steps)
+    return all(_written_for(entry, renderer) for entry in held)
+
+
+def _rules_mark(sources: Iterable[LedgerEntry], steps: Iterable[PackStep] | None = None) -> str:
+    """The field a pass's row holds the rules that agree with it under.
+
+    The shipped rule matcher's name, as it has always been stored, where every
+    rule came from that matcher as the platform runs it; a neutral name where
+    any came from another tool (``core.pack_steps.answer_field``).
+    """
+    return answer_field(
+        "{}",
+        RULES_RENDERER,
+        RULES_MARK_NEUTRAL,
+        shipped=_from_shipped(sources, RULES_RENDERER, steps),
+    )
+
+
+def _rule_marks(row: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """The rules a pass's row is marked as agreeing with, under either name of ``_rules_mark``."""
+    held = read_answer_field(row, "{}", RULES_RENDERER, RULES_MARK_NEUTRAL)
+    return [mark for mark in held or [] if isinstance(mark, dict)]
+
+
+def _anti_analysis_with_capa(
+    answer: dict[str, Any], capa_rows: list[dict[str, Any]], starts: list[str], mark: str = ""
+) -> dict[str, Any]:
+    """The anti-analysis answer, each match marked where a capability rule agrees.
+
+    ``capa_rows`` are the rule rows of the pack's answers of declared kind
+    ``capability_rules`` (``_rule_rows``). A match agrees with a rule when the
+    rule states the match's kind and matched in the same function
+    (``anti_analysis.rule_agrees``: an anti-analysis rule of the row's kind or
+    of no kind, or ``PEB access`` for a TEB/PEB read): the nearest function
+    start at or before the match is the nearest one at or before a rule
+    address. An exact TEB/PEB read (``beside_capa``) is stated only with such
+    a rule in its function; without one it is counted. The mark is under
+    ``mark`` (empty: the shipped rule matcher's name, which it has always
+    been stored under; ``_rules_mark``).
     """
     if not isinstance(answer, dict) or ("stated" not in answer and "beside_capa" not in answer):
         return answer
@@ -2924,7 +3844,7 @@ def _anti_analysis_with_capa(
     for capa in capa_rows:
         rule = str(capa.get("rule") or "")
         namespace = str(capa.get("namespace") or "")
-        if not (namespace.startswith("anti-analysis") or rule in CAPA_RULE_KINDS):
+        if not may_agree(rule, namespace):
             continue
         for address in capa.get("addresses") or []:
             begin = start_of(str(address))
@@ -2934,7 +3854,7 @@ def _anti_analysis_with_capa(
             by_start.setdefault(begin, []).append((rule, namespace, said))
 
     def agreeing(row: dict[str, Any]) -> list[dict[str, str]]:
-        # A row the file's own function table placed (``ghidra_passes.gs_reads``)
+        # A row the file's own function table placed (``anti_analysis.gs_reads``)
         # is asked about that function; any other by the nearest capa start.
         owner = row.get("owner")
         begin = int(str(owner), 16) if owner else start_of(str(row.get("offset") or ""))
@@ -2942,22 +3862,23 @@ def _anti_analysis_with_capa(
             return []
         kind = scan_kind(row)
         return [
-            said for rule, space, said in by_start.get(begin, ()) if capa_agrees(rule, space, kind)
+            said for rule, space, said in by_start.get(begin, ()) if rule_agrees(rule, space, kind)
         ]
 
     marked = dict(answer)
+    field_name = mark or _rules_mark(())
     rows = []
     for row in answer.get("stated") or []:
         row = dict(row)
         agree = agreeing(row)
         if agree:
-            row["capa"] = agree
+            row[field_name] = agree
         rows.append(row)
     counted = 0
     for row in marked.pop("beside_capa", None) or []:
         agree = agreeing(row)
         if agree:
-            rows.append({**row, "capa": agree})
+            rows.append({**row, field_name: agree})
         else:
             counted += 1
     marked["stated"] = rows
@@ -2981,12 +3902,12 @@ def _places(places: list[dict[str, Any]]) -> str:
 
 
 def _constant_item(row: dict[str, Any]) -> str:
-    """``AES forward substitution box [table] @ 0x3100``; a set capa names too, in one clause."""
+    """``AES forward substitution box [table] @ 0x3100``; a set a rule names too, in one clause."""
     name = f"{row.get('algorithm')} {row.get('what')}"
-    capa = [c for c in row.get("capa") or [] if isinstance(c, dict)]
+    capa = _rule_marks(row)
     if capa:
         said = ", ".join(f"{c.get('at')} ({c.get('rule')})" for c in capa)
-        return f"{name}: agrees with capa at {said}"
+        return f"{name}: agrees with {_rules_named()} at {said}"
     items: list[str] = []
     for table in row.get("tables") or []:
         if not isinstance(table, dict):
@@ -3015,7 +3936,7 @@ def _constant_sets(data: dict[str, Any], max_chars: int | None = None) -> str:
         return f"no: none of the {searched} published constant sets stands in the file{lone_said}"
     total = len(rows)
     agree_said = (
-        f"; {_n(agreeing)} more agree with capa at their functions (in this entry)"
+        f"; {_n(agreeing)} more agree with {_rules_named()} at their functions (in this entry)"
         if agreeing
         else ""
     )
@@ -3050,31 +3971,52 @@ def _anti_analysis_item(group: tuple[tuple[str, str], list[dict[str, Any]]]) -> 
     said = " ".join(shown)
     if len(shown) < len(places):
         said += f" (+{len(places) - len(shown)} more places)"
-    rules = list(
-        dict.fromkeys(
-            str(c.get("rule")) for row in rows for c in row.get("capa") or [] if isinstance(c, dict)
-        )
-    )
-    agrees = f" (agrees with capa: {', '.join(rules)})" if rules else ""
+    rules = list(dict.fromkeys(str(c.get("rule")) for row in rows for c in _rule_marks(row)))
+    agrees = f" (agrees with {_rules_named()}: {', '.join(rules)})" if rules else ""
     return f"{category}: {what} @ {said}{agrees}"
 
 
+# What an anti-analysis answer that names no provider calls the one that scanned.
+UNNAMED_SCANNER = "the static provider"
+
+
+def _scanner(provider: str) -> tuple[str, str]:
+    """The display name of the provider registered as ``provider``, and its scan's checks in short.
+
+    Read from the provider's own declaration (``StaticProvider.display_name``,
+    ``scan_checks_short``); a provider no longer registered is named by its id.
+    """
+    from maljan.providers.registry import registered_static_provider
+
+    cls = registered_static_provider(provider) if provider else None
+    if cls is None:
+        return provider or UNNAMED_SCANNER, ""
+    return cls.display_name(), cls.scan_checks_short
+
+
 def _anti_analysis(data: dict[str, Any], max_chars: int | None = None) -> str:
-    """The exact part of Ghidra's scan, each match once with its places; a ``no:`` without."""
+    """The exact part of a provider's scan, each match once with its places; a ``no:`` without.
+
+    The answer names the provider that scanned (its ``server``), which the
+    line names by its display name.
+    """
     rows = [r for r in (data.get("stated") or []) if isinstance(r, dict)]
-    # A TEB/PEB read no capa comparison has stated yet is counted.
+    # A TEB/PEB read no rule comparison has stated yet is counted.
     not_stated = int(data.get("not_stated") or 0) + len(data.get("beside_capa") or [])
     total = int(data.get("total_findings") or 0)
     returned = int(data.get("returned") or total)
-    checks = f"Ghidra's scan ({SCAN_CHECKS_SHORT})"
+    name, short = _scanner(str(data.get("server") or ""))
+    checks = f"{name}'s scan ({short})" if short else f"{name}'s scan"
+    rules = _rules_in_view()
+    lines = f"the {rules} and catalogue lines" if rules else "the catalogue lines"
     rest = (
-        f"; {_n(not_stated)} more of its matches are not stated (an API call, which the capa and "
-        "catalogue lines read, or not the listed instruction or operand)"
+        f"; {_n(not_stated)} more of its matches are not stated (an API call, which {lines} "
+        "read, or not the listed instruction or operand)"
         if not_stated
         else ""
     )
     cut = (
-        f"; Ghidra returned {_n(returned)} of its {_n(total)} matches, in its own order"
+        f"; {name} returned {_n(returned)} of its {_n(total)} matches, in its own order"
         if returned < total
         else ""
     )
@@ -3088,12 +4030,13 @@ def _anti_analysis(data: dict[str, Any], max_chars: int | None = None) -> str:
     groups = list(grouped.items())
     also = int(data.get("also_stated") or 0)
     also_said = (
-        f"; {_n(also)} more stated in this entry (matches at a function a capa rule names too)"
+        f"; {_n(also)} more stated in this entry (matches at a function a {_rules_named()} rule "
+        "names too)"
         if also
         else ""
     )
     head = (
-        f"{checks} matched, each as Ghidra's category: what @ offsets (in function)"
+        f"{checks} matched, each as {name}'s category: what @ offsets (in function)"
         f"{also_said}{rest}{cut}"
     )
 
@@ -3169,63 +4112,45 @@ def _function_matches(data: dict[str, Any]) -> str:
     return f"{text} (families {_names(families)})" if families else text
 
 
-def _reputation_facts(entry: LedgerEntry) -> str:
-    """What the reputation service said, as counts and labels.
+def _reputation_facts(entry: LedgerEntry, answer: ReputationRecord) -> str:
+    """What the reputation service said, as counts and labels, from its read record.
 
-    VirusTotal's answer is read for its engine counts and its popular threat
-    labels; the threat-intel sidecar answers in prose and the first sentence
-    of that is the fact. Neither is graded here.
+    The record is the answer as its lookup's declaration read it
+    (``core.reputation``), from any server. A structured answer that gave its
+    engine counts is stated in words with its labels and detection labels; any
+    other answer is the service's own text, with the count its declared
+    patterns found in it. Neither is graded here.
     """
-    service = "VirusTotal" if entry.server == "virustotal" else str(entry.server or "reputation")
-    data = entry.structured if isinstance(entry.structured, dict) else None
-    if data is not None:
-        stats = _find_key(data, "last_analysis_stats")
-        if isinstance(stats, dict):
-            total = sum(int(v) for v in stats.values() if isinstance(v, int))
-            # In words, never as a fraction. "0/75 malicious" is a score shape a
-            # model reads either way round: a benign control's summary turned
-            # it into "verified clean by 75/75 AV engines".
-            parts = [
-                f"{service}: {int(stats.get('malicious') or 0)} of {total} engines flag it "
-                "as malicious"
-            ]
-            labels: list[str] = []
-            classification = _find_key(data, "popular_threat_classification")
-            if isinstance(classification, dict):
-                label = classification.get("suggested_threat_label")
-                if label:
-                    labels.append(str(label))
-                for key in ("popular_threat_name", "popular_threat_category"):
-                    for row in classification.get(key) or []:
-                        value = row.get("value") if isinstance(row, dict) else row
-                        if value and str(value) not in labels:
-                            labels.append(str(value))
-            if labels:
-                parts.append(f"labels {_names(labels)}")
-            detections = _detection_labels(data)
-            if detections:
-                parts.append(detections)
-            return ", ".join(parts)
-    count = malicious_count(entry.output)
-    text = _short(entry.output)
+    service = answer.service or str(entry.server or REPUTATION_STEP)
+    if (isinstance(entry.structured, dict | list) or not entry.output) and answer.total is not None:
+        # In words, never as a fraction. "0/75 malicious" is a score shape a
+        # model reads either way round: a benign control's summary turned
+        # it into "verified clean by 75/75 AV engines".
+        parts = [
+            f"{service}: {int(answer.malicious or 0)} of {answer.total} engines flag it "
+            "as malicious"
+        ]
+        if answer.labels:
+            parts.append(f"labels {_names(answer.labels)}")
+        detections = _detection_labels(answer.detections)
+        if detections:
+            parts.append(detections)
+        return ", ".join(parts)
+    text = _short(entry.output or answer.summary)
+    count = answer.malicious
     return f"{service} {count} malicious ({text})" if count is not None else f"{service}: {text}"
 
 
-def _detection_labels(data: dict[str, Any]) -> str:
+def _detection_labels(labels: list[str]) -> str:
     """The answer's detection labels, with how many engines gave each.
 
-    VirusTotal's answer through its own MCP server carries ``detections``, one
-    result label per engine that detected the file, and no popular threat
-    classification. The labels are counted exactly as written, most engines
-    first and then in the order the answer lists them, every one of them whole
-    when the pack fits its room and otherwise as many, and as much of each, as
-    the pack's detail level allows, the rest counted; nothing is merged,
-    normalised or read for a family, which is the reader's to decide.
+    One result label per engine that detected the file, as the lookup's
+    declaration read them. The labels are counted exactly as written, most
+    engines first and then in the order the answer lists them, every one of
+    them whole when the pack fits its room and otherwise as many, and as much
+    of each, as the pack's detail level allows, the rest counted; nothing is
+    merged, normalised or read for a family, which is the reader's to decide.
     """
-    rows = _find_key(data, "detections")
-    if not isinstance(rows, list):
-        return ""
-    labels = [" ".join(str(row).split()) for row in rows if isinstance(row, str) and row.strip()]
     if not labels:
         return ""
     counts: dict[str, int] = {}
@@ -3245,25 +4170,6 @@ def _detection_labels(data: dict[str, Any]) -> str:
     return text
 
 
-def _find_key(value: Any, key: str, depth: int = _WALK_DEPTH) -> Any:
-    """The first value under ``key`` within ``depth`` levels, or ``None``."""
-    if depth <= 0:
-        return None
-    if isinstance(value, dict):
-        if key in value:
-            return value[key]
-        for child in value.values():
-            found = _find_key(child, key, depth - 1)
-            if found is not None:
-                return found
-    elif isinstance(value, list):
-        for child in value:
-            found = _find_key(child, key, depth - 1)
-            if found is not None:
-                return found
-    return None
-
-
 # For the tools that answer ``reason`` beside their rows: whether the rows
 # establish anything. A ``reason`` beside nothing established is a failure.
 _ESTABLISHED: dict[str, Callable[[dict[str, Any]], bool]] = {
@@ -3275,87 +4181,261 @@ _ESTABLISHED: dict[str, Callable[[dict[str, Any]], bool]] = {
 }
 
 
-_GROUP_LABELS: dict[str, str] = {
-    "identify_file": "identity",
-    "hashes": "hashes",
-    "signing_info": "signature",
-    "pe_info": "pe",
-    "elf_info": "elf",
-    "macho_info": "mach-o",
-    "apk_info": "apk",
-    "document_info": "document",
-    "archive_list": "archive",
-    "strings": "strings",
-    "iocs_from_file": "iocs",
-    "yara_scan": "yara",
-    "capa": "capa",
-    "sigma_match_sandbox": "sigma",
-    "api_capability": "api catalogue",
-    "lolbin_lookup": "lolbin",
-    "sandbox_processes": "sandbox processes",
-    "sandbox_network": "sandbox network",
-    "sandbox_signatures": "sandbox signatures",
-    "sandbox_dropped_files": "sandbox dropped files",
-    "sandbox_channels": "sandbox channels",
-    sandbox_sections.SECTIONS_TOOL: "sandbox sections",
-    STATUS_TOOL: "sandbox",
-    "pcap_summary": "pcap",
-    "reputation": "reputation",
-    "get_file_report": "reputation",
-    "check_hash": "reputation",
-    "function_matches": "function matches",
-    "floss": "decoded strings",
-    "resolve_api_hashes": "resolved hashes",
-    "decode_string_blobs": "decoded blobs",
-    crypto_constants.TOOL: "crypto constants",
-    ANTI_ANALYSIS_TOOL: "anti-analysis (Ghidra)",
-    artefact_index.TOOL: "function index",
-    upx.TOOL: "UPX unpacking",
+def _written_for(entry: LedgerEntry, renderer: str) -> bool:
+    """Whether ``entry`` is the answer of a tool the shipped steps of ``renderer`` call.
+
+    As the platform runs it: recorded by the pack itself, under that tool.
+    """
+    return entry.server in (None, "", PIPELINE) and written_for(renderer, entry.tool)
+
+
+def _declared_key(names: Mapping[str, str], preferred: Sequence[str]) -> str:
+    """The first of ``preferred`` a declaration names, else the first it names; ``""``."""
+    return next((name for name in preferred if name in names), next(iter(names), ""))
+
+
+# Which declared value names a row, and which place says where it stands.
+_NAMING_VALUES = ("rule", "text", "name", "value")
+_ROW_PLACES = ("addresses", "address", "offset", "rva")
+
+
+def _flat(values: list[Any]) -> list[str]:
+    out: list[str] = []
+    for value in values:
+        for item in value if isinstance(value, list) else [value]:
+            if item not in (None, "") and not isinstance(item, dict | list):
+                out.append(str(item))
+    return out
+
+
+def _scalar_text(value: Any) -> str:
+    """``value`` as one line of text when it is a scalar; ``""`` for an object, a list, nothing."""
+    if value is None or value == "" or isinstance(value, dict | list):
+        return ""
+    return " ".join(str(value).split())
+
+
+def _row_named(read: Mapping[str, Any], values: Sequence[str]) -> str:
+    """What names a row read through its declaration (``read``: value name to its first value).
+
+    Its declared ``rule``, else ``text``, ``name``, ``value``; a declaration
+    that names none of these gives the row's other declared values as
+    ``name=value``, so no other value stands where a row's name belongs.
+    Values that are not scalars are left out.
+    """
+    naming = next((name for name in _NAMING_VALUES if name in values), "")
+    if naming:
+        return _scalar_text(read.get(naming))
+    said = ((name, _scalar_text(read.get(name))) for name in values)
+    return " ".join(f"{name}={text}" for name, text in said if text)
+
+
+def _object_rows(data: Any, path: str) -> list[dict[str, Any]] | None:
+    """The rows ``path`` names in ``data`` that are objects; ``None`` if it names only others.
+
+    A row that is not an object holds no declared value or place, so it is
+    neither counted nor shown; an answer of only such rows is no answer the
+    declaration reads.
+    """
+    found = select(data, path)
+    rows = [row for row in found if isinstance(row, dict)]
+    return rows if rows or not found else None
+
+
+def _declared_rules(entry: LedgerEntry) -> dict[str, Any] | None:
+    """A rule matcher's answer read through its declaration, in the shape ``_capa`` reads.
+
+    Each declared row that is an object is one rule: named by
+    :func:`_row_named`, placed at its declared ``addresses`` (else
+    ``address``, ``offset``, ``rva``, else its first declared place), with the
+    technique ids the declaration says the row names when the tool declares
+    that its techniques are asserted. A row with no readable name is left
+    out. ``None`` for an answer whose declaration names no rows, or whose rows
+    are none of them named objects (the generic line then shows it).
+    """
+    from maljan.reporting.tool_kinds import row_technique_ids
+
+    facts = facts_of(entry)
+    if facts is None or not facts.rows or entry.structured is None:
+        return None
+    raws = _object_rows(entry.structured, facts.rows)
+    if raws is None:
+        return None
+    values = tuple(facts.values)
+    place = _declared_key(facts.places, _ROW_PLACES)
+    rows: list[dict[str, Any]] = []
+    for row in raws:
+        read = {name: first(row, path) for name, path in facts.values.items()}
+        rule = _row_named(read, values)
+        if not rule:
+            # A row the declaration gives no readable name is no rule it
+            # matched: neither counted nor shown as an empty one.
+            continue
+        rows.append(
+            {
+                "rule": rule,
+                "addresses": _flat(select(row, facts.places[place])) if place else [],
+                "attck": row_technique_ids(row, facts) if facts.asserts_techniques else [],
+            }
+        )
+    return {"capabilities": rows} if rows or not raws else None
+
+
+# The renderers that also read an answer through its declared facts
+# (``core.pack_steps.DECLARED_FACT_RENDERERS``): each gives the answer in the
+# shape the renderer reads, or ``None`` where the declaration names too little.
+_DECLARED_SHAPES: dict[str, Callable[[LedgerEntry], dict[str, Any] | None]] = {
+    RULES_RENDERER: _declared_rules,
 }
 
+
+def _shown(entry: LedgerEntry) -> tuple[str, dict[str, Any] | None]:
+    """The renderer ``entry``'s line is shown by, and its answer in the shape that renderer reads.
+
+    The answer as it is for the tool the renderer was shipped for. Any other
+    tool's answer is read through its declared facts, by a renderer of
+    ``_DECLARED_SHAPES``: the one its step declared, else the one of its
+    declared kind. Otherwise ``("", None)``, the generic line: a renderer is
+    never handed an answer it would read as something it does not say.
+    """
+    data = entry.structured if isinstance(entry.structured, dict) else None
+    renderer = renderer_of(entry)
+    if renderer and _written_for(entry, renderer):
+        return renderer, data
+    key = renderer or kind_of(entry)
+    reader = _DECLARED_SHAPES.get(key)
+    if reader is None or data is None or not entry.ok:
+        return "", None
+    shaped = reader(entry)
+    return (key, shaped) if shaped is not None else ("", None)
+
+
+def renderer_of(entry: LedgerEntry) -> str:
+    """How the pack's line shows ``entry``'s answer: one of ``core.pack_steps.PACK_RENDERERS``.
+
+    The renderer the step that wrote it declared (``LedgerEntry.pack_step``);
+    an entry of a step as shipped, which is stamped with none, is read by its
+    shipped step (``core.pack_steps.shipped_renderer``). ``""``: the generic line.
+    """
+    step = entry.pack_step if isinstance(entry.pack_step, dict) else None
+    if step is not None:
+        return str(step.get("renderer") or "")
+    if entry.server not in (None, "", PIPELINE):
+        return ""
+    return shipped_renderer(entry.tool)
+
+
+def _is_index(entry: LedgerEntry) -> bool:
+    return renderer_of(entry) == "function_table"
+
+
+def _is_pass(entry: LedgerEntry) -> bool:
+    return renderer_of(entry) in PASS_RENDERERS
+
+
+def _declared_rows(entry: LedgerEntry) -> str:
+    """The generic line of an answer whose declaration names its rows: how many, and each one.
+
+    Each row that is an object, named by :func:`_row_named`, at its first
+    declared place, as many as the pack's detail shows; ``""`` for an answer
+    whose declaration names no rows, or whose rows are none of them objects.
+    """
+    facts = facts_of(entry)
+    data = entry.structured
+    if facts is None or not facts.rows or data is None or not entry.ok:
+        return ""
+    rows = _object_rows(data, facts.rows)
+    if rows is None:
+        return ""
+    values = tuple(facts.values)
+    place = next(iter(facts.places), "")
+    items: list[str] = []
+    for row in rows:
+        read = {name: first(row, path) for name, path in facts.values.items()}
+        text = _row_named(read, values)
+        held = first(row, facts.places[place]) if place else None
+        where = " ".join(_flat([held])) if held is not None else ""
+        if text and where:
+            items.append(f"{_short(text)} @ {where}")
+        elif text:
+            items.append(_short(text))
+        elif where:
+            items.append(f"@ {where}")
+    kind = f" of kind {facts.kind}" if facts.kind else ""
+    noun = "row" if len(rows) == 1 else "rows"
+    listed = _names(items)
+    return f"{_n(len(rows))} {noun}{kind}" + (f" ({listed})" if listed else "")
+
+
+def _label_of(entry: LedgerEntry) -> str:
+    """What the pack's line calls an entry's step.
+
+    The label the step that wrote it declared (``LedgerEntry.pack_step``); an
+    entry of a step as shipped by its shipped step's label
+    (``core.pack_steps.shipped_label``); any other by its tool's declared
+    display name. The anti-analysis pass names the provider that scans by its
+    display name: the provider its arguments name, else the server its answer
+    names.
+    """
+    step = entry.pack_step if isinstance(entry.pack_step, dict) else None
+    if step is not None:
+        label = str(step.get("label") or "") or display_name(entry)
+    elif entry.server in (None, "", PIPELINE):
+        label = shipped_label(entry.tool, kind_of(entry))
+    else:
+        label = display_name(entry)
+    if kind_of(entry) != SCAN_KIND:
+        return label
+    args = entry.args if isinstance(entry.args, dict) else {}
+    data = entry.structured if isinstance(entry.structured, dict) else {}
+    provider = str(args.get("provider") or data.get("server") or "")
+    return f"{label} ({_scanner(provider)[0]})" if provider else label
+
+
+# Each renderer of ``core.pack_steps.PACK_RENDERERS`` that reads the answer's data.
 _RENDERERS: dict[str, Callable[[dict[str, Any]], str]] = {
-    "identify_file": _identity,
-    "hashes": _hashes,
-    "signing_info": _signature,
-    "pe_info": _pe,
-    "elf_info": _elf,
-    "macho_info": _macho,
-    "apk_info": _apk,
-    "document_info": _document,
-    "archive_list": _archive,
-    "strings": _strings,
-    "iocs_from_file": _iocs,
-    "yara_scan": _yara,
-    "capa": _capa,
-    "sigma_match_sandbox": _sigma,
-    "api_capability": _api_capability,
-    "lolbin_lookup": _lolbin,
+    "identity": _identity,
+    "digests": _hashes,
+    "code_signing": _signature,
+    "pe_header": _pe,
+    "elf_header": _elf,
+    "macho_header": _macho,
+    "apk_manifest": _apk,
+    "document_facts": _document,
+    "archive_listing": _archive,
+    "string_runs": _strings,
+    "file_iocs": _iocs,
+    "signature_rules": _yara,
+    RULES_RENDERER: _capa,
+    "event_rules": _sigma,
+    "api_catalogue": _api_capability,
+    "command_match": _lolbin,
     "sandbox_processes": _sandbox_processes,
     "sandbox_network": _sandbox_network,
     "sandbox_signatures": _sandbox_signatures,
     "sandbox_dropped_files": _sandbox_dropped,
     "sandbox_channels": _sandbox_channels,
-    sandbox_sections.SECTIONS_TOOL: _sandbox_sections,
-    STATUS_TOOL: lambda data: str(data.get("statement") or ""),
-    "pcap_summary": _pcap,
+    "sandbox_sections": _sandbox_sections,
+    "sandbox_status": lambda data: str(data.get("statement") or ""),
+    "capture_summary": _pcap,
     "function_matches": _function_matches,
-    "floss": _decoded_strings,
-    "resolve_api_hashes": _resolved_hashes,
-    "decode_string_blobs": _decoded_blobs,
-    crypto_constants.TOOL: _constant_sets,
-    ANTI_ANALYSIS_TOOL: _anti_analysis,
-    upx.TOOL: _unpacked,
+    "emulated_strings": _decoded_strings,
+    "api_hash_resolution": _resolved_hashes,
+    "decoded_blobs": _decoded_blobs,
+    "crypto_constants": _constant_sets,
+    "anti_analysis_scan": _anti_analysis,
+    "unpacked_image": _unpacked,
 }
 
 # The lines that can say less and still say something, each given the room it
 # has: the decoded strings keep their first strings, the capture its counts and
 # its heaviest conversations.
 _SHORTER_RENDERERS: dict[str, Callable[[dict[str, Any], int], str]] = {
-    "floss": lambda data, room: _decoded_strings(data, max_chars=room),
-    "pcap_summary": lambda data, room: _pcap(data, max_chars=room),
-    "resolve_api_hashes": lambda data, room: _resolved_hashes(data, max_chars=room),
-    "decode_string_blobs": lambda data, room: _decoded_blobs(data, max_chars=room),
-    crypto_constants.TOOL: lambda data, room: _constant_sets(data, max_chars=room),
-    ANTI_ANALYSIS_TOOL: lambda data, room: _anti_analysis(data, max_chars=room),
-    upx.TOOL: lambda data, room: _unpacked(data, max_chars=room),
+    "emulated_strings": lambda data, room: _decoded_strings(data, max_chars=room),
+    "capture_summary": lambda data, room: _pcap(data, max_chars=room),
+    "api_hash_resolution": lambda data, room: _resolved_hashes(data, max_chars=room),
+    "decoded_blobs": lambda data, room: _decoded_blobs(data, max_chars=room),
+    "crypto_constants": lambda data, room: _constant_sets(data, max_chars=room),
+    "anti_analysis_scan": lambda data, room: _anti_analysis(data, max_chars=room),
+    "unpacked_image": lambda data, room: _unpacked(data, max_chars=room),
 }

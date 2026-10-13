@@ -49,7 +49,9 @@ def _extract_sandbox_family(sandbox_report: dict[str, Any] | None) -> str | None
     Only ``cti.family[]`` entries count — a behavioural category is never a
     family. The first non-empty string wins.
     """
-    cti = (sandbox_report or {}).get("cti") or {}
+    from maljan.schemas.sandbox_document import place
+
+    cti = place(sandbox_report, "cti") or {}
     fams = cti.get("family") if isinstance(cti, dict) else None
     if isinstance(fams, list):
         for f in fams:

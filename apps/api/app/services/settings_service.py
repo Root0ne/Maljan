@@ -14,9 +14,12 @@ from typing import Any
 from maljan.core import settings_secrets as box
 from maljan.core.config import BUILTIN_SERVER_KEYS, Settings, builtin_env_allow
 from maljan.core.settings_overrides import (
+    SERVER_MAP_PATH,
     build_settings,
     effective_source,
     flatten_leaves,
+    pack_step_refusals,
+    shipped_tool_facts,
     split_key,
 )
 from pydantic import ValidationError
@@ -25,13 +28,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings as api_settings
 from app.models import RuntimeSetting
-from app.services.frontier_arms import (
-    ARMS_KEY,
-    arm_key_key,
-    masked_arms,
-    merge_arm_secrets,
-    split_arm_secrets,
-)
+from app.services.enrichment_sources import SOURCE_SECRETS
+from app.services.frontier_arms import ARMS
+from app.services.nested_secrets import NestedSecretMap
 from app.services.server_map import (
     SERVER_MAP_KEY,
     TOKEN_MASK,
@@ -48,6 +47,288 @@ from app.services.settings_catalog_api import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# The catalog leaves that hold a provider block's tool declarations
+# (``core.static.ghidra.tool_facts`` …): each is a map of tool name to
+# declaration, stored as its changes over what the block ships, one tool at a
+# time. The server map's declarations are checked inside it (``server_map``).
+TOOL_FACTS_LEAF_SUFFIX = ".tool_facts"
+
+
+def _is_declaration_leaf(key: str, value: Any) -> bool:
+    return (
+        key.startswith("core.") and key.endswith(TOOL_FACTS_LEAF_SUFFIX) and isinstance(value, dict)
+    )
+
+
+def incoming_declaration_leaves(changes: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+    """``changes`` with each provider block's tool declarations marked as changes over what ships.
+
+    A ``core.<block>.tool_facts`` value is read as every path reads a sent
+    map (``tool_declarations.sent_in_force``): marked, as the block's changes
+    over what it ships, so a shipped tool it leaves out stays as shipped and
+    only ``null`` removes one; without the mark, whole, as an earlier release
+    read it. A value sent back exactly as stored therefore says what the
+    stored one says; one stored marked is passed on as it is. A value holding
+    the mark's key with anything but the mark
+    (``tool_declarations.unreadable_map``) is passed on as sent, since marking
+    it would drop that key, for :func:`changed_declaration_refusals` to
+    refuse. Every other key is unchanged.
+    """
+    from maljan.core.tool_declarations import (
+        holds_changes,
+        stored_changes,
+        unreadable_map,
+        with_mark,
+    )
+
+    out = dict(changes)
+    for key, value in changes.items():
+        if not _is_declaration_leaf(key, value):
+            continue
+        held = current.get(key)
+        if (value == held and holds_changes(held)) or unreadable_map(value):
+            continue
+        out[key] = with_mark(stored_changes(value, _shipped_leaf(key)))
+    return out
+
+
+def _leaf_changes(
+    key: str, value: dict[str, Any], held: Any
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """What a leaf's save ships, changes (kept tools aside) and keeps as stored.
+
+    ``value`` is marked (:func:`incoming_declaration_leaves`); a tool it
+    sends with its refused stored change exactly as stored is kept as stored
+    (``tool_declarations.kept_stored_changes``) and left out of the rest.
+    """
+    from maljan.core.tool_declarations import kept_stored_changes, without_mark
+
+    shipped = _shipped_leaf(key)
+    incoming = without_mark(value)
+    kept = kept_stored_changes(incoming, held, shipped)
+    edited = {tool: change for tool, change in incoming.items() if tool not in kept}
+    return shipped, edited, kept
+
+
+def changed_declaration_refusals(
+    changes: dict[str, Any], current: dict[str, Any]
+) -> dict[str, str]:
+    """The strict refusals of the provider tool declarations a save adds or changes.
+
+    Each ``core.<block>.tool_facts`` value is a map of tool name to
+    declaration; one the save leaves as stored (or as shipped) is not held to
+    the strict rules (``tool_declarations.changed_declaration_errors``), so a
+    stored row with a key this version does not read blocks no unrelated
+    save. Keys are ``<leaf>.<tool>[.<field>]``; a value that is not a map,
+    or that names a tool no tool can be called (``check_tool_name``) other
+    than one sent back with its stored change exactly as stored, is refused
+    under ``<leaf>`` itself, as the settings model refuses it.
+    """
+    from maljan.core.tool_declarations import (
+        changed_declaration_errors,
+        merge_tool_facts,
+        sent_names_refusal,
+        stored_in_force,
+    )
+
+    errors: dict[str, str] = {}
+    for key, value in changes.items():
+        if not (key.startswith("core.") and key.endswith(TOOL_FACTS_LEAF_SUFFIX)):
+            continue
+        if value is None:
+            continue
+        if not isinstance(value, dict):
+            errors[key] = "tool declarations are a JSON object keyed by tool name"
+            continue
+        held = current.get(key)
+        shipped, edited, kept = _leaf_changes(key, value, held)
+        refusal = sent_names_refusal(value, kept)
+        if refusal:
+            errors[key] = refusal
+            continue
+        before = stored_in_force(shipped, held)[0] if isinstance(held, dict) else None
+        for where, message in changed_declaration_errors(
+            merge_tool_facts(shipped, edited), [before, shipped]
+        ).items():
+            errors[f"{key}.{where}"] = message
+    return errors
+
+
+def _shipped_leaf(key: str) -> dict[str, Any]:
+    """What the provider block of a ``core.<block>.tool_facts`` leaf ships for it."""
+    return shipped_tool_facts(split_key(key)[1].removesuffix(TOOL_FACTS_LEAF_SUFFIX))
+
+
+def stored_declaration_leaves(
+    changes: dict[str, Any], current: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """``changes`` with each provider block's tool declarations in the form they are stored.
+
+    A ``core.<block>.tool_facts`` value (:func:`incoming_declaration_leaves`)
+    is validated as it is in force and stored as its changes one tool at a
+    time (``tool_declarations.tool_facts_changes``), marked as such, so a
+    tool an operator never changed keeps following later releases. A value
+    sent back exactly as stored is stored as it was, and so is each tool sent
+    with its refused stored change exactly as stored (:func:`_leaf_changes`).
+    Every other key is unchanged.
+    """
+    from maljan.core.config import MCPServerConfig
+    from maljan.core.tool_declarations import merge_tool_facts, tool_facts_changes, with_mark
+
+    out = dict(changes)
+    for key, value in changes.items():
+        if not _is_declaration_leaf(key, value):
+            continue
+        held = None if current is None else current.get(key)
+        if current is not None and value == held:
+            continue
+        shipped, edited, kept = _leaf_changes(key, value, held)
+        try:
+            in_force = MCPServerConfig.model_validate(
+                {"tool_facts": merge_tool_facts(shipped, edited)}
+            ).model_dump(mode="json")["tool_facts"]
+        except ValidationError as exc:
+            # Every refusal above should have said it first; this keeps a save
+            # a precise refusal of the leaf rather than a failed request.
+            raise SettingsValidationError(
+                {key: "; ".join(str(err["msg"]) for err in exc.errors())}
+            ) from None
+        out[key] = with_mark({**tool_facts_changes(in_force, shipped), **kept})
+    return out
+
+
+def served_tool_facts(stored: dict[str, Any], shipped: dict[str, Any]) -> dict[str, Any]:
+    """A stored map of a block's tool declarations as the API serves and exports it.
+
+    Its changes over what the block ships, marked as such
+    (``tool_declarations.with_mark``), whichever form it was stored in: one
+    an earlier release stored whole is served as the changes that put the
+    same in force, so what the console shows and sends back, and what an
+    export carries, reads the same as what is in force. A stored map whose
+    form no release writes (``tool_declarations.unreadable_map``) is not in
+    force and is served as no change at all, so what the console sends back
+    keeps the shipped declarations in force.
+    """
+    from maljan.core.tool_declarations import stored_changes, unreadable_map, with_mark
+
+    if unreadable_map(stored):
+        return with_mark({})
+    return with_mark(stored_changes(stored, shipped))
+
+
+def lenient_imported_declarations(
+    values: dict[str, Any], *, whole_maps: bool = False
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """An import document's tool declarations, without what this version cannot read.
+
+    An export written by another version may hold a key this one does not
+    read (or a field only a kind makes readable, on a declaration that names
+    none): it is left out, the rest is imported, and each tool's leaving-out
+    is returned as a warning keyed by its dotted path. A declaration left
+    with nothing it says is left out whole. The file is never refused for it.
+
+    A block's tool declarations marked as changes
+    (``tool_declarations.holds_changes``) are its changes over what the block
+    ships, one tool at a time; each tool the document names is read as it is
+    in force, and kept as its changes again, marked. A map without the mark,
+    and every map when ``whole_maps`` says the document was written before
+    declarations were stored that way, is its whole map: a shipped tool it
+    does not name was removed, and stays removed.
+    """
+    from maljan.core.tool_declarations import (
+        holds_changes,
+        lenient_declarations,
+        loggable_names,
+        merge_tool_facts,
+        own_prefixed_names,
+        reads_no_kind,
+        refused_tool_names,
+        tool_facts_changes,
+        unreadable_map,
+        whole_as_changes,
+        with_mark,
+        without_mark,
+    )
+
+    from app.services.server_map import SERVER_MAP_KEY
+
+    warnings: dict[str, str] = {}
+
+    def _warn(key: str, text: str) -> None:
+        # Every warning about one tool is kept, in the order it was found.
+        held = warnings.get(key)
+        warnings[key] = f"{held}; then {text}" if held else text
+
+    def _clean(declared: Any, prefix: str, shipped: dict[str, Any], server: str = "") -> Any:
+        if not isinstance(declared, dict) or unreadable_map(declared):
+            # Passed on as written (reading it would drop the mark's key), for
+            # the save to refuse with the key named.
+            return declared
+        # A name no tool can have is carried through as written, whatever its
+        # value (``null`` included, which reading the map would drop), for the
+        # save to refuse with the key named, or keep where it is sent back
+        # exactly as stored.
+        carried = {
+            tool: declared[tool]
+            for tool in [*refused_tool_names(declared), *own_prefixed_names(declared, server)]
+            if tool in declared
+        }
+        declared = {tool: held for tool, held in declared.items() if tool not in carried}
+        # A map marked as changes is read as changes; one without the mark
+        # (every map of a ``/1`` document, or of a ``/2`` one exported from a
+        # store a release before the mark wrote) is read whole, as it was
+        # written: a shipped tool it does not name was removed, and a field a
+        # shipped tool's declaration leaves out is at its default.
+        declared = (
+            without_mark(declared)
+            if holds_changes(declared) and not whole_maps
+            else whole_as_changes(declared, shipped)
+        )
+        in_force = merge_tool_facts(shipped, declared)
+        named = {tool: in_force[tool] for tool in declared if tool in in_force}
+        kept, notes = lenient_declarations(named, where=f"{prefix} ")
+        for tool, names in notes.items():
+            _warn(
+                f"{prefix}.{tool}",
+                "left out " + loggable_names(names) + ": this version does not read them",
+            )
+        for tool, held in list(kept.items()):
+            if isinstance(held, dict) and reads_no_kind(held):
+                held = {**held, "kind": ""}
+            if isinstance(held, dict) and not any(
+                name for name, value in held.items() if value not in ("", None, [], {}, False)
+            ):
+                kept.pop(tool)
+                _warn(f"{prefix}.{tool}", "left out whole: it declares nothing this version reads")
+        held_in_force = {
+            tool: kept[tool] if tool in named else facts
+            for tool, facts in in_force.items()
+            if tool not in named or tool in kept
+        }
+        return {**with_mark(tool_facts_changes(held_in_force, shipped)), **carried}
+
+    out = dict(values)
+    for key, value in values.items():
+        if key == SERVER_MAP_KEY and isinstance(value, dict):
+            servers = {}
+            for name, entry in value.items():
+                if isinstance(entry, dict) and isinstance(entry.get("tool_facts"), dict):
+                    entry = {
+                        **entry,
+                        "tool_facts": _clean(
+                            entry["tool_facts"],
+                            f"{key}.{name}.tool_facts",
+                            shipped_tool_facts(f"{SERVER_MAP_PATH}.{name}"),
+                            str(name),
+                        ),
+                    }
+                servers[name] = entry
+            out[key] = servers
+        elif key.startswith("core.") and key.endswith(TOOL_FACTS_LEAF_SUFFIX):
+            out[key] = _clean(value, key, _shipped_leaf(key))
+    return out, warnings
 
 
 class SettingsValidationError(Exception):
@@ -75,7 +356,22 @@ class SaveResult:
 # The composite catalog leaves whose nested credential is stored as its own
 # runtime-keyed row, and the suffix those rows carry. Resetting the composite
 # resets them; ``save`` prunes the ones whose name left the map.
-_COMPOSITE_SECRET_SUFFIX = {SERVER_MAP_KEY: ".auth_token", ARMS_KEY: ".api_key"}
+#
+# Every composite but the server map keeps its entries' credential the one
+# way ``nested_secrets.NestedSecretMap`` describes: the frontier arms and the
+# enrichment sources.
+NESTED_SECRET_MAPS: tuple[NestedSecretMap, ...] = (ARMS, SOURCE_SECRETS)
+_NESTED_BY_KEY = {spec.key: spec for spec in NESTED_SECRET_MAPS}
+_COMPOSITE_SECRET_SUFFIX = {
+    SERVER_MAP_KEY: ".auth_token",
+    **{spec.key: spec.suffix for spec in NESTED_SECRET_MAPS},
+}
+
+
+def _merge_nested(overrides: dict[str, Any]) -> dict[str, Any]:
+    for spec in NESTED_SECRET_MAPS:
+        overrides = spec.merge(overrides)
+    return overrides
 
 
 def _loc_to_key(ns: str, loc: tuple[Any, ...]) -> str:
@@ -115,7 +411,7 @@ class SettingsService:
                     continue
             else:
                 out[row.key] = row.value
-        return merge_arm_secrets(merge_server_secrets(out))
+        return _merge_nested(merge_server_secrets(out))
 
     async def values(self) -> dict[str, ValueInfo]:
         index = catalog_index()
@@ -152,14 +448,15 @@ class SettingsService:
                     row.updated_by if row is not None else None,
                 )
                 continue
-            if entry.key == ARMS_KEY:
+            nested = _NESTED_BY_KEY.get(entry.key)
+            if nested is not None:
                 # Same split as the server map: the composite row never holds a
-                # key, each set one is its own encrypted row, and what the
-                # editor shows is the mask -- which ``split_arm_secrets`` reads
-                # back as "leave the row alone".
-                stored_arms: Any = row.value if row is not None else default_value
+                # credential, each set one is its own encrypted row, and what
+                # the editor shows is the mask -- which ``NestedSecretMap.split``
+                # reads back as "leave the row alone".
+                stored_composite: Any = row.value if row is not None else default_value
                 out[key] = ValueInfo(
-                    masked_arms(dict(stored_arms or {}), rows),
+                    nested.masked(dict(stored_composite or {}), rows),
                     None,
                     None,
                     "ui" if row is not None else effective_source(overridden=False),
@@ -216,7 +513,13 @@ class SettingsService:
                     )
                 continue
             if row is not None:
-                out[key] = ValueInfo(row.value, None, None, "ui", row.updated_at, row.updated_by)
+                held = row.value
+                shown_value = (
+                    served_tool_facts(held, _shipped_leaf(key))
+                    if isinstance(held, dict) and _is_declaration_leaf(key, held)
+                    else held
+                )
+                out[key] = ValueInfo(shown_value, None, None, "ui", row.updated_at, row.updated_by)
             else:
                 # A read-only (API_READONLY) entry shows what is actually in
                 # effect: for a core leaf, the model default resolved through
@@ -249,6 +552,10 @@ class SettingsService:
         them existed still holds. A shipped default an admin has taken out
         stays out, and is shown as taken out.
 
+        An entry's tool declarations are shown as its changes over what the
+        server ships, marked as such (:func:`served_tool_facts`), whichever
+        form they were stored in.
+
         The map shown is the stored one: a built-in key a row predates is
         re-seeded for the run and written back by the next save
         (``validate_server_map``), but it is not conjured into this view.
@@ -256,6 +563,10 @@ class SettingsService:
         out: dict[str, Any] = {}
         for name, entry in stored_map.items():
             shown = dict(entry)
+            if isinstance(shown.get("tool_facts"), dict):
+                shown["tool_facts"] = served_tool_facts(
+                    shown["tool_facts"], shipped_tool_facts(f"{SERVER_MAP_PATH}.{name}")
+                )
             if name in BUILTIN_SERVER_KEYS:
                 shown["env_allow"] = builtin_env_allow(name, shown.get("env_allow") or [])
             if server_token_key(name) in rows:
@@ -277,8 +588,15 @@ class SettingsService:
         return out
 
     # ---- validation ----------------------------------------------------
-    def check_keys(self, changes: dict[str, Any]) -> None:
+    def check_keys(self, changes: dict[str, Any], stored: dict[str, Any] | None = None) -> None:
+        """Refuse unknown, read-only and out-of-choice keys.
+
+        ``stored`` is what is saved now: a value equal to it is not checked
+        against the choices again, so a form re-sending a stored id whose
+        backend package later broke can still save its other keys.
+        """
         index = catalog_index()
+        stored = stored or {}
         errors = {}
         for key in changes:
             entry = index.get(key)
@@ -286,16 +604,74 @@ class SettingsService:
                 errors[key] = "unknown setting"
             elif not entry.editable:
                 errors[key] = entry.reason or "read-only"
+            elif (
+                entry.choices_from
+                and entry.choices is not None
+                and changes[key] is not None
+                and changes[key] != stored.get(key)
+                and changes[key] not in entry.choices
+            ):
+                # Exactly as the registry spells it: a value that differs in
+                # case or spacing names no provider when a job is built, so it
+                # is refused here rather than stored for every job to fail on.
+                # A choice a registry holds (a memory backend, say) is checked
+                # here, where it is saved, rather than wherever the settings
+                # are read: a stored id whose package later breaks still loads.
+                errors[key] = f"not one of: {', '.join(entry.choices)}"
         if errors:
             raise SettingsValidationError(errors)
+
+    def _with_value_errors(
+        self,
+        refused: SettingsValidationError,
+        changes: dict[str, Any],
+        current: dict[str, Any],
+    ) -> SettingsValidationError:
+        """``refused``, with what ``validate`` says about the keys it did not refuse."""
+        errors = dict(refused.errors)
+        index = catalog_index()
+        merged = dict(current)
+        for key, value in changes.items():
+            if key in errors or key not in index:
+                continue
+            if value is None:
+                merged.pop(key, None)
+            else:
+                merged[key] = value
+        core = {split_key(k)[1]: v for k, v in merged.items() if k.startswith("core.")}
+        api = {split_key(k)[1]: v for k, v in merged.items() if k.startswith("api.")}
+        try:
+            self.validate(core, api)
+        except SettingsValidationError as more:
+            for key, message in more.errors.items():
+                errors.setdefault(key, message)
+        except Exception:  # noqa: BLE001 — the refusal stands on its own
+            pass
+        try:
+            # Stored pack steps are read leniently by ``validate``; the steps
+            # this save changes are held to the strict rules here as well.
+            stored_core = {split_key(k)[1]: v for k, v in current.items() if k.startswith("core.")}
+            for key, message in pack_step_refusals(core, stored_core).items():
+                errors.setdefault(key, message)
+        except Exception:  # noqa: BLE001 — the refusal stands on its own
+            pass
+        return SettingsValidationError(errors)
 
     def validate(self, merged_core: dict[str, Any], merged_api: dict[str, Any]) -> None:
         errors: dict[str, str] = {}
         try:
-            build_settings(merged_core)
+            built = build_settings(merged_core)
         except ValidationError as exc:
             for err in exc.errors():
                 errors[_loc_to_key("core", err["loc"])] = err["msg"]
+        else:
+            # The selected provider's role models are read from its own block,
+            # never borrowed from another provider's.
+            from maljan.llm.provider_base import role_block_problem
+
+            problem = role_block_problem(built)
+            if problem:
+                errors["core.llm.provider"] = problem
         # No ``APISettings(**nest(merged_api))`` here: ``extra="ignore"`` drops
         # everything a catalog ``api.*`` key could supply (every one of them
         # moved off the model), so the call could only ever have failed
@@ -318,14 +694,20 @@ class SettingsService:
     async def save(
         self, changes: dict[str, Any], *, user_id: uuid.UUID | None, ip: str | None
     ) -> SaveResult:
-        self.check_keys(changes)
-        index = catalog_index()
         current = await self.load_overrides()
+        try:
+            self.check_keys(changes, current)
+        except SettingsValidationError as refused:
+            # Every refused key is named in one answer: what the model would
+            # refuse among the keys that passed is said beside it.
+            raise self._with_value_errors(refused, changes, current) from None
+        index = catalog_index()
         # An import document carries the mask wherever a secret was omitted.
         # For a secret leaf the mask means "unchanged", exactly as it does in
         # a composite editor -- never a credential whose literal characters
         # are ten asterisks.
         changes = {k: v for k, v in changes.items() if not (index[k].secret and v == TOKEN_MASK)}
+        changes = incoming_declaration_leaves(changes, current)
         tokens: dict[str, str | None] = {}
         server_map_kept: set[str] | None = None
         if SERVER_MAP_KEY in changes:
@@ -365,33 +747,36 @@ class SettingsService:
                     )
                 server_map_kept = set(changes[SERVER_MAP_KEY])
 
-        arm_keys: dict[str, str | None] = {}
-        arms_kept: set[str] | None = None
-        if ARMS_KEY in changes:
-            if changes[ARMS_KEY] is None:
+        # Per nested-secret composite in the change: its credentials to write
+        # and the entry names it still holds.
+        nested_writes: list[tuple[NestedSecretMap, dict[str, str | None], set[str]]] = []
+        for spec in NESTED_SECRET_MAPS:
+            if spec.key not in changes:
+                continue
+            if changes[spec.key] is None:
                 # An explicit null drops the override like every other key
-                # (handled below); every per-arm key row goes with it.
-                arms_kept = set()
-            else:
-                stored_arms_map = current.get(ARMS_KEY)
-                changes[ARMS_KEY], arm_keys = split_arm_secrets(
-                    changes[ARMS_KEY],
-                    stored=stored_arms_map if isinstance(stored_arms_map, dict) else None,
+                # (handled below); every per-entry credential row goes with it.
+                nested_writes.append((spec, {}, set()))
+                continue
+            stored_composite = current.get(spec.key)
+            changes[spec.key], secrets = spec.split(
+                changes[spec.key],
+                stored=stored_composite if isinstance(stored_composite, dict) else None,
+            )
+            unstorable = [
+                spec.row_key(name)
+                for name, secret in secrets.items()
+                if secret and not box.is_available()
+            ]
+            if unstorable:
+                raise SettingsValidationError(
+                    {
+                        key: "secrets cannot be stored: SETTINGS_ENCRYPTION_KEY is not set"
+                        for key in unstorable
+                    }
                 )
-                unstorable = [
-                    arm_key_key(name)
-                    for name, api_key in arm_keys.items()
-                    if api_key and not box.is_available()
-                ]
-                if unstorable:
-                    raise SettingsValidationError(
-                        {
-                            key: "secrets cannot be stored: SETTINGS_ENCRYPTION_KEY is not set"
-                            for key in unstorable
-                        }
-                    )
-                if isinstance(changes[ARMS_KEY], dict):
-                    arms_kept = set(changes[ARMS_KEY])
+            if isinstance(changes[spec.key], dict):
+                nested_writes.append((spec, secrets, set(changes[spec.key])))
 
         from app.services.agent_map import (
             AGENT_DEFINITIONS_KEY,
@@ -424,7 +809,25 @@ class SettingsService:
                 merged[key] = value
         core = {split_key(k)[1]: v for k, v in merged.items() if k.startswith("core.")}
         api = {split_key(k)[1]: v for k, v in merged.items() if k.startswith("api.")}
-        self.validate(core, api)
+        # Every refusal of the merged values in one answer: the model's, the
+        # pack steps this save changes (stored ones are read leniently, the
+        # changed ones held to the strict rules) and the tool declarations it
+        # changes.
+        refusals: dict[str, str] = {}
+        try:
+            self.validate(core, api)
+        except SettingsValidationError as refused:
+            refusals.update(refused.errors)
+        stored_core = {split_key(k)[1]: v for k, v in current.items() if k.startswith("core.")}
+        for more in (
+            pack_step_refusals(core, stored_core),
+            changed_declaration_refusals(changes, current),
+        ):
+            for key, message in more.items():
+                refusals.setdefault(key, message)
+        if refusals:
+            raise SettingsValidationError(refusals)
+        changes = stored_declaration_leaves(changes, current)
 
         rows = {r.key: r for r in await self._rows()}
         before: dict[str, Any] = {}
@@ -458,9 +861,9 @@ class SettingsService:
             result.applies[entry.applies] = result.applies.get(entry.applies, 0) + 1
         if server_map_kept is not None:
             await self._save_server_tokens(tokens, server_map_kept)
-        if arms_kept is not None:
+        for spec, secrets, kept in nested_writes:
             await self._save_runtime_secrets(
-                arm_keys, arms_kept, prefix=f"{ARMS_KEY}.", suffix=".api_key", key_of=arm_key_key
+                secrets, kept, prefix=f"{spec.key}.", suffix=spec.suffix, key_of=spec.row_key
             )
         await self.db.commit()
         details = {"changed": list(changes), "before": before, "after": after}

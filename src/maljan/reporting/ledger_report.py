@@ -33,6 +33,9 @@ from typing import TYPE_CHECKING, Any
 
 from maljan.agents.output_shortening import BOOKKEEPING_KEY, our_key_in
 from maljan.analysis.technique_ids import says_no_technique, sigma_technique_ids
+from maljan.core.reputation import reputation_of
+from maljan.core.tool_declarations import first, select
+from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import (
     MergeTally,
     finding_fingerprint,
@@ -41,6 +44,7 @@ from maljan.reporting.dedupe import (
 )
 from maljan.reporting.models import EvidenceSection
 from maljan.schemas.evidence import answer_not_shown
+from maljan.schemas.sandbox_document import DNS_NAME_KEYS, dns_name_key
 from maljan.utils.marked_cut import marked_cut
 
 if TYPE_CHECKING:
@@ -97,6 +101,10 @@ class _Sections:
         # Rows a table could not carry past ``MAX_ROWS``, per section, said
         # under it when the sections are handed over.
         self._left_out: dict[str, int] = {}
+        # The ids each section cites, and every id any section cites, so a
+        # citation and the question "was this entry drawn" are one lookup.
+        self._cited: dict[str, set[str]] = {}
+        self._credited: set[str] = set()
 
     def _full(self, section: EvidenceSection, size: int) -> bool:
         if size < MAX_ROWS:
@@ -127,9 +135,20 @@ class _Sections:
             self._seen[key] = set()
         return section
 
+    def credited(self, entry: LedgerEntry) -> bool:
+        """Whether any section built so far cites ``entry``."""
+        return entry.id in self._credited
+
     def cite(self, section: EvidenceSection, entry_id: str) -> None:
-        if entry_id and entry_id not in section.evidence_ids:
+        if not entry_id:
+            return
+        held = self._cited.get(section.key)
+        if held is None:
+            held = self._cited[section.key] = set(section.evidence_ids)
+        if entry_id not in held:
+            held.add(entry_id)
             section.evidence_ids.append(entry_id)
+        self._credited.add(entry_id)
 
     def credit(self, section: EvidenceSection, entry: LedgerEntry) -> None:
         """Cite one entry and record which tool the section came from.
@@ -516,18 +535,77 @@ def _strings(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     acc.credit(table, entry)
 
 
+# The rule tables' titles: ``{tool}`` is the rule tool's declared display name.
+RULE_MATCHES_TITLE = "{tool} rule matches"
+CAPABILITIES_TITLE = "{tool} capabilities"
+# The rule-match tables' section keys, by the declared kind whose rows each
+# holds (stored keys, kept for stored-run byte identity).
+RULE_TABLE_OF_KIND: dict[str, str] = {
+    "event_rules": "sigma_matches",
+    "signature_rules": "yara_matches",
+}
+
+
+def titled_tool(title: Any, template: str) -> str:
+    """The tool name a rule table's ``title`` gives in ``template``, ``""`` for another title.
+
+    A rule table is titled by the declared display name of the tool whose
+    rows it holds, whichever tool of the kind that is; every label printed
+    for the table's rows is read back from its title, so a tool swapped in
+    for a shipped one is named as itself (a stored report's title is read the
+    same way).
+    """
+    text = str(title or "")
+    prefix, _, suffix = template.partition("{tool}")
+    if len(text) > len(prefix) + len(suffix) and text.startswith(prefix) and text.endswith(suffix):
+        return text[len(prefix) : len(text) - len(suffix)]
+    return ""
+
+
+def _rule_rows(entry: LedgerEntry, data: dict[str, Any], key: str) -> Any:
+    """A rule answer's rows: where its declaration says, else under ``key`` as the
+    built-in rule tools answer."""
+    facts = tool_kinds.declared_facts(entry)
+    if facts is not None and facts.rows:
+        return select(data, facts.rows)
+    return data.get(key)
+
+
+def _or(declared: Any, own: Any) -> Any:
+    """The declared value where the declaration names one, else the row's own field."""
+    return own if declared is None else declared
+
+
+def _declared(entry: LedgerEntry, row: dict[str, Any], name: str) -> Any:
+    """The value a rule row holds where its tool's declaration names ``name``, or ``None``."""
+    facts = tool_kinds.declared_facts(entry)
+    path = facts.values.get(name, "") if facts is not None else ""
+    return first(row, path) if path else None
+
+
+def _declared_techniques(entry: LedgerEntry, row: dict[str, Any]) -> list[str]:
+    """The technique ids a rule row names where its tool's declaration says."""
+    facts = tool_kinds.declared_facts(entry)
+    return tool_kinds.row_technique_ids(row, facts) if facts is not None else []
+
+
 def _yara(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
-    matches = data.get("matches")
+    matches = _rule_rows(entry, data, "matches")
     if not isinstance(matches, list) or not matches:
         return
-    table = acc.get("yara_matches", "YARA rule matches", "table", columns=["Rule", "Tags", "Where"])
+    table = acc.get(
+        RULE_TABLE_OF_KIND["signature_rules"],
+        RULE_MATCHES_TITLE.format(tool=tool_kinds.display_name(entry)),
+        "table",
+        columns=["Rule", "Tags", "Where"],
+    )
     for row in matches:
         if not isinstance(row, dict):
             continue
         acc.add_row(
             table,
             [
-                _text(row.get("rule") or row.get("name")),
+                _text(_declared(entry, row, "rule") or row.get("rule") or row.get("name")),
                 _text(row.get("tags")),
                 _text(row.get("strings") or row.get("offsets") or row.get("meta")),
             ],
@@ -536,12 +614,12 @@ def _yara(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
 
 
 def _sigma(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
-    matches = data.get("matches")
+    matches = _rule_rows(entry, data, "matches")
     if not isinstance(matches, list) or not matches:
         return
     table = acc.get(
-        "sigma_matches",
-        "Sigma rule matches",
+        RULE_TABLE_OF_KIND["event_rules"],
+        RULE_MATCHES_TITLE.format(tool=tool_kinds.display_name(entry)),
         "table",
         columns=["Rule", "Level", "Technique", "Matched fields"],
     )
@@ -553,9 +631,15 @@ def _sigma(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
         acc.add_row(
             table,
             [
-                _text(row.get("title") or row.get("rule") or row.get("id")),
+                _text(
+                    _declared(entry, row, "title")
+                    or row.get("title")
+                    or _declared(entry, row, "rule")
+                    or row.get("rule")
+                    or row.get("id")
+                ),
                 _text(row.get("level") or meta.get("level")),
-                _text(sigma_technique_ids(row)),
+                _text(sigma_technique_ids(row) or _declared_techniques(entry, row)),
                 _text(row.get("matched_fields")),
             ],
         )
@@ -563,12 +647,12 @@ def _sigma(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
 
 
 def _capa(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
-    rows = data.get("capabilities")
+    rows = _rule_rows(entry, data, "capabilities")
     if not isinstance(rows, list) or not rows:
         return
     table = acc.get(
         "capa_capabilities",
-        "capa capabilities",
+        CAPABILITIES_TITLE.format(tool=tool_kinds.display_name(entry)),
         "table",
         columns=["Namespace", "Rule", "ATT&CK", "MBC"],
     )
@@ -578,17 +662,26 @@ def _capa(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
         acc.add_row(
             table,
             [
-                _text(row.get("namespace")),
-                _text(row.get("rule")),
-                _text(row.get("attck")),
+                _text(_declared(entry, row, "namespace") or row.get("namespace")),
+                _text(_declared(entry, row, "rule") or row.get("rule")),
+                _text(row.get("attck") or _declared_techniques(entry, row)),
                 _text(row.get("mbc")),
             ],
         )
     acc.credit(table, entry)
 
 
+def _declared_place(entry: LedgerEntry, row: dict[str, Any], name: str) -> Any:
+    """The value a row holds where its tool's declaration places ``name``, or ``None``."""
+    facts = tool_kinds.declared_facts(entry)
+    path = facts.places.get(name, "") if facts is not None else ""
+    return first(row, path) if path else None
+
+
 def _sandbox_processes(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
-    rows = data.get("processes")
+    # Where the declaration says, so a live sandbox server whose rows are shaped
+    # otherwise is drawn as the built-in sandbox's processes are.
+    rows = _rule_rows(entry, data, "processes")
     if not isinstance(rows, list) or not rows:
         return
     table = acc.get(
@@ -603,10 +696,10 @@ def _sandbox_processes(acc: _Sections, entry: LedgerEntry, data: dict[str, Any])
         acc.add_row(
             table,
             [
-                _text(row.get("pid")),
+                _text(_or(_declared_place(entry, row, "pid"), row.get("pid"))),
                 _text(row.get("ppid")),
-                _text(row.get("name")),
-                _text(row.get("command_line")),
+                _text(_or(_declared(entry, row, "name"), row.get("name"))),
+                _text(_or(_declared(entry, row, "command_line"), row.get("command_line"))),
             ],
         )
     acc.credit(table, entry)
@@ -634,17 +727,44 @@ def _sandbox_network(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -
         acc.credit(table, entry)
 
 
+# The keys a network row other than a DNS row names what it is about under,
+# in the order read. A DNS row's name is read by the one DNS row reader
+# (``schemas.sandbox_document.dns_row_name``), then these past its name keys.
+_NON_DNS_ENDPOINT_KEYS = (
+    "request",
+    "hostname",
+    "domain",
+    "host",
+    "uri",
+    "ip",
+    "dst",
+    "name",
+    "ja3",
+    "sni",
+)
+
+
 def _endpoint_of(kind: str, row: Any) -> tuple[str, str]:
     """The address a network row is about, and whatever else it carries."""
     if isinstance(row, str):
         return row, ""
     if not isinstance(row, dict):
         return "", ""
-    for key in ("request", "hostname", "domain", "host", "uri", "ip", "dst", "name", "ja3", "sni"):
+    if kind == "dns":
+        key = dns_name_key(row)
+        keys: tuple[str, ...] = (
+            (key,) if key else tuple(k for k in _NON_DNS_ENDPOINT_KEYS if k not in DNS_NAME_KEYS)
+        )
+    else:
+        keys = _NON_DNS_ENDPOINT_KEYS
+    for key in keys:
         value = row.get(key)
-        if isinstance(value, str) and value:
+        if not isinstance(value, str):
+            continue
+        written = value.strip() if kind == "dns" else value
+        if written:
             detail = {k: v for k, v in row.items() if k != key and v not in (None, "", [], {})}
-            return value, _text(detail)
+            return written, _text(detail)
     return "", ""
 
 
@@ -825,21 +945,14 @@ def _pcap(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     acc.credit(section, entry)
 
 
-# Reverse-engineering tools name a function and answer about it. The report
-# does not paste decompilation, but which functions an analyst actually looked
-# at is the one durable fact of a Ghidra or radare2 loop.
-_FUNCTION_TOOLS = frozenset(
-    {
-        "decompile_function",
-        "decompile",
-        "disassemble_function",
-        "get_function",
-        "analyze_function",
-        "pdf",
-        "pdc",
-    }
-)
-_FUNCTION_LIST_TOOLS = frozenset({"list_functions", "get_functions", "afl", "list_methods"})
+# Reverse-engineering tools name a function and answer about it, and list
+# functions. The report does not paste decompilation, but which functions an
+# analyst actually looked at is the one durable fact of a reverser's loop: an
+# entry whose tool declares a function's code (``decompile``,
+# ``function_disassembly``) or a function listing (``function_list``,
+# ``method_list``) lands under "Functions examined", from any server
+# (``CONSUMER_KINDS``).
+_FUNCTION_CONSUMERS = ("ledger_report._FUNCTION_TOOLS", "ledger_report._FUNCTION_LIST_TOOLS")
 
 
 # What a function's line says when the conversation had no room for the answer.
@@ -866,50 +979,51 @@ def _reputation(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> Non
 
     The service answers the counts nested inside its payload, and the generic
     block flattens that into one cell a reader has to scroll to; the count is
-    the one fact of the lookup a report states.
+    the one fact of the lookup a report states. The counts are the record the
+    lookup's declaration read from the answer when the entry was written
+    (``core.reputation``), from any server.
     """
     _generic_kv(acc, entry, data)
-    body = data.get("data") if isinstance(data.get("data"), dict) else data
-    stats = body.get("last_analysis_stats") if isinstance(body, dict) else None
-    coverage = body.get("coverage") if isinstance(body, dict) else None
-    section = acc.get(f"tool_{entry.tool}", entry.tool.replace("_", " ").capitalize(), "kv")
-    if isinstance(stats, dict):
-        for name in ("malicious", "suspicious", "undetected", "harmless"):
-            if isinstance(stats.get(name), int):
-                acc.add_row(section, [f"engines {name}", str(stats[name])])
-    if isinstance(coverage, dict) and isinstance(coverage.get("engines"), int):
-        acc.add_row(section, ["engines", str(coverage["engines"])])
+    answer = reputation_of(entry)
+    if answer is None:
+        return
+    section = acc.get(f"tool_{entry.tool}", tool_kinds.section_title(entry), "kv")
+    for name in ("malicious", "suspicious", "undetected", "harmless"):
+        if name in answer.stats:
+            acc.add_row(section, [f"engines {name}", str(answer.stats[name])])
+    if answer.engines is not None:
+        acc.add_row(section, ["engines", str(answer.engines)])
 
 
+# The purpose-built section builders, by name. Which one draws an entry is
+# its tool's declared kind (``BUILDER_OF_KIND``), from any server; an entry
+# with no recorded source is drawn as its tool's name always drew it
+# (``tool_kinds.builder_of``).
 _BUILDERS: dict[str, Any] = {
-    "identify_file": _identity,
-    "hashes": _identity,
-    "signing_info": _signing,
-    "pe_info": _binary_info,
-    "elf_info": _binary_info,
-    "macho_info": _binary_info,
-    "apk_info": _binary_info,
-    "strings": _strings,
-    "iocs_from_text": _iocs,
-    "iocs_from_file": _iocs,
-    "yara_scan": _yara,
-    "sigma_match": _sigma,
-    "sigma_match_sandbox": _sigma,
-    "capa": _capa,
-    "sandbox_processes": _sandbox_processes,
-    "sandbox_network": _sandbox_network,
-    "sandbox_signatures": _sandbox_signatures,
-    "sandbox_dropped_files": _sandbox_dropped,
-    "sandbox_registry_ops": _sandbox_registry,
-    "sandbox_api_calls": _sandbox_apis,
-    "sandbox_mutexes": _sandbox_mutexes,
-    "sandbox_services_and_tasks": _sandbox_services,
-    "sandbox_report_section": _sandbox_section,
-    "sandbox_items": _sandbox_items,
-    "sandbox_status": _sandbox_status,
-    "pcap_summary": _pcap,
-    "get_file_report": _reputation,
-    "check_hash": _reputation,
+    builder.__name__: builder
+    for builder in (
+        _identity,
+        _signing,
+        _binary_info,
+        _strings,
+        _iocs,
+        _yara,
+        _sigma,
+        _capa,
+        _sandbox_processes,
+        _sandbox_network,
+        _sandbox_signatures,
+        _sandbox_dropped,
+        _sandbox_registry,
+        _sandbox_apis,
+        _sandbox_mutexes,
+        _sandbox_services,
+        _sandbox_section,
+        _sandbox_items,
+        _sandbox_status,
+        _pcap,
+        _reputation,
+    )
 }
 
 
@@ -937,7 +1051,7 @@ def _generic_table(
                 columns.append(str(column))
     section = acc.get(
         key or f"tool_{entry.tool}",
-        title or entry.tool.replace("_", " ").capitalize(),
+        title or tool_kinds.section_title(entry),
         "table",
         columns=columns,
     )
@@ -959,7 +1073,7 @@ def _generic_kv(
 ) -> None:
     section = acc.get(
         key or f"tool_{entry.tool}",
-        title or entry.tool.replace("_", " ").capitalize(),
+        title or tool_kinds.section_title(entry),
         "kv",
         columns=["Field", "Value"],
     )
@@ -983,7 +1097,7 @@ def _generic_kv(
 def _generic_text(acc: _Sections, entry: LedgerEntry) -> None:
     if not entry.output.strip():
         return
-    section = acc.get(f"tool_{entry.tool}", entry.tool.replace("_", " ").capitalize(), "text")
+    section = acc.get(f"tool_{entry.tool}", tool_kinds.section_title(entry), "text")
     if not section.text:
         section.text = _cut_text(entry.output, entry.id)
     acc.credit(section, entry)
@@ -998,9 +1112,7 @@ def _fallback(acc: _Sections, entry: LedgerEntry) -> None:
         if any(isinstance(row, dict) for row in data):
             _generic_table(acc, entry, data)
         else:
-            section = acc.get(
-                f"tool_{entry.tool}", entry.tool.replace("_", " ").capitalize(), "list"
-            )
+            section = acc.get(f"tool_{entry.tool}", tool_kinds.section_title(entry), "list")
             for item in data:
                 acc.add_item(section, _text(item))
             acc.credit(section, entry)
@@ -1247,15 +1359,22 @@ def build_sections(
             # A failed call is on the record in the ledger and in the run
             # summary; it has no content to build a section out of.
             continue
-        if entry.tool in _FUNCTION_LIST_TOOLS or entry.tool in _FUNCTION_TOOLS:
+        if any(tool_kinds.is_of(entry, consumer) for consumer in _FUNCTION_CONSUMERS):
             _functions_examined(acc, entry, entry.structured)
             continue
-        builder = _BUILDERS.get(entry.tool)
+        builder = _BUILDERS.get(tool_kinds.builder_of(entry) or "")
         data = entry.structured
         if builder is not None and isinstance(data, dict):
             if data.get("error"):
                 continue
             builder(acc, entry, data)
+            # A purpose-built section reads its kind's answer shape (or the
+            # rows a rule tool declares). An operator's own tool of the kind
+            # that answers in another shape is still in the report, as the
+            # generic block, rather than drawn as nothing. An entry with no
+            # source, or from a built-in source, is drawn as it always was.
+            if tool_kinds.from_an_operator_source(entry) and not acc.credited(entry):
+                _fallback(acc, entry)
             continue
         _fallback(acc, entry)
 

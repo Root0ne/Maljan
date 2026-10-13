@@ -88,8 +88,13 @@ async def _unprobed_models_for(db: AsyncSession, config: dict[str, Any]) -> list
         # An unknown profile is refused a few lines further on, with the list
         # of the ones that exist; saying it twice, differently, helps nobody.
         return []
-    named = [agent for stage in team.stages for agent in stage.agents]
-    return await unprobed_models(db, settings, _everyone_the_run_can_reach(settings, named))
+    from maljan.agents.composition import called_assignments
+
+    # Every model the job calls, each on the role its builder reads it on:
+    # the analysts and every agent they can ask, the mediator of a debate,
+    # the summariser while it is on, and the judge and the reporter on the
+    # judge role (``composition.called_assignments``).
+    return await unprobed_models(db, settings, called_assignments(settings, team.stages))
 
 
 async def _unready_providers_for(db: AsyncSession, config: dict[str, Any]) -> list[str]:
@@ -110,20 +115,6 @@ async def _unready_providers_for(db: AsyncSession, config: dict[str, Any]) -> li
         profile,
         global_provider=str(static_provider) if static_provider else None,
     )
-
-
-def _everyone_the_run_can_reach(settings: Any, named: list[str]) -> list[str]:
-    """The stages' agents, and every agent they can ask, and so on.
-
-    The lead team names one agent in its only analysis stage: the specialists
-    that do the work sit in no stage and are reached through ``ask_<key>``.
-    Checking the stages alone would skip exactly the definitions most likely
-    to carry a model of their own. ``composition.reachable_agents`` is the one
-    closure; the worker's sample mirror follows the same one.
-    """
-    from maljan.agents.composition import reachable_agents
-
-    return reachable_agents(settings, named)
 
 
 # The config keys an audit row may carry. A job config is operator-supplied and
@@ -433,6 +424,12 @@ async def get_job_events(
     answers what the stream can no longer reach — an expired stream, or a
     cursor older than the cap. ``seq`` is the ordering key; ``stream_id`` is
     still on an event the stream answered, for a client that keyed on it.
+
+    The job's ``model_usage`` events, one per model call, are written to the
+    table alone, never to the stream or the live socket; a page the stream
+    answers is given the ones in its range from the table, so per-call usage
+    is here while the stream lives as well as after. ``GET
+    /jobs/{job_id}/usage`` totals them.
     """
     import redis.asyncio as aioredis
 
@@ -445,7 +442,17 @@ async def get_job_events(
 
     redis_conn = aioredis.from_url(settings.redis_url, decode_responses=True)
     try:
-        events = await read_events(db, redis_conn, job_id, since=since, limit=limit)
+        events = await read_events(
+            db,
+            redis_conn,
+            job_id,
+            since=since,
+            limit=limit,
+            usage=True,
+            # A job still publishing holds back a usage event past its last
+            # progress event (``read_events``).
+            running=str(getattr(job, "status", "") or "") in ("pending", "running"),
+        )
     finally:
         try:
             await redis_conn.aclose()
@@ -453,6 +460,54 @@ async def get_job_events(
             pass
 
     return {"job_id": str(job_id), "events": events, "count": len(events)}
+
+
+@router.get("/{job_id}/usage")
+async def get_job_usage(
+    job_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    svc: AnalysisService = Depends(_get_service),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """What this job's model calls used and cost so far, from its ``model_usage`` events.
+
+    The worker commits one event per model call as the call is recorded, so
+    this answers during a run and after a worker that died before its run
+    summary. ``tokens`` is the run summary's own block (input and output,
+    cache reads and writes, reasoning, the provider-reported cost, per
+    agent), built by the same code from the same calls; ``retries`` and
+    ``failed_attempts`` count the records that are not calls. ``spend`` sums
+    what the job's spend meter charged each call and each failed attempt
+    when it was settled (``priced_usd`` on the record, a charge by stated
+    estimate included), so it is what the run spent whatever prices are in
+    force now; a record written before records carried their charge is
+    priced again by the same meter code at the current ``llm.model_prices``
+    over the vendored table and counted in ``repriced_calls``. Per agent too.
+    The job's owner only, checked the way the events endpoint checks it: another
+    account's job is not found, to an admin as to anyone else.
+    """
+    from maljan.analysis.run_summary import usage_totals
+    from maljan.core.spend import SpendMeter, hour_cache_models
+
+    from app.services.job_events import read_usage
+    from app.services.settings_service import effective_core_settings
+
+    job = await svc.get_job(job_id, user)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+
+    core = await effective_core_settings(db)
+    # For a record that carries no charge: prices as ``SpendMeter.from_settings``
+    # reads them, without the ceiling, since a total is not a run and nothing
+    # here is admitted or refused.
+    llm = core.llm
+    prices = dict(llm.model_prices or {})
+    hour_writes = hour_cache_models(core)
+    totals = usage_totals(
+        await read_usage(db, job_id),
+        lambda: SpendMeter(None, prices, hour_writes=hour_writes),
+    )
+    return {"job_id": str(job_id), **totals}
 
 
 @router.get("/{job_id}/evidence", response_model=EvidenceListResponse)

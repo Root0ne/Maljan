@@ -55,10 +55,26 @@ def _capa_entry() -> Any:
     )
 
 
+def _listing_entry() -> Any:
+    """A listing of a function of its own: a second source beside the capa row."""
+    return build_entry(
+        entry_id=format_entry_id(2),
+        seq=2,
+        agent="static",
+        tool="decompile_function",
+        args={"address": "0x7777"},
+        server="ghidra",
+        output="void FUN_00007777(void) { WriteProcessMemory(); }",
+        stage="analysis",
+    )
+
+
 def _state(pack_reasons: list[str]) -> dict[str, Any]:
+    # The capa rule and the analyst are two sayers; the capa row and the
+    # analyst's own listing are two sources, one of them code: corroborated.
     claim = ClaimEvidence(
         claim="Allocates and writes memory in a remote process",
-        evidence_ref="[ev_0001] capa: inject code",
+        evidence_ref="[ev_0001] capa: inject code; [ev_0002] the listing of 0x7777",
         confidence=0.8,
         technique_id="T1055",
     )
@@ -66,7 +82,7 @@ def _state(pack_reasons: list[str]) -> dict[str, Any]:
         "iteration_count": 1,
         "reports": {"static": "static findings"},
         "isr_reports": {"static": AgentISR(agent_id="static", domain="static", claims=[claim])},
-        "evidence_ledger": [_capa_entry()],
+        "evidence_ledger": [_capa_entry(), _listing_entry()],
         "sandbox_report": {"signatures": []},
         "sample_path": None,
         "triage_facts": {"degradation_reasons": pack_reasons},

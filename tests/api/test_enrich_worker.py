@@ -37,6 +37,7 @@ def _enabled_patch():
                 side_effect=lambda n: {
                     "enrichment_enabled": True,
                     "enrichment_max_lookups": 25,
+                    "enrichment_sources": {},
                 }[n]
             ),
         ),
@@ -123,6 +124,77 @@ class TestEnrichWorkerHappy:
 
 
 class TestEnrichWorkerSessionLifetime:
+    @pytest.mark.asyncio
+    async def test_the_orchestrator_is_handed_every_declared_source_with_its_credential(
+        self,
+    ) -> None:
+        fake_report = MagicMock()
+        fake_report.job_id = uuid.uuid4()
+        fake_report.malware_report = _malware_report_dict()
+        db = MagicMock()
+        db.get = AsyncMock(return_value=fake_report)
+        db.commit = AsyncMock()
+        session_cm = AsyncMock()
+        session_cm.__aenter__.return_value = db
+        session_cm.__aexit__.return_value = None
+        ctx = {"redis": AsyncMock(), "db_session": MagicMock(return_value=session_cm)}
+        vt_credential = "-".join(["vt", "k"])
+        own_credential = "-".join(["own", "k"])
+        host = ".".join(["rep", "example", "org"])
+        declared = {
+            "domainrep": {
+                "kinds": ["domain"],
+                "requests": {
+                    "domain": {
+                        "url": f"https://{host}/{{value}}",
+                        "headers": {"Authorization": "{credential}"},
+                    }
+                },
+                "record": [{"name": "malicious", "path": "/bad", "read": "count"}],
+                "api_key": own_credential,
+            }
+        }
+        handed: dict[str, Any] = {}
+
+        async def _lookups(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+            handed.update(kwargs)
+            return payload
+
+        with (
+            patch("maljan.enrichment.enrich_malware_report", new=_lookups),
+            patch(
+                "app.worker.enrich_worker.runtime_config.get",
+                AsyncMock(
+                    side_effect=lambda n: {
+                        "enrichment_enabled": True,
+                        "enrichment_max_lookups": 25,
+                        "enrichment_sources": declared,
+                    }[n]
+                ),
+            ),
+            patch(
+                "app.worker.enrich_worker.runtime_config.get_secret",
+                AsyncMock(
+                    side_effect=lambda n: {
+                        "virustotal_api_key": vt_credential,
+                        "abuseipdb_api_key": "",
+                    }[n]
+                ),
+            ),
+            patch("app.worker.enrich_worker._get_memory_store", AsyncMock(return_value=None)),
+        ):
+            await enrich_threat_intel(ctx, str(uuid.uuid4()))
+
+        by_key = {s.key: s for s in handed["sources"]}
+        assert list(by_key) == ["virustotal", "abuseipdb", "domainrep"]
+        assert by_key["virustotal"].credential == vt_credential
+        assert by_key["virustotal"].configured is True
+        assert by_key["abuseipdb"].configured is False
+        assert by_key["domainrep"].credential == own_credential
+        assert by_key["domainrep"].configured is True
+        # No source is asked through a tool server, so none is attached.
+        assert handed["tool_caller"] is None
+
     @pytest.mark.asyncio
     async def test_no_session_is_open_across_the_reputation_lookups(self) -> None:
         """The lookups are third-party HTTP and took 452 s on one live report.
@@ -448,6 +520,7 @@ class TestTheMemoryStoreReadsOneSetOfSettings:
             "url": "http://qdrant:6333",
             "collection": "maljan_cases_v2",
             "api_key": "s3cr3t",
+            "function_hash_collection": "maljan_function_hashes_v1",
         }
 
     def test_an_unset_key_reaches_the_client_as_no_key(self) -> None:

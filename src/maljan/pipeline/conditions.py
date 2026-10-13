@@ -10,8 +10,9 @@ So this is Python's own parser with an allow-list on top. ``ast.parse`` in
 ``eval`` mode gives the grammar; ``_check`` refuses every node type that is not
 in the list below; the evaluator walks the checked tree by hand. No calls, no
 comprehensions, no lambdas, no f-strings, no attribute access except one level
-into ``stages`` and the fields of ``triage``, and no names except the fields
-of ``StageContext``.
+into ``stages`` and the fields of ``triage``, no subscript except a stage's key
+and ``triage.hits["<key>"]``, and no names except the fields of
+``StageContext``.
 
 The same allow-list serves twice. ``validate_condition`` runs it at save time
 against a dummy context, so a typo is a settings error the operator sees while
@@ -23,7 +24,7 @@ from __future__ import annotations
 
 import ast
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 __all__ = [
@@ -32,6 +33,7 @@ __all__ = [
     "StageResult",
     "TriageFacts",
     "constant_truth",
+    "rule_match_hits",
     "evaluate",
     "stage_references",
     "validate_condition",
@@ -82,9 +84,18 @@ class StageResult:
         )
 
 
+# The kinds of answer whose rows are rules that matched the sample: a
+# capability rule set, a signature rule set and an event rule set, whichever
+# tool declares them (``core.tool_declarations``). Vocabulary, never a tool.
+RULE_MATCH_KINDS: frozenset[str] = frozenset({"capability_rules", "signature_rules", "event_rules"})
+# The legacy fields a stored team's condition reads, and the kind each counts.
+SIGNATURE_RULES = "signature_rules"
+CAPABILITY_RULES = "capability_rules"
+
+
 @dataclass(frozen=True)
 class TriageFacts:
-    """What the triage pack established, as the four scalars a condition asks about.
+    """What the triage pack and the run so far established, as the scalars a condition asks about.
 
     The pack writes tens of ledger entries; a condition wants to know whether
     the sample carries a signature, what a reputation service counted, and
@@ -94,12 +105,24 @@ class TriageFacts:
     zero, while ``==`` and ``!=`` compare against ``None`` as written — so a
     condition that means "looked up and found malicious" says
     ``reputation_malicious != None and reputation_malicious > 0``.
+
+    ``rule_hits`` is how many rules matched the sample in every answer of a
+    rule-matching kind (:data:`RULE_MATCH_KINDS`) recorded so far, the pack's
+    and earlier stages' alike, whichever server answered; ``hits`` the same
+    count per key: the answer's declared kind (``signature_rules`` …), the
+    name its tool declares for corroboration (``source``), and the key of the
+    tool server that answered. A key nothing counted reads as zero
+    (``triage.hits["<key>"]``). ``yara_hits`` and ``capa_hits`` are kept for
+    the stored teams that read them: the pack's own signature-rule and
+    capability-rule counts, as they always were.
     """
 
     has_signature: bool = False
     reputation_malicious: int | None = None
     yara_hits: int = 0
     capa_hits: int = 0
+    rule_hits: int = 0
+    hits: Mapping[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -107,18 +130,66 @@ class TriageFacts:
             "reputation_malicious": self.reputation_malicious,
             "yara_hits": self.yara_hits,
             "capa_hits": self.capa_hits,
+            "rule_hits": self.rule_hits,
+            "hits": dict(self.hits),
         }
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any] | None) -> TriageFacts:
         data = data or {}
         malicious = data.get("reputation_malicious")
+        yara = int(data.get("yara_hits") or 0)
+        capa = int(data.get("capa_hits") or 0)
+        held = data.get("hits")
+        if isinstance(held, Mapping):
+            hits = {str(k): int(v) for k, v in held.items() if isinstance(v, int)}
+        else:
+            # Facts written before the per-kind counts: the two the pack kept.
+            hits = {k: v for k, v in ((SIGNATURE_RULES, yara), (CAPABILITY_RULES, capa)) if v}
+        rule_hits = data.get("rule_hits")
         return cls(
             has_signature=bool(data.get("has_signature")),
             reputation_malicious=int(malicious) if isinstance(malicious, int) else None,
-            yara_hits=int(data.get("yara_hits") or 0),
-            capa_hits=int(data.get("capa_hits") or 0),
+            yara_hits=yara,
+            capa_hits=capa,
+            rule_hits=int(rule_hits) if isinstance(rule_hits, int) else yara + capa,
+            hits=hits,
         )
+
+    def with_hits(self, counted: Mapping[str, int], total: int) -> TriageFacts:
+        """These facts with ``hits`` and ``rule_hits`` as counted over a ledger."""
+        return replace(self, hits=dict(counted), rule_hits=int(total))
+
+
+def rule_match_hits(rows: Any) -> tuple[dict[str, int], int]:
+    """``(hits per key, rule_hits)`` over the ok ledger entries of a rule-matching kind.
+
+    Each entry's declared kind and row path (``core.declared_reading``; an
+    entry written before facts were stored is read by its shipped facts)
+    say whether it is a rule match and where its rows are; each row is one
+    rule that matched. A repeat of an earlier entry is not counted twice.
+    """
+    from maljan.core.declared_reading import facts_of
+    from maljan.core.tool_declarations import ToolDeclarations, select
+
+    counted: dict[str, int] = {}
+    total = 0
+    for row in rows or []:
+        get = row.get if isinstance(row, Mapping) else lambda name, r=row: getattr(r, name, None)
+        if not get("ok") or get("repeated_of"):
+            continue
+        facts = facts_of(row)
+        if facts is None or facts.kind not in RULE_MATCH_KINDS or not facts.rows:
+            continue
+        found = len(select(get("structured"), facts.rows))
+        if not found:
+            continue
+        total += found
+        source = ToolDeclarations.source_of(row)
+        server = source.key if source is not None and source.kind == "mcp" else ""
+        for key in dict.fromkeys(k for k in (facts.kind, facts.source, server) if k):
+            counted[key] = counted.get(key, 0) + found
+    return counted, total
 
 
 @dataclass(frozen=True)
@@ -222,6 +293,10 @@ def _check(node: ast.AST) -> None:
         _check_stage_lookup(node)
         return
     if isinstance(node, ast.Subscript):
+        if _is_hits_lookup(node):
+            if not isinstance(node.slice, ast.Constant) or not isinstance(node.slice.value, str):
+                raise ConditionError('triage.hits is read by a literal key: triage.hits["<key>"]')
+            return
         _check_stage_lookup(node)
         return
     raise ConditionError(f"{_describe(node)} is not allowed in a condition")
@@ -230,6 +305,12 @@ def _check(node: ast.AST) -> None:
 def _is_triage_lookup(node: ast.Attribute) -> bool:
     """``triage.<field>``: one level into the pack's facts, and nothing deeper."""
     return isinstance(node.value, ast.Name) and node.value.id == "triage"
+
+
+def _is_hits_lookup(node: ast.Subscript) -> bool:
+    """``triage.hits[...]``: the one subscript into the pack's facts."""
+    holder = node.value
+    return isinstance(holder, ast.Attribute) and _is_triage_lookup(holder) and holder.attr == "hits"
 
 
 def _check_stage_lookup(node: ast.Attribute | ast.Subscript) -> None:
@@ -303,6 +384,9 @@ def _resolve(node: ast.AST, ctx: StageContext) -> Any:
         return tuple(_resolve(e, ctx) for e in node.elts)
     if isinstance(node, ast.List):
         return [_resolve(e, ctx) for e in node.elts]
+    if isinstance(node, ast.Subscript) and _is_hits_lookup(node):
+        assert isinstance(node.slice, ast.Constant)  # noqa: S101 — guaranteed by _check
+        return int(ctx.triage.hits.get(str(node.slice.value), 0))
     if isinstance(node, ast.Attribute):
         if _is_triage_lookup(node):
             return getattr(ctx.triage, node.attr)

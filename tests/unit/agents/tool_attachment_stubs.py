@@ -99,6 +99,19 @@ class FakeRegistry:
     async def atools_for_ref(self, ref, job_id, *, seen=None, **context):  # type: ignore[no-untyped-def]
         return self.tools_for_ref(ref, job_id, seen=seen, **context)
 
+    def agent_tools(self, role, job_id, refs, *, exclude="", seen=None, **context):  # type: ignore[no-untyped-def]
+        """The bound half, then the referenced half, under one ``seen`` map."""
+        seen = {} if seen is None else seen
+        tools, reasons = self.tools_for(role, job_id, exclude=exclude, seen=seen, **context)
+        for ref in refs:
+            picked, ref_reasons = self.tools_for_ref(ref, job_id, seen=seen, **context)
+            tools.extend(picked)
+            reasons.extend(ref_reasons)
+        return tools, reasons
+
+    async def aagent_tools(self, role, job_id, refs, *, exclude="", seen=None, **context):  # type: ignore[no-untyped-def]
+        return self.agent_tools(role, job_id, refs, exclude=exclude, seen=seen, **context)
+
     def _merge(self, server: str, names: list[str], tools: list[Any], seen) -> None:
         """The real registry's collision rule, in miniature.
 

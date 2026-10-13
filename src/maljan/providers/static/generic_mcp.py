@@ -36,6 +36,7 @@ from maljan.providers.base import (
     StaticCapabilities,
     StaticJobContext,
     StaticProvider,
+    with_claim_guidance,
 )
 from maljan.providers.registry import register_static_provider
 from maljan.providers.servers import ServerHandle
@@ -43,14 +44,22 @@ from maljan.providers.servers import ServerHandle
 if TYPE_CHECKING:
     from maljan.core.config import MCPServerConfig, Settings
 
+# The samples directory's mount inside a server reached over the network that
+# declares no ``sample_mount`` of its own: the right-hand side of the samples
+# bind mount in ``docker/docker-compose.yml``.
+REMOTE_SAMPLE_MOUNT = "/data/samples"
+
 
 @register_static_provider("generic_mcp")
 class GenericMCPStaticProvider(StaticProvider):
     """Any MCP tool server, attached through a ``ServerHandle``.
 
     ``label`` names the server in logs and in the generated prompt fragment.
-    ``prompt_fragment_text`` lets a caller supply real tool-specific guidance
-    instead of the generated, tool-name-listing paragraph.
+    The fragment is the opening sentence (``prompt_lead_text``, else one naming
+    the label), the claim guidance every static analyst is given, then the
+    workflow the server declares (its ``prompt_fragment``), or, where it
+    declares none, a generated paragraph listing its tools.
+    ``prompt_fragment_text`` lets a caller supply the whole fragment instead.
 
     The constructor accepts either a ready ``ServerHandle`` (the normal path,
     built by ``from_settings`` from an ``mcp.servers`` entry) or a bare
@@ -60,12 +69,20 @@ class GenericMCPStaticProvider(StaticProvider):
     owns.
     """
 
+    # What the console calls this provider and says about it, and its test's label.
+    choice_label = "Any MCP tool server"
+    choice_order = 3
+    title = "Generic MCP server"
+    description = "A server from the tool-server registry supplies the static tools."
+    settings_intro = "Which configured tool server drives the static analyst."
+
     def __init__(
         self,
         cfg: MCPServerConfig | ServerHandle,
         *,
         label: str = "MCP",
         prompt_fragment_text: str = "",
+        prompt_lead_text: str = "",
     ) -> None:
         if isinstance(cfg, ServerHandle):
             self._handle = cfg
@@ -75,8 +92,26 @@ class GenericMCPStaticProvider(StaticProvider):
             self._handle = self._build_handle(label or "generic", cfg)
         self._label = label
         self._prompt_fragment_text = prompt_fragment_text
+        self._prompt_lead_text = prompt_lead_text
         self._job = StaticJobContext()
         self.tools: list[Any] = []
+        # A declared error's remediation may name the path the server can open
+        # for the job's sample: the job's mirror.
+        self._handle.error_sample_path = self._mirror_path
+
+    def _mirror_path(self) -> str | None:
+        """The path the server can open for the job's sample, ``None`` before a job."""
+        held = getattr(self._job, "mirror_sample_path", None)
+        return held if isinstance(held, str) and held else None
+
+    @property
+    def sample_notes(self) -> Any:
+        """The job's note of the paths this provider's server opened (``providers.sample_open``)."""
+        return self._handle.sample_notes
+
+    @sample_notes.setter
+    def sample_notes(self, notes: Any) -> None:
+        self._handle.sample_notes = notes
 
     def _build_handle(self, name: str, cfg: MCPServerConfig) -> ServerHandle:
         """Wrap a directly-supplied config in a handle, honouring ``server_command``.
@@ -134,15 +169,21 @@ class GenericMCPStaticProvider(StaticProvider):
     def prompt_fragment(self) -> str:
         if self._prompt_fragment_text:
             return self._prompt_fragment_text
+        return with_claim_guidance(self.prompt_lead(), self.workflow_fragment())
+
+    def prompt_lead(self) -> str:
+        named = f"Analyze the binary using the {self._label} tools available to you. "
+        return self._prompt_lead_text or named
+
+    def workflow_fragment(self) -> str:
+        """The server's declared workflow text, else a paragraph listing its tools."""
+        declared = str(getattr(self._cfg, "prompt_fragment", "") or "")
+        if declared.strip():
+            return declared
         names = [t.name for t in self.get_tools()]
         # Every tool name: the list is the model's map of what it can call.
         listed = ", ".join(f"`{n}`" for n in names) if names else "the tools you are given"
         return (
-            f"Analyze the binary using the {self._label} tools available to you. "
-            "For EVERY claim you make, you MUST cite a concrete artifact: a function name, "
-            "string offset (.data+0xNN), API import, or hex pattern. "
-            "Focus on MITRE ATT&CK: T1027 (Obfuscation), T1106 (Native API), "
-            "T1055 (Process Injection), T1140 (Deobfuscation).\n\n"
             "=== TOOL USAGE WORKFLOW ===\n"
             f"Available tools: {listed}.\n"
             "Load or open the sample first, enumerate what the binary imports and "
@@ -168,6 +209,16 @@ class GenericMCPStaticProvider(StaticProvider):
     def server_name(self) -> str:
         """The registry key this provider owns; the static analyst excludes it."""
         return self._handle.name
+
+    @property
+    def declaration_source(self) -> str:
+        """The registry server this provider drives: its tools are that server's.
+
+        Recorded when an entry is written, so a later re-pointing of
+        ``static.generic.server`` does not change which declaration a stored
+        entry is read by.
+        """
+        return f"mcp:{self.server_name}"
 
     def open(self, job: StaticJobContext) -> None:
         """Attach to the configured MCP server for ``job``. Idempotent, per the base contract.
@@ -206,18 +257,16 @@ class GenericMCPStaticProvider(StaticProvider):
     def mirror_spec(self) -> MirrorSpec:
         """Where the sample is mirrored, and under which path the server sees it.
 
-        A stdio server is spawned by the worker and reads the worker's own
-        filesystem, so it has to be told the host path — the empty prefix the
-        mirror step reads as "no translation", the same answer
-        ``R2StaticProvider`` gives. Only an http/streamable-http/sse server is
-        somewhere else with its own mount, and only then does the container
-        prefix describe the path it can open (BUG 4, live run S4). That prefix
-        is the literal the mount in ``docker/docker-compose.yml`` uses; the
-        worker translates it through ``ghidra_container_samples_path`` when it
-        writes the mirror.
+        Both come from the server's own declaration: its ``work_dir`` and its
+        ``sample_mount``. A stdio server is spawned by the worker and reads
+        the worker's own filesystem, so with no mount declared it is handed
+        the host path. An http/streamable-http/sse server is somewhere else
+        with its own mount (BUG 4, live run S4); with none declared it is
+        taken to see the samples directory at ``REMOTE_SAMPLE_MOUNT``, the
+        mount the shipped compose file writes.
         """
-        prefix = "" if self._cfg.transport == "stdio" else "/data/samples"
-        return MirrorSpec(work_subdir=".work", container_prefix=prefix)
+        default = "" if self._cfg.transport == "stdio" else REMOTE_SAMPLE_MOUNT
+        return MirrorSpec.of(self._cfg, default_mount=default)
 
     def close(self) -> None:
         self.tools = []

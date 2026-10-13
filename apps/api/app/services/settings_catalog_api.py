@@ -59,6 +59,9 @@ API_DEFAULTS: dict[str, Any] = {
     "enrichment_max_lookups": 25,
     "virustotal_api_key": "",
     "abuseipdb_api_key": "",
+    # The operator's enrichment sources, laid over the shipped ones
+    # (``maljan.enrichment.builtin_sources``); empty keeps those as shipped.
+    "enrichment_sources": {},
     "rate_limit_enabled": True,
     "rate_limit_requests": 100,
     "rate_limit_window_seconds": 60,
@@ -207,8 +210,8 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         "group": "enrichment",
         "title": "Post-verdict enrichment",
         "description": (
-            "Look up the report's domains and IPs at VirusTotal and AbuseIPDB "
-            "after every analysis. Providers without a key are skipped."
+            "Look up the report's domains and IPs at every configured enrichment "
+            "source after every analysis. A source without the key it needs is skipped."
         ),
     },
     "enrichment_dedicated_worker": {
@@ -229,7 +232,20 @@ API_EDITABLE: dict[str, dict[str, Any]] = {
         "minimum": 1,
         "group": "enrichment",
         "title": "Max lookups per kind",
-        "description": "Cap on domains and on IPs sent to each provider per report.",
+        "description": "Cap on domains and on IPs sent to each source per report.",
+    },
+    "enrichment_sources": {
+        "type": "dict",
+        "group": "enrichment",
+        "title": "Enrichment sources",
+        "description": (
+            "The sources post-verdict enrichment asks, by key: the indicator kinds each "
+            "answers (domain, ip), a reputation server's tool or one https "
+            "request per kind, where its credential is read from, and the paths of its "
+            "answer's facts. An entry under a shipped source's key changes only the "
+            "fields it names; any other key adds a source. A source's own api_key is "
+            "stored encrypted on its own and shown here masked."
+        ),
     },
     "virustotal_api_key": {
         "type": "secret",
@@ -379,8 +395,9 @@ API_READONLY: dict[str, dict[str, Any]] = {
     },
     "samples_dir": {
         "title": "Samples directory",
-        "description": "Host path mounted into the Ghidra MCP container; the worker mirrors "
-        "each job's binary under its .work subdirectory and removes it when the job ends.",
+        "description": "Host path the worker mirrors each job's binary under, one "
+        "subdirectory per server that needs a copy, removed when the job ends; a "
+        "containerised server mounts it at its declared sample mount.",
     },
     "upload_temp_dir": {
         "title": "Upload staging directory",
@@ -470,7 +487,28 @@ def validate_editable_api_value(entry: CatalogEntry, value: Any) -> str | None:
         if value is not None and not isinstance(value, str):
             return "Input should be a valid string"
         return None
+    if entry.type == "dict":
+        if not isinstance(value, dict):
+            return "Input should be a valid object"
+        check = _DICT_CHECKS.get(entry.path)
+        return check(value) if check is not None else None
     return None
+
+
+def _enrichment_sources_problem(value: dict[str, Any]) -> str | None:
+    """Why the enrichment sources these entries leave in force are refused, or ``None``."""
+    from maljan.enrichment.declared import validate_sources
+
+    from app.services.enrichment_sources import credential_problems
+
+    errors = validate_sources(value) or credential_problems(value)
+    if not errors:
+        return None
+    return "; ".join(f"{key}: {why}" if key else why for key, why in errors.items())
+
+
+# The per-key check of an editable ``dict`` leaf's contents.
+_DICT_CHECKS = {"enrichment_sources": _enrichment_sources_problem}
 
 
 def api_catalog() -> list[CatalogEntry]:
@@ -556,7 +594,10 @@ def _choice_sources(
     servers, profiles or agents exist right now; the web must not decide
     either, or "what is a valid profile" has two answers.
     """
+    from maljan.llm.provider_base import provider_names
+    from maljan.memory.store_factory import memory_backends
     from maljan.providers.registry import sandbox_provider_ids, static_provider_ids
+    from maljan.providers.sandbox.readers import choosable_reader_ids
 
     return {
         # Declared for completeness and for the agent definitions.
@@ -572,6 +613,9 @@ def _choice_sources(
         # any agent an operator has defined (spec §2, role vocabulary).
         "agent_roles": list(agents),
         "profiles": list(profiles),
+        "memory_backends": list(memory_backends()),
+        "llm_providers": provider_names(),
+        "sandbox_report_readers": choosable_reader_ids(),
     }
 
 
@@ -594,15 +638,56 @@ def resolved_catalog(
     and a second copy of the rule in the console is a copy that drifts from
     the one the save enforces.
     """
+    from app.services.provider_facts import selector_choices, server_keys
+
     sources = _choice_sources(servers, profiles, agents)
+    catalog = full_catalog()
+    selectors = selector_choices([entry.key for entry in catalog])
+    builtin, reserved = server_keys()
     out: list[CatalogEntry] = []
-    for entry in full_catalog():
+    for entry in catalog:
         if entry.choices_from and entry.choices_from in sources:
             entry = replace(entry, choices=sources[entry.choices_from])
+        if entry.key in selectors:
+            # What each provider declares about itself, so the console names,
+            # describes and tests a choice without a table of its own.
+            titles, descriptions, facts, labels = selectors[entry.key]
+            entry = replace(
+                entry,
+                choice_titles=titles,
+                choice_descriptions=descriptions,
+                choice_facts=facts,
+                choice_labels=labels or entry.choice_labels,
+            )
         if entry.editor == "server_map":
             entry = replace(
                 entry,
                 required_env={key: list(names) for key, names in REQUIRED_ENV_ALLOW.items()},
+                builtin_servers=builtin,
+                reserved_servers=reserved,
             )
+        if entry.editor == "agent_definitions":
+            entry = replace(entry, capability_servers=_capability_servers(servers))
         out.append(entry)
     return out
+
+
+def _capability_servers(servers: Iterable[str]) -> dict[str, list[str]]:
+    """Per capability a seeded definition references, the servers it stands for.
+
+    Over the built-in servers and the configured ones, in that order, read by
+    the same function resolution reads (``agents.composition``).
+    """
+    from maljan.agents.composition import servers_of_capability
+    from maljan.core.config import _builtin_definitions, _builtin_servers
+
+    keys = list(dict.fromkeys([*_builtin_servers(), *servers]))
+    capabilities = sorted(
+        {
+            str(ref.capability)
+            for definition in _builtin_definitions().values()
+            for ref in definition.tools
+            if ref.kind == "capability" and ref.capability
+        }
+    )
+    return {name: servers_of_capability(keys, name) for name in capabilities}

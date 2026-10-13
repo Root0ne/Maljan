@@ -146,19 +146,6 @@ class TestTheEarlierResultAnswersTheCall:
         assert "failed" not in refused
         assert guard.served_repeats == 1
 
-    def test_a_replayed_conversation_is_answered_from_the_record_again(self) -> None:
-        guard = seeded_repeat_guard([_entry()])
-        calls: list[str] = []
-        tool = _wrapped(guard, calls)
-        tool.invoke({"path": "0x3c7c"})
-
-        guard.reset()
-
-        shown = tool.invoke({"path": "0x3c7c"})
-        assert shown.startswith(f"[ev_0003]\n{fenced('ev_0003', RESULT)}")
-        assert calls == []
-        assert guard.served_repeats == 0
-
 
 # ---------------------------------------------------------------------------
 # Through the real chunked analysis: what the model receives in chunk two.

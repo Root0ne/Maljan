@@ -27,8 +27,9 @@ make setup        # uv sync --all-extras --all-packages, pre-commit, external/
 
 `external/` is not carried in git. `make setup` runs
 `scripts/dev/fetch_external.sh`, which reconstructs it; `make external` does the
-same on its own. The `ghidra-mcp` image is built from that tree, so the stack
-cannot build without it.
+same on its own. The `ghidra-mcp` image is built from that tree, so the default
+stack cannot build without it (a stack without Ghidra does not need it; see
+below).
 
 ## The two configuration files
 
@@ -36,8 +37,7 @@ Maljan reads two files, and neither is committed.
 
 **`docker/.env`** — variables Compose substitutes into
 [`docker/docker-compose.yml`](https://github.com/Root0ne/Maljan/blob/dev/docker/docker-compose.yml).
-Every one of them
-is declared with `:?`, so Compose refuses to start while any is missing.
+Fill in every secret it declares.
 
 ```bash
 cp docker/.env.example docker/.env
@@ -47,6 +47,20 @@ python -c "import secrets; print('JWT_SECRET_KEY=' + secrets.token_hex(32))"
 ```
 
 Pick a `MINIO_ROOT_USER` of your own and paste the generated values in.
+
+The secrets the core services need are declared with `:?`, so Compose refuses
+to start while one is missing. Ghidra MCP and Qdrant run under the Compose
+profiles `ghidra` and `qdrant`, which the example file turns on
+(`COMPOSE_PROFILES=ghidra,qdrant`); each of the two does not start without its
+own token, and restarts logging the variable to set.
+
+**Running without Ghidra or Qdrant.** Take its name out of `COMPOSE_PROFILES`
+in `docker/.env` (an empty value runs neither); its token is then not needed,
+and without Ghidra neither is `external/`. Nothing else waits for either. Then,
+once the stack is up, choose another static analyser under **Choose a static
+analyser** below, and without Qdrant set `core.memory.backend` to `memory`
+under **Long-term memory** — a required step, since the shipped backend is
+Qdrant and each run reports it unavailable until then.
 
 **`bootstrap.env`** (repository root) — the same contract as process
 environment, for anything you run outside Compose: `make migrate`, the API or
@@ -126,10 +140,14 @@ walk the guides you need; at minimum:
   OpenAI-compatible server is reached from the containers at
   `http://host.docker.internal:8080/v1`.
 - **Choose a static analyser** — for the bundled container, the Ghidra MCP URL
-  is `http://ghidra-mcp:8089` with the `GHIDRA_MCP_AUTH_TOKEN` you generated.
+  is `http://ghidra-mcp:8089` with the `GHIDRA_MCP_AUTH_TOKEN` you generated;
+  a stack without Ghidra selects radare2, capa and YARA, a tool server of its
+  own, or `none`.
 - **Connect a sandbox** — CAPEv2, Triage, a generic REST sandbox, an uploaded
   report, or the mock provider, which is the default.
-- **Long-term memory** — Qdrant at `http://qdrant:6333` with `QDRANT_API_KEY`.
+- **Long-term memory** — Qdrant at `http://qdrant:6333` with `QDRANT_API_KEY`;
+  a stack without Qdrant sets the backend to `memory`, which keeps it in
+  process.
 
 Each guide ends in a review step and applies the staged values in one write.
 Connection tests are available on the settings that have a probe. An instance

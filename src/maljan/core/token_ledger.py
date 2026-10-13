@@ -33,6 +33,7 @@ answered because the first one failed as a provider — is kept with its reason.
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable, Sequence
 from typing import Any
 
 
@@ -250,6 +251,98 @@ class _Tally:
         }
 
 
+# The parts of a call's usage a durable record of it carries, where the
+# provider reported them: the figures the ledger tallies, and the two the
+# spend meter prices a call by besides — the hour's share of its cache writes
+# and when it was sent — so a total built from the records alone is priced the
+# way the run's own meter priced it.
+CALL_PARTS: tuple[str, ...] = (
+    "input_tokens",
+    "output_tokens",
+    "cached_input_tokens",
+    "cache_write_input_tokens",
+    "cache_write_1h_input_tokens",
+    "reasoning_tokens",
+    "cost",
+    "sent_at",
+)
+
+# The parts held as fractions; the rest are counts.
+_FRACTIONAL_PARTS = frozenset({"cost", "sent_at"})
+
+
+def call_record(
+    usage: dict[str, Any] | None, *, agent: str = "", model: str = "", call: str = ""
+) -> dict[str, Any]:
+    """One call as the ledger recorded it: who made it, which model answered, what it reported.
+
+    ``reported`` is false for a call whose provider reported no usage, and the
+    record then carries no figure: an absent figure is not a zero. A part the
+    provider did not report is left out for the same reason.
+    """
+    row: dict[str, Any] = {
+        "agent": str(agent),
+        "model": str(model),
+        "call": str(call),
+        "reported": usage is not None,
+    }
+    if usage is None:
+        return row
+    for part in CALL_PARTS:
+        value = usage.get(part)
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            row[part] = float(value) if part in _FRACTIONAL_PARTS else int(value)
+    return row
+
+
+# The ``call`` of a record that is a retry of a model request, not a call.
+RETRY_RECORD = "retry"
+
+# What a record says the job's spend meter charged for it, as the meter
+# settled it: what it cost, where the price came from, and for a charge by
+# stated estimate what the estimate cost.
+CHARGE_PARTS: tuple[str, ...] = ("priced_usd", "price_source", "estimated_usd", "estimated_part")
+
+# The charge parts that are text; the rest are US dollars.
+_CHARGE_TEXT = frozenset({"price_source", "estimated_part"})
+
+
+def _with_charge(
+    row: dict[str, Any],
+    usage: dict[str, Any] | None,
+    estimated: dict[str, Any] | None,
+    charged: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """``row`` with the stated estimate it was charged at and what the meter charged.
+
+    The charge is the meter's own figure at the moment the call was settled,
+    so a total summed from the records is what the run spent whatever prices
+    are in force when it is read; ``estimated_part`` says which part of it,
+    if any, is an estimate (``input and output``, or ``output`` where the
+    provider reported the input). Absent where nothing was charged.
+    """
+    from maljan.core.spend import OUTPUT_ESTIMATED
+
+    output_only = bool(estimated and estimated.get(OUTPUT_ESTIMATED))
+    if estimated and (usage is None or output_only):
+        block: dict[str, Any] = {
+            "input_tokens": int(estimated.get("input_tokens") or 0),
+            "output_tokens": int(estimated.get("output_tokens") or 0),
+            "source": str(estimated.get("source") or ""),
+        }
+        if output_only:
+            block[OUTPUT_ESTIMATED] = True
+        row["estimated"] = block
+    for part in CHARGE_PARTS:
+        value = (charged or {}).get(part)
+        if part in _CHARGE_TEXT:
+            if value is not None:
+                row[part] = str(value)
+        elif isinstance(value, int | float) and not isinstance(value, bool):
+            row[part] = float(value)
+    return row
+
+
 class TokenLedger:
     """Thread-safe tally of what one run's model calls spent, per agent and per model."""
 
@@ -261,7 +354,17 @@ class TokenLedger:
         self._total = _Tally()
         self._agents: dict[str, _Tally] = {}
         self._fallbacks: list[dict[str, str]] = []
+        # One row per failed attempt a provider was asked again after
+        # (``maljan.llm.transient``), filed under the call that then answered.
+        self._retries: list[dict[str, str]] = []
         self._unreported: list[dict[str, str]] = []
+        # Told of every recorded call as it is recorded, with the call's own
+        # figures (``call_record``): the worker commits each one to the job's
+        # event record once its loop runs the publish, so what a run spent is
+        # known call by call even when its process dies before any summary is
+        # built (all but a call recorded in the last moments before the kill).
+        # ``None`` where nothing listens.
+        self.on_call: Callable[[dict[str, Any]], None] | None = None
 
     def add(
         self,
@@ -272,6 +375,7 @@ class TokenLedger:
         fallback: str = "",
         call: str = "",
         estimated: dict[str, Any] | None = None,
+        retries: Sequence[str] = (),
     ) -> None:
         """One call: its reported usage, or ``None`` when the provider reported none.
 
@@ -279,7 +383,8 @@ class TokenLedger:
         report section — and is recorded for a call that reported no usage.
         ``estimated`` is a stated estimate of a call that reported none (an
         answer ended while it streamed): it is handed to the spend meter only,
-        and the call stays one that reported no usage here.
+        and the call stays one that reported no usage here. ``retries`` are
+        the failed attempts made before this call answered, one line each.
         """
         with self._lock:
             if usage is None:
@@ -310,8 +415,77 @@ class TokenLedger:
                     tally.cost_calls += 1
             if fallback:
                 self._fallbacks.append({"agent": agent, "model": model, "reason": fallback})
-        if self.spend is not None:
-            self.spend.settle(usage, model, call, estimated=estimated)
+            for reason in retries:
+                self._retries.append({"agent": agent, "model": model, "reason": str(reason)})
+        charged = self._settle(usage, model, call, estimated)
+        row = call_record(usage, agent=agent, model=model, call=call)
+        self._tell(_with_charge(row, usage, estimated, charged))
+
+    def _settle(
+        self,
+        usage: dict[str, Any] | None,
+        model: str,
+        call: str,
+        estimated: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """The call settled on the spend meter, and its charge or ``None``. Never raises."""
+        if self.spend is None:
+            return None
+        try:
+            charged = self.spend.settle(usage, model, call, estimated=estimated)
+        except Exception:  # noqa: BLE001 — recording never raises
+            return None
+        return charged if isinstance(charged, dict) else None
+
+    def _tell(self, row: dict[str, Any]) -> None:
+        """Hand one record to the listener (``on_call``), where one listens. Never raises."""
+        listener = self.on_call
+        if listener is not None:
+            try:
+                listener(row)
+            except Exception:  # noqa: BLE001 — recording never raises
+                pass
+
+    def add_retry(self, *, agent: str = "", model: str = "", reason: str = "") -> None:
+        """One retry of a model request after a transient provider failure (``llm.transient``).
+
+        Written when the retry is decided, so a call that is then lost, or
+        handed to the next model of a list, is counted as one that answers is.
+        Not a call: no call count moves. Handed to the listener as a record of
+        its own (``call`` is :data:`RETRY_RECORD`), so a worker that is killed
+        afterwards keeps it.
+        """
+        with self._lock:
+            self._retries.append({"agent": agent, "model": model, "reason": str(reason)})
+        self._tell(
+            {
+                "agent": str(agent),
+                "model": str(model),
+                "call": RETRY_RECORD,
+                "reported": False,
+                "reason": str(reason),
+            }
+        )
+
+    def charge_failed_attempt(
+        self,
+        usage: dict[str, Any] | None,
+        *,
+        agent: str = "",
+        model: str = "",
+        call: str = "",
+        estimated: dict[str, Any] | None = None,
+    ) -> None:
+        """One failed attempt the provider billed: settled on the spend meter, and recorded.
+
+        Not a call: no call count moves. The record carries the usage the error
+        reported, or the stated estimate it was charged at
+        (``estimated``), and goes to the listener so a worker killed
+        afterwards keeps what the attempt cost.
+        """
+        charged = self._settle(usage, model, call, estimated)
+        row = call_record(usage, agent=agent, model=model, call=call)
+        self._tell(_with_charge(row, usage, estimated, charged))
 
     @property
     def input_tokens(self) -> int:
@@ -336,6 +510,10 @@ class TokenLedger:
             out.pop("models", None)
             out["agents"] = {name: tally.as_dict() for name, tally in sorted(self._agents.items())}
             out["fallbacks"] = [dict(row) for row in self._fallbacks]
+            # Present only when a provider was asked again, so a run without
+            # one reads as it always did.
+            if self._retries:
+                out["retries"] = [dict(row) for row in self._retries]
             # Which calls reported no usage, one row each, present only when
             # one did: ``unreported_calls`` is their count.
             if self._unreported:
@@ -362,6 +540,7 @@ def record_response_usage(
     try:
         from maljan.llm.fallback import turn_model
         from maljan.llm.stream_watch import estimated_usage
+        from maljan.llm.transient import retries_of
 
         answered_by, fallback = turn_model(response, model)
         usage = turn_usage(response)
@@ -375,7 +554,27 @@ def record_response_usage(
             # stated estimate for the spend ceiling; the reported figures stay
             # absent.
             estimated=None if usage is not None else estimated_usage(response),
+            retries=retries_of(response),
         )
+    except Exception:  # noqa: BLE001 — telemetry must never break analysis
+        return
+
+
+def record_lost_retries(
+    ledger: TokenLedger | None, exc: BaseException | None, *, agent: str = "", model: str = ""
+) -> None:
+    """The retries a lost call made before it was given up, onto ``ledger``. Never raises.
+
+    Only the ones no recorder of the job took (``llm.transient``): those are
+    rows already, written when each retry was decided.
+    """
+    if ledger is None or exc is None:
+        return
+    try:
+        from maljan.llm.transient import retries_given_up
+
+        for reason in retries_given_up(exc):
+            ledger.add_retry(agent=agent, model=model, reason=reason)
     except Exception:  # noqa: BLE001 — telemetry must never break analysis
         return
 

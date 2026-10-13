@@ -27,7 +27,7 @@ OBSERVED = "observed"
 # The mark the mock sandbox's stand-in report carries (``MockSandboxClient``).
 SYNTHETIC_KEY = "synthetic"
 # The mark a report the mock sandbox read from a fixture file carries
-# (``providers.cape_view``).
+# (``schemas.sandbox_document``).
 FIXTURE_KEY = "recorded_fixture"
 
 # The tool name of the pack entry that states the status. Named like the
@@ -62,7 +62,7 @@ class SandboxStatus:
 
 
 def sandbox_status(report: Any) -> SandboxStatus:
-    """What ``report`` — the run's CAPE-shaped sandbox report, or ``None`` — is."""
+    """What ``report`` — the run's sandbox report document, or ``None`` — is."""
     if not isinstance(report, dict) or not report:
         return SandboxStatus(NOT_RUN, _NO_REPORT)
     if report.get(SYNTHETIC_KEY):

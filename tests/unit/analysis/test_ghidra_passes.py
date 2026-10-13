@@ -15,7 +15,7 @@ import httpx
 import pytest
 from tests.unit.fake_ghidra import X64_BASE, FakeGhidra
 
-from maljan.analysis.ghidra_passes import (
+from maljan.providers.static.ghidra.passes import (
     ANTI_ANALYSIS_TOOL,
     SCAN_CHECKS,
     GhidraPasses,
@@ -30,6 +30,7 @@ def _passes(fake: FakeGhidra) -> GhidraPasses:
         token="t",
         sample_path="/data/samples/.work/s.exe",
         transport=httpx.MockTransport(fake.handler),
+        note_key="remote http://ghidra.invalid:80",
     )
 
 

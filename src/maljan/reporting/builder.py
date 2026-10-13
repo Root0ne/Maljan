@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 from maljan.analysis.run_summary import NOT_APPLICABLE
 from maljan.core.logger import logger
+from maljan.core.reputation import reputation_of
 from maljan.extractors.attribution import build_family_attribution
 from maljan.extractors.capability_matrix import build_capability_matrix, unmapped_behaviours
 from maljan.pipeline.outcome import (
@@ -52,6 +53,7 @@ from maljan.reporting.models import (
     KeyFinding,
     MalwareReport,
     ReportFrontMatter,
+    ReputationAnswer,
     SeverityAssessment,
     VersionHistoryEntry,
 )
@@ -206,7 +208,7 @@ class MalwareReportBuilder:
 
         negotiation_summary = self._negotiation_summary(self.run_summary, self.overall_confidence)
 
-        references = self._build_references(mappings, identity.hashes.sha256)
+        references = self._build_references(mappings, identity.hashes)
 
         report = MalwareReport(
             verdict=verdict,
@@ -277,9 +279,14 @@ class MalwareReportBuilder:
                 duration_ms=entry.duration_ms,
                 truncated=entry.truncated,
                 repeated_of=entry.repeated_of or None,
+                source=entry.source,
+                facts=entry.facts,
+                agent_role=entry.agent_role,
+                agent_tab=entry.agent_tab,
             )
             for entry in self.evidence_ledger
         ]
+        report.reputation = _reputation_answers(self.evidence_ledger)
 
         # Deterministic front-matter, version history,
         # and consolidated IOC table (the professional-report scaffolding the
@@ -483,23 +490,31 @@ class MalwareReportBuilder:
             platforms.append("Unknown")
         return platforms
 
-    def _build_references(self, mappings: list[Any], sha256: str | None) -> list[ExternalReference]:
-        refs: list[ExternalReference] = []
-        if sha256 and len(sha256) == 64:
-            refs.extend(
-                [
-                    ExternalReference(
-                        source="VirusTotal",
-                        url=f"https://www.virustotal.com/gui/file/{sha256}",
-                        note="VT detection summary",
-                    ),
-                    ExternalReference(
-                        source="MalwareBazaar",
-                        url=f"https://bazaar.abuse.ch/sample/{sha256}/",
-                        note="Sample lookup",
-                    ),
-                ]
+    def _build_references(self, mappings: list[Any], hashes: Any) -> list[ExternalReference]:
+        """The report's references: the sample lookups of the sources the run used, then ATT&CK.
+
+        A source links its declared lookups (``reference_urls``) only when
+        the run recorded an entry from it, and the operator's own templates
+        (``reporting.reference_urls``) are linked on every report
+        (``reporting.references``). A run that asked no service links none.
+        """
+        from maljan.core.config import get_settings
+        from maljan.reporting.references import declared_references
+
+        operator: list[Any] = []
+        try:
+            operator = list(get_settings().reporting.reference_urls)
+        except Exception as exc:  # noqa: BLE001 — a reference is never worth a report
+            logger.debug(
+                "MalwareReportBuilder: no operator references read (%s).", type(exc).__name__
             )
+        try:
+            refs = declared_references(self.evidence_ledger, hashes, operator=operator)
+        except Exception as exc:  # noqa: BLE001 — a reference is never worth a report
+            logger.warning(
+                "MalwareReportBuilder: the sample lookups were not read (%s).", type(exc).__name__
+            )
+            refs = []
         # One ExternalReference per technique produced
         # the "MITRE ATT&CK" source label repeated 7×. Emit a single grouped
         # ATT&CK reference (pointing at the matrix landing page) whose note lists
@@ -564,6 +579,20 @@ class MalwareReportBuilder:
             tlp=tlp,
             copyright=f"© {now:%Y} {rc.publisher}",
         )
+
+
+def _reputation_answers(ledger: list[LedgerEntry]) -> list[ReputationAnswer]:
+    """Every reputation answer of the ledger that established something, in ledger order.
+
+    Each is the record its lookup's declaration read when the entry was
+    written (``core.reputation.reputation_of``), from any server.
+    """
+    out: list[ReputationAnswer] = []
+    for entry in ledger:
+        answer = reputation_of(entry)
+        if answer is not None and answer.says_something():
+            out.append(ReputationAnswer(entry_id=entry.id, tool=entry.tool, **answer.model_dump()))
+    return out
 
 
 def _indicators_merged_in_the_bundle(run_summary: dict[str, Any]) -> int:
@@ -853,6 +882,7 @@ def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
                     ip.outside_processes,
                     ip.marked_only_processes,
                     ip.file_only_processes,
+                    ip.marked_by,
                 )
                 if ip.source == "sandbox"
                 else "",
@@ -1073,6 +1103,7 @@ def _process_tree_words(
     outside: list[str] | None = None,
     marked_only: list[str] | None = None,
     file_only: list[str] | None = None,
+    marked_by: str | None = None,
 ) -> str:
     """What the sandbox report says about which process reached an address."""
     if attributed is True:
@@ -1083,7 +1114,7 @@ def _process_tree_words(
     if marked_only or file_only:
         from maljan.reporting.renderers.stix_renderer import disputed_flow_reason
 
-        return disputed_flow_reason(list(marked_only or []), list(file_only or []))
+        return disputed_flow_reason(list(marked_only or []), list(file_only or []), marked_by)
     return "the sandbox report does not say which process reached it"
 
 
@@ -1097,6 +1128,11 @@ def _domain_context(d: Any) -> str:
         notes.append(f"punycode{target}")
     if d.resolved_ips:
         notes.append("resolved to " + ", ".join(d.resolved_ips[:4]))
+    if getattr(d, "resolved_ips_partial", False):
+        notes.append(
+            f"some addresses withheld for size ({d.resolved_ips_withheld} of its DNS "
+            "request's answers not read)"
+        )
     if d.queried_pids:
         # Which process asked: when a dropped child resolves the C2 rather
         # than the parent, this is the whole story.

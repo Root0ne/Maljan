@@ -12,10 +12,15 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 from maljan.core.model_assignments import endpoint_label
-from maljan.core.settings_annotations import GROUP_DESCRIPTIONS, GROUP_ORDER
+from maljan.core.settings_annotations import (
+    GROUP_DESCRIPTIONS,
+    GROUP_ORDER,
+    RENAMED_SETTINGS,
+    RETIRED_SETTINGS,
+)
 from maljan.core.settings_overrides import redact_url
-from maljan.core.virustotal import SERVER_KEY as VIRUSTOTAL_SERVER_KEY
 from maljan.pipeline.conditions import validate_condition
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import end_read_transaction, get_db
@@ -29,6 +34,8 @@ from app.schemas.settings import (
     ConditionValidateRequest,
     ConditionValidateResponse,
     ContextWindowResponse,
+    CredentialBootstrapResponse,
+    EffortOptionsResponse,
     ExportResponse,
     GroupDTO,
     ImportRequest,
@@ -46,33 +53,40 @@ from app.schemas.settings import (
     TeamLintResponse,
     ValueDTO,
     ValuesResponse,
-    VirustotalRegisterResponse,
 )
+from app.services import credential_bootstrap
 from app.services.audit import record as audit_record
 from app.services.mapping_preview import PREVIEW_MAX_BYTES, preview_mapping
+from app.services.report_formats_lock import (
+    report_formats_serialised,
+    touches_report_formats,
+)
 from app.services.server_map import SERVER_MAP_KEY, TOKEN_MASK
 from app.services.settings_catalog_api import catalog_index, full_catalog, resolved_catalog
 from app.services.settings_probes import (
-    PROBES,
     candidate_settings,
     context_window_facts,
+    known_probe,
     run_agent_probe,
     run_mcp_probe,
     run_probe,
+    with_staged_sources,
 )
 from app.services.settings_service import (
     SettingsService,
     SettingsValidationError,
     core_settings_cache,
-)
-from app.services.virustotal_register import (
-    RegistrationError,
-    masked_state,
-    register_agent,
-    server_map_with_token,
+    effective_core_settings,
+    lenient_imported_declarations,
 )
 
-EXPORT_FORMAT = "maljan-settings/1"
+# The settings document an export writes and an import reads. In ``/2`` a
+# block's tool declarations are its changes over what the block ships, one
+# tool at a time, as they are stored; an import also reads ``/1``, written
+# before that, where a block's tool declarations are its whole map.
+EXPORT_FORMAT = "maljan-settings/2"
+WHOLE_MAP_FORMAT = "maljan-settings/1"
+IMPORT_FORMATS = (EXPORT_FORMAT, WHOLE_MAP_FORMAT)
 
 logger = get_logger("api.settings")
 
@@ -106,17 +120,102 @@ async def _effective_agents(db: AsyncSession) -> tuple[list[str], list[str]]:
 async def get_schema(
     _: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
 ) -> SchemaResponse:
+    from maljan.core.settings_overrides import (
+        build_settings,
+        pack_steps_left_out,
+        refused_tool_changes,
+    )
+
+    from app.services.enrichment_sources import ENRICHMENT_SOURCES_KEY
+    from app.services.settings_service import load_core_overrides
+
     profiles, agents = await _effective_agents(db)
+    stored = await SettingsService(db).load_overrides()
+    core = await load_core_overrides(db)
+    try:
+        configs = build_settings(core).mcp.servers
+    except (ValueError, ValidationError):
+        configs = build_settings({}).mcp.servers
+    try:
+        # Listed also where the stored settings do not build (the steps are
+        # then checked against what does), never a failed schema.
+        left_out = pack_steps_left_out(core)
+    except (ValueError, ValidationError):
+        left_out = {}
+    return served_schema(
+        await _effective_servers(db),
+        profiles=profiles,
+        agents=agents,
+        enrichment_sources=stored.get(ENRICHMENT_SOURCES_KEY),
+        server_configs=configs,
+        tool_facts_conflicts=refused_tool_changes(core),
+        pack_steps_left_out=left_out,
+    )
+
+
+def served_schema(
+    servers: list[str],
+    *,
+    profiles: list[str],
+    agents: list[str],
+    enrichment_sources: Any = None,
+    server_configs: dict[str, Any] | None = None,
+    tool_facts_conflicts: dict[str, list[str]] | None = None,
+    pack_steps_left_out: dict[str, str] | None = None,
+) -> SchemaResponse:
+    """The settings schema as ``GET /settings/schema`` serves it for these choices.
+
+    A pure function of the code and the choices, so the console's tests can
+    be fed exactly what the API serves (``scripts/dev/write_console_schema.py``).
+    ``enrichment_sources`` is the stored ``api.enrichment_sources`` map and
+    ``server_configs`` the tool servers in force; the schema says what the
+    console's guides offer for each, never a credential.
+    ``tool_facts_conflicts`` names, per block, the tools whose stored change
+    is refused over what ships now (``refused_tool_changes``), and
+    ``pack_steps_left_out`` each stored triage pack step left out, with why
+    (``pack_steps_left_out``).
+    """
+    from app.services.credential_bootstrap import bootstrap_facts
+    from app.services.enrichment_sources import source_facts
+
     by_group: dict[str, list[CatalogEntryDTO]] = {}
-    for e in resolved_catalog(await _effective_servers(db), profiles=profiles, agents=agents):
-        d = e.to_dict()
-        by_group.setdefault(e.group, []).append(CatalogEntryDTO(**d))
+    for e in resolved_catalog(servers, profiles=profiles, agents=agents):
+        by_group.setdefault(e.group, []).append(CatalogEntryDTO(**e.to_dict()))
     groups = [
         GroupDTO(key=g, title=t, description=GROUP_DESCRIPTIONS.get(g, ""), entries=by_group[g])
         for g, t in GROUP_ORDER
         if g in by_group
     ]
-    return SchemaResponse(groups=groups)
+    from maljan.core.tool_declarations import declaration_fields
+
+    from app.services.provider_facts import probe_labels
+
+    if server_configs is None:
+        from maljan.core.settings_overrides import build_settings
+
+        server_configs = build_settings({}).mcp.servers
+    return SchemaResponse(
+        groups=groups,
+        probe_labels=probe_labels(enrichment_sources),
+        enrichment_sources=source_facts(enrichment_sources, server_configs),
+        credential_servers=bootstrap_facts(server_configs),
+        tool_declaration_fields=declaration_fields(),
+        tool_facts_conflicts=tool_facts_conflicts or {},
+        pack_steps_left_out=pack_steps_left_out or {},
+    )
+
+
+def default_served_schema() -> SchemaResponse:
+    """The schema a deployment with nothing stored is served."""
+    from maljan.core.settings_overrides import build_settings
+
+    from app.services.agent_map import effective_definitions, effective_profiles
+
+    return served_schema(
+        list(build_settings({}).mcp.servers),
+        profiles=sorted(effective_profiles({})),
+        agents=sorted(effective_definitions({})),
+    )
 
 
 @router.get("", response_model=ValuesResponse)
@@ -150,6 +249,29 @@ async def get_context_window(
     return ContextWindowResponse(**await context_window_facts(settings))
 
 
+@router.get("/effort-options", response_model=EffortOptionsResponse)
+async def get_effort_options(
+    provider: str = Query(..., min_length=1, max_length=64),
+    model: str = Query("", max_length=256),
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> EffortOptionsResponse:
+    """The reasoning-effort levels a per-agent entry may name for one provider and model.
+
+    Read-only and free: the levels come from the settings' own list and, for
+    an Anthropic model the window probe has described, from what the Models
+    API said it takes. No request leaves the process. The console's agent
+    editor draws its effort field from this answer rather than from a list
+    of its own.
+    """
+    from maljan.llm.effort import effort_options
+
+    stored = await SettingsService(db).load_overrides()
+    settings = candidate_settings({}, stored)
+    await end_read_transaction(db)
+    return EffortOptionsResponse(**effort_options(settings, provider, model))
+
+
 async def _agent_warnings(db: AsyncSession) -> dict[str, str]:
     """What is worth saying about the teams as they now stand.
 
@@ -174,6 +296,97 @@ async def _agent_warnings(db: AsyncSession) -> dict[str, str]:
     except Exception as exc:  # noqa: BLE001 — advisory, and the write is done
         logger.debug("Could not compute settings warnings (%s); continuing.", log_safe(str(exc)))
         return {}
+
+
+async def _declared_detects(db: AsyncSession) -> dict[str, Any] | None:
+    """Each declared report format's detect by name, as the settings stand; ``None`` unread.
+
+    Read before a save that writes the report formats, so the overlap warning
+    is said only for a format whose detect the save adds or changes. Never
+    raises, as :func:`_agent_warnings` never does.
+    """
+    try:
+        sandbox = (await effective_core_settings(db)).sandbox
+    except Exception as exc:  # noqa: BLE001 — advisory: unread means every detect is judged
+        logger.debug("Could not read the declared detects (%s); continuing.", type(exc).__name__)
+        return None
+    return {fmt.name: _detect_of(fmt) for fmt in sandbox.report_formats}
+
+
+def _detect_of(fmt: Any) -> list[list[dict[str, Any]]]:
+    return [[test.model_dump(mode="json") for test in group] for group in fmt.detect]
+
+
+async def _mapping_warnings(
+    db: AsyncSession, changes: dict[str, Any], detects_before: dict[str, Any] | None = None
+) -> dict[str, str]:
+    """A warning beside each saved report-mapping path whose reading is not linear in the report,
+    and beside the detect of each format read through a mapping that a built-in's detect overlaps.
+
+    Read from the settings as they now stand, for a save that touched the
+    sandbox settings; the save itself is never refused for either
+    (``core.report_mapping.costly_paths``,
+    ``core.report_formats.builtin_overlapping``). The overlap is said only
+    for a save that writes the report formats, and only beside a format whose
+    detect the save adds or changes (``detects_before``, each declared
+    format's detect by name before the save; ``None`` where it was not read,
+    and then every format's detect is judged), so an unrelated save never
+    repeats it. Never raises, as :func:`_agent_warnings` never does.
+    """
+    from maljan.core.report_formats import (
+        BUILTIN_REPORT_FORMATS,
+        builtin_overlapping,
+        effective_formats,
+        overlapping_paths,
+    )
+    from maljan.core.report_mapping import costly_paths
+    from maljan.providers.sandbox.readers import format_reads_mapping
+
+    if not any(str(key).startswith("core.sandbox.") for key in changes):
+        return {}
+    try:
+        sandbox = (await effective_core_settings(db)).sandbox
+    except Exception as exc:  # noqa: BLE001 — advisory, and the write is done
+        logger.debug("Could not read the mapping paths (%s); continuing.", type(exc).__name__)
+        return {}
+    out = {
+        f"core.sandbox.rest.mapping.{field}": said
+        for field, said in costly_paths(sandbox.rest.mapping).items()
+    }
+    builtins = [
+        fmt
+        for fmt in effective_formats(sandbox.report_formats)
+        if fmt.name in {b.name for b in BUILTIN_REPORT_FORMATS}
+    ]
+    formats_written = touches_report_formats(changes)
+    for index, fmt in enumerate(sandbox.report_formats):
+        if fmt.mapping is not None:
+            for field, said in costly_paths(fmt.mapping).items():
+                out[f"core.sandbox.report_formats.{index}.mapping.{field}"] = said
+        changed = formats_written and (
+            detects_before is None or detects_before.get(fmt.name) != _detect_of(fmt)
+        )
+        overlapping = (
+            builtin_overlapping(fmt, builtins) if changed and format_reads_mapping(fmt) else ""
+        )
+        if overlapping:
+            builtin = next(b for b in builtins if b.name == overlapping)
+            out[f"core.sandbox.report_formats.{index}.detect"] = SHADOWED_DETECT.format(
+                name=fmt.name,
+                builtin=overlapping,
+                places=", ".join(overlapping_paths(builtin)),
+            )
+    return out
+
+
+SHADOWED_DETECT = (
+    "{name!r} is read through a mapping, which is tried after every built-in format, and its "
+    "detect overlaps the built-in format {builtin!r}: a report both recognise is read as "
+    "{builtin!r}, never as {name!r}. To set them apart, add a test on a place {builtin!r} "
+    "tests ({places}) that its reports cannot pass, such as another type or text they never "
+    "hold; a test on a place of your own does not, since {builtin!r}'s reports may carry it "
+    "too. Saved as written."
+)
 
 
 async def _unprobed_models_in(db: AsyncSession, changes: dict[str, Any]) -> list[str]:
@@ -208,7 +421,19 @@ async def patch_values(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> PatchResponse | JSONResponse:
-    unprobed = await _unprobed_models_in(db, body.changes)
+    """Save a set of staged values at once.
+
+    A block's tool declarations (an entry's ``tool_facts`` in
+    ``core.mcp.servers``, a ``core.<block>.tool_facts`` leaf) are read by
+    their mark: a map holding ``"": "changes"`` is the block's changes over
+    what it ships, one tool at a time (``null`` removes a shipped tool, and a
+    tool it leaves out stays as shipped); a map without the mark is the whole
+    map, so a shipped tool it leaves out is removed. A map sent back exactly
+    as stored keeps the reading it is stored with. ``GET`` serves every
+    stored map marked.
+    """
+    changes = _current_keys(body.changes)
+    unprobed = await _unprobed_models_in(db, changes)
     if unprobed:
         from app.services.model_probes import AGENT_MODELS_KEY, refusal_sentence
 
@@ -219,8 +444,17 @@ async def patch_values(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"errors": {AGENT_MODELS_KEY: refusal_sentence(unprobed)}},
         )
+    formats_written = touches_report_formats(changes)
+    detects_before: dict[str, Any] | None = None
     try:
-        res = await SettingsService(db).save(body.changes, user_id=user.id, ip=_client_ip(request))
+        # A write of the declared report formats waits for an accept that is
+        # rewriting them, and an accept for it (``services.report_formats_lock``).
+        async with report_formats_serialised(db, needed=formats_written):
+            if formats_written:
+                # Under the lock, so an accept between the read and the save
+                # is never taken for this save's change.
+                detects_before = await _declared_detects(db)
+            res = await SettingsService(db).save(changes, user_id=user.id, ip=_client_ip(request))
     except SettingsValidationError as exc:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": exc.errors}
@@ -228,7 +462,12 @@ async def patch_values(
     runtime_config.invalidate()
     core_settings_cache.invalidate()
     return PatchResponse(
-        applied=res.applied, applies=res.applies, warnings=await _agent_warnings(db)
+        applied=res.applied,
+        applies=res.applies,
+        warnings={
+            **await _agent_warnings(db),
+            **await _mapping_warnings(db, changes, detects_before),
+        },
     )
 
 
@@ -242,7 +481,8 @@ async def reset_group(
     keys = [e.key for e in full_catalog() if e.group == group and e.editable]
     if not keys:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown group: {group}")
-    removed = await SettingsService(db).reset(keys, user_id=user.id, ip=_client_ip(request))
+    async with report_formats_serialised(db, needed=touches_report_formats(keys)):
+        removed = await SettingsService(db).reset(keys, user_id=user.id, ip=_client_ip(request))
     runtime_config.invalidate()
     core_settings_cache.invalidate()
     return ResetResponse(reset=removed)
@@ -258,7 +498,8 @@ async def reset_key(
     # A row whose key left the catalog (a later deploy renamed the field) must
     # still be removable, so the catalog check only decides between 404 and
     # an empty reset when nothing is stored either.
-    removed = await SettingsService(db).reset([key], user_id=user.id, ip=_client_ip(request))
+    async with report_formats_serialised(db, needed=touches_report_formats([key])):
+        removed = await SettingsService(db).reset([key], user_id=user.id, ip=_client_ip(request))
     if not removed and key not in catalog_index():
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown setting: {key}")
     runtime_config.invalidate()
@@ -393,6 +634,20 @@ async def export_values(
     )
 
 
+def _current_keys(values: dict[str, Any]) -> dict[str, Any]:
+    """``values`` with each moved key read as the key that now holds it.
+
+    An export written before a setting moved carries the old key; it is
+    imported as the new one, and a file carrying both keeps the new one's
+    value.
+    """
+    out = {key: value for key, value in values.items() if key not in RENAMED_SETTINGS}
+    for old, new in RENAMED_SETTINGS.items():
+        if old in values and new not in out:
+            out[new] = values[old]
+    return out
+
+
 @router.post("/import", response_model=PatchResponse)
 async def import_values(
     body: ImportRequest,
@@ -400,16 +655,22 @@ async def import_values(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> PatchResponse | JSONResponse:
-    if body.format != EXPORT_FORMAT:
+    if body.format not in IMPORT_FORMATS:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"errors": {"format": "unsupported format"}},
         )
     index = catalog_index()
+    values = _current_keys(body.values)
     errors: dict[str, str] = {}
-    for key in body.values:
+    for key in values:
         entry = index.get(key)
-        if entry is None:
+        if entry is None and key in RETIRED_SETTINGS:
+            errors[key] = (
+                f"retired setting with no effect ({RETIRED_SETTINGS[key]}); "
+                "delete this key from the file and import again"
+            )
+        elif entry is None:
             errors[key] = "unknown key"
         elif not entry.editable:
             errors[key] = "read-only"
@@ -417,8 +678,14 @@ async def import_values(
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": errors}
         )
+    # A declaration another version wrote may hold what this one does not
+    # read: it is left out with a warning, never a refusal of the file.
+    values, left_out = lenient_imported_declarations(
+        values, whole_maps=body.format == WHOLE_MAP_FORMAT
+    )
     try:
-        res = await SettingsService(db).save(body.values, user_id=user.id, ip=_client_ip(request))
+        async with report_formats_serialised(db, needed=touches_report_formats(values)):
+            res = await SettingsService(db).save(values, user_id=user.id, ip=_client_ip(request))
     except SettingsValidationError as exc:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": exc.errors}
@@ -436,7 +703,9 @@ async def import_values(
     # An import can bring in a whole team just as a patch can, so it answers
     # with the same advisory notes.
     return PatchResponse(
-        applied=res.applied, applies=res.applies, warnings=await _agent_warnings(db)
+        applied=res.applied,
+        applies=res.applies,
+        warnings={**left_out, **await _agent_warnings(db)},
     )
 
 
@@ -529,79 +798,113 @@ async def test_mcp_server(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> ProbeResponse:
-    """Launch one configured MCP server and report the tools it offers.
+    """Launch one configured MCP server, report the tools it offers and propose declarations.
 
     Takes staged values so an operator can test a server they have not saved
     yet — the same contract as every other probe, addressed to one key of one
     setting rather than to a set of settings. Registered ahead of
-    ``/test/{probe}`` so the fixed path wins the match.
+    ``/test/{probe}`` so the fixed path wins the match. The proposals in
+    ``details`` are data for the admin to accept; nothing is saved here. A
+    tool is called only when the body's ``confirmed_calls`` names it after the
+    admin was shown the planned calls (``details.proposals.planned``).
     """
     stored = await SettingsService(db).load_overrides()
     # The staged values are read; what follows launches a server and waits on
     # it. Nothing below needs the transaction that read them, and a probe is
     # the longest await this API makes.
     await end_read_transaction(db)
-    response = await _probe_response(run_mcp_probe(server, body.values, stored))
-    await _record_the_probe(request, user, "mcp", body, response, server=server)
+    response = await _probe_response(
+        run_mcp_probe(server, body.values, stored, confirmed_calls=body.confirmed_calls)
+    )
+    await _record_the_probe(
+        request,
+        user,
+        "mcp",
+        body,
+        response,
+        server=server,
+        confirmed_calls=sorted(body.confirmed_calls),
+    )
     return response
 
 
-@router.post("/virustotal/register", response_model=VirustotalRegisterResponse)
-async def register_virustotal_agent(
+@router.post("/servers/{key}/credential", response_model=CredentialBootstrapResponse)
+async def obtain_server_credential(
+    key: str,
     request: Request,
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
-) -> VirustotalRegisterResponse | JSONResponse:
-    """Obtain a VirusTotal agent token, store it encrypted and enable the server.
+) -> CredentialBootstrapResponse | JSONResponse:
+    """Obtain server ``key``'s credential by its declared request, store it and enable it.
 
-    The one call in this module that reaches a third party in order to *write*
-    settings. It takes no body: everything the registration says about this
-    deployment is a constant of the build, and the only variable part -- the
-    token -- is what comes back. A failure against VirusTotal is reported as a
-    502 with their own sentence in it, because the fix is on their side or in
-    the operator's network, not in the stored settings.
+    For any tool server in force that declares ``credential_bootstrap``. The
+    request takes no body: the URL, the body sent and where the token sits are
+    the declaration's (a built-in's, or one an admin saved in the server map),
+    and the only variable part -- the token -- is what comes back. It is
+    stored encrypted and never returned; the answer carries the mask and the
+    facts the declaration names. A failure at the service is a 502 with its
+    own sentence in it, because the fix is on its side or in the operator's
+    network, not in the stored settings.
     """
+    from maljan.core.settings_overrides import build_settings
+
+    from app.services.settings_service import load_core_overrides
+
+    service = SettingsService(db)
+    try:
+        servers = build_settings(await load_core_overrides(db)).mcp.servers
+    except (ValueError, ValidationError):
+        servers = build_settings({}).mcp.servers
+    config = servers.get(key)
+    if config is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such tool server")
+    declared = config.credential_bootstrap
+    if declared is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, "this tool server declares no credential bootstrap"
+        )
+    label = str(config.label or key)
     # The caller was resolved from the database by the dependency above, so
-    # this request is already in a transaction; the registration is a call to
+    # this request is already in a transaction; the bootstrap is a call to
     # somebody else's service and must not be made inside it.
     await end_read_transaction(db)
     try:
-        facts = await register_agent()
-    except RegistrationError as exc:
-        logger.warning("VirusTotal registration failed: %s", log_safe(str(exc)))
+        token, facts = await credential_bootstrap.obtain_credential(declared, label=label)
+    except credential_bootstrap.BootstrapError as exc:
+        # The service's own sentence goes to the admin who pressed the button,
+        # not into the log.
+        logger.warning("the bootstrap request failed for tool server %s", log_safe(key))
         return JSONResponse(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            content={"errors": {"virustotal": str(exc)}},
+            status_code=status.HTTP_502_BAD_GATEWAY, content={"errors": {key: str(exc)}}
         )
 
-    service = SettingsService(db)
     stored = await service.load_overrides()
     current = stored.get(SERVER_MAP_KEY)
-    servers = server_map_with_token(
-        current if isinstance(current, dict) else {}, facts["agent_token"]
+    updated = credential_bootstrap.server_map_with_token(
+        current if isinstance(current, dict) else {}, key, token
     )
     try:
-        await service.save({SERVER_MAP_KEY: servers}, user_id=user.id, ip=_client_ip(request))
+        await service.save({SERVER_MAP_KEY: updated}, user_id=user.id, ip=_client_ip(request))
     except SettingsValidationError as exc:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": exc.errors}
         )
     await audit_record(
-        "settings.virustotal.register",
+        "settings.servers.credential",
         resource_type="settings",
         user_id=user.id,
         details={
-            "agent_id": log_safe(facts["agent_id"]),
-            "public_handle": log_safe(facts["public_handle"]),
+            "server": log_safe(key),
+            "facts": {log_safe(k): log_safe(v) for k, v in facts.items()},
         },
         ip=_client_ip(request),
     )
     runtime_config.invalidate()
     core_settings_cache.invalidate()
-    logger.info("VirusTotal agent registered: %s", log_safe(facts["public_handle"]))
-    entry = servers[VIRUSTOTAL_SERVER_KEY]
-    return VirustotalRegisterResponse(
-        **masked_state(entry if isinstance(entry, dict) else {}, facts)
+    logger.info("the bootstrap request answered for tool server %s", log_safe(key))
+    entry = updated[key]
+    return CredentialBootstrapResponse(
+        **credential_bootstrap.masked_state(key, entry if isinstance(entry, dict) else {}, facts)
     )
 
 
@@ -618,6 +921,8 @@ async def _write_down_what_was_reached(db: AsyncSession, pairs: list[dict[str, A
     sentence; a store that could not be written is a reason to log, not a
     reason to give them an error instead of their answer.
     """
+    from maljan.core.model_assignments import filed_model
+
     from app.services.model_probes import record_probe
 
     for pair in pairs:
@@ -625,7 +930,8 @@ async def _write_down_what_was_reached(db: AsyncSession, pairs: list[dict[str, A
             await record_probe(
                 db,
                 endpoint=str(pair.get("endpoint") or ""),
-                model=str(pair.get("model") or ""),
+                # A pair asked at an entry's own effort is filed with it.
+                model=filed_model(str(pair.get("model") or ""), pair.get("effort")),
                 provider=str(pair.get("provider") or ""),
                 ok=bool(pair.get("ok")),
                 detail=str(pair.get("detail") or ""),
@@ -673,9 +979,9 @@ async def test_probe(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> ProbeResponse:
-    if probe not in PROBES:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown probe: {probe}")
     stored = await SettingsService(db).load_overrides()
+    if not known_probe(probe, with_staged_sources(stored, body.values)):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown probe: {probe}")
     # An LLM probe is allowed five minutes at a third-party endpoint; the read
     # that prepared it ends here rather than waiting for the answer.
     await end_read_transaction(db)
