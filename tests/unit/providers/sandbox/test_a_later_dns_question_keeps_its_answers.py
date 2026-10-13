@@ -816,8 +816,10 @@ class TestEveryReaderReadsADnsRowSNameAlike:
         chain over two of them alike (:func:`_name_field_copies`). Only the one
         reader's own tuple (``DNS_NAME_KEYS``) holds them, beside the Markdown
         table's keys of a row that is no DNS row (read past the DNS row reader
-        for a DNS row) and the word lists that hold two of the words with
-        another meaning: an argument's role words, a description's vocabulary,
+        for a DNS row), the shape test's DNS-specific question spellings (the
+        evidence a list is DNS, never a reading of a row's name) and the word
+        lists that hold two of the words with another meaning: an argument's
+        role words, a description's vocabulary,
         a card's source fields, indicator kinds and code identifiers. Each is
         named by the name it is assigned to, or the function holding it.
         """
@@ -827,6 +829,7 @@ class TestEveryReaderReadsADnsRowSNameAlike:
         allowed = {
             ("schemas/sandbox_document.py", "DNS_NAME_KEYS"),
             ("reporting/ledger_report.py", "_NON_DNS_ENDPOINT_KEYS"),
+            ("core/report_shapes.py", "_DNS_REQUEST_KEYS"),
             ("core/declaration_proposals.py", "_DESCRIPTION_WORDS"),
             ("core/declaration_proposals.py", "_argument_role"),
             ("memory/technique_cards.py", "SOURCE_FIELDS"),
