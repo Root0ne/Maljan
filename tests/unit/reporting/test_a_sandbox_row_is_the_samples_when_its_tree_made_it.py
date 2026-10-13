@@ -40,7 +40,9 @@ def _triage(
 ) -> Any:
     overview = {"sample": {"id": "t1", "target": target, "sha256": "a" * 64}}
     task = {"processes": processes, "network": {"flows": flows}}
-    return triage_overview_to_sandbox_report(overview, task_reports={"behavioral1": task})
+    return triage_overview_to_sandbox_report(
+        overview, provider="triage", source_format="triage", task_reports={"behavioral1": task}
+    )
 
 
 _PROCESSES = [
@@ -111,9 +113,54 @@ class TestTheNormalisedFlowSaysWhichProcessMadeIt:
             "network": {"flows": [{"proto": "tcp", "dst": f"{DOC}:443", "procid": 5}]},
         }
         report = triage_overview_to_sandbox_report(
-            overview, task_reports={"behavioral1": task}, marked_by="AcmeBox"
+            overview,
+            provider="triage",
+            source_format="triage",
+            task_reports={"behavioral1": task},
+            marked_by="AcmeBox",
         )
         assert report.network.tcp[0]["lineage_marked_by"] == "AcmeBox"
+
+    def test_with_no_matched_format_the_reading_formats_declared_name_marks_the_row(
+        self, monkeypatch: Any
+    ) -> None:
+        from maljan.schemas import sandbox_report
+
+        named = {"triage": "Triage", "acme": "AcmeBox"}
+        monkeypatch.setattr(sandbox_report, "reader_display_name", lambda reader: named[reader])
+        processes = [
+            {"procid": 5, "procid_parent": 0, "image": "x.exe", "orig": True},
+            {"procid": 6, "procid_parent": 0, "image": "invoice.exe", "cmd": "invoice.exe"},
+        ]
+        overview = {"sample": {"id": "t1", "target": "invoice.exe", "sha256": "a" * 64}}
+        task = {
+            "processes": processes,
+            "network": {"flows": [{"proto": "tcp", "dst": f"{DOC}:443", "procid": 5}]},
+        }
+        report = triage_overview_to_sandbox_report(
+            overview, provider="p", source_format="acme", task_reports={"behavioral1": task}
+        )
+        assert report.source_format == "acme" and report.provider == "p"
+        assert report.network.tcp[0]["lineage_marked_by"] == "AcmeBox"
+
+    def test_neither_reader_function_assumes_its_format_or_its_provider(self) -> None:
+        import inspect
+
+        from maljan.schemas.sandbox_report import cape_report_to_sandbox_report
+
+        for function in (cape_report_to_sandbox_report, triage_overview_to_sandbox_report):
+            parameters = inspect.signature(function).parameters
+            for name in ("provider", "source_format"):
+                assert parameters[name].default is inspect.Parameter.empty, (function, name)
+
+    def test_the_built_in_reader_records_its_own_id(self) -> None:
+        from maljan.providers.sandbox.readers import report_reader
+
+        overview = {"sample": {"id": "t1", "target": "invoice.exe", "sha256": "a" * 64}}
+        reader = report_reader("triage")
+        assert reader is not None
+        report = reader.read(overview, provider="triage", task_reports={})
+        assert report.source_format == reader.id
 
     def test_a_mark_and_a_file_name_that_agree_are_the_sample(self) -> None:
         processes = [

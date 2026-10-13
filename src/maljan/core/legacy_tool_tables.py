@@ -125,3 +125,9 @@ def legacy_whole_fragment(block: str, text: object) -> bool:
     release stored there, which no prompt read."""
     opening = LEGACY_WHOLE_FRAGMENT_OPENINGS.get(block)
     return bool(opening) and str(text or "").lstrip().startswith(opening)  # type: ignore[arg-type]
+
+
+# ``schemas.sandbox_report``: the report format whose ``orig`` mark a disputed
+# lineage row stored before rows recorded their marker's name was read by. A
+# report read now names its marker by the format it was read as.
+STORED_LINEAGE_MARKER_FORMAT = "triage"

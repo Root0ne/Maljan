@@ -62,7 +62,7 @@ class TestTheLayout:
 
 class TestCutAndLaidOutAgain:
     def _round_trip(self, source: dict[str, Any]) -> dict[str, Any]:
-        report = cape_report_to_sandbox_report(source, provider="x")
+        report = cape_report_to_sandbox_report(source, provider="x", source_format="cape2")
         return sandbox_document(report)
 
     def test_a_source_is_its_own_document(self) -> None:
@@ -145,7 +145,9 @@ class TestLinearTime:
             gc.disable()
             try:
                 started = time.perf_counter()
-                sandbox_document(cape_report_to_sandbox_report(source, provider="x"))
+                sandbox_document(
+                    cape_report_to_sandbox_report(source, provider="x", source_format="cape2")
+                )
                 best = min(best, time.perf_counter() - started)
             finally:
                 gc.enable()

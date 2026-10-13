@@ -89,7 +89,9 @@ FLOWS = [
 def _sandbox(marked: set[int], flows: list[dict[str, Any]] | None = None) -> Any:
     overview = {"sample": {"id": "s", "target": f"{SHA256}.exe", "sha256": SHA256}}
     task = {"processes": _processes(marked), "network": {"flows": flows or FLOWS}}
-    return triage_overview_to_sandbox_report(overview, task_reports={"behavioral1": task})
+    return triage_overview_to_sandbox_report(
+        overview, provider="triage", source_format="triage", task_reports={"behavioral1": task}
+    )
 
 
 def _desktop_flow(marked: set[int]) -> dict[str, Any]:
@@ -243,6 +245,8 @@ def test_a_flow_of_the_sample_s_own_process_is_still_published() -> None:
     flows = [{"proto": "tcp", "dst": f"{DESKTOP_ADDRESS}:443", "procid": 84, "pid": 1}]
     overview = {"sample": {"id": "s", "target": f"{SHA256}.exe", "sha256": SHA256}}
     task = {"processes": _processes({84, 87, 105}), "network": {"flows": flows}}
-    report = triage_overview_to_sandbox_report(overview, task_reports={"behavioral1": task})
+    report = triage_overview_to_sandbox_report(
+        overview, provider="triage", source_format="triage", task_reports={"behavioral1": task}
+    )
     assert report.network.tcp[0]["sample_process_tree"] is True
     assert "process" not in report.network.tcp[0]

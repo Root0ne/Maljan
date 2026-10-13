@@ -68,7 +68,7 @@ def test_sandbox_run_holds_the_report_once_given_one():
 
 def test_cape_report_to_sandbox_report_keeps_raw_is_raw():
     raw = {"target": {"file": {"sha256": "a" * 64}}}
-    report = cape_report_to_sandbox_report(raw, provider="cape2")
+    report = cape_report_to_sandbox_report(raw, provider="cape2", source_format="cape2")
     assert report.raw is raw
 
 
@@ -117,7 +117,7 @@ def test_target_reads_the_real_cape_nesting_under_file():
             }
         }
     }
-    report = cape_report_to_sandbox_report(raw, provider="cape2")
+    report = cape_report_to_sandbox_report(raw, provider="cape2", source_format="cape2")
     assert report.target.sha256 == "b" * 64
     assert report.target.md5 == "c" * 32
     assert report.target.name == "sample.exe"
@@ -139,7 +139,7 @@ def test_registry_keeps_the_real_string_shape_not_just_dict_rows():
     # but a dict-only filter here would silently drop 100% of that data the
     # moment one does — the same mistake file_writes had, fixed the same way.
     raw = {"behavior": {"summary": {"keys": ["HKEY_LOCAL_MACHINE\\Software\\Run"]}}}
-    report = cape_report_to_sandbox_report(raw, provider="cape2")
+    report = cape_report_to_sandbox_report(raw, provider="cape2", source_format="cape2")
     assert report.registry == ["HKEY_LOCAL_MACHINE\\Software\\Run"]
 
 
@@ -157,7 +157,7 @@ def test_summary_and_file_writes_carry_the_linux_persistence_evidence():
         "behavior": {"summary": {"write_files": ["/etc/cron.d/x"]}},
         "file_writes": ["/etc/rc.local"],
     }
-    report = cape_report_to_sandbox_report(raw, provider="cape2")
+    report = cape_report_to_sandbox_report(raw, provider="cape2", source_format="cape2")
     assert report.summary["write_files"] == ["/etc/cron.d/x"]
     assert report.summary["files"] == []
     assert report.file_writes == ["/etc/rc.local"]

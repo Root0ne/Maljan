@@ -34,6 +34,7 @@ from pydantic import (
     model_serializer,
 )
 
+from maljan.core.legacy_tool_tables import STORED_LINEAGE_MARKER_FORMAT
 from maljan.core.report_formats import SignatureScale, reader_display_name
 from maljan.schemas.sandbox_document import (
     GROUP_ROWS_KEY,
@@ -653,12 +654,15 @@ def cape_report_to_sandbox_report(
     raw: dict[str, Any],
     *,
     provider: str,
-    source_format: str = "cape2",
+    source_format: str,
     task_id: str = "",
     keep_arrangement: bool = True,
     renames: Mapping[str, str] | None = None,
 ) -> SandboxReport:
     """Read a CAPE/Cuckoo-shaped report into the neutral form.
+
+    ``source_format`` is the id of the registered reader that read it, which
+    the report records (``SandboxReport.source_format``); never assumed.
 
     Every place the form names is filled from the report's own block of that
     name. With ``keep_arrangement`` (the CAPE, Cuckoo and mock readers) the
@@ -933,9 +937,10 @@ def _sample_process_tree(task: dict[str, Any], sample: dict[str, Any]) -> _Linea
     return _Lineage(by_mark or by_file, {}, images, bool(marked or named))
 
 
-# The sandbox whose ``orig`` mark this reader reads, by the name the built-in
-# triage format declares, unless the caller names the format it matched.
-LINEAGE_STORED_MARKED_BY = reader_display_name("triage")
+# The sandbox whose ``orig`` mark a row stored without its marker's name was
+# read by, by the name its format declares (``core.legacy_tool_tables``). A
+# report read now names the format it was read as.
+LINEAGE_STORED_MARKED_BY = reader_display_name(STORED_LINEAGE_MARKER_FORMAT)
 
 
 def _flow_attribution(
@@ -1034,16 +1039,19 @@ TRIAGE_NORMALISER_FILLS: frozenset[str] = frozenset(
 def triage_overview_to_sandbox_report(
     overview: dict[str, Any],
     *,
-    provider: str = "triage",
+    provider: str,
+    source_format: str,
     task_reports: dict[str, dict[str, Any]] | None = None,
     task_id: str = "",
     marked_by: str = "",
 ) -> SandboxReport:
     """Map a Triage overview (plus its behavioural task reports) onto the model.
 
-    ``marked_by`` is the name the format the report was matched as declares
-    (its ``display_name``, else its name), which a disputed row names its
-    marking sandbox by; empty is the built-in triage format's.
+    ``provider`` and ``source_format`` are the sandbox provider and the id of
+    the registered reader that read it, which the report records; neither is
+    assumed. ``marked_by`` is the name the format the report was matched as
+    declares (its ``display_name``, else its name), which a disputed row names
+    its marking sandbox by; empty is the name ``source_format`` declares.
 
     Triage reports what it observed, not every API call: there is no per-call
     log, no apistats, no registry timeline, no generic-event stream and (for a
@@ -1074,6 +1082,7 @@ def triage_overview_to_sandbox_report(
     """
     from maljan.providers.sandbox.triage import TriageSandboxProvider
 
+    marker = marked_by or reader_display_name(source_format)
     sample_field, analysis_field = overview.get("sample"), overview.get("analysis")
     sample = sample_field if isinstance(sample_field, dict) else {}
     analysis = analysis_field if isinstance(analysis_field, dict) else {}
@@ -1139,7 +1148,7 @@ def triage_overview_to_sandbox_report(
             if not dst_host:
                 continue
             row: dict[str, Any] = {"dst": dst_host, "dport": dst_port}
-            row.update(_flow_attribution(flow, lineage, marked_by or LINEAGE_STORED_MARKED_BY))
+            row.update(_flow_attribution(flow, lineage, marker))
             # The flow's other fields (its source, times, bytes, protocols,
             # the name and TLS facts the sandbox recorded), under their own names.
             flow_extra = {k: v for k, v in flow.items() if k not in _TRIAGE_FLOW_READ}
@@ -1239,7 +1248,7 @@ def triage_overview_to_sandbox_report(
 
     return SandboxReport(
         provider=provider,
-        source_format="triage",
+        source_format=source_format,
         task_id=str(task_id or sample.get("id") or ""),
         target=SandboxTarget(
             sha256=str(sample.get("sha256") or ""),

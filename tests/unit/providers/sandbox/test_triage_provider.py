@@ -337,7 +337,9 @@ def test_the_rendered_dict_names_what_this_sandbox_cannot_provide():
     from maljan.schemas.sandbox_report import triage_overview_to_sandbox_report
 
     overview = json.loads((FIX / "triage_overview.json").read_text(encoding="utf-8"))
-    rendered = sandbox_document(triage_overview_to_sandbox_report(overview))
+    rendered = sandbox_document(
+        triage_overview_to_sandbox_report(overview, provider="triage", source_format="triage")
+    )
     assert rendered["behavior"]["apistats"] == {}
     assert "apistats" in rendered["unavailable"]
 
@@ -353,7 +355,11 @@ def test_every_consumer_channel_is_populated_or_named_unavailable():
     overview = json.loads((FIX / "triage_overview.json").read_text(encoding="utf-8"))
     task = json.loads((FIX / "triage_report_behavioral1.json").read_text(encoding="utf-8"))
     report = triage_overview_to_sandbox_report(
-        overview, task_reports={"behavioral1": task}, task_id="260904-abcdefgh1"
+        overview,
+        provider="triage",
+        source_format="triage",
+        task_reports={"behavioral1": task},
+        task_id="260904-abcdefgh1",
     )
     unavailable = set(report.unavailable)
     channels: list[tuple[str, object]] = [
@@ -390,7 +396,11 @@ def test_the_mapped_network_survives_the_real_parsers_not_as_na():
     overview = json.loads((FIX / "triage_overview.json").read_text(encoding="utf-8"))
     task = json.loads((FIX / "triage_report_behavioral1.json").read_text(encoding="utf-8"))
     report = triage_overview_to_sandbox_report(
-        overview, task_reports={"behavioral1": task}, task_id="260904-abcdefgh1"
+        overview,
+        provider="triage",
+        source_format="triage",
+        task_reports={"behavioral1": task},
+        task_id="260904-abcdefgh1",
     )
     rendered = sandbox_document(report)
 

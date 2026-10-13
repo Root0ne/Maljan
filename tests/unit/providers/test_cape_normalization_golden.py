@@ -84,19 +84,21 @@ def _at(d, path):
 
 @pytest.mark.parametrize("name,raw", _REPORTS, ids=_IDS)
 def test_cape_document_is_the_report_as_published(name, raw):
-    report = cape_report_to_sandbox_report(raw, provider="cape2")
+    report = cape_report_to_sandbox_report(raw, provider="cape2", source_format="cape2")
     assert as_published(sandbox_document(report), raw)
 
 
 @pytest.mark.parametrize("name,raw", _REPORTS, ids=_IDS)
 def test_the_tools_answer_the_same_on_rendered_and_raw(name, raw):
-    rendered = sandbox_document(cape_report_to_sandbox_report(raw, provider="cape2"))
+    rendered = sandbox_document(
+        cape_report_to_sandbox_report(raw, provider="cape2", source_format="cape2")
+    )
     assert sandbox_view(rendered) == sandbox_view(raw)
 
 
 @pytest.mark.parametrize("name,raw", _REPORTS[:5], ids=_IDS[:5])
 def test_the_layout_reproduces_every_consumer_key_without_the_source_arrangement(name, raw):
-    report = cape_report_to_sandbox_report(raw, provider="cape2").model_copy(
+    report = cape_report_to_sandbox_report(raw, provider="cape2", source_format="cape2").model_copy(
         update={"arrangement": None}
     )
     rendered = sandbox_document(report)
@@ -111,7 +113,7 @@ def test_the_layout_reproduces_every_consumer_key_without_the_source_arrangement
 @pytest.mark.parametrize("name,raw", _REPORTS[:5], ids=_IDS[:5])
 def test_the_rendered_report_still_answers_what_the_raw_one_answered(name, raw):
     """The laid-out dict is not merely shaped right; it carries the same evidence."""
-    report = cape_report_to_sandbox_report(raw, provider="cape2").model_copy(
+    report = cape_report_to_sandbox_report(raw, provider="cape2", source_format="cape2").model_copy(
         update={"arrangement": None}
     )
     rendered = sandbox_document(report)
@@ -156,7 +158,9 @@ def test_file_writes_survives_the_render_as_the_flat_list_it_is():
         "target": {"sha256": "a" * 64},
         "file_writes": ["/etc/rc.local", "/etc/ld.so.preload"],
     }
-    report = cape_report_to_sandbox_report(raw, provider="cape2", keep_arrangement=False)
+    report = cape_report_to_sandbox_report(
+        raw, provider="cape2", source_format="cape2", keep_arrangement=False
+    )
     rendered = sandbox_document(report)
     assert rendered is not raw
     assert rendered["file_writes"] == ["/etc/rc.local", "/etc/ld.so.preload"]

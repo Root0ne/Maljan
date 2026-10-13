@@ -51,7 +51,9 @@ def _triage() -> dict[str, Any]:
     overview = json.loads((FIXTURES / "triage_overview.json").read_text())
     task = json.loads((FIXTURES / "triage_report_behavioral1.json").read_text())
     return sandbox_document(
-        triage_overview_to_sandbox_report(overview, task_reports={"behavioral1": task})
+        triage_overview_to_sandbox_report(
+            overview, provider="triage", source_format="triage", task_reports={"behavioral1": task}
+        )
     )
 
 
@@ -637,7 +639,9 @@ class TestTheReadersDeclareWhatTheyFill:
             report_fills,
         )
 
-        report = cape_report_to_sandbox_report(_rich_cape(), provider="cape2")
+        report = cape_report_to_sandbox_report(
+            _rich_cape(), provider="cape2", source_format="cape2"
+        )
         assert report_fills(report) == CAPE_NORMALISER_FILLS
 
     def test_the_triage_reader(self) -> None:
@@ -650,12 +654,16 @@ class TestTheReadersDeclareWhatTheyFill:
         overview = json.loads((FIXTURES / "triage_overview.json").read_text())
         task = json.loads((FIXTURES / "triage_report_behavioral1.json").read_text())
         overview = {**overview, "extracted": [{"config": {"family": "f"}}]}
-        report = triage_overview_to_sandbox_report(overview, task_reports={"b": task})
+        report = triage_overview_to_sandbox_report(
+            overview, provider="triage", source_format="triage", task_reports={"b": task}
+        )
         assert report_fills(report) == TRIAGE_NORMALISER_FILLS
         # Every other block a CAPE report has, given to it too, fills nothing more.
         crowded = {**_rich_cape(), **overview}
         crowded_task = {**_rich_cape(), **task}
-        more = triage_overview_to_sandbox_report(crowded, task_reports={"b": crowded_task})
+        more = triage_overview_to_sandbox_report(
+            crowded, provider="triage", source_format="triage", task_reports={"b": crowded_task}
+        )
         assert report_fills(more) <= TRIAGE_NORMALISER_FILLS
 
     def test_the_rest_mapping(self) -> None:
@@ -923,7 +931,9 @@ class TestReviewRoundOne:
             "suricata": {"alerts": [{"signature": "s"}]},
             "procdump": [{"pid": 10}],
         }
-        raw = sandbox_document(cape_report_to_sandbox_report(source, provider="cape2"))
+        raw = sandbox_document(
+            cape_report_to_sandbox_report(source, provider="cape2", source_format="cape2")
+        )
         index = ss.section_index(raw, ("cape2", "cape2"))["sections"]
         assert index["extracted"]["items"] == 2
         assert index["resolved_apis"]["items"] == 1
@@ -992,7 +1002,9 @@ class TestReviewRoundTwo:
             }
         # With no behavioural task listed at all, the same.
         bare = {**overview, "tasks": {}}
-        report = triage_overview_to_sandbox_report(bare, provider="triage", task_reports={})
+        report = triage_overview_to_sandbox_report(
+            bare, provider="triage", source_format="triage", task_reports={}
+        )
         assert reader_of(report) == ("triage", "triage", "overview")
         # A run whose task report was read states its counts.
         assert reader_of(_triage_report())[2] == "tasks"
@@ -1093,4 +1105,6 @@ class TestReviewRoundTwo:
 def _triage_report() -> Any:
     overview = json.loads((FIXTURES / "triage_overview.json").read_text())
     task = json.loads((FIXTURES / "triage_report_behavioral1.json").read_text())
-    return triage_overview_to_sandbox_report(overview, provider="triage", task_reports={"b": task})
+    return triage_overview_to_sandbox_report(
+        overview, provider="triage", source_format="triage", task_reports={"b": task}
+    )
