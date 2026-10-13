@@ -528,6 +528,18 @@ def _names_resolved_at_runtime(ledger: list[LedgerEntry], static: StaticAnalysis
     return found
 
 
+def _not_held(rows: list[dict[str, Any]], held: set[str]) -> list[dict[str, Any]]:
+    """``rows`` without those an earlier entry already gave (``held``), which then holds these too.
+
+    A row is its whole content, compared as canonical JSON: a row that differs
+    in any field (a size, a hash) is another row.
+    """
+    keys = [json.dumps(row, sort_keys=True, default=str) for row in rows]
+    kept = [row for row, key in zip(rows, keys, strict=True) if key not in held]
+    held.update(keys)
+    return kept
+
+
 def _once[T](rows: list[T], key: Any) -> list[T]:
     """``rows`` with each key kept at its first occurrence, in order."""
     seen: set[Any] = set()
@@ -707,17 +719,26 @@ def dynamic_from_ledger(ledger: list[LedgerEntry]) -> DynamicBehavior | None:
     dynamic.api_capabilities = _called_api_categories(ledger, dynamic.notable_apis)
     seen = seen or bool(dynamic.api_capabilities)
 
+    # The same task read by the pack and by an analyst lists the same mutexes
+    # and dropped files: a row an earlier entry already gave is that row, and
+    # is kept once. Rows one answer lists twice are its own, and stay.
+    held_rows: set[str] = set()
     for _entry, data in _payloads(ledger, "sandbox_mutexes"):
         names = [str(name) for name in data.get("mutexes") or [] if name]
         if names:
             seen = True
-            dynamic.file_operations.extend({"operation": "mutex", "name": name} for name in names)
+            mutexes: list[dict[str, Any]] = [{"operation": "mutex", "name": n} for n in names]
+            dynamic.file_operations.extend(_not_held(mutexes, held_rows))
 
     for _entry, data in _payloads(ledger, "sandbox_dropped_files"):
-        for row in data.get("dropped") or []:
-            if isinstance(row, dict):
-                seen = True
-                dynamic.file_operations.append({"operation": "write", **row})
+        dropped: list[dict[str, Any]] = [
+            {"operation": "write", **row}
+            for row in data.get("dropped") or []
+            if isinstance(row, dict)
+        ]
+        if dropped:
+            seen = True
+            dynamic.file_operations.extend(_not_held(dropped, held_rows))
 
     # A sandbox that cannot fill a section says so in the report's own
     # ``unavailable`` list, and that disclaimer is the difference between "the
