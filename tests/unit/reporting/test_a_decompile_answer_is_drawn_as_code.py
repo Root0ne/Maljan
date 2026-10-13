@@ -15,8 +15,8 @@ import json
 import time
 from typing import Any
 
-from maljan.core.undeclared_tools import code_text, holds_code
-from maljan.reporting.figures import build_code_listings
+from maljan.core.undeclared_tools import code_listing, code_text, holds_code
+from maljan.reporting.figures import LISTING_CUT_FOR_STORAGE, build_code_listings
 from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
 
 CODE = (
@@ -109,3 +109,58 @@ def test_reading_code_stays_linear() -> None:
 
     small, large = took(20_000), took(200_000)
     assert large < small * 30, (small, large)
+
+
+def test_prose_holding_numbers_is_not_read_as_code() -> None:
+    assert not holds_code("Found 1234 matches in 4096 files total")
+    assert not holds_code("Error 1234 was raised; retry 5678 has failed")
+    assert not holds_code("1234 matches in 4096 files\n5678 errors in 1024 runs\n")
+    assert holds_code("00401000  add eax, 1\n00401003  ret near ptr\n")
+    assert holds_code(".text:00401000 push ebp\n.text:00401001 mov ebp, esp\n")
+
+
+def test_a_decompile_with_other_fields_or_nesting_is_still_drawn() -> None:
+    numbered = json.dumps(
+        {
+            "name": "entry",
+            "code": "void entry(void)\n{\n f();\n}",
+            "comment": "Seen 1234 times in 4096 runs here",
+        }
+    )
+    nested = json.dumps({"result": {"code": "void f(void){ g(); }", "lines": 1}})
+    several = json.dumps({"source": CODE, "callers": "int h(void) { return k(); }"})
+    one_line = json.dumps({"code": "int f(int a) { return g(a); }"})
+    figures = build_code_listings(
+        _report(*(_capture(text, ARGS) for text in (numbered, nested, several, one_line)))
+    )
+    bodies = [figure.content for figure in figures]
+    assert "void entry(void)" in bodies[0] and "Seen 1234" not in bodies[0]
+    assert "void f(void){ g(); }" in bodies[1]
+    # Among several code strings, the one under a code-ish key.
+    assert "void entry(void)" in bodies[2] and "int h(void)" not in bodies[2]
+    assert "return g(a);" in bodies[3]
+
+
+def test_a_json_answer_holding_code_no_string_carries_alone_is_drawn_whole() -> None:
+    split = json.dumps(
+        {"lines": {"a": "0x00401000  55  push rbp", "b": "0x00401001  89e5  mov rbp, rsp"}}
+    )
+    (figure,) = build_code_listings(_report(_capture(split, ARGS)))
+    assert "push rbp" in figure.content and "mov rbp, rsp" in figure.content
+
+
+def test_a_cut_answer_reads_its_escapes_keeps_the_mark_out_and_says_it_was_cut() -> None:
+    whole = json.dumps({"name": "e", "code": 'void entry(void)\n{\n  puts("\u00e9");\n  f();\n}\n'})
+    at = whole.index("u00e9")
+    # Cut inside the escape: the split escape is left out, never read as text.
+    body, cut = code_listing(whole[: at + 2] + "\n\n[OUTPUT TRUNCATED]")
+    assert cut and body.endswith('puts("') and "u0" not in body.split("puts")[-1]
+    # Cut after it: the escape is undone, and no storage mark is in the listing.
+    body, cut = code_listing(whole[: at + 14] + "\u2026")
+    assert cut and 'puts("\u00e9");' in body and "\u2026" not in body
+    body, cut = code_listing(whole[: at + 20] + "\n\n[OUTPUT TRUNCATED]")
+    assert cut and "[OUTPUT TRUNCATED]" not in body
+    (figure,) = build_code_listings(_report(_capture(whole[: at + 20] + "\u2026", ARGS)))
+    assert figure.legend is not None and LISTING_CUT_FOR_STORAGE in figure.legend
+    # A whole answer is not said to be cut.
+    assert code_listing(whole) == ('void entry(void)\n{\n  puts("\u00e9");\n  f();\n}', False)

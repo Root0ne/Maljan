@@ -76,6 +76,7 @@ from maljan.core.tool_declarations import (
 from maljan.core.undeclared_tools import (
     ADDRESS_ARGUMENTS,
     DEFAULT_AUTO_NAME_WORDS,
+    code_strings,
     code_text,
     holds_code,
     undeclared_code_kind,
@@ -1075,8 +1076,8 @@ def _answer_holds_code(answer: Any) -> bool:
         return False
     if isinstance(answer, str):
         return bool(code_text(answer)) and holds_code(code_text(answer))
-    if isinstance(answer, Mapping):
-        return any(isinstance(v, str) and holds_code(v) for v in answer.values())
+    if isinstance(answer, Mapping | list):
+        return bool(code_strings(answer))
     return False
 
 

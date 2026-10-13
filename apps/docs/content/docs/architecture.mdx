@@ -4830,10 +4830,16 @@ is assembled from what the run gathered rather than recomputed beside it:
   section; a run with none is shown what it always was.
 * **A decompile figure draws code.** A code-listing figure draws a JSON
   answer's code field, read at the declared `values.code` path (inside the
-  declared `rows`) or as its one string field that reads as code, with its own
-  line breaks, and an answer cut for storage is read to the cut; a JSON answer
-  holding no code (a search's hits, an error record) is not drawn, and a plain
-  text answer is drawn as it always was. The caption names the call's symbol,
+  declared `rows`) or among its strings at any depth that read as code (the
+  one, or of several the one under a code-ish key, else the longest), with its
+  own line breaks. Code is read by its shape: pseudo-C (a brace, a call, a
+  statement ending at a line's end or before a brace) or two disassembly
+  lines each led by an address, so prose holding numbers is no code. A JSON
+  answer whose code no one string carries is drawn whole, as it always was; a
+  JSON object holding no code (a search's hits, an error record) is not drawn,
+  and a plain text answer is drawn as it always was. An answer cut for storage
+  is read to the cut, an escape the cut split left out and the cut's mark kept
+  out of the listing, and the figure says the answer was cut. The caption names the call's symbol,
   else its address argument, declared or named for an address
   (`name_or_address`).
 * **The report stage derives its budget as the judge does.** A section's and

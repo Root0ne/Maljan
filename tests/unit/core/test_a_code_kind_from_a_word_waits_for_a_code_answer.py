@@ -36,3 +36,16 @@ def test_a_code_kind_from_a_description_word_waits_for_a_code_answer() -> None:
     # A tool whose name says it decompiles is read by its name, as before.
     named = propose_tool({**SEARCH, "name": "decompile_function"})
     assert named is not None and named.facts.get("kind") == "decompile"
+
+
+def test_prose_holding_numbers_is_no_code_answer() -> None:
+    for prose in (
+        "Found 1234 matches in 4096 files total",
+        "Error 1234 was raised; retry 5678 has failed",
+        "1234 matches in 4096 files\n5678 errors in 1024 runs",
+    ):
+        proposed = propose_tool(SEARCH, answer=prose)
+        assert proposed is not None and proposed.facts.get("kind") != "decompile", prose
+    # A code string nested in the answer still confirms code.
+    nested = propose_tool(SEARCH, answer={"result": {"code": CODE}})
+    assert nested is not None and nested.facts.get("kind") == "decompile"

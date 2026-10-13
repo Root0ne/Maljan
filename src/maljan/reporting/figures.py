@@ -18,7 +18,7 @@ from __future__ import annotations
 from html import escape
 from typing import Any
 
-from maljan.core.undeclared_tools import address_arguments, code_text
+from maljan.core.undeclared_tools import address_arguments, code_listing
 from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import distinct_processes
 from maljan.reporting.defang import defang
@@ -327,6 +327,10 @@ def _listed_symbol(output: dict[str, Any], facts: Any) -> str:
     return "function"
 
 
+# The note a listing read from an answer cut for storage carries.
+LISTING_CUT_FOR_STORAGE = "The answer was cut for storage; the listing ends where the cut fell."
+
+
 def build_code_listings(report: MalwareReport) -> list[Figure]:
     """The first ``_LISTINGS`` decompiled functions as figures, the rest counted.
 
@@ -334,7 +338,7 @@ def build_code_listings(report: MalwareReport) -> list[Figure]:
     drawn says how many more the run decompiled, and the evidence ledger holds
     every listing whole.
     """
-    listed: list[tuple[str, str]] = []
+    listed: list[tuple[str, str, bool]] = []
     for outputs in (report.technical_evidence or {}).values():
         for o in outputs or []:
             if not tool_kinds.is_of(o, "figures.code_listing"):
@@ -351,12 +355,14 @@ def build_code_listings(report: MalwareReport) -> list[Figure]:
             facts = tool_kinds.facts_of(o)
             path = str(facts.values.get("code", "")) if facts is not None else ""
             rows = str(facts.rows or "") if facts is not None and path else ""
-            body = code_text(o.get("output"), path, rows)
+            body, cut = code_listing(o.get("output"), path, rows)
             if body:
-                listed.append((_listed_symbol(o, facts), body))
+                listed.append((_listed_symbol(o, facts), body, cut))
     figs: list[Figure] = []
-    for seq, (sym, body) in enumerate(listed[:_LISTINGS]):
+    for seq, (sym, body, cut) in enumerate(listed[:_LISTINGS]):
         notes: list[str] = []
+        if cut:
+            notes.append(LISTING_CUT_FOR_STORAGE)
         if len(body) > _LISTING_CHARS:
             notes.append(
                 f"Cut at {_LISTING_CHARS:,} of {len(body):,} characters; the evidence "
