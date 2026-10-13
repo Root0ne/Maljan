@@ -1182,6 +1182,22 @@ def _message_of(violation: Violation | None) -> str:
     return violation.message
 
 
+def _network_reputation_paragraph() -> str:
+    """The network analyst's flows text, with the paragraph on reputation records."""
+    from maljan.parsers.network_parser import REPUTATION_HEADING, NetworkParser
+
+    text = NetworkParser().parse({"dns": [], "http": [], "tcp": [], "udp": [], "hosts": []})
+    assert REPUTATION_HEADING in text
+    return text
+
+
+def _unsupported_malware_question() -> str:
+    """The judge's question for a Malware verdict over a run no analyst examined."""
+    from maljan.pipeline.validation import UNSUPPORTED_MALWARE_QUESTION
+
+    return UNSUPPORTED_MALWARE_QUESTION.format(listed="ev_0001, ev_0002")
+
+
 def _function_claim_question(several: bool = False) -> str:
     """The question a claim gets when its function's own facts hold none of what it names.
 
@@ -2414,6 +2430,11 @@ PROMPTS: dict[str, str] = {
         )
     ),
     "claim naming a call its function's facts do not hold": _function_claim_question(),
+    "claim naming a string no strings source holds": function_claims.NOT_A_SAMPLE_STRING.format(
+        value="a value"
+    ),
+    "network flows' reputation paragraph": _network_reputation_paragraph(),
+    "judge's question for a Malware verdict nothing examined": (_unsupported_malware_question()),
     "claim naming a call two functions' facts do not hold, one row counted, one with none": (
         _function_claim_question(several=True)
     ),

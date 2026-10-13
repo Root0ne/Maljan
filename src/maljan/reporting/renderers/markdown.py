@@ -63,8 +63,10 @@ from maljan.reporting.judge_reasons import (
 from maljan.reporting.ledger_projection import cell_network_values, listing_kind
 from maljan.reporting.ledger_report import (
     ANALYST_SECTION_SOURCES,
+    CAPABILITIES_TITLE,
     analyst_persistence,
     listed_by,
+    titled_tool,
 )
 from maljan.reporting.models import (
     CapabilityCell,
@@ -699,7 +701,7 @@ class MarkdownRenderer:
                 measured.append(_row(*cells, pm.get("method") or "-", evidence or "-"))
         elif static is not None and static.packer_hint:
             measured.append(f"_{MEASURED}:_ packer hint {_one_line(static.packer_hint)}.")
-        measured.extend(_capa_table(capa, _is_evasion_rule))
+        measured.extend(_capa_table(capa, _is_evasion_rule, _capability_tool(report)))
         # A cipher the model extracted that encrypts no files — a loader's
         # string or traffic cipher — belongs beside the obfuscation prose, not
         # under a ransomware heading.
@@ -753,7 +755,7 @@ class MarkdownRenderer:
                 f"{_one_line(h.get('name'))} ({_one_line(h.get('source'))})" for h in resolving
             )
             measured.append(f"_{MEASURED}:_ rule hits {names}.")
-        measured.extend(_capa_table(capa, _is_resolution_rule))
+        measured.extend(_capa_table(capa, _is_resolution_rule, _capability_tool(report)))
         blocks.append(
             _subsection(
                 "5.2",
@@ -1457,7 +1459,8 @@ class MarkdownRenderer:
                 [
                     "",
                     "_A source marked `(rule match)` or `pipeline:` is a rule that fired over "
-                    "the binary — capa's over its code, the knowledge table's over its imports "
+                    f"the binary — {_capability_owner(report)} over its code, the knowledge "
+                    "table's over its imports "
                     "— with no sandbox and no model. The rule names are in the Procedure cell, "
                     "each with its base rate: how much ordinary software it fires on, over the "
                     "corpus it names. It says nothing about how likely this sample is to be "
@@ -2209,7 +2212,9 @@ class MarkdownRenderer:
 # ---------------------------------------------------------------------------
 
 # The evidence sections that are rule hits.
-_RULE_SECTIONS = ("yara_matches", "capa_capabilities", "sigma_matches")
+# The capability-rule table's key (``ledger_report``), whichever tool of the kind filled it.
+_CAPABILITY_SECTION = "capa_capabilities"
+_RULE_SECTIONS = ("yara_matches", _CAPABILITY_SECTION, "sigma_matches")
 
 # How the report builder begins the reason for an absent summary. Spelled here
 # rather than imported so the renderer keeps no import of the builder.
@@ -4400,7 +4405,7 @@ def _capa_rules(report: MalwareReport) -> list[tuple[dict[str, str], list[str]]]
     out: list[tuple[dict[str, str], list[str]]] = []
     seen: set[tuple[str, str]] = set()
     for section in report.sections:
-        if section.key != "capa_capabilities":
+        if section.key != _CAPABILITY_SECTION:
             continue
         columns = [c.strip().lower() for c in section.columns]
         for row in section.rows:
@@ -4438,15 +4443,41 @@ def _is_resolution_rule(rule: dict[str, str]) -> bool:
 _BRACKETED_ID_RE = re.compile(r"\[([A-Z]{1,2}\d{3,4}(?:\.\d{3})?)\]")
 
 
+def _capability_tool(report: MalwareReport) -> str:
+    """The tool the capability-rule table's title names (``ledger_report.titled_tool``).
+
+    The declared display name of the tool whose rows the table holds, whichever
+    tool of the kind ran; ``""`` for a report with no such table, or one whose
+    title names none.
+    """
+    for section in report.sections:
+        if section.key == _CAPABILITY_SECTION:
+            named = titled_tool(section.title, CAPABILITIES_TITLE)
+            if named:
+                return named
+    return ""
+
+
+def _capability_owner(report: MalwareReport) -> str:
+    """Whose rules fired over the binary's code, in the ATT&CK table's note."""
+    tool = _capability_tool(report)
+    return f"{tool}'s" if tool else "a capability rule tool's"
+
+
 def _capa_table(
     rules: list[tuple[dict[str, str], list[str]]],
     wanted: Callable[[dict[str, str]], bool],
+    tool: str = "",
 ) -> list[str]:
-    """The capa rules one subsection prints, as a Measured table, or nothing."""
+    """The capability rules one subsection prints, as a Measured table, or nothing.
+
+    Headed by the tool the table's title names (:func:`_capability_tool`),
+    else as capability rules.
+    """
     chosen = [(rule, ids) for rule, ids in rules if wanted(rule)]
     if not chosen:
         return []
-    lines = ["", f"_{MEASURED}:_ capa rules", ""]
+    lines = ["", f"_{MEASURED}:_ {tool or 'capability'} rules", ""]
     lines.append(_row("Rule", "Namespace", "ATT&CK / MBC", "Evidence"))
     lines.append(_divider(4))
     for rule, ids in chosen:
@@ -4467,7 +4498,7 @@ def _capa_evidence_ids(report: MalwareReport) -> list[str]:
         dict.fromkeys(
             i
             for section in report.sections
-            if section.key == "capa_capabilities"
+            if section.key == _CAPABILITY_SECTION
             for i in section.evidence_ids
         )
     )

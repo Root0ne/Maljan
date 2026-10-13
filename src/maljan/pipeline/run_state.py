@@ -346,9 +346,22 @@ def index_sentence(entry_id: str, data: Any, *, dropped: bool = False) -> str:
     noun = "function" if len(rows) == 1 else "functions"
     return (
         f"function index: [{entry_id}] lists the {len(rows)} {noun} holding artefacts of their "
-        "own, each with its imports called, resolved names, strings, capa rules, callers and "
-        f"callees; {SERVED_BY}."
+        f"own, each with its imports called, resolved names, strings, {_index_rules(rows)}, "
+        f"callers and callees; {SERVED_BY}."
     )
+
+
+def _index_rules(rows: list[Any]) -> str:
+    """What the index's rule cells are called: by the shipped rule matcher where the rows
+    hold them under its name or hold none, else neutrally (``artefact_index.rules_field``),
+    so the line never names a matcher whose rules the rows do not hold."""
+    from maljan.tools.artefact_index import RULES_FIELD_NEUTRAL, rules_field
+
+    shipped = rules_field(shipped=True)
+    neutral = shipped == RULES_FIELD_NEUTRAL or any(
+        isinstance(row, Mapping) and RULES_FIELD_NEUTRAL in row for row in rows
+    )
+    return "rules" if neutral else f"{shipped} rules"
 
 
 def _answered_lookup(entry: Any) -> bool:

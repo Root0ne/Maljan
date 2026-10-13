@@ -185,7 +185,7 @@ _SYSTEM_PROMPT = (
     "the 'Published ATT&CK techniques' list above (null only if none applies)\n"
     "   - `detection`: CONCRETE technical detection guidance — name the "
     "specific API call, registry key, telemetry source (e.g. Sysmon EventID 3 "
-    "for network, EventID 13 for registry), or a sigma/yara pointer. Do NOT "
+    "for network, EventID 13 for registry), or an event-rule or signature-rule pointer. Do NOT "
     "write generic advice like 'monitor for suspicious activity'; cite the "
     "exact observable.\n"
     "   Each entry is a distinct, non-overlapping action; do not duplicate an "

@@ -30,7 +30,7 @@ name, as the API catalogue compares them
 (``analysis.api_capability_db.canonical_name``); strings by the citation
 check's own whole-value reading (``EntryTexts``). A quoted value is read as a
 claimed string only when it is a sample string some entry holds as data: a
-strings tool's answer, FLOSS's, the blob decoder's, or the index's rows.
+strings tool's answer, a string emulator's, the blob decoder's, or the index's rows.
 
 A value none of them holds is stated to the analyst, once, through the
 validation turn every other question goes through: the claim, the function
@@ -143,7 +143,8 @@ CALLEES_UNKNOWN = (
     "artefact of their own, so the functions reachable from {address} are not all known"
 )
 NOT_A_SAMPLE_STRING = (
-    'no: "{value}" is no string a strings tool, FLOSS, the blob decoder or the function index holds'
+    'no: "{value}" is no string a strings tool, a string emulator, the blob decoder or the '
+    "function index holds"
 )
 FACTS_UNREAD = "no: the function facts could not be read ({kind})"
 # What the reach does not follow, said with every question.
@@ -426,7 +427,7 @@ class FunctionFacts:
     # The names a sentence may name: the catalogue's and this run's, lower-cased.
     known_names: frozenset[str] = frozenset()
     listings: dict[str, _Held] = field(default_factory=dict)
-    # The sample strings as data: the strings tools' answers, FLOSS's, the blob
+    # The sample strings as data: the strings tools' answers, an emulator's, the blob
     # decoder's, and the index rows' strings.
     strings: EntryTexts = field(default_factory=EntryTexts)
     # The index rows' strings, each whole, lower-cased.
