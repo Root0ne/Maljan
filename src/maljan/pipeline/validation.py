@@ -7122,7 +7122,9 @@ _SCOPED_TO_THE_TEXT_RE = re.compile(
 )
 # A negation before a statement in its own clause ("it is not the case that
 # 0x1400 was not read"): the clause says the opposite of its statement.
-_NEGATION_RE = re.compile(r"\b(?:not|never|no|nor|neither|cannot|none)\b|n['’]t\b", re.IGNORECASE)
+_CLAUSE_NEGATION_RE = re.compile(
+    r"\b(?:not|never|no|nor|neither|cannot|none)\b|n['’]t\b", re.IGNORECASE
+)
 # The subject's head as read: identifiers, a pronoun to resolve, or nothing.
 _HEAD_IDS = "ids"
 _HEAD_PRONOUN = "pronoun"
@@ -7383,7 +7385,7 @@ def ledger_absence_contradictions(payload: Any, entries: EntryTexts | None) -> l
                     subject = sentence[previous:relative_at]
                 # A clause that negates before its statement says the
                 # opposite of it ("it is not the case that ..."): not judged.
-                if scoped or _NEGATION_RE.search(sentence, begins, match.start()):
+                if scoped or _CLAUSE_NEGATION_RE.search(sentence, begins, match.start()):
                     continue
                 head, tokens = _subject_head(subject, relative, kind)
                 if head == _HEAD_PRONOUN and index:
