@@ -185,6 +185,8 @@ class TriageSandboxProvider(SandboxProvider):
     description = "Triage runs the sample in its cloud and returns the report it produced."
     probe_label = "Test Triage connection"
     settings_intro = "The API token is stored on the server and never shown again."
+    # The behavioural task reports are fetched beside the overview (``fetch``).
+    FETCHES_TASK_REPORTS = True
 
     UNAVAILABLE: ClassVar[tuple[str, ...]] = (
         "apistats",

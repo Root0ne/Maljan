@@ -60,6 +60,9 @@ __all__ = [
 # code signature, in that order; and the function index's.
 _IDENTITY_RENDERERS: tuple[str, ...] = ("identity", "digests", "code_signing")
 INDEX_RENDERER = "function_table"
+# A call to a tool nobody declared that was given the sample's SHA-256: the
+# platform's own facts about it, never its answer (read the entry by its id).
+SHA256_GIVEN = "sample sha256 given to: [{id}] {tool} ({agent}), answered"
 
 RUN_STATE_BEGIN = "=== RUN STATE (derived from the ledger; regenerated each turn) ==="
 RUN_STATE_END = "=== END RUN STATE ==="
@@ -246,14 +249,26 @@ def _lines(
     # the block wants that too, because why there is no reputation answer is
     # worth as much to a model as the answer.
     reputation = [e for e in pack if reads_as(e, "run_state.reputation")]
-    # An agent that looked the sample up itself, where the pack holds no
-    # answered lookup: the block shows that call, never a "not done" line for
-    # a lookup the run did make.
-    own = _agents_lookup(rows, sha256) if not any(_answered_lookup(e) for e in pack) else None
-    if own is not None:
-        lines.append(_cut(render_pack([own], 0)))
-    elif reputation:
+    if reputation:
         lines.append(_cut(render_pack([reputation[-1]], 0)))
+    # Where the pack holds no answered lookup, a declared lookup an agent made
+    # itself is shown beside the pack's own line, read through its declaration;
+    # a call to a tool nobody declared that was given the sample's SHA-256 is
+    # stated by the platform's own facts alone, never by what it answered.
+    if not any(_answered_lookup(e) for e in pack):
+        declared, undeclared = _agents_lookups(rows, sha256)
+        if declared is not None:
+            lines.append(_cut(render_pack([declared], 0)))
+        if undeclared is not None:
+            lines.append(
+                _cut(
+                    SHA256_GIVEN.format(
+                        id=undeclared.id,
+                        tool=pack_escaped(undeclared.tool),
+                        agent=pack_escaped(undeclared.agent),
+                    )
+                )
+            )
 
     stages = state.get("stage_results") or {}
     if isinstance(stages, Mapping) and stages:
@@ -323,34 +338,45 @@ def _answered_lookup(entry: Any) -> bool:
     return bool(getattr(entry, "ok", False)) and is_lookup_entry(entry)
 
 
-def _agents_lookup(rows: list[Any], sha256: str) -> LedgerEntry | None:
-    """The latest lookup of the sample an agent made itself, or ``None``.
+def _agents_lookups(rows: list[Any], sha256: str) -> tuple[LedgerEntry | None, LedgerEntry | None]:
+    """The latest declared lookup an agent made, and its latest undeclared call given the hash.
 
-    A call to a declared reputation lookup that answered, or a call to a tool
-    its source declares nothing for that answered and was given the sample's
-    own SHA-256 as an argument: the fact the block states is that the call was
-    made and what it answered, read from the entry alone. A tool declared of
-    any other kind is never one, whatever its arguments.
+    The first is a call to a tool declared a reputation lookup
+    (``core.reputation.is_lookup_entry``) that answered. The second is a call
+    to a tool its source declares nothing for that answered and was given the
+    sample's own SHA-256 as an argument: only the platform's facts about it
+    are ever stated. A tool declared of any other kind is neither.
     """
     wanted = sha256.strip().lower()
-    found: LedgerEntry | None = None
+    declared: LedgerEntry | None = None
+    undeclared: LedgerEntry | None = None
     for row in rows:
         if _get(row, "agent") == PIPELINE or _get(row, "ok") is not True:
             continue
         if is_guard_answer(row) or _get(row, "repeated_of"):
             continue
-        args = _get(row, "args")
-        given = isinstance(args, Mapping) and any(
-            isinstance(value, str) and value.strip().lower() == wanted for value in args.values()
-        )
         lookup = is_lookup_entry(row)
-        if not lookup and not (wanted and given and recorded(row) and not kind_of(row)):
-            continue
+        if not lookup:
+            args = _get(row, "args")
+            given = (
+                bool(wanted)
+                and isinstance(args, Mapping)
+                and any(
+                    isinstance(value, str) and value.strip().lower() == wanted
+                    for value in args.values()
+                )
+            )
+            if not (given and recorded(row) and not kind_of(row)):
+                continue
         try:
-            found = row if isinstance(row, LedgerEntry) else LedgerEntry.model_validate(row)
+            entry = row if isinstance(row, LedgerEntry) else LedgerEntry.model_validate(row)
         except Exception:  # noqa: BLE001 — one unreadable row is not a lost block
             continue
-    return found
+        if lookup:
+            declared = entry
+        else:
+            undeclared = entry
+    return declared, undeclared
 
 
 def _cut(line: str) -> str:
