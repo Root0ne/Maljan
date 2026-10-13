@@ -193,6 +193,10 @@ def _server(tools: list[types.Tool] | None = None) -> Server:
         if name == "query_hash":
             return _structured(LOOKUP_ANSWER)
         if name == "section_list":
+            # The run's own sample is listed; any other path is a file the
+            # server cannot open, which is what a connection test sends.
+            if arguments.get("path") == "sample.bin":
+                return _text("section .text at 0x1000\nsection .data at 0x2000")
             return _text(f"cannot open {arguments.get('path')}: no such file")
         return _text("written")
 

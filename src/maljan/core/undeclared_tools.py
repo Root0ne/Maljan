@@ -457,3 +457,40 @@ def entry_address_arguments(entry: Any) -> tuple[str, ...]:
 
     args = _field(entry, "args")
     return address_arguments(kind_free_facts(entry), args if isinstance(args, Mapping) else ())
+
+
+# ---------------------------------------------------------------------------
+# A failure an undeclared tool answers in prose
+# ---------------------------------------------------------------------------
+
+# How a one-line answer opens when all it says is that the call failed: an
+# error log level, or an error word or phrase at its head. Only for a tool its
+# source declares nothing for, whose server's declared error patterns
+# (``MCPServerConfig.error_patterns``) did not already file it.
+_PROSE_ERROR_RE = re.compile(
+    r"^(?:\[(?:error|fatal)\]|"
+    r"errors?\b|fail(?:ed|ure)?\b|fatal\b|exception\b|traceback\b|cannot\b|can't\b|"
+    r"could\s*n[o']t\b|unable\s+to\b|no\s+such\b|invalid\b|not\s+found\b|"
+    r"permission\s+denied\b|access\s+denied\b)",
+    re.IGNORECASE,
+)
+# A longer answer is read as an answer: what a failure says in prose fits a line.
+PROSE_ERROR_CHARS = 400
+
+
+def prose_error(text: Any) -> str | None:
+    """The message of an answer that only says the call failed, else ``None``.
+
+    One line of prose, no longer than :data:`PROSE_ERROR_CHARS`, that opens
+    with an error word (``Error: …``, ``Invalid params: …``, ``Cannot find
+    …``, ``[ERROR] …``): an answer holding any data — a second line, a JSON
+    value, a listing — is never read as one, and neither is a line that only
+    mentions an error later on. Conservative by design: what it does not
+    recognise stays an answer, as it was.
+    """
+    said = str(text or "").strip()
+    if not said or len(said) > PROSE_ERROR_CHARS or "\n" in said or "\r" in said:
+        return None
+    if said[0] in "{" or (said[0] == "[" and not _PROSE_ERROR_RE.match(said)):
+        return None
+    return said if _PROSE_ERROR_RE.match(said) else None
