@@ -95,6 +95,17 @@ class _Registry:
     async def atools_for_ref(self, ref, job_id, **context):  # type: ignore[no-untyped-def]
         return self.tools_for_ref(ref, job_id, **context)
 
+    def agent_tools(self, role, job_id, refs, *, exclude="", seen=None, **context):  # type: ignore[no-untyped-def]
+        tools, reasons = self.tools_for(role, job_id, exclude=exclude, **context)
+        for ref in refs:
+            picked, ref_reasons = self.tools_for_ref(ref, job_id, **context)
+            tools.extend(picked)
+            reasons.extend(ref_reasons)
+        return tools, reasons
+
+    async def aagent_tools(self, role, job_id, refs, *, exclude="", seen=None, **context):  # type: ignore[no-untyped-def]
+        return self.agent_tools(role, job_id, refs, exclude=exclude, seen=seen, **context)
+
 
 class _Container:
     def __init__(self, cfg: Settings, **over: Any) -> None:
@@ -441,13 +452,14 @@ def test_an_awaited_resolution_does_not_block_the_callers_loop_past_its_budget()
 
 
 class _NamedTool:
-    """A stand-in tool: the registry only reads and rewrites ``name``."""
+    """A stand-in tool: the registry reads and rewrites ``name`` and ``metadata``."""
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, metadata: dict | None = None) -> None:
         self.name = name
+        self.metadata = metadata
 
     def model_copy(self, *, update: dict) -> _NamedTool:
-        return _NamedTool(update.get("name", self.name))
+        return _NamedTool(update.get("name", self.name), update.get("metadata", self.metadata))
 
 
 @pytest.fixture()
@@ -495,15 +507,21 @@ def _registry_container(cfg: Settings) -> Any:
     return _Container(cfg, registry=ServerRegistry(cfg))
 
 
-def test_a_referenced_tool_that_collides_with_a_bound_one_is_prefixed_not_dropped(real_registry):
-    """F4: B's collision rule spans both halves of an agent's tool set.
+def _offered(resolved: Any) -> list[tuple[str, str]]:
+    return [(t.name, (t.metadata or {}).get("maljan_server", "")) for t in resolved.tools]
 
-    The bound half claimed ``open_file`` first, so the referenced server's own
-    ``open_file`` arrives as ``s2__open_file`` — the operator asked for it and
-    gets it, instead of silently receiving s1's tool under that name.
+
+def test_a_bound_tool_that_collides_with_a_referenced_one_is_prefixed_not_dropped(real_registry):
+    """B's collision rule spans both halves of an agent's tool set.
+
+    The definition names s2's ``open_file`` itself, so that is the tool the
+    bare name stays with; s1, an operator's server bound to the agent by
+    ``agents``, is the addition, and its own ``open_file`` arrives as
+    ``s1__open_file`` — kept, never dropped, and never in place of the tool
+    the definition asked for.
     """
     resolved = resolve_agent("x", _registry_container(_two_server_settings()))
-    assert [t.name for t in resolved.tools] == ["open_file", "s2__open_file"]
+    assert _offered(resolved) == [("open_file", "s2"), ("s1__open_file", "s1")]
     assert resolved.degradation_reasons == ()
 
 
@@ -518,7 +536,7 @@ def test_the_awaited_resolution_prefixes_the_same_way(real_registry):
     import asyncio
 
     resolved = asyncio.run(aresolve_agent("x", _registry_container(_two_server_settings())))
-    assert [t.name for t in resolved.tools] == ["open_file", "s2__open_file"]
+    assert _offered(resolved) == [("open_file", "s2"), ("s1__open_file", "s1")]
 
 
 # ---------------------------------------------------------------------------

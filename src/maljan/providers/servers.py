@@ -23,7 +23,7 @@ import asyncio
 import sys
 import threading
 import weakref
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -1420,13 +1420,21 @@ class ServerRegistry:
             )
         return handle
 
-    def for_agent(self, role: str, *, exclude: str = "") -> list[ServerHandle]:
+    def for_agent(
+        self, role: str, *, exclude: str = "", builtin: bool | None = None
+    ) -> list[ServerHandle]:
         """Enabled servers bound to ``role``, built-ins first then by key.
 
         Order is what makes the collision rule predictable: a built-in is
         attached before any custom server, so a custom server that happens to
         name a tool ``extract_dns`` is the one that gets renamed, and the
-        pinned built-in tool names never move.
+        pinned built-in tool names never move. Across an agent's whole tool
+        set the same holds through :meth:`agent_tools`, which claims the bound
+        built-ins, then the servers the agent's own definition names, and only
+        then the operator's servers bound by ``agents``.
+
+        ``builtin`` keeps only the built-in servers (``True``) or only the
+        others (``False``); ``None`` keeps both, in the order above.
 
         ``exclude`` drops handles by name — the server a provider already
         opened itself, so the registry does not hand the same tools out twice,
@@ -1448,6 +1456,7 @@ class ServerRegistry:
             if handle.config.enabled
             and role in handle.config.agents
             and handle.name not in excluded
+            and (builtin is None or (handle.name in BUILTIN_SERVER_KEYS) is builtin)
         ]
         return sorted(bound, key=lambda h: (h.name not in BUILTIN_SERVER_KEYS, h.name))
 
@@ -1535,6 +1544,7 @@ class ServerRegistry:
         *,
         exclude: str = "",
         seen: dict[str, str] | None = None,
+        builtin: bool | None = None,
         **context: Any,
     ) -> tuple[list[BaseTool], list[str]]:
         """Open every server bound to ``role`` and concatenate their tools.
@@ -1553,7 +1563,7 @@ class ServerRegistry:
         # ``open`` hands ``initialize`` to the shared agent loop, so that is
         # the loop this caller is really attaching on.
         agent_loop = _get_agent_loop()
-        for bound in self.for_agent(role, exclude=exclude):
+        for bound in self.for_agent(role, exclude=exclude, builtin=builtin):
             handle = self._handle_for(bound, agent_loop)
             try:
                 handle.open(job_id, **context)
@@ -1586,6 +1596,7 @@ class ServerRegistry:
         *,
         exclude: str = "",
         seen: dict[str, str] | None = None,
+        builtin: bool | None = None,
         **context: Any,
     ) -> tuple[list[BaseTool], list[str]]:
         """``tools_for``, but ``await``ed on the caller's own loop.
@@ -1600,7 +1611,7 @@ class ServerRegistry:
         seen = {} if seen is None else seen
         context = self._attach(context)
         loop = asyncio.get_running_loop()
-        for bound in self.for_agent(role, exclude=exclude):
+        for bound in self.for_agent(role, exclude=exclude, builtin=builtin):
             handle = self._handle_for(bound, loop)
             try:
                 await handle.aopen(job_id, **context)
@@ -1737,6 +1748,72 @@ class ServerRegistry:
                 renamed,
                 handle.name,
             )
+        return tools, reasons
+
+    def agent_tools(
+        self,
+        role: str,
+        job_id: str,
+        refs: Iterable[Any],
+        *,
+        exclude: str = "",
+        seen: dict[str, str] | None = None,
+        **context: Any,
+    ) -> tuple[list[BaseTool], list[str]]:
+        """An agent's server tools under one collision rule: its own names never move.
+
+        Three halves under one ``seen`` map, claimed in this order: the
+        built-in servers bound to ``role`` by ``MCPServerConfig.agents``, the
+        servers the agent's own definition names (``refs``, its ``ToolRef``
+        servers), then every other server bound to ``role`` by ``agents``. A
+        server an operator binds to a role is an addition to the agent: where
+        one of its tool names is taken by a built-in or by a server the agent
+        names itself, it is the operator's tool that is offered as
+        ``<server>__<tool>``, and the tool names the agent's prompt and
+        workflow text were written against stay bare. ``seen`` may arrive
+        holding the names the agent's in-process tools claimed (its provider's,
+        its sandbox's), which therefore never move either. A server both bound
+        and named contributes one copy.
+        """
+        seen = {} if seen is None else seen
+        tools, reasons = self.tools_for(
+            role, job_id, exclude=exclude, seen=seen, builtin=True, **context
+        )
+        for ref in refs:
+            picked, ref_reasons = self.tools_for_ref(ref, job_id, seen=seen, **context)
+            tools.extend(picked)
+            reasons.extend(ref_reasons)
+        added, added_reasons = self.tools_for(
+            role, job_id, exclude=exclude, seen=seen, builtin=False, **context
+        )
+        tools.extend(added)
+        reasons.extend(added_reasons)
+        return tools, reasons
+
+    async def aagent_tools(
+        self,
+        role: str,
+        job_id: str,
+        refs: Iterable[Any],
+        *,
+        exclude: str = "",
+        seen: dict[str, str] | None = None,
+        **context: Any,
+    ) -> tuple[list[BaseTool], list[str]]:
+        """:meth:`agent_tools`, awaited on the caller's own loop."""
+        seen = {} if seen is None else seen
+        tools, reasons = await self.atools_for(
+            role, job_id, exclude=exclude, seen=seen, builtin=True, **context
+        )
+        for ref in refs:
+            picked, ref_reasons = await self.atools_for_ref(ref, job_id, seen=seen, **context)
+            tools.extend(picked)
+            reasons.extend(ref_reasons)
+        added, added_reasons = await self.atools_for(
+            role, job_id, exclude=exclude, seen=seen, builtin=False, **context
+        )
+        tools.extend(added)
+        reasons.extend(added_reasons)
         return tools, reasons
 
     def still_open(self) -> list[ServerHandle]:

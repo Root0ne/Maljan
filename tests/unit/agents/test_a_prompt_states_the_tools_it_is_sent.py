@@ -170,6 +170,19 @@ class _Registry:
     async def atools_for_ref(self, *args: Any, **kwargs: Any) -> tuple[list[Any], list[str]]:
         return self.tools_for_ref(*args, **kwargs)
 
+    def agent_tools(
+        self, key: str, job_key: str, refs: Any, exclude: str = "", seen: Any = None, **_: Any
+    ) -> tuple[list[Any], list[str]]:
+        tools, reasons = self.tools_for(key, job_key, exclude=exclude, seen=seen)
+        for ref in refs:
+            picked, ref_reasons = self.tools_for_ref(ref, job_key, seen=seen)
+            tools.extend(picked)
+            reasons.extend(ref_reasons)
+        return tools, reasons
+
+    async def aagent_tools(self, *args: Any, **kwargs: Any) -> tuple[list[Any], list[str]]:
+        return self.agent_tools(*args, **kwargs)
+
 
 def _container(static_provider: str, sandbox_provider: str, profile: str) -> ServiceContainer:
     settings = Settings(_env_file=None)

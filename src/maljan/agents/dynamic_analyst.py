@@ -188,10 +188,14 @@ class DynamicAnalyst(BaseAnalyst):
             self.toolkit = getattr(provider, "_toolkit", None)
         else:
             self.logger.info("Sandbox provider '%s' exposes no tools.", provider.id)
+        own = [*sandbox_tools, *self._definition_sandbox_tools()]
+        # The sandbox's tools are the agent's own: a server tool of the same
+        # name is offered as ``<server>__<tool>`` beside them.
         self.tools = [
-            *sandbox_tools,
-            *self._definition_sandbox_tools(),
-            *self._attach_registry_tools("dynamic"),
+            *own,
+            *self._attach_registry_tools(
+                "dynamic", claimed=own, claimed_by=f"provider:{provider.id}"
+            ),
         ]
 
     # ------------------------------------------------------------------

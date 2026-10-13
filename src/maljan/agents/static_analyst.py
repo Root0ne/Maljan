@@ -255,10 +255,16 @@ class StaticAnalyst(BaseAnalyst):
         # privately and closes it itself (``ServiceContainer.aclose`` calls
         # ``get_static_provider().close()``), so there is nothing for this
         # analyst's ``close_tools()`` to release on the static path.
+        # The provider's tools are the agent's own: a server tool of the same
+        # name is offered as ``<server>__<tool>`` beside them, never in their
+        # place.
         self.tools = [
             *pool,
             *self._attach_registry_tools(
-                "static", exclude=str(getattr(provider, "server_name", ""))
+                "static",
+                exclude=str(getattr(provider, "server_name", "")),
+                claimed=pool,
+                claimed_by=f"provider:{provider.id}",
             ),
         ]
         self.logger.info("Static provider '%s': %d tools attached.", provider.id, len(self.tools))
