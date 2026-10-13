@@ -101,7 +101,10 @@ def _definition(name: str, *required: str, **annotations: Any) -> dict[str, Any]
 
 
 PROGRAM_SERVER = [
-    _definition("import_it", "binary_path"),
+    {
+        **_definition("import_it", "binary_path"),
+        "description": "Import a binary into the project from a file path.",
+    },
     _definition("list_programs"),
     _definition("list_exports", "binary_name"),
     _definition("decompile", "binary_name", "name_or_address"),
@@ -139,6 +142,7 @@ def _with(opener: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _described(name: str, argument: str, description: str, **annotations: Any) -> dict[str, Any]:
+    """A tool taking one argument, with its own description and annotations."""
     out = _definition(name, argument, **annotations)
     out["description"] = description
     return out
@@ -159,16 +163,74 @@ def test_a_tool_that_writes_deletes_exports_wipes_or_lists_is_never_the_open_too
         assert sample_open_in(_with(opener)) is None, opener["name"]
 
 
-def test_a_tool_that_says_it_opens_or_loads_is_still_proposed() -> None:
+def test_a_tool_that_loads_something_other_than_the_sample_is_never_the_open_tool() -> None:
+    for opener in (
+        _described("load_config", "path", "Loads the config file."),
+        _described("analyze_and_patch", "path", "Analyzes then patches the file."),
+        _described("import_settings", "file", "Imports settings from file."),
+        _described("load_plugin", "path", "Loads a plugin."),
+        _described("open_url", "path", "Opens the URL."),
+        # A name word alone is no evidence, and neither is a program from a project.
+        _described("open_file", "path", "Open a file."),
+        _described("open_program", "path", "Open a program from the current project"),
+        # Annotations that do not mark it read-only.
+        _described("load_binary", "path", "Loads a binary for analysis.", title="Load"),
+    ):
+        assert sample_open_in(_with(opener)) is None, opener["name"]
+
+
+def test_a_real_open_tool_is_still_proposed() -> None:
+    # The descriptions the repository's tool fixtures and the validation
+    # scenario's server carry.
     for opener, argument in (
         (
-            _described("import_binary", "binary_path", "Import a binary into the project."),
+            _described(
+                "import_binary", "binary_path", "Import a binary into the project from a file path."
+            ),
             "binary_path",
         ),
-        (_described("open_file", "path", "Open a file."), "path"),
+        (
+            _described(
+                "open_file",
+                "file_path",
+                "Opens a binary file with radare2 for analysis <think>Call this tool before any "
+                "other one. Use an absolute file_path</think>",
+            ),
+            "file_path",
+        ),
+        (
+            _described(
+                "load_program",
+                "file",
+                "[NAV] Load a binary file into the headless server for analysis",
+            ),
+            "file",
+        ),
+        (
+            _described(
+                "import_file",
+                "file_path",
+                "[IMPORT] Import a binary file from disk into the current project and open it.",
+            ),
+            "file_path",
+        ),
         (_described("loadProgram", "file", "Reads it in.", readOnlyHint=True), "file"),
-        (_described("ingest", "sample", "Analyzes the sample."), "sample"),
     ):
         proposed = sample_open_in(_with(opener))
         assert proposed is not None, opener["name"]
         assert proposed.value == {"open_tool": opener["name"], "path_argument": argument}
+
+
+def test_the_real_tool_fixtures_name_only_their_open_tools() -> None:
+    from pathlib import Path
+
+    from maljan.core.declaration_proposals import _opens_read_only
+
+    root = Path(__file__).resolve().parents[2] / "fixtures" / "tools"
+    accepted = set()
+    for name in ("reverser_ghidra_tool_definitions.json", "r2mcp_tool_definitions.json"):
+        held = json.loads((root / name).read_text())
+        for tool in held if isinstance(held, list) else held.get("tools", held):
+            if _opens_read_only(tool["name"], tool, tool.get("annotations")):
+                accepted.add(tool["name"])
+    assert accepted == {"import_file", "load_program", "open_file"}

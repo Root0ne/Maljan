@@ -3082,11 +3082,16 @@ operator-bound server's mark when its own provider declares none. An agent
 whose provider tools open the sample before the loop is not told twice. A
 connection test proposes `sample_open` (low confidence, `open_tool` and
 `path_argument` only) when exactly one tool takes a path as its only
-required argument and shows it opens the file and changes nothing (its name
-or description says it opens, loads, imports or analyses; the server marks it
-read-only or gives no read-only hint; nothing in its name, description or
-annotation title says it writes, deletes, exports, saves, wipes or lists a
-directory; its path argument names no output), and at least two other tools
+required argument and shows it opens the sample for analysis: either the
+server marks it read-only (`readOnlyHint` true) and its name or description
+says it opens, loads, imports or analyses, or the server gives no annotations
+and its description (never its name alone) says it opens, loads or imports a
+binary, an executable, a sample or an image, or a program or a file for
+analysis. A tool marked destructive or not read-only, one whose path argument
+names an output, and one whose name, description or annotation title names a
+changing verb (write, delete, export, save, patch, apply, update, edit,
+install, run, …), a directory, or another object (a configuration, settings,
+a plugin, a URL) is never proposed. At least two other tools
 share a required argument that is neither a path nor a place in code;
 accepting it in the console fills only the fields the server leaves empty.
 

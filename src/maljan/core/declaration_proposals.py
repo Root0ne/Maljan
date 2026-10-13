@@ -1361,11 +1361,29 @@ _PLACE_ARGUMENT = re.compile(r"addr|func|location|offset", re.IGNORECASE)
 
 # A word saying a tool opens or loads what it is given.
 _OPENS_WORD = re.compile(r"\b(?:open|load|import|analy[sz]e)(?:s|es|ed|ing)?\b")
-# A word saying a tool changes what is on disk or what its server holds, or
-# lists a directory: such a tool is never the one that opens the sample.
+# A description saying the tool opens, loads or imports the thing analysed:
+# a binary, an executable, a sample or an image; a program or a file only
+# when it says the opening is for analysis (``Opens a binary file with ... for
+# analysis``, ``Import a binary into the project from a file path``). A
+# program opened from a project is no sample.
+_OPENS_SAMPLE = re.compile(
+    r"\b(?:open|load|import)(?:s|ed|ing)?\b[^.;]{0,40}?"
+    r"\b(?:binar(?:y|ies)|executables?|samples?|images?)\b"
+)
+_OPENS_FOR_ANALYSIS = re.compile(
+    r"\b(?:open|load|import)(?:s|ed|ing)?\b[^.;]{0,40}?\b(?:programs?|files?)\b"
+    r"[^.;]{0,80}?\b(?:for analy[sz]is|to analy[sz]e)\b"
+)
+# A word saying a tool changes what is on disk or what its server holds, runs
+# something, lists a directory, or works on something other than the sample
+# (a configuration, settings, a plugin, a URL): such a tool is never the one
+# that opens the sample.
 _CHANGES_WORD = re.compile(
     r"\b(?:write|delete|remove|export|save|wipe|erase|overwrite|truncate|destroy|unlink"
-    r"|shred|rename|move|upload|director(?:y|ies)|folders?|dir|ls)"
+    r"|shred|rename|move|upload|patch|apply|update|edit|install|uninstall|modify|set"
+    r"|kill|clear|create|add|append|insert|replace|reset|commit|push|send|post|run"
+    r"|exec|execute|script|start|stop|close|director(?:y|ies)|folders?|dir|ls"
+    r"|config|configs|configuration|settings?|preferences?|plugins?|extensions?|urls?)"
     r"(?:s|es|ed|ing|d)?\b"
 )
 # A path argument naming where something is written, never what is read.
@@ -1379,24 +1397,40 @@ def _words(text: str) -> str:
 
 
 def _opens_read_only(name: str, definition: Any, annotations: Any) -> bool:
-    """Whether a path-only tool shows it opens or loads the file and changes nothing.
+    """Whether a path-only tool shows it opens the sample for analysis and changes nothing.
 
-    Positive evidence only: its name or description says it opens, loads,
-    imports or analyses, and the server either marks it read-only
-    (``readOnlyHint`` true) or gives no read-only hint at all. A tool marked
-    destructive or not read-only, or one whose name, description or
-    annotation title says it writes, deletes, exports, saves, wipes or lists
-    a directory, is never proposed.
+    Positive evidence only, one of two kinds:
+
+    * the server marks it read-only (``readOnlyHint`` true) and its name or
+      description says it opens, loads, imports or analyses; or
+    * the server gives no annotations and its description (its name alone is
+      not enough) says it opens, loads or imports a binary, an executable, a
+      sample or an image, or a program or a file for analysis.
+
+    Either way, a tool whose name, description or annotation title names a
+    changing verb (write, delete, export, save, patch, apply, update, edit,
+    install, run, …), a directory, or another object than the sample (a
+    configuration, settings, a plugin, a URL) is never proposed, and so is
+    one marked destructive or not read-only.
     """
     hints = annotations if isinstance(annotations, Mapping) else {}
     if hints.get("destructiveHint") is True or hints.get("readOnlyHint") is False:
         return False
-    description = _get(definition, "description")
+    raw = _get(definition, "description")
+    description = _words(raw) if isinstance(raw, str) else ""
     title = hints.get("title")
-    text = " ".join(_words(t) for t in (name, description, title) if isinstance(t, str) and t)
+    text = " ".join(_words(t) for t in (name, title) if isinstance(t, str) and t)
+    text = f"{text} {description}"
     if _CHANGES_WORD.search(text):
         return False
-    return bool(_OPENS_WORD.search(text))
+    if hints.get("readOnlyHint") is True:
+        return bool(_OPENS_WORD.search(text))
+    if hints:
+        return False
+    # ``_words`` reads a sentence's full stop as a separator: the description
+    # is read for the object with its own punctuation.
+    plain = raw.lower() if isinstance(raw, str) else ""
+    return bool(_OPENS_SAMPLE.search(plain) or _OPENS_FOR_ANALYSIS.search(plain))
 
 
 def sample_open_in(definitions: Iterable[Any]) -> Proposed | None:
