@@ -1603,63 +1603,140 @@ def _pack_left_out(entries: list[Any], container: ServiceContainer) -> dict[str,
     }
 
 
-# The renderer of the pack's decoded-strings step, whose server's environment
-# the in-process decoder and the pack's staging read (``FlossSettings``).
+# The renderers of the pack's decoded-strings step and of its UPX carve. The
+# in-process decoder reads the environment of the server declaring the
+# decoder's tool (``FlossSettings.environ``); the carve writes where the
+# server declaring the unpack tool's kind reads (``PackInputs.carve_environ``).
 _DECODER_RENDERER = "emulated_strings"
+_CARVE_RENDERER = "unpacked_image"
+
+
+def _pack_step_of(renderer: str, steps: Sequence[Any]) -> Any:
+    """The step of ``renderer`` in ``steps``, else its shipped declaration, else ``None``."""
+    from maljan.core.pack_steps import default_steps
+
+    def _of(held: Sequence[Any]) -> Any:
+        return next((s for s in held if getattr(s, "renderer", "") == renderer), None)
+
+    return _of(steps) or _of(default_steps())
+
+
+def _declared_kind(called: str) -> str:
+    """The kind the platform ships for a step's ``called`` tool, ``""`` for none."""
+    from maljan.core.declared_reading import shipped_by_name
+
+    facts = shipped_by_name().get(called)
+    return str(getattr(facts, "kind", "") or "")
+
+
+def _declaring_server_key(servers: Mapping[str, Any], called: str, *, purpose: str) -> str:
+    """The key of the enabled server declaring a step's ``called`` tool or its kind.
+
+    Servers declaring ``called`` by name come first, then servers declaring a
+    tool of the same declared kind, each in ``mcp.servers`` order; a
+    switched-off server is never read. When more than one qualifies, the
+    first is taken and the choice is logged at info (the node resolves each
+    purpose once per run). ``""`` when none qualifies.
+    """
+    kind = _declared_kind(called)
+    by_name: list[str] = []
+    by_kind: list[str] = []
+    for key, server in servers.items():
+        if not getattr(server, "enabled", True):
+            continue
+        facts = getattr(server, "tool_facts", None) or {}
+        if called in facts:
+            by_name.append(str(key))
+        elif kind and any(getattr(f, "kind", None) == kind for f in facts.values()):
+            by_kind.append(str(key))
+    qualified = by_name + by_kind
+    if len(qualified) > 1:
+        logger.info(
+            "triage pack: %s reads server %r; %s also declare %r.",
+            purpose,
+            qualified[0],
+            ", ".join(repr(k) for k in qualified[1:]),
+            called if not by_kind else f"{called} or its kind {kind}",
+        )
+    return qualified[0] if qualified else ""
 
 
 def _decoder_server_key(servers: Mapping[str, Any], steps: Sequence[Any]) -> str:
     """The key of the server the pack's decoded-strings step declares, ``""`` for none.
 
-    The step's own ``server``, else the first server of ``mcp.servers``, in
-    its order, whose tool declarations name the tool the step calls: the
+    The step's own ``server`` when it is enabled, else the enabled server
+    declaring the tool the step calls (:func:`_declaring_server_key`): the
     server whose tool the in-process step stands in for. With the step left
-    out of ``steps`` (switched off), its shipped declaration is read, since
-    the pack's staging reads the same environment.
+    out of ``steps`` (switched off), its shipped declaration is read.
     """
-    from maljan.core.pack_steps import default_steps
-
-    def _decoder(held: Sequence[Any]) -> Any:
-        return next((s for s in held if getattr(s, "renderer", "") == _DECODER_RENDERER), None)
-
-    step = _decoder(steps) or _decoder(default_steps())
+    step = _pack_step_of(_DECODER_RENDERER, steps)
     if step is None:
         return ""
     if step.server:
-        return str(step.server)
-    return next(
-        (
-            str(key)
-            for key, server in servers.items()
-            if step.called in (getattr(server, "tool_facts", None) or {})
-        ),
-        "",
-    )
+        named = servers.get(step.server)
+        if named is not None and getattr(named, "enabled", True):
+            return str(step.server)
+    return _declaring_server_key(servers, step.called, purpose="the decoder")
 
 
-def _decoder_server_environ(container: ServiceContainer, steps: Sequence[Any]) -> dict[str, str]:
-    """This process's environment with the decoder step's server's own ``env`` map over it.
+def _carve_server_key(servers: Mapping[str, Any]) -> str:
+    """The key of the server whose file tools read what the pack's UPX carve writes.
 
-    What the pack's decoded-strings step reads its build path and the staging
-    base from, so an operator who named the build or the base in the server's
-    settings gets the same build and the same directory from the pack as from
-    the tool (:func:`_decoder_server_key`). Never raises: a server entry that
-    cannot be read, or no server declaring the step's tool, leaves this
-    process's environment, and is logged.
+    The carve is the platform's own step, so its shipped declaration names
+    the tool it stands in for; the enabled server declaring that tool or its
+    kind (:func:`_declaring_server_key`) is the one whose staging base the
+    carve writes under. Independent of the decoded-strings step: an operator
+    who moves that step to another server leaves the carve where it was.
+    """
+    step = _pack_step_of(_CARVE_RENDERER, ())
+    if step is None:
+        return ""
+    return _declaring_server_key(servers, step.called, purpose="the unpack carve")
+
+
+def _server_environ(
+    container: ServiceContainer, pick: Callable[[Mapping[str, Any]], str], what: str
+) -> dict[str, str]:
+    """This process's environment with the picked server's own ``env`` map over it.
+
+    Never raises: a server entry that cannot be read, or no server picked,
+    leaves this process's environment, and is logged.
     """
     environ = dict(os.environ)
     try:
         servers = container.config.mcp.servers
-        key = _decoder_server_key(servers, steps)
+        key = pick(servers)
         server = servers.get(key) if key else None
         extra = dict(getattr(server, "env", None) or {})
     except Exception as exc:  # noqa: BLE001 — an unreadable entry adds nothing
-        logger.debug("triage pack: the decoder server's env could not be read (%s).", exc)
+        logger.debug("triage pack: the %s server's env could not be read (%s).", what, exc)
         return environ
     if not key:
-        logger.debug("triage pack: no server declares the decoder step's tool; own env read.")
+        logger.debug("triage pack: no enabled server declares the %s's tool; own env read.", what)
     environ.update({str(k): str(v) for k, v in extra.items()})
     return environ
+
+
+def _decoder_server_environ(container: ServiceContainer, steps: Sequence[Any]) -> dict[str, str]:
+    """The environment the pack's decoded-strings step reads its build path from.
+
+    The decoder step's server's own ``env`` over this process's
+    (:func:`_decoder_server_key`), so an operator who named the build in the
+    server's settings gets the same build from the pack as from the tool.
+    """
+    return _server_environ(
+        container, lambda servers: _decoder_server_key(servers, steps), "decoder"
+    )
+
+
+def _carve_server_environ(container: ServiceContainer) -> dict[str, str]:
+    """The environment the pack's UPX carve reads its staging base from.
+
+    The unpack-declaring server's own ``env`` over this process's
+    (:func:`_carve_server_key`), so the ``carved_path`` the entry gives is
+    one that server's file tools open.
+    """
+    return _server_environ(container, _carve_server_key, "unpack carve")
 
 
 def _knowledge_module() -> Any:
@@ -1747,6 +1824,7 @@ def make_triage_node(
             floss=FlossSettings(
                 environ=_decoder_server_environ(container, steps), job_id=container.job_key()
             ),
+            carve_environ=_carve_server_environ(container),
             steps=steps,
         )
 

@@ -2,8 +2,9 @@
 
 The step comes after every step the pack had, so each earlier id is the id it
 was, and only when ``pe_info``'s packer signatures name UPX. The program is
-written where the analysis server's ``carve_payloads`` writes for this job and
-sample, so the ``carved_path`` the entry gives is read by the server's file
+written under the staging base of the server declaring the unpack tool's kind
+(``PackInputs.carve_environ``, else the decoder's environment) for this job and
+sample, so the ``carved_path`` the entry gives is read by that server's file
 tools; the pack is not run again on it. Its one line takes only the room the
 other lines leave. The packed files are synthetic (``synthetic_upx``).
 """
@@ -102,6 +103,25 @@ def test_the_unpacking_comes_last_and_writes_beside_the_carved_files(tmp_path: P
     assert stat.S_IMODE(written.stat().st_mode) == 0o600
     assert stat.S_IMODE(tree.stat().st_mode) == 0o700
     assert result.failed == []
+
+
+def test_the_carve_writes_under_its_own_environment_not_the_decoders(tmp_path: Path) -> None:
+    path = _sample(tmp_path, su.build().data)
+    recorder = EvidenceRecorder(PIPELINE, counter=EvidenceCounter(), stage="triage_pack")
+    inputs = PackInputs(
+        sample_path=path,
+        sha256="a" * 64,
+        file_type="pe",
+        strings_head=10,
+        capa=CapaSettings(rules_dir="", signatures_dir="", timeout_s=1),
+        floss=FlossSettings(
+            environ={staging.STAGING_DIR_ENV: str(tmp_path / "decoder")}, job_id=JOB
+        ),
+        carve_environ={staging.STAGING_DIR_ENV: str(tmp_path / "shared")},
+    )
+    written = Path(_entry(run_pack(recorder, inputs)).structured["child"]["carved_path"])
+    tree = staging.job_staging_dir(tmp_path / "shared", JOB) / staging.CARVED_DIRECTORY
+    assert written.parent.parent == tree
 
 
 def test_the_ids_before_it_are_the_ids_a_pack_without_it_gives(

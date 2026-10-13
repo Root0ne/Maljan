@@ -504,6 +504,10 @@ class PackInputs:
     # The steps to run, in order (``core.pack_steps``); ``None`` runs the
     # shipped list.
     steps: tuple[PackStep, ...] | None = None
+    # The environment the UPX carve reads its staging base from: the server
+    # declaring the unpack tool's kind, kept apart from the decoder's server.
+    # ``None`` reads ``floss.environ``.
+    carve_environ: Mapping[str, str] | None = None
 
 
 # The one reputation call, made by the node through the tool server. It takes
@@ -1507,9 +1511,10 @@ class _Pack:
         and only when ``pe_info``'s packer signatures name UPX or a pack header
         with a true checksum byte stands where UPX writes one (renamed sections
         keep their header; a UPX-named file with none gets its ``no:``). The unpacked
-        program is written where the analysis server's ``carve_payloads``
-        writes for this job and sample, so the ``carved_path`` the answer gives
-        is one every file tool of the server reads. The pack is not run again
+        program is written under the staging base of the server declaring the
+        unpack tool's kind (``PackInputs.carve_environ``), for this job and
+        sample, so the ``carved_path`` the answer gives is one every file
+        tool of that server reads. The pack is not run again
         on it: the entry states it exists and where, and the models decide
         what to open. A run with no job directory to write in is one entry
         saying so.
@@ -1522,11 +1527,11 @@ class _Pack:
         if not settings.job_id:
             self._record_absent(upx.TOOL, args, UPX_NO_JOB)
             return
+        carve_environ = self.inputs.carve_environ
+        environ = settings.environ if carve_environ is None else carve_environ
 
         def call() -> dict[str, Any]:
-            carved = staging.open_job_directory(
-                settings.job_id, staging.CARVED_DIRECTORY, settings.environ
-            )
+            carved = staging.open_job_directory(settings.job_id, staging.CARVED_DIRECTORY, environ)
             destination = staging.private_dir(carved / _file_digest(path))
             return upx.unpack_upx(path, destination)
 

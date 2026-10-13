@@ -7,6 +7,12 @@
 * A step that names its own server reads that server.
 * A switched-off step still reads its shipped declaration's server.
 * No server declaring the tool leaves this process's environment.
+* A switched-off server is never read, and a server declaring only a tool of
+  the step's tool's kind qualifies after the ones naming the tool.
+* Several qualifying servers give the first, and the choice is logged once.
+* The UPX carve's environment is the unpack-declaring server's, apart from
+  the decoder's: an operator who moves the decoded-strings step to its own
+  server leaves the carve staging where that server's file tools read.
 """
 
 from __future__ import annotations
@@ -18,8 +24,15 @@ from maljan.core.pack_steps import PackStep, default_steps, effective_steps
 from maljan.pipeline import nodes
 
 
-def _server(tools: tuple[str, ...], env: dict[str, str] | None = None) -> Any:
-    return SimpleNamespace(tool_facts={tool: {} for tool in tools}, env=env or {})
+def _server(
+    tools: tuple[str, ...],
+    env: dict[str, str] | None = None,
+    *,
+    enabled: bool = True,
+    kinds: dict[str, str] | None = None,
+) -> Any:
+    facts = {tool: SimpleNamespace(kind=(kinds or {}).get(tool, "")) for tool in tools}
+    return SimpleNamespace(tool_facts=facts, env=env or {}, enabled=enabled)
 
 
 def _container(servers: dict[str, Any]) -> Any:
@@ -31,6 +44,7 @@ def test_as_shipped_the_analysis_servers_env_is_read() -> None:
 
     servers = Settings(_env_file=None).mcp.servers
     assert nodes._decoder_server_key(servers, default_steps()) == "analysis"
+    assert nodes._carve_server_key(servers) == "analysis"
 
 
 def test_the_first_server_declaring_the_steps_tool_is_read_whatever_its_key() -> None:
@@ -68,3 +82,49 @@ def test_no_declaring_server_leaves_this_processs_environment(monkeypatch: Any) 
     servers = {"lookups": _server(("get_ip_report",), {"MALJAN_FLOSS_PATH": "/not-this"})}
     environ = nodes._decoder_server_environ(_container(servers), default_steps())
     assert environ["MALJAN_FLOSS_PATH"] == "/own"
+
+
+def test_a_switched_off_server_is_never_read() -> None:
+    servers = {
+        "old": _server(("floss", "unpack_upx"), {"MALJAN_STAGING_DIR": "/old"}, enabled=False),
+        "analysis": _server(("floss", "unpack_upx"), {"MALJAN_STAGING_DIR": "/shared"}),
+    }
+    container = _container(servers)
+    assert nodes._decoder_server_environ(container, default_steps())["MALJAN_STAGING_DIR"] == (
+        "/shared"
+    )
+    assert nodes._carve_server_environ(container)["MALJAN_STAGING_DIR"] == "/shared"
+
+
+def test_a_server_declaring_the_tools_kind_qualifies_after_one_naming_it() -> None:
+    kind_only = _server(("unwrap",), {"MALJAN_STAGING_DIR": "/kind"}, kinds={"unwrap": "unpack"})
+    assert nodes._carve_server_key({"unpacker": kind_only}) == "unpacker"
+    named = _server(("unpack_upx",), {"MALJAN_STAGING_DIR": "/named"})
+    assert nodes._carve_server_key({"unpacker": kind_only, "analysis": named}) == "analysis"
+
+
+def test_several_qualifying_servers_give_the_first_and_say_so_once(monkeypatch: Any) -> None:
+    said: list[str] = []
+    monkeypatch.setattr(nodes.logger, "info", lambda msg, *args: said.append(msg % args))
+    servers = {
+        "first": _server(("unpack_upx",), {"MALJAN_STAGING_DIR": "/first"}),
+        "second": _server(("unpack_upx",), {"MALJAN_STAGING_DIR": "/second"}),
+    }
+    assert nodes._carve_server_environ(_container(servers))["MALJAN_STAGING_DIR"] == "/first"
+    assert len(said) == 1
+    assert "'first'" in said[0] and "'second'" in said[0]
+
+
+def test_moving_the_decoded_strings_step_leaves_the_carve_where_it_was() -> None:
+    steps = (
+        PackStep(
+            id="floss", server="emu", tool="unwind", renderer="emulated_strings", formats=("pe",)
+        ),
+    )
+    servers = {
+        "analysis": _server(("floss", "unpack_upx"), {"MALJAN_STAGING_DIR": "/shared"}),
+        "emu": _server(("unwind",), {"MALJAN_STAGING_DIR": "/emu-only"}),
+    }
+    container = _container(servers)
+    assert nodes._decoder_server_environ(container, steps)["MALJAN_STAGING_DIR"] == "/emu-only"
+    assert nodes._carve_server_environ(container)["MALJAN_STAGING_DIR"] == "/shared"
