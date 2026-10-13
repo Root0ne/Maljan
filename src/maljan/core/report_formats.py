@@ -460,29 +460,57 @@ def least_report(group: Sequence[FieldTest]) -> dict[str, Any] | None:
     return root if all(test.holds(root) for test in group) else None
 
 
+def _paths_meet(left: Sequence[FieldTest], right: Sequence[FieldTest]) -> bool:
+    """Whether a test of ``left`` and one of ``right`` name one place, or one below the other."""
+    lefts = {tuple(parse_path(test.path)) for test in left}
+    rights = {tuple(parse_path(test.path)) for test in right}
+    if lefts & rights:
+        return True
+    for shorter, longer in ((lefts, rights), (rights, lefts)):
+        prefixes = {path[:depth] for path in longer for depth in range(1, len(path))}
+        if shorter & prefixes:
+            return True
+    return False
+
+
 def builtin_overlapping(
     fmt: ReportFormat, builtins: Iterable[ReportFormat] = BUILTIN_REPORT_FORMATS
 ) -> str:
     """The first built-in whose detect overlaps ``fmt``'s, by name; empty where none does.
 
-    Two readings, each on the plainest report a detect group describes
+    Three readings, each on the plainest report detect groups describe
     (:func:`least_report`): a built-in recognises the plainest report of one
-    of ``fmt``'s groups (the reports ``fmt`` was written for), or ``fmt``
+    of ``fmt``'s groups (the reports ``fmt`` was written for); ``fmt``
     recognises the plainest report of one of a built-in's groups (``fmt``'s
-    tests are among the built-in's). A format read through a mapping is tried
-    after every built-in, so a report both recognise is read as the built-in.
+    tests are among the built-in's); or a group of each names a shared place
+    (the same path, or one below the other) and one report holds both groups'
+    tests (a partial overlap: a report of the built-in's family carrying what
+    ``fmt`` tests too). Groups sharing no place are not compared, since nearly
+    any two groups of tests can hold on one report. A format read through a
+    mapping is tried after every built-in, so a report both recognise is read
+    as the built-in; whole overlaps are named before partial ones. Linear in
+    the groups' paths per pair of groups.
     """
-    builtins = list(builtins)
+    builtins = [builtin for builtin in builtins if builtin.name != fmt.name]
     own = [report for group in fmt.detect if (report := least_report(group)) is not None]
     for builtin in builtins:
-        if builtin.name == fmt.name:
-            continue
         if any(builtin.matches(report) for report in own):
             return builtin.name
         for group in builtin.detect:
             report = least_report(group)
             if report is not None and fmt.matches(report):
                 return builtin.name
+    # Partial overlaps after every whole one, so the built-in named is the
+    # one that claims the format's own reports where one does.
+    for builtin in builtins:
+        for group in builtin.detect:
+            for mine in fmt.detect:
+                if _paths_meet(mine, group) and (
+                    # A later test writes over an earlier one's place: each order.
+                    least_report([*mine, *group]) is not None
+                    or least_report([*group, *mine]) is not None
+                ):
+                    return builtin.name
     return ""
 
 

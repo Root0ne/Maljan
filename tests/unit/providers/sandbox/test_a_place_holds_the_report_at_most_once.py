@@ -234,6 +234,67 @@ class TestAMappedFormatABuiltInOverlapsIsNamed:
         own = self._format("own", {"path": "/acme_meta/version", "contains": "acme"})
         assert builtin_overlapping(own) == ""
 
+    def test_a_partial_overlap_on_a_shared_place_is_named(self) -> None:
+        from maljan.core.report_formats import builtin_overlapping, format_named
+
+        # Every cuckoo-derived report carrying /signatures passes both detects.
+        derived = self._format(
+            "derived",
+            {"path": "/info", "non_empty": True},
+            {"path": "/signatures", "types": ["array"]},
+        )
+        cuckoo = format_named("cuckoo")
+        assert cuckoo is not None
+        assert builtin_overlapping(derived, [cuckoo]) == "cuckoo"
+        # A CAPE report (/info an object) carrying /signatures passes it too.
+        assert builtin_overlapping(derived) == "cape2"
+
+    def test_a_partial_overlap_below_a_built_in_s_place_is_named(self) -> None:
+        from maljan.core.report_formats import builtin_overlapping, format_named
+
+        below = self._format(
+            "below",
+            {"path": "/info/id", "types": ["number"]},
+            {"path": "/acme", "types": ["object"]},
+        )
+        cuckoo = format_named("cuckoo")
+        assert cuckoo is not None
+        assert builtin_overlapping(below, [cuckoo]) == "cuckoo"
+
+    def test_a_built_in_s_place_below_a_format_s_is_named(self) -> None:
+        from maljan.core.report_formats import ReportFormat, builtin_overlapping
+
+        own = self._format("own_meta", {"path": "/meta", "types": ["object"]})
+        builtin = ReportFormat.model_validate(
+            {
+                "name": "shipped",
+                "detect": [[{"path": "/meta/engine", "contains": "x"}, {"path": "/run"}]],
+                "reader": "generic",
+            }
+        )
+        assert builtin_overlapping(own, [builtin]) == "shipped"
+
+    def test_a_shared_place_both_cannot_hold_is_not_named(self) -> None:
+        from maljan.core.report_formats import builtin_overlapping
+
+        # cuckoo needs /info an object; a text there is no cuckoo report.
+        text = self._format(
+            "text_info",
+            {"path": "/info", "types": ["string"]},
+            {"path": "/signatures", "types": ["array"]},
+        )
+        assert builtin_overlapping(text) == ""
+
+    def test_groups_sharing_no_place_are_not_named(self) -> None:
+        from maljan.core.report_formats import builtin_overlapping
+
+        apart = self._format(
+            "apart",
+            {"path": "/analysis_report", "types": ["object"]},
+            {"path": "/infos", "types": ["object"]},
+        )
+        assert builtin_overlapping(apart) == ""
+
     @pytest.mark.parametrize("fixture", ["unread_flat_report.json", "unread_nested_report.json"])
     def test_an_accepted_proposal_is_not_named(self, fixture: str) -> None:
         from pathlib import Path
