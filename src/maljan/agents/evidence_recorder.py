@@ -580,6 +580,10 @@ class RepeatGuard:
         # can shape (a forged or a shared name), so a call is a repeat only
         # when its listing is the held one, or a prefix of it.
         self._functions: dict[tuple[str, Any], list[tuple[str, str]]] = {}
+        # Where each seeded entry was made: an earlier chunk of this input
+        # (``EARLIER_CHUNK``) or an earlier round of this analysis
+        # (``EARLIER_ROUND``), which is what its answer says.
+        self._origins: dict[str, str] = {}
 
     def _seeded_count(self, key: str) -> int:
         """Where a seeded call's count starts: one served retry for a failure or an unkept result."""
@@ -595,6 +599,7 @@ class RepeatGuard:
         failed: bool = False,
         recorded: str | None = None,
         rerun: bool = False,
+        origin: str = "",
     ) -> None:
         """A call an earlier chunk made: an identical one is answered from its entry, not run.
 
@@ -606,10 +611,13 @@ class RepeatGuard:
         the entry. A failed one (``failed``), and one whose result the run did
         not keep (``rerun``), is seeded as asked once, so one retry is served,
         as the guard serves any retry after a failure. No first touch counts
-        toward the loop's repeats (:meth:`first_touch_of_seed`).
+        toward the loop's repeats (:meth:`first_touch_of_seed`). ``origin`` is
+        where the call was made (``EARLIER_CHUNK`` when not given, or
+        ``EARLIER_ROUND``), which the answer to an identical call says.
         """
         key = self._key(tool, kwargs)
         self._seeded.setdefault(key, str(entry_id))
+        self._origins.setdefault(str(entry_id), origin or EARLIER_CHUNK)
         if failed:
             self._seeded_failures.add(str(entry_id))
         elif rerun:
@@ -667,6 +675,10 @@ class RepeatGuard:
             if held.startswith(body):
                 return entry_id
         return None
+
+    def origin_of(self, entry_id: str) -> str:
+        """Where a seeded entry was made: ``EARLIER_CHUNK`` or ``EARLIER_ROUND``."""
+        return self._origins.get(str(entry_id), EARLIER_CHUNK)
 
     def seeded_failure(self, entry_id: str) -> bool:
         """Whether a seeded entry recorded a failure."""
@@ -740,8 +752,20 @@ class RepeatGuard:
         self._first.setdefault(key, entry_id)
 
 
-def seeded_repeat_guard(entries: Sequence[Any] | None) -> RepeatGuard:
+# Where a call a loop's guard was seeded with was made.
+EARLIER_CHUNK = "chunk"
+EARLIER_ROUND = "round"
+
+
+def seeded_repeat_guard(
+    entries: Sequence[Any] | None, *, earlier_rounds: Sequence[Any] | None = None
+) -> RepeatGuard:
     """A loop's repeat guard, seeded with the calls earlier chunks made (``RepeatGuard.seed``).
+
+    ``earlier_rounds`` are the calls this agent made in earlier rounds of the
+    run (a revision's first answer and the revisions before it), seeded first
+    and answered the same way: a revision that repeats an identical call reads
+    the result its entry recorded, and no tool runs.
 
     An answered call is seeded with the result its entry recorded, which is
     what a later identical call is answered with. A call whose entry does not
@@ -751,7 +775,11 @@ def seeded_repeat_guard(entries: Sequence[Any] | None) -> RepeatGuard:
     cut is held as the model read it, which a second call would hand back.
     """
     guard = RepeatGuard()
-    for entry in entries or ():
+    seeds = [
+        *((entry, EARLIER_ROUND) for entry in earlier_rounds or ()),
+        *((entry, EARLIER_CHUNK) for entry in entries or ()),
+    ]
+    for entry, origin in seeds:
         tool = str(getattr(entry, "tool", "") or "")
         entry_id = str(getattr(entry, "id", "") or "")
         args = getattr(entry, "args", None)
@@ -761,13 +789,13 @@ def seeded_repeat_guard(entries: Sequence[Any] | None) -> RepeatGuard:
         if getattr(entry, "repeated_of", None):
             continue
         if not bool(getattr(entry, "ok", True)):
-            guard.seed(tool, args, entry_id, failed=True)
+            guard.seed(tool, args, entry_id, failed=True, origin=origin)
             continue
         if not holds_its_answer(entry):
-            guard.seed(tool, args, entry_id, rerun=True)
+            guard.seed(tool, args, entry_id, rerun=True, origin=origin)
             continue
         output = str(getattr(entry, "output", "") or "")
-        guard.seed(tool, args, entry_id, recorded=output)
+        guard.seed(tool, args, entry_id, recorded=output, origin=origin)
         if entry_decompiles(entry):
             guard.note_function(listed_function(output), entry_id, output)
     return guard
@@ -815,7 +843,12 @@ def same_function_notice(name: str, entry_id: str) -> str:
 
 
 def earlier_chunk_answer(
-    tool: str, entry_id: str, recorded: str, narrowing: Sequence[str] = ()
+    tool: str,
+    entry_id: str,
+    recorded: str,
+    narrowing: Sequence[str] = (),
+    *,
+    origin: str = EARLIER_CHUNK,
 ) -> str:
     """What a later chunk's call an earlier chunk made is answered with.
 
@@ -829,11 +862,18 @@ def earlier_chunk_answer(
     # the recorded text the same way (``_stamp``).
     shortened = shortened_notice(recorded, narrowing=narrowing)
     shown = fenced(entry_id, recorded)
-    return f"[{entry_id}]\n{shown}{shortened}\n\n{earlier_chunk_sentence(tool, entry_id)}"
+    said = earlier_chunk_sentence(tool, entry_id, origin=origin)
+    return f"[{entry_id}]\n{shown}{shortened}\n\n{said}"
 
 
-def earlier_chunk_sentence(tool: str, entry_id: str) -> str:
-    """The sentence under an earlier chunk's result, and the note its repeat entry keeps."""
+def earlier_chunk_sentence(tool: str, entry_id: str, *, origin: str = EARLIER_CHUNK) -> str:
+    """The sentence under an earlier chunk's (or round's) result, and the note its repeat keeps."""
+    if origin == EARLIER_ROUND:
+        return (
+            f"This call to {tool} with these arguments was made in an earlier round of this "
+            f"analysis and is not run again: the text above is the result recorded in "
+            f"[{entry_id}]."
+        )
     return (
         f"This call to {tool} with these arguments was made in an earlier chunk of this "
         f"input and is not run again: the text above is the result recorded in [{entry_id}]."
@@ -1180,9 +1220,11 @@ def _record_tool(
                 server=server,
                 source=source,
                 first=earlier,
-                said=earlier_chunk_sentence(name, earlier),
+                said=earlier_chunk_sentence(name, earlier, origin=repeats.origin_of(earlier)),
             )
-            return earlier_chunk_answer(name, *recorded, narrowing)
+            return earlier_chunk_answer(
+                name, *recorded, narrowing, origin=repeats.origin_of(earlier)
+            )
         if not repeats.first_touch_of_seed(name, kwargs):
             repeats.note_repeat()
         failed = recorder.entry_failed(first) or repeats.seeded_failure(first)

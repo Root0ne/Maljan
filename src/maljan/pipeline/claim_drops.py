@@ -28,6 +28,7 @@ changed nothing.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
@@ -238,6 +239,40 @@ def dropped_values_sentence(name: str, revision_round: int, dropped: DroppedValu
         f"{', '.join(dropped.missing)}, which its answer in force stated in the claim "
         f'"{dropped.claim}".'
     )
+
+
+_EVIDENCE_ID = re.compile(r"\bev_\d+\b", re.IGNORECASE)
+
+
+def claim_substance(isr: Any) -> Counter[tuple[frozenset[str], frozenset[str], str]]:
+    """What an answer's claims state, wording aside: each claim's values, entry ids and technique.
+
+    The values are :func:`claim_values` (numbers, hex, technique ids, quoted
+    values), the entry ids those its evidence line cites, the technique the
+    claim's own; two claims that say the same with other words are one key.
+    """
+    keys: Counter[tuple[frozenset[str], frozenset[str], str]] = Counter()
+    for claim in getattr(isr, "claims", None) or []:
+        technique = str(getattr(claim, "technique_id", "") or "").strip()
+        keys[
+            (
+                claim_values(str(getattr(claim, "claim", "") or ""), technique),
+                frozenset(
+                    i.lower() for i in _EVIDENCE_ID.findall(str(getattr(claim, "evidence_ref", "")))
+                ),
+                technique,
+            )
+        ] += 1
+    return keys
+
+
+def unchanged_in_substance(in_force: Any, revision: Any) -> bool:
+    """Whether a revision states the claims in force again, wording aside (:func:`claim_substance`).
+
+    An answer with no claim is not one: it states nothing to compare.
+    """
+    before = claim_substance(in_force)
+    return bool(before) and before == claim_substance(revision)
 
 
 def answer_unchanged(in_force: str, revision: str) -> bool:

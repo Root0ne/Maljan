@@ -2839,6 +2839,33 @@ def current_run_state(agent: Any) -> str:
         return body
 
 
+def own_earlier_entries(agent: Any) -> list[LedgerEntry]:
+    """The entries ``agent`` filed in the run's earlier rounds, from the state it was briefed with.
+
+    Its own calls the run's ledger already held when the node briefed it
+    (``run_state_source``): a revision's first answer and the revisions before
+    it. None for an agent briefed without the state. Never raises.
+    """
+    source = getattr(agent, "run_state_source", None)
+    name = str(getattr(agent, "name", "") or "")
+    if not isinstance(source, Mapping) or not name:
+        return []
+    found: list[LedgerEntry] = []
+    try:
+        for row in source.get("evidence_ledger") or ():
+            owner = row.get("agent") if isinstance(row, Mapping) else getattr(row, "agent", None)
+            if owner != name:
+                continue
+            try:
+                entry = row if isinstance(row, LedgerEntry) else LedgerEntry.model_validate(row)
+            except Exception:  # noqa: BLE001 — one unreadable row is not a lost guard
+                continue
+            found.append(entry)
+    except Exception:  # noqa: BLE001 — no seed is the guard as it was
+        return []
+    return found
+
+
 def _row_id(row: Any) -> str:
     """A ledger row's id, whether the row is an entry or its stored mapping."""
     value = row.get("id") if isinstance(row, Mapping) else getattr(row, "id", None)
@@ -4709,8 +4736,13 @@ class BaseAnalyst(BudgetMeter, ABC):
         # The repeat guard is per loop, like the recorder, and a later chunk's
         # starts with the calls the earlier chunks of the same analysis made:
         # an identical one is answered with the entry that holds it, as the
-        # chunk's prompt lists them (``earlier_chunks_block``).
-        repeats = seeded_repeat_guard(getattr(self, "_prior_chunk_calls", None))
+        # chunk's prompt lists them (``earlier_chunks_block``). A revision's
+        # starts with the calls this agent made in the run's earlier rounds,
+        # answered the same way (``own_earlier_entries``).
+        repeats = seeded_repeat_guard(
+            getattr(self, "_prior_chunk_calls", None),
+            earlier_rounds=own_earlier_entries(self),
+        )
         # The function map reads this loop's calls as they are made.
         self._live_map_entries = recorder.entries
         # The arguments this loop had to close off, so the ledger entry for

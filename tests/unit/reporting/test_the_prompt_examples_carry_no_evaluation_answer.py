@@ -42,7 +42,11 @@ from maljan.agents.delegation import (
     _what_an_ask_gets_sentence,
 )
 from maljan.agents.dynamic_analyst import sandbox_server_label
-from maljan.agents.evidence_recorder import earlier_chunk_answer, same_function_notice
+from maljan.agents.evidence_recorder import (
+    EARLIER_ROUND,
+    earlier_chunk_answer,
+    same_function_notice,
+)
 from maljan.agents.judge_agent import (
     COMPACT_BUNDLE_RULES,
     CONTRADICTION_DEFINITION,
@@ -2070,6 +2074,9 @@ PROMPTS: dict[str, str] = {
     ),
     "a later chunk's answer from an earlier chunk's recorded result": earlier_chunk_answer(
         "a", "ev_0001", "a recorded result"
+    ),
+    "a revision's answer from an earlier round's recorded result": earlier_chunk_answer(
+        "a", "ev_0001", "a recorded result", origin=EARLIER_ROUND
     ),
     "a decompile answered with a function an earlier entry holds": same_function_notice(
         "FUN_00401000", "ev_0001"

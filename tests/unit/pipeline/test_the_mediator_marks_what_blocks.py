@@ -1,8 +1,9 @@
 """The mediator decides which listed contradiction blocks; the platform states ledger counts.
 
 Every listed line used to block consensus, so a bookkeeping line kept a debate
-open for rounds. The platform no longer decides that any line is closed or
-settled. What it does:
+open for rounds. The platform decides no line's content. What it does (the one
+line it sets aside, a count the ledger answers once its facts were told, is in
+``test_the_debate_settles_what_the_ledger_answers``):
 
 - for a listed line whose cited entries state, in a field named for a count or
   a total, a number the line itself states, it states those values, every one

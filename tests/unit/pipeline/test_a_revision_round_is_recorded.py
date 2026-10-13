@@ -105,6 +105,7 @@ class TestTheRoundRecord:
                 "stage": "debate",
                 "made": 2,
                 "identical": True,
+                "reworded": True,
                 "revised": NAMES,
                 "not_revised": {},
                 "converged": [],
@@ -126,11 +127,26 @@ class TestTheRoundRecord:
                 "stage": "debate",
                 "made": 2,
                 "identical": False,
+                "reworded": True,
                 "revised": NAMES,
                 "not_revised": {},
                 "converged": [],
             }
         ]
+
+    def test_a_revision_that_changes_a_claim_is_not_reworded(self) -> None:
+        update, _ = _run(
+            {
+                "static": (
+                    "static changed",
+                    _isr("static", "Opens a key at 0x44.", "Prose claim."),
+                ),
+                "dynamic": ("dynamic in force", IN_FORCE["dynamic"]),
+            }
+        )
+
+        [record] = update["revision_rounds"]
+        assert record["identical"] is False and record["reworded"] is False
 
 
 class TestTheAnswerInForceIsRevised:

@@ -6,10 +6,18 @@ things:
 
 - **states facts**: for a listed line whose cited ledger entries (cited by
   the line itself, or by a claim the line names) hold, in a field whose name
-  says count or total, a number the line itself states, it states every such
-  value, also when two entries disagree. No call is made for them: they ride
-  on the calls the debate makes anyway, the revision directive of the analysts
-  the line names and the next mediation's prompt;
+  says count or total, or as the length of a list field, a number the line
+  itself states, it states every such value, also when two entries disagree.
+  No call is made for them: they ride on the calls the debate makes anyway,
+  the revision directive of the analysts the line names and the next
+  mediation's prompt;
+- **settles a count the ledger answers**: a blocking line every count of
+  which (a number before a plural noun: "0 hits", "31 rules") a cited entry
+  states is answered by the ledger. Once the analysts were told those facts
+  (an earlier mediation of the debate stated every one of them), the line is
+  not argued again: it no longer blocks, and the run records it as settled
+  with its facts (``settled_by_ledger``). A line with a count no entry states
+  is never settled;
 - **reads marks**: the mediator ends each line with ``[blocking: <reason>]`` or
   ``[not blocking: <reason>]``. A line marked not blocking does not stand
   against consensus. An unmarked line blocks, as every line did before marks
@@ -137,18 +145,28 @@ def _entry_fields(entry: Any) -> tuple[str, str, Any]:
     )
 
 
-def _counts_of(structured: Any) -> list[tuple[str, int]]:
-    """The integer count fields at the top of a tool's structured answer."""
+def _counts_of(structured: Any) -> list[tuple[str, int, str]]:
+    """The counts at the top of a tool's structured answer: ``(key, count, as stated)``.
+
+    An integer field whose name says count or total, and the length of a list
+    field (a match list, a hit list), which is how many items the answer holds.
+    """
     if not isinstance(structured, Mapping):
         return []
-    return [
-        (str(key), int(value))
-        for key, value in structured.items()
-        if _COUNT_KEY.search(str(key))
-        and not _NOT_A_COUNT_KEY.search(str(key))
-        and isinstance(value, int)
-        and not isinstance(value, bool)
-    ]
+    found: list[tuple[str, int, str]] = []
+    for key, value in structured.items():
+        if _NOT_A_COUNT_KEY.search(str(key)):
+            continue
+        if isinstance(value, list):
+            found.append((str(key), len(value), f"{len(value)} items"))
+        elif _COUNT_KEY.search(str(key)) and isinstance(value, int) and not isinstance(value, bool):
+            found.append((str(key), int(value), str(int(value))))
+    return found
+
+
+# A count a line states: a number before a plural noun, with at most two words
+# between them ("0 hits", "31 rules", "11 distinct DNS names").
+_STATED_COUNT = re.compile(r"(?<![\w.%#])(\d+)\s+(?:[A-Za-z][\w-]*\s+){0,2}[A-Za-z][\w-]*s\b")
 
 
 def ledger_count_facts(
@@ -165,43 +183,134 @@ def ledger_count_facts(
     read.
     """
     names = list(agent_names) or [str(k) for k in isr_reports]
+    entries = _ledger_counts_by_id(ledger)
+    facts: list[str] = []
+    for line in lines:
+        text = str(line)
+        stated = _line_counts(text, names, entries, isr_reports).said
+        if stated:
+            facts.append(f'For the line "{text}": {"; ".join(stated)}.')
+    return facts
+
+
+@dataclass(frozen=True)
+class _LineCounts:
+    """What the cited entries state for one line: the sentences, the atoms and the counts met."""
+
+    said: tuple[str, ...] = ()
+    # ``(entry id, "key = value")``, one per count stated.
+    atoms: frozenset[tuple[str, str]] = frozenset()
+    met: frozenset[int] = frozenset()
+    # The counts the line states (``_STATED_COUNT``).
+    counts: frozenset[int] = frozenset()
+
+
+def _ledger_counts_by_id(ledger: Iterable[Any]) -> dict[str, tuple[str, Any]]:
     entries: dict[str, tuple[str, Any]] = {}
     for entry in ledger or ():
         entry_id, tool, structured = _entry_fields(entry)
         if entry_id:
             entries[entry_id] = (tool, structured)
-    facts: list[str] = []
+    return entries
+
+
+def _line_counts(
+    text: str,
+    names: Sequence[str],
+    entries: Mapping[str, tuple[str, Any]],
+    isr_reports: Mapping[str, Any],
+) -> _LineCounts:
+    """The counts the entries a line cites state that the line states too. Never raises."""
+    try:
+        bare = _CLAIM_NUMBERS.sub(" ", re.sub(r"\b0x[0-9a-fA-F]+\b", " ", _ENTRY_ID.sub(" ", text)))
+        numbers = {int(n) for n in _NUMBER.findall(bare)}
+        if not numbers:
+            return _LineCounts()
+        cited = list(dict.fromkeys(_ENTRY_ID.findall(text)))
+        for name, claim_numbers in _claims_named(text, names):
+            claims = _claims_of(isr_reports, name)
+            for number in claim_numbers:
+                place = _claim_place(number, len(claims))
+                if place is not None:
+                    ref = str(getattr(claims[place], "evidence_ref", "") or "")
+                    cited.extend(i for i in _ENTRY_ID.findall(ref) if i not in cited)
+        stated: list[str] = []
+        atoms: set[tuple[str, str]] = set()
+        met: set[int] = set()
+        for entry_id in cited:
+            if entry_id not in entries:
+                continue
+            tool, structured = entries[entry_id]
+            counts = [
+                (key, value, shown)
+                for key, value, shown in _counts_of(structured)
+                if value in numbers
+            ]
+            if counts:
+                said = ", ".join(f"{key} = {shown}" for key, _value, shown in counts)
+                stated.append(f"entry {entry_id}{f' ({tool})' if tool else ''} states {said}")
+                atoms.update((entry_id, f"{key} = {shown}") for key, _value, shown in counts)
+                met.update(value for _key, value, _shown in counts)
+        return _LineCounts(
+            said=tuple(stated),
+            atoms=frozenset(atoms),
+            met=frozenset(met),
+            counts=frozenset(int(n) for n in _STATED_COUNT.findall(bare)),
+        )
+    except Exception:  # noqa: BLE001 — a line that cannot be read gets no fact
+        return _LineCounts()
+
+
+# One entry's part of a stated fact, and the counts it lists.
+_STATED_PART = re.compile(r"entry (ev_\d+)(?: \([^)]*\))? states (.+?)(?=; entry ev_\d+ |\.$|$)")
+
+
+def fact_atoms(facts: Iterable[str]) -> frozenset[tuple[str, str]]:
+    """``(entry id, "key = value")`` for every count these stated facts carry."""
+    atoms: set[tuple[str, str]] = set()
+    for fact in facts:
+        text = str(fact)
+        head = text.rfind('": entry ev_')
+        body = text[head + 3 :] if head >= 0 else text
+        for match in _STATED_PART.finditer(body):
+            for count in match.group(2).split(", "):
+                atoms.add((match.group(1), count.strip()))
+    return frozenset(atoms)
+
+
+def settled_by_ledger(
+    lines: Sequence[str],
+    isr_reports: Mapping[str, Any],
+    ledger: Iterable[Any],
+    agent_names: Iterable[str],
+    told: Iterable[str],
+) -> list[tuple[str, tuple[str, ...]]]:
+    """``(line, facts)`` for each blocking line the ledger answers and the analysts were told.
+
+    A line is answered when it states at least one count (a number before a
+    plural noun) and a cited entry states every count it states. It is settled
+    when, besides, every fact stated for it was stated before (``told``, the
+    facts an earlier mediation of the debate carried): the analysts it names
+    heard them, and arguing the count again changes nothing the ledger holds.
+    Linear in the lines, the claims they name and the ledger.
+    """
+    names = list(agent_names) or [str(k) for k in isr_reports]
+    entries = _ledger_counts_by_id(ledger)
+    heard = fact_atoms(told)
+    found: list[tuple[str, tuple[str, ...]]] = []
+    if not heard:
+        return found
     for line in lines:
         text = str(line)
-        try:
-            bare = _CLAIM_NUMBERS.sub(
-                " ", re.sub(r"\b0x[0-9a-fA-F]+\b", " ", _ENTRY_ID.sub(" ", text))
-            )
-            numbers = {int(n) for n in _NUMBER.findall(bare)}
-            if not numbers:
-                continue
-            cited = list(dict.fromkeys(_ENTRY_ID.findall(text)))
-            for name, claim_numbers in _claims_named(text, names):
-                claims = _claims_of(isr_reports, name)
-                for number in claim_numbers:
-                    place = _claim_place(number, len(claims))
-                    if place is not None:
-                        ref = str(getattr(claims[place], "evidence_ref", "") or "")
-                        cited.extend(i for i in _ENTRY_ID.findall(ref) if i not in cited)
-            stated = []
-            for entry_id in cited:
-                if entry_id not in entries:
-                    continue
-                tool, structured = entries[entry_id]
-                counts = [(key, value) for key, value in _counts_of(structured) if value in numbers]
-                if counts:
-                    said = ", ".join(f"{key} = {value}" for key, value in counts)
-                    stated.append(f"entry {entry_id}{f' ({tool})' if tool else ''} states {said}")
-        except Exception:  # noqa: BLE001 — a line that cannot be read gets no fact
-            continue
-        if stated:
-            facts.append(f'For the line "{text}": {"; ".join(stated)}.')
-    return facts
+        counts = _line_counts(text, names, entries, isr_reports)
+        if counts.counts and counts.counts <= counts.met and counts.atoms and counts.atoms <= heard:
+            found.append((text, counts.said))
+    return found
+
+
+def settled_sentence(line: str, facts: Sequence[str]) -> str:
+    """The run's record of one line the ledger settled."""
+    return f'Settled by the ledger, told to the analysts before: "{line}": {"; ".join(facts)}.'
 
 
 def facts_naming(name: str, facts: Iterable[str]) -> list[str]:

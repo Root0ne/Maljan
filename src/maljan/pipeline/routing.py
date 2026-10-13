@@ -13,6 +13,10 @@ Decision priority (highest to lowest), in ``debate_route``:
      No change — no analyst was revised in that round (every revision failed,
      wrote nothing, carried no structured report or was not asked): judge, by
      consensus where the mediator stated one, otherwise ``not_revised``.
+     Reworded — every revision of that round states the claims in force
+     again, wording aside (the same values, entry ids and techniques,
+     ``claim_drops.unchanged_in_substance``): another round would argue over
+     wording. Judge (``reworded``); no consensus is claimed.
      Points unchanged — analysts were revised in that round, and this
      mediation's blocking lines are the same contested points as the last
      mediation's (``debate_facts.same_points``: none resolved, none new):
@@ -133,6 +137,9 @@ NO_CONTESTED_POINT = "no_contested_point"
 # blocking lines are the last mediation's contested points, none resolved and
 # none new: the round changed none of them.
 POINTS_UNCHANGED = "contested_points_unchanged"
+# Every revision of the round before this mediation states the claims in
+# force again, wording aside: the round changed no value, entry id or technique.
+REWORDED = "reworded"
 # Why a revision round opens.
 NO_CONSENSUS = "no_consensus"
 
@@ -272,6 +279,17 @@ def route_within_limit(
             iteration,
         )
         return "judge", CONVERGED
+
+    # Every revision of the round before states the claims in force again,
+    # wording aside: what the analysts claim, cite and map did not move, and a
+    # round more would argue over words. The answers in force go to the judge.
+    if revised is not None and int(revised.get("made") or 0) > 0 and revised.get("reworded"):
+        say(
+            "Every revision of the round before round %d states the claims in force again, "
+            "wording aside; routing to judge with the answers in force.",
+            iteration,
+        )
+        return "judge", REWORDED
 
     # No analyst was revised in the round before: every answer this mediation
     # read is the one the last mediation read. The round made no change, and

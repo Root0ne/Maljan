@@ -68,6 +68,16 @@ class AgentArgument(BaseModel):
             "platform put them to the analysts the line names."
         ),
     )
+    settled_by_ledger: list[str] = Field(
+        default_factory=list,
+        repr=False,
+        description=(
+            "For the mediator: the blocking lines the evidence ledger answered and the "
+            "analysts had been told before (``debate_facts.settled_by_ledger``), each with "
+            "its facts. They no longer block; the mediator wrote them, the platform set them "
+            "aside, and the run records each one."
+        ),
+    )
     converged: list[dict[str, Any]] = Field(
         default_factory=list,
         repr=False,
