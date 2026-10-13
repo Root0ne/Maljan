@@ -54,7 +54,14 @@ def test_the_network_analyst_takes_both_halves_from_the_registry(monkeypatch):
     container = ServiceContainer(config=cfg, mock=True)
     registry = container.get_server_registry()
 
-    monkeypatch.setattr(registry, "tools_for", lambda role, job_id, **kw: ([_T("extract_dns")], []))
+    # The built-in ``network`` server is the one bound to the role.
+    monkeypatch.setattr(
+        registry,
+        "tools_for",
+        lambda role, job_id, *, builtin=None, **kw: (
+            ([_T("extract_dns")], []) if builtin is not False else ([], [])
+        ),
+    )
     monkeypatch.setattr(
         registry,
         "tools_for_ref",
@@ -82,9 +89,10 @@ async def test_the_judge_takes_its_tools_from_the_registry(monkeypatch):
     container = ServiceContainer(config=cfg, mock=True)
     registry = container.get_server_registry()
 
-    async def fake(role, job_id, **kw):
+    async def fake(role, job_id, *, builtin=None, **kw):
         assert role == "judge"
-        return [_T("check_ip_reputation")], []
+        # The built-in ``threatintel`` server is the one bound to the role.
+        return ([_T("check_ip_reputation")], []) if builtin is not False else ([], [])
 
     async def fake_ref(ref, job_id, **kw):
         return [_T(f"{ref.server}_tool")], []

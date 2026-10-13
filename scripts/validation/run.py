@@ -357,7 +357,7 @@ def _rehearsal(wire: str, scenario: str = "normal", **kwargs: Any) -> Rehearsal:
         scenario=scenario,
         provider=wire,
         job_timeout_s=JOB_DEADLINE_S,
-        loop_steps=8 if scenario == "long_loop" else None,
+        loop_steps=kwargs.pop("loop_steps", 8 if scenario == "long_loop" else None),
         **kwargs,
     )
 
@@ -460,6 +460,10 @@ def preflight_r2(ctx: Context, times: int = 3) -> dict[str, Any]:
     return {"ok": all(n >= 30 for n in counts), "tool_counts": counts}
 
 
+# The tool calls a long-loop run gives each analyst (scenarios a and b).
+LONG_LOOP_STEPS = 16
+
+
 def scenario_a(ctx: Context) -> list[RunResult]:
     if not ctx.r2mcp or not Path(ctx.r2mcp).is_file():
         return [_skipped("a", f"r2mcp not found ({ctx.r2mcp_searched})")]
@@ -516,7 +520,7 @@ def scenario_a(ctx: Context) -> list[RunResult]:
     # the preferred tools: its r2 reach is recorded there and held in the long
     # loop, whose sixteen calls follow the answers into the code.
     results = []
-    runs = [(w, "normal", 2) for w in ctx.wires] + [(ctx.wires[0], "long_loop", 16)]
+    runs = [(w, "normal", 2) for w in ctx.wires] + [(ctx.wires[0], "long_loop", LONG_LOOP_STEPS)]
     for wire, scenario, steps in runs:
         rehearsal = replace(
             _rehearsal(
@@ -832,7 +836,14 @@ def scenario_b(ctx: Context) -> list[RunResult]:
             ctx,
             "b",
             name,
-            _rehearsal(wire, extra=extra, fill_from_results=True),
+            # The long loop scenario a holds its code gates with: a normal
+            # run's two calls are spent before the reverser reaches its
+            # decompiler, so the loop follows the answers through import,
+            # listing and decompile instead.
+            replace(
+                _rehearsal(wire, "long_loop", extra=extra, fill_from_results=True),
+                loop_steps=LONG_LOOP_STEPS,
+            ),
             servers={"pyghidra": required},
             gates=gates,
             notes=proposal_notes if name.startswith("b2p") else None,
@@ -1239,6 +1250,11 @@ def expected_first_lookup(servers: dict[str, Any]) -> str:
 # and a pack lookup is the judge's to cite.
 REPUTATION_E = ("E1", "E3", "E4", "E5", "E6")
 STUB_SERVICE = "Stub reputation"
+# The stub's server key: the service an accepted proposal names the stub by,
+# since a probe proposes no display name for a tool whose server gives no
+# title (``core.reputation``: service, display name, then the server).
+STUB_KEY = "repstub"
+STUB_NAMES = frozenset({STUB_SERVICE, STUB_KEY})
 
 
 def scenario_e(ctx: Context) -> list[RunResult]:
@@ -1260,8 +1276,9 @@ def scenario_e(ctx: Context) -> list[RunResult]:
     results = []
     for name, servers, wires in variants:
         expected = expected_first_lookup(servers)
-        if name.startswith("e2p"):
-            # An accepted proposal is held to what the hand declaration gets.
+        if name.startswith("e2p") and expected not in STUB_NAMES:
+            # An accepted proposal is held to what the hand declaration gets:
+            # the stub asked first, whatever name the accepted facts give it.
             expected = STUB_SERVICE
         for wire in wires:
 
@@ -1270,9 +1287,7 @@ def scenario_e(ctx: Context) -> list[RunResult]:
             ) -> Gates:
                 rep = record.malware_report.get("reputation") or []
                 first = rep[0] if rep else {}
-                stub: dict[str, Any] = next(
-                    (r for r in rep if r.get("service") == STUB_SERVICE), {}
-                )
+                stub: dict[str, Any] = next((r for r in rep if r.get("service") in STUB_NAMES), {})
                 own: Gates = {
                     "first_service": (
                         (first.get("service") or "") == expected,
@@ -1280,14 +1295,14 @@ def scenario_e(ctx: Context) -> list[RunResult]:
                         + json.dumps(first, default=str)[:300],
                     ),
                 }
-                if expected == STUB_SERVICE or stub:
+                if expected in STUB_NAMES or stub:
                     own["stub_counts_read"] = (
                         stub.get("malicious") == 3 and stub.get("total") == 60,
                         f"{stub.get('malicious')}/{stub.get('total')}",
                     )
                 return own
 
-            asked = expected == STUB_SERVICE
+            asked = expected in STUB_NAMES
             result, _ = run_one(
                 ctx,
                 "e",
@@ -1445,7 +1460,7 @@ def _kit_run(
         ctx,
         name.split("-", 1)[0],
         name,
-        _rehearsal(ctx.wires[0], extra=extra, fill_from_results=True, **kw),
+        _rehearsal(ctx.wires[0], extra=extra, **{"fill_from_results": True, **kw}),
         servers={"kit": ALL_E},
         gates=_kit_gates(extra, declared),
     )
@@ -1466,7 +1481,20 @@ def scenario_f1(ctx: Context) -> list[RunResult]:
             "static.r2.binary_path": ctx.r2mcp,
             "static.r2.enabled": True,
         }
-        results.append(_kit_run(ctx, "f1-with-r2", extra, {}, static_sample_paths={"r2": ""}))
+        # Every kit tool shares its name with one of the static analyst's own
+        # (r2's decompiler, the built-in servers'), so each is offered as
+        # ``kit__<name>``. The loop turns through its tools rather than
+        # following r2's answers, which would spend every step on r2.
+        results.append(
+            _kit_run(
+                ctx,
+                "f1-with-r2",
+                extra,
+                {},
+                static_sample_paths={"r2": ""},
+                fill_from_results=False,
+            )
+        )
     return results
 
 

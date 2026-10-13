@@ -3227,7 +3227,18 @@ registry's servers and the static providers' alike, so an answer a pattern
 matches is filed as a failed call with the pattern's code and remediation, the
 answers of a declared `sample_open` tool and of the select and analyse calls it
 makes included. A server that declares no pattern has its answers passed on as
-they are. `remediation_with_path` names the job's sample where the server's
+they are, with one exception for a tool its source declares nothing for (an
+operator's tool declared without a kind included): an answer with an error's
+form is filed as a failed call. That is a traceback (its last line is the
+message), or one line of prose of at most 400 characters that opens with an
+error label followed by a message (`Error: …`, `Fatal error: …`, `[ERROR] …`,
+`[Errno 2] …`, `Error executing …: …`), an exception class's shape
+(`ValueError: …`) or a failure phrase with its verb (`Failed to …`, `Unable to
+…`, `Cannot …`, `Could not …`, `Permission denied`). A line that merely opens
+with an error word is data (`Error handling routine at …`, `Invalid
+signature`, `Not found in …`), as is a label followed by a count (`errors: 0`,
+`Failed logins: 0`) and an answer holding any data.
+`remediation_with_path` names the job's sample where the server's
 path for it is known: for the static providers' servers (the job's mirror);
 an `mcp.servers` entry gets `remediation`.
 
@@ -3379,7 +3390,15 @@ shape:
   function map, a function claim's check, a repeated decompile and the static
   turn's tool line read it so, and a call gives its address in the argument
   `arguments.address` names, then in the shared list (`address`, `addr`,
-  `function_address`, `ea`, `va`, `start_address`, `entry_address`). Only a
+  `function_address`, `ea`, `va`, `start_address`, `entry_address`), then,
+  for a tool whose answer is a code listing, in any of the call's own
+  arguments whose name has a code address's shape: address words alone
+  (`address`, `rva`) or paired with words for the place of code (`func_addr`,
+  `target_address`, `instruction_address`, `name_or_address`). A network or
+  identity address (`ip_address`, `email_address`, `remote_addr`,
+  `address_family`), a bound, a size or a base (`end_address`,
+  `base_address`, `address_count`) and `offset` (a page's first row as often
+  as a place) are never read as one. Only a
   tool that declares nothing is read by the words of its name (`decompil`,
   `disassembl`, `xref`, `string`), in one place (`core.undeclared_tools`), and
   the report reads such a tool's code listing by the same words: a
@@ -3548,7 +3567,10 @@ whether it was called and what it was made without; a server that does not
 answer without the withheld values (a child that dies at start included), and
 a call that answers with an error, say so plainly; a cancelled probe is still
 cancelled. An answer
-proposes the row shape when the tool has no `outputSchema`, the auto-name
+proposes the row shape when the tool has no `outputSchema` or one that only
+wraps a text (a single string field, the form an MCP server writes for a tool
+that returns a string) and the answer's text is JSON that is not an error
+report (an `isError` reply, `{"error": …}`, an object of only a message), the auto-name
 prefixes it writes twice beyond the defaults, and, for a one-line prose answer
 to the missing path that the platform does not already read as an error and
 that is no longer than a captured output is kept (6,000 characters), an

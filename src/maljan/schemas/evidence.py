@@ -400,6 +400,7 @@ class LedgerEntry(BaseModel):
             seq=max(0, self.seq - 1),
             source=self.source,
             facts=self.facts,
+            ok=self.ok,
         )
 
     @classmethod
@@ -416,7 +417,7 @@ class LedgerEntry(BaseModel):
             tool=captured.tool_name,
             args=dict(captured.args),
             symbol=captured.symbol,
-            ok=True,
+            ok=captured.ok,
             output=captured.output,
             structured=parse_structured(captured.output),
             seq=seq,
@@ -512,6 +513,14 @@ def build_entry(
             ok, error = False, message
             remediation = remediation or hint
     facts = _facts_at_write(source, tool)
+    if ok and error is None and not repeated_of and _declares_no_kind(facts):
+        # A tool its source declares nothing for has no declared way to say
+        # it failed: an answer that is only an error line is filed as failed.
+        from maljan.core.undeclared_tools import prose_error
+
+        said = prose_error(full)
+        if said is not None:
+            ok, error = False, said
     # The platform cut or replaced the answer: the conversation had no room for
     # it, or the guardrail or a ceiling left a prefix. No reputation record is
     # read from such an output (``_reputation_at_write``).
@@ -568,6 +577,15 @@ def _facts_at_write(source: str | None, tool: str) -> dict[str, Any] | None:
     from maljan.core.declared_reading import facts_record
 
     return facts_record(source, tool)
+
+
+def _declares_no_kind(facts: dict[str, Any] | None) -> bool:
+    """Whether the facts stored at write time say the tool's source declares no kind for it.
+
+    ``None`` (no source recorded: the platform's own calls, a stored run's
+    entries) is not such a record: those are read as they always were.
+    """
+    return isinstance(facts, dict) and not str(facts.get("kind") or "").strip()
 
 
 def _reputation_at_write(

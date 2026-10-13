@@ -2903,8 +2903,13 @@ reached over HTTP and off until an operator registers an agent token.
 The two tool sidecars carry `agents: []` and are bound only by the `ToolRef`s
 in the agent definitions, so the definition's tool list is the single binding
 and a clone that drops a reference really loses those tools. Both bindings are
-composed the same way for every agent — role-bound servers first, then the
-definition's references, under one collision rule.
+composed the same way for every agent, under one collision rule that keeps the
+agent's own tool names bare: its static provider's and sandbox's tools first,
+then the built-in servers bound to its role, then the servers its definition
+references, and only then an operator's server bound to the role by `agents`.
+Where an operator's server offers a tool under a name one of those already
+holds, it is the operator's tool that is offered as `<server>__<tool>`, beside
+the agent's own, never in its place.
 
 The implementations live in `src/maljan/tools/` as plain functions — explicit
 arguments, JSON-serialisable returns, no `Settings` access — so the sidecar is

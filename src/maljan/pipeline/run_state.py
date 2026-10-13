@@ -27,15 +27,16 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from maljan.core.declared_reading import reads_as
+from maljan.core.declared_reading import kind_of, reads_as, recorded
+from maljan.core.reputation import is_lookup_entry, reputation_of
 from maljan.pipeline.triage_pack import (
-    INDEX_TOOL,
     NOT_RUN_PREFIX,
     PIPELINE,
     pack_entries,
     render_pack,
+    renderer_of,
 )
-from maljan.schemas.evidence import is_guard_answer
+from maljan.schemas.evidence import LedgerEntry, is_guard_answer
 from maljan.tools.artefact_index import SERVED_BY
 from maljan.utils.written_forms import pack_escaped
 
@@ -53,6 +54,21 @@ __all__ = [
     "with_run_state_tail",
     "without_run_state_tail",
 ]
+
+# The pack lines the block carries about the sample itself, by the renderer
+# their step declared (``core.pack_steps``): its identity, its digests and its
+# code signature, in that order; and the function index's.
+_IDENTITY_RENDERERS: tuple[str, ...] = ("identity", "digests", "code_signing")
+INDEX_RENDERER = "function_table"
+# A call to a tool nobody declared that was given the sample's SHA-256: the
+# platform's own facts about it, never its answer (read the entry by its id).
+SHA256_GIVEN = "sample sha256 given to: [{id}] {tool} ({agent}), answered"
+# A declared lookup of the sample whose engine counts its declaration could not
+# read: stated by the platform's facts, never by the service's own text.
+LOOKUP_UNREAD = (
+    "sample sha256 looked up by: [{id}] {tool} ({agent}), answered; "
+    "its declaration read no engine counts from the answer"
+)
 
 RUN_STATE_BEGIN = "=== RUN STATE (derived from the ledger; regenerated each turn) ==="
 RUN_STATE_END = "=== END RUN STATE ==="
@@ -227,9 +243,11 @@ def _lines(
 
     rows = list(state.get("evidence_ledger") or [])
     pack = pack_entries(rows)
-    by_tool = {entry.tool: entry for entry in pack if entry.ok}
-    for tool in ("identify_file", "hashes", "signing_info"):
-        entry = by_tool.get(tool)
+    # Each pack line by the renderer its step declared (``renderer_of``), never
+    # by a tool name a step running an operator's tool could take.
+    by_renderer = {renderer_of(entry): entry for entry in pack if entry.ok}
+    for renderer in _IDENTITY_RENDERERS:
+        entry = by_renderer.get(renderer)
         if entry is not None:
             lines.append(_cut(render_pack([entry], 0)))
     # A call to any server's reputation lookup, by its declared kind, and the
@@ -239,6 +257,34 @@ def _lines(
     reputation = [e for e in pack if reads_as(e, "run_state.reputation")]
     if reputation:
         lines.append(_cut(render_pack([reputation[-1]], 0)))
+    # Where the pack holds no answered lookup, a declared lookup an agent made
+    # itself is shown beside the pack's own line, read through its declaration;
+    # a call to a tool nobody declared that was given the sample's SHA-256 is
+    # stated by the platform's own facts alone, never by what it answered.
+    if not any(_answered_lookup(e) for e in pack):
+        declared, undeclared = _agents_lookups(rows, sha256)
+        if declared is not None and _counts_read(declared):
+            lines.append(_cut(render_pack([declared], 0)))
+        elif declared is not None:
+            lines.append(
+                _cut(
+                    LOOKUP_UNREAD.format(
+                        id=declared.id,
+                        tool=pack_escaped(declared.tool),
+                        agent=pack_escaped(declared.agent),
+                    )
+                )
+            )
+        if undeclared is not None:
+            lines.append(
+                _cut(
+                    SHA256_GIVEN.format(
+                        id=undeclared.id,
+                        tool=pack_escaped(undeclared.tool),
+                        agent=pack_escaped(undeclared.agent),
+                    )
+                )
+            )
 
     stages = state.get("stage_results") or {}
     if isinstance(stages, Mapping) and stages:
@@ -260,14 +306,16 @@ def _lines(
         first, last = ids[0], ids[-1]
         span = f"{first}–{last}" if first != last else first
         lines.append(f"ledger: {total} entries ({span}), {len(pack)} from the triage pack")
-    index = by_tool.get(INDEX_TOOL)
+    index = by_renderer.get(INDEX_RENDERER)
     if index is not None:
         lines.append(index_sentence(index.id, index.structured, dropped=index.truncated))
     # A call that was never made — a skipped lookup, a step after the budget,
     # a call a guard answered with no tool run — is not a failed tool; the
     # pack line says "not done" for it, and so does this one by leaving it out.
+    # Tool and agent names are written as the pack writes a value, on one line.
     failed = [
-        f"{_get(row, 'tool')} ({_get(row, 'agent') or PIPELINE})"
+        f"{pack_escaped(str(_get(row, 'tool')))} "
+        f"({pack_escaped(str(_get(row, 'agent') or PIPELINE))})"
         for row in rows
         if _get(row, "ok") is False and not _was_not_made(row) and not is_guard_answer(row)
     ]
@@ -301,6 +349,71 @@ def index_sentence(entry_id: str, data: Any, *, dropped: bool = False) -> str:
         "own, each with its imports called, resolved names, strings, capa rules, callers and "
         f"callees; {SERVED_BY}."
     )
+
+
+def _answered_lookup(entry: Any) -> bool:
+    """Whether ``entry`` is a reputation lookup that answered."""
+    return bool(getattr(entry, "ok", False)) and is_lookup_entry(entry)
+
+
+def _counts_read(entry: LedgerEntry) -> bool:
+    """Whether a lookup's line states engine counts its declaration read, never its text.
+
+    The condition the pack's reputation line words its counts on
+    (``triage_pack._reputation_facts``): a record with a total, read from a
+    structured answer or one with no text.
+    """
+    answer = reputation_of(entry)
+    if answer is None or answer.total is None:
+        return False
+    return isinstance(entry.structured, dict | list) or not entry.output
+
+
+def _given_the_sample(row: Any, wanted: str) -> bool:
+    """Whether one of the call's own top-level arguments is the sample's SHA-256."""
+    args = _get(row, "args")
+    return (
+        bool(wanted)
+        and isinstance(args, Mapping)
+        and any(
+            isinstance(value, str) and value.strip().lower() == wanted for value in args.values()
+        )
+    )
+
+
+def _agents_lookups(rows: list[Any], sha256: str) -> tuple[LedgerEntry | None, LedgerEntry | None]:
+    """An agent's latest declared lookup of the sample, and its latest undeclared call given it.
+
+    Both were given the sample's own SHA-256 as an argument (``_given_the_sample``):
+    a lookup of a dropped file, an address or a domain is about another subject
+    and is never shown as the sample's. The first is a call to a tool declared a
+    reputation lookup (``core.reputation.is_lookup_entry``) that answered. The
+    second is a call to a tool its source declares nothing for that answered:
+    only the platform's facts about it are ever stated. A tool declared of any
+    other kind is neither.
+    """
+    wanted = sha256.strip().lower()
+    declared: LedgerEntry | None = None
+    undeclared: LedgerEntry | None = None
+    for row in rows:
+        if _get(row, "agent") == PIPELINE or _get(row, "ok") is not True:
+            continue
+        if is_guard_answer(row) or _get(row, "repeated_of"):
+            continue
+        if not _given_the_sample(row, wanted):
+            continue
+        lookup = is_lookup_entry(row)
+        if not lookup and not (recorded(row) and not kind_of(row)):
+            continue
+        try:
+            entry = row if isinstance(row, LedgerEntry) else LedgerEntry.model_validate(row)
+        except Exception:  # noqa: BLE001 — one unreadable row is not a lost block
+            continue
+        if lookup:
+            declared = entry
+        else:
+            undeclared = entry
+    return declared, undeclared
 
 
 def _cut(line: str) -> str:

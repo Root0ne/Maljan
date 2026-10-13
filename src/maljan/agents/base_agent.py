@@ -152,6 +152,12 @@ from maljan.schemas.isr_models import AgentISR, Artifact, ClaimEvidence, Finding
 from maljan.schemas.tool_evidence import CapturedToolOutput
 from maljan.utils.marked_cut import CUT_MARK
 
+# The owner an agent's in-process tools claim their names under in the
+# collision map (``_attach_registry_tools``). Holds a colon, which no server
+# key admits (``core.config.SERVER_KEY_PATTERN``), so no server is ever taken
+# for the owner of a name an in-process tool claimed.
+IN_PROCESS_SOURCE = "in-process:agent"
+
 # Regex: matches MITRE ATT&CK technique IDs like T1055 or T1055.001.
 _TECHNIQUE_RE = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\b")
 
@@ -4006,14 +4012,30 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         return _excluded_servers(container.config, self.name)
 
-    def _attach_registry_tools(self, role: str, *, exclude: str = "", **context: Any) -> list[Any]:
+    def _attach_registry_tools(
+        self,
+        role: str,
+        *,
+        exclude: str = "",
+        claimed: Sequence[Any] = (),
+        claimed_by: str = "",
+        **context: Any,
+    ) -> list[Any]:
         """Tools from every server this agent is bound to, minus one it owns.
 
         Two bindings, the same two resolution composes: servers bound to
-        ``role`` by ``MCPServerConfig.agents``, then the servers the agent's
-        own definition names by ``ToolRef``. One ``seen`` map spans both, so
-        the collision rule holds across them and a server named twice
-        contributes one copy.
+        ``role`` by ``MCPServerConfig.agents`` and the servers the agent's own
+        definition names by ``ToolRef``. One ``seen`` map spans both, so the
+        collision rule holds across them and a server named twice contributes
+        one copy; the built-in servers and the definition's own claim their
+        names before an operator's server bound by ``agents``
+        (``ServerRegistry.agent_tools``), so the agent's own tool names never
+        move.
+
+        ``claimed`` is the agent's in-process tools (its static provider's, its
+        sandbox's), already in its tool list: their names are claimed first,
+        under ``claimed_by``, so a server tool of the same name is offered as
+        ``<server>__<tool>`` instead of shadowing the agent's own unrenamed.
 
         ``exclude`` is the static provider's own server: a ``generic_mcp``
         provider driving ``mcp.servers["mine"]`` and an ``agents: ["static"]``
@@ -4032,15 +4054,12 @@ class BaseAnalyst(BudgetMeter, ABC):
             return []
         withheld = ",".join(x for x in (exclude, self._profile_excluded_servers()) if x)
         seen: dict[str, str] = {}
-        tools, reasons = registry.tools_for(
-            role, self._job_key(), exclude=withheld, seen=seen, **context
+        for tool in claimed:
+            seen.setdefault(str(getattr(tool, "name", "")), claimed_by or IN_PROCESS_SOURCE)
+        refs = [ref for ref in self._definition_tool_refs() if str(ref.server) != exclude]
+        tools, reasons = registry.agent_tools(
+            role, self._job_key(), refs, exclude=withheld, seen=seen, **context
         )
-        for ref in self._definition_tool_refs():
-            if str(ref.server) == exclude:
-                continue
-            picked, ref_reasons = registry.tools_for_ref(ref, self._job_key(), seen=seen, **context)
-            tools.extend(picked)
-            reasons.extend(ref_reasons)
         if reasons:
             self.degradation_reasons = [*self.degradation_reasons, *reasons]
         return list(tools)

@@ -252,7 +252,66 @@ ADDRESS_ARGUMENTS: tuple[str, ...] = (
 )
 
 
-def address_arguments(facts: Any) -> tuple[str, ...]:
+# The words an argument's name says a code or memory address in the binary
+# by, read from a positive shape so a network or identity address
+# (``ip_address``, ``email_address``, ``remote_addr``, ``address_family``) and
+# a bound, a size or a base (``end_address``, ``base_address``) never are. A
+# name of these words alone is one (``address``, ``rva``, ``addr_va``);
+# ``offset`` is not, being a page's first row as often as a place.
+_ADDRESS_WORDS = frozenset({"addr", "address", "ea", "va", "rva", "vaddr"})
+# The words that pair with an address word to name the place of code
+# (``func_addr``, ``target_address``, ``entry_rva``, ``instruction_address``).
+_CODE_PLACE_WORDS = frozenset(
+    {
+        "code",
+        "entry",
+        "fn",
+        "func",
+        "function",
+        "insn",
+        "instruction",
+        "loc",
+        "location",
+        "routine",
+        "start",
+        "sub",
+        "target",
+    }
+)
+_CAMEL_RE = re.compile(r"([a-z0-9])([A-Z])")
+_WORD_SPLIT_RE = re.compile(r"[^a-z0-9]+")
+
+
+def named_as_address(name: Any) -> bool:
+    """Whether an argument's name says it takes a code or memory address in the binary.
+
+    One of :data:`ADDRESS_ARGUMENTS`; a name made only of address words
+    (``address``, ``rva``); or a name pairing an address word with words for
+    the place of code (``func_addr``, ``targetAddress``, ``entry_rva``), with
+    ``name … or`` allowed beside them (``name_or_address``). Any other word
+    makes it something else — a network or identity address (``ip``,
+    ``email``, ``remote``, ``bind``, ``host``, ``wallet``, ``family``) or a
+    bound, a size or a base (``end``, ``base``, ``count``, ``space``). Read
+    from the name alone, whatever tool it belongs to.
+    """
+    text = str(name or "")
+    if text.lower() in ADDRESS_ARGUMENTS:
+        return True
+    words = {w for w in _WORD_SPLIT_RE.split(_CAMEL_RE.sub(r"\1_\2", text).lower()) if w}
+    if not words or not (_ADDRESS_WORDS & words):
+        return False
+    rest = words - _ADDRESS_WORDS
+    if not rest:
+        return True
+    if not rest <= _CODE_PLACE_WORDS | {"name", "or", "of"}:
+        return False
+    # ``name_or_address``: a symbol's name or its address, both places of code.
+    if "name" in rest:
+        return "or" in rest
+    return bool(_CODE_PLACE_WORDS & rest)
+
+
+def address_arguments(facts: Any, offered: Iterable[Any] = ()) -> tuple[str, ...]:
     """The arguments a call gives an address in, in the order they are read.
 
     The one the tool declares for the ``address`` role
@@ -260,13 +319,21 @@ def address_arguments(facts: Any) -> tuple[str, ...]:
     declaration names the argument a tool's own name for an address has
     (``offset_va``), and a built-in's declaration does not name every
     argument that takes one (a byte range's ``start_address``), so the shared
-    list still follows it.
+    list still follows it. Then each of ``offered`` (the call's own argument
+    names, or a tool schema's) that is named for an address
+    (:func:`named_as_address`), in its own order: a tool nobody declared
+    whose decompiler takes ``name_or_address`` is read as the one that
+    declares it.
     """
     declared = getattr(facts, "arguments", None)
     held = str(declared.get("address") or "") if isinstance(declared, Mapping) else ""
-    if not held:
-        return ADDRESS_ARGUMENTS
-    return (held, *(name for name in ADDRESS_ARGUMENTS if name != held))
+    known = ADDRESS_ARGUMENTS if not held else (held, *(n for n in ADDRESS_ARGUMENTS if n != held))
+    extra: list[str] = []
+    for name in offered:
+        text = str(name or "")
+        if text and text not in known and text not in extra and named_as_address(text):
+            extra.append(text)
+    return (*known, *extra) if extra else known
 
 
 # The prefixes a decompiler writes before an address when it names a function
@@ -400,8 +467,82 @@ def entry_address_arguments(entry: Any) -> tuple[str, ...]:
     """The arguments an entry's call gave an address in (:func:`address_arguments`).
 
     ``arguments`` is read without a kind, so a record that names none still
-    gives its declared address argument (``declared_reading.kind_free_facts``).
+    gives its declared address argument (``declared_reading.kind_free_facts``);
+    the call's own arguments named for an address follow, for a tool whose
+    answer is a code listing only (:func:`entry_lists_any_code`).
     """
     from maljan.core.declared_reading import kind_free_facts
 
-    return address_arguments(kind_free_facts(entry))
+    args = _field(entry, "args")
+    offered = args if isinstance(args, Mapping) and entry_lists_any_code(entry) else ()
+    return address_arguments(kind_free_facts(entry), offered)
+
+
+# ---------------------------------------------------------------------------
+# A failure an undeclared tool answers in prose
+# ---------------------------------------------------------------------------
+
+# What an answer that only says the call failed has the form of, never just
+# its first word ("Error handling routine at …", "Failed logins: 0", "Invalid
+# signature" and "Not found in …" are data). Only for a tool its source
+# declares nothing for, whose server's declared error patterns
+# (``MCPServerConfig.error_patterns``) did not already file it.
+#
+# An error label: a level in brackets (``[ERROR]``, ``[Errno 2]``), an error
+# word followed by a colon or a bracket (``Error:``, ``Fatal error:``), or an
+# error word naming what it was doing (``Error executing …:``).
+_ERROR_LABEL_RE = re.compile(
+    r"^(?:\[(?:error|fatal)\]|\[errno\s*-?\d+\]|"
+    r"(?:fatal\s+)?(?:error|fatal|exception|failure)\s*[:\]]|"
+    r"error\s+(?:executing|calling|running|invoking|loading|opening|reading|processing|parsing)"
+    r"\b[^:]*:)",
+    re.IGNORECASE,
+)
+# An exception class's shape: one CamelCase name ending in Error or Exception,
+# then a colon (``ValueError: …``, ``pkg.ToolError: …``).
+_EXCEPTION_CLASS_RE = re.compile(r"^[A-Za-z_][\w.]*(?:Error|Exception):")
+# A failure phrase with its verb.
+_FAILURE_PHRASE_RE = re.compile(
+    r"^(?:(?:failed|unable|not\s+able)\s+to\s+[a-z]|"
+    r"(?:cannot|can\s+not|can't|could\s*n[o']t)\s+[a-z]|"
+    r"(?:permission|access)\s+denied\b)",
+    re.IGNORECASE,
+)
+_TRACEBACK_RE = re.compile(r"^traceback \(most recent call last\):", re.IGNORECASE)
+# A longer answer is read as an answer: what a failure says in prose fits a line.
+PROSE_ERROR_CHARS = 400
+
+
+def prose_error(text: Any) -> str | None:
+    """The message of an answer that only says the call failed, else ``None``.
+
+    The answer must have an error's form, not merely open with an error word:
+    a traceback (its last line is the message), or one line of prose no longer
+    than :data:`PROSE_ERROR_CHARS` that opens with an error label followed by
+    a message (``Error: binary not loaded``, ``[ERROR] …``), an exception
+    class's shape (``ValueError: …``) or a failure phrase with its verb
+    (``Failed to open file``, ``Cannot find …``). A label followed by a count
+    or nothing (``errors: 0``) is data, and so is an answer holding any data —
+    a second line, a JSON value, a listing. Conservative by design: what it
+    does not recognise stays an answer, as it was.
+    """
+    said = str(text or "").strip()
+    if not said:
+        return None
+    if _TRACEBACK_RE.match(said):
+        last = said.splitlines()[-1].strip()
+        return last[:PROSE_ERROR_CHARS] or said[:PROSE_ERROR_CHARS]
+    if len(said) > PROSE_ERROR_CHARS or "\n" in said or "\r" in said or said[0] == "{":
+        return None
+    if _FAILURE_PHRASE_RE.match(said):
+        return said
+    label = _ERROR_LABEL_RE.match(said)
+    if label:
+        # The label must be followed by a message: a count or nothing is data.
+        return said if re.search(r"[A-Za-z]", said[label.end() :]) else None
+    shape = _EXCEPTION_CLASS_RE.match(said)
+    if shape:
+        # A message of words, never one value (``LastError: ERROR_SUCCESS``).
+        rest = said[shape.end() :].strip()
+        return said if re.search(r"[A-Za-z]", rest) and re.search(r"\s", rest) else None
+    return None

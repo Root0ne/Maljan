@@ -266,7 +266,10 @@ class NetworkAnalyst(BaseAnalyst):
         # ``_attach_registry_tools`` records its own degradation reasons on the
         # analyst, so nothing here may reassign ``degradation_reasons`` — doing
         # so would erase the reason for the very server that failed to attach.
-        self.tools = [*self._attach_registry_tools("network"), *sandbox]
+        # The sandbox's tools are the agent's own, listed after the servers'
+        # as they always were: a server tool of the same name is offered as
+        # ``<server>__<tool>`` and never shadows one of them.
+        self.tools = [*self._attach_registry_tools("network", claimed=sandbox), *sandbox]
         self.logger.info("Network tool servers: %d tools attached.", len(self.tools))
 
     # ``_try_initialize_mcp`` used to live here. It now lives on ``BaseAnalyst``

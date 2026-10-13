@@ -317,6 +317,10 @@ def build_code_listings(report: MalwareReport) -> list[Figure]:
         for o in outputs or []:
             if not tool_kinds.is_of(o, "figures.code_listing"):
                 continue
+            # A failed call's answer is an error, not a listing: the ledger
+            # report skips it, and no figure says a function was decompiled.
+            if o.get("ok") is False:
+                continue
             body = str(o.get("output") or "").strip()
             if body:
                 listed.append((str(o.get("symbol") or "").strip() or "function", body))

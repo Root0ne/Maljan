@@ -1847,19 +1847,20 @@ class JudgeAgent(BudgetMeter):
         registry = self._server_registry()
         if registry is None:
             return
-        seen: dict[str, str] = {}
-        tools, reasons = await registry.atools_for(
-            "judge", self._job_key(), exclude=self._profile_excluded_servers(), seen=seen
-        )
         # The judge's definition names its servers the same way an analyst's
         # does, and ``knowledge`` reaches it by that reference alone — it is
         # bound to no role. Awaited here rather than taken from a
         # ``ResolvedAgent`` for the reason ``aclose`` spells out: whichever
         # loop enters a toolkit's exit stack has to be the one that unwinds it.
-        for ref in self._definition_tool_refs():
-            picked, ref_reasons = await registry.atools_for_ref(ref, self._job_key(), seen=seen)
-            tools.extend(picked)
-            reasons.extend(ref_reasons)
+        # The built-in servers and the definition's own claim their names
+        # before an operator's server bound by ``agents``.
+        tools, reasons = await registry.aagent_tools(
+            "judge",
+            self._job_key(),
+            self._definition_tool_refs(),
+            exclude=self._profile_excluded_servers(),
+            seen={},
+        )
         self.tools = tools
         self.degradation_reasons = reasons
         self.logger.info("Judge tool servers: %s", [t.name for t in self.tools])

@@ -725,17 +725,23 @@ def tools_taking_an_address(tools: Iterable[Any]) -> list[str]:
     Read from each tool's own argument schema, by the argument its
     declaration names for an address and the shared list after it
     (``core.undeclared_tools.address_arguments``): what a tool can be asked is
-    what it declares, whichever server serves it.
+    what it declares, whichever server serves it. A field named for a code
+    address (``core.undeclared_tools.named_as_address``) counts only for a tool
+    whose answer is a code listing, so a reputation lookup taking
+    ``ip_address`` is never listed.
     """
     from maljan.agents.tool_pinning import declared_facts_of
-    from maljan.core.undeclared_tools import address_arguments
+    from maljan.core.undeclared_tools import address_arguments, code_kind
 
     names: list[str] = []
     for tool in tools or ():
         fields = getattr(getattr(tool, "args_schema", None), "model_fields", None)
         if not isinstance(fields, dict):
             continue
-        taking = {name.lower() for name in address_arguments(declared_facts_of(tool))}
+        facts = declared_facts_of(tool)
+        # A field read by its name only for a tool whose answer is a code listing.
+        offered = fields if code_kind(facts, getattr(tool, "name", "")) else ()
+        taking = {name.lower() for name in address_arguments(facts, offered)}
         if any(str(field).strip().lower() in taking for field in fields):
             names.append(str(getattr(tool, "name", "") or ""))
     return [n for n in names if n]

@@ -699,6 +699,10 @@ class SandboxProvider(ABC):
     # block by each entry's own advanced flag.
     guide_leaves: ClassVar[tuple[str, ...]] = ()
     guide_advanced_leaves: ClassVar[tuple[str, ...]] = ()
+    # Whether the provider hands its report reader the per-task reports it
+    # fetched beside the report itself, so a stored report that does not say
+    # what was read (``SandboxReport.read_from``) is read as having had them.
+    FETCHES_TASK_REPORTS: ClassVar[bool] = False
     # The non-secret environment variable names this provider's own sentences
     # name, kept whole in published text (as ``StaticProvider.variable_names``).
     variable_names: ClassVar[tuple[str, ...]] = ()

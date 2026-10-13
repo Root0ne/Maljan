@@ -257,6 +257,57 @@ def read_by_name(entry: Any) -> bool:
     return not recorded(entry) and not has_stored_facts(entry)
 
 
+@cache
+def _shipped_tools_by_source() -> Mapping[str, frozenset[str]]:
+    """Each built-in source, by its recorded text, and the tool names it ships a declaration for.
+
+    The built-in servers (``mcp:<key>``), the provider-owned blocks
+    (``provider:<id>``) and the platform's in-process sources, from built-in
+    data alone.
+    """
+    from maljan.core import builtin_declarations as shipped
+    from maljan.core.tool_declarations import PROVIDER_BLOCKS
+
+    out: dict[str, frozenset[str]] = {
+        f"mcp:{key}": frozenset(shipped.server_declaration(key).get("tool_facts") or {})
+        for key in shipped.builtin_server_names()
+    }
+    for source, path in PROVIDER_BLOCKS.items():
+        block = "_".join(path.split(".")[1:])
+        out[source] = frozenset(shipped.provider_declaration(block).get("tool_facts") or {})
+    for source, tools in _in_process_blocks().items():
+        out[source] = frozenset(tools)
+    return out
+
+
+def shipped_under_its_source(entry: Any) -> bool:
+    """Whether ``entry``'s tool is one a built-in source ships, under the source it recorded.
+
+    The platform's own name tables (which format a parser reads, which tool
+    opens which container) describe the platform's own tools only: an entry
+    is read by one when the source it recorded is a built-in source that
+    ships a declaration for its tool (its bare name, the collision prefix
+    taken off). An operator's tool of the same name, recorded under the
+    operator's server, never is; nor is an entry that recorded no source.
+    Read from the entry and built-in data, never the reading process's
+    settings.
+    """
+    source = ToolDeclarations.source_of(entry)
+    if source is None:
+        return False
+    return ships_tool(str(source), _field(entry, "tool"))
+
+
+def ships_tool(source: str, tool: Any) -> bool:
+    """Whether the built-in ``source`` (``mcp:<key>``, ``pack`` …) ships ``tool``.
+
+    By the tool's bare name; ``False`` for a source that is not built-in, and
+    for a tool the source ships no declaration for.
+    """
+    held = _shipped_tools_by_source().get(str(source))
+    return held is not None and bare_name(tool) in held
+
+
 @lru_cache(maxsize=4096)
 def _parsed(text: str) -> ToolFacts | None:
     """One stored record as facts; ``None`` for one that declares nothing or cannot be read.

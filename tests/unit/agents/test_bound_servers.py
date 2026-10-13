@@ -68,20 +68,30 @@ def _serve_refs(
     monkeypatch.setattr(registry, "tools_for_ref", _ref)
 
 
-def test_the_provider_tools_come_first_then_the_bound_server_then_the_references(monkeypatch):
+def _operator_bound(tools, reasons=()):
+    """A ``tools_for`` answering the operator's bound servers, which are not built-in."""
+
+    def _bound(role, job_id, *, builtin=None, **kw):
+        return ([*tools], [*reasons]) if builtin is not True else ([], [])
+
+    return _bound
+
+
+def test_the_provider_tools_come_first_then_the_references_then_the_bound_server(monkeypatch):
     container = _container(
         monkeypatch,
         extra=MCPServerConfig(enabled=True, command="mcp", agents=["static"], tools=["helper"]),
     )
     registry = container.get_server_registry()
-    monkeypatch.setattr(registry, "tools_for", lambda role, job_id, **kw: ([_T("helper")], []))
+    monkeypatch.setattr(registry, "tools_for", _operator_bound([_T("helper")]))
     _serve_refs(registry, monkeypatch, {"analysis": "pe_info", "knowledge": "attck_lookup"})
     agent = _wired(container, "static")
     monkeypatch.setattr(type(agent), "_provider", lambda self: _StubProvider())
     agent._initialize_mcp_client()
-    # The provider opens its own tools, the role binding comes next, and the
-    # definition's references last — the order the settings probe reports.
-    assert [t.name for t in agent.tools] == ["ghidra_tool", "helper", "pe_info", "attck_lookup"]
+    # The provider opens its own tools, the definition's references come next,
+    # and the operator's role binding last: the agent's own names are claimed
+    # before an addition's (``ServerRegistry.agent_tools``).
+    assert [t.name for t in agent.tools] == ["ghidra_tool", "pe_info", "attck_lookup", "helper"]
 
 
 class _StubProvider:
@@ -132,7 +142,9 @@ def test_the_server_the_provider_already_owns_is_not_attached_twice(monkeypatch)
     provider.server_name = "mine"
     monkeypatch.setattr(type(agent), "_provider", lambda self: provider)
     agent._initialize_mcp_client()
-    assert asked == ["mine"]
+    # Asked once for the bound built-ins and once for the operator's servers,
+    # each time without the provider's own.
+    assert asked == ["mine", "mine"]
     assert asked_refs == [], "a reference to the provider's own server is skipped too"
 
 
@@ -144,9 +156,7 @@ def test_a_failed_bound_server_degrades_a_static_run_that_would_otherwise_fail(m
     )
     registry = container.get_server_registry()
     monkeypatch.setattr(
-        registry,
-        "tools_for",
-        lambda role, job_id, **kw: ([], ["mcp server 'broken' unavailable"]),
+        registry, "tools_for", _operator_bound([], ["mcp server 'broken' unavailable"])
     )
     _serve_refs(registry, monkeypatch, {"analysis": "pe_info", "knowledge": "attck_lookup"})
     agent = _wired(container, "static")
@@ -179,13 +189,13 @@ def test_the_dynamic_analyst_appends_after_the_sandbox_tools(monkeypatch, role):
     )
     container.sandbox_report = {"behavior": {"processes": [{"pid": 1}]}}
     registry = container.get_server_registry()
-    monkeypatch.setattr(registry, "tools_for", lambda r, job_id, **kw: ([_T("extra")], []))
+    monkeypatch.setattr(registry, "tools_for", _operator_bound([_T("extra")]))
     _serve_refs(registry, monkeypatch, {"knowledge": "attck_lookup"})
     agent = _wired(container, "dynamic")
     agent._initialize_mcp_client()
     names = [t.name for t in agent.tools]
     # The in-process sandbox tools its definition references come first, then
-    # the role-bound server, then the referenced ones.
+    # the referenced servers, then the operator's role-bound server.
     assert "sandbox_processes" in names
-    assert names.index("extra") > names.index("sandbox_processes")
-    assert names[-1] == "attck_lookup"
+    assert names.index("attck_lookup") > names.index("sandbox_processes")
+    assert names[-1] == "extra"

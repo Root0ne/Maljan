@@ -43,6 +43,7 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
@@ -62,6 +63,28 @@ Room = Callable[[str], "int | None"]
 # What joins two sources that fit one chunk: the break the upstream block is
 # put in front of a head chunk with.
 SOURCE_SEPARATOR = "\n\n"
+
+
+def head_object(data: str) -> dict | None:
+    """The JSON object a chunk opens with, read whole whatever follows it.
+
+    A head chunk of a sample-fed agent opens with the sample context as one
+    JSON object (``analysis_file_path`` and the rest); when another source fits
+    beside it (:func:`joined_when_it_fits`) that source follows after
+    :data:`SOURCE_SEPARATOR`, and the joined text is no longer one JSON
+    document. Only the first value is decoded, so what is joined after it
+    never decides whether the head is read. ``None`` when the chunk does not
+    open with a JSON object. One pass over the first value.
+    """
+    stripped = data.lstrip()
+    if not stripped.startswith("{"):
+        return None
+    try:
+        parsed, _end = json.JSONDecoder().raw_decode(stripped)
+    except (json.JSONDecodeError, ValueError, RecursionError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
 
 # The chunk size this platform shipped with, in characters: what an input is
 # split at with no window learned, and the least the head source is given.

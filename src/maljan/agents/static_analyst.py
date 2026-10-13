@@ -255,10 +255,16 @@ class StaticAnalyst(BaseAnalyst):
         # privately and closes it itself (``ServiceContainer.aclose`` calls
         # ``get_static_provider().close()``), so there is nothing for this
         # analyst's ``close_tools()`` to release on the static path.
+        # The provider's tools are the agent's own: a server tool of the same
+        # name is offered as ``<server>__<tool>`` beside them, never in their
+        # place.
         self.tools = [
             *pool,
             *self._attach_registry_tools(
-                "static", exclude=str(getattr(provider, "server_name", ""))
+                "static",
+                exclude=str(getattr(provider, "server_name", "")),
+                claimed=pool,
+                claimed_by=f"provider:{provider.id}",
             ),
         ]
         self.logger.info("Static provider '%s': %d tools attached.", provider.id, len(self.tools))
@@ -828,16 +834,10 @@ def _extract_load_hint(data: str, offered: frozenset[str], sample_open: Any = No
     the tool is among those offered; without one the line gives the path and
     names no tool, so a provider that opens no sample is not told to call one.
     """
-    import json as _json
+    from maljan.loaders.binary_chunker import head_object
 
-    stripped = data.strip()
-    if not stripped or not stripped.startswith("{"):
-        return ""
-    try:
-        parsed = _json.loads(stripped)
-    except (_json.JSONDecodeError, ValueError):
-        return ""
-    if not isinstance(parsed, dict):
+    parsed = head_object(data)
+    if parsed is None:
         return ""
     path = parsed.get("analysis_file_path")
     if not isinstance(path, str) or not path:
@@ -862,16 +862,10 @@ def _extract_analysis_path(data: str) -> str | None:
     so the sink-reachability pre-pass can hand it to the provider. Best-effort:
     non-JSON or pathless chunks return None.
     """
-    import json as _json
+    from maljan.loaders.binary_chunker import head_object
 
-    stripped = data.strip()
-    if not stripped or not stripped.startswith("{"):
-        return None
-    try:
-        parsed = _json.loads(stripped)
-    except (_json.JSONDecodeError, ValueError):
-        return None
-    if not isinstance(parsed, dict):
+    parsed = head_object(data)
+    if parsed is None:
         return None
     path = parsed.get("analysis_file_path")
     return path if isinstance(path, str) and path else None
@@ -885,16 +879,10 @@ def _extract_sample_hash(data: str) -> str | None:
     ``sample_id``, so a re-analysis can exclude its own prior matches. Falls
     back to the short ``sample_hash`` fingerprint. Best-effort: None on any miss.
     """
-    import json as _json
+    from maljan.loaders.binary_chunker import head_object
 
-    stripped = data.strip()
-    if not stripped or not stripped.startswith("{"):
-        return None
-    try:
-        parsed = _json.loads(stripped)
-    except (_json.JSONDecodeError, ValueError):
-        return None
-    if not isinstance(parsed, dict):
+    parsed = head_object(data)
+    if parsed is None:
         return None
     for key in ("sha256", "sample_hash"):
         val = parsed.get(key)

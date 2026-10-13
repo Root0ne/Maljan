@@ -1004,18 +1004,24 @@ def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAge
         tools,
         seen,
     )
-    _claim_in_process_tools(_sandbox_tools(container, definition), "sandbox", tools, seen)
-    _claim_in_process_tools(_agent_tools(container, definition, key), "team", tools, seen)
-    registry = container.get_server_registry()
-    bound, bound_reasons = registry.tools_for(
-        key, job_key, exclude=_excluded_servers(settings, key), seen=seen
+    _claim_in_process_tools(
+        _sandbox_tools(container, definition), "in-process:sandbox", tools, seen
     )
-    tools.extend(bound)
-    reasons.extend(bound_reasons)
-    for ref in _mcp_refs(settings, definition, key):
-        referenced, ref_reasons = registry.tools_for_ref(ref, job_key, seen=seen)
-        tools.extend(referenced)
-        reasons.extend(ref_reasons)
+    _claim_in_process_tools(
+        _agent_tools(container, definition, key), "in-process:team", tools, seen
+    )
+    registry = container.get_server_registry()
+    # The built-in servers and the definition's own claim their names before
+    # an operator's server bound by ``agents`` (``ServerRegistry.agent_tools``).
+    served, served_reasons = registry.agent_tools(
+        key,
+        job_key,
+        _mcp_refs(settings, definition, key),
+        exclude=_excluded_servers(settings, key),
+        seen=seen,
+    )
+    tools.extend(served)
+    reasons.extend(served_reasons)
 
     deduped = _dedupe(tools)
     staged, staging_reasons = _stage(container, deduped, job_key)
@@ -1073,18 +1079,22 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
     # above returns nothing, so without this the registry below would be the
     # first builder — on the caller's own loop.
     await asyncio.to_thread(container.get_context_budget)
-    _claim_in_process_tools(_sandbox_tools(container, definition), "sandbox", tools, seen)
-    _claim_in_process_tools(_agent_tools(container, definition, key), "team", tools, seen)
-    registry = container.get_server_registry()
-    bound, bound_reasons = await registry.atools_for(
-        key, job_key, exclude=_excluded_servers(settings, key), seen=seen
+    _claim_in_process_tools(
+        _sandbox_tools(container, definition), "in-process:sandbox", tools, seen
     )
-    tools.extend(bound)
-    reasons.extend(bound_reasons)
-    for ref in _mcp_refs(settings, definition, key):
-        referenced, ref_reasons = await registry.atools_for_ref(ref, job_key, seen=seen)
-        tools.extend(referenced)
-        reasons.extend(ref_reasons)
+    _claim_in_process_tools(
+        _agent_tools(container, definition, key), "in-process:team", tools, seen
+    )
+    registry = container.get_server_registry()
+    served, served_reasons = await registry.aagent_tools(
+        key,
+        job_key,
+        _mcp_refs(settings, definition, key),
+        exclude=_excluded_servers(settings, key),
+        seen=seen,
+    )
+    tools.extend(served)
+    reasons.extend(served_reasons)
 
     deduped = _dedupe(tools)
     staged, staging_reasons = await _astage(

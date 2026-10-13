@@ -195,6 +195,24 @@ def _read_entry_points() -> None:
             )
 
 
+def fetches_task_reports(provider: str) -> bool:
+    """Whether the registered sandbox provider ``provider`` declares it fetches task reports.
+
+    Read from the provider class's declaration
+    (``SandboxProvider.FETCHES_TASK_REPORTS``), never from settings; ``False``
+    for a provider that declares nothing and for an id no provider is
+    registered under (a stored report of a provider since removed).
+    """
+    from maljan.providers.errors import ProviderConfigurationError
+    from maljan.providers.registry import sandbox_provider_class
+
+    try:
+        cls = sandbox_provider_class(str(provider or ""))
+    except ProviderConfigurationError:
+        return False
+    return bool(getattr(cls, "FETCHES_TASK_REPORTS", False))
+
+
 def report_reader(reader_id: str) -> ReportReader | None:
     """The reader registered under ``reader_id``, or ``None``."""
     _read_entry_points()
@@ -413,9 +431,6 @@ class TriageReportReader(ReportReader):
     """A Triage overview, with the behavioural task reports a sandbox fetched beside it."""
 
     id = "triage"
-    # The providers that hand this reader task reports to read, for a report
-    # that does not say what was read.
-    TASK_READERS: ClassVar[frozenset[str]] = frozenset({"triage"})
     PARTIAL = "read from its overview alone"
 
     def read(
@@ -449,8 +464,9 @@ class TriageReportReader(ReportReader):
         )
 
         if not read_from:
-            # Not said: the providers that fetch task reports are taken to have.
-            read_from = READ_FROM_TASKS if provider in self.TASK_READERS else READ_FROM_OVERVIEW
+            # Not said: a provider that declares it fetches task reports
+            # (``SandboxProvider.FETCHES_TASK_REPORTS``) is taken to have.
+            read_from = READ_FROM_TASKS if fetches_task_reports(provider) else READ_FROM_OVERVIEW
         if read_from == READ_FROM_OVERVIEW:
             return Reading(TRIAGE_OVERVIEW_FILLS, partial=self.PARTIAL)
         return Reading(TRIAGE_NORMALISER_FILLS)

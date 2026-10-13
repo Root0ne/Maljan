@@ -152,7 +152,7 @@ from maljan.pipeline.nodes import (
     skipped_analysts_reason,
 )
 from maljan.pipeline.routing import NO_CONTESTED_POINT, NOT_REVISED, POINTS_UNCHANGED
-from maljan.pipeline.run_state import NO_LIMIT, budget_line
+from maljan.pipeline.run_state import LOOKUP_UNREAD, NO_LIMIT, SHA256_GIVEN, budget_line
 from maljan.pipeline.sycophancy_detector import convergence_sentence
 from maljan.pipeline.validation import (
     _UNPARSED_ANSWER_MESSAGE,
@@ -2014,6 +2014,12 @@ PROMPTS: dict[str, str] = {
     _SECTIONS_ENTRY: _sandbox_sections_sentences(),
     "a term's example ids and how many more": _term_ids_said(["T1000", "T1001", "T1002"]),
     "run-state budget line of a loop with no limit": budget_line(NO_LIMIT, NO_LIMIT),
+    "run-state line of an undeclared call given the sample's hash": SHA256_GIVEN.format(
+        id="ev_0002", tool="lookup", agent="judge"
+    ),
+    "run-state line of a declared lookup whose counts were not read": LOOKUP_UNREAD.format(
+        id="ev_0002", tool="lookup", agent="judge"
+    ),
     "ask tool budget sentence with no limit": _what_an_ask_gets_sentence("lead", None, None),
     "judge technique question head": technique_question_head("r", "Suspicious", ["T1112"]),
     "judge technique question entry marks": " ".join(
