@@ -192,12 +192,22 @@ report instead:
    report's block count. Where no list reads as one of those parts, no
    declaration is proposed (it would read nothing the unread read does not).
 
-   A list reads as DNS questions only with DNS-specific evidence: the question
-   under `request` or `query`, its answers under `answers`, a key only DNS
-   rows write (`qname`, `qtype`, `rrtype` ...), or question types that are DNS
-   record types; a name it sits under saying so (`dns`, `lookups`) alone reads
-   with low confidence, and not where its type values are seen to be no record
-   types. A name and a type alone are what function, section, rule and
+   A list reads as DNS questions only with DNS-specific evidence: a key only
+   DNS rows write (`qname`, `qtype`, `rrtype` ...), question types that are DNS
+   record types, or the DNS row's structure (a question, its type and its
+   answers under `answers`); a name it sits under saying so (`dns`, `lookups`)
+   alone reads with low confidence, and not where its type values are seen to
+   be no record types. A question under `request` or `query` is no evidence on
+   its own, since HTTP, WMI, LDAP, registry and database logs write those
+   keys too: it reads as DNS only beside a second DNS signal (one of the
+   above, a name saying `dns`, `lookups` or `resolutions`, a key saying `dns`,
+   or question values shaped like host names), and never with `high`
+   confidence on that spelling and one signal alone. A list whose question
+   values are no host names (white space, a slash, a backslash, brackets, a
+   query's punctuation, or no dot in any of them), or whose rows carry another
+   protocol's or an endpoint's keys (`method`, `url`, `uri`, `path`, `status`,
+   `user_agent`, `port` ...), reads as no DNS unless a key only DNS rows write,
+   or record types, say otherwise. A name and a type alone are what function, section, rule and
    classification lists hold, and a name with its addresses (`addresses`,
    `ips`, `resolved`) what interfaces, hosts files and embedded configurations
    hold. Likewise a digest, a name and a size read as dropped files only under
@@ -205,7 +215,9 @@ report instead:
    listing's members. Each mapping slot goes to the list with the strongest
    evidence (its confidence, the evidence of its own kind, then the parts it
    names), not to the first one found, so a list that only resembles a kind
-   never takes the slot from one that plainly is of it.
+   never takes the slot from one that plainly is of it. A mapping holds one
+   path per slot, so every other list read as the same slot is named in the
+   proposal's `notes`, for the admin to map instead.
 2. A run reads it *unread*: every top-level block is a raw `report.<block>`
    channel the dynamic analyst reads, every section is listed as unavailable,
    and no observed fact (process, flow, DNS name, indicator) is drawn from it.
@@ -248,6 +260,20 @@ A body nested deeper than 160 levels is logged once as it is read, with the
 number of containers read as the marked placeholder. The upload is read in a
 worker thread, so a large body never holds the API's event loop.
 
+### A sandbox served over MCP
+
+A sandbox reached through an MCP server you add is read through its tools'
+declarations. Declare the server a sandbox source with `roles: [sandbox]` on
+its block (the console's declaration "roles" box, or the API) before its
+connection test: only then are its undeclared tools proposed sandbox kinds
+(`sandbox_processes`, `sandbox_network`, `sandbox_dropped_files`) from the
+shape of their rows, since rows shaped like a run's are also what a memory
+image, a capture or a lookup answers with. The shipped CAPE MCP block carries
+the role. A connection test of a server without it, some of whose tools' rows
+read like a sandbox run's, proposes no sandbox kind and says so in the
+proposals' notes, naming those tools. See
+[proposed declarations](/configuration/) for what each kind reads.
+
 ### Report formats are declarations
 
 Each report format is declared as data. Every sandbox provider and the upload
@@ -287,9 +313,14 @@ the exception: it is tried after every built-in and every registered reader,
 so it never takes a report one of them reads. Saving such a format whose
 detect overlaps a built-in's returns a warning beside its `detect` (the save
 is kept): a built-in recognises the plainest report one of its detect groups
-describes, or it recognises the plainest report one of a built-in's groups
-describes. A format carries no stored sample report, so the check reads those
-plainest reports, built from the tests themselves. A
+describes, it recognises the plainest report one of a built-in's groups
+describes, or (a partial overlap) one of its groups and one of a built-in's
+test a shared place (the same path, or one below the other) and one report can
+pass both, as every report of a built-in's family carrying the paths the
+format tests does. Groups that share no place are not compared, since nearly
+any two groups can hold on one report; try a format whose paths are all its
+own with a real report. A format carries no stored sample report, so the check
+reads those plainest reports, built from the tests themselves. A
 declaration under a built-in's name is merged over that built-in field by
 field: a field you set replaces the shipped value, a field you leave out keeps
 it. So `{"name": "cape2", "signature_scale": {...}}` changes CAPE's scale alone,

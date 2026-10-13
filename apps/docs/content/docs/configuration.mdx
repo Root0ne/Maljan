@@ -3578,11 +3578,18 @@ command line as values; rows naming a destination and a port, or a DNS
 question, propose `sandbox_network` (with the `flow_table` reader where the
 answer lays its rows out as one, under `tcp`, `udp`, `conversations` or
 `dns`); rows naming a digest, a name and a size propose
-`sandbox_dropped_files`. A DNS question needs DNS-specific evidence: the
-question under `request` or `query`, its answers under `answers`, a key only
-DNS rows write (`qname`, `qtype`, `rrtype` ...), or question types that are
-DNS record types; a list or tool name saying DNS alone reads with low
-confidence. A name with its addresses (`addresses`, `ips`, `resolved`) is what
+`sandbox_dropped_files`. A DNS question needs DNS-specific evidence: a key
+only DNS rows write (`qname`, `qtype`, `rrtype` ...), question types that are
+DNS record types (where a confirmed call's answer shows them), or a question,
+its type and its answers under `answers`; a list or tool name saying DNS alone
+reads with low confidence. A question under `request` or `query` needs a
+second DNS signal beside it (one of those, a name saying `dns`, `lookups` or
+`resolutions`, or answer values shaped like host names), and rows carrying an
+HTTP request's or an endpoint's keys (`method`, `url`, `status`, `port` ...)
+or question values that are no host names read as no DNS question. A
+connection test of a server without the role whose tools' rows read like a
+sandbox run's says so in the proposals' notes, naming the tools, and
+proposes no sandbox kind. A name with its addresses (`addresses`, `ips`, `resolved`) is what
 interfaces, hosts files, name servers and embedded configurations hold, and is
 no DNS question; dropped files need a list or tool name saying so: a name and
 a type, or a digest, a name and a size, are what function, section, rule and
