@@ -782,10 +782,11 @@ def _detection_items(run: RunRecord) -> tuple[list[_Item], bool, list[str]]:
         if spec is None:
             continue
         recorded = True
-        engine, compared = spec
-        # The table is labelled by the tool its title names (any tool of the
-        # kind, a swapped one as itself), else by the engine it was built for.
-        engine = _titled_engine(section.get("title")) or engine
+        kind_engine, compared = spec
+        # Rows pair by the section's kind, so one rule matched by two tools of
+        # the kind in two runs is one detection; the label names the tool the
+        # table's title names (a swapped one as itself), else the kind's engine.
+        label_engine = _titled_engine(section.get("title")) or kind_engine
         columns = [_text(c).lower() for c in _list(section.get("columns"))]
         try:
             rule_at = columns.index("rule")
@@ -804,7 +805,7 @@ def _detection_items(run: RunRecord) -> tuple[list[_Item], bool, list[str]]:
                 name.lower(): (_text(cells[pos]) if pos < len(cells) else "") or None
                 for name, pos in positions.items()
             }
-            items.append(_Item(f"{engine}|{rule}", f"{engine}: {rule}", fields))
+            items.append(_Item(f"{kind_engine}|{rule}", f"{label_engine}: {rule}", fields))
     return items, recorded, evidence
 
 
