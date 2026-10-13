@@ -6864,8 +6864,8 @@ _CLAUSE_START_RE = re.compile(
     re.IGNORECASE,
 )
 # A relative clause's word just before the statement: its subject is the last
-# thing the clause before it names.
-_RELATIVE_TAIL_RE = re.compile(r"(?:,\s*)?\b(?:which|that)\s*$", re.IGNORECASE)
+# thing the clause before it names (``_relative_word_at``).
+_RELATIVE_WORDS = ("which", "that")
 # A subject that is a pronoun: it names what the sentence before it named.
 _PRONOUN_SUBJECT_RE = re.compile(r"^\W*(?:its|it|their|they|this|these|that)\b", re.IGNORECASE)
 # A value a subject writes: in quotes or backticks, or an identifier of three
@@ -6992,16 +6992,32 @@ def _argument_addresses(entry: Any) -> list[int]:
     return list(dict.fromkeys(found))
 
 
-def _absence_subject(text: str, start: int) -> str:
-    """The words a statement at ``start`` is about: its clause's text before it."""
-    head = text[:start]
-    if _RELATIVE_TAIL_RE.search(head):
-        return head
-    flat = _outside_brackets(head)
-    begins = 0
-    for match in _CLAUSE_START_RE.finditer(flat):
-        begins = match.end()
-    return head[begins:]
+def _relative_word_at(text: str, end: int) -> int | None:
+    """Where a relative word (``which``, ``that``) ending ``text[:end]`` begins, its comma included.
+
+    Read backwards from ``end`` over whitespace only, so a call costs the
+    whitespace and the word it reads, never the text before them.
+    """
+    at = end
+    while at > 0 and text[at - 1].isspace():
+        at -= 1
+    for word in _RELATIVE_WORDS:
+        begin = at - len(word)
+        if (
+            begin >= 0
+            and text[begin:at].lower() == word
+            and (begin == 0 or not (text[begin - 1].isalnum() or text[begin - 1] == "_"))
+        ):
+            comma = begin
+            while comma > 0 and text[comma - 1].isspace():
+                comma -= 1
+            return comma - 1 if comma > 0 and text[comma - 1] == "," else begin
+    return None
+
+
+def _clause_starts(sentence: str) -> list[int]:
+    """Where each clause of ``sentence`` begins after the first, read once outside brackets."""
+    return [match.end() for match in _CLAUSE_START_RE.finditer(_outside_brackets(sentence))]
 
 
 def _subject_addresses(subject: str, relative: bool) -> list[int]:
@@ -7053,7 +7069,21 @@ def ledger_absence_contradictions(payload: Any, entries: EntryTexts | None) -> l
     def _read(text: str) -> None:
         sentences = _SENTENCE_END_RE.split(text)
         for index, sentence in enumerate(sentences):
-            for match in _ABSENCE_RE.finditer(sentence):
+            statements = list(_ABSENCE_RE.finditer(sentence))
+            if not statements:
+                continue
+            # Read once per sentence: its clause starts, its citations and the
+            # addresses of the sentence before it. A statement's subject runs
+            # from its clause's start, or from the statement before it in the
+            # same clause, to the statement: no text is read for two of them.
+            starts = _clause_starts(sentence)
+            cited = [
+                entry_id for _line, ids in _sentences_with_citations(sentence) for entry_id in ids
+            ]
+            before_addresses: list[int] | None = None
+            at_start = 0
+            done = 0
+            for match in statements:
                 kind = (
                     _NOT_READ
                     if match.group("read") or match.group("read_perfect")
@@ -7061,17 +7091,28 @@ def ledger_absence_contradictions(payload: Any, entries: EntryTexts | None) -> l
                     if match.group("ledger")
                     else _NOT_CONFIRMED
                 )
-                subject = _absence_subject(sentence, match.start())
-                relative = bool(_RELATIVE_TAIL_RE.search(subject))
-                if relative:
-                    subject = _RELATIVE_TAIL_RE.sub("", subject)
+                while at_start < len(starts) and starts[at_start] <= match.start():
+                    at_start += 1
+                begins = max(starts[at_start - 1] if at_start else 0, done)
+                done = match.end()
+                relative_at = _relative_word_at(sentence, match.start())
+                relative = relative_at is not None and relative_at >= begins
+                subject = sentence[begins : relative_at if relative else match.start()]
+                if relative and not _prose_addresses(subject):
+                    # The relative word opens the clause: its subject is what
+                    # the clause before it names last.
+                    previous = starts[at_start - 2] if at_start >= 2 else 0
+                    subject = sentence[previous:relative_at]
                 addresses = _subject_addresses(subject, relative)
                 if not addresses and index and _PRONOUN_SUBJECT_RE.match(subject):
-                    before = list(dict.fromkeys(_prose_addresses(sentences[index - 1])))
-                    addresses = before if len(before) == 1 else []
+                    if before_addresses is None:
+                        before_addresses = list(
+                            dict.fromkeys(_prose_addresses(sentences[index - 1]))
+                        )
+                    addresses = before_addresses if len(before_addresses) == 1 else []
                 whats: list[str] = []
                 held: list[str] = []
-                for what, holders in _contradicted(kind, subject, addresses, sentence):
+                for what, holders in _contradicted(kind, subject, addresses, cited):
                     if holders and (kind, what) not in asked:
                         asked.add((kind, what))
                         whats.append(what)
@@ -7080,7 +7121,7 @@ def ledger_absence_contradictions(payload: Any, entries: EntryTexts | None) -> l
                     found.append((kind, whats, held, sentence.strip()))
 
     def _contradicted(
-        kind: str, subject: str, addresses: list[int], sentence: str
+        kind: str, subject: str, addresses: list[int], cited: list[str]
     ) -> list[tuple[str, list[str]]]:
         out: list[tuple[str, list[str]]] = []
         if kind == _NOT_READ:
@@ -7105,7 +7146,6 @@ def ledger_absence_contradictions(payload: Any, entries: EntryTexts | None) -> l
                     )
                 )
             return out
-        cited = [entry_id for line, ids in _sentences_with_citations(sentence) for entry_id in ids]
         for value in _subject_values(subject):
             if not decidable(value):
                 continue

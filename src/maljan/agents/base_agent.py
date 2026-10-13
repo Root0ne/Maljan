@@ -1538,14 +1538,16 @@ def _bare_technique(text: str) -> str:
 _ID_WITH_BRACKETED_WORDS_RE = re.compile(
     r"(?<![\w.])(?P<id>T\d{4}(?:\.\d{3})?)\s*\((?P<words>[^()]*)\)", re.IGNORECASE
 )
-# An id followed by words with no bracket, after a space, a dash or a colon,
-# up to the next comma, semicolon or the line's end: the catalogue's name for
-# it written beside it ("T1106 Native API", "T1071.001 - Web Protocols").
-_ID_WITH_WORDS_RE = re.compile(
-    r"(?<![\w.])(?P<id>T\d{4}(?:\.\d{3})?)(?:\s*[-–—:]\s*|\s+)"
-    r"(?P<words>[A-Za-z][^,;()\[\]\n]*?)(?=\s*(?:[,;]|$))",
-    re.IGNORECASE,
-)
+# An id at a place in a list item, and what separates it from the words after
+# it: a space, a dash or a colon (``_without_unbracketed_names``). Anchored at
+# the place it is tried, and every part of it possessive, so a try costs the
+# characters it reads.
+_ID_AT_RE = re.compile(r"(?P<id>T\d{4}(?:\.\d{3})?+)(?:\s*+[-–—:]\s*+|\s++)(?=[A-Za-z])", re.I)
+# Where an id may begin in an item: a T after no word character or dot.
+_ID_START_RE = re.compile(r"(?<![\w.])T(?=\d)", re.IGNORECASE)
+# What ends a list item, and what a name with no bracket never holds.
+_ITEM_END_RE = re.compile(r"[,;]")
+_NOT_IN_A_NAME = frozenset("()[]\n")
 
 
 def _catalogue_names_for(technique_id: str) -> set[str]:
@@ -1584,7 +1586,42 @@ def _without_catalogue_names(text: str) -> str:
             return match.group("id")
         return match.group(0)
 
-    return _ID_WITH_WORDS_RE.sub(_plain, _ID_WITH_BRACKETED_WORDS_RE.sub(_plain, text))
+    return _without_unbracketed_names(_ID_WITH_BRACKETED_WORDS_RE.sub(_plain, text))
+
+
+def _without_unbracketed_names(text: str) -> str:
+    """``text`` with an id's catalogue name written after it with no bracket taken off.
+
+    Read item by item (the text between commas and semicolons), each once:
+    the name runs from after the id's space, dash or colon to the item's end,
+    trailing whitespace aside, and is the first id of the item whose words to
+    the end hold no bracket or line break. Taken off only when all of it is
+    the id's catalogue name; any other item is kept as written. Linear in the
+    text.
+    """
+    from maljan.memory.attck_loader import _folded_name
+
+    out: list[str] = []
+    at = 0
+    for end in [m.start() for m in _ITEM_END_RE.finditer(text)] + [len(text)]:
+        item = text[at:end]
+        # The last bracket or line break of the item: a name runs past none.
+        last_stop = max((i for i, ch in enumerate(item) if ch in _NOT_IN_A_NAME), default=-1)
+        replaced = item
+        for start in _ID_START_RE.finditer(item):
+            found = _ID_AT_RE.match(item, start.start())
+            if found is None or found.end() <= last_stop:
+                continue
+            words = item[found.end() :].rstrip()
+            folded = _folded_name(words)
+            if folded and folded in _catalogue_names_for(found.group("id").upper()):
+                trailing = item[found.end() + len(words) :]
+                replaced = item[: start.start()] + found.group("id") + trailing
+            break
+        out.append(replaced)
+        out.append(text[end : end + 1])
+        at = end + 1
+    return "".join(out)
 
 
 def _numbered_in_order(chunks: list[Any]) -> list[Any]:

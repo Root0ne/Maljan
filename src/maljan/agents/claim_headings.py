@@ -15,7 +15,7 @@ import re
 # What may stand before a label at the start of a line: quote and emphasis
 # marks, and one list marker (``-``, ``+``, ``1.``, ``2)``; ``*`` is an
 # emphasis mark already).
-LINE_PREFIX = r"[ \t>*_#]*(?:(?:[-+]|\d+[.)])[ \t]+)?[ \t>*_#]*"
+LINE_PREFIX = r"[ \t>*_#]*+(?:(?:[-+]|\d++[.)])[ \t]++)?[ \t>*_#]*+"
 
 # A claim's heading at the start of a line, as models number and mark it:
 # ``CLAIM:``, ``CLAIM 3:``, ``CLAIM R3:`` (a label of letters before its
@@ -29,11 +29,12 @@ LINE_PREFIX = r"[ \t>*_#]*(?:(?:[-+]|\d+[.)])[ \t]+)?[ \t>*_#]*"
 # beside the claim (``heading_note``) and the sentence is what follows the
 # delimiter; a heading that is its note alone has that note as its sentence. A
 # bracket is closed on its own line or the line is no heading, and a bracket
-# that never closes is given up once, so a line costs time linear in its length.
+# that never closes is given up once, and every run of spaces and marks is read
+# possessively, so a line costs time linear in its length.
 CLAIM_HEAD_RE = re.compile(
-    r"^" + LINE_PREFIX + r"CLAIM(?:(?:[ \t]+#?(?P<label>[A-Za-z]++)|[ \t]*#?)(?P<number>\d+))?"
-    r"(?:[ \t]*(?P<note>\([^)\n]*\)|\[[^\]\n]*\]))?[ \t]*(?:\*\*)?[ \t]*"
-    r"(?:(?P<delim>:|—|–|-(?=\s))[ \t]*(?:\*\*)?[ \t]*|(?(note)$|(?!)))"
+    r"^" + LINE_PREFIX + r"CLAIM(?:(?:[ \t]++#?(?P<label>[A-Za-z]++)|[ \t]*+#?)(?P<number>\d++))?"
+    r"(?:[ \t]*+(?P<note>\([^)\n]*+\)|\[[^\]\n]*+\]))?[ \t]*+(?:\*\*)?[ \t]*+"
+    r"(?:(?P<delim>:|—|–|-(?=\s))[ \t]*+(?:\*\*)?[ \t]*+|(?(note)$|(?!)))"
 )
 
 
