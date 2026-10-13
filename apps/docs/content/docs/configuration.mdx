@@ -3072,6 +3072,20 @@ would only cut a call the server is still working on, the open would not be
 noted, and every later open would import and analyse again; an operator who
 sets that budget accepts that a cut analysis is opened again by the next open.
 
+**Any agent given the open tool is told to open first.** A server that declares
+`sample_open` (declared, accepted from a proposal, or bound to an agent by the
+operator through `agents`) marks the open tool it offers with its declaration.
+A generic agent offered that tool is told, on the request that carries the
+sample path, `LOAD THIS BINARY FIRST: call open_tool(path_argument="<path>")`,
+the line the static role gets from its provider; the static role reads an
+operator-bound server's mark when its own provider declares none. An agent
+whose provider tools open the sample before the loop is not told twice. A
+connection test proposes `sample_open` (low confidence, `open_tool` and
+`path_argument` only) when exactly one tool the server does not mark
+destructive takes a path as its only required argument and at least two other
+tools share a required argument that is neither a path nor a place in code;
+accepting it in the console fills only the fields the server leaves empty.
+
 **Declared tools must refuse in a structured way.** A refusal is read by the
 platform's one rule for failed tool answers: an MCP `isError` result, a
 `{"error": …}` answer, or an HTTP error. A refusal written as plain text
@@ -3506,7 +3520,7 @@ about, under `details.proposals`, read from what the server says itself:
 | MCP `inputSchema` (a property's name, `format`, `pattern`, length, description) | `arguments`: the `path`, `hash`, `address`, `ip`, `domain` and `url` roles, one argument each |
 | MCP `outputSchema` | `rows` (the first list of objects), `places` and `values` inside a row, `techniques` (`/**N/<field>`), the `reputation` paths where the answer holds a malicious count (dates and links read by generic words: first or last with seen, submission, analysis, scan, date or time; link or url) |
 | MCP `annotations` and `execution` | `display_name` (the tool's own title, verbatim, one printable line of at most 80 characters), `long_running` (`execution.taskSupport`), `discloses_sample` (`openWorldHint` on a tool taking a path) |
-| the description and the `capabilities` manifest cell's `facts` | the `kind`, with the arguments and the answer's shape (`signature_rules` for rows with techniques and a rule match, `reputation` for a hash lookup with counts, a code kind for a decompiler); no kind when nothing names one |
+| the description and the `capabilities` manifest cell's `facts` | the `kind`, with the arguments and the answer's shape (`signature_rules` for rows with techniques and a rule match, `reputation` for a hash lookup with counts, a code kind for a decompiler, from the tool's name, or from the description's words only when the probe answer holds code); no kind when nothing names one |
 | the `capabilities` manifest cell | `timeout_seconds`, `long_running` |
 
 Each field carries its `evidence` (the schema location or answer it was read
