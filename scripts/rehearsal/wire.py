@@ -277,6 +277,8 @@ def read_anthropic(body: dict[str, Any], headers: dict[str, str] | None = None) 
             "name": tool.get("name"),
             "description": tool.get("description") or "",
             "schema": tool.get("input_schema") or {},
+            # A server's own hints, where a request carries them.
+            **({"annotations": tool["annotations"]} if tool.get("annotations") else {}),
         }
         for tool in body.get("tools") or []
         if isinstance(tool, dict)
@@ -336,6 +338,11 @@ def read_openai(body: dict[str, Any], headers: dict[str, str] | None = None) -> 
                     "name": function.get("name"),
                     "description": function.get("description") or "",
                     "schema": function.get("parameters") or {},
+                    **(
+                        {"annotations": function["annotations"]}
+                        if function.get("annotations")
+                        else {}
+                    ),
                 }
             )
     cap = body.get("max_completion_tokens", body.get("max_tokens"))
