@@ -458,16 +458,32 @@ def e3_misses_when_nothing_cites_or_a_declared_entry_never_reaches_corroboration
     uncited = _record(events=[])
     assert not reach(uncited, None, "newcomer")["E3"]["ok"]
     assert reach(uncited, None, "newcomer", expect_cited=False)["E3"]["ok"]
-    declared = _record()
-    declared.malware_report["evidence_index"][1]["facts"] = {"kind": "strings"}
-    row = reach(declared, None, "newcomer")["E3"]
-    assert not row["ok"] and "corroboration" in row["why"], row
-    declared.run_summary = {"corroboration": {"T1": {"sources": ["ev_0002"]}}}
-    assert reach(declared, None, "newcomer")["E3"]["ok"]
-    declared.run_summary = {
+    # A kind that asserts no technique is held to citation and flags only.
+    plain = _record()
+    plain.malware_report["evidence_index"][1]["facts"] = {"kind": "strings"}
+    row = reach(plain, None, "newcomer")["E3"]
+    assert row["ok"] and row["corroboration"] == "n/a (kind asserts no technique)", row
+    # An asserting kind cited for a technique must reach corroboration and be placed there.
+    asserting = _record()
+    asserting.malware_report["evidence_index"][1]["facts"] = {
+        "kind": "signatures",
+        "asserts_techniques": True,
+        "techniques": "/t",
+    }
+    claim = {"claim": "It looks.", "evidence_ref": "[ev_0002] look", "technique_id": "T1071"}
+    asserting.events[0]["claims"] = [claim]
+    row = reach(asserting, None, "newcomer")["E3"]
+    assert not row["ok"] and "never reaches corroboration" in row["why"], row
+    asserting.run_summary = {"corroboration": {"T1": {"sources": ["ev_0002"]}}}
+    assert reach(asserting, None, "newcomer")["E3"]["corroboration"] == "reached"
+    asserting.run_summary = {
         "corroboration": {"T1": {"sources": ["ev_0002"], "roots_not_read": ["ev_0002: no: x"]}}
     }
-    assert not reach(declared, None, "newcomer")["E3"]["ok"]
+    assert not reach(asserting, None, "newcomer")["E3"]["ok"]
+    asserting.events[0]["claims"] = [{**claim, "technique_id": "NONE"}]
+    asserting.run_summary = {"corroboration": {}}
+    row = reach(asserting, None, "newcomer")["E3"]
+    assert row["ok"] and row["corroboration"].startswith("n/a (no claim"), row
 
 
 @check

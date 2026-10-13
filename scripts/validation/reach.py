@@ -409,28 +409,48 @@ def reach(
     declared = {
         str(e.get("id")) for e in entries if e.get("ok") and (e.get("facts") or {}).get("kind")
     }
-    declared_listed = sorted(set(listed) & declared)
     asserted = _asserted(record, [e for e in entries if str(e.get("id")) in declared], answers)
+
+    def names_technique(claim: dict[str, Any]) -> bool:
+        return str(claim.get("technique_id") or claim.get("technique") or "").upper() not in (
+            "",
+            "NONE",
+        )
+
+    # Corroboration is kept per technique: its rule holds only the declared
+    # entries whose kind asserts techniques and that a claim naming a
+    # technique cites; every other entry is held to citation and flags only.
+    asserting = {
+        str(e.get("id"))
+        for e in entries
+        if str(e.get("id")) in declared
+        and (
+            (e.get("facts") or {}).get("asserts_techniques")
+            or (e.get("facts") or {}).get("techniques")
+        )
+    }
+    held = {i for c in citing if names_technique(c) for i in c["cites"]} & asserting
+    held_listed = set(listed) & held
     e3_why = []
     if expect_cited and not citing:
         e3_why.append("no claim cites an entry")
     if flagged:
         e3_why.append("a claim citing it is flagged for grounding or citation")
-    if declared and not declared_listed:
-        # Corroboration is kept per technique: say when no claim citing a
-        # declared entry names one, so the miss is read for what it is.
-        named = any(
-            str(c.get("technique_id") or c.get("technique") or "").upper() not in ("", "NONE")
-            for c in citing
-            if set(c["cites"]) & declared
+    if not held:
+        corroboration = (
+            "n/a (kind asserts no technique)"
+            if not asserting
+            else "n/a (no claim citing an asserting entry names a technique)"
         )
-        e3_why.append(
-            "no declared entry reaches corroboration"
-            + ("" if named else " (no claim citing one names a technique)")
-        )
-    elif declared_listed and not set(placed) & declared:
-        e3_why.append("no declared entry is placed in corroboration")
-    if any(not held for held in asserted.values()):
+    elif not held_listed:
+        corroboration = "missed"
+        e3_why.append("an asserting entry cited for a technique never reaches corroboration")
+    elif not set(placed) & held:
+        corroboration = "missed"
+        e3_why.append("an asserting entry cited for a technique is not placed in corroboration")
+    else:
+        corroboration = "reached"
+    if any(not ok for ok in asserted.values()):
         e3_why.append("an asserting declared source is not among asserted_by")
     e3 = {
         "ok": not e3_why,
@@ -439,6 +459,8 @@ def reach(
         "placed": placed,
         "unplaced": unplaced,
         "declared": sorted(declared),
+        "corroboration": corroboration,
+        "held_to_corroboration": sorted(held),
         "undeclared": sorted(set(ok_ids) - declared),
         "asserted": asserted,
     }
