@@ -1511,6 +1511,12 @@ def _field(
 _ONE_TECHNIQUE_RE = re.compile(r"T\d{4}(?:\.\d{3})?", re.IGNORECASE)
 # What a TECHNIQUE line says to claim none.
 _NO_TECHNIQUE = frozenset({"", "NONE", "—", "–", "-"})
+# A line that opens with "none" and words after it ("none asserted", "none
+# (capability only)"): it claims none whatever the words say, when no
+# technique id stands anywhere on it; with an id on it, the words may name one
+# and the line is asked about.
+_NONE_WITH_WORDS_RE = re.compile(r"none\b", re.IGNORECASE)
+_ANY_TECHNIQUE_ID_RE = re.compile(r"(?<![\w.])T\d{4}(?:\.\d{3})?(?!\w)", re.IGNORECASE)
 # What separates the ids of a list on one TECHNIQUE line: a comma, "and", both
 # ("T1027, T1140, and T1106"), or a slash ("T1027 / T1140"). Every part must be
 # an id and nothing else; "or", "and/or", a doubled or trailing slash, or any
@@ -1531,6 +1537,14 @@ def _bare_technique(text: str) -> str:
 # An id followed by words in brackets: "T1027 (Obfuscated Files or Information)".
 _ID_WITH_BRACKETED_WORDS_RE = re.compile(
     r"(?<![\w.])(?P<id>T\d{4}(?:\.\d{3})?)\s*\((?P<words>[^()]*)\)", re.IGNORECASE
+)
+# An id followed by words with no bracket, after a space, a dash or a colon,
+# up to the next comma, semicolon or the line's end: the catalogue's name for
+# it written beside it ("T1106 Native API", "T1071.001 - Web Protocols").
+_ID_WITH_WORDS_RE = re.compile(
+    r"(?<![\w.])(?P<id>T\d{4}(?:\.\d{3})?)(?:\s*[-–—:]\s*|\s+)"
+    r"(?P<words>[A-Za-z][^,;()\[\]\n]*?)(?=\s*(?:[,;]|$))",
+    re.IGNORECASE,
 )
 
 
@@ -1554,11 +1568,13 @@ def _catalogue_names_for(technique_id: str) -> set[str]:
 
 
 def _without_catalogue_names(text: str) -> str:
-    """``text`` with each bracketed catalogue name after its own id taken off.
+    """``text`` with each catalogue name after its own id taken off, bracketed or not.
 
     Only words that are the vendored catalogue's own name for the id they
-    follow are taken off; any other bracketed words stay where they are, and
-    the line is read as it always was.
+    follow are taken off; any other words stay where they are, and the line
+    is read as it always was. A name with no bracket runs to the next comma,
+    semicolon or the line's end, and is taken off only when all of it is the
+    id's name.
     """
     from maljan.memory.attck_loader import _folded_name
 
@@ -1568,7 +1584,7 @@ def _without_catalogue_names(text: str) -> str:
             return match.group("id")
         return match.group(0)
 
-    return _ID_WITH_BRACKETED_WORDS_RE.sub(_plain, text)
+    return _ID_WITH_WORDS_RE.sub(_plain, _ID_WITH_BRACKETED_WORDS_RE.sub(_plain, text))
 
 
 def _numbered_in_order(chunks: list[Any]) -> list[Any]:
@@ -1603,12 +1619,16 @@ def read_technique_line(line: str) -> tuple[tuple[str, ...], str | None]:
     reader could name without deciding what the words mean, so no id is read
     and the line is returned as written, for the validation turn to ask about
     (``isr.technique_line_unread``). An id followed by the vendored
-    catalogue's own name for it in brackets ("T1027 (Obfuscated Files or
-    Information)") is that id: the bracket names the id and decides nothing.
+    catalogue's own name for it, in brackets or not ("T1027 (Obfuscated Files
+    or Information)", "T1106 Native API"), is that id: the name names the id
+    and decides nothing. A line that opens with "none" and holds no technique
+    id ("none asserted") claims none.
     """
     text = str(line or "").strip()
     bare = _bare_technique(_without_catalogue_names(_TRAILING_BLOCK_SEPARATOR_RE.sub("", text)))
     if bare.upper() in _NO_TECHNIQUE:
+        return (), None
+    if _NONE_WITH_WORDS_RE.match(bare) and not _ANY_TECHNIQUE_ID_RE.search(bare):
         return (), None
     parts = [_bare_technique(part) for part in _TECHNIQUE_LIST_SEPARATOR_RE.split(bare)]
     if parts and all(_ONE_TECHNIQUE_RE.fullmatch(part) for part in parts):
