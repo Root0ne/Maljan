@@ -546,3 +546,95 @@ def prose_error(text: Any) -> str | None:
         rest = said[shape.end() :].strip()
         return said if re.search(r"[A-Za-z]", rest) and re.search(r"\s", rest) else None
     return None
+
+
+# What a code listing looks like, read from its text: pseudo-C (braces, a
+# call's parenthesis, a statement ending in a semicolon on its line) or a
+# disassembly line (an address, at most sixteen byte pairs, a mnemonic and an
+# operand). Each pattern is bounded, so a hostile answer is read in one pass.
+_CALL_SHAPE_RE = re.compile(r"\w\(")
+_STATEMENT_END_RE = re.compile(r";[ \t]*$", re.MULTILINE)
+_ASM_LINE_RE = re.compile(
+    r"\b(?:0x)?[0-9A-Fa-f]{4,16}h?[ \t:|]+(?:[0-9A-Fa-f]{2}[ \t]?){0,16}[ \t]*"
+    r"[A-Za-z]{2,7}[ \t]+[\w\[$%#-]"
+)
+
+
+def holds_code(text: Any) -> bool:
+    """Whether ``text`` reads as a code listing: pseudo-C or disassembly lines."""
+    said = str(text or "")
+    if not said.strip():
+        return False
+    # A listing cut for storage may have lost its closing brace.
+    if "{" in said and _CALL_SHAPE_RE.search(said):
+        if _STATEMENT_END_RE.search(said):
+            return True
+    return sum(1 for _ in zip(range(2), _ASM_LINE_RE.finditer(said), strict=False)) >= 2
+
+
+# Where a JSON object's string field opens: its name, a colon, a quote.
+_STRING_FIELD_RE = re.compile(r'"([^"\\\n]{1,200})"[ \t\r\n]*:[ \t\r\n]*"')
+# A JSON string's escapes, undone in the field a cut falls in.
+_ESCAPE_RE = re.compile(r"\\(.)", re.DOTALL)
+_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", '"': '"', "\\": "\\", "/": "/"}
+
+
+def _string_fields(text: str) -> dict[str, str]:
+    """The string fields of a JSON object cut short, each read to its end or to the cut.
+
+    One pass: a field found inside a value already read is skipped, and the
+    field the cut falls in is read to the cut with its escapes undone.
+    """
+    from json import decoder
+
+    scanstring = decoder.scanstring  # type: ignore[attr-defined]
+
+    fields: dict[str, str] = {}
+    read_to = 0
+    for match in _STRING_FIELD_RE.finditer(text):
+        if match.start() < read_to:
+            continue
+        try:
+            value, read_to = scanstring(text, match.end())
+        except ValueError:
+            rest = text[match.end() :]
+            undone = _ESCAPE_RE.sub(lambda m: _ESCAPES.get(m.group(1), m.group(1)), rest)
+            fields.setdefault(match.group(1), undone)
+            break
+        fields.setdefault(match.group(1), value)
+    return fields
+
+
+def code_text(answer: Any, path: str = "", rows: str = "") -> str:
+    """The code a code-listing answer holds, or ``""`` when it holds none.
+
+    A JSON object's code is read at the declared path (``ToolFacts.values``
+    ``code``, inside the first of the declared ``rows``) when the declaration
+    names one, else from its one string field
+    that reads as code (:func:`holds_code`); an object with none, or with
+    several, holds no code this reads, and is never drawn as a listing (a
+    search's hits, a status record). A plain text answer is its listing, as
+    it always was drawn.
+    """
+    said = str(answer or "").strip()
+    if not said:
+        return ""
+    if said[0] == "{":
+        import json
+
+        try:
+            document: Any = json.loads(said)
+        except ValueError:
+            # An answer cut for storage is no whole JSON: its top-level
+            # string fields are read up to the cut.
+            document = _string_fields(said)
+        if isinstance(document, Mapping):
+            if path:
+                from maljan.core.tool_declarations import first, select
+
+                found = select(document, rows) if rows else [document]
+                held = first(found[0], path) if found else None
+                return held.strip("\n") if isinstance(held, str) and holds_code(held) else ""
+            fields = [v for v in document.values() if isinstance(v, str) and holds_code(v)]
+            return fields[0].strip("\n") if len(fields) == 1 else ""
+    return said

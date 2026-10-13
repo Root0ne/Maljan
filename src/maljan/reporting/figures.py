@@ -16,7 +16,9 @@ the browser and in WeasyPrint, and is theme-neutral (uses
 from __future__ import annotations
 
 from html import escape
+from typing import Any
 
+from maljan.core.undeclared_tools import address_arguments, code_text
 from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import distinct_processes
 from maljan.reporting.defang import defang
@@ -305,6 +307,26 @@ def build_infection_chain(report: MalwareReport) -> Figure | None:
 # ---------------------------------------------------------------------------
 
 
+def _listed_symbol(output: dict[str, Any], facts: Any) -> str:
+    """What a listing's caption names: the call's symbol, else its address argument.
+
+    The address argument is the one the tool declares for the ``address``
+    role, else one named for an address (``core.undeclared_tools.
+    address_arguments``), as the call gave it. ``function`` when the call
+    names neither.
+    """
+    symbol = str(output.get("symbol") or "").strip()
+    if symbol:
+        return symbol
+    held = output.get("args")
+    args: dict[str, Any] = held if isinstance(held, dict) else {}
+    for name in address_arguments(facts, tuple(args)):
+        value = args.get(name)
+        if isinstance(value, str | int) and not isinstance(value, bool) and str(value).strip():
+            return str(value).strip()
+    return "function"
+
+
 def build_code_listings(report: MalwareReport) -> list[Figure]:
     """The first ``_LISTINGS`` decompiled functions as figures, the rest counted.
 
@@ -321,9 +343,17 @@ def build_code_listings(report: MalwareReport) -> list[Figure]:
             # report skips it, and no figure says a function was decompiled.
             if o.get("ok") is False:
                 continue
-            body = str(o.get("output") or "").strip()
+            # What is drawn is the code the answer holds: a JSON answer's code
+            # field, read at the declared path or as its one code-like string,
+            # with its own line breaks; a plain text answer as it was. A JSON
+            # answer holding no code (a search's hits, a status record) is not
+            # drawn as a decompiled function.
+            facts = tool_kinds.facts_of(o)
+            path = str(facts.values.get("code", "")) if facts is not None else ""
+            rows = str(facts.rows or "") if facts is not None and path else ""
+            body = code_text(o.get("output"), path, rows)
             if body:
-                listed.append((str(o.get("symbol") or "").strip() or "function", body))
+                listed.append((_listed_symbol(o, facts), body))
     figs: list[Figure] = []
     for seq, (sym, body) in enumerate(listed[:_LISTINGS]):
         notes: list[str] = []
