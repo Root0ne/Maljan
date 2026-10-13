@@ -131,3 +131,44 @@ def test_no_open_tool_is_proposed_where_the_schemas_do_not_say_one() -> None:
     ]
     assert sample_open_in(places) is None
     assert "sample_open" not in propose(many)["server"]
+
+
+def _with(opener: dict[str, Any]) -> list[dict[str, Any]]:
+    """The program server with its open tool replaced by ``opener``."""
+    return [opener, *PROGRAM_SERVER[1:]]
+
+
+def _described(name: str, argument: str, description: str, **annotations: Any) -> dict[str, Any]:
+    out = _definition(name, argument, **annotations)
+    out["description"] = description
+    return out
+
+
+def test_a_tool_that_writes_deletes_exports_wipes_or_lists_is_never_the_open_tool() -> None:
+    for opener in (
+        _described("delete_file", "path", "Deletes the file at path."),
+        _described("export_report", "output_path", "Writes the report to output_path."),
+        _described("wipe", "file_path", "Wipes the file.", readOnlyHint=False),
+        _described("list_directory", "path", "Lists the entries of a directory."),
+        _described("open_it", "path", "Opens the file.", readOnlyHint=False),
+        _described("load_it", "path", "Loads the file.", destructiveHint=True),
+        _described("load_and_save", "path", "Loads the file and saves the project."),
+        # Read-only, but nothing says it opens the file.
+        _described("hash_file", "path", "Hashes the file.", readOnlyHint=True),
+    ):
+        assert sample_open_in(_with(opener)) is None, opener["name"]
+
+
+def test_a_tool_that_says_it_opens_or_loads_is_still_proposed() -> None:
+    for opener, argument in (
+        (
+            _described("import_binary", "binary_path", "Import a binary into the project."),
+            "binary_path",
+        ),
+        (_described("open_file", "path", "Open a file."), "path"),
+        (_described("loadProgram", "file", "Reads it in.", readOnlyHint=True), "file"),
+        (_described("ingest", "sample", "Analyzes the sample."), "sample"),
+    ):
+        proposed = sample_open_in(_with(opener))
+        assert proposed is not None, opener["name"]
+        assert proposed.value == {"open_tool": opener["name"], "path_argument": argument}

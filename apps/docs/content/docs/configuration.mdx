@@ -3081,9 +3081,13 @@ the line the static role gets from its provider; the static role reads an
 operator-bound server's mark when its own provider declares none. An agent
 whose provider tools open the sample before the loop is not told twice. A
 connection test proposes `sample_open` (low confidence, `open_tool` and
-`path_argument` only) when exactly one tool the server does not mark
-destructive takes a path as its only required argument and at least two other
-tools share a required argument that is neither a path nor a place in code;
+`path_argument` only) when exactly one tool takes a path as its only
+required argument and shows it opens the file and changes nothing (its name
+or description says it opens, loads, imports or analyses; the server marks it
+read-only or gives no read-only hint; nothing in its name, description or
+annotation title says it writes, deletes, exports, saves, wipes or lists a
+directory; its path argument names no output), and at least two other tools
+share a required argument that is neither a path nor a place in code;
 accepting it in the console fills only the fields the server leaves empty.
 
 **Declared tools must refuse in a structured way.** A refusal is read by the

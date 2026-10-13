@@ -1358,11 +1358,52 @@ _PATH_ARGUMENT = re.compile(r"path|^file(?:name)?$|^sample$", re.IGNORECASE)
 _PLACE_ARGUMENT = re.compile(r"addr|func|location|offset", re.IGNORECASE)
 
 
+# A word saying a tool opens or loads what it is given.
+_OPENS_WORD = re.compile(r"\b(?:open|load|import|analy[sz]e)(?:s|es|ed|ing)?\b")
+# A word saying a tool changes what is on disk or what its server holds, or
+# lists a directory: such a tool is never the one that opens the sample.
+_CHANGES_WORD = re.compile(
+    r"\b(?:write|delete|remove|export|save|wipe|erase|overwrite|truncate|destroy|unlink"
+    r"|shred|rename|move|upload|director(?:y|ies)|folders?|dir|ls)"
+    r"(?:s|es|ed|ing|d)?\b"
+)
+# A path argument naming where something is written, never what is read.
+_OUTPUT_ARGUMENT = re.compile(r"out|dest|save|target|export", re.IGNORECASE)
+
+
+def _words(text: str) -> str:
+    """``text`` lowered with its name separators and case changes read as spaces."""
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", text)
+    return re.sub(r"[_\-.]+", " ", spaced).lower()
+
+
+def _opens_read_only(name: str, definition: Any, annotations: Any) -> bool:
+    """Whether a path-only tool shows it opens or loads the file and changes nothing.
+
+    Positive evidence only: its name or description says it opens, loads,
+    imports or analyses, and the server either marks it read-only
+    (``readOnlyHint`` true) or gives no read-only hint at all. A tool marked
+    destructive or not read-only, or one whose name, description or
+    annotation title says it writes, deletes, exports, saves, wipes or lists
+    a directory, is never proposed.
+    """
+    hints = annotations if isinstance(annotations, Mapping) else {}
+    if hints.get("destructiveHint") is True or hints.get("readOnlyHint") is False:
+        return False
+    description = _get(definition, "description")
+    title = hints.get("title")
+    text = " ".join(_words(t) for t in (name, description, title) if isinstance(t, str) and t)
+    if _CHANGES_WORD.search(text):
+        return False
+    return bool(_OPENS_WORD.search(text))
+
+
 def sample_open_in(definitions: Iterable[Any]) -> Proposed | None:
     """The ``sample_open`` the tool schemas suggest, or ``None``.
 
-    Proposed when exactly one tool the server does not mark destructive takes
-    a path as its only required argument, and at least two other tools share
+    Proposed when exactly one tool that shows it opens the file and changes
+    nothing (:func:`_opens_read_only`) takes a path that is not an output as
+    its only required argument, and at least two other tools share
     one required argument that is neither a path nor a place in code: the one
     tool opens the file, and the others are given the name of what it opened.
     Only ``open_tool`` and ``path_argument`` are proposed; what names the
@@ -1382,7 +1423,10 @@ def sample_open_in(definitions: Iterable[Any]) -> Proposed | None:
         required = schema.get("required") if isinstance(schema, Mapping) else None
         required = [str(r) for r in required or [] if isinstance(r, str)]
         if len(required) == 1 and _PATH_ARGUMENT.search(required[0]):
-            openers.append((name, required[0]))
+            if not _OUTPUT_ARGUMENT.search(required[0]) and _opens_read_only(
+                name, definition, annotations
+            ):
+                openers.append((name, required[0]))
             continue
         for argument in required:
             if not _PATH_ARGUMENT.search(argument) and not _PLACE_ARGUMENT.search(argument):
