@@ -463,17 +463,33 @@ def entry_address_arguments(entry: Any) -> tuple[str, ...]:
 # A failure an undeclared tool answers in prose
 # ---------------------------------------------------------------------------
 
-# How a one-line answer opens when all it says is that the call failed: an
-# error log level, or an error word or phrase at its head. Only for a tool its
-# source declares nothing for, whose server's declared error patterns
+# What an answer that only says the call failed has the form of, never just
+# its first word ("Error handling routine at …", "Failed logins: 0", "Invalid
+# signature" and "Not found in …" are data). Only for a tool its source
+# declares nothing for, whose server's declared error patterns
 # (``MCPServerConfig.error_patterns``) did not already file it.
-_PROSE_ERROR_RE = re.compile(
-    r"^(?:\[(?:error|fatal)\]|"
-    r"errors?\b|fail(?:ed|ure)?\b|fatal\b|exception\b|traceback\b|cannot\b|can't\b|"
-    r"could\s*n[o']t\b|unable\s+to\b|no\s+such\b|invalid\b|not\s+found\b|"
-    r"permission\s+denied\b|access\s+denied\b)",
+#
+# An error label: a level in brackets (``[ERROR]``, ``[Errno 2]``), an error
+# word followed by a colon or a bracket (``Error:``, ``Fatal error:``), or an
+# error word naming what it was doing (``Error executing …:``).
+_ERROR_LABEL_RE = re.compile(
+    r"^(?:\[(?:error|fatal)\]|\[errno\s*-?\d+\]|"
+    r"(?:fatal\s+)?(?:error|fatal|exception|failure)\s*[:\]]|"
+    r"error\s+(?:executing|calling|running|invoking|loading|opening|reading|processing|parsing)"
+    r"\b[^:]*:)",
     re.IGNORECASE,
 )
+# An exception class's shape: one CamelCase name ending in Error or Exception,
+# then a colon (``ValueError: …``, ``pkg.ToolError: …``).
+_EXCEPTION_CLASS_RE = re.compile(r"^[A-Za-z_][\w.]*(?:Error|Exception):")
+# A failure phrase with its verb.
+_FAILURE_PHRASE_RE = re.compile(
+    r"^(?:(?:failed|unable|not\s+able)\s+to\s+[a-z]|"
+    r"(?:cannot|can\s+not|can't|could\s*n[o']t)\s+[a-z]|"
+    r"(?:permission|access)\s+denied\b)",
+    re.IGNORECASE,
+)
+_TRACEBACK_RE = re.compile(r"^traceback \(most recent call last\):", re.IGNORECASE)
 # A longer answer is read as an answer: what a failure says in prose fits a line.
 PROSE_ERROR_CHARS = 400
 
@@ -481,16 +497,33 @@ PROSE_ERROR_CHARS = 400
 def prose_error(text: Any) -> str | None:
     """The message of an answer that only says the call failed, else ``None``.
 
-    One line of prose, no longer than :data:`PROSE_ERROR_CHARS`, that opens
-    with an error word (``Error: …``, ``Invalid params: …``, ``Cannot find
-    …``, ``[ERROR] …``): an answer holding any data — a second line, a JSON
-    value, a listing — is never read as one, and neither is a line that only
-    mentions an error later on. Conservative by design: what it does not
-    recognise stays an answer, as it was.
+    The answer must have an error's form, not merely open with an error word:
+    a traceback (its last line is the message), or one line of prose no longer
+    than :data:`PROSE_ERROR_CHARS` that opens with an error label followed by
+    a message (``Error: binary not loaded``, ``[ERROR] …``), an exception
+    class's shape (``ValueError: …``) or a failure phrase with its verb
+    (``Failed to open file``, ``Cannot find …``). A label followed by a count
+    or nothing (``errors: 0``) is data, and so is an answer holding any data —
+    a second line, a JSON value, a listing. Conservative by design: what it
+    does not recognise stays an answer, as it was.
     """
     said = str(text or "").strip()
-    if not said or len(said) > PROSE_ERROR_CHARS or "\n" in said or "\r" in said:
+    if not said:
         return None
-    if said[0] in "{" or (said[0] == "[" and not _PROSE_ERROR_RE.match(said)):
+    if _TRACEBACK_RE.match(said):
+        last = said.splitlines()[-1].strip()
+        return last[:PROSE_ERROR_CHARS] or said[:PROSE_ERROR_CHARS]
+    if len(said) > PROSE_ERROR_CHARS or "\n" in said or "\r" in said or said[0] == "{":
         return None
-    return said if _PROSE_ERROR_RE.match(said) else None
+    if _FAILURE_PHRASE_RE.match(said):
+        return said
+    label = _ERROR_LABEL_RE.match(said)
+    if label:
+        # The label must be followed by a message: a count or nothing is data.
+        return said if re.search(r"[A-Za-z]", said[label.end() :]) else None
+    shape = _EXCEPTION_CLASS_RE.match(said)
+    if shape:
+        # A message of words, never one value (``LastError: ERROR_SUCCESS``).
+        rest = said[shape.end() :].strip()
+        return said if re.search(r"[A-Za-z]", rest) and re.search(r"\s", rest) else None
+    return None

@@ -3227,10 +3227,17 @@ registry's servers and the static providers' alike, so an answer a pattern
 matches is filed as a failed call with the pattern's code and remediation, the
 answers of a declared `sample_open` tool and of the select and analyse calls it
 makes included. A server that declares no pattern has its answers passed on as
-they are, with one exception for a tool its source declares nothing for: an
-answer that is one line of prose of at most 400 characters opening with an
-error word or an error log level (`Error: …`, `Invalid params: …`, `Cannot …`,
-`[ERROR] …`) is filed as a failed call; an answer holding any data is not.
+they are, with one exception for a tool its source declares nothing for (an
+operator's tool declared without a kind included): an answer with an error's
+form is filed as a failed call. That is a traceback (its last line is the
+message), or one line of prose of at most 400 characters that opens with an
+error label followed by a message (`Error: …`, `Fatal error: …`, `[ERROR] …`,
+`[Errno 2] …`, `Error executing …: …`), an exception class's shape
+(`ValueError: …`) or a failure phrase with its verb (`Failed to …`, `Unable to
+…`, `Cannot …`, `Could not …`, `Permission denied`). A line that merely opens
+with an error word is data (`Error handling routine at …`, `Invalid
+signature`, `Not found in …`), as is a label followed by a count (`errors: 0`,
+`Failed logins: 0`) and an answer holding any data.
 `remediation_with_path` names the job's sample where the server's
 path for it is known: for the static providers' servers (the job's mirror);
 an `mcp.servers` entry gets `remediation`.

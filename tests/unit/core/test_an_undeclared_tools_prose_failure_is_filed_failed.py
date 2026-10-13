@@ -35,12 +35,20 @@ def _entry(output: str, *, source: str | None = "mcp:other", tool: str = "load_b
     "said",
     [
         "Error: binary 'x.exe' is not in the project",
-        "Invalid params: name_or_address is required",
+        "Error: binary not loaded",
+        "error: no program is open",
+        "Fatal error: the project is locked",
+        "Error executing tool decompile_function: no function at 0x1000",
         "Cannot find function at 0x1000",
+        "Could not open the file",
         "[ERROR] analysis is not complete",
+        "[Errno 2] No such file or directory",
         "Failed to decompile: no function there",
+        "Failed to open file",
         "Unable to open the file",
-        "No such binary",
+        "Permission denied",
+        "ValueError: invalid literal for int() with base 16",
+        "pkg.ToolError: the binary was not imported",
     ],
 )
 def test_a_one_line_failure_is_filed_failed(said: str) -> None:
@@ -60,10 +68,38 @@ def test_a_one_line_failure_is_filed_failed(said: str) -> None:
         "Found 0 strings",
         "Error: " + "x" * PROSE_ERROR_CHARS,
         "[1, 2, 3]",
+        # An error word at the head of a datum is not an error's form.
+        "Error handling routine at 0x401000",
+        "Failed logins: 0",
+        "Invalid signature",
+        "Invalid PE checksum (0x0)",
+        "Invalid PE checksum (0x1234 expected 0x5678)",
+        "Exception handler installed at 0x401000",
+        "errors: 0",
+        "Errors: 0",
+        "Error: 0",
+        "Failures: 3",
+        "Not found in VirusTotal",
+        "No such export",
+        "LastError: ERROR_SUCCESS",
+        "Exception count: 2",
+        "Cannot",
     ],
 )
 def test_an_answer_holding_data_stays_an_answer(said: str) -> None:
     assert _entry(said).ok is True
+
+
+def test_a_traceback_is_filed_failed_with_its_last_line() -> None:
+    said = (
+        "Traceback (most recent call last):\n"
+        '  File "server.py", line 12, in decompile\n'
+        "    raise ValueError('no function')\n"
+        "ValueError: no function"
+    )
+    entry = _entry(said)
+    assert entry.ok is False
+    assert entry.error == "ValueError: no function"
 
 
 def test_a_declared_tool_is_read_by_its_declaration() -> None:
@@ -85,3 +121,7 @@ def test_the_reading_is_one_pass_over_a_line() -> None:
 
     assert _timed(39_000) < max(_timed(3_900) * 30, 0.5)
     assert prose_error("x\n" * 100_000) is None
+    big = "Traceback (most recent call last):\n" + "  frame\n" * 100_000 + "ValueError: x"
+    start = time.perf_counter()
+    assert prose_error(big) == "ValueError: x"
+    assert time.perf_counter() - start < 1.0
