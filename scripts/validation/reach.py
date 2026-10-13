@@ -6,14 +6,18 @@ the evidence entries of one source:
 
 * **E1 recorded** — an ``evidence_index`` row of that source filed ``ok``;
 * **E2 cited** — a claim in force cites one of its entry ids;
-* **E3 validated** — no flagged statement against a claim citing it; where a
-  declared entry appears in corroboration it is placed; whether an asserting
-  source is among ``asserted_by``, and an undeclared entry read "unplaced",
-  are recorded;
+* **E3 validated** — a claim cites it where the scenario expects one; no
+  flagged statement against a claim citing it; a declared entry reaches
+  corroboration and is placed there; an asserting declared source is among
+  ``asserted_by``; an undeclared entry read "unplaced" is recorded, never
+  failed;
 * **E4 composer** — its id or its answer reaches a composer section request;
 * **E5 report** — a report section lists its id, Appendix A lists it, and
   the kind-specific places (code listing figure, "Functions examined",
   Reputation row, dynamic sections) are read off for the scenario to gate;
+  code evidence is credited only for a decompile or disassembly answer that
+  holds code, at a place an answer of the same source listed as a function
+  start (``code_evidence``);
 * **E6 nothing false** — no degradation names the source unavailable, no
   published text names a tool the scenario says the run did not use, and no
   entry filed ``ok`` reads as an error, and no figure draws an answer filed
@@ -21,7 +25,9 @@ the evidence entries of one source:
 
 The source is matched by the entry's ``server`` or its ``source``
 (``<server>``, ``mcp:<server>``, ``provider:<server>``), or by a predicate
-the caller gives; nothing here names a tool.
+the caller gives; nothing here names a tool. Each reading that misses says
+why in ``why``, in words that name no entry id, so a pinned product gap
+matches exactly from one run to the next.
 """
 
 from __future__ import annotations
@@ -50,6 +56,17 @@ _ERROR_WORDS = re.compile(
 _GROUNDING_CODE = re.compile(r"ground|cit", re.IGNORECASE)
 # The shortest answer head that counts as the answer reaching a section.
 _ANSWER_HEAD = 24
+# The declared kinds whose answers are code read at a place.
+CODE_KINDS = ("decompile", "disassembly", "function_disassembly")
+# A place as an answer or an argument spells it: a hex address, or a name a
+# disassembler gives a function it found no name for (its hex part read).
+_PLACE = re.compile(r"\b0x([0-9A-Fa-f]{1,16})\b|\b(?:FUN_|fcn\.|sub_)([0-9A-Fa-f]{4,16})\b")
+# A tool name that speaks of the program's functions or entry points as a whole.
+_LISTS_FUNCTIONS = re.compile(r"functions|entry_?points", re.IGNORECASE)
+# An ATT&CK technique id as an answer names one.
+_TECHNIQUE_ID = re.compile(r"\bT\d{4}(?:\.\d{3})?\b")
+# A listing line's leading address, taken off before its text is read.
+_LINE_ADDRESS = re.compile(r"^\s*(?:0x)?[0-9A-Fa-f]{4,16}:?\s+")
 
 Entry = dict[str, Any]
 Match = Callable[[Entry], bool]
@@ -159,6 +176,116 @@ def tools_offered(dump_dir: Path | None, role: str = "analyst") -> list[str]:
     return sorted(names)
 
 
+def calls_by_entry(dump_dir: Path | None) -> dict[str, dict[str, Any]]:
+    """Each entry id's call as the model made it: ``{"tool", "args"}``, from the dumped bodies.
+
+    A tool answer the product hands back starts with the id it filed the call
+    under; the call that answer belongs to carries the arguments.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    if dump_dir is None or not Path(dump_dir).is_dir():
+        return out
+    for path in sorted(Path(dump_dir).glob("*.json")):
+        try:
+            body = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(body, dict):
+            continue
+        request = wire.read_anthropic(body) if "system" in body else wire.read_openai(body)
+        calls = {c.id: c for c in request.tool_calls_made if c.id}
+        for result in request.tool_results:
+            head = _EVIDENCE_ID.match(result.text.lstrip("[ "))
+            call = calls.get(result.id)
+            if head and call is not None:
+                out.setdefault(head.group(0), {"tool": call.name, "args": dict(call.args)})
+    return out
+
+
+def _places(text: str) -> set[int]:
+    """Every place ``text`` spells, as a number."""
+    return {int(m.group(1) or m.group(2), 16) for m in _PLACE.finditer(text)}
+
+
+def holds_code(answer: str) -> bool:
+    """Whether a listing answer holds code: one line read as more than an error or ``invalid``."""
+    text = answer.strip()
+    if not text or _ERROR_WORDS.match(text):
+        return False
+    for line in text.splitlines():
+        rest = _LINE_ADDRESS.sub("", line, count=1).strip()
+        words = rest.split()
+        if words and words[0].lower() != "invalid" and re.search(r"[A-Za-z]{2,}", rest):
+            return True
+    return False
+
+
+def code_evidence(record: RunRecord, dump_dir: Path | None, entries: list[Entry]) -> dict[str, Any]:
+    """Which of ``entries`` are code read at a function start the same source listed.
+
+    Function starts are the places in the answers of the source's entries
+    that list functions or entry points: a declared kind naming functions or
+    entry points (and not code), or, undeclared, a tool name saying so whose
+    call took no place. A code entry (a declared code kind, or undeclared with
+    a code-listing figure kind) counts when its answer holds code and the place
+    its call was given is one of those starts.
+    """
+    answers = answers_of(record)
+    calls = calls_by_entry(dump_dir)
+    starts: set[int] = set()
+    code: list[str] = []
+    for entry in entries:
+        if not entry.get("ok"):
+            continue
+        ident = str(entry.get("id"))
+        kind = str((entry.get("facts") or {}).get("kind") or "")
+        call = calls.get(ident) or {}
+        took_place = any(_places(str(v)) for v in (call.get("args") or {}).values())
+        if kind in CODE_KINDS:
+            code.append(ident)
+        elif kind:
+            if ("function" in kind or "entr" in kind) and not took_place:
+                starts |= _places(answers.get(ident, ""))
+        elif _LISTS_FUNCTIONS.search(str(entry.get("tool") or "")) and not took_place:
+            starts |= _places(answers.get(ident, ""))
+    credited: list[str] = []
+    refused: dict[str, str] = {}
+    for ident in code:
+        held = calls.get(ident)
+        at: set[int] = set()
+        for value in (held or {}).get("args", {}).values():
+            at |= _places(str(value))
+        if held is None:
+            refused[ident] = "its call's arguments are not in the dumped requests"
+        elif not holds_code(answers.get(ident, "")):
+            refused[ident] = "its answer holds no code"
+        elif not at & starts:
+            refused[ident] = "its place is not a function start an answer listed"
+        else:
+            credited.append(ident)
+    return {
+        "function_starts": sorted(f"0x{p:x}" for p in starts),
+        "code_entries": code,
+        "credited": credited,
+        "refused": refused,
+    }
+
+
+def offers(dump_dir: Path | None, role: str = "analyst") -> list[dict[str, str]]:
+    """Each request the stub answered as ``role``: its offered tool names and their descriptions."""
+    out: list[dict[str, str]] = []
+    if dump_dir is None or not Path(dump_dir).is_dir():
+        return out
+    for path in sorted(Path(dump_dir).glob(f"*-{role}.json")):
+        try:
+            body = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        request = wire.read_anthropic(body) if "system" in body else wire.read_openai(body)
+        out.append({str(t.get("name")): str(t.get("description") or "") for t in request.tools})
+    return out
+
+
 def _appendix_ids(markdown: str) -> set[str]:
     start = markdown.find("Appendix A")
     if start < 0:
@@ -184,8 +311,13 @@ def _placement(record: RunRecord, ids: set[str]) -> tuple[list[str], list[str], 
     return sorted(placed), sorted(unplaced - placed), sorted(listed)
 
 
-def _asserted(record: RunRecord, entries: list[Entry]) -> dict[str, bool]:
-    """Each asserting entry's source, and whether corroboration counts it among ``asserted_by``."""
+def _asserted(record: RunRecord, entries: list[Entry], answers: dict[str, str]) -> dict[str, bool]:
+    """Each source that asserted, and whether corroboration counts it among ``asserted_by``.
+
+    A source asserts when one of its entries is declared to assert techniques
+    and its answer names one (an ATT&CK id); an entry that names none asserted
+    nothing, and is not held to ``asserted_by``.
+    """
     sayers = {
         str(s)
         for row in (record.run_summary.get("corroboration") or {}).values()
@@ -195,7 +327,9 @@ def _asserted(record: RunRecord, entries: list[Entry]) -> dict[str, bool]:
     out: dict[str, bool] = {}
     for entry in entries:
         facts = entry.get("facts") or {}
-        if facts.get("asserts_techniques"):
+        if facts.get("asserts_techniques") and _TECHNIQUE_ID.search(
+            answers.get(str(entry.get("id")), "")
+        ):
             source = str(facts.get("source") or entry.get("server") or "")
             out[source] = source in sayers
     return out
@@ -231,19 +365,34 @@ def reach(
     *,
     match: Match | None = None,
     absent: Iterable[str] = (),
+    expect_cited: bool = True,
 ) -> dict[str, Any]:
-    """The E1–E6 readings for ``server_key``'s entries (or ``match``'s) in this run."""
+    """The E1–E6 readings for ``server_key``'s entries (or ``match``'s) in this run.
+
+    ``expect_cited``: the scenario expects a claim to cite the source, so E3
+    misses when none does.
+    """
     entries = entries_of(record, match or by_server(server_key))
     ids = [str(e.get("id")) for e in entries]
     ok_ids = [str(e.get("id")) for e in entries if e.get("ok")]
     answers = answers_of(record)
     mr = record.malware_report
 
-    e1 = {"ok": bool(ok_ids), "entries": ids, "ok_entries": ok_ids}
+    e1 = {
+        "ok": bool(ok_ids),
+        "why": "" if ok_ids else "no entry filed ok",
+        "entries": ids,
+        "ok_entries": ok_ids,
+    }
 
     citing = claims_citing(record, ok_ids)
     cited = sorted({i for c in citing for i in c["cites"]})
-    e2 = {"ok": bool(cited), "cited": cited, "claims": [c.get("claim", "") for c in citing]}
+    e2 = {
+        "ok": bool(cited),
+        "why": "" if cited else "no claim in force cites an entry",
+        "cited": cited,
+        "claims": [c.get("claim", "") for c in citing],
+    }
 
     flagged = [
         row
@@ -257,12 +406,35 @@ def reach(
         )
     ]
     placed, unplaced, listed = _placement(record, set(ok_ids))
-    declared = {str(e.get("id")) for e in entries if (e.get("facts") or {}).get("kind")}
+    declared = {
+        str(e.get("id")) for e in entries if e.get("ok") and (e.get("facts") or {}).get("kind")
+    }
     declared_listed = sorted(set(listed) & declared)
-    asserted = _asserted(record, entries)
-    e3_ok = not flagged and (not declared_listed or bool(set(placed) & declared))
+    asserted = _asserted(record, [e for e in entries if str(e.get("id")) in declared], answers)
+    e3_why = []
+    if expect_cited and not citing:
+        e3_why.append("no claim cites an entry")
+    if flagged:
+        e3_why.append("a claim citing it is flagged for grounding or citation")
+    if declared and not declared_listed:
+        # Corroboration is kept per technique: say when no claim citing a
+        # declared entry names one, so the miss is read for what it is.
+        named = any(
+            str(c.get("technique_id") or c.get("technique") or "").upper() not in ("", "NONE")
+            for c in citing
+            if set(c["cites"]) & declared
+        )
+        e3_why.append(
+            "no declared entry reaches corroboration"
+            + ("" if named else " (no claim citing one names a technique)")
+        )
+    elif declared_listed and not set(placed) & declared:
+        e3_why.append("no declared entry is placed in corroboration")
+    if any(not held for held in asserted.values()):
+        e3_why.append("an asserting declared source is not among asserted_by")
     e3 = {
-        "ok": e3_ok,
+        "ok": not e3_why,
+        "why": "; ".join(e3_why),
         "flagged": flagged,
         "placed": placed,
         "unplaced": unplaced,
@@ -280,7 +452,11 @@ def reach(
                 hits.append(entry_id)
         if hits:
             sections_seen[section] = hits
-    e4 = {"ok": bool(sections_seen), "sections": sections_seen}
+    e4 = {
+        "ok": bool(sections_seen),
+        "why": "" if sections_seen else "no composer section request holds an entry",
+        "sections": sections_seen,
+    }
 
     report_sections = [
         str(s.get("key"))
@@ -305,24 +481,36 @@ def reach(
         for i in failed_ids
         if (head := answers.get(i, "").strip()[:60]) and any(head in text for text in drawn)
     )
-    functions_examined = any(
-        isinstance(s, dict)
-        and s.get("key") == "functions_examined"
-        and set(s.get("evidence_ids") or []) & set(ok_ids)
+    examined_ids = {
+        str(i)
         for s in mr.get("sections") or []
-    )
+        if isinstance(s, dict) and s.get("key") == "functions_examined"
+        for i in s.get("evidence_ids") or []
+    }
+    functions_examined = bool(examined_ids & set(ok_ids))
+    code = code_evidence(record, dump_dir, entries)
     reputation_rows = [
         r
         for r in mr.get("reputation") or []
         if isinstance(r, dict) and str(r.get("entry_id") or "") in set(ok_ids)
     ]
+    e5_why = []
+    if not report_sections:
+        e5_why.append("no report section lists an entry")
+    if not appendix:
+        e5_why.append("Appendix A lists no entry")
     e5 = {
-        "ok": bool(report_sections) and bool(appendix),
+        "ok": not e5_why,
+        "why": "; ".join(e5_why),
         "sections": report_sections,
         "appendix": appendix,
         "code_listing_figures": len(listings),
         "listing_from_source": listing_from_source,
         "functions_examined": functions_examined,
+        # "Functions examined" cites a code entry credited as code at a function start.
+        "functions_examined_by_code": bool(examined_ids & set(code["credited"])),
+        "functions_examined_ids": sorted(examined_ids & set(ids)),
+        "code": code,
         "reputation_rows": reputation_rows,
     }
 
@@ -332,8 +520,19 @@ def reach(
     ]
     named_absent = absent_names(record, absent)
     suspect = [i for i in ok_ids if _ERROR_WORDS.match(answers.get(i, ""))]
+    e6_why = [
+        why
+        for why, held in (
+            ("a degradation names it unavailable", naming),
+            (f"published text names {sorted(named_absent)}", named_absent),
+            ("an entry filed ok reads as an error", suspect),
+            ("a figure draws an answer filed as failed", failed_drawn),
+        )
+        if held
+    ]
     e6 = {
-        "ok": not naming and not named_absent and not suspect and not failed_drawn,
+        "ok": not e6_why,
+        "why": "; ".join(e6_why),
         "degradations_naming": naming,
         "absent_named": named_absent,
         "ok_but_reads_as_error": suspect,
