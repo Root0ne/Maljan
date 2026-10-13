@@ -4834,7 +4834,10 @@ is assembled from what the run gathered rather than recomputed beside it:
   one, or of several the one under a code-ish key, else the longest), with its
   own line breaks. Code is read by its shape: pseudo-C (a brace, a call, a
   statement ending at a line's end or before a brace) or two disassembly
-  lines each led by an address, so prose holding numbers is no code. A JSON
+  lines each led by an address, so prose holding numbers is no code; a field
+  under a code-ish key (`disassembly`, `listing`, `asm`, `code`) also reads as
+  code with three or more lines of mnemonic-and-operand shape and an operand
+  mark (two operands joined by a comma, a memory reference). A JSON
   answer whose code no one string carries is drawn whole, as it always was; a
   JSON object holding no code (a search's hits, an error record) is not drawn,
   and a plain text answer is drawn as it always was. An answer cut for storage

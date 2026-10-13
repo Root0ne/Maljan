@@ -650,6 +650,36 @@ def _string_fields(text: str) -> tuple[dict[str, str], str | None]:
 # A field name a decompiler or disassembler gives its listing.
 _CODE_KEY_RE = re.compile(r"code|decomp|pseudo|source|listing|disas|asm", re.IGNORECASE)
 
+# A disassembly line with no address: a mnemonic alone, with one operand, or
+# with operands separated by commas (``push ebp``, ``mov dword ptr [ebp-4], eax``,
+# ``retn``). Bounded, anchored to the whole line.
+_OPERAND = r"[\w\[\]+\-*:$%#.@?]{1,64}"
+_BARE_ASM_LINE_RE = re.compile(
+    rf"[ \t]*[A-Za-z]{{2,7}}(?:\.[A-Za-z]{{1,3}})?"
+    rf"(?:[ \t]+{_OPERAND}(?:(?:[ \t]+{_OPERAND}){{0,3}}[ \t]*,[ \t]*{_OPERAND}"
+    rf"(?:[ \t]+{_OPERAND}){{0,3}}){{0,3}})?[ \t]*"
+)
+# What only an instruction's operands write: a comma between two operands
+# with no space before it, or a memory reference.
+_OPERAND_MARK_RE = re.compile(r"\w,[ \t]*[\w\[]|\[\w")
+
+
+def holds_bare_listing(text: str) -> bool:
+    """Whether ``text`` is a disassembly written without addresses.
+
+    Three or more lines of mnemonic-and-operand shape, at least four in five of
+    its lines, and an operand mark (two operands joined by a comma, or a
+    memory reference) on one of them: prose of short lines is no listing. Read only for a field
+    under a code-ish key, where a listing is what the field holds.
+    """
+    lines = [line for line in text.splitlines() if line.strip()]
+    shaped = [line for line in lines if _BARE_ASM_LINE_RE.fullmatch(line)]
+    return (
+        len(shaped) >= 3
+        and len(shaped) * 5 >= len(lines) * 4
+        and any(_OPERAND_MARK_RE.search(line) for line in shaped)
+    )
+
 
 def code_strings(document: Any) -> list[tuple[str, str]]:
     """Every string in a JSON document that reads as code, with the key it stands under.
@@ -661,7 +691,7 @@ def code_strings(document: Any) -> list[tuple[str, str]]:
     while stack:
         key, value = stack.pop()
         if isinstance(value, str):
-            if holds_code(value):
+            if holds_code(value) or (_CODE_KEY_RE.search(key) and holds_bare_listing(value)):
                 found.append((key, value))
         elif isinstance(value, Mapping):
             stack.extend(reversed([(str(k), v) for k, v in value.items()]))
@@ -712,7 +742,7 @@ def code_listing(answer: Any, path: str = "", rows: str = "") -> tuple[str, bool
 
         found = select(document, rows) if rows else [document]
         held = first(found[0], path) if found else None
-        if isinstance(held, str) and holds_code(held):
+        if isinstance(held, str) and (holds_code(held) or holds_bare_listing(held)):
             return held.strip("\n"), cut_field is not None and held == document.get(cut_field)
     strings = code_strings(document)
     if strings:

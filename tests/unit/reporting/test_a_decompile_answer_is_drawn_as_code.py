@@ -164,3 +164,34 @@ def test_a_cut_answer_reads_its_escapes_keeps_the_mark_out_and_says_it_was_cut()
     assert figure.legend is not None and LISTING_CUT_FOR_STORAGE in figure.legend
     # A whole answer is not said to be cut.
     assert code_listing(whole) == ('void entry(void)\n{\n  puts("\u00e9");\n  f();\n}', False)
+
+
+BARE = "push ebp\nmov ebp, esp\nsub esp, 10h\ncall sub_401000\nmov dword ptr [ebp-4], eax\nretn"
+
+
+def test_a_listing_without_addresses_under_a_code_key_is_drawn() -> None:
+    for key in ("disassembly", "listing", "asm", "code"):
+        answer = json.dumps({key: BARE, "address": "0x401000"})
+        (figure,) = build_code_listings(_report(_capture(answer, ARGS)))
+        assert "mov ebp, esp" in figure.content and "retn" in figure.content, key
+
+
+def test_short_prose_lines_under_a_code_key_are_not_drawn() -> None:
+    for prose in (
+        "Hello world\nGood bye\nSee you",
+        "Status ok\nRetry 3\nDone",
+        "Found 1234 matches\nin 4096 files\nsee the log",
+        "The function loads the config, then patches it.\nIt calls 3 helpers.\nNothing else.",
+    ):
+        assert build_code_listings(_report(_capture(json.dumps({"code": prose}), ARGS))) == []
+
+
+def test_a_bare_listing_is_read_in_linear_time() -> None:
+    def took(size: int) -> float:
+        hostile = json.dumps({"disassembly": ("mov eax, " + "a " * 40 + "\n") * size})
+        start = time.perf_counter()
+        code_text(hostile)
+        return time.perf_counter() - start
+
+    small, large = took(2_000), took(20_000)
+    assert large < max(small, 0.01) * 30, (small, large)
