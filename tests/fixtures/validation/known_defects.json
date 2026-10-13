@@ -1,0 +1,158 @@
+{
+ "about": "Product gaps the validation runs are known to show, each excusing one miss of one run whose detail matches exactly. Every row names its gap; see the validation harness report.",
+ "pins": [
+  {
+   "scenario": "a",
+   "run": "long_loop-openai",
+   "wire": "openai",
+   "check": "reach:r2:E6",
+   "detail": "a figure draws an answer filed as failed",
+   "gap": "G1",
+   "note": "a failed decompile is drawn as a code-listing figure (reporting/figures.py build_code_listings takes outputs whatever the entry's ok)"
+  },
+  {
+   "scenario": "e",
+   "run": "e2p-proposed-openai",
+   "wire": "openai",
+   "check": "reach:repstub:E1",
+   "detail": "no entry filed ok",
+   "gap": "G3",
+   "note": "the proposal ignores the confirmed probe answer when the tool has any outputSchema (core/declaration_proposals.py): the accepted lookup stays undeclared and the pack never asks"
+  },
+  {
+   "scenario": "e",
+   "run": "e2p-proposed-openai",
+   "wire": "openai",
+   "check": "reach:repstub:E4",
+   "detail": "no composer section request holds an entry",
+   "gap": "G3",
+   "note": "the proposal ignores the confirmed probe answer when the tool has any outputSchema (core/declaration_proposals.py): the accepted lookup stays undeclared and the pack never asks"
+  },
+  {
+   "scenario": "e",
+   "run": "e2p-proposed-openai",
+   "wire": "openai",
+   "check": "reach:repstub:E5",
+   "detail": "no report section lists an entry; Appendix A lists no entry",
+   "gap": "G3",
+   "note": "the proposal ignores the confirmed probe answer when the tool has any outputSchema (core/declaration_proposals.py): the accepted lookup stays undeclared and the pack never asks"
+  },
+  {
+   "scenario": "e",
+   "run": "e2p-proposed-openai",
+   "wire": "openai",
+   "check": "first_service",
+   "detail": "expected 'Stub reputation': {}",
+   "gap": "G3",
+   "note": "the proposal ignores the confirmed probe answer when the tool has any outputSchema (core/declaration_proposals.py): the accepted lookup stays undeclared and the pack never asks"
+  },
+  {
+   "scenario": "e",
+   "run": "e2p-proposed-openai",
+   "wire": "openai",
+   "check": "stub_counts_read",
+   "detail": "None/None",
+   "gap": "G3",
+   "note": "the proposal ignores the confirmed probe answer when the tool has any outputSchema (core/declaration_proposals.py): the accepted lookup stays undeclared and the pack never asks"
+  },
+  {
+   "scenario": "e",
+   "run": "e2p-proposed-anthropic",
+   "wire": "anthropic",
+   "check": "reach:repstub:E1",
+   "detail": "no entry filed ok",
+   "gap": "G3",
+   "note": "the proposal ignores the confirmed probe answer when the tool has any outputSchema (core/declaration_proposals.py): the accepted lookup stays undeclared and the pack never asks"
+  },
+  {
+   "scenario": "e",
+   "run": "e2p-proposed-anthropic",
+   "wire": "anthropic",
+   "check": "reach:repstub:E4",
+   "detail": "no composer section request holds an entry",
+   "gap": "G3",
+   "note": "the proposal ignores the confirmed probe answer when the tool has any outputSchema (core/declaration_proposals.py): the accepted lookup stays undeclared and the pack never asks"
+  },
+  {
+   "scenario": "e",
+   "run": "e2p-proposed-anthropic",
+   "wire": "anthropic",
+   "check": "reach:repstub:E5",
+   "detail": "no report section lists an entry; Appendix A lists no entry",
+   "gap": "G3",
+   "note": "the proposal ignores the confirmed probe answer when the tool has any outputSchema (core/declaration_proposals.py): the accepted lookup stays undeclared and the pack never asks"
+  },
+  {
+   "scenario": "e",
+   "run": "e2p-proposed-anthropic",
+   "wire": "anthropic",
+   "check": "first_service",
+   "detail": "expected 'Stub reputation': {}",
+   "gap": "G3",
+   "note": "the proposal ignores the confirmed probe answer when the tool has any outputSchema (core/declaration_proposals.py): the accepted lookup stays undeclared and the pack never asks"
+  },
+  {
+   "scenario": "e",
+   "run": "e2p-proposed-anthropic",
+   "wire": "anthropic",
+   "check": "stub_counts_read",
+   "detail": "None/None",
+   "gap": "G3",
+   "note": "the proposal ignores the confirmed probe answer when the tool has any outputSchema (core/declaration_proposals.py): the accepted lookup stays undeclared and the pack never asks"
+  },
+  {
+   "scenario": "f1",
+   "run": "f1-undeclared",
+   "wire": "openai",
+   "check": "offered_names",
+   "detail": "[\"built-in analysis identify_file renamed analysis__identify_file\", \"built-in analysis pe_info renamed analysis__pe_info\", \"built-in analysis strings renamed analysis__strings\", \"built-in knowledge attck_lookup renamed knowledge__attck_lookup\"]",
+   "gap": "G4",
+   "note": "a server bound by mcp.servers.<key>.agents takes the bare names and the agent's built-in tools are renamed <server>__<tool>, untold"
+  },
+  {
+   "scenario": "f1",
+   "run": "f1-undeclared",
+   "wire": "openai",
+   "check": "degradations",
+   "detail": "{\"changed_untold\": [\"built-in analysis identify_file renamed analysis__identify_file\", \"built-in analysis pe_info renamed analysis__pe_info\", \"built-in analysis strings renamed analysis__strings\", \"built-in knowledge attck_lookup renamed knowledge__attck_lookup\"], \"kit_unavailable\": []}",
+   "gap": "G4",
+   "note": "a server bound by mcp.servers.<key>.agents takes the bare names and the agent's built-in tools are renamed <server>__<tool>, untold"
+  },
+  {
+   "scenario": "f1",
+   "run": "f1-declared",
+   "wire": "openai",
+   "check": "offered_names",
+   "detail": "[\"built-in analysis identify_file renamed analysis__identify_file\", \"built-in analysis pe_info renamed analysis__pe_info\", \"built-in analysis strings renamed analysis__strings\", \"built-in knowledge attck_lookup renamed knowledge__attck_lookup\"]",
+   "gap": "G4",
+   "note": "a server bound by mcp.servers.<key>.agents takes the bare names and the agent's built-in tools are renamed <server>__<tool>, untold"
+  },
+  {
+   "scenario": "f1",
+   "run": "f1-declared",
+   "wire": "openai",
+   "check": "degradations",
+   "detail": "{\"changed_untold\": [\"built-in analysis identify_file renamed analysis__identify_file\", \"built-in analysis pe_info renamed analysis__pe_info\", \"built-in analysis strings renamed analysis__strings\", \"built-in knowledge attck_lookup renamed knowledge__attck_lookup\"], \"kit_unavailable\": []}",
+   "gap": "G4",
+   "note": "a server bound by mcp.servers.<key>.agents takes the bare names and the agent's built-in tools are renamed <server>__<tool>, untold"
+  },
+  {
+   "scenario": "f1",
+   "run": "f1-with-r2",
+   "wire": "openai",
+   "check": "offered_names",
+   "detail": "[\"built-in analysis identify_file renamed analysis__identify_file\", \"built-in analysis pe_info renamed analysis__pe_info\", \"built-in analysis strings renamed analysis__strings\", \"built-in knowledge attck_lookup renamed knowledge__attck_lookup\", \"built-in r2 decompile_function hidden behind the kit copy\"]",
+   "gap": "G4, G5",
+   "note": "G4 (built-ins renamed for an agent-bound operator server, untold) and G5 (the static provider's decompile_function hidden behind the kit's: the built-in static role's registry merge never learns the provider pool's names)"
+  },
+  {
+   "scenario": "f1",
+   "run": "f1-with-r2",
+   "wire": "openai",
+   "check": "degradations",
+   "detail": "{\"changed_untold\": [\"built-in analysis identify_file renamed analysis__identify_file\", \"built-in analysis pe_info renamed analysis__pe_info\", \"built-in analysis strings renamed analysis__strings\", \"built-in knowledge attck_lookup renamed knowledge__attck_lookup\", \"built-in r2 decompile_function hidden behind the kit copy\"], \"kit_unavailable\": []}",
+   "gap": "G4, G5",
+   "note": "G4 (built-ins renamed for an agent-bound operator server, untold) and G5 (the static provider's decompile_function hidden behind the kit's: the built-in static role's registry merge never learns the provider pool's names)"
+  }
+ ]
+}

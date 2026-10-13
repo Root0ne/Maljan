@@ -59,6 +59,10 @@ REP_STUB = FIXTURES / "validation" / "rep_stub.py"
 KIT_STUB = FIXTURES / "validation" / "kit_stub.py"
 SANDBOX_FIXTURES = FIXTURES / "sandbox"
 PINS_FILE = FIXTURES / "rehearsal" / "known_defects.json"
+# Product gaps a validation run is known to show: each row excuses one miss of
+# one run, matched exactly (scenario, run, wire, check, detail), and names the
+# gap it stands for. Nothing is excused by a pattern.
+GAP_PINS_FILE = FIXTURES / "validation" / "known_defects.json"
 JOB_DEADLINE_S = 600.0
 ALL_E = ("E1", "E2", "E3", "E4", "E5", "E6")
 
@@ -78,6 +82,8 @@ class Context:
     wires: tuple[str, ...] = ("openai", "anthropic")
     python: str = sys.executable
     r2mcp: str = ""
+    # Where r2mcp was looked for, said when a scenario needing it is skipped.
+    r2mcp_searched: str = "--r2mcp"
     pyghidra: str = ""
     ghidra_dir: str = ""
     java_home: str = ""
@@ -97,23 +103,51 @@ class RunResult:
     required: dict[str, tuple[str, ...]]
     gates: Gates
     notes: dict[str, Any] = field(default_factory=dict)
+    # Misses a product gap pin excuses: check -> the gap's reference.
+    pinned: dict[str, str] = field(default_factory=dict)
 
     @property
     def reach_misses(self) -> list[str]:
-        misses = []
+        return [k.removeprefix("reach:") for k in self.reach_miss_details]
+
+    @property
+    def reach_miss_details(self) -> dict[str, str]:
+        misses = {}
         for row in self.reach:
             for e in self.required.get(row["server"], ()):
                 if not row[e]["ok"]:
-                    misses.append(f"{row['server']}:{e}")
+                    misses[f"reach:{row['server']}:{e}"] = str(row[e].get("why") or "")
         return misses
 
     @property
+    def misses(self) -> dict[str, str]:
+        """Every miss of this run, check -> detail, pinned or not."""
+        return {
+            **{f"base:{k}": v for k, v in self.base_failures.items()},
+            **self.reach_miss_details,
+            **{k: d for k, (ok, d) in self.gates.items() if not ok},
+        }
+
+    @property
+    def unpinned(self) -> dict[str, str]:
+        return {k: v for k, v in self.misses.items() if k not in self.pinned}
+
+    @property
+    def held_back(self) -> bool:
+        """A run that did not happen: skipped for a missing tool, or pending other work."""
+        return self.status in ("skipped", "pending")
+
+    @property
     def ok(self) -> bool:
-        return (
-            not self.base_failures
-            and not self.reach_misses
-            and all(ok for ok, _detail in self.gates.values())
-        )
+        return not self.unpinned and not self.held_back
+
+    @property
+    def label(self) -> str:
+        if self.held_back:
+            return self.status.upper()
+        if self.unpinned:
+            return "MISS"
+        return "ok (pinned gap)" if self.pinned else "ok"
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -121,13 +155,68 @@ class RunResult:
             "run": self.name,
             "wire": self.wire,
             "ok": self.ok,
+            "label": self.label,
             "job_status": self.status,
             "base_failures": self.base_failures,
             "excused": self.excused,
             "reach_misses": self.reach_misses,
             "gates": {k: {"ok": ok, "detail": d} for k, (ok, d) in self.gates.items()},
+            "pinned": {k: {"gap": g, "detail": self.misses.get(k)} for k, g in self.pinned.items()},
+            "unpinned": self.unpinned,
             "notes": self.notes,
         }
+
+
+# Where an r2mcp installed by hand outside PATH and radare2's own install
+# places is commonly kept (``static.r2.binary_path`` names it in settings).
+KNOWN_R2MCP = ("~/tools/bin/r2mcp",)
+
+
+def find_r2mcp(given: str = "") -> tuple[str, str]:
+    """The r2mcp to use, and every place looked, in words.
+
+    ``--r2mcp`` or ``VALIDATION_R2MCP`` first; then the product's own lookup
+    of the shipped ``static.r2.binary_path`` (PATH, then radare2's install
+    places); then the known places above.
+    """
+    from maljan.providers.static.r2 import resolve_r2_binary
+
+    looked: list[str] = []
+    for value in (given, os.environ.get("VALIDATION_R2MCP", "")):
+        if value:
+            looked.append(value)
+            if os.access(value, os.X_OK) and Path(value).is_file():
+                return value, "; ".join(looked)
+    found = resolve_r2_binary(_defaults().static.r2.binary_path)
+    looked.extend(found.looked)
+    if found.path:
+        return found.path, "; ".join(looked)
+    for known in KNOWN_R2MCP:
+        path = str(Path(known).expanduser())
+        looked.append(path)
+        if os.access(path, os.X_OK) and Path(path).is_file():
+            return path, "; ".join(looked)
+    return "", "looked in: " + "; ".join(looked)
+
+
+def clean_outputs(out: Path, scenarios: list[str]) -> list[str]:
+    """Take away what an earlier run left in ``out`` for ``scenarios``; returns what went.
+
+    Each named scenario's directory (every run of it, any name an earlier
+    harness version wrote there included) and its summary files go; nothing
+    else in ``out`` is touched.
+    """
+    gone: list[str] = []
+    for scenario in scenarios:
+        for entry in (out / scenario, out / f"{scenario}.json", out / f"{scenario}.md"):
+            if entry.is_dir() and not entry.is_symlink():
+                shutil.rmtree(entry)
+            elif entry.exists() or entry.is_symlink():
+                entry.unlink()
+            else:
+                continue
+            gone.append(entry.name)
+    return gone
 
 
 def no_hidden_segment(path: Path) -> Path:
@@ -136,6 +225,23 @@ def no_hidden_segment(path: Path) -> Path:
     if any(part.startswith(".") for part in resolved.parts[1:]):
         raise SystemExit(f"{resolved} holds a path segment starting with a dot; pick another --out")
     return resolved
+
+
+def gap_pins() -> dict[tuple[str, str, str, str], tuple[str, str]]:
+    """The product gap pins: (scenario, run, wire, check) -> (detail, gap)."""
+    if not GAP_PINS_FILE.is_file():
+        return {}
+    rows = json.loads(GAP_PINS_FILE.read_text(encoding="utf-8"))["pins"]
+    return {(r["scenario"], r["run"], r["wire"], r["check"]): (r["detail"], r["gap"]) for r in rows}
+
+
+def apply_pins(result: RunResult) -> None:
+    """Excuse each miss of ``result`` a gap pin names with exactly its detail."""
+    pins = gap_pins()
+    for check, detail in result.misses.items():
+        held = pins.get((result.scenario, result.name, result.wire, check))
+        if held is not None and held[0] == detail:
+            result.pinned[check] = held[1]
 
 
 def _known_defects() -> dict[tuple[str, str], dict[str, str]]:
@@ -157,14 +263,20 @@ def run_one(
     absent: tuple[str, ...] = (),
     gates: Callable[[RunRecord, dict[str, dict[str, Any]], Path], Gates] | None = None,
     notes: dict[str, Any] | None = None,
+    watch: Callable[[], Gates] | None = None,
 ) -> tuple[RunResult, RunRecord]:
-    """Run ``rehearsal`` once, read it against every gate and write its result files."""
+    """Run ``rehearsal`` once, read it against every gate and write its result files.
+
+    ``watch`` is read right after the run ends (before any reading): gates of
+    what the run left behind on the machine.
+    """
     run_dir = ctx.out / scenario / name
     if run_dir.exists():
         shutil.rmtree(run_dir)
     run_dir.mkdir(parents=True)
     rehearsal = replace(rehearsal, work_dir=run_dir / "work", dump_dir=run_dir / "dump")
     record = asyncio.run(rehearse(rehearsal))
+    left = watch() if watch else {}
     # The run's own report, kept beside the gates for whoever reads a miss.
     (run_dir / "report.md").write_text(record.markdown, encoding="utf-8")
     (run_dir / "report.json").write_text(
@@ -182,11 +294,12 @@ def run_one(
             key,
             match=(matches or {}).get(key),
             absent=absent,
+            expect_cited="E2" in servers[key],
         )
         for key in servers
     ]
     by_key = {row["server"]: row for row in rows}
-    own = gates(record, by_key, run_dir / "dump") if gates else {}
+    own = {**left, **(gates(record, by_key, run_dir / "dump") if gates else {})}
     if absent:
         named = reach_mod.absent_names(record, absent)
         own.setdefault("names_absent", (not named, json.dumps(named) if named else "none named"))
@@ -210,6 +323,7 @@ def run_one(
             **(notes or {}),
         },
     )
+    apply_pins(result)
     payload = {**as_json(record, checks), "validation": result.summary(), "reach": rows}
     (run_dir.parent / f"{name}.json").write_text(
         json.dumps(payload, indent=1, default=str), encoding="utf-8"
@@ -227,7 +341,12 @@ def run_one(
         f"- {'ok' if not base_failures else 'MISS'} base gate: "
         + (json.dumps(base_failures) if base_failures else "every check passes"),
         f"- {'ok' if not result.reach_misses else 'MISS'} reach: "
-        + (", ".join(result.reach_misses) or "every required row"),
+        + (
+            "; ".join(f"{k}: {v}" for k, v in result.reach_miss_details.items())
+            or "every required row"
+        ),
+        *(f"- pinned {k}: product gap {g}" for k, g in result.pinned.items()),
+        f"- run: {result.label}",
     ]
     (run_dir.parent / f"{name}.md").write_text("\n".join(md) + "\n", encoding="utf-8")
     return result, record
@@ -343,7 +462,7 @@ def preflight_r2(ctx: Context, times: int = 3) -> dict[str, Any]:
 
 def scenario_a(ctx: Context) -> list[RunResult]:
     if not ctx.r2mcp or not Path(ctx.r2mcp).is_file():
-        return [_skipped("a", "r2mcp not found (--r2mcp)")]
+        return [_skipped("a", f"r2mcp not found ({ctx.r2mcp_searched})")]
     pre = preflight_r2(ctx)
     extra = {
         "static.provider": "r2",
@@ -361,22 +480,34 @@ def scenario_a(ctx: Context) -> list[RunResult]:
             ),
         ),
     }
-    r2_ok = lambda e: reach_mod.by_server("r2")(e) and bool(e.get("ok"))  # noqa: E731
 
     def gates(record: RunRecord, rows: dict[str, Any], _dump: Path, deep: bool = True) -> Gates:
         own: Gates = {"preflight": (pre["ok"], json.dumps(pre))}
         if not deep:
             return own
-        kinds = _entry_kinds(record, r2_ok)
-        code = [k for k in kinds if k in ("decompile", "disassembly", "function_disassembly")]
+        e5 = rows["r2"]["E5"]
         own.update(
             {
-                "code_entry": (bool(code), f"r2 entry kinds filed ok: {kinds}"),
+                # Code read where the product itself said a function starts:
+                # a decompile or disassembly answer that holds code, at a
+                # place a function or entry-point listing of r2 returned.
+                "code_entry": _code_entry_gate(e5["code"]),
                 "code_listing_figure": (
-                    rows["r2"]["E5"]["listing_from_source"],
-                    f"{rows['r2']['E5']['code_listing_figures']} code listing figure(s)",
+                    e5["listing_from_source"],
+                    f"{e5['code_listing_figures']} code listing figure(s)",
                 ),
-                "functions_examined": (rows["r2"]["E5"]["functions_examined"], ""),
+                # "Functions examined" must stand on a function actually
+                # read as code, never on a listing call.
+                "functions_examined": (
+                    e5["functions_examined_by_code"],
+                    "cites a credited code entry"
+                    if e5["functions_examined_by_code"]
+                    else (
+                        "cites no credited code entry"
+                        if e5["functions_examined"]
+                        else "no Functions examined section cites r2"
+                    ),
+                ),
             }
         )
         return own
@@ -414,6 +545,87 @@ def scenario_a(ctx: Context) -> list[RunResult]:
 # ---------------------------------------------------------------------------
 # (b) a second decompiler of another make, over MCP (run alone: it starts a JVM)
 # ---------------------------------------------------------------------------
+
+
+def _code_entry_gate(code: dict[str, Any]) -> tuple[bool, str]:
+    """The code-entry gate from ``reach.code_evidence``, its detail free of entry ids."""
+    if code["credited"]:
+        return True, f"{len(code['credited'])} code entr(y/ies) at a listed function start"
+    reasons = sorted(set(code["refused"].values()))
+    return False, (
+        f"{len(code['code_entries'])} code entr(y/ies), none credited"
+        + (f" ({'; '.join(reasons)})" if reasons else "")
+        + f"; {len(code['function_starts'])} function start(s) listed"
+    )
+
+
+def processes_naming(marker: str) -> dict[int, str]:
+    """Every process whose command line holds ``marker``, with its descendants: pid -> line.
+
+    Read from ``/proc`` alone; this process is never one of them.
+    """
+    lines: dict[int, str] = {}
+    parents: dict[int, int] = {}
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        pid = int(entry.name)
+        try:
+            raw = (entry / "cmdline").read_bytes()
+            stat = (entry / "stat").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        lines[pid] = raw.replace(b"\0", b" ").decode("utf-8", errors="replace").strip()
+        try:
+            parents[pid] = int(stat.rsplit(")", 1)[1].split()[1])
+        except (IndexError, ValueError):
+            continue
+    held = {pid for pid, line in lines.items() if marker in line and pid != os.getpid()}
+    grew = True
+    while grew:
+        children = {pid for pid, parent in parents.items() if parent in held} - held
+        children.discard(os.getpid())
+        grew = bool(children)
+        held |= children
+    return {pid: lines.get(pid, "")[:300] for pid in sorted(held)}
+
+
+def end_survivors(marker: str, grace_s: float = 15.0) -> dict[int, str]:
+    """The processes still naming ``marker`` after ``grace_s``, each then ended by its pid.
+
+    A survivor is asked to end (SIGTERM), then made to (SIGKILL); a pid is
+    signalled only while its command line (or its parent's) still holds the
+    marker, so a reused pid is never touched. Returns the survivors as found.
+    """
+    import signal
+    import time
+
+    deadline = time.monotonic() + grace_s
+    survivors = processes_naming(marker)
+    while survivors and time.monotonic() < deadline:
+        time.sleep(0.5)
+        survivors = processes_naming(marker)
+    for sig in (signal.SIGTERM, signal.SIGKILL) if survivors else ():
+        for pid in processes_naming(marker):
+            try:
+                os.kill(pid, sig)
+            except OSError:
+                pass
+        end = time.monotonic() + 10.0
+        while processes_naming(marker) and time.monotonic() < end:
+            time.sleep(0.5)
+    return survivors
+
+
+def survivor_gate(marker: str) -> Gates:
+    """A gate that misses when a process naming ``marker`` outlived the step (then ended)."""
+    left = end_survivors(marker)
+    return {
+        "no_survivor": (
+            not left,
+            "no process left" if not left else f"ended by pid: {json.dumps(left)}",
+        )
+    }
 
 
 def _pyghidra_entry(ctx: Context, **changes: Any) -> dict[str, Any]:
@@ -532,13 +744,31 @@ def scenario_b(ctx: Context) -> list[RunResult]:
         auto_name_prefixes=["FUN_"],
         tools=PYGHIDRA_READ_ONLY,
     )
-    pre = [_probe_mcp("pyghidra", b1) for _ in range(3)]
+    # Every pyghidra process (the JVM it hosts included) names the project
+    # path on its command line: none may outlive a probe or a run.
+    marker = str(b1["args"][1])
+    before = end_survivors(marker, grace_s=0.0)
+    pre = []
+    left: dict[str, Any] = {"before": before} if before else {}
+    for index in range(3):
+        pre.append(_probe_mcp("pyghidra", b1))
+        survived = end_survivors(marker)
+        if survived:
+            left[f"probe {index + 1}"] = survived
+            break
     preflight = {
-        "ok": all(p.ok and len(p.tools or []) >= 20 for p in pre),
+        "ok": len(pre) == 3 and all(p.ok and len(p.tools or []) >= 20 for p in pre) and not left,
         "tools": [len(p.tools or []) for p in pre],
         "details": [p.detail for p in pre],
+        "survivors_ended_by_pid": left,
     }
+    if left:
+        # A process outlived a probe: the scenario stops here (each was ended by pid).
+        return [_stopped("b", "preflight", preflight)]
     b2p, proposal = accepted_proposal("pyghidra", b1)
+    survived = end_survivors(marker)
+    if survived:
+        return [_stopped("b", "proposal", {"survivors_ended_by_pid": survived})]
     pg = reach_mod.by_server("pyghidra")
 
     def gates(record: RunRecord, rows: dict[str, Any], _dump: Path) -> Gates:
@@ -574,8 +804,12 @@ def scenario_b(ctx: Context) -> list[RunResult]:
             servers={"pyghidra": required},
             gates=gates,
             notes=proposal_notes if name.startswith("b2p") else None,
+            watch=functools.partial(survivor_gate, marker),
         )
         results.append(result)
+        if not result.gates["no_survivor"][0]:
+            # Ended by pid and reported; no further JVM is started.
+            break
     return results
 
 
@@ -609,24 +843,104 @@ def _sandbox_entries(entry: dict[str, Any]) -> bool:
     return str((entry.get("facts") or {}).get("kind") or "").startswith("sandbox_")
 
 
+def _upload_client(sandbox: Any) -> Any:
+    """A test client over the upload route itself, the API's own way (no server, no database).
+
+    Only the seams the route's own tests replace are replaced: the sample
+    lookup, the row write, the object store, the audit record and the stored
+    settings read (``sandbox`` stands for them); format reading, the allowed
+    list, the reader check and the size cap are the route's.
+    """
+    import uuid
+    from contextlib import ExitStack
+    from unittest import mock
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api.v1 import sandbox_reports as module
+    from app.database import get_db
+    from app.deps import get_current_user, require_active_user
+
+    app = FastAPI()
+    app.include_router(module.router, prefix="/api/v1")
+    user = mock.MagicMock(id=uuid.uuid4())
+    sample = mock.MagicMock(id=uuid.uuid4(), sha256=_sample_sha256(), uploaded_by=user.id)
+    stack = ExitStack()
+    stack.enter_context(
+        mock.patch.object(module, "_load_sample", mock.MagicMock(return_value=sample))
+    )
+    stack.enter_context(
+        mock.patch.object(module, "_sandbox_settings", mock.AsyncMock(return_value=sandbox))
+    )
+    stack.enter_context(mock.patch.object(module, "put_object", mock.AsyncMock()))
+    stack.enter_context(
+        mock.patch.object(module, "_persist", mock.MagicMock(side_effect=lambda db, row: row))
+    )
+    stack.enter_context(mock.patch.object(module.audit, "record", mock.AsyncMock()))
+    app.dependency_overrides[get_db] = lambda: mock.MagicMock()
+    app.dependency_overrides[get_current_user] = lambda: user
+    app.dependency_overrides[require_active_user] = lambda: user
+    return stack, TestClient(app), sample
+
+
+def _post_report(sandbox: Any, name: str, blob: bytes) -> dict[str, Any]:
+    stack, client, sample = _upload_client(sandbox)
+    with stack:
+        response = client.post(
+            f"/api/v1/samples/{sample.id}/sandbox-reports",
+            files={"file": (name, blob, "application/json")},
+        )
+    body = response.json() if response.content else {}
+    return {
+        "status": response.status_code,
+        "format": body.get("format"),
+        "task_id": body.get("task_id"),
+        "sample_sha256_match": body.get("sample_sha256_match"),
+        "detail": body.get("detail"),
+    }
+
+
 def upload_checks() -> dict[str, Any]:
-    """What the upload route decides for each fixture, read through its own functions."""
+    """The upload route's answer for each fixture, through the API's test client.
+
+    Beside the three fixtures: the reader check (a recognised, allowed format
+    whose declaration names no registered reader is refused, 422) and the
+    size cap (a report over the configured maximum is refused, 413).
+    """
     from app.api.v1.sandbox_reports import _read_declared, sandbox_formats
 
-    settings = _defaults()
-    allowed = set(settings.sandbox.upload.allowed_formats)
-    formats = sandbox_formats(settings.sandbox.report_formats)
+    sandbox = _defaults().sandbox
     out: dict[str, Any] = {}
     for name in ("cape2_report.json", "triage_overview.json", "triage_report_behavioral1.json"):
-        payload = json.loads((SANDBOX_FIXTURES / name).read_text(encoding="utf-8"))
-        fmt, task_id, target = _read_declared(payload, formats)
-        accepted = fmt is not None and fmt.name in allowed
-        out[name] = {
-            "format": getattr(fmt, "name", None),
-            "status": 201 if accepted else 415,
-            "task_id": task_id,
-            "target_sha256": target,
-        }
+        out[name] = _post_report(sandbox, name, (SANDBOX_FIXTURES / name).read_bytes())
+    # The reader check: the format the first fixture is read as, declared with no reader.
+    blob = (SANDBOX_FIXTURES / "cape2_report.json").read_bytes()
+    fmt, _task, _target = _read_declared(json.loads(blob), sandbox_formats(sandbox.report_formats))
+    from maljan.core.report_formats import effective_formats
+
+    declared = next(
+        (d for d in effective_formats(sandbox.report_formats) if fmt and d.name == fmt.name), None
+    )
+    if declared is None:
+        out["format without a reader"] = {"status": None, "detail": "not checked: no declaration"}
+    else:
+        raw = sandbox.model_dump(mode="json")
+        raw["report_formats"] = [
+            *(r for r in raw.get("report_formats") or [] if r.get("name") != declared.name),
+            {**declared.model_dump(mode="json"), "reader": ""},
+        ]
+        out["format without a reader"] = _post_report(
+            type(sandbox).model_validate(raw), "no-reader.json", blob
+        )
+    capped = {**sandbox.model_dump(mode="json")}
+    capped["upload"] = {**capped["upload"], "max_report_bytes": max(1, len(blob) // 2)}
+    try:
+        small = type(sandbox).model_validate(capped)
+    except ValueError as exc:
+        out["over the size cap"] = {"status": None, "detail": f"not checked: {exc}"}
+    else:
+        out["over the size cap"] = _post_report(small, "too-large.json", blob)
     return out
 
 
@@ -654,6 +968,21 @@ def scenario_c1(ctx: Context) -> list[RunResult]:
                         api[fixture]["status"] == 201 and api[fixture]["format"] == fmt,
                         json.dumps(api[fixture]),
                     ),
+                    "upload_route_refusals": (
+                        api["triage_report_behavioral1.json"]["status"] == 415
+                        and api["format without a reader"]["status"] == 422
+                        and api["over the size cap"]["status"] in (413, None),
+                        json.dumps(
+                            {
+                                k: api[k]
+                                for k in (
+                                    "triage_report_behavioral1.json",
+                                    "format without a reader",
+                                    "over the size cap",
+                                )
+                            }
+                        ),
+                    ),
                     "dynamic_sections": (
                         bool(rows["sandbox"]["E5"]["sections"]),
                         json.dumps(rows["sandbox"]["E5"]["sections"]),
@@ -677,7 +1006,7 @@ def scenario_c1(ctx: Context) -> list[RunResult]:
                     "upload_route": api,
                     # The fixture's target hash is not the rehearsal sample's:
                     # the worker degrades such a run, the in-process run does not.
-                    "target_matches_sample": api[fixture]["target_sha256"] == _sample_sha256(),
+                    "target_matches_sample": api[fixture]["sample_sha256_match"],
                 },
             )
             results.append(result)
@@ -961,23 +1290,117 @@ def _kit_read_by_its_own_facts(record: RunRecord, declared: dict[str, Any]) -> t
     return not wrong, "; ".join(wrong) or "every kit entry read by its own facts"
 
 
-def _kit_gates(declared: dict[str, Any]) -> Callable[..., Gates]:
+def kit_tools() -> dict[str, str]:
+    """The kit's own tools as its server lists them: name -> description."""
+    import runpy
+
+    server = runpy.run_path(str(KIT_STUB))["server"]
+    return {t.name: str(t.description or "") for t in asyncio.run(server.list_tools())}
+
+
+def builtin_sources(extra: dict[str, Any], newcomer: str) -> dict[str, set[str]]:
+    """Each built-in source of the run's settings and the tool names it declares.
+
+    The enabled servers other than ``newcomer`` by their key, and the static
+    provider by its id: read as settings data (``tool_facts``), never by name.
+    """
+    from maljan.core.settings_overrides import build_settings
+    from maljan.core.tool_declarations import PROVIDER_BLOCKS, block_at
+
+    settings = build_settings(extra)
+    out = {
+        key: set(entry.tool_facts or {})
+        for key, entry in settings.mcp.servers.items()
+        if key != newcomer and entry.enabled
+    }
+    provider = str(settings.static.provider or "")
+    block = PROVIDER_BLOCKS.get(f"provider:{provider}")
+    if block:
+        out[provider] = set(block_at(settings, block).tool_facts or {})
+    return out
+
+
+def offered_name_findings(
+    requests: list[dict[str, str]],
+    newcomer: str,
+    own: dict[str, str],
+    builtins: dict[str, set[str]],
+) -> list[str]:
+    """What each request offers wrong when the newcomer's names collide with a built-in's.
+
+    In a request holding a built-in source (any of its other tools offered),
+    a built-in tool the newcomer's tool shares a name with keeps its bare
+    name: offered as ``<source>__<name>`` it was renamed; offered not at all
+    while the newcomer's copy is, it was hidden. The newcomer's copy is known
+    by its own description.
+    """
+    found: set[str] = set()
+    # A name several built-in sources declare (each server's own status tool)
+    # says nothing about which of them a request holds.
+    counts: dict[str, int] = {}
+    for declared in builtins.values():
+        for name in declared:
+            counts[name] = counts.get(name, 0) + 1
+    for offered in requests:
+        theirs = {
+            name for name, text in offered.items() if any(d and d in text for d in own.values())
+        }
+        for source, declared in builtins.items():
+            shared = declared & set(own)
+            if not shared:
+                continue
+            unique = {n for n in declared - set(own) if counts[n] == 1}
+            held = {n for n in offered if n not in theirs and n in unique} | {
+                n for n in offered if n.startswith(f"{source}__")
+            }
+            if not held:
+                continue
+            for name in sorted(shared):
+                if f"{source}__{name}" in offered:
+                    found.add(f"built-in {source} {name} renamed {source}__{name}")
+                bare_builtin = name in offered and name not in theirs
+                if (
+                    not bare_builtin
+                    and f"{source}__{name}" not in offered
+                    and theirs
+                    & {
+                        name,
+                        f"{newcomer}__{name}",
+                    }
+                ):
+                    found.add(f"built-in {source} {name} hidden behind the {newcomer} copy")
+    return sorted(found)
+
+
+def _kit_gates(extra: dict[str, Any], declared: dict[str, Any]) -> Callable[..., Gates]:
+    own = kit_tools()
+    builtins = builtin_sources(extra, "kit")
+
     def gates(record: RunRecord, _rows: dict[str, Any], dump: Path) -> Gates:
-        kit_tools = [
+        kit_tools_called = [
             str(e.get("tool")) for e in reach_mod.entries_of(record, reach_mod.by_server("kit"))
         ]
-        kit_names = {"strings", "pe_info", "attck_lookup", "identify_file", "decompile_function"}
-        offered = [
-            name
-            for name in reach_mod.tools_offered(dump)
-            if name in kit_names or name.startswith("kit")
-        ]
-        degradations = record.malware_report.get("degradation_reasons") or []
+        findings = offered_name_findings(reach_mod.offers(dump), "kit", own, builtins)
+        degradations = [str(d) for d in record.malware_report.get("degradation_reasons") or []]
+        # A built-in renamed or hidden is a change the operator must be told
+        # of; a degradation naming the kit's server unavailable is false.
+        untold = [f for f in findings if not any(f.split()[2] in d for d in degradations)]
+        kit_unavailable = sorted(
+            d for d in degradations if "kit" in d.split(".") and "unavailable" in d.lower()
+        )
         return {
             "own_facts": _kit_read_by_its_own_facts(record, declared),
-            "kit_entries": (bool(kit_tools), json.dumps(kit_tools)),
-            "offered_names": (True, json.dumps(offered)),
-            "degradations": (True, json.dumps(degradations)),
+            "kit_entries": (bool(kit_tools_called), json.dumps(kit_tools_called)),
+            "offered_names": (
+                not findings,
+                json.dumps(findings) if findings else "every built-in keeps its bare name",
+            ),
+            "degradations": (
+                not untold and not kit_unavailable,
+                json.dumps({"changed_untold": untold, "kit_unavailable": kit_unavailable})
+                if untold or kit_unavailable
+                else "nothing changed untold, the kit never named unavailable",
+            ),
         }
 
     return gates
@@ -992,7 +1415,7 @@ def _kit_run(
         name,
         _rehearsal(ctx.wires[0], extra=extra, fill_from_results=True, **kw),
         servers={"kit": ALL_E},
-        gates=_kit_gates(declared),
+        gates=_kit_gates(extra, declared),
     )
     return result
 
@@ -1058,9 +1481,11 @@ def scenario_f3(ctx: Context) -> list[RunResult]:
     clone = _defaults().agents.definitions["static"].model_dump(mode="json", exclude_none=True)
     clone["label"] = "Static analyst (operator kit)"
     clone.pop("tab", None)
+    # The kit takes the analysis server's place after the clone's other
+    # servers, as an operator adds a server to an agent that already holds some.
     clone["tools"] = [
-        {"kind": "mcp", "server": "kit"},
         *[t for t in clone.get("tools") or [] if t.get("server") != "analysis"],
+        {"kind": "mcp", "server": "kit"},
     ]
     stages = default_stages()
     for stage in stages:
@@ -1086,6 +1511,20 @@ def scenario_f4(ctx: Context) -> list[RunResult]:
 # ---------------------------------------------------------------------------
 # Placeholders, the driver
 # ---------------------------------------------------------------------------
+
+
+def _stopped(scenario: str, step: str, detail: dict[str, Any]) -> RunResult:
+    return RunResult(
+        scenario,
+        f"stopped-at-{step}",
+        "",
+        "stopped",
+        {},
+        {},
+        [],
+        {},
+        {"no_survivor": (False, json.dumps(detail, default=str))},
+    )
 
 
 def _skipped(scenario: str, why: str) -> RunResult:
@@ -1117,14 +1556,15 @@ def write_scenario(ctx: Context, scenario: str, results: list[RunResult]) -> Non
     (ctx.out / f"{scenario}.json").write_text(json.dumps(rows, indent=1, default=str), "utf-8")
     lines = [f"# Scenario {scenario}", "", "| Run | Wire | Job | Gate |", "|---|---|---|---|"]
     for r in results:
-        lines.append(f"| {r.name} | {r.wire} | {r.status} | {'ok' if r.ok else 'MISS'} |")
+        lines.append(f"| {r.name} | {r.wire} | {r.status} | {r.label} |")
     for r in results:
-        misses = [k for k, (ok, _d) in r.gates.items() if not ok]
-        if r.base_failures or r.reach_misses or misses:
+        if r.misses or r.held_back:
             lines += ["", f"## {r.name} ({r.wire})"]
-            lines += [f"- base: {k}: {v}" for k, v in r.base_failures.items()]
-            lines += [f"- reach: {m}" for m in r.reach_misses]
-            lines += [f"- gate: {k}: {r.gates[k][1]}" for k in misses]
+            for check, detail in r.misses.items():
+                gap = r.pinned.get(check)
+                lines.append(f"- {'pinned ' + gap if gap else 'MISS'} {check}: {detail}")
+            if r.held_back:
+                lines += [f"- {r.status}: {d}" for _ok, d in r.gates.values()]
     (ctx.out / f"{scenario}.md").write_text("\n".join(lines) + "\n", "utf-8")
 
 
@@ -1133,8 +1573,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, help="results directory (no dot-segment in its path)")
     parser.add_argument("--scenarios", nargs="*", default=list(DEFAULT_SET))
     parser.add_argument("--wires", nargs="*", default=["openai", "anthropic"])
+    parser.add_argument("--r2mcp", default="", help="r2mcp to use (else looked for)")
     parser.add_argument(
-        "--r2mcp", default=os.environ.get("VALIDATION_R2MCP") or shutil.which("r2mcp") or ""
+        "--allow-skips",
+        action="store_true",
+        help="a skipped or pending scenario does not make the exit status non-zero",
     )
     parser.add_argument(
         "--pyghidra",
@@ -1155,16 +1598,21 @@ def main(argv: list[str] | None = None) -> int:
     unknown = [s for s in args.scenarios if s not in SCENARIOS]
     if unknown:
         parser.error(f"unknown scenario(s) {unknown}; one of {sorted(SCENARIOS)}")
+    r2mcp, searched = find_r2mcp(args.r2mcp)
     ctx = Context(
         out=no_hidden_segment(args.out),
         wires=tuple(args.wires),
-        r2mcp=args.r2mcp,
+        r2mcp=r2mcp,
+        r2mcp_searched=searched,
         pyghidra=args.pyghidra,
         ghidra_dir=args.ghidra_dir,
         java_home=args.java_home,
     )
     ctx.out.mkdir(parents=True, exist_ok=True)
+    for name in clean_outputs(ctx.out, list(args.scenarios)):
+        print(f"cleaned {name}")
     missed = 0
+    held_back = 0
     for scenario in args.scenarios:
         try:
             results = SCENARIOS[scenario](ctx)
@@ -1177,9 +1625,17 @@ def main(argv: list[str] | None = None) -> int:
             ]
         write_scenario(ctx, scenario, results)
         for r in results:
-            missed += not r.ok
-            print(f"{scenario:3} {r.name:32} {r.wire:9} {r.status:9} {'ok' if r.ok else 'MISS'}")
-    return 1 if missed else 0
+            held_back += r.held_back
+            missed += not r.ok and not r.held_back
+            print(f"{scenario:3} {r.name:32} {r.wire:9} {r.status:9} {r.label}")
+            if r.held_back:
+                print(f"    {r.status}: {'; '.join(d for _ok, d in r.gates.values())}")
+    if missed:
+        return 1
+    if held_back and not args.allow_skips:
+        print(f"{held_back} scenario(s) skipped or pending; --allow-skips accepts that")
+        return 2
+    return 0
 
 
 if __name__ == "__main__":

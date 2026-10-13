@@ -327,6 +327,247 @@ def a_results_directory_under_a_dot_segment_is_refused() -> None:
     assert no_hidden_segment(Path("/tmp/x/out")) == Path("/tmp/x/out").resolve()
 
 
+def _request(tools: list[dict[str, Any]], *answers: tuple[str, str, dict[str, Any]]) -> Any:
+    from scripts.rehearsal import wire
+
+    turns = [wire.Turn(role="user", text="go")]
+    for i, (name, text, args) in enumerate(answers):
+        turns.append(wire.Turn(role="assistant", tool_calls=[wire.ToolCall(name, args, f"c{i}")]))
+        turns.append(wire.Turn(role="user", tool_results=[wire.ToolResult(f"c{i}", text)]))
+    return wire.Request("openai", "m", "sys", turns, tools, None, False, {})
+
+
+SECTIONS = json.dumps({"sections": [{"name": ".text", "virtual_address": "0x00001000"}]})
+
+
+@check
+def a_place_is_read_where_a_function_listing_says_a_function_starts() -> None:
+    from scripts.rehearsal.roles import _next_call
+
+    lister = {**_tool("enumerate", {}), "description": "Lists all functions found"}
+    reader = _tool("reader", {"address": {"type": "string"}})
+    header = _tool("header", {})
+    index = {**_tool("index", {}), "description": "Join every reading by the functions found."}
+    tools = [header, index, lister, reader]
+    # A section address seen first: the functions are listed before any place is read.
+    seen = _request(tools, ("header", SECTIONS, {}))
+    call = _next_call(seen, _facts(), 1, fill_from_results=True)
+    assert call is not None and call.name == "enumerate", call
+    # A listing that gives only a base is no list of starts: the next lister is asked.
+    based = {**_tool("bases", {}), "description": "Lists the functions known"}
+    only_base = _request(
+        [header, based, lister, reader],
+        ("header", SECTIONS, {}),
+        ("bases", json.dumps({"image_base": "0x140000000"}), {}),
+    )
+    call = _next_call(only_base, _facts(), 2, fill_from_results=True)
+    assert call is not None and call.name == "enumerate", call
+    listed = _request(tools, ("header", SECTIONS, {}), ("enumerate", "0x140001000  entry0\n", {}))
+    call = _next_call(listed, _facts(), 2, fill_from_results=True)
+    assert call is not None and call.args == {"address": "0x140001000"}, call
+
+
+@check
+def a_place_one_tool_failed_at_is_still_tried_by_another() -> None:
+    from scripts.rehearsal.roles import _next_call
+
+    lister = {**_tool("enumerate", {}), "description": "Lists all functions found"}
+    first = _tool("decompile_it", {"address": {"type": "string"}})
+    second = _tool("disassemble_it", {"address": {"type": "string"}})
+    failed = json.dumps({"error": {"code": "tool_failed", "message": "no function here"}})
+    request = _request(
+        [lister, first, second],
+        ("enumerate", "0x140001000  entry0\n", {}),
+        ("decompile_it", failed, {"address": "0x140001000"}),
+    )
+    call = _next_call(request, _facts(), 2, fill_from_results=True)
+    assert call is not None and call.name == "disassemble_it", call
+    assert call.args == {"address": "0x140001000"}, call
+
+
+@check
+def a_tool_that_changes_state_is_left_alone() -> None:
+    from scripts.rehearsal.roles import _changes_state
+
+    assert _changes_state({"description": "[MODIFY] Renames the function"})
+    assert _changes_state({"description": "This tool renames a variable"})
+    assert _changes_state({"description": "Reads", "annotations": {"destructiveHint": True}})
+    assert _changes_state({"description": "Reads", "annotations": {"readOnlyHint": False}})
+    assert not _changes_state(
+        {"description": "Sets nothing", "annotations": {"readOnlyHint": True}}
+    )
+    assert not _changes_state({"description": "[LIST] Lists all functions"})
+
+
+@check
+def code_is_credited_only_when_read_at_a_listed_function_start() -> None:
+    import tempfile
+
+    from scripts.validation.reach import code_evidence, holds_code
+
+    assert not holds_code("0x00003000      invalid\n0x00003001      invalid\n")
+    assert not holds_code('{"error": {"code": "tool_failed"}}')
+    assert holds_code("0x140001000      sub rsp, 0x28\n")
+    assert holds_code("int entry0(void) {\n    return 0;\n}")
+    entries = [
+        {"id": "ev_0001", "ok": True, "tool": "fl", "facts": {"kind": "function_list"}},
+        {"id": "ev_0002", "ok": True, "tool": "da", "facts": {"kind": "disassembly"}},
+        {"id": "ev_0003", "ok": True, "tool": "da", "facts": {"kind": "disassembly"}},
+        {"id": "ev_0004", "ok": True, "tool": "da", "facts": {"kind": "disassembly"}},
+    ]
+    outputs = {
+        1: "0x140001000  entry0",
+        2: "0x140001000      sub rsp, 0x28",
+        3: "0x00003000      invalid",
+        4: "0x00001000      push rbp",
+    }
+    record = _record()
+    record.malware_report["technical_evidence"] = {
+        "s": [{"seq": n - 1, "output": text} for n, text in outputs.items()]
+    }
+    calls = {1: ("fl", {}), 2: ("da", {"address": "0x140001000"})}
+    calls |= {3: ("da", {"address": "0x00003000"}), 4: ("da", {"address": "0x00001000"})}
+    with tempfile.TemporaryDirectory() as tmp:
+        messages: list[dict[str, Any]] = [{"role": "user", "content": "go"}]
+        for n, (tool, args) in calls.items():
+            messages.append(
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": f"c{n}",
+                            "function": {"name": tool, "arguments": json.dumps(args)},
+                        }
+                    ],
+                }
+            )
+            text = f"[ev_{n:04d}]\n{outputs[n]}"
+            messages.append({"role": "tool", "tool_call_id": f"c{n}", "content": text})
+        body = {"model": "m", "messages": messages}
+        (Path(tmp) / "0001-analyst.json").write_text(json.dumps(body), encoding="utf-8")
+        code = code_evidence(record, Path(tmp), entries)
+    assert code["credited"] == ["ev_0002"], code
+    assert code["refused"]["ev_0003"] == "its answer holds no code", code
+    assert code["refused"]["ev_0004"].startswith("its place is not"), code
+
+
+@check
+def e3_misses_when_nothing_cites_or_a_declared_entry_never_reaches_corroboration() -> None:
+    from scripts.validation.reach import reach
+
+    uncited = _record(events=[])
+    assert not reach(uncited, None, "newcomer")["E3"]["ok"]
+    assert reach(uncited, None, "newcomer", expect_cited=False)["E3"]["ok"]
+    declared = _record()
+    declared.malware_report["evidence_index"][1]["facts"] = {"kind": "strings"}
+    row = reach(declared, None, "newcomer")["E3"]
+    assert not row["ok"] and "corroboration" in row["why"], row
+    declared.run_summary = {"corroboration": {"T1": {"sources": ["ev_0002"]}}}
+    assert reach(declared, None, "newcomer")["E3"]["ok"]
+    declared.run_summary = {
+        "corroboration": {"T1": {"sources": ["ev_0002"], "roots_not_read": ["ev_0002: no: x"]}}
+    }
+    assert not reach(declared, None, "newcomer")["E3"]["ok"]
+
+
+@check
+def a_process_naming_the_marker_is_found_and_ended_by_pid() -> None:
+    import subprocess
+    import tempfile
+    import time
+
+    from scripts.validation.run import end_survivors, processes_naming
+
+    marker = tempfile.mkdtemp(prefix="validation-marker-")
+    child = subprocess.Popen(["/bin/sh", "-c", "sleep 30", marker])
+    try:
+        time.sleep(0.3)
+        assert child.pid in processes_naming(marker)
+        left = end_survivors(marker, grace_s=0.5)
+        assert child.pid in left, left
+        child.wait(timeout=10)
+        assert not processes_naming(marker)
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+        Path(marker).rmdir()
+
+
+@check
+def a_gap_pin_excuses_only_its_exact_miss_and_a_skip_is_no_pass() -> None:
+    from unittest import mock
+
+    from scripts.validation import run
+
+    def result(detail: str) -> Any:
+        return run.RunResult(
+            "z", "r1", "openai", "completed", {}, {}, [], {}, {"g": (False, detail)}
+        )
+
+    pins = {("z", "r1", "openai", "g"): ("exact words", "G0")}
+    with mock.patch.object(run, "gap_pins", return_value=pins):
+        held = result("exact words")
+        run.apply_pins(held)
+        other = result("exact words, and more")
+        run.apply_pins(other)
+    assert held.ok and held.pinned == {"g": "G0"}, held.summary()
+    assert not other.ok and not other.pinned
+    skipped = run._skipped("z", "no tool")
+    assert not skipped.ok and skipped.label == "SKIPPED"
+    assert run._pending("z", "later").label == "PENDING"
+
+
+@check
+def a_built_in_renamed_or_hidden_by_a_newcomers_name_is_found() -> None:
+    from scripts.validation.run import offered_name_findings
+
+    own = {"pe_info": "Describe as the kit records it.", "dec": "Answer the kit's listing."}
+    builtins = {"analysis": {"pe_info", "hashes"}, "prov": {"dec", "open"}}
+    fine = [
+        {
+            "pe_info": "PE header reader",
+            "kit__pe_info": "Describe as the kit records it.",
+            "hashes": "h",
+            "dec": "real decompiler",
+            "kit__dec": "Answer the kit's listing.",
+            "open": "o",
+        }
+    ]
+    assert offered_name_findings(fine, "kit", own, builtins) == []
+    renamed = [
+        {
+            "analysis__pe_info": "PE header reader",
+            "pe_info": "Describe as the kit records it.",
+            "hashes": "h",
+            "dec": "[ANALYZE] Answer the kit's listing.",
+            "open": "o",
+        }
+    ]
+    assert offered_name_findings(renamed, "kit", own, builtins) == [
+        "built-in analysis pe_info renamed analysis__pe_info",
+        "built-in prov dec hidden behind the kit copy",
+    ]
+    alone = [{"pe_info": "Describe as the kit records it."}]
+    assert offered_name_findings(alone, "kit", own, builtins) == []
+
+
+@check
+def a_new_run_clears_only_the_named_scenarios_earlier_outputs() -> None:
+    import tempfile
+
+    from scripts.validation.run import clean_outputs
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp)
+        (out / "e" / "an-old-name").mkdir(parents=True)
+        (out / "e.json").write_text("{}")
+        (out / "d").mkdir()
+        (out / "notes.txt").write_text("kept")
+        assert sorted(clean_outputs(out, ["e"])) == ["e", "e.json"]
+        assert sorted(p.name for p in out.iterdir()) == ["d", "notes.txt"]
+
+
 def run_self_checks() -> int:
     failed = 0
     for name, fn in CHECKS:

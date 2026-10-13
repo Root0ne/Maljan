@@ -90,7 +90,11 @@ def register() -> ValidationKVStore:
 
 
 def unregister() -> None:
-    """Take ``validation_kv`` out of the registry again."""
+    """Take ``validation_kv`` out of the registry again.
+
+    The registry has no public way to take a backend out (a product never
+    needs one); this harness reaches into it, and only for its own id.
+    """
     from maljan.memory import store_factory
 
     store_factory._BACKENDS.pop(BACKEND_ID, None)
