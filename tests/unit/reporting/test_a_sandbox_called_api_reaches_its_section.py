@@ -105,6 +105,10 @@ def test_counting_stays_linear() -> None:
     assert large < small * 30, (small, large)
 
 
+# The label the pack's line gives the catalogue asked about the sandbox's calls.
+CALLED_LABEL = "sandbox-called api catalogue"
+
+
 def _kind(entry: Any) -> str:
     return str((entry.facts or {}).get("kind") or "")
 
@@ -126,6 +130,17 @@ def test_the_pack_asks_the_catalogue_about_the_sandbox_s_calls(tmp_path: Any) ->
         "platform": "windows",
     }
     assert result.entries[-1] is asked
+    # Its line says these are the sandbox's recorded calls; an import
+    # catalogue line keeps its own name.
+    from maljan.pipeline.triage_pack import render_pack
+
+    lines = render_pack(result.entries, 1_000_000).splitlines()
+    (line,) = [x for x in lines if x.startswith(f"[{asked.id}] ")]
+    assert line.startswith(f"[{asked.id}] {CALLED_LABEL}: API catalogue associations")
+    for other in result.entries:
+        if other.tool == "api_capability" and other is not asked:
+            (own,) = [x for x in lines if x.startswith(f"[{other.id}] ")]
+            assert own.startswith(f"[{other.id}] api catalogue: ")
     dynamic = dynamic_from_ledger(result.entries)
     assert dynamic is not None and dynamic.api_capabilities.get("crypto") == 1
     # The import profile never reads the calls' catalogue answer.

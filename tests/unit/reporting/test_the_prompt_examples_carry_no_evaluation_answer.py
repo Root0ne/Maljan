@@ -114,6 +114,7 @@ from maljan.analysis.function_summarizer import SHORTENED_NOTE as SUMMARISER_SHO
 from maljan.analysis.function_summarizer import SUMMARY_CUT_NOTE, SUMMARY_FENCE_STATEMENT
 from maljan.analysis.pcap_summary import CaptureRead
 from maljan.core.config import SampleOpenConfig
+from maljan.core.pack_steps import CALLED_API_CATALOGUE, shipped_label
 from maljan.core.reputation import read_answer
 from maljan.extractors.capability_matrix import (
     NOT_ASKED_UNKNOWN_ID,
@@ -1444,6 +1445,7 @@ PROMPTS: dict[str, str] = {
     ).message,
     "absence marker": ABSENCE_TECHNIQUE_MARKER,
     "failed-calls marker": FAILED_CALLS_MARKER,
+    "sandbox-called api catalogue label": shipped_label("api_capability", CALLED_API_CATALOGUE),
     "capability questions for the anti-analysis and anti-forensics terms": " ".join(
         v.message
         for v in ungrounded_capabilities(

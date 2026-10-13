@@ -4381,7 +4381,7 @@ def _label_of(entry: LedgerEntry) -> str:
     if step is not None:
         label = str(step.get("label") or "") or display_name(entry)
     elif entry.server in (None, "", PIPELINE):
-        label = shipped_label(entry.tool)
+        label = shipped_label(entry.tool, kind_of(entry))
     else:
         label = display_name(entry)
     if kind_of(entry) != SCAN_KIND:
