@@ -202,12 +202,20 @@ report instead:
    keys too: it reads as DNS only beside a second DNS signal (one of the
    above, a name saying `dns`, `lookups` or `resolutions`, a key saying `dns`,
    or question values shaped like host names), and never with `high`
-   confidence on that spelling and one signal alone. A list whose question
-   values are no host names (white space, a slash, a backslash, brackets, a
-   query's punctuation, or no dot in any of them), or whose rows carry another
-   protocol's or an endpoint's keys (`method`, `url`, `uri`, `path`, `status`,
-   `user_agent`, `port` ...), reads as no DNS unless a key only DNS rows write,
-   or record types, say otherwise. A name and a type alone are what function, section, rule and
+   confidence on that spelling and one signal alone. Question values read as
+   host names when most of them do: at least three in four hold no white
+   space, slash, backslash, bracket, quote or query punctuation, and at least
+   half of those hold a dot, so one odd lookup (a wildcard, a value with a
+   space) never decides a list. A list whose question values are no host
+   names reads as no DNS unless a key only DNS rows write says otherwise, or
+   record types do beside the DNS row's structure (its answers under
+   `answers`) or beside a name saying `dns`, `lookups` or `resolutions`: a
+   `dns` list of typed lookups of `wpad` and `localhost` is proposed, while
+   names typed `A` and nothing more, as an import table writes, are not. A
+   list whose rows carry another protocol's or an endpoint's keys (`method`,
+   `url`, `uri`, `path`, `status`, `user_agent`, `port` ...) reads as no DNS
+   unless a key only DNS rows write, or record types, say otherwise. A name
+   and a type alone are what function, section, rule and
    classification lists hold, and a name with its addresses (`addresses`,
    `ips`, `resolved`) what interfaces, hosts files and embedded configurations
    hold. Likewise a digest, a name and a size read as dropped files only under

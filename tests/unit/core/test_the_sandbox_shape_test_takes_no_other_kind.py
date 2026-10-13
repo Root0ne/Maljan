@@ -346,6 +346,81 @@ class TestARequestOrQueryKeyIsNoDnsEvidenceAlone:
         assert shape is not None and shape.kind == "dns"
 
 
+class TestQuestionValuesAreJudgedByMostOfThem:
+    """Odd or dotless questions in a real DNS list never veto it; an import table stays none."""
+
+    @pytest.mark.parametrize(
+        "dns",
+        [
+            [{"request": "wpad", "type": "A", "answers": []}],
+            [
+                {"request": "wpad", "type": "A", "answers": []},
+                {"request": "localhost", "type": "A", "answers": ["127.0.0.1"]},
+            ],
+            [{"request": "wpad", "type": "A"}, {"request": "localhost", "type": "A"}],
+            [
+                {"request": "*.a.example", "type": "A", "answers": []},
+                {"request": "b.example", "type": "A", "answers": ["192.0.2.1"]},
+            ],
+            [
+                {"request": "a example", "type": "A", "answers": []},
+                *(
+                    {"request": f"h{i}.example", "type": "A", "answers": ["192.0.2.1"]}
+                    for i in range(50)
+                ),
+            ],
+        ],
+        ids=["wpad", "wpad-localhost", "dotless-under-a-dns-name", "one-wildcard", "one-odd-of-51"],
+    )
+    def test_a_typed_dns_list_is_proposed(self, dns: list[dict[str, Any]]) -> None:
+        proposal = propose_format(_with(_NO_DNS, "network", {"dns": dns}))
+        assert proposal["declaration"]["mapping"]["dns"] == "$['network']['dns'][*]"
+
+    def test_one_odd_value_among_many_still_reads_as_host_names(self) -> None:
+        values = [*(f"h{i}.example" for i in range(50)), "a example"]
+        rows = [{"request": value} for value in values]
+        proposal = propose_format(_with(_NO_DNS, "network", {"dns_requests": rows}))
+        assert proposal["declaration"]["mapping"]["dns"] == "$['network']['dns_requests'][*]"
+
+    @pytest.mark.parametrize(
+        "imports",
+        [
+            [{"name": "CreateFileA", "type": "A"}, {"name": "wpad", "type": "A"}],
+            [
+                {"name": "CreateFileA", "type": "A"},
+                {"name": "ReadFile", "type": "A"},
+                {"name": "kernel32.dll", "type": "A"},
+            ],
+        ],
+        ids=["dotless", "one-module-name"],
+    )
+    def test_names_typed_a_and_nothing_more_read_as_no_dns(
+        self, imports: list[dict[str, Any]]
+    ) -> None:
+        proposal = propose_format(_with(_NO_DNS, "static", {"imports": imports}))
+        assert "dns" not in proposal["declaration"]["mapping"]
+
+    def test_untyped_dotless_questions_read_as_no_dns(self) -> None:
+        report = _with(_NO_DNS, "network", {"dns_requests": [{"request": "wpad"}]})
+        assert "dns" not in propose_format(report)["declaration"]["mapping"]
+
+    @pytest.mark.parametrize(
+        ("held", "reads"),
+        [
+            ([0, 0, 0], False),
+            ([4, 3, 2], True),
+            ([3, 2, 2], False),
+            ([2, 2, 0], False),
+            ([3, 3, 1], False),
+            ([51, 50, 50], True),
+        ],
+    )
+    def test_the_host_name_share(self, held: list[int], reads: bool) -> None:
+        from maljan.core.report_shapes import host_names
+
+        assert host_names({"request": held}) == {"request": reads}
+
+
 @pytest.mark.parametrize(
     ("name", "rows", "keys", "description"),
     [

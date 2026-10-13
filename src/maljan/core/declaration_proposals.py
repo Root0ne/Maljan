@@ -1008,7 +1008,7 @@ def _row_values(answer: Any, reading: _AnswerReading) -> dict[str, Any]:
     if not rows:
         return {}
     record_types: dict[str, bool] = {}
-    hosts: dict[str, list[bool]] = {}
+    hosts: dict[str, list[int]] = {}
     for row in rows:
         for key, value in row.items():
             if not isinstance(key, str):

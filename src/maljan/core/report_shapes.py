@@ -163,26 +163,45 @@ def host_name_shape(value: object) -> tuple[bool, bool] | None:
     return _NOT_IN_A_HOST_NAME.search(text) is None, "." in text.strip(".")
 
 
-def note_question_value(held: dict[str, list[bool]], key: str, value: object) -> None:
+def note_question_value(held: dict[str, list[int]], key: str, value: object) -> None:
     """Fold one row value into ``held[key]`` where ``key`` spells a DNS question.
 
-    ``held[key]`` is ``[every value shaped like a host name, one holding a
-    dot]``; :func:`host_names` reads it. Constant work per value beside the
-    value's length.
+    ``held[key]`` is ``[values seen, values shaped like a host name, shaped
+    values holding a dot]``; :func:`host_names` reads it. Constant work per
+    value beside the value's length.
     """
     if key.lower() not in _QUESTION_KEYS:
         return
     seen = host_name_shape(value)
     if seen is None:
         return
-    entry = held.setdefault(key, [True, False])
-    entry[0] = entry[0] and seen[0]
-    entry[1] = entry[1] or seen[1]
+    entry = held.setdefault(key, [0, 0, 0])
+    entry[0] += 1
+    if seen[0]:
+        entry[1] += 1
+        entry[2] += seen[1]
 
 
-def host_names(held: Mapping[str, list[bool]]) -> dict[str, bool]:
-    """``row_shape``'s ``host_names`` from what :func:`note_question_value` folded."""
-    return {key: shaped and dotted for key, (shaped, dotted) in held.items()}
+# The share of a question's values that must be shaped like host names for
+# the values to read as host names: a clear majority, so one odd lookup a
+# sample made (a wildcard, a value with a space) never vetoes a list. Of
+# those, at least half must hold a dot, as most names a run looks up do: a
+# list of function names with one module name among them is no host list.
+_HOST_NAME_SHARE = (3, 4)
+
+
+def host_names(held: Mapping[str, list[int]]) -> dict[str, bool]:
+    """``row_shape``'s ``host_names`` from what :func:`note_question_value` folded.
+
+    A key's values read as host names where at least three in four of them
+    are shaped like one and at least half of those (and one at the least)
+    hold a dot.
+    """
+    part, whole = _HOST_NAME_SHARE
+    return {
+        key: shaped * whole >= seen * part and dotted > 0 and dotted * 2 >= shaped
+        for key, (seen, shaped, dotted) in held.items()
+    }
 
 
 @dataclass
@@ -238,10 +257,14 @@ def row_shape(
     a DNS record type (``True``), that the values seen are not (``False``, which
     no name the list sits under outweighs), or that none was seen (``None``).
     ``host_names`` maps a key, as the rows write it, to whether the values
-    seen under it read as host names (every one shaped like a host name, at
-    least one holding a dot); a key absent had no value seen. A question whose
-    values are no host names is no DNS question unless a key only DNS rows
-    write says it is.
+    seen under it read as host names (at least three in four shaped like a
+    host name, at least half of those holding a dot, :func:`host_names`); a key absent
+    had no value seen. A question whose values are no host names is no DNS
+    question unless a key only DNS rows write says it is, or record types do
+    beside the DNS row's structure or a name the list sits under that says
+    DNS on its own (a list of typed lookups of ``wpad`` and ``localhost``
+    still reads as DNS; a list of names typed ``A`` and nothing more, as an
+    import table writes, does not).
     ``high`` where every part is under the consumer's own field name,
     ``medium`` where some part is under another spelling or where the
     question is spelled generically (``request``, ``query``) with only one
@@ -272,7 +295,11 @@ def row_shape(
             typed = bool(record_types) and "type" in parts
             structure = "type" in parts and parts.get("answers", "").lower() in _DNS_ANSWER_KEYS
             hosts = None if host_names is None else host_names.get(parts["request"])
-            if hosts is False and not dns_only:
+            # Record types outweigh question values that are no host names
+            # only beside a second DNS sign of the same strength: a name and
+            # a type ``A`` alone is what an import table writes.
+            dns_named = _named(names, _DNS_ONLY_WORDS)
+            if hosts is False and not (dns_only or (typed and (structure or dns_named))):
                 continue
             if _NOT_A_QUESTION_KEYS & keyset and not (dns_only or typed):
                 continue
@@ -283,7 +310,7 @@ def row_shape(
             specific = (dns_only, typed, structure)
             evidence = sum(specific) + bool(hosts) + said + named
             if parts["request"].lower() in _GENERIC_QUESTION_KEYS:
-                second = (*specific, bool(hosts), said, _named(names, _DNS_ONLY_WORDS))
+                second = (*specific, bool(hosts), said, dns_named)
                 if not any(second):
                     continue
                 if sum((*specific, bool(hosts))) < 2:

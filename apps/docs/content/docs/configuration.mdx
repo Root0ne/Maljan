@@ -3586,7 +3586,11 @@ reads with low confidence. A question under `request` or `query` needs a
 second DNS signal beside it (one of those, a name saying `dns`, `lookups` or
 `resolutions`, or answer values shaped like host names), and rows carrying an
 HTTP request's or an endpoint's keys (`method`, `url`, `status`, `port` ...)
-or question values that are no host names read as no DNS question. A
+read as no DNS question unless a key only DNS rows write or record types say
+otherwise. Question values read as host names when most do (three in four
+shaped like one, half of those dotted); rows whose values are no host names
+read as no DNS question unless a key only DNS rows write says otherwise, or
+record types do beside answers under `answers` or a name saying DNS. A
 connection test of a server without the role whose tools' rows read like a
 sandbox run's says so in the proposals' notes, naming the tools, and
 proposes no sandbox kind. A name with its addresses (`addresses`, `ips`, `resolved`) is what
