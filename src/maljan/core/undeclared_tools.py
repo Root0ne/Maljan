@@ -546,3 +546,238 @@ def prose_error(text: Any) -> str | None:
         rest = said[shape.end() :].strip()
         return said if re.search(r"[A-Za-z]", rest) and re.search(r"\s", rest) else None
     return None
+
+
+# What a code listing looks like, read from its text: pseudo-C (braces, a
+# call's parenthesis, a statement ending in a semicolon at its line's end or
+# before a closing brace) or disassembly lines (each line led by an address,
+# at most a byte run, a mnemonic and an operand). Each pattern is bounded and
+# anchored, so a hostile answer is read in one pass, and prose that merely
+# holds numbers ("Found 1234 matches in 4096 files") is no listing.
+_CALL_SHAPE_RE = re.compile(r"\w\(")
+_STATEMENT_END_RE = re.compile(r";[ \t]*(?:$|\})", re.MULTILINE)
+_ASM_LINE_RE = re.compile(
+    # A gutter (a disassembler's box-drawing bar, an arrow), a segment's name.
+    r"^[ \t│|>*]{0,16}(?:[\w.]{1,32}:)?"
+    # The address: written 0x…, six or more hex digits, or four before a colon.
+    r"(?:0x[0-9A-Fa-f]{2,16}|[0-9A-Fa-f]{6,16}|[0-9A-Fa-f]{4,5}(?=[ \t]*:))h?"
+    r"[ \t]*:?[ \t]+"
+    # The instruction's bytes, as one run or as pairs.
+    r"(?:(?:[0-9A-Fa-f]{2}[ \t]?){1,16}[ \t]+)?"
+    # The mnemonic and the start of an operand.
+    r"[A-Za-z]{2,7}(?:\.[A-Za-z]{1,3})?[ \t]+[\w\[$%#-]",
+    re.MULTILINE,
+)
+
+
+def holds_code(text: Any) -> bool:
+    """Whether ``text`` reads as a code listing: pseudo-C, or two disassembly lines."""
+    said = str(text or "")
+    if not said.strip():
+        return False
+    # A listing cut for storage may have lost its closing brace.
+    if "{" in said and _CALL_SHAPE_RE.search(said) and _STATEMENT_END_RE.search(said):
+        return True
+    return sum(1 for _ in zip(range(2), _ASM_LINE_RE.finditer(said), strict=False)) >= 2
+
+
+# Where a JSON object's string field opens: its name, a colon, a quote.
+_STRING_FIELD_RE = re.compile(r'"([^"\\\n]{1,200})"[ \t\r\n]*:[ \t\r\n]*"')
+# A JSON string's escapes, undone in the field a cut falls in when the
+# decoder cannot read it.
+_ESCAPE_RE = re.compile(r"\\(u[0-9a-fA-F]{4}|.)", re.DOTALL)
+_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", '"': '"', "\\": "\\", "/": "/", "b": "\b", "f": "\f"}
+# An escape the cut split: a ``\u`` short of its four digits, or a lone backslash.
+_SPLIT_ESCAPE_RE = re.compile(r"\\u[0-9a-fA-F]{0,3}$|(?<!\\)(?:\\\\)*\\$")
+# The marks a text cut for storage ends with: the tool-output guardrail's
+# (``agents.mcp_client.TRUNCATION_MARKER``) and the marked cut's.
+_STORAGE_CUT_MARKS = ("[OUTPUT TRUNCATED]", "…")
+
+
+def _undo_escape(match: re.Match[str]) -> str:
+    said = match.group(1)
+    if said.startswith("u") and len(said) == 5:
+        return chr(int(said[1:], 16))
+    return _ESCAPES.get(said, said)
+
+
+def _read_to_cut(rest: str) -> str:
+    """The text of a JSON string the cut fell in: the cut's mark and a split escape left out."""
+    value = rest.rstrip()
+    trimmed = True
+    while trimmed:
+        trimmed = False
+        for mark in _STORAGE_CUT_MARKS:
+            if value.endswith(mark):
+                value = value[: -len(mark)].rstrip()
+                trimmed = True
+    value = _SPLIT_ESCAPE_RE.sub("", value)
+    from json import decoder
+
+    try:
+        read, _ = decoder.scanstring(value + '"', 0, False)  # type: ignore[attr-defined]
+    except ValueError:
+        read = _ESCAPE_RE.sub(_undo_escape, value)
+    return str(read)
+
+
+def _string_fields(text: str) -> tuple[dict[str, str], str | None]:
+    """The string fields of a JSON object cut short, each read to its end or to the cut.
+
+    One pass: a field found inside a value already read is skipped, and the
+    field the cut falls in is read to the cut (:func:`_read_to_cut`). Returns
+    the fields and the name of the one the cut fell in, ``None`` for none.
+    """
+    from json import decoder
+
+    scanstring = decoder.scanstring  # type: ignore[attr-defined]
+
+    fields: dict[str, str] = {}
+    read_to = 0
+    for match in _STRING_FIELD_RE.finditer(text):
+        if match.start() < read_to:
+            continue
+        try:
+            value, read_to = scanstring(text, match.end(), False)
+        except ValueError:
+            name = match.group(1)
+            fields.setdefault(name, _read_to_cut(text[match.end() :]))
+            return fields, name
+        fields.setdefault(match.group(1), value)
+    return fields, None
+
+
+# A field name a decompiler or disassembler gives its listing.
+_CODE_KEY_RE = re.compile(r"code|decomp|pseudo|source|listing|disas|asm", re.IGNORECASE)
+
+# A disassembly line with no address: a mnemonic alone, with one operand, or
+# with operands separated by commas (``push ebp``, ``mov dword ptr [ebp-4], eax``,
+# ``retn``). Bounded, anchored to the whole line.
+_OPERAND = r"[\w\[\]+\-*:$%#.@?]{1,64}"
+_BARE_ASM_LINE_RE = re.compile(
+    rf"[ \t]*[A-Za-z]{{2,7}}(?:\.[A-Za-z]{{1,3}})?"
+    rf"(?:[ \t]+{_OPERAND}(?:(?:[ \t]+{_OPERAND}){{0,3}}[ \t]*,[ \t]*{_OPERAND}"
+    rf"(?:[ \t]+{_OPERAND}){{0,3}}){{0,3}})?[ \t]*"
+)
+# What only an instruction's operands write: a comma between two operands
+# with no space before it, or a memory reference.
+_OPERAND_MARK_RE = re.compile(r"\w,[ \t]*[\w\[]|\[\w")
+
+
+def holds_bare_listing(text: str) -> bool:
+    """Whether ``text`` is a disassembly written without addresses.
+
+    Three or more lines of mnemonic-and-operand shape, at least four in five of
+    its lines, and an operand mark (two operands joined by a comma, or a
+    memory reference) on one of them: prose of short lines is no listing. Read only for a field
+    under a code-ish key, where a listing is what the field holds.
+    """
+    lines = [line for line in text.splitlines() if line.strip()]
+    shaped = [line for line in lines if _BARE_ASM_LINE_RE.fullmatch(line)]
+    return (
+        len(shaped) >= 3
+        and len(shaped) * 5 >= len(lines) * 4
+        and any(_OPERAND_MARK_RE.search(line) for line in shaped)
+    )
+
+
+def code_strings(document: Any) -> list[tuple[str, str]]:
+    """Every string in a JSON document that reads as code, with the key it stands under.
+
+    Walked iteratively, objects and lists at any depth, in document order.
+    """
+    found: list[tuple[str, str]] = []
+    stack: list[tuple[str, Any]] = [("", document)]
+    while stack:
+        key, value = stack.pop()
+        if isinstance(value, str):
+            if holds_code(value) or (_CODE_KEY_RE.search(key) and holds_bare_listing(value)):
+                found.append((key, value))
+        elif isinstance(value, Mapping):
+            stack.extend(reversed([(str(k), v) for k, v in value.items()]))
+        elif isinstance(value, list):
+            stack.extend(reversed([(key, v) for v in value]))
+    return found
+
+
+def _pick_code(found: list[tuple[str, str]]) -> str:
+    """The listing among several code strings: the one under a code-ish key, else the longest."""
+    if len(found) == 1:
+        return found[0][1]
+    keyed = [value for key, value in found if _CODE_KEY_RE.search(key)]
+    return (keyed or sorted((v for _, v in found), key=len, reverse=True))[0]
+
+
+def code_listing(answer: Any, path: str = "", rows: str = "") -> tuple[str, bool]:
+    """The code a code-listing answer holds, and whether the cut for storage fell in it.
+
+    A JSON object's code is read at the declared path (``ToolFacts.values``
+    ``code``, inside the first of the declared ``rows``) when the declaration
+    names one and it reads as code; else from the strings that read as code
+    (:func:`holds_code`) at any depth: the one, or among several the one
+    under a code-ish key, else the longest. A JSON answer holding code that
+    no string carries alone is drawn whole, as it always was; a JSON object
+    that holds no code anywhere is no listing (a search's hits, a status
+    record) and gives ``""``. A JSON list holding no code string, and a plain
+    text answer, are drawn whole as before.
+    """
+    said = str(answer or "").strip()
+    if not said:
+        return "", False
+    if said[0] not in "{[":
+        return said, False
+    import json
+
+    cut_field: str | None = None
+    try:
+        document: Any = json.loads(said)
+    except ValueError:
+        if said[0] != "{":
+            return said, False
+        # An answer cut for storage is no whole JSON: its string fields are
+        # read up to the cut.
+        document, cut_field = _string_fields(said)
+    if path and isinstance(document, Mapping):
+        from maljan.core.tool_declarations import first, select
+
+        found = select(document, rows) if rows else [document]
+        held = first(found[0], path) if found else None
+        if isinstance(held, str) and (holds_code(held) or holds_bare_listing(held)):
+            return held.strip("\n"), cut_field is not None and held == document.get(cut_field)
+    strings = code_strings(document)
+    if strings:
+        picked = _pick_code(strings)
+        cut = cut_field is not None and isinstance(document, Mapping)
+        return picked.strip("\n"), cut and picked == document.get(cut_field)
+    if (
+        cut_field is not None
+        and _CODE_KEY_RE.search(cut_field)
+        and isinstance(document, Mapping)
+        and str(document.get(cut_field) or "").strip()
+    ):
+        # The cut fell in the listing's own field before it showed a code
+        # shape: what was read of it is drawn, marked cut.
+        return str(document[cut_field]).strip("\n"), True
+    if isinstance(document, list) or holds_code(said) or holds_code(_joined_strings(document)):
+        return said, False
+    return "", False
+
+
+def _joined_strings(document: Any) -> str:
+    """Every string of a JSON document, one per line, walked iteratively in document order."""
+    out: list[str] = []
+    stack: list[Any] = [document]
+    while stack:
+        value = stack.pop()
+        if isinstance(value, str):
+            out.append(value)
+        elif isinstance(value, Mapping):
+            stack.extend(reversed(list(value.values())))
+        elif isinstance(value, list):
+            stack.extend(reversed(value))
+    return "\n".join(out)
+
+
+def code_text(answer: Any, path: str = "", rows: str = "") -> str:
+    """The code a code-listing answer holds, or ``""`` when it holds none (:func:`code_listing`)."""
+    return code_listing(answer, path, rows)[0]

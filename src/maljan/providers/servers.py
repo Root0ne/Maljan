@@ -1027,7 +1027,7 @@ class ServerHandle:
         it, so the reason and the remedy reach the operator and the degraded
         block. A server that answered no manifest is offered whole, as before.
         """
-        from maljan.providers.sample_open import wrap_open_tool
+        from maljan.providers.sample_open import mark_open_tool, wrap_open_tool
 
         allowed = self.config.tools
         withheld = self.capabilities.unusable() if self.capabilities else frozenset()
@@ -1058,12 +1058,17 @@ class ServerHandle:
             every_tool = [reading[id(tool)] for tool in every_tool]
         # A server that declares its open tool has that tool answered through
         # the job's note: a path opened once is not opened again.
-        return wrap_open_tool(
-            offered,
+        spec = getattr(self.config, "sample_open", None)
+        return mark_open_tool(
+            wrap_open_tool(
+                offered,
+                every_tool,
+                server=self.note_key,
+                spec=spec,
+                notes=self.sample_notes,
+            ),
+            spec,
             every_tool,
-            server=self.note_key,
-            spec=getattr(self.config, "sample_open", None),
-            notes=self.sample_notes,
         )
 
     def withheld_reasons(self) -> list[str]:

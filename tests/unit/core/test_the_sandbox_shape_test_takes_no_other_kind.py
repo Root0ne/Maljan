@@ -105,12 +105,18 @@ def test_a_static_tool_is_proposed_as_dev_proposed_it(
 
 
 def test_another_kind_signal_comes_before_the_sandbox_shape() -> None:
-    # Rows that would pass the DNS test, from a tool its words name a decompiler.
+    # Rows that would pass the DNS test, from a tool its name says decompiles.
     proposal = propose_tool(
-        _tool("show", "dns", ["request", "type", "answers"], "Decompiles the function.")
+        _tool("decompile_show", "dns", ["request", "type", "answers"], "Decompiles the function.")
     )
     assert proposal is not None
     assert proposal.facts.get("kind") == "decompile"
+    # Its description's word alone, with no answer holding code, names no kind:
+    # and the rows are still not read as a sandbox's.
+    worded = propose_tool(
+        _tool("show", "dns", ["request", "type", "answers"], "Decompiles the function.")
+    )
+    assert worded is not None and worded.facts.get("kind") is None
 
 
 def test_a_sandbox_tool_s_own_evidence_still_names_its_kind() -> None:

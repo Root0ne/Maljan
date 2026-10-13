@@ -1403,6 +1403,33 @@ class _Pack:
                 lambda: knowledge.api_capability([], platform=platform, resolved_names=names),
             )
 
+    def _sandbox_api_capability(self, step: PackStep) -> None:
+        """The catalogue asked about the APIs the sandbox recorded the sample calling.
+
+        The names are the sandbox's own API reading of the job's report
+        (``sandbox_tools.sandbox_api_calls``), asked under the routed format's
+        vocabulary; the entry is recorded under the step's own kind
+        (``called_api_catalogue``), so the import profile and the technique
+        rules of the import-set lookup are never read from it. Nothing is
+        asked without an observed report, API calls in it or a vocabulary.
+        """
+        report = observed_report(self.inputs.sandbox_report)
+        platform = _BEHAVIOUR_PLATFORM_BY_FORMAT.get(self.routed)
+        if not report or platform is None:
+            return
+        rows = sandbox_tools.sandbox_api_calls(report).get("apis") or []
+        names = list(
+            dict.fromkeys(
+                str(row.get("api")) for row in rows if isinstance(row, dict) and row.get("api")
+            )
+        )
+        if names:
+            self.record(
+                step.called,
+                {"api_names": names, "platform": platform},
+                lambda: knowledge.api_capability(names, platform=platform),
+            )
+
     # -- the deobfuscation passes -------------------------------------------
 
     def _crypto_constants(self, step: PackStep) -> None:
@@ -1614,6 +1641,7 @@ _BUILTIN_STEPS: dict[str, Callable[[_Pack, PackStep], None]] = {
     "resolve_api_hashes": _Pack._resolve_api_hashes,
     "decode_string_blobs": _Pack._decode_string_blobs,
     "resolved_api_capability": _Pack._resolved_api_capability,
+    "sandbox_api_capability": _Pack._sandbox_api_capability,
     crypto_constants.TOOL: _Pack._crypto_constants,
     SCAN_TOOL: _Pack._anti_analysis_pass,
     artefact_index.TOOL: _Pack._function_index,
@@ -4353,7 +4381,7 @@ def _label_of(entry: LedgerEntry) -> str:
     if step is not None:
         label = str(step.get("label") or "") or display_name(entry)
     elif entry.server in (None, "", PIPELINE):
-        label = shipped_label(entry.tool)
+        label = shipped_label(entry.tool, kind_of(entry))
     else:
         label = display_name(entry)
     if kind_of(entry) != SCAN_KIND:

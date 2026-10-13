@@ -88,6 +88,7 @@ SHIPPED_IDS = [
     "function_index",
     "unpack_upx",
     "sandbox_sections",
+    "sandbox_api_capability",
 ]
 
 INVENTORY = {

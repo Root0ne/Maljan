@@ -839,7 +839,12 @@ its own section table.
 **A sandbox report is sections of items, each with an id a claim cites.**
 Where a sandbox produced a report, the pack's last entry is
 `sandbox_sections` (`analysis.sandbox_sections`), after every other step so
-every earlier id keeps its value; it is read in memory in time linear in the
+every earlier id keeps its value, save one: where the report records API
+calls, the step `sandbox_api_capability` follows it and asks the API catalogue
+about the APIs called, recorded under the kind `called_api_catalogue` so the
+import profile never reads it (`DynamicBehavior.api_capabilities` does), and
+its line is labelled `sandbox-called api catalogue`, apart from the import
+catalogue's `api catalogue` line; it is read in memory in time linear in the
 report, so neither the pack's time budget nor its evidence byte budget stops or blanks it. It reads the report the
 run holds into fixed sections: processes, API calls, file operations,
 registry operations, network rows (DNS, hosts, HTTP, TCP, UDP, domains, ICMP,
@@ -1629,7 +1634,19 @@ decides.
    entry, and the judge's memory query follows the same rule; a noted claim
    never displaces a positive claim for its technique when chunk answers are
    merged. A benign control run had published thirteen techniques from such
-   claims. The outcome every finding is published with in the
+   claims. **A claim citing only failed calls** is flagged the same way once
+   the run's ledger is known (the judge node,
+   `validation.mark_claims_citing_only_failed_calls`): every reference its
+   evidence names is an entry id and every entry it cites is a call the
+   ledger files as failed, so it rests on nothing the sample showed; a claim
+   that also names a sandbox item (`net:3`) or any other reference is not
+   flagged
+   (a tool's name is in its own error text, and grounding reads token
+   overlap). It is kept as written and logged; the judge's summary, the
+   upstream-findings block and, when every claim naming a technique is
+   flagged, the ATT&CK table print "the claim cites only tool calls that
+   failed" beside it (`ClaimEvidence.cites_only_failed_calls`). Publication
+   is unchanged. The outcome every finding is published with in the
    conversation is the kept answer's: an analyst whose retry lost claims keeps
    its first answer, and the loop checks that answer again before it says what
    became of each finding (`retry_with_feedback_sync(keep=)`). A retry that
@@ -4784,6 +4801,50 @@ is assembled from what the run gathered rather than recomputed beside it:
   the report. The recommendation's category is the model's own. The Markdown
   prints the host identifiers in §9 under the report model's voice, unpublished,
   and the console draws them in the technical-analysis panel.
+* **What a technical section is shown, and when it is asked.** A section's
+  analyst claims are picked by its keywords (`evidence_bundles.mentions`): a
+  keyword shorter than six letters matches a whole word or a word's prefix,
+  words split at camel case (`rsa` in `RSA1` and `rsaenh`, `encrypt` in
+  `CryptEncrypt`), or a word's end with a plural, verb, agent or API suffix
+  after it (`rc4` in `ARC4`, `key` in `pubkey`, `http` in `winhttp`, `task` in
+  `schtasks`, `hash` in `apihashing`, `mutex` in `createmutexw`), never inside
+  another word (`rsa` in `rehearsal`), never in an ordinary word that ends
+  with it by chance (`key` in `monkey`, `rsa` in `versa`) and never starting
+  or ending inside a number written in hex (`c2` in `0xC2C4`); a longer stem
+  matches anywhere (`obfuscat` in `deobfuscation`).
+  The communications, command-and-control and configuration sections are shown
+  `entries_holding` beside the run's urls, domains and ips: each value with the
+  answered entries whose captured output, one-entry section or self-naming
+  table row holds it, read once per report and only for the wanted values, so
+  a section can cite the entry behind a value whether or not an analyst did; a
+  value no entry is known to hold is left out. The encryption, discovery and
+  evasion sections are shown `sandbox_called_<category>_api_count` beside the
+  import profile's count: the APIs a sandbox API reading (kind
+  `sandbox_api_calls`) recorded called, by the category an API catalogue
+  answer of the run (kind `api_catalogue`) gave each name
+  (`DynamicBehavior.api_capabilities`), so a sandbox-only crypto call asks the
+  encryption section. A zero count is not shown and asks nothing. The
+  encryption section is also shown `crypto_finding_entries`: every answered
+  entry of a crypto-finding kind (`crypto_constants`), whichever server or
+  pack step wrote it, so a published constant set found in the file asks the
+  section; a run with none is shown what it always was.
+* **A decompile figure draws code.** A code-listing figure draws a JSON
+  answer's code field, read at the declared `values.code` path (inside the
+  declared `rows`) or among its strings at any depth that read as code (the
+  one, or of several the one under a code-ish key, else the longest), with its
+  own line breaks. Code is read by its shape: pseudo-C (a brace, a call, a
+  statement ending at a line's end or before a brace) or two disassembly
+  lines each led by an address, so prose holding numbers is no code; a field
+  under a code-ish key (`disassembly`, `listing`, `asm`, `code`) also reads as
+  code with three or more lines of mnemonic-and-operand shape and an operand
+  mark (two operands joined by a comma, a memory reference). A JSON
+  answer whose code no one string carries is drawn whole, as it always was; a
+  JSON object holding no code (a search's hits, an error record) is not drawn,
+  and a plain text answer is drawn as it always was. An answer cut for storage
+  is read to the cut, an escape the cut split left out and the cut's mark kept
+  out of the listing, and the figure says the answer was cut. The caption names the call's symbol,
+  else its address argument, declared or named for an address
+  (`name_or_address`).
 * **The report stage derives its budget as the judge does.** A section's and
   the narrative round's output budget
   (`core.container.composer_output_budget`, `report_stage_budget`,

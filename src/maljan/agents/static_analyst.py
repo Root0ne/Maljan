@@ -627,7 +627,13 @@ class StaticAnalyst(BaseAnalyst):
         # ``analysis_file_path`` on the chunk JSON. When present we hoist
         # it to a separate "Load using" line so the model can't miss it,
         # even on a degraded local 8-9B run.
-        load_hint = _extract_load_hint(data, tool_names(self.tools), self._sample_open())
+        # The provider's own declaration, else a declaration an operator-bound
+        # server's offered open tool carries (``sample_open.mark_open_tool``).
+        from maljan.providers.sample_open import declared_open
+
+        load_hint = _extract_load_hint(
+            data, tool_names(self.tools), self._sample_open() or declared_open(self.tools)
+        )
 
         # Maltracker-style sink-reachability triage: when we have a
         # container-visible path, run a deterministic call-graph pre-pass and
@@ -845,11 +851,9 @@ def _extract_load_hint(data: str, offered: frozenset[str], sample_open: Any = No
     tool = str(getattr(sample_open, "open_tool", "") or "")
     argument = str(getattr(sample_open, "path_argument", "") or "")
     if tool and argument and tool in offered:
-        return (
-            f'LOAD THIS BINARY FIRST: call ``{tool}({argument}="{path}")``.\n'
-            "All subsequent analysis tools operate on the program loaded by "
-            "that call. Do not invent a path — use the one above verbatim.\n\n"
-        )
+        from maljan.providers.sample_open import load_line
+
+        return load_line(tool, argument, path)
     if offered:
         return f"Sample path (use exactly this string wherever a tool asks for a file): {path}\n\n"
     return f"Sample path: {path}\n\n"

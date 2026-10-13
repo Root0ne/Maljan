@@ -594,6 +594,46 @@ def _row_text(row: dict[str, Any], path: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _called_api_categories(
+    ledger: list[LedgerEntry], called: list[dict[str, Any]]
+) -> dict[str, int]:
+    """The categories of the APIs the sandbox recorded called, one count per name.
+
+    A name's category is what an API catalogue answer of the run (declared
+    kind ``api_catalogue``, from any server) said of it, compared by the
+    A/W-folded key; the first answer naming a category for a name gives it.
+    A called name no answer covers is not counted. An answer of kind
+    ``called_api_catalogue`` (the pack's ask about the sandbox's own API
+    reading) names called APIs by what it is, so its names are wanted too.
+    Linear in the rows.
+    """
+    from maljan.core.pack_steps import CALLED_API_CATALOGUE
+
+    wanted = {_canonical(str(row.get("api") or "")) for row in called if row.get("api")}
+    for _entry, data in _payloads(ledger, CALLED_API_CATALOGUE):
+        wanted.update(
+            _canonical(str(row.get("api") or ""))
+            for row in data.get("capabilities") or []
+            if isinstance(row, dict)
+        )
+    wanted.discard("")
+    if not wanted:
+        return {}
+    category_of: dict[str, str] = {}
+    for _entry, data in _payloads(ledger, CALLED_API_CATALOGUE, "api_catalogue"):
+        for row in data.get("capabilities") or []:
+            if not isinstance(row, dict):
+                continue
+            key = _canonical(str(row.get("api") or ""))
+            category = str(row.get("category") or "").strip()
+            if key in wanted and category and key not in category_of:
+                category_of[key] = category
+    counts: dict[str, int] = {}
+    for category in category_of.values():
+        counts[category] = counts.get(category, 0) + 1
+    return counts
+
+
 def dynamic_from_ledger(ledger: list[LedgerEntry]) -> DynamicBehavior | None:
     """``DynamicBehavior`` from the sandbox tools the dynamic analyst called."""
     dynamic = DynamicBehavior()
@@ -663,6 +703,9 @@ def dynamic_from_ledger(ledger: list[LedgerEntry]) -> DynamicBehavior | None:
                     "arguments": str(row.get("first_args") or ""),
                 }
             )
+
+    dynamic.api_capabilities = _called_api_categories(ledger, dynamic.notable_apis)
+    seen = seen or bool(dynamic.api_capabilities)
 
     for _entry, data in _payloads(ledger, "sandbox_mutexes"):
         names = [str(name) for name in data.get("mutexes") or [] if name]

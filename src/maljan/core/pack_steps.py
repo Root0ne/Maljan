@@ -99,6 +99,11 @@ ARGUMENT_PLACEHOLDERS: dict[str, str] = {
     "file_type": "the format the run routed the sample as",
 }
 
+# The kind of the catalogue's answer about the APIs a sandbox recorded the
+# sample calling (the pack's ``sandbox_api_capability`` step): an
+# ``api_catalogue`` answer whose names are calls, not imports.
+CALLED_API_CATALOGUE = "called_api_catalogue"
+
 # How a pack line can show an answer: each a shape of answer, never a tool.
 PACK_RENDERERS: dict[str, str] = {
     "identity": "a file identification: format, platform, size, mime type, category",
@@ -397,6 +402,15 @@ def _shipped() -> tuple[PackStep, ...]:
             display_name="UPX unpacking",
         ),
         _o(id="sandbox_sections", renderer="sandbox_sections", display_name="sandbox sections"),
+        # The catalogue's categories of the APIs the sandbox saw called, under
+        # a kind of its own: never read as the import profile.
+        _o(
+            id="sandbox_api_capability",
+            tool="api_capability",
+            renderer="api_catalogue",
+            kind=CALLED_API_CATALOGUE,
+            display_name="sandbox-called api catalogue",
+        ),
     )
 
 
@@ -427,7 +441,13 @@ def _indexes() -> tuple[dict[str, PackStep], dict[str, PackStep], dict[str, froz
         _INDEXES.append(
             (
                 {s.id: s for s in steps},
-                {s.called: s for s in steps},
+                # A step recording under a kind of its own is found by its
+                # kind (``shipped_label``), never in place of the tool's
+                # first step: the import catalogue's line keeps its name.
+                {
+                    **{s.called: s for s in reversed(steps) if s.kind},
+                    **{s.called: s for s in reversed(steps) if not s.kind},
+                },
                 {renderer: frozenset(names) for renderer, names in tools.items()},
             )
         )
@@ -519,13 +539,28 @@ def shipped_renderer(tool: str) -> str:
     return held.renderer if held is not None else ""
 
 
-def shipped_label(tool: str) -> str:
+def shipped_label(tool: str, kind: str = "") -> str:
     """The label the pack's line gives the shipped step that records under ``tool``.
 
-    ``tool`` itself for a tool no shipped step records under.
+    A shipped step that records under a ``kind`` of its own is named by its
+    own label for an entry of that kind (the catalogue asked about the APIs a
+    sandbox recorded called is not the import catalogue). ``tool`` itself for
+    a tool no shipped step records under.
     """
-    held = _by_tool().get(str(tool or ""))
-    return (held.display_name if held is not None else "") or str(tool or "")
+    name = str(tool or "")
+    if kind:
+        own = next(
+            (
+                step
+                for step in _indexes()[0].values()
+                if step.kind == kind and step.called == name and step.display_name
+            ),
+            None,
+        )
+        if own is not None:
+            return own.display_name
+    held = _by_tool().get(name)
+    return (held.display_name if held is not None else "") or name
 
 
 def _as_step(value: Any) -> PackStep:

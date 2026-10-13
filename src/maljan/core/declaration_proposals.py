@@ -76,6 +76,9 @@ from maljan.core.tool_declarations import (
 from maljan.core.undeclared_tools import (
     ADDRESS_ARGUMENTS,
     DEFAULT_AUTO_NAME_WORDS,
+    code_strings,
+    code_text,
+    holds_code,
     undeclared_code_kind,
 )
 
@@ -932,7 +935,7 @@ def propose_tool(
     # The kind, when something the server said names one; a sandbox's rows, by
     # the shape test, only for a server declared a sandbox source and where
     # nothing else names a kind, with the parts a run reads.
-    found_kind = _kind_of(name, words, word_origin, proposal, reading)
+    found_kind = _kind_of(name, words, word_origin, proposal, reading, answer)
     # A tool asked about an address, a domain or a URL describes that subject
     # (a lookup, a resolution), not what a run did, whatever server serves it.
     subject = bool(_SUBJECT_ROLES & set(proposal.roles))
@@ -1016,8 +1019,16 @@ def _kind_of(
     word_origin: str,
     proposal: ToolProposal,
     reading: _AnswerReading,
+    answer: Any = None,
 ) -> tuple[str, str, list[str]] | None:
-    """The proposed kind, how sure, and what said it; ``None`` when nothing names one."""
+    """The proposed kind, how sure, and what said it; ``None`` when nothing names one.
+
+    A code-listing kind read from the description's words alone (the tool's
+    name says no such thing) is proposed only when the confirmed probe
+    ``answer`` holds code (``undeclared_tools.holds_code``): a search over
+    decompiled code is described with the word too, and its hits are no
+    listing. With no answer, or one holding no code, no code kind is proposed.
+    """
     roles = proposal.roles
     counts = f"a malicious count in the answer ({reading.reputation.get('malicious', '')})"
     if reading.reputation and "hash" in roles:
@@ -1045,13 +1056,29 @@ def _kind_of(
     code = undeclared_code_kind(name)
     if code:
         return code, LOW, ["tool name"]
-    if {"decompile", "decompiled", "decompiles"} & words:
-        return "decompile", LOW, [f"{word_origin} (decompile)"]
-    if {"disassemble", "disassembly"} & words and "address" in roles:
-        return "function_disassembly", LOW, [f"{word_origin} (disassembly)"]
+    answered_code = _answer_holds_code(answer)
+    if {"decompile", "decompiled", "decompiles"} & words and answered_code:
+        return "decompile", LOW, [f"{word_origin} (decompile)", "probe answer holds code"]
+    if {"disassemble", "disassembly"} & words and "address" in roles and answered_code:
+        return (
+            "function_disassembly",
+            LOW,
+            [f"{word_origin} (disassembly)", "probe answer holds code"],
+        )
     if "strings" in words and "text" in reading.values:
         return "strings", LOW, [f"{word_origin} (strings)", "rows with a text value"]
     return None
+
+
+def _answer_holds_code(answer: Any) -> bool:
+    """Whether a probe answer (its text, or the object parsed from it) holds a code listing."""
+    if answer is None:
+        return False
+    if isinstance(answer, str):
+        return bool(code_text(answer)) and holds_code(code_text(answer))
+    if isinstance(answer, Mapping | list):
+        return bool(code_strings(answer))
+    return False
 
 
 # The argument roles that name a subject to describe rather than a run or its
@@ -1326,6 +1353,136 @@ def auto_name_prefixes_in(texts: Iterable[str]) -> Proposed | None:
     return Proposed(sorted(picked), ["probe answers (names written before an address)"], LOW)
 
 
+# A required argument that names a file on disk.
+_PATH_ARGUMENT = re.compile(r"path|^file(?:name)?$|^sample$", re.IGNORECASE)
+# A required argument that names a place in code, never what was opened.
+_PLACE_ARGUMENT = re.compile(r"addr|func|location|offset", re.IGNORECASE)
+
+
+# A word saying a tool opens or loads what it is given.
+_OPENS_WORD = re.compile(r"\b(?:open|load|import|analy[sz]e)(?:s|es|ed|ing)?\b")
+# A description saying the tool opens, loads or imports the thing analysed:
+# a binary, an executable, a sample or an image; a program or a file only
+# when it says the opening is for analysis (``Opens a binary file with ... for
+# analysis``, ``Import a binary into the project from a file path``). A
+# program opened from a project is no sample.
+_OPENS_SAMPLE = re.compile(
+    r"\b(?:open|load|import)(?:s|ed|ing)?\b[^.;]{0,40}?"
+    r"\b(?:binar(?:y|ies)|executables?|samples?|images?)\b"
+)
+_OPENS_FOR_ANALYSIS = re.compile(
+    r"\b(?:open|load|import)(?:s|ed|ing)?\b[^.;]{0,40}?\b(?:programs?|files?)\b"
+    r"[^.;]{0,80}?\b(?:for analy[sz]is|to analy[sz]e)\b"
+)
+# A word saying a tool changes what is on disk or what its server holds, runs
+# something, lists a directory, or works on something other than the sample
+# (a configuration, settings, a plugin, a URL): such a tool is never the one
+# that opens the sample.
+_CHANGES_WORD = re.compile(
+    r"\b(?:write|delete|remove|export|save|wipe|erase|overwrite|truncate|destroy|unlink"
+    r"|shred|rename|move|upload|patch|apply|update|edit|install|uninstall|modify|set"
+    r"|kill|clear|create|add|append|insert|replace|reset|commit|push|send|post|run"
+    r"|exec|execute|script|start|stop|close|director(?:y|ies)|folders?|dir|ls"
+    r"|config|configs|configuration|settings?|preferences?|plugins?|extensions?|urls?)"
+    r"(?:s|es|ed|ing|d)?\b"
+)
+# A path argument naming where something is written, never what is read.
+_OUTPUT_ARGUMENT = re.compile(r"out|dest|save|target|export", re.IGNORECASE)
+
+
+def _words(text: str) -> str:
+    """``text`` lowered with its name separators and case changes read as spaces."""
+    spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", text)
+    return re.sub(r"[_\-.]+", " ", spaced).lower()
+
+
+def _opens_read_only(name: str, definition: Any, annotations: Any) -> bool:
+    """Whether a path-only tool shows it opens the sample for analysis and changes nothing.
+
+    Positive evidence only, one of two kinds:
+
+    * the server marks it read-only (``readOnlyHint`` true) and its name or
+      description says it opens, loads, imports or analyses; or
+    * the server gives no annotations and its description (its name alone is
+      not enough) says it opens, loads or imports a binary, an executable, a
+      sample or an image, or a program or a file for analysis.
+
+    Either way, a tool whose name, description or annotation title names a
+    changing verb (write, delete, export, save, patch, apply, update, edit,
+    install, run, …), a directory, or another object than the sample (a
+    configuration, settings, a plugin, a URL) is never proposed, and so is
+    one marked destructive or not read-only.
+    """
+    hints = annotations if isinstance(annotations, Mapping) else {}
+    if hints.get("destructiveHint") is True or hints.get("readOnlyHint") is False:
+        return False
+    raw = _get(definition, "description")
+    description = _words(raw) if isinstance(raw, str) else ""
+    title = hints.get("title")
+    text = " ".join(_words(t) for t in (name, title) if isinstance(t, str) and t)
+    text = f"{text} {description}"
+    if _CHANGES_WORD.search(text):
+        return False
+    if hints.get("readOnlyHint") is True:
+        return bool(_OPENS_WORD.search(text))
+    if hints:
+        return False
+    # ``_words`` reads a sentence's full stop as a separator: the description
+    # is read for the object with its own punctuation.
+    plain = raw.lower() if isinstance(raw, str) else ""
+    return bool(_OPENS_SAMPLE.search(plain) or _OPENS_FOR_ANALYSIS.search(plain))
+
+
+def sample_open_in(definitions: Iterable[Any]) -> Proposed | None:
+    """The ``sample_open`` the tool schemas suggest, or ``None``.
+
+    Proposed when exactly one tool that shows it opens the file and changes
+    nothing (:func:`_opens_read_only`) takes a path that is not an output as
+    its only required argument, and at least two other tools share
+    one required argument that is neither a path nor a place in code: the one
+    tool opens the file, and the others are given the name of what it opened.
+    Only ``open_tool`` and ``path_argument`` are proposed; what names the
+    opened thing is the operator's to declare. Low confidence: read from the
+    schemas alone.
+    """
+    openers: list[tuple[str, str]] = []
+    shared: dict[str, list[str]] = {}
+    for definition in definitions:
+        name = _get(definition, "name")
+        if not isinstance(name, str):
+            continue
+        annotations = _plain(_get(definition, "annotations"))
+        if isinstance(annotations, Mapping) and annotations.get("destructiveHint") is True:
+            continue
+        schema = _get(definition, "inputSchema")
+        required = schema.get("required") if isinstance(schema, Mapping) else None
+        required = [str(r) for r in required or [] if isinstance(r, str)]
+        if len(required) == 1 and _PATH_ARGUMENT.search(required[0]):
+            if not _OUTPUT_ARGUMENT.search(required[0]) and _opens_read_only(
+                name, definition, annotations
+            ):
+                openers.append((name, required[0]))
+            continue
+        for argument in required:
+            if not _PATH_ARGUMENT.search(argument) and not _PLACE_ARGUMENT.search(argument):
+                shared.setdefault(argument, []).append(name)
+    if len(openers) != 1:
+        return None
+    named = sorted((arg for arg, tools in shared.items() if len(tools) >= 2), key=str)
+    if not named:
+        return None
+    tool, argument = openers[0]
+    users = shared[named[0]]
+    return Proposed(
+        {"open_tool": tool, "path_argument": argument},
+        [
+            f"{tool} takes only {argument}",
+            f"{len(users)} other tools take {named[0]}: {', '.join(sorted(users))}",
+        ],
+        LOW,
+    )
+
+
 # ---------------------------------------------------------------------------
 # A server
 # ---------------------------------------------------------------------------
@@ -1365,6 +1522,7 @@ def propose(
     them, since such rows are also what a memory image, a capture or a lookup
     answers with, and the admin knows which this server is.
     """
+    definitions = list(definitions)
     cells = _manifest_cells(capabilities)
     skipped = set(skip)
     answered = dict(answers or {})
@@ -1415,6 +1573,10 @@ def propose(
     prefixes = auto_name_prefixes_in(texts)
     if prefixes is not None:
         server["auto_name_prefixes"] = prefixes.as_dict()
+    named = [d for d in definitions if isinstance(_get(d, "name"), str)]
+    opens = sample_open_in(d for d in named if _get(d, "name") not in skipped)
+    if opens is not None:
+        server["sample_open"] = opens.as_dict()
     out: dict[str, Any] = {"v": PROPOSALS_VERSION, "tools": tools, "server": server}
     if shaped:
         out["notes"] = [ROLE_HINT.format(tools=", ".join(shaped), role=SANDBOX_ROLE)]

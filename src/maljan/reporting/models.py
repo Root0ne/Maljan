@@ -334,6 +334,11 @@ class DynamicBehavior(BaseModel):
     registry_mods: list[RegistryMod] = Field(default_factory=list)
     file_operations: list[dict[str, Any]] = Field(default_factory=list)
     notable_apis: list[dict[str, Any]] = Field(default_factory=list)
+    # The behaviour categories of the APIs the sandbox recorded the sample
+    # calling, counted per category by what an API catalogue answer of the run
+    # said of each name (one count per name). A name no catalogue answer
+    # covers is not counted. Empty on a report stored before it was read.
+    api_capabilities: dict[str, int] = Field(default_factory=dict)
     sandbox_signatures: list[SandboxSignature] = Field(default_factory=list)
     # Sections this sandbox structurally cannot produce, by the platform's
     # section ids (``schemas.sandbox_report.SECTION_IDS``), printed as stored:

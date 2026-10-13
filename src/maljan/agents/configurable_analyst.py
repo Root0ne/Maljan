@@ -161,6 +161,27 @@ class ConfigurableAnalyst(BaseAnalyst):
         hint = prepare_sample(self._own_static_provider(), path, self.logger)
         return f"{hint}\n" if hint else ""
 
+    def _load_hint(self, data: str) -> str:
+        """The static role's load line, for an agent given a server's declared open tool.
+
+        A server that declares ``sample_open`` (declared, accepted from a
+        proposal, or bound to the agent by the operator) marks its open tool
+        (``providers.sample_open.mark_open_tool``); an agent offered it is told
+        to open the sample with it first, as the static role is. Only on the
+        chunk that carries the sample path, and not for an agent whose
+        provider tools open the sample before the loop (``_priority_hint``):
+        every other request is unchanged.
+        """
+        path = _analysis_path_in(data)
+        if path is None or PROVIDER_FAMILY in tool_families(self.tools):
+            return ""
+        from maljan.providers.sample_open import declared_open, load_line
+
+        spec = declared_open(self.tools)
+        if spec is None:
+            return ""
+        return load_line(spec.open_tool, spec.path_argument, self._analysis_file_path or path)
+
     # ------------------------------------------------------------------
     # Text interface
     # ------------------------------------------------------------------
@@ -197,7 +218,12 @@ class ConfigurableAnalyst(BaseAnalyst):
         return self._run(
             [
                 ("system", self._resolved.prompt),
-                ("human", self._priority_hint(data) + self._with_path_header(data)),
+                (
+                    "human",
+                    self._priority_hint(data)
+                    + self._load_hint(data)
+                    + self._with_path_header(data),
+                ),
             ],
             "analysis",
         ).text

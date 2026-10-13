@@ -207,6 +207,18 @@ single-call role once.
 | `deadline_hit` | Every call is slow enough that the run's deadline fires. It must end as a failed job with the reason said. Against the stack the deadline is `core.job_timeout`, and the stopped job must keep its run summary and a partial report. |
 | `cross_loop` | Normal answers, with the report stage's calls after the analysts' calls on the same client. |
 
+The validation scenarios with other tools (`scripts/validation/run.py`) run
+the stub in a mode that follows its answers, as a model reading them would:
+it reads the platform's failure markers (`{"error": …}`, `{"tool_error": …}`)
+as failed, opens the sample with a read-only tool that takes only its path
+before any tool needing a value only an answer gives, asks a no-argument
+listing again (after a pause, at most twelve times, the bound logged when it
+is hit) while what was opened is listed as not done, reads a `<thing>_name`
+only from a listing answer of a call that did not take it, decompiles where a
+function listing (else an export listing) says a function starts, and asks
+an API catalogue about every API an answer listed. A normal rehearsal chooses
+as before.
+
 ## What it checks
 
 Each run writes `<scenario>-runN.json` and `<scenario>-runN.md`. The runner
@@ -222,7 +234,10 @@ closed: what it cannot confirm is a failure.
 - Each of the sixteen composer sections is written, or accounted for in one of
   three ways:
   - marked not written by a degradation reason;
-  - excused by the product's own bundling, which finds its evidence empty;
+  - excused by the product's own bundling, which finds its evidence empty
+    (for the encryption section only where the report holds no crypto
+    evidence of any kind, neither a crypto API imported or called nor an
+    answered crypto-constant finding, and no claim in force speaks of it);
   - left empty on purpose by the stub, because the sample holds nothing for it.
 
   A fault scenario may mark not written only the sections its fault reaches

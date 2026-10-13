@@ -580,7 +580,13 @@ CONSUMER_KINDS: dict[str, dict[str, Any]] = {
     "evidence_roots._WHOLE_FILE_TOOLS": {"kinds": ["identity", "signing"]},
     "evidence_roots.FILE_ASSESSMENT_TOOLS": {"kinds": [*REPUTATION_KINDS, "reputation_not_asked"]},
     "evidence_roots._REFERENCE_TOOLS": {
-        "kinds": ["reference", "api_catalogue", "capabilities", "indicator_report"]
+        "kinds": [
+            "reference",
+            "api_catalogue",
+            "called_api_catalogue",
+            "capabilities",
+            "indicator_report",
+        ]
     },
     "evidence_roots._IMPORT_LISTINGS": {
         "kinds": ["import_listing"],
@@ -625,7 +631,7 @@ CONSUMER_KINDS: dict[str, dict[str, Any]] = {
         "kinds": ["function_list", "method_list"],
         "legacy_names": ["get_functions", "afl"],
     },
-    "validation._REFERENCE_SECTION_SOURCES": {"kinds": ["api_catalogue"]},
+    "validation._REFERENCE_SECTION_SOURCES": {"kinds": ["api_catalogue", "called_api_catalogue"]},
     "validation._SAMPLE_VALUE_SECTION_SOURCES": {
         "kinds": ["strings", "file_iocs", "emulated_strings"]
     },
