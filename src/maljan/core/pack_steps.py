@@ -409,7 +409,7 @@ def _shipped() -> tuple[PackStep, ...]:
             tool="api_capability",
             renderer="api_catalogue",
             kind=CALLED_API_CATALOGUE,
-            display_name="called-API catalogue",
+            display_name="api catalogue",
         ),
     )
 
