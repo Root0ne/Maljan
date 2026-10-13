@@ -256,6 +256,7 @@ _CAPABILITY_RULES: dict[str, Any] = {
     "rows": "/capabilities/*",
     "places": {"addresses": "/addresses"},
     "values": {"rule": "/rule", "namespace": "/namespace"},
+    "function_starts": "/function_starts",
     "techniques": list(TECHNIQUES_ANYWHERE),
     "arguments": {"path": "path"},
     "display_name": "capa",

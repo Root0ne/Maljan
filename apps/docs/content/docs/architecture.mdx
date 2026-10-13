@@ -384,9 +384,19 @@ human analyst runs the same dozen commands on every sample before opening a
 disassembler, and the live runs showed the local model rarely asks for any of
 them; a fact a model may or may not ask for is not a fact a run can rely on.
 
-The pack is the same code the `analysis` sidecar serves, called in-process, in
-a fixed order so the ids a sample produces are the same from one run to the
-next: `identify_file` and `hashes`; `signing_info` for the routed format alone
+The pack is a list of steps declared as data (`maljan.core.pack_steps`; an
+operator lays their own over it in `triage.steps`, see *The pack's steps* in
+[configuration.md](/configuration/)): each step names its tool and server, an
+argument template, the routed formats it runs for, its budget, whether it
+starts beside the others and beside which, the renderer of its pack line and
+the kind of answer it records. A step with a server is any tool server's tool,
+called through the tool server registry exactly as an agent's call is and
+recorded under that server at its place, so an operator hands monotonous work
+to a tool rather than to a model. A later step reads an earlier answer by its
+declared kind, never by the tool that gave it. The shipped list is the same
+code the `analysis` sidecar serves, called in-process, in a fixed order so the
+ids a sample produces are the same from one run to the next: `identify_file`
+and `hashes`; `signing_info` for the routed format alone
 (Authenticode for a PE, with the signer's subject, issuer and thumbprint read
 out of the certificate table and no chain verdict claimed; the APK signing
 block for an APK; `LC_CODE_SIGNATURE` for a Mach-O; and for anything else the
@@ -423,12 +433,15 @@ removes. The entry keeps up to 200 rows. It is last so the ids issued before it
 are the ids they were before it existed. Without a build the entry says so,
 with the remedy, and is not a failure; a run stopped by its wall clock or its
 memory limit is a failed entry whose line says which. FLOSS reads the file and
-nothing the pack writes, so it starts as soon as the routed format says PE and
-runs beside the rest of the pack, capa included — when there is room for both.
-Running them together adds FLOSS to capa's peak, so what they need is capa's
-peak as this worker measured it (the capa child reports its own peak resident
-memory before its answer, and the largest one seen is kept) plus FLOSS's 4 GiB
-address-space bound. The host's `MemAvailable` less that must stay at or above
+nothing the pack writes, so its step declares that it starts right after
+`signing_info`, when the routed format says PE, and runs beside the rest of the
+pack, beside capa's step — when there is room for both. Running them together
+adds their peaks, so what they need is each step's peak: capa's as this worker
+measured it (the capa child reports its own peak resident memory before its
+answer, and the largest one seen is kept) plus FLOSS's 4 GiB address-space
+bound, its declared `peak_mb`; any step an operator declares with
+`starts_after` and `beside` is sized the same way, from its measured or
+declared peak. The host's `MemAvailable` less that must stay at or above
 `triage.memory_floor_mb` (10,240 MiB), and the worker's own cgroup limit, where
 it has one (`memory.max` less `memory.current`, or cgroup v1's
 `memory.limit_in_bytes` less `memory.usage_in_bytes`), must hold both: inside a
@@ -436,7 +449,8 @@ container `MemAvailable` is the host's figure, and the container's limit is what
 an allocation meets first. Otherwise — the first capa run of a worker, which
 has nothing measured yet, a host with a local model loaded beside the worker, a
 container with its 8 GB limit — the two run in turn, and
-`run_summary.triage.floss` says which and why ("beside capa", or "in turn: …").
+`run_summary.triage.floss` (the step's id) says which and why ("beside capa",
+or "in turn: …").
 Its entry is written in its place either way, with its own clock, and a run it began
 within the pack's budget is recorded whatever the clock says by then. Measured
 on PuTTY: 312 s in turn, 183 s beside capa; the pack's process tree peaked at
@@ -548,9 +562,16 @@ failed entry with Ghidra's own words (`no: the pass failed: …`).
 (`tools.artefact_index`), for a PE. It lists every function the run knows and,
 for each, the artefacts the run's answers and the platform's decoder place in
 it. The functions come from the file's exception directory (a chained fragment
-counted for the function it belongs to), its exports, its entry point, capa's
-function starts, and every direct call target the decoder reaches in an
-executable section. A disassembler's function list is not read: the pack
+counted for the function it belongs to), its exports, its entry point, the
+function starts of every answer that lists them (an answer of kind
+`function_list` or `capability_rules` that declares `function_starts`: capa's,
+as shipped, said as `capa function starts`), and every direct call target the
+decoder reaches in an executable section. Its rules come from every
+`capability_rules` answer, said under the matcher's display name and held in
+each row under `capa` when the shipped capa answered them, else under `rules`
+with `rule_sources` naming each rule entry's tool, and its
+call-site strings from every emulated or decoded strings answer that names its
+call sites; an input no answer fills is stated by the kind it lacks. A disassembler's function list is not read: the pack
 runs before any analyst opens one, and the entry says so as `no:` with that
 reason. Every function start is collected first, by a walk that adds each
 direct call target it reaches; then each function is read with all of them
@@ -738,7 +759,7 @@ The analysis server serves the same index as the tool `function_index`
 file alone. It joins `pe_info`, `resolve_api_hashes` and `decode_string_blobs`
 over that file, run in-process, and FLOSS's rows when FLOSS ran on the file
 in that server; each source it does not join is stated under `absent` with its
-reason. It never runs capa and says so, and it states its own reason for the
+reason. It never runs a rule matcher and says so under `capability_rules`, and it states its own reason for the
 disassemblers' lists: the analysis server has no disassembler of its own. With
 no address it answers the whole table in the pack's row form. An address is
 hexadecimal, with or without `0x` (the pack prints hex, so a bare number is

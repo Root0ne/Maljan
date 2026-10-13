@@ -97,10 +97,39 @@ def _one_change(server: str) -> dict[str, Any]:
     return {tool: {"display_name": "Mine"}}
 
 
-def _full(entry: dict[str, Any]) -> dict[str, Any]:
+def _read(entry: dict[str, Any]) -> dict[str, Any]:
+    """A declaration as this release reads it, every field written out."""
     from maljan.core.tool_declarations import ToolFacts
 
     return ToolFacts.model_validate(entry).model_dump(mode="json")
+
+
+def _full(entry: dict[str, Any]) -> dict[str, Any]:
+    """A declaration as a release before the revision dumped it whole.
+
+    Its fields only (the record's defaults name them): a field a later release
+    added was never in a map stored whole.
+    """
+    fields = json.loads(RECORD.read_text("utf-8"))["defaults"]
+    return {key: value for key, value in _read(entry).items() if key in fields}
+
+
+def _dev_shipped(block: str) -> dict[str, Any]:
+    """The tool declarations ``block`` shipped in the release before the revision, dumped whole.
+
+    The last state of the frozen record: what a map stored whole was written
+    against, which today's shipped declarations need not equal.
+    """
+    held = json.loads(RECORD.read_text("utf-8"))["blocks"][block]
+    return {t: _full(held["versions"][t][i]) for t, i in held["states"][-1].items()}
+
+
+def _today(block: str) -> dict[str, Any]:
+    """The tool declarations ``block`` ships now, as the settings hold them."""
+    node: Any = _shipped_dump()
+    for part in block.split("."):
+        node = node[part]
+    return dict(node["tool_facts"])
 
 
 def _in_force(rows: dict[str, Any]) -> dict[str, Any]:
@@ -111,7 +140,7 @@ def _in_force(rows: dict[str, Any]) -> dict[str, Any]:
 
 
 def test_a_dev_row_with_one_accepted_proposal_keeps_only_that_tool() -> None:
-    shipped = _shipped_dump()["mcp"]["servers"]["analysis"]["tool_facts"]
+    shipped = _dev_shipped("mcp.servers.analysis")
     proposed = _full({"display_name": "Pack scanner", "timeout_seconds": 600})
     whole = {**shipped, "pack_scan": proposed}
     conn = _connect()
@@ -119,7 +148,11 @@ def test_a_dev_row_with_one_accepted_proposal_keeps_only_that_tool() -> None:
     _run(_module(), conn)
     after_rows = _rows(conn)
     assert after_rows[SERVERS]["analysis"]["tool_facts"] == _marked({"pack_scan": proposed})
-    assert _in_force(after_rows)["mcp"]["servers"]["analysis"]["tool_facts"] == whole
+    # Every tool the operator left alone takes the declaration shipped now.
+    assert _in_force(after_rows)["mcp"]["servers"]["analysis"]["tool_facts"] == {
+        **_today("mcp.servers.analysis"),
+        "pack_scan": _read(proposed),
+    }
 
 
 def test_a_tool_an_older_release_stored_as_shipped_takes_todays_declaration() -> None:
@@ -144,7 +177,7 @@ def test_a_tool_an_older_release_stored_as_shipped_takes_todays_declaration() ->
 
 
 def test_an_operator_change_keeps_its_fields_and_a_removal_stays() -> None:
-    shipped = _shipped_dump()["mcp"]["servers"]["analysis"]["tool_facts"]
+    shipped = _dev_shipped("mcp.servers.analysis")
     first, second, *_ = list(shipped)
     whole = dict(shipped)
     whole.pop(first)
@@ -154,12 +187,16 @@ def test_an_operator_change_keeps_its_fields_and_a_removal_stays() -> None:
     _run(_module(), conn)
     stored = _rows(conn)[SERVERS]["analysis"]["tool_facts"]
     assert stored == _marked({first: None, second: {"timeout_seconds": 1234.0}})
-    # What dev read from the whole map is what is in force now.
-    assert _in_force(_rows(conn))["mcp"]["servers"]["analysis"]["tool_facts"] == whole
+    # What dev read from the whole map is in force now, each tool the operator
+    # left alone as it ships now.
+    today = _today("mcp.servers.analysis")
+    expected = {tool: entry for tool, entry in today.items() if tool != first}
+    expected[second] = {**today[second], "timeout_seconds": 1234.0}
+    assert _in_force(_rows(conn))["mcp"]["servers"]["analysis"]["tool_facts"] == expected
 
 
 def test_a_provider_leaf_typed_whole_is_rewritten_the_same_way() -> None:
-    shipped = _shipped_dump()["static"]["ghidra"]["tool_facts"]
+    shipped = _dev_shipped("static.ghidra")
     tool = next(iter(shipped))
     typed = {name: dict(entry) for name, entry in shipped.items()}
     typed[tool] = {**typed[tool], "long_running": True}
@@ -251,7 +288,7 @@ def test_a_custom_server_s_whole_map_is_marked_and_an_unknown_leaf_stays_whole(c
 
 
 def test_one_fixed_info_line_is_logged_and_a_downgrade_reads_the_same(caplog) -> None:
-    shipped = _shipped_dump()["mcp"]["servers"]["analysis"]["tool_facts"]
+    shipped = _dev_shipped("mcp.servers.analysis")
     whole = {**shipped, "pack_scan": _full({"display_name": "Pack scanner"})}
     whole.pop(next(iter(shipped)))
     conn = _connect()
@@ -321,7 +358,7 @@ def test_an_unmigrated_whole_map_is_read_as_dev_read_it() -> None:
     analysis = held["mcp"]["servers"]["analysis"]["tool_facts"]
     # The removed tool stays removed, and a field the whole entry leaves at its
     # default is not filled from what ships.
-    assert analysis == whole
+    assert analysis == {tool: _read(entry) for tool, entry in whole.items()}
     ghidra = _shipped_dump()["static"]["ghidra"]["tool_facts"]
     tool = next(iter(ghidra))
     leaf = _in_force({GHIDRA: {tool: {"kind": "strings"}}})["static"]["ghidra"]["tool_facts"]
@@ -372,5 +409,14 @@ def test_a_downgrade_reads_as_dev_and_leaves_an_unmarked_map_alone() -> None:
     restored = after[SERVERS]["analysis"]["tool_facts"]
     assert "" not in restored and first not in restored
     assert restored[second]["timeout_seconds"] == 77.0
-    # What dev reads from the downgraded rows (whole maps) is what was in force.
-    assert _in_force(after) == in_force_before
+    # The downgraded rows are whole maps under the declarations the release
+    # before the revision shipped: that release reads them as what was in
+    # force, each untouched tool as it shipped then.
+    dev = _dev_shipped("mcp.servers.analysis")
+    expected = {tool: _read(entry) for tool, entry in dev.items() if tool != first}
+    expected[second] = {**expected[second], "timeout_seconds": 77.0}
+    in_force_after = _in_force(after)
+    assert in_force_after["mcp"]["servers"]["analysis"]["tool_facts"] == expected
+    for held in (in_force_after, in_force_before):
+        held["mcp"]["servers"]["analysis"].pop("tool_facts")
+    assert in_force_after == in_force_before

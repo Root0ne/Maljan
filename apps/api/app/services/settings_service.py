@@ -18,6 +18,7 @@ from maljan.core.settings_overrides import (
     build_settings,
     effective_source,
     flatten_leaves,
+    pack_step_refusals,
     shipped_tool_facts,
     split_key,
 )
@@ -646,6 +647,14 @@ class SettingsService:
                 errors.setdefault(key, message)
         except Exception:  # noqa: BLE001 — the refusal stands on its own
             pass
+        try:
+            # Stored pack steps are read leniently by ``validate``; the steps
+            # this save changes are held to the strict rules here as well.
+            stored_core = {split_key(k)[1]: v for k, v in current.items() if k.startswith("core.")}
+            for key, message in pack_step_refusals(core, stored_core).items():
+                errors.setdefault(key, message)
+        except Exception:  # noqa: BLE001 — the refusal stands on its own
+            pass
         return SettingsValidationError(errors)
 
     def validate(self, merged_core: dict[str, Any], merged_api: dict[str, Any]) -> None:
@@ -800,10 +809,24 @@ class SettingsService:
                 merged[key] = value
         core = {split_key(k)[1]: v for k, v in merged.items() if k.startswith("core.")}
         api = {split_key(k)[1]: v for k, v in merged.items() if k.startswith("api.")}
-        self.validate(core, api)
-        declaration_refusals = changed_declaration_refusals(changes, current)
-        if declaration_refusals:
-            raise SettingsValidationError(declaration_refusals)
+        # Every refusal of the merged values in one answer: the model's, the
+        # pack steps this save changes (stored ones are read leniently, the
+        # changed ones held to the strict rules) and the tool declarations it
+        # changes.
+        refusals: dict[str, str] = {}
+        try:
+            self.validate(core, api)
+        except SettingsValidationError as refused:
+            refusals.update(refused.errors)
+        stored_core = {split_key(k)[1]: v for k, v in current.items() if k.startswith("core.")}
+        for more in (
+            pack_step_refusals(core, stored_core),
+            changed_declaration_refusals(changes, current),
+        ):
+            for key, message in more.items():
+                refusals.setdefault(key, message)
+        if refusals:
+            raise SettingsValidationError(refusals)
         changes = stored_declaration_leaves(changes, current)
 
         rows = {r.key: r for r in await self._rows()}

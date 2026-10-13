@@ -461,6 +461,7 @@ KIND_DEPENDENT_FIELDS: tuple[str, ...] = (
     "reputation",
     "reader",
     "report_sections",
+    "function_starts",
 )
 
 # Whether a tool declaration is read as an operator's edit being saved. The
@@ -494,6 +495,12 @@ _LOG_NAME_CHARS = 64
 _LOG_NAMES = 20
 
 
+def loggable_text(text: str) -> str:
+    """``text`` with every control character written out, so it shows as one line."""
+    text = text.replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t")
+    return _LOG_CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", text)
+
+
 def loggable_names(names: Iterable[Any]) -> str:
     """``names`` as one sanitised, bounded log text."""
     held = [str(name) for name in names]
@@ -503,8 +510,7 @@ def loggable_names(names: Iterable[Any]) -> str:
             # An empty name, shown as such rather than as nothing at all.
             shown.append('""')
             continue
-        text = name.replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t")
-        text = _LOG_CONTROL.sub(lambda m: f"\\x{ord(m.group()):02x}", text)
+        text = loggable_text(name)
         shown.append(text[:_LOG_NAME_CHARS] + ("…" if len(text) > _LOG_NAME_CHARS else ""))
     more = len(held) - len(shown)
     return ", ".join(shown) + (f" and {more} more" if more > 0 else "")
@@ -833,7 +839,11 @@ class ToolFacts(BaseModel):
     holds one; ``values`` names, per kind of value (``text``, ``rule``,
     ``namespace``, ``value`` …), the path inside a row that holds one.
     ``techniques`` lists where the answer names technique ids. ``reputation``
-    is set on a reputation lookup. ``arguments`` names, per role (``path``,
+    is set on a reputation lookup. ``function_starts`` is the path of the
+    answer's list of function start addresses (offsets from the image base),
+    read for an answer of kind ``function_list`` or ``capability_rules``
+    (the triage pack's function index and the readings of an image with no
+    function table of its own). ``arguments`` names, per role (``path``,
     ``hash``, ``address``, ``program``, ``command_lines`` …), the argument a
     call gives it in.
 
@@ -865,6 +875,7 @@ class ToolFacts(BaseModel):
     values: dict[str, str] = Field(default_factory=dict)
     techniques: tuple[TechniqueField, ...] = ()
     reputation: ReputationFacts | None = None
+    function_starts: str = ""
     arguments: dict[str, str] = Field(default_factory=dict)
     reader: str = ""
     report_sections: tuple[str, ...] = ()
@@ -907,7 +918,7 @@ class ToolFacts(BaseModel):
     def _optional_word(cls, value: str, info: Any) -> str:
         return _word(value, info.field_name) if value else value
 
-    @field_validator("rows")
+    @field_validator("rows", "function_starts")
     @classmethod
     def _rows_parse(cls, value: str) -> str:
         return _check_path(value)

@@ -47,6 +47,13 @@ from maljan.agents.prompts import (
     TRIAGE_PROMPT,
 )
 from maljan.core import virustotal
+from maljan.core.pack_steps import (
+    DECLARED_FACT_RENDERERS,
+    PackStep,
+    check_steps,
+    effective_steps,
+    written_for,
+)
 from maljan.core.report_formats import (
     READER_ID_PATTERN,
     ReportFormat,
@@ -4155,6 +4162,17 @@ class TriageConfig(BaseModel):
     # holds both. 10,240 is the machine rule this project runs its models
     # under: ten gigabytes free before heavy work. 0 checks only that both fit.
     memory_floor_mb: Annotated[int, Field(ge=0)] = 10240
+    # The operator's steps, laid over the shipped list (``core.pack_steps``):
+    # one under a shipped step's id changes that step in its place
+    # (``enabled: false`` drops it), one that names another tool or server
+    # replaces it there, and a new id adds a step, after the step its
+    # ``after`` names or after every shipped step. Empty runs the shipped list.
+    steps: list[PackStep] = Field(default_factory=list)
+
+    @field_validator("steps")
+    @classmethod
+    def _steps_run(cls, value: list[PackStep]) -> list[PackStep]:
+        return check_steps(value)
 
 
 class EventsConfig(BaseModel):
@@ -4480,18 +4498,15 @@ class Settings(BaseSettings):
             for ref in definition.tools:
                 if ref.kind != "mcp":
                     continue
-                server = self.mcp.servers.get(str(ref.server))
-                if server is None:
-                    raise ValueError(f"{key!r} references unknown mcp server {ref.server!r}")
-                # ``tools=None`` is "every tool this server advertises", which
-                # is only knowable from a live handshake. A name against such a
-                # server is checked at resolution and a miss degrades there;
-                # refusing it here would make a built-in sidecar unreferenceable.
-                if ref.name is not None and server.tools is not None:
-                    if ref.name not in server.tools:
-                        raise ValueError(
-                            f"{key!r}: {ref.name!r} is not allowed on server {ref.server!r}"
-                        )
+                self._check_server_tool(repr(key), str(ref.server), ref.name)
+
+        # A triage pack step that calls a server's tool is checked as an
+        # agent's reference is, so a list that cannot run is refused here, and
+        # so is removing a server a step uses.
+        for step in effective_steps(self.triage.steps):
+            problem = self.pack_step_problem(step)
+            if problem:
+                raise ValueError(problem)
 
         self._rederive_converted_profiles()
 
@@ -4505,6 +4520,69 @@ class Settings(BaseSettings):
                         f"Available: {available}"
                     )
         return self
+
+    def pack_step_problem(self, step: PackStep) -> str:
+        """Why these settings cannot run the enabled pack ``step`` as declared; ``""`` for none.
+
+        A server's tool is checked as an agent's reference is
+        (:meth:`_check_server_tool`). A renderer that reads a tool's answer by
+        its declared facts (``core.pack_steps.DECLARED_FACT_RENDERERS``)
+        reads the facts of its own kind only: on a step whose tool is declared
+        another kind, or none, it would call that tool's rows what they are
+        not. The step's own ``kind`` declares its tool's kind where it is set.
+        Read strictly on a save, leniently for stored settings
+        (``core.pack_steps.lenient_steps``).
+        """
+        if not step.builtin:
+            try:
+                self._check_server_tool(f"triage step {step.id!r}", step.server, step.called)
+            except ValueError as exc:
+                return str(exc)
+        if step.renderer not in DECLARED_FACT_RENDERERS or (
+            step.builtin and written_for(step.renderer, step.called)
+        ):
+            return ""
+        kind = step.kind or self._step_tool_kind(step)
+        if kind == step.renderer:
+            return ""
+        declared = f"is declared of kind {kind!r}" if kind else "declares no kind"
+        return (
+            f"triage step {step.id!r}: renderer {step.renderer!r} reads the declared facts of a "
+            f"tool of kind {step.renderer!r}, and {step.called!r} {declared}; leave renderer "
+            f"empty for the generic line, or set the step's kind to {step.renderer!r} if its "
+            "tool answers rule matches"
+        )
+
+    def _step_tool_kind(self, step: PackStep) -> str:
+        """The kind ``step``'s tool declares: its server's declaration, else the pack's own."""
+        from maljan.core.tool_declarations import renamed_tool
+
+        if step.builtin:
+            from maljan.core.builtin_declarations import in_process_declarations
+            from maljan.core.tool_declarations import PACK
+
+            pack = in_process_declarations().get(PACK)
+            held = pack.tool_facts.get(step.called) if pack is not None else None
+        else:
+            server = self.mcp.servers.get(step.server)
+            facts = server.tool_facts if server is not None else {}
+            held = facts.get(step.called) or facts.get(renamed_tool(step.server, step.called))
+        return held.kind if held is not None else ""
+
+    def _check_server_tool(self, owner: str, server_key: str, tool: str | None) -> None:
+        """Refuse a reference by ``owner`` to a server not in ``mcp.servers``, or to a tool
+        outside the server's ``tools`` allow-list.
+
+        ``tools=None`` is "every tool this server advertises", which is only
+        knowable from a live handshake. A name against such a server is checked
+        at resolution and a miss degrades there; refusing it here would make a
+        built-in sidecar unreferenceable.
+        """
+        server = self.mcp.servers.get(server_key)
+        if server is None:
+            raise ValueError(f"{owner} references unknown mcp server {server_key!r}")
+        if tool is not None and server.tools is not None and tool not in server.tools:
+            raise ValueError(f"{owner}: {tool!r} is not allowed on server {server_key!r}")
 
     def _rederive_converted_profiles(self) -> None:
         """Give a converted profile the global values it is supposed to inherit.

@@ -1153,6 +1153,120 @@ def _reputation_lookup(container: ServiceContainer, sha256: str) -> Any:
     return lookup
 
 
+# Why a server step was not asked, by case. Each starts with the prefix the
+# pack reads a call that was never made by (``triage_pack._was_not_made``).
+STEP_WITHHELD = "{server} withheld by the team's exclude_servers; {tool} was not asked"
+STEP_WITHHELD_UNREAD = "{server} withheld because the team's exclusions could not be read"
+STEP_NO_SERVER = "no enabled tool server is configured as {server}; {tool} was not asked"
+
+
+def _step_arguments(step: Any, facts: Any, values: dict[str, str]) -> dict[str, Any]:
+    """A server step's arguments: its template filled, else read from its tool's declaration.
+
+    With no template, the argument the tool declares for the ``path`` role
+    takes the sample's path and the one for ``hash`` its sha256.
+    """
+    from maljan.core.pack_steps import placeholder_values
+
+    if step.arguments:
+        return placeholder_values(step.arguments, values)
+    roles = dict(getattr(facts, "arguments", None) or {})
+    args: dict[str, Any] = {}
+    if roles.get("path"):
+        args[roles["path"]] = values["sample_path"]
+    if roles.get("hash") and values.get("sha256"):
+        args[roles["hash"]] = values["sha256"]
+    return args
+
+
+def _server_step_call(container: ServiceContainer) -> Any:
+    """The pack's call of a step a tool server answers, bound to this job's servers and settings.
+
+    Returns the callable the pack hands each server step to
+    (``triage_pack.ServerStepCall``). The call goes through the tool server
+    registry exactly as an agent's does, to the sample's path as that server
+    opens it (staged to a remote server, or its declared mount), and is
+    answered for the pack to record under that server at the step's place. A
+    server the active team withholds, or that is not configured, is not asked,
+    and the answer says why; one that cannot be attached or whose call fails
+    answers its failure. The call's wall clock is the step's budget, else the
+    tool's declared ``timeout_seconds``, else what is left of the pack's
+    budget, else none. Never raises.
+    """
+    from maljan.agents.base_agent import run_coro_blocking
+    from maljan.agents.composition import _mounted, _stage
+    from maljan.core.config import ALL_SERVERS, ToolRef
+    from maljan.core.declared_reading import declarations
+    from maljan.pipeline.triage_pack import ServerAnswer
+
+    def call(step: Any, values: Any, left: float | None) -> Any:
+        server, tool_name = str(step.server), str(step.called)
+        started, wall_clock = time.monotonic(), time.time()
+        held = {str(k): str(v) for k, v in dict(values or {}).items()}
+        facts: Any = None
+        try:
+            facts = declarations(container.config).declaration_for((f"mcp:{server}", tool_name))
+        except Exception as exc:  # noqa: BLE001 — an unread declaration declares nothing
+            logger.debug("triage pack: %s's declaration was not read (%s).", tool_name, exc)
+        args = _step_arguments(step, facts, held)
+
+        def answer(output: str, *, ok: bool = True, made: bool = True) -> Any:
+            said = output if made or ok else f"{NOT_RUN_PREFIX} {output}"
+            return ServerAnswer(
+                tool=tool_name,
+                args=args,
+                server=server,
+                output=said,
+                ok=ok,
+                error=None if ok else said,
+                started_at=wall_clock,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+
+        withheld = _withheld_servers(container)
+        if withheld is None:
+            return answer(STEP_WITHHELD_UNREAD.format(server=server), ok=False, made=False)
+        if ALL_SERVERS in withheld or server in withheld:
+            return answer(STEP_WITHHELD.format(server=server, tool=tool_name), ok=False, made=False)
+        configured = container.config.mcp.servers.get(server)
+        if configured is None or not getattr(configured, "enabled", True):
+            return answer(
+                STEP_NO_SERVER.format(server=server, tool=tool_name), ok=False, made=False
+            )
+        registry = container.get_server_registry()
+        tools, reasons = registry.tools_for_ref(
+            ToolRef(kind="mcp", server=server, name=tool_name),
+            container.job_key(),
+            truncation_ledger=container.get_truncation_ledger(),
+        )
+        if not tools:
+            return answer(
+                "; ".join(reasons) or f"{server} offered no tool named {tool_name}", ok=False
+            )
+        staged, _reasons = _stage(container, tools[:1], container.job_key())
+        staged = _mounted(container, tools[:1], staged)
+        target = staged.get(server)
+        if target:
+            held["sample_path"] = target
+            args = _step_arguments(step, facts, held)
+        budget = step.budget_seconds or getattr(facts, "timeout_seconds", None) or left
+        try:
+            output = str(
+                run_coro_blocking(
+                    tools[0].ainvoke(args),
+                    float(budget) if budget else None,
+                    label=f"triage:{tool_name}",
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — a failed step is an entry
+            return answer(f"{type(exc).__name__}: {exc}", ok=False)
+        # Handed in as a success and left to ``build_entry`` to read, as the
+        # reputation lookup's answer is.
+        return answer(output)
+
+    return call
+
+
 # Held while a degradation reason is added, so a parallel stage fan-out cannot
 # write the same sentence twice.
 _REASON_LOCK = threading.Lock()
@@ -1571,6 +1685,7 @@ def make_triage_node(
         )
         cfg = container.config
         capa_cfg = cfg.static.capa
+        from maljan.core.pack_steps import effective_steps
         from maljan.providers import sandbox_tools
 
         inputs = PackInputs(
@@ -1592,6 +1707,7 @@ def make_triage_node(
             floss=FlossSettings(
                 environ=_analysis_server_environ(container), job_id=container.job_key()
             ),
+            steps=effective_steps(getattr(cfg.triage, "steps", None) or ()),
         )
 
         def _elapsed_ms() -> int:
@@ -1605,6 +1721,7 @@ def make_triage_node(
                 reputation=_reputation_lookup(container, inputs.sha256),
                 function_matches=_function_matches_step(container, state),
                 anti_analysis=_anti_analysis_step(container, state),
+                server_step=_server_step_call(container),
             )
         except Exception as exc:  # noqa: BLE001 — the pack never fails the job
             logger.warning(

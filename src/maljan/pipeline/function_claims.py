@@ -549,14 +549,17 @@ def _row_held(row: Mapping[str, Any]) -> _Held:
             if isinstance(cell, Mapping) and cell.get("name"):
                 held.names.add(_api_key(str(cell["name"]).rpartition("!")[2]))
                 held.texts.append(str(cell["name"]).lower())
-    for key, field_name in (
-        ("decoded_strings", "text"),
-        ("plain_strings", "text"),
-        ("capa", "rule"),
-    ):
+    from maljan.tools.artefact_index import rule_cells
+
+    for key in ("decoded_strings", "plain_strings"):
         for cell in row.get(key) or []:
-            if isinstance(cell, Mapping) and cell.get(field_name):
-                held.texts.append(str(cell[field_name]).lower())
+            if isinstance(cell, Mapping) and cell.get("text"):
+                held.texts.append(str(cell["text"]).lower())
+    # The rules matched in the function, whichever matcher answered: the
+    # row holds them under the shipped matcher's name or the neutral one.
+    for cell in rule_cells(row):
+        if cell.get("rule"):
+            held.texts.append(str(cell["rule"]).lower())
     return held
 
 
@@ -1166,6 +1169,7 @@ def _row_words(row: Mapping[str, Any], entry: str, row_parts: Any) -> str:
     finding row's bound for one value (``events.FINDING_VALUE_LIMIT``)."""
     from maljan.agents.function_map import _count
     from maljan.pipeline.events import FINDING_VALUE_LIMIT
+    from maljan.tools.artefact_index import rule_cells, rule_count_words
 
     said = str(row_parts(row, entry))
     if len(said) <= FINDING_VALUE_LIMIT:
@@ -1181,11 +1185,13 @@ def _row_words(row: Mapping[str, Any], entry: str, row_parts: Any) -> str:
         ("resolved", "resolved name", "resolved names"),
         ("decoded_strings", "decoded string", "decoded strings"),
         ("plain_strings", "plain string", "plain strings"),
-        ("capa", "capa rule", "capa rules"),
     ):
         n = len([c for c in row.get(key) or [] if isinstance(c, Mapping)])
         if n:
             counts.append(_count(n, one, many))
+    rules = rule_cells(row)
+    if rules:
+        counts.append(_count(len(rules), *rule_count_words(row)))
     callers, callees = len(row.get("callers") or []), len(row.get("callees") or [])
     counted = ", ".join(counts) or "no artefact of its own"
     return safe_finding_value(

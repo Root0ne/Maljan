@@ -200,12 +200,19 @@ def test_the_container_reason_and_the_pack_route_to_the_same_tool() -> None:
     """Two tables, one routing decision.
 
     `sample_identity._FORMAT_TOOL_FOR` says which tool's answer silences the
-    container reason and `triage_pack._FORMAT_TOOLS` says which tool the pack
-    actually calls. A format added to one and forgotten in the other makes the
-    report state something about the run that did not happen.
+    container reason and the pack's shipped format steps (``core.pack_steps``,
+    each with the routed formats it reads) say which tool the pack actually
+    calls. A format added to one and forgotten in the other makes the report
+    state something about the run that did not happen.
     """
+    from maljan.core.pack_steps import default_steps
     from maljan.extractors.sample_identity import _FORMAT_TOOL_FOR
-    from maljan.pipeline.triage_pack import _FORMAT_TOOLS
+    from maljan.pipeline.triage_pack import _FORMAT_CALLS
 
-    routed = {file_type: tool for file_type, (tool, _call) in _FORMAT_TOOLS.items()}
+    routed = {
+        file_type: step.called
+        for step in default_steps()
+        if step.id in _FORMAT_CALLS
+        for file_type in step.formats
+    }
     assert _FORMAT_TOOL_FOR == routed

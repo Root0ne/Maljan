@@ -9159,6 +9159,37 @@
      "editable": true,
      "editor": null,
      "group": "analysis",
+     "key": "core.triage.steps",
+     "maximum": null,
+     "minimum": null,
+     "namespace": "core",
+     "nullable": false,
+     "order": 0,
+     "path": "triage.steps",
+     "probe": null,
+     "reason": null,
+     "required_env": null,
+     "reserved_servers": null,
+     "secret": false,
+     "subgroup": "Triage pack",
+     "title": "Triage pack steps",
+     "type": "json"
+    },
+    {
+     "advanced": false,
+     "applies": "next_job",
+     "applies_when": null,
+     "builtin_servers": null,
+     "capability_servers": null,
+     "choice_descriptions": null,
+     "choice_facts": null,
+     "choice_labels": null,
+     "choice_titles": null,
+     "choices": null,
+     "choices_from": null,
+     "editable": true,
+     "editor": null,
+     "group": "analysis",
      "key": "core.triage.strings_head",
      "maximum": null,
      "minimum": 1.0,
@@ -11516,6 +11547,7 @@
    "title": "Deployment (read-only)"
   }
  ],
+ "pack_steps_left_out": {},
  "probe_labels": {
   "abuseipdb": "Test AbuseIPDB",
   "agent": "Resolve agent",
@@ -11534,6 +11566,7 @@
  "tool_declaration_fields": {
   "kind_dependent": {
    "asserts_techniques": false,
+   "function_starts": "",
    "holds_strings": false,
    "places": {},
    "reader": "",

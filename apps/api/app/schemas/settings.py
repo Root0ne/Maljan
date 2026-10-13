@@ -77,6 +77,13 @@ class SchemaResponse(BaseModel):
     # (``core.settings_overrides.refused_tool_changes``): each is in force as
     # shipped, and the console marks it for the operator to reset or edit.
     tool_facts_conflicts: dict[str, list[str]] = Field(default_factory=dict)
+    # Each stored triage pack step the settings leave out, by id (else
+    # ``#<position>``), with why, sanitised
+    # (``core.settings_overrides.pack_steps_left_out``): whatever left it out
+    # (a step this release cannot run, a reset of the server it calls, a
+    # shipped declaration that changed its tool's kind), the shipped step it
+    # changed, if any, is in force, and the console marks it on the steps.
+    pack_steps_left_out: dict[str, str] = Field(default_factory=dict)
 
 
 class ValueDTO(BaseModel):

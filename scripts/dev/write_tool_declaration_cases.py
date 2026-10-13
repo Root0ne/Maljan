@@ -39,6 +39,7 @@ _GOOD: dict[str, Any] = {
     "source": "sigma",
     "holds_strings": True,
     "rows": "/m/*",
+    "function_starts": "/f",
     "places": {"offset": "/o"},
     "values": {"text": "/t"},
     "techniques": [{"path": "/tags/*"}],

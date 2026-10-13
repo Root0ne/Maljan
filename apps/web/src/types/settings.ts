@@ -410,6 +410,10 @@ export interface SettingsSchema {
    *  whose stored change the API leaves out because it does not validate
    *  over what this release ships; each is in force as shipped. */
   tool_facts_conflicts?: Record<string, string[]>;
+  /** Each stored triage pack step the API leaves out, by id (else
+   *  `#<position>`), with why; the shipped step it changed, if any, runs
+   *  instead. */
+  pack_steps_left_out?: Record<string, string>;
 }
 
 /** The word naming no kind, and each kind-free and kind-dependent field of a

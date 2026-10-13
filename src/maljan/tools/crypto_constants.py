@@ -573,7 +573,7 @@ def _row(entry: ConstantSet, **found: Any) -> dict[str, Any]:
 def find_crypto_constants(
     path: str,
     function_starts: Sequence[Any] | None = None,
-    function_source: str = "capa",
+    function_source: str = "",
 ) -> dict[str, Any]:
     """Every published constant set of the catalogue that stands in the file at ``path``.
 
