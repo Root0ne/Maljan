@@ -61,6 +61,7 @@ from maljan.core.report_formats import (
     SignatureScale,
     check_declared_formats,
 )
+from maljan.core.report_mapping import RestMappingConfig
 from maljan.core.tool_declarations import (
     VOCABULARY_PATTERN,
     CredentialBootstrap,
@@ -3862,55 +3863,6 @@ class RestReportConfig(BaseModel):
         rungs = self.signature_scale_rungs
         name = self.signature_scale_name.strip() or f"1–{len(rungs)}"
         return SignatureScale(name=name, rungs=rungs)
-
-
-class RestMappingConfig(BaseModel):
-    """RFC 9535 JSONPaths selecting each consumer channel out of a report.
-
-    Read only when ``report.format`` is ``generic``. An empty path is not a
-    mistake: it says the sandbox does not publish that channel, and the
-    provider lists it in ``SandboxReport.unavailable`` so a rendered report
-    never reads like a clean sample by omission.
-    """
-
-    target_sha256: str = "$.target.sha256"
-    processes: str = ""  # each match: {pid, ppid, name, command_line}
-    calls: str = ""  # each match: {pid, api, args, timestamp}
-    signatures: str = ""  # each match: {name, description, severity, ttps}
-    dns: str = ""  # each match: {request, type, answers[]}
-    http: str = ""
-    tcp: str = ""  # each match: {dst, dport}
-    udp: str = ""
-    hosts: str = ""  # each match: a string
-    domains: str = ""
-    dropped_files: str = ""  # each match: {name, sha256, size}
-    registry: str = ""  # each match: a string
-    # "<channel>.<consumer field>" -> the field name this sandbox uses,
-    # e.g. {"processes.command_line": "cmdline"}.
-    field_names: dict[str, str] = Field(default_factory=dict)
-    # Channels this schema has no field for: "<name>" -> JSONPath, landing in
-    # SandboxReport.channels under that name. Namespace the name by platform,
-    # e.g. {"android.permissions": "$.apk.permissions[*]"}.
-    channels: dict[str, str] = Field(default_factory=dict)
-    # The report's places with no channel above (``schemas.sandbox_document.
-    # OPEN_PLACES``: the process tree, the resolved API names, what the
-    # sandbox extracted, the process dumps, the memory regions, the IDS
-    # alerts): "<place>" -> JSONPath, each match kept as the sandbox published
-    # it, e.g. {"extracted": "$.configs[*]"}.
-    places: dict[str, str] = Field(default_factory=dict)
-
-    @field_validator("places")
-    @classmethod
-    def _places_are_open_places(cls, value: dict[str, str]) -> dict[str, str]:
-        from maljan.schemas.sandbox_document import OPEN_PLACES
-
-        unknown = sorted(set(value) - set(OPEN_PLACES))
-        if unknown:
-            raise ValueError(
-                f"no such report place {', '.join(unknown)}; the places a path may name are "
-                f"{', '.join(OPEN_PLACES)}"
-            )
-        return value
 
 
 class SandboxRestConfig(BaseModel):

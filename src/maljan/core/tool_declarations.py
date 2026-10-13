@@ -1089,6 +1089,12 @@ SNAPSHOT_DIGESTED_FIELDS: tuple[str, ...] = tuple(
 REFERENCE_PLACEHOLDERS: tuple[str, ...] = ("{sha256}", "{md5}", "{sha1}")
 
 
+# The role a server declares to say it is a sandbox source: its tools answer
+# with what a run did, so a proposal may read their rows as a sandbox's
+# (``core.declaration_proposals``). A word in ``roles`` like any other.
+SANDBOX_ROLE = "sandbox"
+
+
 def check_roles(value: list[str]) -> list[str]:
     return _words(value, "server role")
 

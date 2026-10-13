@@ -905,7 +905,7 @@ def network_from_ledger(
     resolved: set[str] = set()
     tls_names: set[str] = set()
 
-    from maljan.schemas.sandbox_document import ADDRESS_TYPES, DnsAnswers
+    from maljan.schemas.sandbox_document import ADDRESS_TYPES, DnsAnswers, dns_row_name
 
     # The addresses each name already holds, so a value is added once.
     held_ips: dict[str, set[str]] = {}
@@ -917,7 +917,9 @@ def network_from_ledger(
         answers_of = DnsAnswers(data.get("dns"))
         for key in ("dns", "domains"):
             for row in data.get(key) or []:
-                name = _first_str(row, "request", "hostname", "domain", "name")
+                # A DNS row's name as every reader reads it; a ``domains``
+                # row may be the bare name.
+                name = row if isinstance(row, str) else dns_row_name(row)
                 _add("domain", name, "sandbox")
                 resolved.add(value_key("domain", name))
                 # The addresses the answer gave for it, as the record states them.

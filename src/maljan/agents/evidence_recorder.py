@@ -212,8 +212,12 @@ def result_text(value: Any) -> str:
     if isinstance(value, str):
         return value
     if isinstance(value, dict | list):
+        from maljan.core.safe_json import dumps
+
         try:
-            return json.dumps(value, default=str)
+            # Depth-safe: a value nested past the guard is written with a
+            # marked placeholder there, never a raise (``core.safe_json``).
+            return dumps(value, default=str)
         except (TypeError, ValueError):
             return str(value)
     return str(value)

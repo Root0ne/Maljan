@@ -205,8 +205,21 @@ class SandboxReportResponse(BaseModel):
     sample_sha256_match: bool
     warning: str | None = None
     uploaded_at: datetime = Field(validation_alias="created_at")
+    # For a report accepted unread: a proposed format declaration read from its
+    # shape (``maljan.core.report_proposals``), each field with its evidence and
+    # confidence, for an operator to accept or edit. Nothing reads it but the
+    # console.
+    proposal: dict[str, Any] | None = None
 
     model_config = {"from_attributes": True, "populate_by_name": True}
+
+
+class AcceptReportFormatRequest(BaseModel):
+    """A report format declaration an operator accepts, and the unread upload it is for."""
+
+    declaration: dict[str, Any]
+    sample_id: uuid.UUID
+    report_id: uuid.UUID
 
 
 class SandboxReportListResponse(BaseModel):

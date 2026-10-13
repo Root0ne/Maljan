@@ -2503,12 +2503,18 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # and checked in the session above; what is left here needs the
         # container rather than the database.
         if attached_report is not None:
+            from maljan.core.report_formats import UNREAD_FORMAT, UNREAD_RUN_REASON
+
             from app.api.v1.sandbox_reports import get_object
 
             # L2: the upload endpoint's mismatch warning promises "The
             # analysis will still run and will say so in its findings" —
-            # nothing threaded the stored flag into the run until now.
-            if _attached_hash_matches is False:
+            # nothing threaded the stored flag into the run until now. A
+            # report accepted unread claims no target to compare: the run says
+            # it was read unread instead.
+            if _attached_format == UNREAD_FORMAT:
+                _report_hash_mismatch_reason = UNREAD_RUN_REASON
+            elif _attached_hash_matches is False:
                 _report_hash_mismatch_reason = (
                     "uploaded sandbox report's target hash differs from the sample"
                 )

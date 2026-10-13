@@ -18,7 +18,7 @@ from typing import Any
 from maljan.analysis import sandbox_sections as ss
 from maljan.core.config import RestMappingConfig
 from maljan.providers.sandbox.readers import ReportReader, required_reader
-from maljan.providers.sandbox.rest_mapping import MAX_ROWS_PER_CHANNEL, unnamed_blocks
+from maljan.providers.sandbox.rest_mapping import unnamed_blocks
 from maljan.providers.sandbox_tools import sandbox_channels, sandbox_network
 from maljan.schemas.sandbox_document import sandbox_document
 from maljan.schemas.sandbox_report import TASK_KEY, TASK_ROWS_KEY, SandboxReport
@@ -143,8 +143,8 @@ class TestAMappedReportKeepsItsUnnamedBlocks:
 
 
 class TestTheMappedPlacesAreReadWhole:
-    def test_a_place_keeps_every_row_past_the_channel_cap(self) -> None:
-        many = MAX_ROWS_PER_CHANNEL + 7
+    def test_a_place_keeps_every_row(self) -> None:
+        many = 5_000 + 7
         payload = {"apis": [f"kernel32.dll.F{i}" for i in range(many)]}
         document = _mapped(payload, RestMappingConfig(places={"resolved_apis": "$.apis[*]"}))
         assert len(document["behavior"]["summary"]["resolved_apis"]) == many

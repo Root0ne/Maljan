@@ -401,9 +401,10 @@ test.describe("tool servers and the REST sandbox", () => {
     await page.getByLabel("Paste a sample response").fill('{"procs": [{"pid": 1}, {}]}');
     await editor.getByRole("button", { name: "Preview mapping" }).click();
 
-    // `processes` comes back truncated at the server's row ceiling.
+    // `processes` comes back cut: its matches repeat, so the path selected
+    // more than the report holds and was cut at the report's own size.
     await expect(editor.locator('[data-channel="processes"]')).toHaveText(
-      "2 / 1 / 1 · truncated at 5000"
+      "2 / 1 / 1 · cut at the report's size: the path's matches repeat"
     );
     // `dns` comes back with a channel-local error instead of counts.
     await expect(editor.locator('[data-channel="dns"]')).toHaveText(

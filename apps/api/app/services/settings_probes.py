@@ -23,6 +23,7 @@ from maljan.core.config import BUILTIN_SERVER_KEYS, MCPServerConfig, builtin_env
 from maljan.core.logger import logger
 from maljan.core.model_assignments import endpoint_for, endpoint_label
 from maljan.core.settings_overrides import build_settings, redact_url, split_key
+from maljan.core.tool_declarations import SANDBOX_ROLE
 from maljan.llm.provider_base import COMPLETION_MAX_TOKENS as _COMPLETION_MAX_TOKENS
 from maljan.llm.provider_base import COMPLETION_PROMPT as _COMPLETION_PROMPT
 from maljan.llm.provider_base import facts_of
@@ -637,7 +638,11 @@ async def _inspect(
 
 
 def _proposals(
-    found: server_probe.Inspection, declared: frozenset[str], *, withheld: list[str] | None
+    found: server_probe.Inspection,
+    declared: frozenset[str],
+    *,
+    withheld: list[str] | None,
+    sandbox_source: bool = False,
 ) -> dict[str, Any] | None:
     """The declaration proposals for the tools ``found`` lists and nothing declares.
 
@@ -646,7 +651,9 @@ def _proposals(
     to propose for. A proposal that cannot be built is reported as none rather
     than failing the connection test. ``withheld`` is what a confirmed call
     is made without (:func:`_withheld`); ``None`` when the server's
-    declaration needs its credential and it is sent.
+    declaration needs its credential and it is sent. ``sandbox_source`` says
+    the server's declaration names it a sandbox source (its ``roles``), the
+    only server whose tools may be proposed sandbox kinds.
     """
     from maljan.core.declaration_proposals import propose
     from maljan.tools.capabilities import CAPABILITIES_TOOL
@@ -659,6 +666,7 @@ def _proposals(
             capabilities=found.capabilities,
             answers=found.answers,
             skip=declared | {CAPABILITIES_TOOL},
+            sandbox_source=sandbox_source,
         )
     except Exception as exc:  # noqa: BLE001 — a proposal is never worth the probe
         logger.warning("declaration proposals could not be built (%s).", type(exc).__name__)
@@ -672,6 +680,7 @@ def _proposals(
         call["credential"] = withheld is None
         call["withheld"] = list(withheld or [])
     held = proposals["tools"] or proposals["server"] or proposals.get("failed")
+    held = held or proposals.get("notes")
     return proposals if held else None
 
 
@@ -859,7 +868,9 @@ async def probe_mcp(v: dict[str, Any]) -> ProbeResult:
         if unavailable:
             detail += f"; {len(unavailable)} unavailable on this host"
         details = {"capabilities": capabilities}
-    proposals = _proposals(found, declared, withheld=withheld)
+    proposals = _proposals(
+        found, declared, withheld=withheld, sandbox_source=SANDBOX_ROLE in config.roles
+    )
     if proposals is not None:
         details = {**(details or {}), "proposals": proposals}
         detail += f"; declarations proposed for {len(proposals['tools'])} undeclared tools"

@@ -143,7 +143,15 @@ export default function DeclarationProposals({
   const serverFields = Object.entries(proposals.server);
   const failed = Object.entries(proposals.failed ?? {});
   const planned = proposals.planned ?? [];
-  if (tools.length === 0 && serverFields.length === 0 && failed.length === 0) return null;
+  const notes = proposals.notes ?? [];
+  if (
+    tools.length === 0 &&
+    serverFields.length === 0 &&
+    failed.length === 0 &&
+    notes.length === 0
+  ) {
+    return null;
+  }
   return (
     <details
       className="mt-2 border border-border rounded p-2"
@@ -159,6 +167,11 @@ export default function DeclarationProposals({
         what an undeclared tool gets until you accept a kind for it. Only the tools you
         accept are stored; every other tool keeps following what the server ships.
       </p>
+      {notes.map((note) => (
+        <p key={note} className="text-[11px] text-text-secondary mt-1" data-proposal-note>
+          {note}
+        </p>
+      ))}
       <div className="space-y-2 mt-2 text-xs">
         {proposing.map(([tool, proposal]) => (
           <fieldset key={tool} className="border border-border rounded p-2" data-proposal-tool={tool}>

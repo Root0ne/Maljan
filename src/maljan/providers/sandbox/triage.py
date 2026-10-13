@@ -502,8 +502,11 @@ class TriageSandboxProvider(SandboxProvider):
                 response.read()
                 self._raise_for_status(response, operation)
             body = read_capped(response, what=f"The Triage {operation.split()[0]} body")
+        from maljan.core.safe_json import loads
+
         try:
-            return json.loads(body)
+            # Read at any nesting depth (``core.safe_json``).
+            return loads(body)
         except ValueError as exc:
             raise ProviderError(f"Triage {operation} did not return valid JSON.") from exc
 

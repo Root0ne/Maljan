@@ -15,8 +15,14 @@ through code written against its name. A declaration says:
   first non-empty string or number a path names wins;
 * ``reader``: the id of the registered report reader
   (``providers.sandbox.readers``) that reads a report of this format into the
-  neutral sandbox report (``cape2``, ``cuckoo`` and ``triage`` ship, and an
-  operator registers more), empty for a format no reader reads yet;
+  neutral sandbox report (``cape2``, ``cuckoo``, ``triage`` and the JSONPath
+  mapping reader ``generic`` ship, and an operator registers more), empty for
+  a format no reader reads yet;
+* ``mapping``: where each part of a report of this format sits, as JSONPaths
+  (``core.report_mapping.RestMappingConfig``), for a reader that reads through
+  a mapping; absent, such a reader reads through ``sandbox.rest.mapping``.
+  The upload route and the REST provider read it alike, so a sandbox nobody
+  wrote a reader for is read per format, each format through its own paths;
 * ``signature_scale``: what a signature's severity number means, as the rung
   of the five-word severity ladder each score from 1 up names; absent where the
   format documents no scale;
@@ -28,7 +34,10 @@ The built-in formats (:data:`BUILTIN_REPORT_FORMATS`) reproduce what the
 platform recognised and read before formats were declared. An operator
 declares more in ``sandbox.report_formats``, read by every sandbox provider
 and by the upload route alike. A new name is tried before the built-ins,
-because the operator's format is the more specific knowledge; a declaration
+because the operator's format is the more specific knowledge, except a
+format read through a mapping (``reader: generic``, an accepted proposal
+among them), which is tried after every built-in
+(``providers.sandbox.readers.sandbox_formats``); a declaration
 under a built-in's name is merged over that built-in field by field, in its
 place, so a field it does not set keeps the shipped value
 (:func:`effective_formats`).
@@ -47,10 +56,21 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from maljan.core.report_mapping import RestMappingConfig, check_mapping_paths
 from maljan.core.tool_declarations import parse_path, select
 
 # The name a payload no format recognises is given.
 UNKNOWN_FORMAT = "unknown"
+# The format an upload no format recognises is accepted as, where the operator
+# allows it (``"unread"`` in ``sandbox.upload.allowed_formats``): stored and
+# read as raw blocks only, with a proposed declaration beside it
+# (``core.report_proposals``). Never a declared format's name.
+UNREAD_FORMAT = "unread"
+# What a run that read an upload unread records among its degradations.
+UNREAD_RUN_REASON = (
+    "uploaded sandbox report was read unread: no declared format recognises it, so no "
+    "observed fact was drawn from it"
+)
 
 # A format's name is stored on the upload row (``sandbox_reports.format``,
 # ``String(32)``), so a name is a lowercase word of at most that many characters.
@@ -175,12 +195,17 @@ class ReportFormat(BaseModel):
     reader: str = Field(default="", pattern=READER_ID_PATTERN)
     signature_scale: SignatureScale | None = None
     display_name: str = Field(default="", max_length=64)
+    # Where each part of a report of this format sits, for a reader that reads
+    # through a mapping (the module docstring).
+    mapping: RestMappingConfig | None = None
 
     @field_validator("name")
     @classmethod
     def _not_reserved(cls, value: str) -> str:
         if value == UNKNOWN_FORMAT:
             raise ValueError(f"{UNKNOWN_FORMAT!r} names a payload no format recognises")
+        if value == UNREAD_FORMAT:
+            raise ValueError(f"{UNREAD_FORMAT!r} names an upload accepted unread")
         return value
 
     @field_validator("detect")
@@ -195,6 +220,13 @@ class ReportFormat(BaseModel):
         if "detect" in self.model_fields_set and not self.detect:
             raise ValueError("detect needs at least one group; leave it out to keep a built-in's")
         return self
+
+    @field_validator("mapping")
+    @classmethod
+    def _mapping_paths_compile(cls, value: RestMappingConfig | None) -> RestMappingConfig | None:
+        if value is not None:
+            check_mapping_paths(value)
+        return value
 
     @field_validator("task_id_paths", "target_sha256_paths")
     @classmethod
@@ -365,6 +397,191 @@ def format_named(name: str, formats: Iterable[ReportFormat] | None = None) -> Re
         if fmt.name == name:
             return fmt
     return None
+
+
+def _least_value(test: FieldTest) -> tuple[bool, Any]:
+    """``(possible, value)``: the plainest value ``test`` holds on, where one can."""
+    allowed = list(test.types) or ["string"]
+    if test.contains:
+        if "string" in allowed:
+            return True, test.contains
+        if "number" in allowed and test.contains.isdigit():
+            return True, int(test.contains)
+        return False, None
+    kind = allowed[0]
+    least: dict[str, tuple[Any, Any]] = {
+        "object": ({}, {"_": 0}),
+        "array": ([], [0]),
+        "string": ("x", "x"),
+        "number": (1, 1),
+        "boolean": (True, True),
+        "null": (None, None),
+    }
+    if kind == "null" and test.non_empty:
+        return False, None
+    empty, filled = least[kind]
+    return True, filled if test.non_empty else empty
+
+
+def least_report(group: Sequence[FieldTest]) -> dict[str, Any] | None:
+    """The plainest report every test of ``group`` holds on, or ``None`` where none is built.
+
+    Each test's path is written down with the plainest value it holds on (an
+    empty object or list, ``"x"``, the text it must contain); ``*`` is one
+    item. The shallowest paths are written first, so a deeper test writes
+    into the container a shallower one made. ``None`` where the tests
+    contradict each other. Linear in the tests' paths.
+    """
+    root: dict[str, Any] = {}
+    for test in sorted(group, key=lambda t: len(parse_path(t.path))):
+        possible, value = _least_value(test)
+        segments = parse_path(test.path)
+        if not possible or not segments:
+            return None
+        node: Any = root
+        for index, segment in enumerate(segments):
+            last = index == len(segments) - 1
+            following = None if last else segments[index + 1]
+            fresh: Any = value if last else ([] if following == "*" else {})
+            if isinstance(node, list):
+                if segment != "*":
+                    return None
+                if not node or node == [0]:
+                    node[:] = [fresh]
+                child = node[0]
+            elif isinstance(node, dict):
+                key = "_" if segment == "*" else str(segment)
+                if last or not isinstance(node.get(key), dict | list):
+                    node[key] = fresh
+                child = node[key]
+            else:
+                return None
+            node = child
+    return root if all(test.holds(root) for test in group) else None
+
+
+def _paths_meet(left: Sequence[FieldTest], right: Sequence[FieldTest]) -> bool:
+    """Whether a test of ``left`` and one of ``right`` name one place, or one below the other."""
+    lefts = {tuple(parse_path(test.path)) for test in left}
+    rights = {tuple(parse_path(test.path)) for test in right}
+    if lefts & rights:
+        return True
+    for shorter, longer in ((lefts, rights), (rights, lefts)):
+        prefixes = {path[:depth] for path in longer for depth in range(1, len(path))}
+        if shorter & prefixes:
+            return True
+    return False
+
+
+def _covers(builtin_test: FieldTest, own: FieldTest) -> bool:
+    """Whether every value ``builtin_test`` passes also passes ``own`` (one path, both)."""
+    if builtin_test.path != own.path:
+        return False
+    if own.types and not (builtin_test.types and set(builtin_test.types) <= set(own.types)):
+        return False
+    if own.non_empty and not builtin_test.non_empty:
+        return False
+    return not own.contains or own.contains.lower() in builtin_test.contains.lower()
+
+
+def _sets_apart(mine: Sequence[FieldTest], group: Sequence[FieldTest]) -> bool:
+    """Whether a test of ``mine`` on a place ``group`` tests fails on ``group``'s plainest report.
+
+    The built-in's plainest report (:func:`least_report`) writes only the
+    places the built-in tests (each path and the containers above it); a test
+    of ``mine`` on another place says nothing about the built-in's reports,
+    which may carry anything more. A test on a place the built-in tests that
+    the plainest report fails (another type, text its value does not contain)
+    is one the built-in's reports cannot pass.
+    """
+    report = least_report(group)
+    if report is None:
+        return False
+    places = {
+        tuple(path[:depth])
+        for test in group
+        for path in (parse_path(test.path),)
+        for depth in range(1, len(path) + 1)
+    }
+    return any(tuple(parse_path(test.path)) in places and not test.holds(report) for test in mine)
+
+
+def _overlap_score(fmt: ReportFormat, builtin: ReportFormat) -> tuple[int, int, int] | None:
+    """How closely ``builtin``'s detect overlaps ``fmt``'s, or ``None`` where it does not.
+
+    For each pair of groups (one of ``fmt``'s, one of ``builtin``'s) that
+    overlaps: ``builtin``'s group recognises the plainest report of ``fmt``'s
+    (every report of that group is read as the built-in); ``fmt``'s group
+    recognises the plainest report of ``builtin``'s; or the two test a shared
+    place and one report holds both groups' tests (a partial overlap) and no
+    test of ``fmt``'s group sets the built-in's reports apart
+    (:func:`_sets_apart`). The score is the best pair's: the paths both test
+    where the built-in's test passes only what ``fmt``'s does, the paths both
+    test, then a whole overlap over a partial one.
+    """
+    best: tuple[int, int, int] | None = None
+    for mine in fmt.detect:
+        own = least_report(mine)
+        mine_paths = {test.path for test in mine}
+        for group in builtin.detect:
+            whole = own is not None and all(test.holds(own) for test in group)
+            plainest = least_report(group)
+            whole = whole or (plainest is not None and all(test.holds(plainest) for test in mine))
+            partial = (
+                not whole
+                and _paths_meet(mine, group)
+                and (
+                    # A later test writes over an earlier one's place: each order.
+                    least_report([*mine, *group]) is not None
+                    or least_report([*group, *mine]) is not None
+                )
+                and not _sets_apart(mine, group)
+            )
+            if not (whole or partial):
+                continue
+            covered = sum(any(_covers(theirs, test) for theirs in group) for test in mine)
+            shared = len(mine_paths & {test.path for test in group})
+            score = (covered, shared, int(whole))
+            if best is None or score > best:
+                best = score
+    return best
+
+
+def builtin_overlapping(
+    fmt: ReportFormat, builtins: Iterable[ReportFormat] = BUILTIN_REPORT_FORMATS
+) -> str:
+    """The built-in whose detect overlaps ``fmt``'s most closely, by name; empty where none does.
+
+    The readings are those of :func:`_overlap_score`, each on the plainest
+    report detect groups describe (:func:`least_report`): a built-in
+    recognises the plainest report of one of ``fmt``'s groups (the reports
+    ``fmt`` was written for); ``fmt`` recognises the plainest report of one of
+    a built-in's groups (``fmt``'s tests are among the built-in's); or a group
+    of each names a shared place (the same path, or one below the other) and
+    one report holds both groups' tests (a partial overlap: a report of the
+    built-in's family carrying what ``fmt`` tests too), unless ``fmt``'s group
+    holds a test on a place the built-in tests that the built-in's plainest
+    report fails. Groups sharing no place are not compared, since nearly any
+    two groups of tests can hold on one report. A format read through a
+    mapping is tried after every built-in, so a report both recognise is read
+    as the built-in. Of the built-ins that overlap, the one named shares the
+    most of ``fmt``'s tests (its own test on the path passes only what
+    ``fmt``'s does), then the most paths, then overlaps whole; ties go to the
+    first declared. Linear in the groups' paths per pair of groups.
+    """
+    best_name, best_score = "", None
+    for builtin in builtins:
+        if builtin.name == fmt.name:
+            continue
+        score = _overlap_score(fmt, builtin)
+        if score is not None and (best_score is None or score > best_score):
+            best_name, best_score = builtin.name, score
+    return best_name
+
+
+def overlapping_paths(builtin: ReportFormat) -> list[str]:
+    """The places ``builtin``'s detect tests, once each in declared order."""
+    return list(dict.fromkeys(test.path for group in builtin.detect for test in group))
 
 
 # Where a run summary records the signature scale of the run's sandbox report.

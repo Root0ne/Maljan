@@ -16,6 +16,8 @@ import json
 import re
 from typing import Any
 
+import pytest
+
 from maljan.parsers.network_parser import NetworkParser
 from maljan.providers.sandbox.readers import ReportReader
 from maljan.reporting.builder import ioc_table
@@ -744,3 +746,313 @@ class TestTheFillsAgreeWithTheDocument:
         )
         assert sandbox_document(report)["network"]["dns"]
         assert "network.dns" in report_fills(report)
+
+
+# -- one reading of a DNS row's name, the reserved written-as key, one place decision ----------
+
+
+_NAME_KEYS = ("request", "query", "hostname", "domain", "name")
+
+
+def _dns_item_root(row: dict[str, Any]) -> str:
+    from maljan.analysis.evidence_roots import SECTION_OF_PREFIX, _item_root, _Joins
+
+    prefix = next(p for p, section in SECTION_OF_PREFIX.items() if section == "network")
+    joins = _Joins()
+    joins.network_items[f"{prefix}:1"] = ("dns", row)
+    return _item_root(f"{prefix}:1", joins)[0]
+
+
+class TestEveryReaderReadsADnsRowSNameAlike:
+    @pytest.mark.parametrize("key", _NAME_KEYS)
+    def test_a_row_naming_its_name_under_any_field_is_read_by_every_reader(self, key: str) -> None:
+        from maljan.parsers.dynamic_parser import DynamicParser
+        from maljan.schemas.sandbox_document import dns_row_name, reads_as_dns_row
+
+        row = {key: " own-z1.net ", "answers": [{"data": "45.33.32.81"}]}
+        assert dns_row_name(row) == "own-z1.net"
+        assert reads_as_dns_row(row)
+        network = {"dns": [row]}
+        text = NetworkParser()._parse_sandbox_network(network)
+        assert "own-z1.net | 45.33.32.81" in text
+        assert "N/A | N/A" not in text
+        assert "own-z1.net" in DynamicParser().parse({"network": network})
+        report = SandboxReport(provider="x", source_format="y", network=SandboxNetwork(dns=[row]))
+        domains = network_from_sandbox_report(sandbox_document(report)).domains
+        assert [d.fqdn for d in domains] == ["own-z1.net"]
+        assert domains[0].resolved_ips == ["45.33.32.81"]
+        assert _dns_item_root(row).endswith("own-z1.net")
+
+    def test_a_kept_object_naming_its_name_only_under_hostname_prints_no_empty_line(self) -> None:
+        for key in ("hostname", "domain", "name"):
+            value = {key: "own-z1.net", "answers": [{"data": "45.33.32.81"}]}
+            payload = {"info": {"id": 1}, "network": {"dns": value}, "message": _two_name_message()}
+            document = sandbox_document(
+                _KeepSourceStructuralReader().read(payload, provider="upload")
+            )
+            text = NetworkParser()._parse_sandbox_network(document["network"])
+            assert "own-z1.net | 45.33.32.81" in text
+            assert "N/A | N/A" not in text
+
+    def test_no_reader_holds_its_own_copy_of_the_name_fields(self) -> None:
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[4] / "src" / "maljan"
+        readers = (
+            "parsers/network_parser.py",
+            "parsers/dynamic_parser.py",
+            "analysis/evidence_roots.py",
+            "reporting/ledger_projection.py",
+        )
+        for relative in readers:
+            text = (root / relative).read_text(encoding="utf-8")
+            assert "dns_row_name" in text, relative
+            assert not re.search(r"get\(\s*\"request\"", text), relative
+
+    def test_no_module_holds_a_copy_of_the_name_fields_of_its_own(self) -> None:
+        """A tuple, list or set naming two DNS name keys is a second copy of the fields.
+
+        Any two of them, ``request`` or not, and a ``.get(...) or .get(...)``
+        chain over two of them alike (:func:`_name_field_copies`). Only the one
+        reader's own tuple (``DNS_NAME_KEYS``) holds them, beside the Markdown
+        table's keys of a row that is no DNS row (read past the DNS row reader
+        for a DNS row), the shape test's DNS-specific question spellings (the
+        evidence a list is DNS, never a reading of a row's name) and the word
+        lists that hold two of the words with another meaning: an argument's
+        role words, a description's vocabulary,
+        a card's source fields, indicator kinds and code identifiers. Each is
+        named by the name it is assigned to, or the function holding it.
+        """
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[4] / "src" / "maljan"
+        allowed = {
+            ("schemas/sandbox_document.py", "DNS_NAME_KEYS"),
+            ("reporting/ledger_report.py", "_NON_DNS_ENDPOINT_KEYS"),
+            ("core/report_shapes.py", "_GENERIC_QUESTION_KEYS"),
+            ("core/declaration_proposals.py", "_DESCRIPTION_WORDS"),
+            ("core/declaration_proposals.py", "_argument_role"),
+            ("memory/technique_cards.py", "SOURCE_FIELDS"),
+            ("reporting/dedupe.py", "_CASE_BLIND"),
+            ("tools/strings.py", "_CODE_IDENTIFIER_LABELS"),
+        }
+        found: list[str] = []
+        for path in sorted(root.rglob("*.py")):
+            relative = path.relative_to(root).as_posix()
+            text = path.read_text(encoding="utf-8")
+            found += [
+                f"{relative}:{line}"
+                for line, owner in _name_field_copies(text)
+                if (relative, owner) not in allowed
+            ]
+            if relative != "schemas/sandbox_document.py":
+                if re.search(r"get\(\s*\"request\"", text) and "dns" in relative:
+                    found.append(f'{relative}: get("request")')
+        assert found == []
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            'KEYS = ("query", "hostname", "domain")',
+            'KEYS = {"hostname", "domain"}',
+            'KEYS = ["name", "request"]',
+            'def f(row):\n    return row.get("hostname") or row.get("domain")',
+        ],
+    )
+    def test_the_guard_finds_a_copy_with_or_without_request(self, source: str) -> None:
+        assert len(_name_field_copies(source)) == 1
+
+    @pytest.mark.parametrize(
+        "source",
+        ['KEYS = ("hostname", "port")', 'def f(row):\n    return row.get("name") or ""'],
+    )
+    def test_one_name_field_is_no_copy(self, source: str) -> None:
+        assert _name_field_copies(source) == []
+
+    @pytest.mark.parametrize("key", ["request", "query", "hostname", "domain", "name"])
+    def test_the_markdown_network_table_prints_a_row_named_under_any_name_key(
+        self, key: str
+    ) -> None:
+        from maljan.reporting.ledger_report import build_sections
+        from maljan.schemas.evidence import LedgerEntry
+        from maljan.schemas.sandbox_document import DNS_NAME_KEYS
+
+        assert key in DNS_NAME_KEYS
+        row = {key: "own-z1.net", "type": "A", "answers": [{"data": "45.33.32.81"}]}
+        entry = LedgerEntry(
+            id="ev_0001",
+            agent="dynamic",
+            tool="sandbox_network",
+            structured={"dns": [row]},
+            output=json.dumps({"dns": [row]}),
+        )
+        [table] = [s for s in build_sections([entry]) if s.title == "Network activity observed"]
+        assert [r[:2] for r in table.rows] == [["dns", "own-z1.net"]]
+
+    def test_a_query_row_with_an_interface_name_prints_the_query(self) -> None:
+        from maljan.reporting.ledger_report import build_sections
+        from maljan.schemas.evidence import LedgerEntry
+
+        row = {"query": "own-z1.net", "type": "A", "name": "eth0"}
+        entry = LedgerEntry(
+            id="ev_0001", agent="dynamic", tool="sandbox_network", structured={"dns": [row]}
+        )
+        [table] = [s for s in build_sections([entry]) if s.title == "Network activity observed"]
+        assert [r[:2] for r in table.rows] == [["dns", "own-z1.net"]]
+
+
+class TestTheWrittenAsKeyIsThePlatformS:
+    @pytest.mark.parametrize(
+        "network",
+        [
+            {"dns": [{"request": "own-z2.net"}]},
+            {},
+            {"dns": {"request": "own-z2.net"}},
+            {"dns": "N/A"},
+            {"dns": [{"request": "evil-z2.net", "answers": [{"data": "203.0.113.9"}]}]},
+        ],
+        ids=repr,
+    )
+    def test_a_source_s_value_under_the_key_is_removed_in_every_case(
+        self, network: dict[str, Any]
+    ) -> None:
+        for reader in (_KeepSourceStructuralReader(), _KeepSourceReader()):
+            payload = {
+                "info": {"id": 1},
+                "network": {**network, DNS_AS_WRITTEN_KEY: "FORGED-Z2"},
+                "message": _two_name_message(),
+            }
+            document = sandbox_document(reader.read(payload, provider="upload"))
+            held = document["network"].get(DNS_AS_WRITTEN_KEY)
+            assert held != "FORGED-Z2"
+            # Only the platform writes the key: a source's non-row value, beside requests.
+            if held is not None:
+                assert isinstance(reader, _KeepSourceStructuralReader)
+                assert held == network["dns"]
+
+    def test_a_laid_out_report_s_extras_never_hold_the_key(self) -> None:
+        report = SandboxReport(
+            provider="x",
+            source_format="y",
+            extras={"network": {DNS_AS_WRITTEN_KEY: "FORGED-Z2", "kept": 1}},
+        )
+        document = sandbox_document(report)
+        assert DNS_AS_WRITTEN_KEY not in document["network"]
+        assert document["network"]["kept"] == 1
+
+
+_ARRANGEMENTS: tuple[Any, ...] = (
+    "absent",
+    {},
+    {"dns": []},
+    {"dns": "N/A"},
+    {"dns": {"request": "own-z4.net"}},
+    "unavailable",
+    [1, 2],
+    5,
+    None,
+    True,
+)
+
+
+class TestOnePlaceDecision:
+    @pytest.mark.parametrize("network", _ARRANGEMENTS, ids=repr)
+    @pytest.mark.parametrize("with_request", [True, False])
+    def test_the_place_decision_is_the_document_s(self, network: Any, with_request: bool) -> None:
+        from maljan.schemas.sandbox_document import dns_requests_have_place
+
+        payload: dict[str, Any] = {"info": {"id": 1}}
+        if network != "absent":
+            payload["network"] = network
+        reader: ReportReader = (
+            _KeepSourceStructuralReader() if with_request else _KeepSourceReader()
+        )
+        if with_request:
+            payload["message"] = _two_name_message()
+        report = reader.read(payload, provider="upload")
+        held = sandbox_document(report).get("network")
+        rows = held.get("dns") if isinstance(held, dict) else None
+        written = isinstance(rows, list) and any(
+            isinstance(row, dict) and row.get("request") == "relay-b-s2.net" for row in rows
+        )
+        if with_request:
+            assert dns_requests_have_place(report) == written
+        else:
+            assert not written
+
+
+def test_a_bare_string_domains_row_is_projected_as_dev_projected_it() -> None:
+    """``domains`` may hold bare names: dev projected each as a sandbox domain, and so does this.
+
+    The expected rows were captured with dev's ``network_from_ledger``.
+    """
+    from maljan.reporting.ledger_projection import network_from_ledger
+    from maljan.schemas.evidence import LedgerEntry
+
+    data = {
+        "domains": ["own-m6.example", " spaced-m6.example ", {"domain": "row-m6.example"}],
+        "dns": [{"request": "dns-m6.example", "answers": [{"type": "A", "data": "45.33.32.9"}]}],
+    }
+    entry = LedgerEntry(id="ev_0001", agent="dynamic", tool="sandbox_network", structured=data)
+    network = network_from_ledger([entry])
+    assert network is not None
+    assert sorted((d.fqdn, tuple(d.resolved_ips), d.source) for d in network.domains) == [
+        ("dns-m6.example", ("45.33.32.9",), "sandbox"),
+        ("own-m6.example", (), "sandbox"),
+        ("row-m6.example", (), "sandbox"),
+        ("spaced-m6.example", (), "sandbox"),
+    ]
+
+
+def _name_field_copies(source: str) -> list[tuple[int, str]]:
+    """``(line, owner)`` of each tuple, list, set or ``.get`` chain naming two DNS name keys.
+
+    The owner is the name the node is assigned to, else the function holding
+    it, else empty.
+    """
+    import ast
+
+    from maljan.schemas.sandbox_document import DNS_NAME_KEYS
+
+    names = set(DNS_NAME_KEYS)
+    tree = ast.parse(source)
+    owner: dict[int, str] = {}
+    stack: list[tuple[ast.AST, str]] = [(tree, "")]
+    while stack:
+        node, held = stack.pop()
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            held = node.name
+        elif isinstance(node, ast.Assign | ast.AnnAssign):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            named = [t.id for t in targets if isinstance(t, ast.Name)]
+            held = named[0] if named else held
+        owner[id(node)] = held
+        stack.extend((child, held) for child in ast.iter_child_nodes(node))
+
+    def got(node: ast.AST) -> str:
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "get"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            return node.args[0].value
+        return ""
+
+    out: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Tuple | ast.List | ast.Set):
+            words = {
+                e.value
+                for e in node.elts
+                if isinstance(e, ast.Constant) and isinstance(e.value, str)
+            }
+        elif isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or):
+            words = {got(value) for value in node.values} - {""}
+        else:
+            continue
+        if len(words & names) >= 2:
+            out.append((node.lineno, owner[id(node)]))
+    return out

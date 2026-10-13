@@ -44,6 +44,7 @@ from maljan.reporting.dedupe import (
 )
 from maljan.reporting.models import EvidenceSection
 from maljan.schemas.evidence import answer_not_shown
+from maljan.schemas.sandbox_document import DNS_NAME_KEYS, dns_name_key
 from maljan.utils.marked_cut import marked_cut
 
 if TYPE_CHECKING:
@@ -548,6 +549,11 @@ def _rule_rows(entry: LedgerEntry, data: dict[str, Any], key: str) -> Any:
     return data.get(key)
 
 
+def _or(declared: Any, own: Any) -> Any:
+    """The declared value where the declaration names one, else the row's own field."""
+    return own if declared is None else declared
+
+
 def _declared(entry: LedgerEntry, row: dict[str, Any], name: str) -> Any:
     """The value a rule row holds where its tool's declaration names ``name``, or ``None``."""
     facts = tool_kinds.declared_facts(entry)
@@ -643,8 +649,17 @@ def _capa(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     acc.credit(table, entry)
 
 
+def _declared_place(entry: LedgerEntry, row: dict[str, Any], name: str) -> Any:
+    """The value a row holds where its tool's declaration places ``name``, or ``None``."""
+    facts = tool_kinds.declared_facts(entry)
+    path = facts.places.get(name, "") if facts is not None else ""
+    return first(row, path) if path else None
+
+
 def _sandbox_processes(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
-    rows = data.get("processes")
+    # Where the declaration says, so a live sandbox server whose rows are shaped
+    # otherwise is drawn as the built-in sandbox's processes are.
+    rows = _rule_rows(entry, data, "processes")
     if not isinstance(rows, list) or not rows:
         return
     table = acc.get(
@@ -659,10 +674,10 @@ def _sandbox_processes(acc: _Sections, entry: LedgerEntry, data: dict[str, Any])
         acc.add_row(
             table,
             [
-                _text(row.get("pid")),
+                _text(_or(_declared_place(entry, row, "pid"), row.get("pid"))),
                 _text(row.get("ppid")),
-                _text(row.get("name")),
-                _text(row.get("command_line")),
+                _text(_or(_declared(entry, row, "name"), row.get("name"))),
+                _text(_or(_declared(entry, row, "command_line"), row.get("command_line"))),
             ],
         )
     acc.credit(table, entry)
@@ -690,17 +705,44 @@ def _sandbox_network(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -
         acc.credit(table, entry)
 
 
+# The keys a network row other than a DNS row names what it is about under,
+# in the order read. A DNS row's name is read by the one DNS row reader
+# (``schemas.sandbox_document.dns_row_name``), then these past its name keys.
+_NON_DNS_ENDPOINT_KEYS = (
+    "request",
+    "hostname",
+    "domain",
+    "host",
+    "uri",
+    "ip",
+    "dst",
+    "name",
+    "ja3",
+    "sni",
+)
+
+
 def _endpoint_of(kind: str, row: Any) -> tuple[str, str]:
     """The address a network row is about, and whatever else it carries."""
     if isinstance(row, str):
         return row, ""
     if not isinstance(row, dict):
         return "", ""
-    for key in ("request", "hostname", "domain", "host", "uri", "ip", "dst", "name", "ja3", "sni"):
+    if kind == "dns":
+        key = dns_name_key(row)
+        keys: tuple[str, ...] = (
+            (key,) if key else tuple(k for k in _NON_DNS_ENDPOINT_KEYS if k not in DNS_NAME_KEYS)
+        )
+    else:
+        keys = _NON_DNS_ENDPOINT_KEYS
+    for key in keys:
         value = row.get(key)
-        if isinstance(value, str) and value:
+        if not isinstance(value, str):
+            continue
+        written = value.strip() if kind == "dns" else value
+        if written:
             detail = {k: v for k, v in row.items() if k != key and v not in (None, "", [], {})}
-            return value, _text(detail)
+            return written, _text(detail)
     return "", ""
 
 

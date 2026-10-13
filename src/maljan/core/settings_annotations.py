@@ -2105,7 +2105,10 @@ ANNOTATIONS.update(
                 "cuckoo, triage, the name of any format declared in "
                 "sandbox.report_formats, and the id of any report reader "
                 "registered at run time or by an installed package. A file "
-                "that sniffs as anything else is refused."
+                "that sniffs as anything else is refused, unless the list holds "
+                "unread: then a report no format recognises is kept unread (its "
+                "blocks reach the analyst raw, no fact is drawn from them) and "
+                "the upload proposes a format declaration for it to accept."
             ),
             "applies_when": _SANDBOX_UPLOAD,
         },
@@ -2116,7 +2119,9 @@ ANNOTATIONS.update(
                 "provider and by report upload: each one's name (at most 32 "
                 "characters), how it is recognised (detect: groups of field tests), "
                 "where its task id and target sha256 sit (field paths), which reader "
-                "reads it (cape2, cuckoo, triage, or empty), and its signature "
+                "reads it (cape2, cuckoo, triage, generic, or empty), its own "
+                "JSONPath mapping for the generic reader (mapping, as "
+                "sandbox.rest.mapping; absent, that one is read), and its signature "
                 "severity scale. A new name is tried before the built-ins; a "
                 "built-in's name is merged over that built-in, field by field."
             ),

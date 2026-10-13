@@ -16,6 +16,7 @@ import json
 from typing import Any
 
 from maljan.core.config import RestMappingConfig
+from maljan.core.safe_json import dumps
 from maljan.providers.errors import ProviderConfigurationError
 from maljan.providers.sandbox.rest_mapping import CHANNELS, apply_mapping, compile_mapping
 
@@ -113,7 +114,8 @@ def preview_mapping(sample: dict[str, Any], mapping: dict[str, Any]) -> dict[str
                 "kept": stats.kept,
                 "dropped": stats.dropped,
                 "truncated": stats.truncated,
-                "sample_rows": json.loads(json.dumps(rows, default=str)),
+                # Depth-safe: a row nested past the guard is marked there.
+                "sample_rows": json.loads(dumps(rows, default=str)),
                 "error": stats.error or None,
             }
     return {"target_sha256": target, "channels": channels}

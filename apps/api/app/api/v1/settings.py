@@ -57,6 +57,10 @@ from app.schemas.settings import (
 from app.services import credential_bootstrap
 from app.services.audit import record as audit_record
 from app.services.mapping_preview import PREVIEW_MAX_BYTES, preview_mapping
+from app.services.report_formats_lock import (
+    report_formats_serialised,
+    touches_report_formats,
+)
 from app.services.server_map import SERVER_MAP_KEY, TOKEN_MASK
 from app.services.settings_catalog_api import catalog_index, full_catalog, resolved_catalog
 from app.services.settings_probes import (
@@ -72,6 +76,7 @@ from app.services.settings_service import (
     SettingsService,
     SettingsValidationError,
     core_settings_cache,
+    effective_core_settings,
     lenient_imported_declarations,
 )
 
@@ -293,6 +298,97 @@ async def _agent_warnings(db: AsyncSession) -> dict[str, str]:
         return {}
 
 
+async def _declared_detects(db: AsyncSession) -> dict[str, Any] | None:
+    """Each declared report format's detect by name, as the settings stand; ``None`` unread.
+
+    Read before a save that writes the report formats, so the overlap warning
+    is said only for a format whose detect the save adds or changes. Never
+    raises, as :func:`_agent_warnings` never does.
+    """
+    try:
+        sandbox = (await effective_core_settings(db)).sandbox
+    except Exception as exc:  # noqa: BLE001 — advisory: unread means every detect is judged
+        logger.debug("Could not read the declared detects (%s); continuing.", type(exc).__name__)
+        return None
+    return {fmt.name: _detect_of(fmt) for fmt in sandbox.report_formats}
+
+
+def _detect_of(fmt: Any) -> list[list[dict[str, Any]]]:
+    return [[test.model_dump(mode="json") for test in group] for group in fmt.detect]
+
+
+async def _mapping_warnings(
+    db: AsyncSession, changes: dict[str, Any], detects_before: dict[str, Any] | None = None
+) -> dict[str, str]:
+    """A warning beside each saved report-mapping path whose reading is not linear in the report,
+    and beside the detect of each format read through a mapping that a built-in's detect overlaps.
+
+    Read from the settings as they now stand, for a save that touched the
+    sandbox settings; the save itself is never refused for either
+    (``core.report_mapping.costly_paths``,
+    ``core.report_formats.builtin_overlapping``). The overlap is said only
+    for a save that writes the report formats, and only beside a format whose
+    detect the save adds or changes (``detects_before``, each declared
+    format's detect by name before the save; ``None`` where it was not read,
+    and then every format's detect is judged), so an unrelated save never
+    repeats it. Never raises, as :func:`_agent_warnings` never does.
+    """
+    from maljan.core.report_formats import (
+        BUILTIN_REPORT_FORMATS,
+        builtin_overlapping,
+        effective_formats,
+        overlapping_paths,
+    )
+    from maljan.core.report_mapping import costly_paths
+    from maljan.providers.sandbox.readers import format_reads_mapping
+
+    if not any(str(key).startswith("core.sandbox.") for key in changes):
+        return {}
+    try:
+        sandbox = (await effective_core_settings(db)).sandbox
+    except Exception as exc:  # noqa: BLE001 — advisory, and the write is done
+        logger.debug("Could not read the mapping paths (%s); continuing.", type(exc).__name__)
+        return {}
+    out = {
+        f"core.sandbox.rest.mapping.{field}": said
+        for field, said in costly_paths(sandbox.rest.mapping).items()
+    }
+    builtins = [
+        fmt
+        for fmt in effective_formats(sandbox.report_formats)
+        if fmt.name in {b.name for b in BUILTIN_REPORT_FORMATS}
+    ]
+    formats_written = touches_report_formats(changes)
+    for index, fmt in enumerate(sandbox.report_formats):
+        if fmt.mapping is not None:
+            for field, said in costly_paths(fmt.mapping).items():
+                out[f"core.sandbox.report_formats.{index}.mapping.{field}"] = said
+        changed = formats_written and (
+            detects_before is None or detects_before.get(fmt.name) != _detect_of(fmt)
+        )
+        overlapping = (
+            builtin_overlapping(fmt, builtins) if changed and format_reads_mapping(fmt) else ""
+        )
+        if overlapping:
+            builtin = next(b for b in builtins if b.name == overlapping)
+            out[f"core.sandbox.report_formats.{index}.detect"] = SHADOWED_DETECT.format(
+                name=fmt.name,
+                builtin=overlapping,
+                places=", ".join(overlapping_paths(builtin)),
+            )
+    return out
+
+
+SHADOWED_DETECT = (
+    "{name!r} is read through a mapping, which is tried after every built-in format, and its "
+    "detect overlaps the built-in format {builtin!r}: a report both recognise is read as "
+    "{builtin!r}, never as {name!r}. To set them apart, add a test on a place {builtin!r} "
+    "tests ({places}) that its reports cannot pass, such as another type or text they never "
+    "hold; a test on a place of your own does not, since {builtin!r}'s reports may carry it "
+    "too. Saved as written."
+)
+
+
 async def _unprobed_models_in(db: AsyncSession, changes: dict[str, Any]) -> list[str]:
     """Every per-agent model this save names that no probe has reached.
 
@@ -348,8 +444,17 @@ async def patch_values(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"errors": {AGENT_MODELS_KEY: refusal_sentence(unprobed)}},
         )
+    formats_written = touches_report_formats(changes)
+    detects_before: dict[str, Any] | None = None
     try:
-        res = await SettingsService(db).save(changes, user_id=user.id, ip=_client_ip(request))
+        # A write of the declared report formats waits for an accept that is
+        # rewriting them, and an accept for it (``services.report_formats_lock``).
+        async with report_formats_serialised(db, needed=formats_written):
+            if formats_written:
+                # Under the lock, so an accept between the read and the save
+                # is never taken for this save's change.
+                detects_before = await _declared_detects(db)
+            res = await SettingsService(db).save(changes, user_id=user.id, ip=_client_ip(request))
     except SettingsValidationError as exc:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": exc.errors}
@@ -357,7 +462,12 @@ async def patch_values(
     runtime_config.invalidate()
     core_settings_cache.invalidate()
     return PatchResponse(
-        applied=res.applied, applies=res.applies, warnings=await _agent_warnings(db)
+        applied=res.applied,
+        applies=res.applies,
+        warnings={
+            **await _agent_warnings(db),
+            **await _mapping_warnings(db, changes, detects_before),
+        },
     )
 
 
@@ -371,7 +481,8 @@ async def reset_group(
     keys = [e.key for e in full_catalog() if e.group == group and e.editable]
     if not keys:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown group: {group}")
-    removed = await SettingsService(db).reset(keys, user_id=user.id, ip=_client_ip(request))
+    async with report_formats_serialised(db, needed=touches_report_formats(keys)):
+        removed = await SettingsService(db).reset(keys, user_id=user.id, ip=_client_ip(request))
     runtime_config.invalidate()
     core_settings_cache.invalidate()
     return ResetResponse(reset=removed)
@@ -387,7 +498,8 @@ async def reset_key(
     # A row whose key left the catalog (a later deploy renamed the field) must
     # still be removable, so the catalog check only decides between 404 and
     # an empty reset when nothing is stored either.
-    removed = await SettingsService(db).reset([key], user_id=user.id, ip=_client_ip(request))
+    async with report_formats_serialised(db, needed=touches_report_formats([key])):
+        removed = await SettingsService(db).reset([key], user_id=user.id, ip=_client_ip(request))
     if not removed and key not in catalog_index():
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown setting: {key}")
     runtime_config.invalidate()
@@ -572,7 +684,8 @@ async def import_values(
         values, whole_maps=body.format == WHOLE_MAP_FORMAT
     )
     try:
-        res = await SettingsService(db).save(values, user_id=user.id, ip=_client_ip(request))
+        async with report_formats_serialised(db, needed=touches_report_formats(values)):
+            res = await SettingsService(db).save(values, user_id=user.id, ip=_client_ip(request))
     except SettingsValidationError as exc:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": exc.errors}

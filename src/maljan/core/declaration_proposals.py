@@ -18,7 +18,17 @@ server already said when it listed its tools:
   exist, the digest of empty input, a documentation address), made only when
   the operator asks for it: the row shape of an answer that has no
   ``outputSchema``, the auto-name prefixes a listing writes and the text the
-  server answers a missing file with.
+  server answers a missing file with;
+* for a server declared a sandbox source (its ``roles`` hold ``sandbox``)
+  and only for one, the shape test of a sandbox report
+  (``core.report_shapes``): rows whose keys
+  say process id, parent and name propose a sandbox's process kind, with the
+  process id as the place a run root is read from; rows naming a destination
+  and its port, or a DNS question, a sandbox's network kind (read as a flow
+  table where the answer lays its rows out as one); rows naming a digest, a
+  name and a size, a sandbox's dropped-file kind. An accepted sandbox kind
+  gives a live sandbox server's answers what the built-in sandbox tools'
+  answers get: observed steps and ``run`` roots.
 
 This module turns that into a *proposal*: per tool, a ``ToolFacts`` that
 validates, and per field the parts of the schema or answer it was read from
@@ -47,8 +57,16 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from maljan.core.report_shapes import (
+    DNS_TYPE_KEYS,
+    host_names,
+    is_record_type,
+    note_question_value,
+    row_shape,
+)
 from maljan.core.tool_declarations import (
     KIND_DEPENDENT_FIELDS,
+    SANDBOX_ROLE,
     ErrorPattern,
     ToolFacts,
     check_auto_name_prefixes,
@@ -572,6 +590,9 @@ class _AnswerReading:
     reputation: dict[str, Any] = field(default_factory=dict)
     reputation_evidence: list[str] = field(default_factory=list)
     confidence: str = MEDIUM
+    # The first list of objects: its path segments (the list's own) and its row's keys.
+    row_list: tuple[str, ...] = ()
+    row_keys: tuple[str, ...] = ()
 
 
 def _read_answer(root: _Shape, origin: str, confidence: str) -> _AnswerReading:
@@ -583,6 +604,7 @@ def _read_answer(root: _Shape, origin: str, confidence: str) -> _AnswerReading:
     for segments, shape in nodes:
         if shape.kind == "array" and shape.items is not None and shape.items.props:
             row_at, row = (*segments, "*"), shape.items
+            reading.row_list, reading.row_keys = tuple(segments), tuple(shape.items.props)
             reading.rows = Proposed(
                 value=_path(row_at),
                 evidence=[f"{_where(origin, segments)} (a list of objects)"],
@@ -703,6 +725,10 @@ class ToolProposal:
     read_only: bool | None = None
     destructive: bool | None = None
     open_world: bool | None = None
+    # The rows pass the sandbox shape test on a server not declared a sandbox
+    # source: no kind is proposed, and the server's answer says how to have
+    # one proposed (:func:`propose`). Not part of the tool's proposal.
+    run_shaped: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -721,6 +747,7 @@ _REQUIRES: dict[str, tuple[str, ...]] = {
 # Dropped in this order until the facts validate (a field read wrongly is
 # never worth the rest of the proposal).
 _DROP_ORDER = (
+    "reader",
     "asserts_techniques",
     "places",
     "values",
@@ -738,6 +765,7 @@ def propose_tool(
     *,
     manifest_cell: Mapping[str, Any] | None = None,
     answer: Any = None,
+    sandbox_source: bool = False,
 ) -> ToolProposal | None:
     """The proposal for one tool, or ``None`` for one whose name a declaration cannot hold.
 
@@ -745,6 +773,12 @@ def propose_tool(
     ``manifest_cell`` the tool's cell of the server's ``capabilities``
     manifest; ``answer`` the parsed answer of a harmless probe call, read for
     the answer's shape when the definition has no ``outputSchema``.
+    ``sandbox_source`` says the server is declared a sandbox source (its
+    ``roles`` hold :data:`~maljan.core.tool_declarations.SANDBOX_ROLE`): only
+    then are its rows read by the sandbox shape test, since rows shaped like
+    a run's (processes, connections, DNS questions, dropped files) are also
+    what a memory image, a capture, a live resolver or an intelligence lookup
+    answers with, and a sandbox kind makes them observed run facts.
     """
     name = _get(definition, "name")
     if not isinstance(name, str):
@@ -804,8 +838,23 @@ def propose_tool(
             list(reading.techniques), list(reading.techniques_evidence), reading.confidence
         )
 
-    # The kind, when something the server said names one.
+    # The kind, when something the server said names one; a sandbox's rows, by
+    # the shape test, only for a server declared a sandbox source and where
+    # nothing else names a kind, with the parts a run reads.
     found_kind = _kind_of(name, words, word_origin, proposal, reading)
+    # A tool asked about an address, a domain or a URL describes that subject
+    # (a lookup, a resolution), not what a run did, whatever server serves it.
+    subject = bool(_SUBJECT_ROLES & set(proposal.roles))
+    sandbox = _sandbox_kind(name, reading, answer) if found_kind is None and not subject else None
+    if sandbox is not None and not sandbox_source:
+        proposal.run_shaped = True
+        sandbox = None
+    if sandbox is not None:
+        kind, extra = sandbox
+        found_kind = kind, extra["_kind"].confidence, list(extra["_kind"].evidence)
+        for key, held in extra.items():
+            if key != "_kind":
+                proposal.fields[key] = held
     if found_kind is not None:
         kind, kind_confidence, kind_evidence = found_kind
         if kind in _RULE_KINDS and reading.techniques:
@@ -912,6 +961,115 @@ def _kind_of(
     if "strings" in words and "text" in reading.values:
         return "strings", LOW, [f"{word_origin} (strings)", "rows with a text value"]
     return None
+
+
+# The argument roles that name a subject to describe rather than a run or its
+# sample: a tool taking one is never read by the sandbox shape test.
+_SUBJECT_ROLES = frozenset({"ip", "domain", "url"})
+# The top-level keys a flow table lays its rows out under
+# (``analysis.evidence_roots``: reader ``flow_table``).
+_FLOW_TABLE_KEYS = frozenset({"tcp", "udp", "conversations", "dns"})
+_SANDBOX_KIND_OF_SHAPE = {
+    "processes": "sandbox_processes",
+    "flows": "sandbox_network",
+    "dns": "sandbox_network",
+    "dropped_files": "sandbox_dropped_files",
+}
+
+
+def _answer_rows(answer: Any, segments: Sequence[str]) -> list[Mapping[str, Any]]:
+    """The rows of ``answer`` at the list ``segments`` names (``*`` an element), each once."""
+    nodes: list[Any] = [answer]
+    for segment in segments:
+        nxt: list[Any] = []
+        for node in nodes:
+            if segment == "*" and isinstance(node, list | tuple):
+                nxt.extend(node)
+            elif isinstance(node, Mapping) and segment in node:
+                nxt.append(node[segment])
+        nodes = nxt
+    rows: list[Mapping[str, Any]] = []
+    for node in nodes:
+        if isinstance(node, list | tuple):
+            rows.extend(row for row in node if isinstance(row, Mapping))
+    return rows
+
+
+def _row_values(answer: Any, reading: _AnswerReading) -> dict[str, Any]:
+    """``row_shape``'s value evidence from a probe answer's rows; empty without an answer.
+
+    Whether every question type seen is a DNS record type, and whether the
+    question values read as host names: what an uploaded report's rows give
+    the same test.
+    """
+    if answer is None or isinstance(answer, str):
+        return {}
+    rows = _answer_rows(answer, reading.row_list)
+    if not rows:
+        return {}
+    record_types: dict[str, bool] = {}
+    hosts: dict[str, list[int]] = {}
+    for row in rows:
+        for key, value in row.items():
+            if not isinstance(key, str):
+                continue
+            if key.lower() in DNS_TYPE_KEYS:
+                record_types[key] = record_types.get(key, True) and is_record_type(value)
+            note_question_value(hosts, key, value)
+    return {
+        "record_types": any(record_types.values()) if record_types else None,
+        "host_names": host_names(hosts),
+    }
+
+
+def _sandbox_kind(
+    name: str, reading: _AnswerReading, answer: Any = None
+) -> tuple[str, dict[str, Proposed]] | None:
+    """A sandbox kind for an answer whose rows pass the shape test, with the fields it reads.
+
+    ``("sandbox_processes", {...})`` gives the row's process id as the place
+    a ``run`` root is read from and its name and command line as values; a
+    network answer laid out as a flow table gets that reader. The returned
+    mapping's ``_kind`` entry is the kind's own evidence; every other entry is
+    a field to propose. ``None`` where the rows pass no shape test. The names
+    the rows sit under, for the test's evidence, are the list's own, the
+    block's holding it and the tool's (``name``); a probe ``answer``'s rows
+    add the values' evidence (record types, host names). Asked only where
+    nothing else the server said names a kind (:func:`_kind_of` first).
+    """
+    if reading.rows is None or not reading.row_keys:
+        return None
+    names = [s for s in reversed(reading.row_list) if s != "*"][:2]
+    shape = row_shape([*names, name], reading.row_keys, **_row_values(answer, reading))
+    if shape is None:
+        return None
+    kind = _SANDBOX_KIND_OF_SHAPE[shape.kind]
+    origin = reading.rows.evidence[0] if reading.rows.evidence else "rows"
+    parts = ", ".join(sorted(shape.parts.values()))
+    confidence = LOW if reading.confidence == LOW else MEDIUM
+    extra: dict[str, Proposed] = {
+        "_kind": Proposed(
+            kind, [f"{origin} ({parts})", "the sandbox report shape test"], confidence
+        )
+    }
+    if shape.kind == "processes":
+        extra["places"] = Proposed(
+            {"pid": f"/{shape.parts['pid']}"}, [f"{origin}.{shape.parts['pid']}"], confidence
+        )
+        values = {"name": f"/{shape.parts['name']}"}
+        if "command_line" in shape.parts:
+            values["command_line"] = f"/{shape.parts['command_line']}"
+        extra["values"] = Proposed(values, [f"{origin} ({parts})"], confidence)
+    elif (
+        shape.kind in ("flows", "dns")
+        and len(reading.row_list) == 1
+        and reading.row_list[0] in _FLOW_TABLE_KEYS
+        and all(shape.parts.get(p) == p for p in ("dst", "dport") if p in shape.parts)
+    ):
+        extra["reader"] = Proposed(
+            "flow_table", [f"{origin} (laid out as a flow table)"], confidence
+        )
+    return kind, extra
 
 
 def _settle(proposal: ToolProposal) -> None:
@@ -1082,22 +1240,39 @@ def auto_name_prefixes_in(texts: Iterable[str]) -> Proposed | None:
 # ---------------------------------------------------------------------------
 
 
+# The hint a probe of a server not declared a sandbox source answers with
+# when some of its tools' rows read like a sandbox run's.
+ROLE_HINT = (
+    "The rows of {tools} read like a sandbox run's (processes, connections, DNS questions or "
+    "dropped files), but this server is not declared a sandbox source, so no sandbox kind is "
+    "proposed. If it is a sandbox, declare roles: [{role}] on the server and test the "
+    "connection again to have sandbox kinds proposed; a server that is no sandbox (a memory "
+    "image, a capture, a lookup) needs nothing."
+)
+
+
 def propose(
     definitions: Iterable[Any],
     *,
     capabilities: Mapping[str, Any] | None = None,
     answers: Mapping[str, tuple[ProbeCall, Any]] | None = None,
     skip: Iterable[str] = (),
+    sandbox_source: bool = False,
 ) -> dict[str, Any]:
     """The proposals for every tool ``definitions`` lists, as JSON the console reads.
 
     ``{"v": 1, "tools": {tool: {"facts", "fields", "notes"?}}, "server":
     {field: proposed}, "planned"?: [{tool, arguments, remote}], "failed"?:
-    {tool: reason}}``. ``planned`` lists the harmless calls the operator may
+    {tool: reason}, "notes"?: [text]}``. ``planned`` lists the harmless calls the operator may
     confirm; ``failed`` the tools whose schema could not be read, each losing
     only its own proposal. ``answers`` are the harmless calls made and what
     each returned (the text, or the parsed object); ``skip`` names tools
-    proposed for nothing (the manifest tool itself).
+    proposed for nothing (the manifest tool itself); ``sandbox_source`` says
+    the server is declared a sandbox source (:func:`propose_tool`). ``notes``
+    holds the hint, for a server that is not, that names the tools whose rows
+    read like a sandbox run's (:data:`ROLE_HINT`): nothing is proposed from
+    them, since such rows are also what a memory image, a capture or a lookup
+    answers with, and the admin knows which this server is.
     """
     cells = _manifest_cells(capabilities)
     skipped = set(skip)
@@ -1109,6 +1284,7 @@ def propose(
     errors: list[dict[str, Any]] = []
     error_evidence: list[str] = []
     error_confidence = MEDIUM
+    shaped: list[str] = []
     for definition in definitions:
         name = _get(definition, "name")
         if not isinstance(name, str) or name in skipped:
@@ -1116,9 +1292,16 @@ def propose(
         try:
             held = answered.get(name)
             answer = _parsed(held[1]) if held is not None else None
-            proposal = propose_tool(definition, manifest_cell=cells.get(name), answer=answer)
+            proposal = propose_tool(
+                definition,
+                manifest_cell=cells.get(name),
+                answer=answer,
+                sandbox_source=sandbox_source,
+            )
             if proposal is None:
                 continue
+            if proposal.run_shaped:
+                shaped.append(name)
             call = harmless_call(proposal)
             if held is not None:
                 made, raw = held
@@ -1142,6 +1325,8 @@ def propose(
     if prefixes is not None:
         server["auto_name_prefixes"] = prefixes.as_dict()
     out: dict[str, Any] = {"v": PROPOSALS_VERSION, "tools": tools, "server": server}
+    if shaped:
+        out["notes"] = [ROLE_HINT.format(tools=", ".join(shaped), role=SANDBOX_ROLE)]
     if planned:
         out["planned"] = planned
     if failed:

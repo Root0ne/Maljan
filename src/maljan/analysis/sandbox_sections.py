@@ -1060,7 +1060,7 @@ class ItemCitations:
         """The item's own text, lower-cased, as an entry's is held; ``None`` when unread."""
         key = str(item_id or "").strip().lower()
         if key not in self._texts:
-            import json
+            from maljan.core.safe_json import dumps
 
             found = self.item(key)
             # The row's own fields and the process and parent it names; not the
@@ -1070,7 +1070,7 @@ class ItemCitations:
                 if found
                 else None
             )
-            self._texts[key] = json.dumps(said, default=str).lower() if said else None
+            self._texts[key] = dumps(said, default=str).lower() if said else None
         return self._texts[key]
 
     def known(self, item_id: str) -> bool:

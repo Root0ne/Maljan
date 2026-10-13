@@ -72,6 +72,9 @@ export interface SandboxReportDTO {
   sample_sha256_match: boolean;
   warning: string | null;
   uploaded_at: string;
+  /** For a report accepted unread: a proposed format declaration read from its
+   *  shape, for an admin to accept or edit. */
+  proposal?: unknown;
 }
 
 export interface ReportSummaryDTO {
@@ -863,6 +866,25 @@ class ApiClient {
     return this.request<{ items: SandboxReportDTO[]; total: number }>(
       `/api/v1/samples/${sampleId}/sandbox-reports`
     );
+  }
+
+  /** An unread upload with its proposed declaration, read again from the stored report. */
+  getSandboxReportProposal(sampleId: string, reportId: string) {
+    return this.request<SandboxReportDTO>(
+      `/api/v1/samples/${sampleId}/sandbox-reports/${reportId}/proposal`
+    );
+  }
+
+  /** Save an admin-accepted format declaration and read the unread upload as it. */
+  acceptSandboxReportFormat(
+    sampleId: string,
+    reportId: string,
+    declaration: Record<string, unknown>
+  ) {
+    return this.request<SandboxReportDTO>(`/api/v1/sandbox-report-formats/accept`, {
+      method: "POST",
+      body: JSON.stringify({ declaration, sample_id: sampleId, report_id: reportId }),
+    });
   }
 
   deleteSandboxReport(sampleId: string, reportId: string) {

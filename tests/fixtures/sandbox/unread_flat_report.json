@@ -1,0 +1,41 @@
+{
+  "version": 2,
+  "sample_info": {
+    "analysis_id": 99812,
+    "sample_sha256": "1b2c3d4e5f60718293a4b5c6d7e8f90112233445566778899aabbccddeeff001",
+    "file_type": "PE32 executable"
+  },
+  "process_list": [
+    {
+      "process_id": 1,
+      "parent_process_id": 0,
+      "process_name": "setup-r2.exe",
+      "command_line": "setup-r2.exe --silent"
+    },
+    {
+      "process_id": 2,
+      "parent_process_id": 1,
+      "process_name": "powershell.exe",
+      "command_line": "powershell.exe -nop -w hidden -c iex(gc .\\s.txt)"
+    }
+  ],
+  "network_tcp": [
+    {"dst_ip": "203.0.113.77", "dst_port": 8080, "bytes_sent": 1024}
+  ],
+  "network_udp": [
+    {"dst_ip": "198.51.100.53", "dst_port": 53}
+  ],
+  "dns_lookups": [
+    {"domain": "beacon-r2.example", "record_type": "A", "addresses": [{"data": "203.0.113.77"}]}
+  ],
+  "files_written": [
+    {
+      "sha256": "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0",
+      "filename": "C:\\ProgramData\\r2\\s.txt",
+      "file_size": 512
+    }
+  ],
+  "vti": {
+    "matches": [{"category": "persistence", "description": "Writes a script it later runs"}]
+  }
+}

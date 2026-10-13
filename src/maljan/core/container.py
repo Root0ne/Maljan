@@ -1836,12 +1836,13 @@ class ServiceContainer:
         and nowhere else. It is model input only; the report the run stores is
         not this text.
         """
-        import json
-
+        from maljan.core.safe_json import dumps
         from maljan.schemas.sandbox_document import place
 
         def compact(document: Any) -> str:
-            return json.dumps(document, separators=(",", ":"), default=str)
+            # Depth-safe: a report nested past the guard is written with a
+            # marked placeholder there, never a raise (``core.safe_json``).
+            return dumps(document, separators=(",", ":"), default=str)
 
         if source == "sandbox.target":
             return self.loader.chunk_text(

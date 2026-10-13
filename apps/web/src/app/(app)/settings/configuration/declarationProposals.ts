@@ -59,6 +59,9 @@ export interface Proposals {
   probed?: Record<string, string>;
   planned?: PlannedCall[];
   failed?: Record<string, string>;
+  /** What the probe says of the server as a whole, such as the hint that its
+   *  tools' rows read like a sandbox run's while it is not declared one. */
+  notes?: string[];
 }
 
 const CONFIDENCES = new Set(["high", "medium", "low"]);
@@ -134,6 +137,7 @@ export function readProposals(result: ProbeResult | null | undefined): Proposals
   }
   const probed = readStringMap(raw.probed);
   const failed = readStringMap(raw.failed);
+  const notes = strings(raw.notes);
   return {
     v: typeof raw.v === "number" ? raw.v : 1,
     tools,
@@ -141,6 +145,7 @@ export function readProposals(result: ProbeResult | null | undefined): Proposals
     ...(Object.keys(probed).length ? { probed } : {}),
     ...(planned.length ? { planned } : {}),
     ...(Object.keys(failed).length ? { failed } : {}),
+    ...(notes.length ? { notes } : {}),
   };
 }
 
