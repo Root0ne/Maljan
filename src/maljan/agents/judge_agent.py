@@ -79,7 +79,7 @@ from maljan.core.spend import SpendCeilingStop, call_deadline_of
 from maljan.core.token_ledger import TokenLedger, structured_answer
 from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
 from maljan.llm.answer_text import answer_text
-from maljan.llm.anthropic_history import keeps_turns_as_received
+from maljan.llm.anthropic_history import TOOL_LOOP_TURN, keeps_turns_as_received
 from maljan.llm.context_window import (
     ContextBudget,
     tool_definition_chars,
@@ -2088,6 +2088,15 @@ class JudgeAgent(BudgetMeter):
             )
             _hold_the_turn(held_binding, self.llm, held)
             self._publish_questions(conversation, asked)
+            # Each turn of the loop says so, as an analyst's does, for a
+            # provider that caches a conversation it will send again
+            # (``anthropic_history``): the first turn writes the prompt's
+            # prefix and every later turn of the loop reads it. The note rides
+            # the request alone, never the loop's own messages.
+            if conversation:
+                last = conversation[-1]
+                noted = {**(getattr(last, "response_metadata", None) or {}), TOOL_LOOP_TURN: True}
+                return [*conversation[:-1], last.model_copy(update={"response_metadata": noted})]
             return conversation
 
         # The key this loop's turns are counted and reserved under.

@@ -2029,6 +2029,19 @@ before, with no breakpoint, and pays no cache write. On DeepSeek and other OpenA
 caching is automatic and the request is unchanged: the head is already the
 same leading text on every section.
 
+### The judge's tool loop is cached as an analyst's is
+
+Each turn of the mediator's tool loop is noted as a loop turn, as every
+analyst's turn is: on Anthropic its first request sends the prompt's first
+user turn as one block with a breakpoint, which writes the cache entry, and
+every later turn of the loop reads that prefix and writes only what it added.
+A mediator that answers on its first turn pays the write premium once and
+reads nothing; one that calls a tool reads the whole prompt from the cache on
+each later turn. The judge's single-shot calls (the verdict, the technique
+question, the mediation's extraction) carry no breakpoint: no later request
+repeats their tools and system prompt within the cache's lifetime, so a
+breakpoint would only add the write premium.
+
 A stored `true` or `false` (a JSON boolean) keeps its meaning. Stages used to
 be written with `sequential` whether or not anybody chose it; the database
 revision `20261002000000` takes that word off every analysis stage, so the
