@@ -559,66 +559,98 @@ def _code_entry_gate(code: dict[str, Any]) -> tuple[bool, str]:
     )
 
 
-def processes_naming(marker: str) -> dict[int, str]:
-    """Every process whose command line holds ``marker``, with its descendants: pid -> line.
+# The argument a server takes its project directory by: the scenario's own
+# directory, given after it, marks every process the scenario started.
+PROJECT_FLAG = "--project-path"
 
-    Read from ``/proc`` alone; this process is never one of them.
-    """
-    lines: dict[int, str] = {}
-    parents: dict[int, int] = {}
+
+def _proc_table() -> dict[int, tuple[list[str], int]]:
+    """Every process's argv and parent pid, read from ``/proc``."""
+    table: dict[int, tuple[list[str], int]] = {}
     for entry in Path("/proc").iterdir():
         if not entry.name.isdigit():
             continue
-        pid = int(entry.name)
         try:
             raw = (entry / "cmdline").read_bytes()
             stat = (entry / "stat").read_text(encoding="utf-8", errors="replace")
-        except OSError:
+            parent = int(stat.rsplit(")", 1)[1].split()[1])
+        except (OSError, IndexError, ValueError):
             continue
-        lines[pid] = raw.replace(b"\0", b" ").decode("utf-8", errors="replace").strip()
-        try:
-            parents[pid] = int(stat.rsplit(")", 1)[1].split()[1])
-        except (IndexError, ValueError):
-            continue
-    held = {pid for pid, line in lines.items() if marker in line and pid != os.getpid()}
+        argv = [a.decode("utf-8", errors="replace") for a in raw.split(b"\0") if a]
+        table[int(entry.name)] = (argv, parent)
+    return table
+
+
+def _names_project(argv: list[str], project: str) -> bool:
+    """Whether ``argv`` gives exactly ``project`` as its ``--project-path``."""
+    for index, arg in enumerate(argv):
+        if arg == PROJECT_FLAG and index + 1 < len(argv) and argv[index + 1] == project:
+            return True
+        if arg == f"{PROJECT_FLAG}={project}":
+            return True
+    return False
+
+
+def _held_by(table: dict[int, tuple[list[str], int]], project: str) -> set[int]:
+    """The processes started for ``project`` and their children, never this one or its parents."""
+    mine = {os.getpid()}
+    pid = os.getpid()
+    while pid in table and table[pid][1] not in mine and table[pid][1] > 0:
+        pid = table[pid][1]
+        mine.add(pid)
+    held = {pid for pid, (argv, _p) in table.items() if _names_project(argv, project)} - mine
     grew = True
     while grew:
-        children = {pid for pid, parent in parents.items() if parent in held} - held
-        children.discard(os.getpid())
+        children = {pid for pid, (_a, parent) in table.items() if parent in held} - held - mine
         grew = bool(children)
         held |= children
-    return {pid: lines.get(pid, "")[:300] for pid in sorted(held)}
+    return held
 
 
-def end_survivors(marker: str, grace_s: float = 15.0) -> dict[int, str]:
-    """The processes still naming ``marker`` after ``grace_s``, each then ended by its pid.
+def processes_naming(project: str) -> dict[int, str]:
+    """Every process given ``project`` as its ``--project-path``, with its descendants: pid -> line.
 
-    A survivor is asked to end (SIGTERM), then made to (SIGKILL); a pid is
-    signalled only while its command line (or its parent's) still holds the
-    marker, so a reused pid is never touched. Returns the survivors as found.
+    The argv element after the flag must be the path exactly; a process that
+    merely mentions the path is not one of them, nor is this process or any
+    of its ancestors.
+    """
+    table = _proc_table()
+    return {pid: " ".join(table[pid][0])[:300] for pid in sorted(_held_by(table, project))}
+
+
+def end_survivors(project: str, grace_s: float = 15.0) -> dict[int, str]:
+    """The processes still held by ``project`` after ``grace_s``, each then ended by its pid.
+
+    A survivor is asked to end (SIGTERM), then made to (SIGKILL). Right before
+    each signal the process table is read again and the pid is signalled only
+    while it is still held (its own argv names the project, or it descends
+    from one that does), so a reused pid is never touched. Returns the
+    survivors as found.
     """
     import signal
     import time
 
     deadline = time.monotonic() + grace_s
-    survivors = processes_naming(marker)
+    survivors = processes_naming(project)
     while survivors and time.monotonic() < deadline:
         time.sleep(0.5)
-        survivors = processes_naming(marker)
+        survivors = processes_naming(project)
     for sig in (signal.SIGTERM, signal.SIGKILL) if survivors else ():
-        for pid in processes_naming(marker):
+        for pid in processes_naming(project):
+            if pid not in _held_by(_proc_table(), project):
+                continue
             try:
                 os.kill(pid, sig)
             except OSError:
                 pass
         end = time.monotonic() + 10.0
-        while processes_naming(marker) and time.monotonic() < end:
+        while processes_naming(project) and time.monotonic() < end:
             time.sleep(0.5)
     return survivors
 
 
 def survivor_gate(marker: str) -> Gates:
-    """A gate that misses when a process naming ``marker`` outlived the step (then ended)."""
+    """A gate that misses when a process started for ``marker`` outlived the step (then ended)."""
     left = end_survivors(marker)
     return {
         "no_survivor": (

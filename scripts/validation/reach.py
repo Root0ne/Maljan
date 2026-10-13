@@ -61,8 +61,9 @@ CODE_KINDS = ("decompile", "disassembly", "function_disassembly")
 # A place as an answer or an argument spells it: a hex address, or a name a
 # disassembler gives a function it found no name for (its hex part read).
 _PLACE = re.compile(r"\b0x([0-9A-Fa-f]{1,16})\b|\b(?:FUN_|fcn\.|sub_)([0-9A-Fa-f]{4,16})\b")
-# A tool name that speaks of the program's functions or entry points as a whole.
-_LISTS_FUNCTIONS = re.compile(r"functions|entry_?points", re.IGNORECASE)
+# A tool name or declared kind naming the program's functions or entry points:
+# a whole word of it (``function_list``, ``entrypoints``; never ``entropy``).
+_LISTS_FUNCTIONS = re.compile(r"(?:^|_)(?:functions?|entry_?points?)(?:_|$)", re.IGNORECASE)
 # An ATT&CK technique id as an answer names one.
 _TECHNIQUE_ID = re.compile(r"\bT\d{4}(?:\.\d{3})?\b")
 # A listing line's leading address, taken off before its text is read.
@@ -244,7 +245,7 @@ def code_evidence(record: RunRecord, dump_dir: Path | None, entries: list[Entry]
         if kind in CODE_KINDS:
             code.append(ident)
         elif kind:
-            if ("function" in kind or "entr" in kind) and not took_place:
+            if _LISTS_FUNCTIONS.search(kind) and not took_place:
                 starts |= _places(answers.get(ident, ""))
         elif _LISTS_FUNCTIONS.search(str(entry.get("tool") or "")) and not took_place:
             starts |= _places(answers.get(ident, ""))

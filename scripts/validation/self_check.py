@@ -487,27 +487,47 @@ def e3_misses_when_nothing_cites_or_a_declared_entry_never_reaches_corroboration
 
 
 @check
-def a_process_naming_the_marker_is_found_and_ended_by_pid() -> None:
+def a_process_started_for_the_project_is_ended_by_pid_and_a_decoy_is_not() -> None:
     import subprocess
     import tempfile
     import time
 
     from scripts.validation.run import end_survivors, processes_naming
 
-    marker = tempfile.mkdtemp(prefix="validation-marker-")
-    child = subprocess.Popen(["/bin/sh", "-c", "sleep 30", marker])
+    project = tempfile.mkdtemp(prefix="validation-project-")
+    # $0 and $1 of the shell: the project given after the flag, exactly.
+    child = subprocess.Popen(["/bin/sh", "-c", "sleep 30", "--project-path", project])
+    # Decoys: one only mentions the path, one gives another path after the flag.
+    decoys = [
+        subprocess.Popen(["/bin/sh", "-c", "sleep 30", "decoy", f"{project}/sub"]),
+        subprocess.Popen(["/bin/sh", "-c", "sleep 30", "--project-path", f"{project}-other"]),
+    ]
     try:
         time.sleep(0.3)
-        assert child.pid in processes_naming(marker)
-        left = end_survivors(marker, grace_s=0.5)
+        found = processes_naming(project)
+        assert child.pid in found, found
+        assert not {d.pid for d in decoys} & set(found), found
+        left = end_survivors(project, grace_s=0.5)
         assert child.pid in left, left
         child.wait(timeout=10)
-        assert not processes_naming(marker)
+        assert not processes_naming(project)
+        assert all(d.poll() is None for d in decoys), "a decoy was signalled"
     finally:
-        if child.poll() is None:
-            child.kill()
-            child.wait()
-        Path(marker).rmdir()
+        for proc in (child, *decoys):
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+        Path(project).rmdir()
+
+
+@check
+def an_entry_point_kind_is_matched_as_a_whole_word() -> None:
+    from scripts.validation.reach import _LISTS_FUNCTIONS
+
+    for kind in ("function_list", "function_tree", "entrypoints", "entry_points", "list_functions"):
+        assert _LISTS_FUNCTIONS.search(kind), kind
+    for kind in ("entropy", "section_entropy", "disfunctional", "entry"):
+        assert not _LISTS_FUNCTIONS.search(kind), kind
 
 
 @check
