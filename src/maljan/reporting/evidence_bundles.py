@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import weakref
 from collections.abc import Callable, Iterable, Iterator
 from typing import Any
 from urllib.parse import urlsplit
@@ -212,14 +213,14 @@ def _claims_text(report: MalwareReport, isr_reports: dict[str, Any] | None) -> l
     ]
 
 
-def _word_starts(text: str) -> list[int]:
-    """Where each word of ``text`` starts, in order.
+def _word_starts(text: str) -> Iterator[int]:
+    """Where each word of ``text`` starts, in order, one at a time.
 
     A word starts at a letter or digit that follows anything else, and inside
     a run of letters where the case says a new word begins: ``CryptEncrypt``
-    is two words, ``HTTPRequest`` is ``HTTP`` and ``Request``. One pass.
+    is two words, ``HTTPRequest`` is ``HTTP`` and ``Request``. One pass, and
+    nothing kept beside the text: the reader stops at its first match.
     """
-    starts: list[int] = []
     prev = ""
     for index, char in enumerate(text):
         if char.isalnum() and (
@@ -232,9 +233,8 @@ def _word_starts(text: str) -> list[int]:
                 and text[index + 1].islower()
             )
         ):
-            starts.append(index)
+            yield index
         prev = char
-    return starts
 
 
 # A keyword this long is a stem that names its subject inside a compound
@@ -770,8 +770,10 @@ _STRING_TOOLS = "evidence_bundles._STRING_TOOLS"
 _HOST_STRING_KINDS = frozenset({"path", "registry", "mutex", "command"})
 
 
-# What ends a token when an answer's text is read for the values it holds.
-_TOKEN_BREAK = re.compile(r"[\s\"'`<>()\[\]{},;|]+")
+# A token of an answer's text when it is read for the values it holds: a run
+# of characters none of which ends a token. One character class, no
+# alternation: the scan cannot backtrack.
+_TOKEN = re.compile(r"[^\s\"'`<>()\[\]{},;|]+")
 
 
 def _token_forms(token: str) -> Iterator[str]:
@@ -781,7 +783,10 @@ def _token_forms(token: str) -> Iterator[str]:
     if trimmed != token:
         yield trimmed
     if "://" in trimmed:
-        host = urlsplit(trimmed).hostname
+        try:
+            host = urlsplit(trimmed).hostname
+        except ValueError:
+            host = None
         if host:
             yield host
     address, sep, port = trimmed.rpartition(":")
@@ -789,8 +794,8 @@ def _token_forms(token: str) -> Iterator[str]:
         yield address
 
 
-def _value_holders(report: MalwareReport) -> dict[str, dict[str, None]]:
-    """Every value the report's answered entries hold, each with the entries holding it.
+def _value_holders(report: MalwareReport, wanted: frozenset[str]) -> dict[str, list[str]]:
+    """The answered entries holding each of the ``wanted`` values.
 
     Read from two places, each naming the entry exactly: a captured tool
     output (its call number names its entry, held to the evidence index by
@@ -798,7 +803,12 @@ def _value_holders(report: MalwareReport) -> dict[str, dict[str, None]]:
     built from one entry, or a table row that names its own entry. A section
     built from several entries whose rows name none is not read: which entry
     holds a value there is not known. Only entries the index files as
-    answered count. One pass over the texts.
+    answered count.
+
+    Each text is scanned once, token by token, and only a token naming a
+    wanted value is kept: what is held grows with the wanted values and
+    their holders, never with the size of an answer, which the sample
+    controls.
     """
     from maljan.schemas.evidence import entry_ids_in, format_entry_id
 
@@ -807,12 +817,12 @@ def _value_holders(report: MalwareReport) -> dict[str, dict[str, None]]:
 
     def add(text: str, entry_ids: Iterable[str]) -> None:
         ids = [i for i in entry_ids if (row := index.get(i)) is not None and row.ok]
-        if not ids:
+        if not ids or not text:
             return
-        for token in _TOKEN_BREAK.split(text):
-            for form in _token_forms(token) if token else ():
-                holders = held.setdefault(form, {})
-                holders.update(dict.fromkeys(ids))
+        for match in _TOKEN.finditer(text):
+            for form in _token_forms(match.group(0)):
+                if form in wanted:
+                    held.setdefault(form, {}).update(dict.fromkeys(ids))
 
     for outputs in (report.technical_evidence or {}).values():
         for output in outputs:
@@ -826,14 +836,49 @@ def _value_holders(report: MalwareReport) -> dict[str, dict[str, None]]:
                 add(str(output.get("output") or ""), (entry_id,))
     for section in report.sections:
         if len(section.evidence_ids) == 1:
-            cells = [cell for row in section.rows for cell in row]
-            add("\n".join([*cells, *section.items, section.text]), section.evidence_ids)
+            for row in section.rows:
+                for cell in row:
+                    add(cell, section.evidence_ids)
+            for item in section.items:
+                add(item, section.evidence_ids)
+            add(section.text, section.evidence_ids)
             continue
+        own = set(section.evidence_ids)
         for row in section.rows:
-            named = sorted(entry_ids_in(" ".join(row)) & set(section.evidence_ids))
-            if named:
-                add("\n".join(row), named)
-    return held
+            named = sorted(set().union(*(entry_ids_in(cell) for cell in row)) & own)
+            for cell in row if named else ():
+                add(cell, named)
+    return {form: sorted(ids) for form, ids in held.items()}
+
+
+def _lookups(value: str) -> tuple[str, ...]:
+    """The forms ``value`` is looked up by: itself, and an ``address:port``'s address."""
+    address, sep, port = value.rpartition(":")
+    if sep and (port.isdigit() or port == "None"):
+        return (value, address)
+    return (value,)
+
+
+# The holders read per report, so the sections of one report scan its texts
+# once: keyed by the report object (held weakly) and the values asked for.
+# A report model is not hashable, so it is keyed by its identity, and its
+# entry leaves when the report is collected.
+_HOLDERS_READ: dict[int, tuple[weakref.ref[Any], dict[tuple[str, ...], list[str]]]] = {}
+
+
+def _holders_read(report: MalwareReport) -> dict[tuple[str, ...], list[str]]:
+    """What was read of ``report`` so far, by value list."""
+    key = id(report)
+    held = _HOLDERS_READ.get(key)
+    if held is not None and held[0]() is report:
+        return held[1]
+    try:
+        ref = weakref.ref(report)
+    except TypeError:
+        return {}
+    weakref.finalize(report, _HOLDERS_READ.pop, key, None)
+    _HOLDERS_READ[key] = (ref, {})
+    return _HOLDERS_READ[key][1]
 
 
 def value_entries(report: MalwareReport, values: Iterable[str]) -> list[str]:
@@ -841,19 +886,29 @@ def value_entries(report: MalwareReport, values: Iterable[str]) -> list[str]:
 
     A value no entry is known to hold is left out rather than given an entry
     that may not hold it. An ``address:port`` value is looked up by its
-    address too.
+    address too. Read once per report and value list (``_HOLDERS_READ``).
     """
-    values = [v for v in dict.fromkeys(values) if v]
-    if not values:
+    asked = tuple(v for v in dict.fromkeys(values) if v)
+    if not asked:
         return []
-    held = _value_holders(report)
+    cached = _holders_read(report)
+    # What was read changes the key: a report given another section, entry or
+    # captured output since is read again.
+    key = (
+        *asked,
+        f"\0{len(report.sections)}/{len(report.evidence_index)}/"
+        f"{sum(len(o) for o in (report.technical_evidence or {}).values())}",
+    )
+    if key in cached:
+        return list(cached[key])
+    held = _value_holders(report, frozenset(f for v in asked for f in _lookups(v)))
     out: list[str] = []
-    for value in values:
-        address, _sep, port = value.rpartition(":")
-        ids = held.get(value) or (held.get(address) if port.isdigit() or port == "None" else None)
+    for value in asked:
+        ids = next((held[form] for form in _lookups(value) if held.get(form)), None)
         if ids:
-            out.append(f"{value}: {', '.join(sorted(ids))}")
-    return out
+            out.append(f"{value}: {', '.join(ids)}")
+    cached[key] = out
+    return list(out)
 
 
 def _network_holders(report: MalwareReport) -> list[str]:

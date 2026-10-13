@@ -132,3 +132,51 @@ def test_reading_the_holders_stays_linear() -> None:
 
     small, large = took(200), took(2_000)
     assert large < small * 30, (small, large)
+
+
+def _big_answer(distinct: int) -> MalwareReport:
+    """One answered entry whose text holds ``distinct`` unrelated tokens and three wanted values."""
+    filler = " ".join(f"token-of-filler-{n:x}" for n in range(distinct))
+    text = f"{URL} {filler} 192.0.2.7:443 {filler[: len(filler) // 2]}"
+    return _report(
+        evidence_index=[_row("ev_0001", "strings")],
+        technical_evidence={"static": [_output("strings", 0, text)]},
+    )
+
+
+def test_a_huge_answer_keeps_only_the_wanted_values_in_memory() -> None:
+    import tracemalloc
+
+    def peak(distinct: int) -> int:
+        report = _big_answer(distinct)
+        tracemalloc.start()
+        try:
+            held = value_entries(report, [URL, HOST, "192.0.2.7:443"])
+            return tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+            assert held == [f"{URL}: ev_0001", f"{HOST}: ev_0001", "192.0.2.7:443: ev_0001"]
+
+    # About 7 MB and a quarter of a million distinct tokens, against a
+    # thousandth of it: the peak is the same.
+    small, large = peak(250), peak(250_000)
+    assert large < 256 * 1024, large
+    assert large < small + 64 * 1024, (small, large)
+
+
+def test_the_sections_of_one_report_read_its_answers_once() -> None:
+    from unittest import mock
+
+    from maljan.reporting import evidence_bundles
+
+    report = _big_answer(10)
+    wraps = evidence_bundles._value_holders
+    with mock.patch.object(evidence_bundles, "_value_holders", wraps=wraps) as read:
+        for section in ("communications", "command_and_control", "configuration"):
+            bundle_for(section, report)
+    assert read.call_count == 1
+    # A report given another entry since is read again.
+    report.evidence_index.append(_row("ev_0002", "iocs"))
+    with mock.patch.object(evidence_bundles, "_value_holders", wraps=wraps) as read:
+        bundle_for("communications", report)
+    assert read.call_count == 1
