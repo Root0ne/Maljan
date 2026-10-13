@@ -328,7 +328,16 @@ pass both, as every report of a built-in's family carrying the paths the
 format tests does. Groups that share no place are not compared, since nearly
 any two groups can hold on one report; try a format whose paths are all its
 own with a real report. A format carries no stored sample report, so the check
-reads those plainest reports, built from the tests themselves. A
+reads those plainest reports, built from the tests themselves. The warning
+names the built-in that overlaps most closely: the one whose own tests on the
+paths both test pass only what the format's do, then the one sharing the most
+paths, then a whole overlap over a partial one; ties go to the built-in listed
+first. A partial overlap is cleared by a test on a place the built-in tests
+that its plainest report fails (another type, or text its value never holds,
+such as your sandbox's name under `/info`); a test on a place of your own does
+not clear it, since the built-in's reports may carry that place too. The
+warning is said by the save that adds the format or changes its detect, not
+by later saves that leave the detect as it was. A
 declaration under a built-in's name is merged over that built-in field by
 field: a field you set replaces the shipped value, a field you leave out keeps
 it. So `{"name": "cape2", "signature_scale": {...}}` changes CAPE's scale alone,

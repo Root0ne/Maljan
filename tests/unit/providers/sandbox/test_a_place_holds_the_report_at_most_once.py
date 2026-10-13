@@ -246,8 +246,71 @@ class TestAMappedFormatABuiltInOverlapsIsNamed:
         cuckoo = format_named("cuckoo")
         assert cuckoo is not None
         assert builtin_overlapping(derived, [cuckoo]) == "cuckoo"
-        # A CAPE report (/info an object) carrying /signatures passes it too.
-        assert builtin_overlapping(derived) == "cape2"
+        # A CAPE report (/info an object) carrying /signatures passes it too,
+        # but cuckoo's test on /info (a non-empty object) is the format's own:
+        # the most specific built-in is named, not the first declared.
+        assert builtin_overlapping(derived) == "cuckoo"
+
+    def test_the_most_specific_built_in_is_named(self) -> None:
+        from maljan.core.report_formats import builtin_overlapping
+
+        derived = self._format(
+            "derived",
+            {"path": "/info", "types": ["object"], "non_empty": True},
+            {"path": "/signatures", "types": ["array"]},
+        )
+        assert builtin_overlapping(derived) == "cuckoo"
+        # Sharing a place with CAPE's own test names CAPE.
+        versioned = self._format(
+            "versioned",
+            {"path": "/info", "types": ["object"]},
+            {"path": "/info/version", "contains": "cape"},
+            {"path": "/signatures", "types": ["array"]},
+        )
+        assert builtin_overlapping(versioned) == "cape2"
+
+    @pytest.mark.parametrize(
+        "apart",
+        [
+            {"path": "/info", "contains": "acme sandbox"},
+            {"path": "/info", "types": ["string"]},
+        ],
+        ids=["text-it-never-holds", "another-type"],
+    )
+    def test_a_test_the_built_in_s_reports_cannot_pass_clears_it(
+        self, apart: dict[str, Any]
+    ) -> None:
+        from maljan.core.report_formats import builtin_overlapping
+
+        derived = self._format(
+            "derived",
+            {"path": "/info", "non_empty": True},
+            {"path": "/signatures", "types": ["array"]},
+            apart,
+        )
+        assert builtin_overlapping(derived) == ""
+
+    def test_a_test_on_a_place_of_its_own_does_not_clear_it(self) -> None:
+        from maljan.core.report_formats import builtin_overlapping
+
+        # Every cuckoo report may carry /acme_marker too.
+        derived = self._format(
+            "derived",
+            {"path": "/info", "non_empty": True},
+            {"path": "/signatures", "types": ["array"]},
+            {"path": "/acme_marker", "types": ["string"]},
+        )
+        assert builtin_overlapping(derived) == "cuckoo"
+
+    def test_a_built_in_claiming_every_report_of_a_group_is_named_whatever_it_adds(self) -> None:
+        from maljan.core.report_formats import ReportFormat, builtin_overlapping
+
+        # The built-in reads any /run text; the format's /run text is one of them.
+        mine = self._format("mine", {"path": "/run", "contains": "acme"})
+        shipped = ReportFormat.model_validate(
+            {"name": "shipped", "detect": [[{"path": "/run"}]], "reader": "generic"}
+        )
+        assert builtin_overlapping(mine, [shipped]) == "shipped"
 
     def test_a_partial_overlap_below_a_built_in_s_place_is_named(self) -> None:
         from maljan.core.report_formats import builtin_overlapping, format_named
@@ -354,3 +417,137 @@ class TestAMappedFormatABuiltInOverlapsIsNamed:
         assert set(warnings) == {"core.sandbox.report_formats.0.detect"}
         assert "'cuckoo'" in warnings["core.sandbox.report_formats.0.detect"]
         assert "Saved as written" in warnings["core.sandbox.report_formats.0.detect"]
+
+
+class TestTheOverlapIsSaidForTheSaveThatWritesTheDetect:
+    """The warning beside a detect is said once, by the save that adds or changes it."""
+
+    _DERIVED: dict[str, Any] = {
+        "name": "derived",
+        "detect": [[{"path": "/info", "non_empty": True}, {"path": "/signatures"}]],
+        "reader": "generic",
+        "mapping": {"processes": "$.behavior.processes[*]"},
+    }
+
+    def _warnings(
+        self, monkeypatch: Any, changes: dict[str, Any], before: dict[str, Any] | None
+    ) -> dict[str, str]:
+        import asyncio
+
+        from app.api.v1 import settings as route
+        from maljan.core.config import Settings
+
+        settings = Settings(
+            _env_file=None,  # type: ignore[call-arg]
+            sandbox={"report_formats": [self._DERIVED]},
+        )
+
+        async def _effective(_db: Any) -> Settings:
+            return settings
+
+        monkeypatch.setattr(route, "effective_core_settings", _effective)
+        return asyncio.run(route._mapping_warnings(object(), changes, before))
+
+    def _before(self, monkeypatch: Any) -> dict[str, Any] | None:
+        import asyncio
+
+        from app.api.v1 import settings as route
+        from maljan.core.config import Settings
+
+        settings = Settings(
+            _env_file=None,  # type: ignore[call-arg]
+            sandbox={"report_formats": [self._DERIVED]},
+        )
+
+        async def _effective(_db: Any) -> Settings:
+            return settings
+
+        monkeypatch.setattr(route, "effective_core_settings", _effective)
+        return asyncio.run(route._declared_detects(object()))
+
+    def test_a_save_adding_the_format_names_the_most_specific_built_in(
+        self, monkeypatch: Any
+    ) -> None:
+        warnings = self._warnings(monkeypatch, {"core.sandbox.report_formats": []}, {})
+        said = warnings["core.sandbox.report_formats.0.detect"]
+        assert "'cuckoo'" in said and "'cape2'" not in said
+        assert "/behavior, /info" in said
+
+    def test_a_save_changing_the_detect_says_it_again(self, monkeypatch: Any) -> None:
+        before = {"derived": [[{"path": "/info", "types": [], "non_empty": True, "contains": ""}]]}
+        warnings = self._warnings(monkeypatch, {"core.sandbox.report_formats": []}, before)
+        assert "core.sandbox.report_formats.0.detect" in warnings
+
+    def test_a_save_leaving_the_detect_as_it_was_does_not_repeat_it(self, monkeypatch: Any) -> None:
+        before = self._before(monkeypatch)
+        assert before is not None and "derived" in before
+        warnings = self._warnings(monkeypatch, {"core.sandbox.report_formats": []}, before)
+        assert "core.sandbox.report_formats.0.detect" not in warnings
+
+    @pytest.mark.parametrize(
+        "changes",
+        [{"core.sandbox.rest.mapping": {}}, {"core.sandbox.rest.base_url": "http://x"}],
+    )
+    def test_an_unrelated_sandbox_save_does_not_repeat_it(
+        self, monkeypatch: Any, changes: dict[str, Any]
+    ) -> None:
+        assert "core.sandbox.report_formats.0.detect" not in self._warnings(
+            monkeypatch, changes, None
+        )
+
+    def test_the_patch_route_says_it_for_a_new_detect_only(self, monkeypatch: Any) -> None:
+        from unittest.mock import MagicMock
+
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from app.api.v1 import settings as route
+        from app.database import get_db
+        from app.deps import require_admin
+        from app.services.settings_service import SaveResult
+        from maljan.core.config import Settings
+
+        state: dict[str, Any] = {"formats": []}
+
+        async def _effective(_db: Any) -> Settings:
+            return Settings(
+                _env_file=None,  # type: ignore[call-arg]
+                sandbox={"report_formats": state["formats"]},
+            )
+
+        async def _save(_self: Any, changes: dict[str, Any], **_kw: Any) -> Any:
+            if "core.sandbox.report_formats" in changes:
+                state["formats"] = changes["core.sandbox.report_formats"]
+            return SaveResult(list(changes), {})
+
+        async def _quiet(*_a: Any, **_kw: Any) -> Any:
+            return {}
+
+        async def _none(*_a: Any, **_kw: Any) -> list[str]:
+            return []
+
+        monkeypatch.setattr(route, "effective_core_settings", _effective)
+        monkeypatch.setattr("app.services.settings_service.SettingsService.save", _save)
+        monkeypatch.setattr(route, "_agent_warnings", _quiet)
+        monkeypatch.setattr(route, "_unprobed_models_in", _none)
+        app = FastAPI()
+        app.include_router(route.router, prefix="/api/v1")
+        app.dependency_overrides[get_db] = lambda: MagicMock()
+        app.dependency_overrides[require_admin] = lambda: MagicMock(id=None)
+        api = TestClient(app)
+
+        def _patch(formats: list[dict[str, Any]]) -> dict[str, str]:
+            answer = api.patch(
+                "/api/v1/settings", json={"changes": {"core.sandbox.report_formats": formats}}
+            )
+            assert answer.status_code == 200, answer.text
+            return answer.json()["warnings"]
+
+        key = "core.sandbox.report_formats.0.detect"
+        assert key in _patch([self._DERIVED])
+        # The same detect with another mapping: not said again.
+        remapped = {**self._DERIVED, "mapping": {"processes": "$.behavior.procs[*]"}}
+        assert key not in _patch([remapped])
+        # A changed detect that still overlaps: said again.
+        changed = {**remapped, "detect": [[{"path": "/info", "non_empty": True}]]}
+        assert key in _patch([changed])

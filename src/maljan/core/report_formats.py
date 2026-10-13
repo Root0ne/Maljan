@@ -473,45 +473,115 @@ def _paths_meet(left: Sequence[FieldTest], right: Sequence[FieldTest]) -> bool:
     return False
 
 
-def builtin_overlapping(
-    fmt: ReportFormat, builtins: Iterable[ReportFormat] = BUILTIN_REPORT_FORMATS
-) -> str:
-    """The first built-in whose detect overlaps ``fmt``'s, by name; empty where none does.
+def _covers(builtin_test: FieldTest, own: FieldTest) -> bool:
+    """Whether every value ``builtin_test`` passes also passes ``own`` (one path, both)."""
+    if builtin_test.path != own.path:
+        return False
+    if own.types and not (builtin_test.types and set(builtin_test.types) <= set(own.types)):
+        return False
+    if own.non_empty and not builtin_test.non_empty:
+        return False
+    return not own.contains or own.contains.lower() in builtin_test.contains.lower()
 
-    Three readings, each on the plainest report detect groups describe
-    (:func:`least_report`): a built-in recognises the plainest report of one
-    of ``fmt``'s groups (the reports ``fmt`` was written for); ``fmt``
-    recognises the plainest report of one of a built-in's groups (``fmt``'s
-    tests are among the built-in's); or a group of each names a shared place
-    (the same path, or one below the other) and one report holds both groups'
-    tests (a partial overlap: a report of the built-in's family carrying what
-    ``fmt`` tests too). Groups sharing no place are not compared, since nearly
-    any two groups of tests can hold on one report. A format read through a
-    mapping is tried after every built-in, so a report both recognise is read
-    as the built-in; whole overlaps are named before partial ones. Linear in
-    the groups' paths per pair of groups.
+
+def _sets_apart(mine: Sequence[FieldTest], group: Sequence[FieldTest]) -> bool:
+    """Whether a test of ``mine`` on a place ``group`` tests fails on ``group``'s plainest report.
+
+    The built-in's plainest report (:func:`least_report`) writes only the
+    places the built-in tests (each path and the containers above it); a test
+    of ``mine`` on another place says nothing about the built-in's reports,
+    which may carry anything more. A test on a place the built-in tests that
+    the plainest report fails (another type, text its value does not contain)
+    is one the built-in's reports cannot pass.
     """
-    builtins = [builtin for builtin in builtins if builtin.name != fmt.name]
-    own = [report for group in fmt.detect if (report := least_report(group)) is not None]
-    for builtin in builtins:
-        if any(builtin.matches(report) for report in own):
-            return builtin.name
+    report = least_report(group)
+    if report is None:
+        return False
+    places = {
+        tuple(path[:depth])
+        for test in group
+        for path in (parse_path(test.path),)
+        for depth in range(1, len(path) + 1)
+    }
+    return any(tuple(parse_path(test.path)) in places and not test.holds(report) for test in mine)
+
+
+def _overlap_score(fmt: ReportFormat, builtin: ReportFormat) -> tuple[int, int, int] | None:
+    """How closely ``builtin``'s detect overlaps ``fmt``'s, or ``None`` where it does not.
+
+    For each pair of groups (one of ``fmt``'s, one of ``builtin``'s) that
+    overlaps: ``builtin``'s group recognises the plainest report of ``fmt``'s
+    (every report of that group is read as the built-in); ``fmt``'s group
+    recognises the plainest report of ``builtin``'s; or the two test a shared
+    place and one report holds both groups' tests (a partial overlap) and no
+    test of ``fmt``'s group sets the built-in's reports apart
+    (:func:`_sets_apart`). The score is the best pair's: the paths both test
+    where the built-in's test passes only what ``fmt``'s does, the paths both
+    test, then a whole overlap over a partial one.
+    """
+    best: tuple[int, int, int] | None = None
+    for mine in fmt.detect:
+        own = least_report(mine)
+        mine_paths = {test.path for test in mine}
         for group in builtin.detect:
-            report = least_report(group)
-            if report is not None and fmt.matches(report):
-                return builtin.name
-    # Partial overlaps after every whole one, so the built-in named is the
-    # one that claims the format's own reports where one does.
-    for builtin in builtins:
-        for group in builtin.detect:
-            for mine in fmt.detect:
-                if _paths_meet(mine, group) and (
+            whole = own is not None and all(test.holds(own) for test in group)
+            plainest = least_report(group)
+            whole = whole or (plainest is not None and all(test.holds(plainest) for test in mine))
+            partial = (
+                not whole
+                and _paths_meet(mine, group)
+                and (
                     # A later test writes over an earlier one's place: each order.
                     least_report([*mine, *group]) is not None
                     or least_report([*group, *mine]) is not None
-                ):
-                    return builtin.name
-    return ""
+                )
+                and not _sets_apart(mine, group)
+            )
+            if not (whole or partial):
+                continue
+            covered = sum(any(_covers(theirs, test) for theirs in group) for test in mine)
+            shared = len(mine_paths & {test.path for test in group})
+            score = (covered, shared, int(whole))
+            if best is None or score > best:
+                best = score
+    return best
+
+
+def builtin_overlapping(
+    fmt: ReportFormat, builtins: Iterable[ReportFormat] = BUILTIN_REPORT_FORMATS
+) -> str:
+    """The built-in whose detect overlaps ``fmt``'s most closely, by name; empty where none does.
+
+    The readings are those of :func:`_overlap_score`, each on the plainest
+    report detect groups describe (:func:`least_report`): a built-in
+    recognises the plainest report of one of ``fmt``'s groups (the reports
+    ``fmt`` was written for); ``fmt`` recognises the plainest report of one of
+    a built-in's groups (``fmt``'s tests are among the built-in's); or a group
+    of each names a shared place (the same path, or one below the other) and
+    one report holds both groups' tests (a partial overlap: a report of the
+    built-in's family carrying what ``fmt`` tests too), unless ``fmt``'s group
+    holds a test on a place the built-in tests that the built-in's plainest
+    report fails. Groups sharing no place are not compared, since nearly any
+    two groups of tests can hold on one report. A format read through a
+    mapping is tried after every built-in, so a report both recognise is read
+    as the built-in. Of the built-ins that overlap, the one named shares the
+    most of ``fmt``'s tests (its own test on the path passes only what
+    ``fmt``'s does), then the most paths, then overlaps whole; ties go to the
+    first declared. Linear in the groups' paths per pair of groups.
+    """
+    best_name, best_score = "", None
+    for builtin in builtins:
+        if builtin.name == fmt.name:
+            continue
+        score = _overlap_score(fmt, builtin)
+        if score is not None and (best_score is None or score > best_score):
+            best_name, best_score = builtin.name, score
+    return best_name
+
+
+def overlapping_paths(builtin: ReportFormat) -> list[str]:
+    """The places ``builtin``'s detect tests, once each in declared order."""
+    return list(dict.fromkeys(test.path for group in builtin.detect for test in group))
 
 
 # Where a run summary records the signature scale of the run's sandbox report.
