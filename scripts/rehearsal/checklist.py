@@ -220,6 +220,24 @@ def _answered(record: RunRecord) -> list[dict[str, Any]]:
     return [e for e in record.stub_log if e.get("status") == 200]
 
 
+def _measured_empty(record: RunRecord, section: str) -> bool:
+    """Whether the run's own measurements hold nothing for a section asked only on evidence.
+
+    The encryption section is asked on the crypto counts the report carries
+    (the import profile's and the sandbox-called APIs') or on a claim about
+    it: with both counts zero and no claim, the product's finding that its
+    evidence is empty is the sample's, not a loss. Any other section is read
+    by :data:`EVIDENCE_EMPTY` alone.
+    """
+    if section != "encryption_scheme":
+        return False
+    report = record.malware_report
+    profiles = [
+        ((report.get(block) or {}).get("api_capabilities") or {}) for block in ("static", "dynamic")
+    ]
+    return not any(profile.get("crypto") for profile in profiles)
+
+
 def section_statuses(record: RunRecord) -> dict[str, str]:
     """Each composer section's status; any status starting ``LOST`` fails the run."""
     reasons = _degradations(record)
@@ -235,7 +253,11 @@ def section_statuses(record: RunRecord) -> dict[str, str]:
             statuses[section] = "written"
         elif any(f"'{section}'" in r or f"{section} section" in r for r in reasons):
             statuses[section] = "marked not written"
-        elif not mine and section in empty and section in EVIDENCE_EMPTY:
+        elif (
+            not mine
+            and section in empty
+            and (section in EVIDENCE_EMPTY or _measured_empty(record, section))
+        ):
             statuses[section] = "not asked: the product finds its evidence empty"
         elif not mine and section in empty:
             statuses[section] = "LOST: excused as evidence-empty, but the sample's report has some"

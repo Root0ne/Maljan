@@ -293,9 +293,23 @@ class TestTheHolesAGreenRunCouldHide:
         record.malware_report["c2_channels"] = []
         record.stub_log = [e for e in record.stub_log if e["role"] != "composer"]
         record.empty_evidence_sections = list(COMPOSED)
+        # The sandbox saw a crypto API called: the encryption section had evidence.
+        record.malware_report["dynamic"] = {"api_capabilities": {"crypto": 1}}
         statuses = section_statuses(record)
         assert sum(s.startswith("not asked") for s in statuses.values()) == 4
+        assert statuses["encryption_scheme"].startswith("LOST: excused as evidence-empty")
         assert "every report section written or accounted for" in _failed(record)
+
+    def test_an_encryption_section_with_no_crypto_measured_is_evidence_empty(self) -> None:
+        record = _record()
+        record.malware_report["technical_analysis"].pop("encryption_scheme", None)
+        record.stub_log = [e for e in record.stub_log if e.get("section") != "encryption_scheme"]
+        record.empty_evidence_sections = ["encryption_scheme"]
+        record.malware_report["static"] = {"api_capabilities": {"network": 4}}
+        record.malware_report["dynamic"] = {"api_capabilities": {}}
+        assert section_statuses(record)["encryption_scheme"].startswith("not asked")
+        record.malware_report["static"] = {"api_capabilities": {"crypto": 2}}
+        assert section_statuses(record)["encryption_scheme"].startswith("LOST")
 
     def test_a_section_the_report_should_write_cannot_be_excused_as_evidence_empty(self) -> None:
         record = _record()
