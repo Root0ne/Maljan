@@ -157,11 +157,13 @@ class StaticEvidenceBundle:
     capa_rules: list[dict[str, Any]] = field(default_factory=list)
     yara_matches: list[dict[str, Any]] = field(default_factory=list)
 
-    def answers(self, source: str = "provider:capa_yara") -> tuple[EvidenceAnswer, ...]:
+    def answers(self, source: str) -> tuple[EvidenceAnswer, ...]:
         """Every answer of the bundle: ``entries``, then the legacy rule fields as answers.
 
         A legacy field becomes the answer of its kind under the tool
-        ``source``'s declaration names for that kind.
+        ``source``'s declaration names for that kind; ``source`` is the
+        declaration source of the provider that built the bundle
+        (``StaticProvider.declaration_source``), never assumed.
         """
         legacy: list[EvidenceAnswer] = []
         for kind, payload in (
