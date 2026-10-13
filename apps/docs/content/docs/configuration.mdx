@@ -3716,7 +3716,12 @@ instead: the block joins the provider blocks, is read, snapshotted and
 switched on and off as a built-in's is, and leaves them when the provider is
 taken out. The built-in providers' blocks (`static.ghidra`, `static.r2`,
 `sandbox.cape2.mcp`) are read as before, and no class may name another path
-for one of them.
+for one of them. Registration refuses, with the reason, a path where the
+settings model holds no server block (a block with `tool_facts`) and a path
+that is, holds or sits inside another provider's block, shipped or registered,
+so two providers never read one block. The settings have no place for a
+third-party provider's own block yet, so such a provider declares through
+`declaration(cfg)`.
 
 **Saving.** A built-in's stored block takes the shipped value of any field it
 never set, and one the operator set, empty included, is kept. A save stores

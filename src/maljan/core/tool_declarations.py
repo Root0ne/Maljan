@@ -1709,13 +1709,49 @@ def provider_blocks() -> dict[str, str]:
     return blocks
 
 
+def _settings_block_class(path: str) -> type[BaseModel] | None:
+    """The settings model class at a dotted ``path`` of :class:`Settings`, ``None`` for none.
+
+    Walked through the settings model's declared fields, so no settings are
+    built; a step through anything but a model (a mapping, a scalar) is no
+    place.
+    """
+    from typing import get_args
+
+    from maljan.core.config import Settings
+
+    node: type[BaseModel] | None = Settings
+    for part in path.split("."):
+        held = node.model_fields.get(part) if node is not None else None
+        if held is None:
+            return None
+        node = next(
+            (
+                c
+                for c in (held.annotation, *get_args(held.annotation))
+                if isinstance(c, type) and issubclass(c, BaseModel)
+            ),
+            None,
+        )
+    return node
+
+
+def _overlaps(path: str, other: str) -> bool:
+    """Whether two dotted paths name one block, or one holds the other."""
+    return path == other or path.startswith(other + ".") or other.startswith(path + ".")
+
+
 def register_provider_block(source: str, path: str) -> None:
     """Read ``source``'s declaration (``provider:<id>``) from the settings block at ``path``.
 
     How a provider whose settings hold a server block of its own declares its
     tools the way the built-ins do (its class's ``declaration_block``,
-    ``providers.registry``). A shipped source keeps its shipped block: naming
-    another path for it is refused, as is a path that is not dotted words.
+    ``providers.registry``). Refused, with the reason, at registration:
+    a path that is not dotted words; another path for a shipped source (it
+    keeps its shipped block); a path where the settings model holds no server
+    block (a place with tool declarations); and a path that is, holds or sits
+    inside another source's block, shipped or registered, so two sources never
+    read one block.
     """
     ref = SourceRef.parse(source)
     if ref.kind != "provider":
@@ -1723,9 +1759,24 @@ def register_provider_block(source: str, path: str) -> None:
     if not _BLOCK_PATH_RE.fullmatch(str(path or "")):
         raise ValueError(f"{path!r} is not a settings path: dotted lowercase words")
     shipped = shipped_provider_blocks().get(str(ref))
-    if shipped is not None and shipped != path:
-        raise ValueError(f"{source!r} is declared by its shipped block {shipped!r}")
-    if shipped is None and _REGISTERED_PROVIDER_BLOCKS.get(str(ref)) != path:
+    if shipped is not None:
+        if shipped != path:
+            raise ValueError(f"{source!r} is declared by its shipped block {shipped!r}")
+        return
+    for other, held in provider_blocks().items():
+        if other != str(ref) and _overlaps(path, held):
+            raise ValueError(
+                f"{path!r} is {other!r}'s block {held!r} or overlaps it; "
+                f"{source!r} needs a settings block of its own"
+            )
+    place = _settings_block_class(path)
+    if place is None or "tool_facts" not in place.model_fields:
+        raise ValueError(
+            f"{path!r} is no server block in the settings, so {source!r} would declare "
+            "nothing there; name a block the settings hold, or declare through the "
+            "provider class's declaration hook"
+        )
+    if _REGISTERED_PROVIDER_BLOCKS.get(str(ref)) != path:
         _REGISTERED_PROVIDER_BLOCKS[str(ref)] = path
         _DECLARATION_VERSION[0] += 1
 
@@ -1744,18 +1795,26 @@ def block_at(settings: Any, path: str) -> Any:
     return node
 
 
+# The (source, path) pairs whose missing block was logged in this process.
+_MISSING_BLOCKS_NOTED: set[tuple[str, str]] = set()
+
+
 def provider_block_at(settings: Any, source: str, path: str) -> Any:
     """The block ``source`` declares its tools in, or ``None`` where the settings hold none.
 
-    A shipped block is always there; a registered one whose path the settings
-    do not hold declares nothing, and is logged.
+    A shipped block is always there, and registration refuses a path the
+    settings model does not hold; a settings object that still lacks the
+    block (one built otherwise) declares nothing, logged once per source and
+    path in the process.
     """
     try:
         return block_at(settings, path)
     except AttributeError:
-        from maljan.core.logger import logger
+        if (source, path) not in _MISSING_BLOCKS_NOTED:
+            _MISSING_BLOCKS_NOTED.add((source, path))
+            from maljan.core.logger import logger
 
-        logger.warning("Provider block for %s is not in the settings (%s).", source, path)
+            logger.warning("Provider block for %s is not in the settings (%s).", source, path)
         return None
 
 

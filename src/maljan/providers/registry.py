@@ -36,7 +36,9 @@ def _declare(name: str, cls: type) -> None:
     server block) joins the provider blocks and is read there as the built-ins
     are (``core.tool_declarations.provider_blocks``); a class whose
     ``declaration`` hook answers ``None`` declares nothing, and a provider
-    whose block is one of the provider blocks keeps that block.
+    whose block is one of the provider blocks keeps that block. A block
+    path registration refuses (no server block in the settings, or another
+    source's block) raises here, with the reason.
     """
     from maljan.core.tool_declarations import (
         register_provider_block,
@@ -57,9 +59,11 @@ def register_static_provider(name: str):  # type: ignore[no-untyped-def]
             if name in _STATIC_REGISTRY:
                 logger.debug("Static provider '%s' re-registered (overwriting).", name)
             cls.id = name  # type: ignore[attr-defined]
+            # Declared first: a block registration refuses is raised before
+            # the provider is registered, so none is half there.
+            _declare(name, cls)
             _STATIC_REGISTRY[name] = cls
             _VERSION[0] += 1
-            _declare(name, cls)
         return cls
 
     return decorator
@@ -71,9 +75,11 @@ def register_sandbox_provider(name: str):  # type: ignore[no-untyped-def]
             if name in _SANDBOX_REGISTRY:
                 logger.debug("Sandbox provider '%s' re-registered (overwriting).", name)
             cls.id = name  # type: ignore[attr-defined]
+            # Declared first: a block registration refuses is raised before
+            # the provider is registered, so none is half there.
+            _declare(name, cls)
             _SANDBOX_REGISTRY[name] = cls
             _VERSION[0] += 1
-            _declare(name, cls)
         return cls
 
     return decorator
