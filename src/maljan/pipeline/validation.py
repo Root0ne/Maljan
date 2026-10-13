@@ -6866,8 +6866,6 @@ _CLAUSE_START_RE = re.compile(
 # A relative clause's word just before the statement: its subject is the last
 # thing the clause before it names (``_relative_word_at``).
 _RELATIVE_WORDS = ("which", "that")
-# A subject that is a pronoun: it names what the sentence before it named.
-_PRONOUN_SUBJECT_RE = re.compile(r"^\W*(?:its|it|their|they|this|these|that)\b", re.IGNORECASE)
 # A value a subject writes: in quotes or backticks, or an identifier of three
 # characters or more with a capital after its first letter, a digit or an
 # underscore in it (``CreateMutexW``, ``update_data``), never a plain word.
@@ -7020,29 +7018,307 @@ def _clause_starts(sentence: str) -> list[int]:
     return [match.end() for match in _CLAUSE_START_RE.finditer(_outside_brackets(sentence))]
 
 
-def _subject_addresses(subject: str, relative: bool) -> list[int]:
-    found = _prose_addresses(subject)
-    return found[-1:] if relative else found
+# The tokens of a subject: a quoted or backticked value, a word (an address,
+# an identifier, a possessive), a separator, a bracket, or other marks.
+_SUBJECT_TOKEN_RE = re.compile(
+    r"`[^`\n]++`|\"[^\"\n]++\"|“[^”\n]++”|[A-Za-z0-9_$.]++(?:['’]s\b)?|[,&]|[(\[]|[)\]]"
+    r"|[^\sA-Za-z0-9_$.,&()\[\]`\"“]++"
+)
+# Words a subject may open with before its head.
+_DETERMINERS = frozenset(
+    {"the", "a", "an", "this", "these", "that", "those", "both", "all", "each"}
+)
+# Nouns that only say what kind of thing the head identifier after them is
+# ("routine 0x1400", "the import CreateMutexW").
+_KIND_NOUNS = frozenset(
+    {
+        "routine",
+        "routines",
+        "function",
+        "functions",
+        "subroutine",
+        "subroutines",
+        "procedure",
+        "procedures",
+        "method",
+        "methods",
+        "address",
+        "addresses",
+        "import",
+        "imports",
+        "export",
+        "exports",
+        "api",
+        "apis",
+        "symbol",
+        "symbols",
+        "string",
+        "strings",
+        "value",
+        "values",
+        "name",
+        "names",
+        "entry",
+        "entries",
+    }
+)
+# Of those, the ones a routine is named by: "the routine at 0x1400" is 0x1400.
+_ROUTINE_NOUNS = frozenset(
+    {"routine", "routines", "function", "functions", "subroutine", "subroutines", "procedure"}
+)
+# Words that make what follows them a modifier of the head, not the head
+# ("the caller of 0x1400", "called by 0x1400", "the constant at offset 0x1400").
+_MODIFIER_WORDS = frozenset(
+    {
+        "of",
+        "by",
+        "from",
+        "at",
+        "in",
+        "on",
+        "beyond",
+        "than",
+        "besides",
+        "except",
+        "within",
+        "inside",
+        "for",
+        "after",
+        "before",
+        "via",
+        "through",
+        "with",
+        "without",
+    }
+)
+# Separators of coordinated head identifiers ("0x1c38 and 0x1a08").
+_COORDINATORS = frozenset({",", "&", "and", "or"})
+# A pronoun subject and a possessive one, read from the sentence before.
+_PRONOUNS = frozenset({"it", "they", "this", "these"})
+_POSSESSIVES = frozenset({"its", "their"})
+# What an answer about an address holds of it besides the address: the
+# relation a possessive pronoun's noun may name ("its callers").
+_RELATION_NOUNS = frozenset(
+    {
+        "caller",
+        "callers",
+        "callee",
+        "callees",
+        "xref",
+        "xrefs",
+        "cross-reference",
+        "cross-references",
+        "reference",
+        "references",
+        "referrer",
+        "referrers",
+    }
+)
+# A sentence scoped to the text around it ("not read in this section"): what
+# it says is absent is absent from that text, not from the run.
+_SCOPED_TO_THE_TEXT_RE = re.compile(
+    r"\bin\s++this\s++(?:section|subsection|paragraph|part|table|list|report|chapter)\b",
+    re.IGNORECASE,
+)
+# A negation before a statement in its own clause ("it is not the case that
+# 0x1400 was not read"): the clause says the opposite of its statement.
+_NEGATION_RE = re.compile(r"\b(?:not|never|no|nor|neither|cannot|none)\b|n['’]t\b", re.IGNORECASE)
+# The subject's head as read: identifiers, a pronoun to resolve, or nothing.
+_HEAD_IDS = "ids"
+_HEAD_PRONOUN = "pronoun"
 
 
-def _subject_values(subject: str) -> list[str]:
-    """The values a subject writes: quoted, backticked, or identifier-shaped."""
+def _subject_tokens(subject: str) -> list[str]:
+    tokens: list[str] = []
+    for token in _SUBJECT_TOKEN_RE.findall(subject):
+        if token[:1] in '`"“':
+            tokens.append(token)
+            continue
+        token = token.rstrip(".")
+        if token and not all(ch in "*~>#-–—:!?;" for ch in token):
+            tokens.append(token)
+    return tokens
+
+
+def _is_head_identifier(token: str) -> bool:
+    """Whether a token names one thing: an address, an entry id, a quoted value, an identifier."""
+    if token[:1] in '`"“':
+        return True
+    return bool(
+        _HEX_ADDRESS.fullmatch(token)
+        or generic_function_name().fullmatch(token)
+        or _EVIDENCE_ID_RE.fullmatch(token)
+        or _IDENTIFIER_VALUE_RE.fullmatch(token)
+    )
+
+
+def _possessive(token: str) -> bool:
+    return token.lower().endswith(("'s", "’s"))
+
+
+def _modifies(tokens: Sequence[str]) -> bool:
+    """Whether any token makes what follows it a modifier (``of``, ``by``, a possessive)."""
+    return any(t.lower() in _MODIFIER_WORDS or _possessive(t) for t in tokens)
+
+
+def _bracket_list(tokens: list[str]) -> tuple[list[str], list[str]] | None:
+    """A closing bracketed list of identifiers and what comes before it, or ``None``.
+
+    The bracket must close the tokens and hold identifiers and separators
+    only ("(PeekNamedPipe, CreateMutexW)", "(0x1c38 and 0x1a08)"): a bracket
+    with any other word ("(called by 0x1400)") is no list.
+    """
+    if not tokens or tokens[-1] not in (")", "]"):
+        return None
+    depth = 0
+    for at in range(len(tokens) - 1, -1, -1):
+        if tokens[at] in (")", "]"):
+            depth += 1
+        elif tokens[at] in ("(", "["):
+            depth -= 1
+            if depth == 0:
+                inner = tokens[at + 1 : -1]
+                ids = [t for t in inner if t.lower() not in _COORDINATORS]
+                if ids and all(_is_head_identifier(t) and not _possessive(t) for t in ids):
+                    return ids, tokens[:at]
+                return [], tokens[:at]
+    return None
+
+
+def _ids_from(tokens: list[str], at: int) -> tuple[list[str], int]:
+    """The coordinated identifiers from ``at`` on ("A, B and C"), and where they end."""
+    ids: list[str] = []
+    while at < len(tokens) and _is_head_identifier(tokens[at]):
+        if _possessive(tokens[at]):
+            return [], at
+        ids.append(tokens[at])
+        at += 1
+        if at + 1 < len(tokens) and tokens[at].lower() in _COORDINATORS:
+            if not _is_head_identifier(tokens[at + 1]):
+                break
+            at += 1
+    return ids, at
+
+
+def _subject_head(subject: str, relative: bool, kind: str) -> tuple[str, list[str]]:
+    """The head of a statement's subject: ``("ids", tokens)``, ``("pronoun", [])`` or ``("", [])``.
+
+    Only the head of the subject phrase is judged, never an identifier inside
+    a modifier ("the caller of 0x1400", "0x1800, called by 0x1400", "the
+    return value of X", "the arguments X receives"). The head is the
+    identifier the subject opens with, after a determiner and a kind noun
+    ("routine 0x1400", "the routine at 0x1400"), with identifiers coordinated
+    to it, and nothing after them but a bracket; or a closing bracketed list
+    of identifiers after a head noun no modifier follows ("the import names
+    … (A, B)"); for a relative clause, the identifier that ends the words
+    before it, no modifier word before its kind noun. A pronoun alone, and a
+    possessive pronoun before a relation noun for a statement about the
+    ledger ("its callers"), stand for the sentence before. Anything else is
+    not read: nothing is judged.
+    """
+    tokens = _subject_tokens(subject)
+    while tokens and tokens[-1] == ",":
+        tokens.pop()
+    if not tokens:
+        return "", []
+    bracketed = _bracket_list(tokens)
+    if relative:
+        if bracketed is not None:
+            ids, before = bracketed
+            return (_HEAD_IDS, ids) if ids and not _modifies(before[-1:]) else ("", [])
+        end = len(tokens)
+        start = end
+        while start > 0 and (
+            _is_head_identifier(tokens[start - 1])
+            or (tokens[start - 1].lower() in _COORDINATORS and start < end)
+        ):
+            start -= 1
+        ids = [t for t in tokens[start:end] if t.lower() not in _COORDINATORS]
+        if not ids or any(_possessive(t) for t in ids):
+            return "", []
+        at = start
+        if at > 0 and tokens[at - 1].lower() == "at" and at > 1:
+            if tokens[at - 2].lower() in _ROUTINE_NOUNS:
+                at -= 1
+        while at > 0 and tokens[at - 1].lower() in _KIND_NOUNS:
+            at -= 1
+        if at > 0 and _modifies(tokens[at - 1 : at]):
+            return "", []
+        return _HEAD_IDS, ids
+    if bracketed is not None:
+        listed, before = bracketed
+        tokens = before
+    else:
+        listed = []
+    at = 0
+    while at < len(tokens) and tokens[at].lower() in _DETERMINERS:
+        at += 1
+    if at >= len(tokens):
+        return (_HEAD_IDS, listed) if listed else ("", [])
+    word = tokens[at].lower()
+    if word in _PRONOUNS and at == len(tokens) - 1 and not listed:
+        return _HEAD_PRONOUN, []
+    if word in _POSSESSIVES:
+        rest = [t.lower() for t in tokens[at + 1 :]]
+        if (
+            kind == _NOT_IN_LEDGER
+            and not listed
+            and rest
+            and any(t in _RELATION_NOUNS for t in rest)
+            and all(t.isalpha() or t in _COORDINATORS for t in rest)
+            and not _modifies(rest)
+        ):
+            return _HEAD_PRONOUN, []
+        return "", []
+    kind_noun = False
+    while at < len(tokens) and tokens[at].lower() in _KIND_NOUNS:
+        kind_noun = kind_noun or tokens[at].lower() in _ROUTINE_NOUNS
+        at += 1
+    if kind_noun and at < len(tokens) and tokens[at].lower() == "at":
+        at += 1
+    ids, end = _ids_from(tokens, at)
+    if ids:
+        return (_HEAD_IDS, ids) if end == len(tokens) else ("", [])
+    if listed and not _modifies(tokens):
+        return _HEAD_IDS, listed
+    return "", []
+
+
+def _head_values(tokens: Sequence[str]) -> list[str]:
+    """The values among head tokens: quoted, backticked or identifier-shaped, no address or id."""
     values: list[str] = []
-    for match in _QUOTED_VALUE_RE.finditer(subject):
-        values.append(next(group for group in match.groups() if group))
-    for match in _IDENTIFIER_VALUE_RE.finditer(_QUOTED_VALUE_RE.sub(" ", subject)):
-        if generic_function_name().fullmatch(match.group(0)) is None:
-            values.append(match.group(0))
-    return [value for value in dict.fromkeys(values) if not _EVIDENCE_ID_RE.fullmatch(value)]
+    for token in tokens:
+        if token[:1] in '`"“':
+            inner = token[1:-1].strip()
+            if len(inner) >= 2:
+                values.append(inner)
+        elif (
+            _IDENTIFIER_VALUE_RE.fullmatch(token)
+            and generic_function_name().fullmatch(token) is None
+            and not _EVIDENCE_ID_RE.fullmatch(token)
+        ):
+            values.append(token)
+    return list(dict.fromkeys(values))
+
+
+def _head_addresses(tokens: Sequence[str]) -> list[int]:
+    return list(dict.fromkeys(a for token in tokens for a in _prose_addresses(token)))
+
+
+def _head_entry_ids(tokens: Sequence[str]) -> list[str]:
+    return [t.lower() for t in tokens if _EVIDENCE_ID_RE.fullmatch(t)]
 
 
 def ledger_absence_contradictions(payload: Any, entries: EntryTexts | None) -> list[Violation]:
     """Sentences that say the ledger lacks what an answered entry of this run holds.
 
     Read in every string of the answer, sentence by sentence. Three statements
-    are read, each with its subject taken from its own clause (a relative
-    clause's subject is the last thing named before it; a pronoun's, the one
-    address the sentence before it names):
+    are read, each for the head of its subject, taken from its own clause
+    (:func:`_subject_head`: never an identifier inside a modifier; a relative
+    clause's head is the identifier that ends the words before it; a
+    pronoun's, the one address the sentence before it names). A sentence
+    scoped to the text around it ("in this section") and a clause that
+    negates before its statement are not judged:
 
     * a routine "not read" (or decompiled): false when a decompile of that
       address answered;
@@ -7083,6 +7359,8 @@ def ledger_absence_contradictions(payload: Any, entries: EntryTexts | None) -> l
             before_addresses: list[int] | None = None
             at_start = 0
             done = 0
+            # A sentence scoped to the text around it says nothing of the run.
+            scoped = _SCOPED_TO_THE_TEXT_RE.search(sentence) is not None
             for match in statements:
                 kind = (
                     _NOT_READ
@@ -7098,21 +7376,31 @@ def ledger_absence_contradictions(payload: Any, entries: EntryTexts | None) -> l
                 relative_at = _relative_word_at(sentence, match.start())
                 relative = relative_at is not None and relative_at >= begins
                 subject = sentence[begins : relative_at if relative else match.start()]
-                if relative and not _prose_addresses(subject):
+                if relative and not subject.strip(" ,"):
                     # The relative word opens the clause: its subject is what
                     # the clause before it names last.
                     previous = starts[at_start - 2] if at_start >= 2 else 0
                     subject = sentence[previous:relative_at]
-                addresses = _subject_addresses(subject, relative)
-                if not addresses and index and _PRONOUN_SUBJECT_RE.match(subject):
+                # A clause that negates before its statement says the
+                # opposite of it ("it is not the case that ..."): not judged.
+                if scoped or _NEGATION_RE.search(sentence, begins, match.start()):
+                    continue
+                head, tokens = _subject_head(subject, relative, kind)
+                if head == _HEAD_PRONOUN and index:
                     if before_addresses is None:
                         before_addresses = list(
                             dict.fromkeys(_prose_addresses(sentences[index - 1]))
                         )
-                    addresses = before_addresses if len(before_addresses) == 1 else []
+                    tokens = (
+                        [hex(a) for a in before_addresses] if len(before_addresses) == 1 else []
+                    )
+                elif head != _HEAD_IDS:
+                    tokens = []
+                if not tokens:
+                    continue
                 whats: list[str] = []
                 held: list[str] = []
-                for what, holders in _contradicted(kind, subject, addresses, cited):
+                for what, holders in _contradicted(kind, tokens, cited):
                     if holders and (kind, what) not in asked:
                         asked.add((kind, what))
                         whats.append(what)
@@ -7121,9 +7409,10 @@ def ledger_absence_contradictions(payload: Any, entries: EntryTexts | None) -> l
                     found.append((kind, whats, held, sentence.strip()))
 
     def _contradicted(
-        kind: str, subject: str, addresses: list[int], cited: list[str]
+        kind: str, tokens: list[str], cited: list[str]
     ) -> list[tuple[str, list[str]]]:
         out: list[tuple[str, list[str]]] = []
+        addresses = _head_addresses(tokens)
         if kind == _NOT_READ:
             for address in addresses:
                 out.append((hex(address), _holds().read.holders(address)))
@@ -7132,10 +7421,9 @@ def ledger_absence_contradictions(payload: Any, entries: EntryTexts | None) -> l
             ledger = _holds()
             for address in addresses:
                 out.append((hex(address), ledger.named.holders(address)))
-            for written in _EVIDENCE_ID_RE.findall(_CODE_SPAN_RE.sub(" ", subject)):
-                key = written.lower()
+            for key in _head_entry_ids(tokens):
                 out.append((key, [key] if key in ledger.answered else []))
-            for value in _subject_values(subject):
+            for value in _head_values(tokens):
                 if not decidable(value):
                     continue
                 candidates = entries.may_hold(value) & ledger.answered
@@ -7146,7 +7434,7 @@ def ledger_absence_contradictions(payload: Any, entries: EntryTexts | None) -> l
                     )
                 )
             return out
-        for value in _subject_values(subject):
+        for value in _head_values(tokens):
             if not decidable(value):
                 continue
             out.append(

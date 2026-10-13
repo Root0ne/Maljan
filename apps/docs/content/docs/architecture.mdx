@@ -1223,10 +1223,19 @@ Two producers use it:
   holds (for an address, an entry given it whose answer names another address,
   or a decompile of it); a value said to be "not confirmed by", "not shown
   in" or "not listed in" the entry the sentence cites, which that entry holds.
-  The subject is read from the statement's own clause (a relative clause's is
-  the last thing named before it; a pronoun's is the one address the sentence
-  before it names), an offset and its virtual address are one routine, and a
-  statement whose subject cannot be read is not judged. The model is asked
+  Only the head of the statement's subject is judged: the identifier the
+  subject opens with, after a determiner and a kind noun ("routine 0x1400",
+  "the routine at 0x1400"), with identifiers coordinated to it; a closing
+  bracketed list of identifiers after a head noun no modifier follows ("the
+  import names … (A, B)"); for a relative clause, the identifier that ends the
+  words before it; a pronoun alone, or a possessive one before a relation
+  noun for a statement about the ledger ("its callers"), is the one address
+  the sentence before it names. An identifier inside a modifier ("the caller
+  of X", "X, called by Y", "the return value of X", "the call site of X"), a
+  sentence scoped to the text around it ("in this section"), and a clause
+  that negates before its statement are not judged; an offset and its virtual
+  address are one routine, and a statement whose subject cannot be read is
+  not judged. The model is asked
   once with the entry named; the sentence is never rewritten.
   **A technique written with another technique's name**
   (`report.technique_name`): an id followed by a name in brackets whose name

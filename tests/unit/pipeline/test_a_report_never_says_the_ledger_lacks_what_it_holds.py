@@ -3,11 +3,13 @@
 A report said a routine "is not read" while a decompile of it had answered,
 that a routine's callers "are not in the ledger" while a callers query listed
 them, and that import names "are not confirmed by the parser output" it cited
-while that entry listed them. Each such sentence is read for its subject — an
-address, an entry id or a value — and checked against the answered entries:
-the model is asked once with the entry named, and the sentence is never
-rewritten. A statement whose subject cannot be read, or whose entry holds
-nothing of it, is not judged.
+while that entry listed them. Each such sentence is read for the head of its
+subject — an address, an entry id or a value — and checked against the
+answered entries: the model is asked once with the entry named, and the
+sentence is never rewritten. An identifier inside a modifier ("the caller of
+X", "X, called by Y"), a sentence scoped to the text around it ("in this
+section"), a clause that negates its statement, a statement whose subject
+cannot be read, or whose entry holds nothing of it, is not judged.
 """
 
 from __future__ import annotations
@@ -107,7 +109,7 @@ class TestAStatementTheLedgerContradicts:
         assert "ev_0004 (pe_info) holds them" in violation.message
 
     def test_an_entry_id_said_not_in_the_ledger(self) -> None:
-        [violation] = _asked("The callers listing ev_0057 is not in the ledger.")
+        [violation] = _asked("Entry ev_0057 is not in the ledger.")
         assert "ev_0057 is not in the ledger" in violation.message
 
     def test_a_virtual_address_and_its_offset_are_one_routine(self) -> None:
@@ -151,6 +153,38 @@ class TestAStatementThatStands:
     )
     def test_it_is_not_asked(self, text: str) -> None:
         assert _asked(text) == []
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "The caller of routine 0x5a10 was not read.",
+            "The routine that 0x5a10 calls was not decompiled.",
+            "0x6000, called by 0x5a10, was not read.",
+            "A second copy of 0x5a10's string table was not read.",
+            "The constant at offset 0x5a10 in the resource was not read.",
+            "Routine 0x5a10 was not read in this section; see section 4.",
+            "It is not the case that 0x5a10 was not read.",
+            "The call site of ReadThingW at 0x9000 is not in the ledger.",
+            "The arguments ReadThingW receives are not in the ledger.",
+            "Callers of 0x7c40 beyond the two listed are not in the ledger.",
+            "The return value of MakeThingW is not confirmed by the parser output [ev_0004].",
+        ],
+    )
+    def test_an_identifier_outside_the_subject_s_head_is_not_judged(self, text: str) -> None:
+        assert _asked(text) == []
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Routine 0x5a10 was not read.",
+            "The routine at 0x5a10 was not decompiled.",
+            "The routines that build them (0x5a10 and 0x7000) were not decompiled in this run.",
+            "The decoder hands its buffer to function 0x5a10, which was not read.",
+        ],
+    )
+    def test_the_head_identifier_is_judged(self, text: str) -> None:
+        [violation] = _asked(text)
+        assert "ev_0159" in violation.message
 
     def test_a_ledger_with_no_entries_judges_nothing(self) -> None:
         assert ledger_absence_contradictions({"body": "0x5a10 is not read."}, None) == []
