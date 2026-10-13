@@ -1326,6 +1326,58 @@ def auto_name_prefixes_in(texts: Iterable[str]) -> Proposed | None:
     return Proposed(sorted(picked), ["probe answers (names written before an address)"], LOW)
 
 
+# A required argument that names a file on disk.
+_PATH_ARGUMENT = re.compile(r"path|^file(?:name)?$|^sample$", re.IGNORECASE)
+# A required argument that names a place in code, never what was opened.
+_PLACE_ARGUMENT = re.compile(r"addr|func|location|offset", re.IGNORECASE)
+
+
+def sample_open_in(definitions: Iterable[Any]) -> Proposed | None:
+    """The ``sample_open`` the tool schemas suggest, or ``None``.
+
+    Proposed when exactly one tool the server does not mark destructive takes
+    a path as its only required argument, and at least two other tools share
+    one required argument that is neither a path nor a place in code: the one
+    tool opens the file, and the others are given the name of what it opened.
+    Only ``open_tool`` and ``path_argument`` are proposed; what names the
+    opened thing is the operator's to declare. Low confidence: read from the
+    schemas alone.
+    """
+    openers: list[tuple[str, str]] = []
+    shared: dict[str, list[str]] = {}
+    for definition in definitions:
+        name = _get(definition, "name")
+        if not isinstance(name, str):
+            continue
+        annotations = _plain(_get(definition, "annotations"))
+        if isinstance(annotations, Mapping) and annotations.get("destructiveHint") is True:
+            continue
+        schema = _get(definition, "inputSchema")
+        required = schema.get("required") if isinstance(schema, Mapping) else None
+        required = [str(r) for r in required or [] if isinstance(r, str)]
+        if len(required) == 1 and _PATH_ARGUMENT.search(required[0]):
+            openers.append((name, required[0]))
+            continue
+        for argument in required:
+            if not _PATH_ARGUMENT.search(argument) and not _PLACE_ARGUMENT.search(argument):
+                shared.setdefault(argument, []).append(name)
+    if len(openers) != 1:
+        return None
+    named = sorted((arg for arg, tools in shared.items() if len(tools) >= 2), key=str)
+    if not named:
+        return None
+    tool, argument = openers[0]
+    users = shared[named[0]]
+    return Proposed(
+        {"open_tool": tool, "path_argument": argument},
+        [
+            f"{tool} takes only {argument}",
+            f"{len(users)} other tools take {named[0]}: {', '.join(sorted(users))}",
+        ],
+        LOW,
+    )
+
+
 # ---------------------------------------------------------------------------
 # A server
 # ---------------------------------------------------------------------------
@@ -1365,6 +1417,7 @@ def propose(
     them, since such rows are also what a memory image, a capture or a lookup
     answers with, and the admin knows which this server is.
     """
+    definitions = list(definitions)
     cells = _manifest_cells(capabilities)
     skipped = set(skip)
     answered = dict(answers or {})
@@ -1415,6 +1468,10 @@ def propose(
     prefixes = auto_name_prefixes_in(texts)
     if prefixes is not None:
         server["auto_name_prefixes"] = prefixes.as_dict()
+    named = [d for d in definitions if isinstance(_get(d, "name"), str)]
+    opens = sample_open_in(d for d in named if _get(d, "name") not in skipped)
+    if opens is not None:
+        server["sample_open"] = opens.as_dict()
     out: dict[str, Any] = {"v": PROPOSALS_VERSION, "tools": tools, "server": server}
     if shaped:
         out["notes"] = [ROLE_HINT.format(tools=", ".join(shaped), role=SANDBOX_ROLE)]

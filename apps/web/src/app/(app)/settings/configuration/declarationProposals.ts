@@ -18,6 +18,7 @@ import type {
   ErrorPatternEntry,
   McpServerEntry,
   ProbeResult,
+  SampleOpenEntry,
   ToolDeclarationFields,
   ToolFactsEntry,
 } from "@/types/settings";
@@ -291,8 +292,28 @@ export function acceptServerField(
     const added = (proposed.value as string[]).filter((p) => !held.includes(p));
     return { auto_name_prefixes: [...held, ...added] };
   }
+  if (field === "sample_open" && isRecord(proposed.value)) {
+    // Fills only the fields the server leaves empty: a declared field stays.
+    const held: SampleOpenEntry = { ...EMPTY_SAMPLE_OPEN, ...(server.sample_open ?? {}) };
+    const filled = { ...held };
+    for (const key of Object.keys(EMPTY_SAMPLE_OPEN) as (keyof SampleOpenEntry)[]) {
+      const value = proposed.value[key];
+      if (!held[key] && typeof value === "string") filled[key] = value;
+    }
+    return { sample_open: filled };
+  }
   return {};
 }
+
+const EMPTY_SAMPLE_OPEN: SampleOpenEntry = {
+  open_tool: "",
+  path_argument: "",
+  name_field: "",
+  select_tool: "",
+  select_argument: "",
+  analyse_tool: "",
+  analyse_argument: "",
+};
 
 /** Whether `tool`'s declaration in force holds `field` with exactly the proposed value. */
 export function isAccepted(

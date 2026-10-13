@@ -235,6 +235,24 @@ describe("accepting", () => {
     ).toEqual({ auto_name_prefixes: ["proc_", "blk_"] });
     expect(acceptServerField(server, "other", { value: 1, evidence: [], confidence: "low" })).toEqual({});
   });
+
+  it("fills only the sample_open fields the server leaves empty", () => {
+    const proposed = {
+      value: { open_tool: "import_it", path_argument: "binary_path" },
+      evidence: ["import_it takes only binary_path"],
+      confidence: "low" as const,
+    };
+    const empty = acceptServerField({} as McpServerEntry, "sample_open", proposed);
+    expect(empty.sample_open?.open_tool).toBe("import_it");
+    expect(empty.sample_open?.path_argument).toBe("binary_path");
+    expect(empty.sample_open?.name_field).toBe("");
+    const declared = {
+      sample_open: { ...empty.sample_open, open_tool: "load_it", path_argument: "" },
+    } as McpServerEntry;
+    const kept = acceptServerField(declared, "sample_open", proposed);
+    expect(kept.sample_open?.open_tool).toBe("load_it");
+    expect(kept.sample_open?.path_argument).toBe("binary_path");
+  });
 });
 
 describe("accepting on a server that ships declarations", () => {

@@ -611,3 +611,61 @@ def long_running_tools(spec: Any) -> frozenset[str]:
     if not declared(spec):
         return frozenset()
     return frozenset(t for t in (spec.open_tool, spec.analyse_tool) if t)
+
+
+def load_line(tool: str, argument: str, path: str) -> str:
+    """The line telling an agent to open the sample with a declared open tool first."""
+    return (
+        f'LOAD THIS BINARY FIRST: call ``{tool}({argument}="{path}")``.\n'
+        "All subsequent analysis tools operate on the program loaded by "
+        "that call. Do not invent a path — use the one above verbatim.\n\n"
+    )
+
+
+# The metadata key an offered open tool carries its server's declaration
+# under, so an agent given the tool can say how to open the sample with it.
+OPEN_METADATA_KEY = "maljan_sample_open"
+
+
+def mark_open_tool(
+    tools: Sequence[Any], spec: Any, every_tool: Sequence[Any] | None = None
+) -> list[Any]:
+    """``tools`` with the declared open tool marked by its declaration (``OPEN_METADATA_KEY``).
+
+    The mark is on a copy of the tool, so a tool object shared with another
+    agent is left as it was. With no declaration, or one naming a select or
+    analysis tool the server's whole manifest (``every_tool``) lacks, ``tools``
+    come back as they were, as :func:`wrap_open_tool` offers them.
+    """
+    if not declared(spec):
+        return list(tools)
+    if every_tool is not None:
+        names = {str(getattr(t, "name", "")) for t in every_tool}
+        if any(t and t not in names for t in (spec.select_tool, spec.analyse_tool)):
+            return list(tools)
+    mark = {"open_tool": str(spec.open_tool), "path_argument": str(spec.path_argument)}
+    out: list[Any] = []
+    for tool in tools:
+        if getattr(tool, "name", "") == spec.open_tool:
+            metadata = {**(getattr(tool, "metadata", None) or {}), OPEN_METADATA_KEY: mark}
+            try:
+                tool = tool.model_copy(update={"metadata": metadata})
+            except Exception as exc:  # noqa: BLE001 - an unmarked tool is offered as it is
+                logger.warning("%s offered unmarked (%s).", spec.open_tool, type(exc).__name__)
+        out.append(tool)
+    return out
+
+
+def declared_open(tools: Sequence[Any]) -> Any:
+    """The open declaration an offered tool carries (``open_tool``, ``path_argument``), or ``None``.
+
+    The first marked tool among ``tools`` gives it, as a namespace the load
+    line reads.
+    """
+    from types import SimpleNamespace
+
+    for tool in tools:
+        mark = (getattr(tool, "metadata", None) or {}).get(OPEN_METADATA_KEY)
+        if isinstance(mark, dict) and mark.get("open_tool") and mark.get("path_argument"):
+            return SimpleNamespace(**mark)
+    return None
