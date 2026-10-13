@@ -58,17 +58,27 @@ def _has_successful_rep(obj: dict[str, Any]) -> bool:
     return isinstance(rep, dict) and bool(rep.get("source"))
 
 
-def _carry_cape_context(prev: Any, rep: dict[str, Any]) -> None:
-    """Preserve sandbox-sourced context when live enrichment replaces reputation.
+# The fields of a row's earlier reputation a new record keeps where it has
+# none of its own: the record's ``link`` (the neutral field a source declares
+# its permalink under, in its ``record``) and the sandbox context of an IP.
+# A stored row seeded before ``link`` holds its permalink under the legacy key
+# (``core.legacy_reputation``), kept the same way.
+CARRIED_REPUTATION_FIELDS: tuple[str, ...] = ("link", "hostname", "contacted_ports")
 
-    The network extractor seeds ``reputation`` with a deterministic
-    ``virustotal_url`` permalink (plus ``hostname`` / ``contacted_ports`` for
-    IPs) straight from the sandbox report. The live records are richer but
-    lack those keys, so fold them forward instead of clobbering them.
+
+def _carry_seeded_context(prev: Any, rep: dict[str, Any]) -> None:
+    """Preserve the earlier record's context when live enrichment replaces reputation.
+
+    A row's reputation may already hold a permalink (``link``) and, for an
+    IP, ``hostname`` / ``contacted_ports`` from the sandbox report. The live
+    records are richer but may lack those keys, so they are folded forward
+    instead of clobbered.
     """
+    from maljan.core.legacy_reputation import STORED_REPUTATION_LINK_KEYS
+
     if not isinstance(prev, dict):
         return
-    for key in ("virustotal_url", "hostname", "contacted_ports"):
+    for key in (*STORED_REPUTATION_LINK_KEYS, *CARRIED_REPUTATION_FIELDS):
         val = prev.get(key)
         if val is not None and rep.get(key) is None:
             rep[key] = val
@@ -204,7 +214,7 @@ async def _first_record(
 def _keep(row: dict[str, Any], found: tuple[ReadySource, dict[str, Any]]) -> None:
     source, rep = found
     annotate_age(rep, source.source)
-    _carry_cape_context(row.get("reputation"), rep)
+    _carry_seeded_context(row.get("reputation"), rep)
     row["reputation"] = rep
     # Feed verified reputation back into the heuristic suspicion flag so an
     # enriched-malicious indicator is not stuck at is_suspicious=False.
