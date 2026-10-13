@@ -105,9 +105,19 @@ def shown_to_section(section: str, output: dict[str, Any]) -> bool:
 
 # Keyword hints to pull the relevant ISR claims into a technical section.
 _SECTION_CLAIM_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "packing_obfuscation": ("pack", "obfuscat", "entropy", "encoded", "dynamic api"),
+    "packing_obfuscation": ("pack", "unpack", "obfuscat", "entropy", "encoded", "dynamic api"),
     "cli_flags": ("argument", "command-line", "command line", "flag", "parameter", "argv"),
-    "encryption_scheme": ("encrypt", "aes", "rsa", "rc4", "xor", "crypto", "cipher", "key"),
+    "encryption_scheme": (
+        "encrypt",
+        "aes",
+        "rsa",
+        "rc4",
+        "xor",
+        "crypto",
+        "crypt",
+        "cipher",
+        "key",
+    ),
     "discovery": ("enumerate", "discovery", "drive", "registry query", "system info"),
     "persistence_detail": ("persist", "run key", "scheduled task", "startup", "service", "autorun"),
     "evasion_antiforensics": ("evasion", "anti-", "unhook", "masquerad", "syslog", "shadow"),
@@ -200,15 +210,63 @@ def _claims_text(report: MalwareReport, isr_reports: dict[str, Any] | None) -> l
     ]
 
 
+def _word_starts(text: str) -> list[int]:
+    """Where each word of ``text`` starts, in order.
+
+    A word starts at a letter or digit that follows anything else, and inside
+    a run of letters where the case says a new word begins: ``CryptEncrypt``
+    is two words, ``HTTPRequest`` is ``HTTP`` and ``Request``. One pass.
+    """
+    starts: list[int] = []
+    prev = ""
+    for index, char in enumerate(text):
+        if char.isalnum() and (
+            not prev.isalnum()
+            or (prev.islower() and char.isupper())
+            or (
+                prev.isupper()
+                and char.isupper()
+                and index + 1 < len(text)
+                and text[index + 1].islower()
+            )
+        ):
+            starts.append(index)
+        prev = char
+    return starts
+
+
+# A keyword this long is a stem that names its subject inside a compound
+# word too (``obfuscat`` in ``deobfuscation``, ``string`` in ``stackstrings``);
+# a shorter one turns up inside unrelated words by chance (``rsa`` in
+# ``rehearsal``, ``c2`` in ``0xc2c4``) and matches only where a word begins.
+_STEM_LENGTH = 6
+
+
+def mentions(text: str, keywords: tuple[str, ...]) -> bool:
+    """Whether ``text`` holds one of ``keywords`` as a word or a word's prefix.
+
+    A keyword shorter than ``_STEM_LENGTH`` matches where a word begins, as a
+    whole word or its prefix (``rsa`` in ``RSA1`` and ``rsaenh``, ``key`` in
+    ``KeyBlob``), never inside a word (``rsa`` in ``rehearsal``, ``key`` in
+    ``monkey``, ``aes`` in ``caesar``); a longer one matches anywhere, as it
+    always did. Case is ignored. Linear in the text for a given keyword list.
+    """
+    if not keywords:
+        return False
+    # Lowered one character at a time, so every index still names the same
+    # character (a few characters lower to two).
+    lowered = "".join(c.lower() if len(c.lower()) == 1 else c for c in text)
+    stems = [k for k in keywords if len(k) >= _STEM_LENGTH]
+    if any(k in lowered for k in stems):
+        return True
+    short = tuple(k for k in keywords if len(k) < _STEM_LENGTH)
+    return bool(short) and any(lowered.startswith(short, at) for at in _word_starts(text))
+
+
 def _filter_claims(claims: list[dict[str, str]], keywords: tuple[str, ...]) -> list[dict[str, str]]:
     if not keywords:
         return []
-    picked = []
-    for c in claims:
-        hay = f"{c['claim']} {c['evidence_ref']}".lower()
-        if any(k in hay for k in keywords):
-            picked.append(c)
-    return picked
+    return [c for c in claims if mentions(f"{c['claim']} {c['evidence_ref']}", keywords)]
 
 
 def cited_entry_ids(claims: list[dict[str, str]]) -> set[str]:
