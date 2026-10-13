@@ -6,7 +6,9 @@ document is written out. The values a place's kept matches hold, each counted
 with what is nested in it, never exceed the values the report holds; past that
 the place is cut and says so. A path that holds more than one descendant
 segment reads the report once per node the first reached: the settings save
-says so beside it, and never refuses it.
+says so beside it, and never refuses it. So does a format read through a
+mapping whose detect a built-in's overlaps: tried after every built-in, it
+never reads a report both recognise.
 """
 
 from __future__ import annotations
@@ -193,3 +195,101 @@ def test_the_settings_save_warns_beside_a_costly_path_and_saves_it(monkeypatch: 
     }
     assert "anchor it" in warnings["core.sandbox.rest.mapping.places.memory"]
     assert asyncio.run(route._mapping_warnings(object(), {"llm.provider": "x"})) == {}
+
+
+class TestAMappedFormatABuiltInOverlapsIsNamed:
+    """A format read through a mapping is tried after every built-in: an overlap is said on save."""
+
+    @staticmethod
+    def _format(name: str, *tests: dict[str, Any], reader: str = "generic") -> Any:
+        from maljan.core.report_formats import ReportFormat
+
+        return ReportFormat.model_validate(
+            {"name": name, "detect": [list(tests)], "reader": reader, "mapping": {}}
+        )
+
+    def test_a_detect_among_a_built_in_s_tests_is_named(self) -> None:
+        from maljan.core.report_formats import builtin_overlapping
+
+        older = self._format(
+            "older_generic",
+            {"path": "/info", "types": ["object"]},
+            {"path": "/behavior", "types": ["object"]},
+        )
+        assert builtin_overlapping(older) == "cuckoo"
+
+    def test_a_detect_whose_own_reports_a_built_in_claims_is_named(self) -> None:
+        from maljan.core.report_formats import builtin_overlapping
+
+        claimed = self._format(
+            "claimed",
+            {"path": "/CAPE", "types": ["object"]},
+            {"path": "/acme", "types": ["string"]},
+        )
+        assert builtin_overlapping(claimed) == "cape2"
+
+    def test_a_detect_of_its_own_is_not_named(self) -> None:
+        from maljan.core.report_formats import builtin_overlapping
+
+        own = self._format("own", {"path": "/acme_meta/version", "contains": "acme"})
+        assert builtin_overlapping(own) == ""
+
+    @pytest.mark.parametrize("fixture", ["unread_flat_report.json", "unread_nested_report.json"])
+    def test_an_accepted_proposal_is_not_named(self, fixture: str) -> None:
+        from pathlib import Path
+
+        from maljan.core.report_formats import ReportFormat, builtin_overlapping
+        from maljan.core.report_proposals import propose_format
+
+        path = Path(__file__).resolve().parents[3] / "fixtures" / "sandbox" / fixture
+        declaration = propose_format(json.loads(path.read_text()))["declaration"]
+        assert builtin_overlapping(ReportFormat.model_validate(declaration)) == ""
+
+    def test_the_plainest_report_of_each_built_in_group_passes_it(self) -> None:
+        from maljan.core.report_formats import BUILTIN_REPORT_FORMATS, least_report
+
+        for fmt in BUILTIN_REPORT_FORMATS:
+            for group in fmt.detect:
+                report = least_report(group)
+                assert report is not None and all(t.holds(report) for t in group), fmt.name
+
+    def test_the_settings_save_warns_beside_the_detect_and_saves_it(self, monkeypatch: Any) -> None:
+        import asyncio
+
+        from app.api.v1 import settings as route
+        from maljan.core.config import Settings
+
+        settings = Settings(
+            _env_file=None,  # type: ignore[call-arg]
+            sandbox={
+                "report_formats": [
+                    {
+                        "name": "older_generic",
+                        "detect": [
+                            [
+                                {"path": "/info", "types": ["object"]},
+                                {"path": "/behavior", "types": ["object"]},
+                            ]
+                        ],
+                        "reader": "generic",
+                        "mapping": {"processes": "$.behavior.processes[*]"},
+                    },
+                    {
+                        "name": "own_reader",
+                        "detect": [[{"path": "/behavior", "types": ["object"]}]],
+                        "reader": "cuckoo",
+                    },
+                ],
+            },
+        )
+
+        async def _effective(_db: Any) -> Settings:
+            return settings
+
+        monkeypatch.setattr(route, "effective_core_settings", _effective)
+        warnings = asyncio.run(
+            route._mapping_warnings(object(), {"core.sandbox.report_formats": []})
+        )
+        assert set(warnings) == {"core.sandbox.report_formats.0.detect"}
+        assert "'cuckoo'" in warnings["core.sandbox.report_formats.0.detect"]
+        assert "Saved as written" in warnings["core.sandbox.report_formats.0.detect"]

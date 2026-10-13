@@ -299,14 +299,22 @@ async def _agent_warnings(db: AsyncSession) -> dict[str, str]:
 
 
 async def _mapping_warnings(db: AsyncSession, changes: dict[str, Any]) -> dict[str, str]:
-    """A warning beside each saved report-mapping path whose reading is not linear in the report.
+    """A warning beside each saved report-mapping path whose reading is not linear in the report,
+    and beside the detect of each format read through a mapping that a built-in's detect overlaps.
 
     Read from the settings as they now stand, for a save that touched the
-    sandbox settings; the save itself is never refused for it
-    (``core.report_mapping.costly_paths``). Never raises, as
+    sandbox settings; the save itself is never refused for either
+    (``core.report_mapping.costly_paths``,
+    ``core.report_formats.builtin_overlapping``). Never raises, as
     :func:`_agent_warnings` never does.
     """
+    from maljan.core.report_formats import (
+        BUILTIN_REPORT_FORMATS,
+        builtin_overlapping,
+        effective_formats,
+    )
     from maljan.core.report_mapping import costly_paths
+    from maljan.providers.sandbox.readers import format_reads_mapping
 
     if not any(str(key).startswith("core.sandbox.") for key in changes):
         return {}
@@ -319,11 +327,29 @@ async def _mapping_warnings(db: AsyncSession, changes: dict[str, Any]) -> dict[s
         f"core.sandbox.rest.mapping.{field}": said
         for field, said in costly_paths(sandbox.rest.mapping).items()
     }
+    builtins = [
+        fmt
+        for fmt in effective_formats(sandbox.report_formats)
+        if fmt.name in {b.name for b in BUILTIN_REPORT_FORMATS}
+    ]
     for index, fmt in enumerate(sandbox.report_formats):
         if fmt.mapping is not None:
             for field, said in costly_paths(fmt.mapping).items():
                 out[f"core.sandbox.report_formats.{index}.mapping.{field}"] = said
+        overlapping = builtin_overlapping(fmt, builtins) if format_reads_mapping(fmt) else ""
+        if overlapping:
+            out[f"core.sandbox.report_formats.{index}.detect"] = SHADOWED_DETECT.format(
+                name=fmt.name, builtin=overlapping
+            )
     return out
+
+
+SHADOWED_DETECT = (
+    "{name!r} is read through a mapping, which is tried after every built-in format, and its "
+    "detect overlaps the built-in format {builtin!r}: a report both recognise is read as "
+    "{builtin!r}, never as {name!r}. Add a detect test only this sandbox's reports pass. "
+    "Saved as written."
+)
 
 
 async def _unprobed_models_in(db: AsyncSession, changes: dict[str, Any]) -> list[str]:

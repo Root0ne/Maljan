@@ -399,6 +399,93 @@ def format_named(name: str, formats: Iterable[ReportFormat] | None = None) -> Re
     return None
 
 
+def _least_value(test: FieldTest) -> tuple[bool, Any]:
+    """``(possible, value)``: the plainest value ``test`` holds on, where one can."""
+    allowed = list(test.types) or ["string"]
+    if test.contains:
+        if "string" in allowed:
+            return True, test.contains
+        if "number" in allowed and test.contains.isdigit():
+            return True, int(test.contains)
+        return False, None
+    kind = allowed[0]
+    least: dict[str, tuple[Any, Any]] = {
+        "object": ({}, {"_": 0}),
+        "array": ([], [0]),
+        "string": ("x", "x"),
+        "number": (1, 1),
+        "boolean": (True, True),
+        "null": (None, None),
+    }
+    if kind == "null" and test.non_empty:
+        return False, None
+    empty, filled = least[kind]
+    return True, filled if test.non_empty else empty
+
+
+def least_report(group: Sequence[FieldTest]) -> dict[str, Any] | None:
+    """The plainest report every test of ``group`` holds on, or ``None`` where none is built.
+
+    Each test's path is written down with the plainest value it holds on (an
+    empty object or list, ``"x"``, the text it must contain); ``*`` is one
+    item. The shallowest paths are written first, so a deeper test writes
+    into the container a shallower one made. ``None`` where the tests
+    contradict each other. Linear in the tests' paths.
+    """
+    root: dict[str, Any] = {}
+    for test in sorted(group, key=lambda t: len(parse_path(t.path))):
+        possible, value = _least_value(test)
+        segments = parse_path(test.path)
+        if not possible or not segments:
+            return None
+        node: Any = root
+        for index, segment in enumerate(segments):
+            last = index == len(segments) - 1
+            following = None if last else segments[index + 1]
+            fresh: Any = value if last else ([] if following == "*" else {})
+            if isinstance(node, list):
+                if segment != "*":
+                    return None
+                if not node or node == [0]:
+                    node[:] = [fresh]
+                child = node[0]
+            elif isinstance(node, dict):
+                key = "_" if segment == "*" else str(segment)
+                if last or not isinstance(node.get(key), dict | list):
+                    node[key] = fresh
+                child = node[key]
+            else:
+                return None
+            node = child
+    return root if all(test.holds(root) for test in group) else None
+
+
+def builtin_overlapping(
+    fmt: ReportFormat, builtins: Iterable[ReportFormat] = BUILTIN_REPORT_FORMATS
+) -> str:
+    """The first built-in whose detect overlaps ``fmt``'s, by name; empty where none does.
+
+    Two readings, each on the plainest report a detect group describes
+    (:func:`least_report`): a built-in recognises the plainest report of one
+    of ``fmt``'s groups (the reports ``fmt`` was written for), or ``fmt``
+    recognises the plainest report of one of a built-in's groups (``fmt``'s
+    tests are among the built-in's). A format read through a mapping is tried
+    after every built-in, so a report both recognise is read as the built-in.
+    """
+    builtins = list(builtins)
+    own = [report for group in fmt.detect if (report := least_report(group)) is not None]
+    for builtin in builtins:
+        if builtin.name == fmt.name:
+            continue
+        if any(builtin.matches(report) for report in own):
+            return builtin.name
+        for group in builtin.detect:
+            report = least_report(group)
+            if report is not None and fmt.matches(report):
+                return builtin.name
+    return ""
+
+
 # Where a run summary records the signature scale of the run's sandbox report.
 SIGNATURE_SCALE_KEY = "sandbox_signature_scale"
 
