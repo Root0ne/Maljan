@@ -252,26 +252,30 @@ ADDRESS_ARGUMENTS: tuple[str, ...] = (
 )
 
 
-# Words that make an argument named for an address a bound, a size or a base
-# rather than the one place a call asks about (``end_address``, ``max_addr``,
-# ``base_address``, ``address_count``): such an argument is never read as one.
-_NOT_A_PLACE_WORDS = frozenset(
+# The words an argument's name says a code or memory address in the binary
+# by, read from a positive shape so a network or identity address
+# (``ip_address``, ``email_address``, ``remote_addr``, ``address_family``) and
+# a bound, a size or a base (``end_address``, ``base_address``) never are. A
+# name of these words alone is one (``address``, ``rva``, ``addr_va``);
+# ``offset`` is not, being a page's first row as often as a place.
+_ADDRESS_WORDS = frozenset({"addr", "address", "ea", "va", "rva", "vaddr"})
+# The words that pair with an address word to name the place of code
+# (``func_addr``, ``target_address``, ``entry_rva``, ``instruction_address``).
+_CODE_PLACE_WORDS = frozenset(
     {
-        "base",
-        "bound",
-        "count",
-        "end",
-        "last",
-        "len",
-        "length",
-        "limit",
-        "max",
-        "min",
-        "range",
-        "size",
-        "space",
-        "stop",
-        "until",
+        "code",
+        "entry",
+        "fn",
+        "func",
+        "function",
+        "insn",
+        "instruction",
+        "loc",
+        "location",
+        "routine",
+        "start",
+        "sub",
+        "target",
     }
 )
 _CAMEL_RE = re.compile(r"([a-z0-9])([A-Z])")
@@ -279,19 +283,32 @@ _WORD_SPLIT_RE = re.compile(r"[^a-z0-9]+")
 
 
 def named_as_address(name: Any) -> bool:
-    """Whether an argument's name says it takes the one address a call asks about.
+    """Whether an argument's name says it takes a code or memory address in the binary.
 
-    One of :data:`ADDRESS_ARGUMENTS`, or a name one of whose words is ``addr``
-    or ``address`` (``name_or_address``, ``func_addr``, ``targetAddress``)
-    and none of whose words makes it a bound, a size or a base
-    (``end_address``, ``base_address``). Read from the name alone, whatever
-    tool it belongs to.
+    One of :data:`ADDRESS_ARGUMENTS`; a name made only of address words
+    (``address``, ``rva``); or a name pairing an address word with words for
+    the place of code (``func_addr``, ``targetAddress``, ``entry_rva``), with
+    ``name … or`` allowed beside them (``name_or_address``). Any other word
+    makes it something else — a network or identity address (``ip``,
+    ``email``, ``remote``, ``bind``, ``host``, ``wallet``, ``family``) or a
+    bound, a size or a base (``end``, ``base``, ``count``, ``space``). Read
+    from the name alone, whatever tool it belongs to.
     """
     text = str(name or "")
     if text.lower() in ADDRESS_ARGUMENTS:
         return True
     words = {w for w in _WORD_SPLIT_RE.split(_CAMEL_RE.sub(r"\1_\2", text).lower()) if w}
-    return bool({"addr", "address"} & words) and not (_NOT_A_PLACE_WORDS & words)
+    if not words or not (_ADDRESS_WORDS & words):
+        return False
+    rest = words - _ADDRESS_WORDS
+    if not rest:
+        return True
+    if not rest <= _CODE_PLACE_WORDS | {"name", "or", "of"}:
+        return False
+    # ``name_or_address``: a symbol's name or its address, both places of code.
+    if "name" in rest:
+        return "or" in rest
+    return bool(_CODE_PLACE_WORDS & rest)
 
 
 def address_arguments(facts: Any, offered: Iterable[Any] = ()) -> tuple[str, ...]:
@@ -451,12 +468,14 @@ def entry_address_arguments(entry: Any) -> tuple[str, ...]:
 
     ``arguments`` is read without a kind, so a record that names none still
     gives its declared address argument (``declared_reading.kind_free_facts``);
-    the call's own arguments named for an address follow.
+    the call's own arguments named for an address follow, for a tool whose
+    answer is a code listing only (:func:`entry_lists_any_code`).
     """
     from maljan.core.declared_reading import kind_free_facts
 
     args = _field(entry, "args")
-    return address_arguments(kind_free_facts(entry), args if isinstance(args, Mapping) else ())
+    offered = args if isinstance(args, Mapping) and entry_lists_any_code(entry) else ()
+    return address_arguments(kind_free_facts(entry), offered)
 
 
 # ---------------------------------------------------------------------------

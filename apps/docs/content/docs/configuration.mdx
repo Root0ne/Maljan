@@ -3390,10 +3390,15 @@ shape:
   function map, a function claim's check, a repeated decompile and the static
   turn's tool line read it so, and a call gives its address in the argument
   `arguments.address` names, then in the shared list (`address`, `addr`,
-  `function_address`, `ea`, `va`, `start_address`, `entry_address`), then in
-  any of the call's own arguments whose name holds the word `addr` or
-  `address` (`name_or_address`, `func_addr`) and no word making it a bound, a
-  size or a base (`end_address`, `base_address`, `address_count`). Only a
+  `function_address`, `ea`, `va`, `start_address`, `entry_address`), then,
+  for a tool whose answer is a code listing, in any of the call's own
+  arguments whose name has a code address's shape: address words alone
+  (`address`, `rva`) or paired with words for the place of code (`func_addr`,
+  `target_address`, `instruction_address`, `name_or_address`). A network or
+  identity address (`ip_address`, `email_address`, `remote_addr`,
+  `address_family`), a bound, a size or a base (`end_address`,
+  `base_address`, `address_count`) and `offset` (a page's first row as often
+  as a place) are never read as one. Only a
   tool that declares nothing is read by the words of its name (`decompil`,
   `disassembl`, `xref`, `string`), in one place (`core.undeclared_tools`), and
   the report reads such a tool's code listing by the same words: a
