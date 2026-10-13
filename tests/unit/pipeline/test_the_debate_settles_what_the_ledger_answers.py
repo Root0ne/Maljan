@@ -244,8 +244,12 @@ class TestTheDebateEndsWhenTheLedgerStatedEveryBlockingLine:
         assert debate_route(state, max_rounds=5) == ("judge", LEDGER_STATED)
 
 
-def _claim(text: str, ref: str = "[ev_0004]", technique: str | None = "T1027") -> ClaimEvidence:
-    return ClaimEvidence(claim=text, evidence_ref=ref, confidence=0.7, technique_id=technique)
+def _claim(
+    text: str, ref: str = "[ev_0004]", technique: str | None = "T1027", confidence: float = 0.7
+) -> ClaimEvidence:
+    return ClaimEvidence(
+        claim=text, evidence_ref=ref, confidence=confidence, technique_id=technique
+    )
 
 
 def _isr(*claims: ClaimEvidence) -> AgentISR:
@@ -270,6 +274,30 @@ class TestARoundOfWordingOnly:
     def test_a_changed_value_entry_or_technique_is_a_change(self, after: AgentISR) -> None:
         before = _isr(_claim("Routine 0x1400 decodes 57 blobs with key 'k7q2'."))
         assert not unchanged_in_substance(before, after)
+
+    def test_another_algorithm_is_a_change(self) -> None:
+        before = _isr(_claim("Strings are decrypted with RC4."))
+        after = _isr(_claim("Strings are decrypted with XOR."))
+        assert not unchanged_in_substance(before, after)
+
+    def test_a_negation_with_a_lower_confidence_is_a_change(self) -> None:
+        before = _isr(_claim("The sample injects into the shell process.", confidence=0.9))
+        after = _isr(_claim("The sample does not inject into the shell process.", confidence=0.2))
+        assert not unchanged_in_substance(before, after)
+
+    def test_a_negation_alone_is_a_change(self) -> None:
+        before = _isr(_claim("The sample injects into the shell process."))
+        after = _isr(_claim("The sample doesn't inject into the shell process."))
+        assert not unchanged_in_substance(before, after)
+
+    def test_a_confidence_beyond_its_step_is_a_change(self) -> None:
+        before = _isr(_claim("Routine 0x1400 decodes the blobs.", confidence=0.7))
+        assert not unchanged_in_substance(
+            before, _isr(_claim("The blobs are decoded by 0x1400.", confidence=0.5))
+        )
+        assert unchanged_in_substance(
+            before, _isr(_claim("The blobs are decoded by 0x1400.", confidence=0.71))
+        )
 
     def test_an_answer_with_no_claim_is_never_reworded(self) -> None:
         assert not unchanged_in_substance(_isr(), _isr())

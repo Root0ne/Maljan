@@ -28,7 +28,8 @@ Decision priority (highest to lowest), in ``debate_route``:
      left unmarked) — judge.
      Reworded — no consensus, and every revision of the round right before
      this mediation states the claims in force again, wording aside (the same
-     values, entry ids and techniques, ``claim_drops.unchanged_in_substance``):
+     values, entry ids, techniques, negators, confidence step and technical
+     terms, ``claim_drops.unchanged_in_substance``):
      another round would argue over wording. Judge (``reworded``); no
      consensus is claimed.
   6. Adaptive termination — statistical confidence convergence, with no
@@ -144,7 +145,8 @@ NO_CONTESTED_POINT = "no_contested_point"
 # none new: the round changed none of them.
 POINTS_UNCHANGED = "contested_points_unchanged"
 # Every revision of the round before this mediation states the claims in
-# force again, wording aside: the round changed no value, entry id or technique.
+# force again, wording aside: the round changed no value, entry id, technique,
+# negation, confidence step or technical term.
 REWORDED = "reworded"
 # Every blocking line of this mediation states only counts the ledger states,
 # and the analysts were told them by an earlier mediation.

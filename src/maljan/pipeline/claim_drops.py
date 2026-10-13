@@ -242,25 +242,89 @@ def dropped_values_sentence(name: str, revision_round: int, dropped: DroppedValu
 
 
 _EVIDENCE_ID = re.compile(r"\bev_\d+\b", re.IGNORECASE)
+# The words a claim says something is not so with: two claims that differ in
+# them differ in what they claim, whatever else they share.
+_NEGATORS = frozenset(
+    {
+        "not",
+        "no",
+        "never",
+        "none",
+        "nor",
+        "neither",
+        "without",
+        "absent",
+        "unconfirmed",
+        "unobserved",
+        "cannot",
+        "nothing",
+        "nowhere",
+    }
+)
+# A word as a claim writes it: letters, digits and the joiners an identifier,
+# a file name or a host name holds inside it.
+_WORD = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9_.\-']*[A-Za-z0-9])?")
+# Confidence is compared in steps of this size: two values in one step are the
+# same confidence, any other two a change.
+CONFIDENCE_STEP = 0.05
+# The key of one claim: values, entry ids, technique, negators, confidence
+# step and technical terms.
+ClaimKey = tuple[frozenset[str], frozenset[str], str, tuple[str, ...], int | None, frozenset[str]]
 
 
-def claim_substance(isr: Any) -> Counter[tuple[frozenset[str], frozenset[str], str]]:
-    """What an answer's claims state, wording aside: each claim's values, entry ids and technique.
+def _technical(word: str) -> bool:
+    """Whether a word names a technical thing: an acronym, an identifier, a name with a digit.
 
-    The values are :func:`claim_values` (numbers, hex, technique ids, quoted
-    values), the entry ids those its evidence line cites, the technique the
-    claim's own; two claims that say the same with other words are one key.
+    "RC4", "XOR", "CreateMutexW", "FUN_1400", "a.dll" are; "Strings",
+    "decodes" are not.
     """
-    keys: Counter[tuple[frozenset[str], frozenset[str], str]] = Counter()
+    if any(c.isdigit() for c in word) or any(c in "_." for c in word):
+        return True
+    letters = [c for c in word if c.isalpha()]
+    if len(letters) >= 2 and all(c.isupper() for c in letters):
+        return True
+    return any(c.isupper() for c in word[1:])
+
+
+def _negators(text: str) -> tuple[str, ...]:
+    words = [w.lower() for w in _WORD.findall(text)]
+    found = [w for w in words if w in _NEGATORS or w.endswith("n't")]
+    return tuple(sorted(found))
+
+
+def _confidence_step(claim: Any) -> int | None:
+    value = getattr(claim, "confidence", None)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return int(round(float(value) / CONFIDENCE_STEP))
+
+
+def claim_substance(isr: Any) -> Counter[ClaimKey]:
+    """What an answer's claims state, wording aside, one key per claim.
+
+    A claim's key holds everything that changes what it claims:
+    :func:`claim_values` (numbers, hex addresses, technique ids, quoted
+    values), the entry ids its evidence line cites, its technique, the
+    negators it writes ("not", "no", "never", "without", a word ending
+    "n't"), its confidence in steps of :data:`CONFIDENCE_STEP`, and its
+    technical terms (acronyms, identifiers, names holding a digit, folded:
+    "RC4" against "XOR"). Two claims are one key only when all of these are
+    equal; everything else is wording.
+    """
+    keys: Counter[ClaimKey] = Counter()
     for claim in getattr(isr, "claims", None) or []:
+        text = str(getattr(claim, "claim", "") or "")
         technique = str(getattr(claim, "technique_id", "") or "").strip()
         keys[
             (
-                claim_values(str(getattr(claim, "claim", "") or ""), technique),
+                claim_values(text, technique),
                 frozenset(
                     i.lower() for i in _EVIDENCE_ID.findall(str(getattr(claim, "evidence_ref", "")))
                 ),
                 technique,
+                _negators(text),
+                _confidence_step(claim),
+                frozenset(w.lower() for w in _WORD.findall(text) if _technical(w)),
             )
         ] += 1
     return keys
@@ -269,10 +333,14 @@ def claim_substance(isr: Any) -> Counter[tuple[frozenset[str], frozenset[str], s
 def unchanged_in_substance(in_force: Any, revision: Any) -> bool:
     """Whether a revision states the claims in force again, wording aside (:func:`claim_substance`).
 
-    An answer with no claim is not one: it states nothing to compare.
+    An answer with no claim is not one: it states nothing to compare. Any
+    claim whose key cannot be read makes the round not reworded.
     """
-    before = claim_substance(in_force)
-    return bool(before) and before == claim_substance(revision)
+    try:
+        before = claim_substance(in_force)
+        return bool(before) and before == claim_substance(revision)
+    except Exception:  # noqa: BLE001 — unsure is a change
+        return False
 
 
 def answer_unchanged(in_force: str, revision: str) -> bool:
