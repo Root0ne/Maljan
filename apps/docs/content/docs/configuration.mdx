@@ -3232,7 +3232,7 @@ it:
 | `timeout_seconds` | the budget the tool itself keeps, where it has one |
 | `memory_peak_mb` | the tool's measured memory peak, where known |
 | `discloses_sample` | the tool sends the sample, or its bytes, out of the deployment |
-| `read_only` | the tool changes nothing and answers an identical call the same (read-only or idempotent): a revision that repeats an identical call of an earlier round is answered from that round's entry, as a tool its server marks `readOnlyHint` is; any other tool runs again |
+| `read_only` | the tool changes nothing and answers an identical call the same (read-only or idempotent): a revision that repeats an identical call of an earlier round is answered from that round's entry, as a tool its server marks `readOnlyHint` is, while no call that is not read-only has run on the same server since that entry was recorded; any other tool runs again. The shipped Ghidra, radare2, analysis, knowledge and network declarations mark their reading tools (`builtin_reverser_tools.GHIDRA_READ_ONLY`, `R2_READ_ONLY`, `builtin_declarations.ANALYSIS_READ_ONLY`, `KNOWLEDGE_READ_ONLY`, `NETWORK_READ_ONLY`) |
 | `holds_strings` | the answer holds the sample's strings as data though its kind is not a strings kind (Ghidra's `batch_string_anchor_report` and `find_undocumented_by_string`); a function claim's quoted value is looked for in it |
 | `function_starts` | the path of the answer's list of function start addresses (offsets from the image base), read for a `function_list` or `capability_rules` answer by the triage pack's function index and the readings of an image with no function table of its own |
 | `rows` | the path of the answer's rows |

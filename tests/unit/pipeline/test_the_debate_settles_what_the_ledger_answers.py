@@ -27,6 +27,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from pydantic import BaseModel
 
 from maljan.agents.base_agent import own_earlier_entries, repeatable_earlier_entries
 from maljan.agents.evidence_recorder import (
@@ -403,9 +404,11 @@ class TestOnlyAToolThatAnswersTheSameIsSeeded:
     @staticmethod
     def _agent(*tools: Any) -> Any:
         rows = [
-            _entry(2, "beta", "decompile_function", "0x1400", "x").model_dump(mode="json"),
-            _entry(3, "beta", "rename_function", "0x1400", "renamed").model_dump(mode="json"),
-            _entry(4, "beta", "task_status", "", "pending").model_dump(mode="json"),
+            # The rename and the poll come first: a state change after the
+            # decompile would make its answer stale.
+            _entry(2, "beta", "rename_function", "0x1400", "renamed").model_dump(mode="json"),
+            _entry(3, "beta", "task_status", "", "pending").model_dump(mode="json"),
+            _entry(4, "beta", "decompile_function", "0x1400", "x").model_dump(mode="json"),
         ]
         return SimpleNamespace(
             name="beta", tools=list(tools), run_state_source={"evidence_ledger": rows}
@@ -419,7 +422,7 @@ class TestOnlyAToolThatAnswersTheSameIsSeeded:
         )
         assert [e.tool for e in repeatable_earlier_entries(agent)] == ["decompile_function"]
         guard = seeded_repeat_guard(None, earlier_rounds=repeatable_earlier_entries(agent))
-        assert guard.answered_by("decompile_function", {"address": "0x1400"}) == "ev_0002"
+        assert guard.answered_by("decompile_function", {"address": "0x1400"}) == "ev_0004"
         assert guard.answered_by("rename_function", {"address": "0x1400"}) is None
         assert guard.answered_by("task_status", {"address": ""}) is None
 
@@ -432,8 +435,15 @@ class TestOnlyAToolThatAnswersTheSameIsSeeded:
             "maljan.agents.tool_pinning.declared_facts_of",
             lambda tool: ToolFacts(read_only=True) if tool.name == "task_status" else None,
         )
-        agent = self._agent(_tool("rename_function"), _tool("task_status"))
-        assert [e.tool for e in repeatable_earlier_entries(agent)] == ["task_status"]
+        agent = self._agent(
+            _tool("rename_function"),
+            _tool("task_status"),
+            _tool("decompile_function", server_read_only=True),
+        )
+        assert [e.tool for e in repeatable_earlier_entries(agent)] == [
+            "task_status",
+            "decompile_function",
+        ]
 
     def test_an_agent_with_no_such_tool_seeds_nothing(self) -> None:
         agent = self._agent(_tool("decompile_function"), _tool("rename_function"))
@@ -487,3 +497,106 @@ class TestLinearTime:
         small = cost(100)
         large = cost(1_000)
         assert large <= max(small, 1e-3) * 30
+
+
+class _Address(BaseModel):
+    address: str = ""
+
+
+def _server_tool(name: str, server: str, calls: list[str], *, read_only: bool) -> Any:
+    from langchain_core.tools import StructuredTool
+
+    from maljan.agents.tool_pinning import READ_ONLY_METADATA_KEY, SERVER_METADATA_KEY
+
+    def _run(address: str = "") -> str:
+        calls.append(f"{name}@{server}")
+        return f"{name} answer"
+
+    metadata: dict[str, Any] = {SERVER_METADATA_KEY: server}
+    if read_only:
+        metadata[READ_ONLY_METADATA_KEY] = True
+    return StructuredTool.from_function(
+        func=_run,
+        name=name,
+        description=name,
+        args_schema=_Address,
+        infer_schema=False,
+        metadata=metadata,
+    )
+
+
+def _held(seq: int, tool: str, server: str, output: str = "undefined8 FUN_1400(void)") -> Any:
+    return build_entry(
+        entry_id=f"ev_{seq:04d}",
+        seq=seq,
+        agent="beta",
+        tool=tool,
+        args={"address": "0x1400"},
+        server=server,
+        output=output,
+    )
+
+
+class TestAStateChangeMakesAnEarlierRoundsAnswerStale:
+    """A seeded answer holds only while no call that is not read-only ran on its server since."""
+
+    def _loop(self, *, earlier: list[Any]) -> tuple[dict[str, Any], list[str]]:
+        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+        from maljan.schemas.evidence import EvidenceCounter
+
+        calls: list[str] = []
+        tools = [
+            _server_tool("decompile_function", "dis", calls, read_only=True),
+            _server_tool("rename_function", "dis", calls, read_only=False),
+            _server_tool("rename_function_elsewhere", "other", calls, read_only=False),
+        ]
+        agent = SimpleNamespace(
+            name="beta",
+            tools=tools,
+            run_state_source={"evidence_ledger": [e.model_dump(mode="json") for e in earlier]},
+        )
+        guard = seeded_repeat_guard(None, earlier_rounds=repeatable_earlier_entries(agent))
+        recorder = EvidenceRecorder("beta", counter=EvidenceCounter())
+        wrapped = {t.name: t for t in record_tools(tools, recorder, guard)}
+        return wrapped, calls
+
+    def test_no_state_change_keeps_the_seed(self) -> None:
+        wrapped, calls = self._loop(earlier=[_held(2, "decompile_function", "dis")])
+        answer = wrapped["decompile_function"].invoke({"address": "0x1400"})
+        assert calls == []
+        assert "earlier round" in answer
+
+    def test_a_rename_in_an_earlier_round_makes_the_decompile_run(self) -> None:
+        earlier = [
+            _held(2, "decompile_function", "dis"),
+            _held(3, "rename_function", "dis", output="renamed"),
+        ]
+        wrapped, calls = self._loop(earlier=earlier)
+        wrapped["decompile_function"].invoke({"address": "0x1400"})
+        assert calls == ["decompile_function@dis"]
+
+    def test_a_rename_in_this_round_makes_the_next_decompile_run(self) -> None:
+        wrapped, calls = self._loop(earlier=[_held(2, "decompile_function", "dis")])
+        wrapped["decompile_function"].invoke({"address": "0x1400"})
+        wrapped["rename_function"].invoke({"address": "0x1400"})
+        wrapped["decompile_function"].invoke({"address": "0x1400"})
+        assert calls == ["rename_function@dis", "decompile_function@dis"]
+
+    def test_a_state_change_on_another_server_keeps_the_seed(self) -> None:
+        earlier = [
+            _held(2, "decompile_function", "dis"),
+            _held(3, "rename_function_elsewhere", "other", output="renamed"),
+        ]
+        wrapped, calls = self._loop(earlier=earlier)
+        wrapped["rename_function_elsewhere"].invoke({"address": "0x1400"})
+        answer = wrapped["decompile_function"].invoke({"address": "0x1400"})
+        assert calls == ["rename_function_elsewhere@other"]
+        assert "earlier round" in answer
+
+    def test_the_guard_drops_only_that_server_s_round_seeds(self) -> None:
+        guard = seeded_repeat_guard(
+            [_held(5, "decompile_function", "dis")],
+            earlier_rounds=[_held(2, "decompile_function", "other")],
+        )
+        assert guard.forget_round_seeds("dis") == 0, "a chunk's seed is kept"
+        assert guard.forget_round_seeds("other") == 1

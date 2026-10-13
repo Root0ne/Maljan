@@ -584,6 +584,10 @@ class RepeatGuard:
         # (``EARLIER_CHUNK``) or an earlier round of this analysis
         # (``EARLIER_ROUND``), which is what its answer says.
         self._origins: dict[str, str] = {}
+        # The server each earlier round's seeded call was made on, by its key:
+        # a call on that server that may change state makes the seed stale
+        # (:meth:`forget_round_seeds`).
+        self._seed_servers: dict[str, str] = {}
 
     def _seeded_count(self, key: str) -> int:
         """Where a seeded call's count starts: one served retry for a failure or an unkept result."""
@@ -600,6 +604,7 @@ class RepeatGuard:
         recorded: str | None = None,
         rerun: bool = False,
         origin: str = "",
+        server: str = "",
     ) -> None:
         """A call an earlier chunk made: an identical one is answered from its entry, not run.
 
@@ -618,6 +623,8 @@ class RepeatGuard:
         key = self._key(tool, kwargs)
         self._seeded.setdefault(key, str(entry_id))
         self._origins.setdefault(str(entry_id), origin or EARLIER_CHUNK)
+        if origin == EARLIER_ROUND:
+            self._seed_servers.setdefault(key, str(server or ""))
         if failed:
             self._seeded_failures.add(str(entry_id))
         elif rerun:
@@ -675,6 +682,31 @@ class RepeatGuard:
             if held.startswith(body):
                 return entry_id
         return None
+
+    def forget_round_seeds(self, server: str) -> int:
+        """Drop every earlier round's seed made on ``server``: a call there may have changed it.
+
+        Called after a call that is not read-only runs on ``server``. Its
+        seeds' recorded answers may no longer be what the server would answer,
+        so an identical call runs again. ``""`` is the server of a call whose
+        server is unknown, and drops only the seeds whose server is unknown
+        too. A chunk's seeds are kept. Returns how many were dropped.
+        """
+        dropped = 0
+        for key, held in list(self._seed_servers.items()):
+            if held != str(server or ""):
+                continue
+            entry = self._seeded.pop(key, None)
+            del self._seed_servers[key]
+            if entry is None:
+                continue
+            # Its answer, told or not, is no longer what the server holds: the
+            # next identical call runs and answers for the call from then on.
+            if self._first.get(key) == entry:
+                del self._first[key]
+                self._count.pop(key, None)
+            dropped += 1
+        return dropped
 
     def origin_of(self, entry_id: str) -> str:
         """Where a seeded entry was made: ``EARLIER_CHUNK`` or ``EARLIER_ROUND``."""
@@ -752,6 +784,11 @@ class RepeatGuard:
         self._first.setdefault(key, entry_id)
 
 
+def entry_server(entry: Any) -> str:
+    """The server a ledger entry's call was made on: its server key, else its source, else ``""``."""
+    return str(getattr(entry, "server", None) or getattr(entry, "source", None) or "")
+
+
 # Where a call a loop's guard was seeded with was made.
 EARLIER_CHUNK = "chunk"
 EARLIER_ROUND = "round"
@@ -780,6 +817,7 @@ def seeded_repeat_guard(
         *((entry, EARLIER_CHUNK) for entry in entries or ()),
     ]
     for entry, origin in seeds:
+        server = entry_server(entry)
         tool = str(getattr(entry, "tool", "") or "")
         entry_id = str(getattr(entry, "id", "") or "")
         args = getattr(entry, "args", None)
@@ -789,13 +827,13 @@ def seeded_repeat_guard(
         if getattr(entry, "repeated_of", None):
             continue
         if not bool(getattr(entry, "ok", True)):
-            guard.seed(tool, args, entry_id, failed=True, origin=origin)
+            guard.seed(tool, args, entry_id, failed=True, origin=origin, server=server)
             continue
         if not holds_its_answer(entry):
-            guard.seed(tool, args, entry_id, rerun=True, origin=origin)
+            guard.seed(tool, args, entry_id, rerun=True, origin=origin, server=server)
             continue
         output = str(getattr(entry, "output", "") or "")
-        guard.seed(tool, args, entry_id, recorded=output, origin=origin)
+        guard.seed(tool, args, entry_id, recorded=output, origin=origin, server=server)
         if entry_decompiles(entry):
             guard.note_function(listed_function(output), entry_id, output)
     return guard
@@ -1130,6 +1168,10 @@ def _record_tool(
     from maljan.agents.tool_answer_clearing import READS_EVIDENCE
 
     reads_evidence = bool((getattr(tool, "metadata", None) or {}).get(READS_EVIDENCE))
+    # Whether the tool changes nothing and answers the same (``answers_again``).
+    from maljan.agents.tool_pinning import answers_again
+
+    reads_only = answers_again(tool)
 
     def _the_room_is_gone(kwargs: dict[str, Any]) -> str | None:
         """The line a call gets once this agent's conversation has no room left.
@@ -1259,6 +1301,10 @@ def _record_tool(
         """
         if repeats is not None:
             repeats.note(name, kwargs, entry_id)
+            # A call that may change its server's state makes every earlier
+            # round's answer from that server stale.
+            if not reads_only:
+                repeats.forget_round_seeds(server or source or "")
 
     def _served_again(kwargs: dict[str, Any]) -> str | None:
         """The first entry for a call being served a second time, counted as a repeat.

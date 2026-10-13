@@ -2955,12 +2955,16 @@ def own_earlier_entries(agent: Any) -> list[LedgerEntry]:
 
 
 def repeatable_earlier_entries(agent: Any) -> list[LedgerEntry]:
-    """The agent's own earlier-round entries whose tool answers an identical call the same.
+    """The agent's own earlier-round entries whose answer still holds, for tools that answer the same.
 
     Of :func:`own_earlier_entries`, those of a tool the agent holds that its
     server marks read-only or its declaration marks read-only or idempotent
-    (``tool_pinning.answers_again``). A call of any other tool (a rename, a
-    status poll, a submission) runs again in a revision. Never raises.
+    (``tool_pinning.answers_again``), and only while no call that is not
+    read-only ran on the same server after the entry was recorded, by any
+    agent of the run (:func:`_stale_after`): a rename or a patch makes a
+    later decompile of that server's program a new question. A call of any
+    other tool (a rename, a status poll, a submission) runs again in a
+    revision. Never raises.
     """
     from maljan.agents.tool_pinning import answers_again
 
@@ -2974,7 +2978,66 @@ def repeatable_earlier_entries(agent: Any) -> list[LedgerEntry]:
         return []
     if not repeatable:
         return []
-    return [entry for entry in own_earlier_entries(agent) if entry.tool in repeatable]
+    candidates = [entry for entry in own_earlier_entries(agent) if entry.tool in repeatable]
+    if not candidates:
+        return []
+    stale = _stale_after(agent, repeatable)
+    return [entry for entry in candidates if entry.id not in stale]
+
+
+def _entry_reads_only(row: Any, repeatable: set[str]) -> bool:
+    """Whether a ledger row's call changed nothing: a tool the agent holds as read-only, or
+    one its stored source declares ``read_only``. Anything unknown may have changed state."""
+    tool = str(row.get("tool") if isinstance(row, Mapping) else getattr(row, "tool", "") or "")
+    if tool in repeatable:
+        return True
+    source = row.get("source") if isinstance(row, Mapping) else getattr(row, "source", None)
+    if not source:
+        return False
+    try:
+        from maljan.core.declared_reading import declarations
+
+        facts = declarations().declaration_for((str(source), tool))
+    except Exception:  # noqa: BLE001 — an unreadable declaration declares nothing
+        return False
+    return bool(facts is not None and getattr(facts, "read_only", False) is True)
+
+
+def _stale_after(agent: Any, repeatable: set[str]) -> set[str]:
+    """The ids of the ledger's entries after which a call that is not read-only ran on their server.
+
+    Read once, newest first, from the state the agent was briefed with: a
+    server is marked changed at the first such call met, and every entry
+    older than it on that server is stale. A call answered from the record
+    (``repeated_of``) ran nothing. Linear in the ledger.
+    """
+    from maljan.agents.evidence_recorder import entry_server
+
+    source = getattr(agent, "run_state_source", None)
+    if not isinstance(source, Mapping):
+        return set()
+
+    def _field(row: Any, name: str) -> Any:
+        return row.get(name) if isinstance(row, Mapping) else getattr(row, name, None)
+
+    rows = sorted(
+        (row for row in source.get("evidence_ledger") or ()),
+        key=lambda row: int(_field(row, "seq") or 0),
+        reverse=True,
+    )
+    changed: set[str] = set()
+    stale: set[str] = set()
+    for row in rows:
+        server = entry_server(
+            SimpleNamespace(server=_field(row, "server"), source=_field(row, "source"))
+        )
+        if server in changed:
+            stale.add(str(_field(row, "id") or ""))
+        if _field(row, "repeated_of"):
+            continue
+        if not _entry_reads_only(row, repeatable):
+            changed.add(server)
+    return stale
 
 
 def _row_id(row: Any) -> str:
