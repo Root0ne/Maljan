@@ -1239,6 +1239,11 @@ def expected_first_lookup(servers: dict[str, Any]) -> str:
 # and a pack lookup is the judge's to cite.
 REPUTATION_E = ("E1", "E3", "E4", "E5", "E6")
 STUB_SERVICE = "Stub reputation"
+# The stub's server key: the service an accepted proposal names the stub by,
+# since a probe proposes no display name for a tool whose server gives no
+# title (``core.reputation``: service, display name, then the server).
+STUB_KEY = "repstub"
+STUB_NAMES = frozenset({STUB_SERVICE, STUB_KEY})
 
 
 def scenario_e(ctx: Context) -> list[RunResult]:
@@ -1260,8 +1265,9 @@ def scenario_e(ctx: Context) -> list[RunResult]:
     results = []
     for name, servers, wires in variants:
         expected = expected_first_lookup(servers)
-        if name.startswith("e2p"):
-            # An accepted proposal is held to what the hand declaration gets.
+        if name.startswith("e2p") and expected not in STUB_NAMES:
+            # An accepted proposal is held to what the hand declaration gets:
+            # the stub asked first, whatever name the accepted facts give it.
             expected = STUB_SERVICE
         for wire in wires:
 
@@ -1270,9 +1276,7 @@ def scenario_e(ctx: Context) -> list[RunResult]:
             ) -> Gates:
                 rep = record.malware_report.get("reputation") or []
                 first = rep[0] if rep else {}
-                stub: dict[str, Any] = next(
-                    (r for r in rep if r.get("service") == STUB_SERVICE), {}
-                )
+                stub: dict[str, Any] = next((r for r in rep if r.get("service") in STUB_NAMES), {})
                 own: Gates = {
                     "first_service": (
                         (first.get("service") or "") == expected,
@@ -1280,14 +1284,14 @@ def scenario_e(ctx: Context) -> list[RunResult]:
                         + json.dumps(first, default=str)[:300],
                     ),
                 }
-                if expected == STUB_SERVICE or stub:
+                if expected in STUB_NAMES or stub:
                     own["stub_counts_read"] = (
                         stub.get("malicious") == 3 and stub.get("total") == 60,
                         f"{stub.get('malicious')}/{stub.get('total')}",
                     )
                 return own
 
-            asked = expected == STUB_SERVICE
+            asked = expected in STUB_NAMES
             result, _ = run_one(
                 ctx,
                 "e",

@@ -760,6 +760,60 @@ _DROP_ORDER = (
 )
 
 
+_WRAPPED_ORIGIN = "probe answer (the text the outputSchema's one string field wraps)"
+
+
+def _wrapping_field(schema: Any) -> str | None:
+    """The one field of an ``outputSchema`` that only wraps a text answer, or ``None``.
+
+    An object schema with a single property typed ``string`` and nothing under
+    it says no more than "the answer is a text": what an MCP server writes for
+    a tool that returns a string (``{"result": <the text>}``). Whatever the
+    field is called; any second field, a structure under it or a type other
+    than a string makes it a schema that says something, read as one.
+    """
+    if not isinstance(schema, Mapping):
+        return None
+    props = schema.get("properties")
+    if not isinstance(props, Mapping) or len(props) != 1:
+        return None
+    if schema.get("type") not in (None, "object"):
+        return None
+    name, sub = next(iter(props.items()))
+    if not isinstance(name, str) or not isinstance(sub, Mapping):
+        return None
+    declared = sub.get("type")
+    if isinstance(declared, list):
+        declared = [t for t in declared if t != "null"]
+        declared = declared[0] if len(declared) == 1 else None
+    if declared != "string":
+        return None
+    if any(key in sub for key in ("properties", "items", "anyOf", "oneOf", "allOf", "$ref")):
+        return None
+    return name
+
+
+def _wrapped_answer(schema: Any, answer: Any) -> Any:
+    """The confirmed answer inside a wrapping schema's one text field, when its text is JSON.
+
+    ``answer`` is the probe answer as :func:`_parsed` gives it: the wrapper
+    object the server returned (``{field: <text>}``), the text, or the text's
+    JSON already. ``None`` when the schema says something of its own
+    (:func:`_wrapping_field`), there is no answer, or the text is not a JSON
+    object or list: the schema is then read as before.
+    """
+    from maljan.schemas.evidence import parse_structured
+
+    field_name = _wrapping_field(schema)
+    if field_name is None or answer is None:
+        return None
+    if isinstance(answer, Mapping) and set(answer) == {field_name}:
+        answer = answer[field_name]
+    if isinstance(answer, str):
+        return parse_structured(answer)
+    return answer if isinstance(answer, Mapping | list) else None
+
+
 def propose_tool(
     definition: Any,
     *,
@@ -772,7 +826,8 @@ def propose_tool(
     ``definition`` is the MCP ``Tool`` (or a mapping of its fields);
     ``manifest_cell`` the tool's cell of the server's ``capabilities``
     manifest; ``answer`` the parsed answer of a harmless probe call, read for
-    the answer's shape when the definition has no ``outputSchema``.
+    the answer's shape when the definition has no ``outputSchema`` or one that
+    only wraps a text whose answer is JSON (:func:`_wrapped_answer`).
     ``sandbox_source`` says the server is declared a sandbox source (its
     ``roles`` hold :data:`~maljan.core.tool_declarations.SANDBOX_ROLE`): only
     then are its rows read by the sandbox shape test, since rows shaped like
@@ -817,7 +872,14 @@ def propose_tool(
 
     # The answer.
     output_schema = _get(definition, "outputSchema")
-    if isinstance(output_schema, Mapping) and output_schema:
+    wrapped = _wrapped_answer(output_schema, answer)
+    if wrapped is not None:
+        # The schema only wraps a text, and the confirmed answer's text is
+        # JSON: the answer is read, as the run reads it (the text's JSON wins
+        # over a structure that only wraps it, ``schemas.evidence``).
+        answer = wrapped
+        reading = _read_answer(shape_of_value(answer), _WRAPPED_ORIGIN, LOW)
+    elif isinstance(output_schema, Mapping) and output_schema:
         reading = _read_answer(shape_of_schema(output_schema), "outputSchema", MEDIUM)
     elif answer is not None and not isinstance(answer, str):
         reading = _read_answer(shape_of_value(answer), "probe answer", LOW)
