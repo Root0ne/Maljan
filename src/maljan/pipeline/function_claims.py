@@ -30,7 +30,8 @@ name, as the API catalogue compares them
 (``analysis.api_capability_db.canonical_name``); strings by the citation
 check's own whole-value reading (``EntryTexts``). A quoted value is read as a
 claimed string only when it is a sample string some entry holds as data: a
-strings tool's answer, a string emulator's, the blob decoder's, or the index's rows.
+strings tool's answer, an attached string emulator's (named by its declared
+display name), the blob decoder's, or the index's rows.
 
 A value none of them holds is stated to the analyst, once, through the
 validation turn every other question goes through: the claim, the function
@@ -143,9 +144,38 @@ CALLEES_UNKNOWN = (
     "artefact of their own, so the functions reachable from {address} are not all known"
 )
 NOT_A_SAMPLE_STRING = (
-    'no: "{value}" is no string a strings tool, a string emulator, the blob decoder or the '
+    'no: "{value}" is no string a strings tool, {emulators}, the blob decoder or the '
     "function index holds"
 )
+# ``{emulators}`` when no string emulator is attached: the neutral words.
+NO_EMULATOR_NAMED = "a string emulator"
+# The declared kind of a string emulator's answer.
+_EMULATOR_KIND = "emulated_strings"
+
+
+def attached_emulators() -> str:
+    """The attached string emulators by their declared display names, for ``{emulators}``.
+
+    Every enabled tool of the emulated-strings kind, each distinct name once,
+    in declaration order ("FLOSS" for a built-in run); the neutral words when
+    none is attached or none declares a name. Never raises: unreadable
+    declarations give the neutral words, and are logged.
+    """
+    from maljan.core.declared_reading import declarations
+
+    try:
+        held = declarations().tools_of_kind(_EMULATOR_KIND, enabled_only=True)
+    except Exception as exc:  # noqa: BLE001 — a name is never worth a lost check
+        from maljan.core.logger import logger
+
+        logger.debug("function claims: the emulators were not read (%s).", type(exc).__name__)
+        return NO_EMULATOR_NAMED
+    names = dict.fromkeys(
+        str(facts.display_name).strip() for _source, _tool, facts in held if facts.display_name
+    )
+    return ", ".join(name for name in names if name) or NO_EMULATOR_NAMED
+
+
 FACTS_UNREAD = "no: the function facts could not be read ({kind})"
 # What the reach does not follow, said with every question.
 NOT_FOLLOWED = (
@@ -430,6 +460,8 @@ class FunctionFacts:
     # The sample strings as data: the strings tools' answers, an emulator's, the blob
     # decoder's, and the index rows' strings.
     strings: EntryTexts = field(default_factory=EntryTexts)
+    # The attached string emulators, as the function check names them.
+    emulators: str = NO_EMULATOR_NAMED
     # The index rows' strings, each whole, lower-cased.
     index_strings: frozenset[str] = frozenset()
     # Every text of the rows, the placed values and the index strings, read
@@ -593,7 +625,7 @@ def function_facts(
     from maljan.tools.artefact_index import row_line
 
     found = merged_artefacts(artefacts, function_artefacts(entries))
-    facts = FunctionFacts()
+    facts = FunctionFacts(emulators=attached_emulators())
     run_names: set[str] = set()
     sources = [entry for entry in [*pack_entries, *entries] if entry_is_strings_source(entry)]
     for entry in entries:
@@ -1313,7 +1345,10 @@ def check_function_claims(
                 claimed.append(value)
             else:
                 out.not_checked.append(
-                    f"claim {number}: {NOT_A_SAMPLE_STRING.format(value=safe_finding_value(value))}"
+                    f"claim {number}: "
+                    + NOT_A_SAMPLE_STRING.format(
+                        value=safe_finding_value(value), emulators=facts.emulators
+                    )
                 )
         unheld = [
             (value, api)

@@ -2431,7 +2431,12 @@ PROMPTS: dict[str, str] = {
     ),
     "claim naming a call its function's facts do not hold": _function_claim_question(),
     "claim naming a string no strings source holds": function_claims.NOT_A_SAMPLE_STRING.format(
-        value="a value"
+        value="a value", emulators=function_claims.attached_emulators()
+    ),
+    "claim naming a string no strings source holds, no emulator attached": (
+        function_claims.NOT_A_SAMPLE_STRING.format(
+            value="a value", emulators=function_claims.NO_EMULATOR_NAMED
+        )
     ),
     "network flows' reputation paragraph": _network_reputation_paragraph(),
     "judge's question for a Malware verdict nothing examined": (_unsupported_malware_question()),

@@ -7,12 +7,19 @@
   matcher only where the rows hold them under its name.
 * The Markdown capability tables and the ATT&CK table's note name the tool the
   capability table's title names, the shipped one as before.
+* The narrative's rule pointer is read from the rule tables the report holds,
+  "sigma/yara" for a built-in run as before, a swapped tool as itself.
+* The function check names the attached string emulators by their declared
+  display names ("FLOSS" for a built-in run, as before), neutrally when none is
+  attached.
 """
 
 from __future__ import annotations
 
 import json
 from types import SimpleNamespace
+
+import pytest
 
 from maljan.agents.function_map import build_function_map, function_artefacts, function_map_block
 from maljan.core.declared_reading import shipped_by_name, stored_record
@@ -80,3 +87,41 @@ def test_the_capability_tables_name_the_tool_their_title_names() -> None:
     assert _capability_owner(_report("capa capabilities")) == "capa's"
     assert _capability_owner(_report("RuleBench capabilities")) == "RuleBench's"
     assert _capability_owner(_report("Capabilities")) == "a capability rule tool's"
+
+
+def _rule_report(**titles: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        sections=[SimpleNamespace(key=key, title=title) for key, title in titles.items()]
+    )
+
+
+def test_the_narrative_rule_pointer_is_read_from_the_reports_rule_tables() -> None:
+    from maljan.reporting import narrative_agent
+
+    assert narrative_agent.rule_pointer() == "a sigma/yara pointer"
+    assert narrative_agent.system_prompt() == narrative_agent._SYSTEM_PROMPT
+    assert "or a sigma/yara pointer. Do NOT " in narrative_agent._SYSTEM_PROMPT
+    shipped = _rule_report(sigma_matches="Sigma rule matches", yara_matches="YARA rule matches")
+    assert narrative_agent.system_prompt(shipped) == narrative_agent._SYSTEM_PROMPT
+    swapped = _rule_report(sigma_matches="Hayabusa rule matches")
+    assert narrative_agent.rule_pointer(swapped) == "a hayabusa/yara pointer"
+    assert "or a hayabusa/yara pointer. Do NOT " in narrative_agent.system_prompt(swapped)
+
+
+def test_the_function_check_names_the_attached_emulator(monkeypatch: pytest.MonkeyPatch) -> None:
+    from maljan.core import declared_reading
+    from maljan.pipeline import function_claims as fc
+
+    assert fc.attached_emulators() == "FLOSS"
+    built_in = fc.NOT_A_SAMPLE_STRING.format(value="v", emulators=fc.attached_emulators())
+    assert built_in == (
+        'no: "v" is no string a strings tool, FLOSS, the blob decoder or the function index holds'
+    )
+    for held, said in (
+        ([("mcp:emu", "unwind", SimpleNamespace(display_name="Unwinder"))], "Unwinder"),
+        ([], fc.NO_EMULATOR_NAMED),
+        ([("mcp:emu", "unwind", SimpleNamespace(display_name=""))], fc.NO_EMULATOR_NAMED),
+    ):
+        fake = SimpleNamespace(tools_of_kind=lambda kind, enabled_only=False, h=held: h)
+        monkeypatch.setattr(declared_reading, "declarations", lambda settings=None, f=fake: f)
+        assert fc.attached_emulators() == said

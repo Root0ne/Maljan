@@ -151,7 +151,55 @@ from offline backups.",
 # ---------------------------------------------------------------------------
 
 
-_SYSTEM_PROMPT = (
+# Where rule 5 names the rule tables a detection may point at (:func:`system_prompt`).
+_RULE_POINTER = "\x00rule pointer\x00"
+# Each rule-table kind's word when no tool of the kind is shipped or tabled.
+_NEUTRAL_RULE_WORDS: dict[str, str] = {
+    "event_rules": "event-rule",
+    "signature_rules": "signature-rule",
+}
+
+
+def _shipped_rule_word(kind: str) -> str:
+    """The shipped tool of ``kind``'s declared display name, lower-cased, else the kind's word."""
+    from maljan.core.declared_reading import shipped_by_name
+
+    named = next(
+        (f.display_name for f in shipped_by_name().values() if f.kind == kind and f.display_name),
+        "",
+    )
+    return str(named).lower() or _NEUTRAL_RULE_WORDS[kind]
+
+
+def rule_pointer(report: Any = None) -> str:
+    """The rule pointer rule 5 offers, read from the rule tables ``report`` holds.
+
+    One word per rule-table kind (event rules, then signature rules): the
+    tool the report's table of that kind is titled by, lower-cased, so a tool
+    swapped in for a shipped one is named as itself; a kind the report holds
+    no table of keeps the shipped tool's word ("sigma/yara" for a built-in
+    run, as before).
+    """
+    from maljan.reporting.ledger_report import RULE_MATCHES_TITLE, RULE_TABLE_OF_KIND, titled_tool
+
+    titles = {
+        str(getattr(section, "key", "")): getattr(section, "title", "")
+        for section in getattr(report, "sections", None) or ()
+    }
+    words = [
+        titled_tool(titles.get(key), RULE_MATCHES_TITLE).lower() or _shipped_rule_word(kind)
+        for kind, key in RULE_TABLE_OF_KIND.items()
+    ]
+    pointer = "/".join(dict.fromkeys(words))
+    return f"{'an' if pointer[:1] in 'aeiou' else 'a'} {pointer} pointer"
+
+
+def system_prompt(report: Any = None) -> str:
+    """The narrative's system prompt, its rule pointer read from ``report``'s rule tables."""
+    return _SYSTEM_PROMPT_TEMPLATE.replace(_RULE_POINTER, rule_pointer(report))
+
+
+_SYSTEM_PROMPT_TEMPLATE = (
     "You are a senior malware reverse engineer producing a CTI analyst report. "
     "Write in calm, technical prose suitable for a SOC handover. "
     "STRICT RULES:\n"
@@ -185,7 +233,7 @@ _SYSTEM_PROMPT = (
     "the 'Published ATT&CK techniques' list above (null only if none applies)\n"
     "   - `detection`: CONCRETE technical detection guidance — name the "
     "specific API call, registry key, telemetry source (e.g. Sysmon EventID 3 "
-    "for network, EventID 13 for registry), or an event-rule or signature-rule pointer. Do NOT "
+    "for network, EventID 13 for registry), or " + _RULE_POINTER + ". Do NOT "
     "write generic advice like 'monitor for suspicious activity'; cite the "
     "exact observable.\n"
     "   Each entry is a distinct, non-overlapping action; do not duplicate an "
@@ -201,6 +249,8 @@ _SYSTEM_PROMPT = (
     + "\nFor example (the shape only; write what this run's evidence supports):\n"
     + EXAMPLE_OBJECT
 )
+# The prompt with the shipped rule pointer: a report holding no rule table.
+_SYSTEM_PROMPT = system_prompt()
 
 
 _LIST_FIELDS = ("key_findings", "defensive_recommendations")
@@ -1028,7 +1078,7 @@ class NarrativeAgent:
         if run_state:
             body = f"{with_run_state('', run_state)}\n\n{body}"
         return [
-            SystemMessage(content=_SYSTEM_PROMPT),
+            SystemMessage(content=system_prompt(report)),
             HumanMessage(content=body),
         ]
 
