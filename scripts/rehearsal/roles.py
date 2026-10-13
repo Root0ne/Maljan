@@ -308,6 +308,7 @@ class Brain:
         loop_steps: int | None = None,
         slow_seconds: float | None = None,
         deadline_in: str | None = None,
+        fill_from_results: bool = False,
     ) -> None:
         if scenario not in SCENARIOS:
             raise ValueError(f"unknown scenario {scenario!r}; one of {sorted(SCENARIOS)}")
@@ -317,6 +318,9 @@ class Brain:
             )
         self.scenario = scenario
         self.deadline_in = deadline_in or ""
+        # Required arguments with no rule of their own are filled from the
+        # earlier tool answers of the same request (``_fillable``).
+        self.fill_from_results = fill_from_results
         self.slow_roles = STAGE_ROLES[deadline_in] if deadline_in else frozenset()
         self.loop_steps = (
             loop_steps if loop_steps is not None else (12 if scenario == "long_loop" else 2)
@@ -493,7 +497,7 @@ class Brain:
         wants_tools = bool(request.tools) and calls_made < self.loop_steps and not tools_withheld
         nudged = markers().no_tool_nudge in last.text and not tools_withheld
         if wants_tools or (request.tools and nudged):
-            call = _next_call(request, facts, calls_made)
+            call = _next_call(request, facts, calls_made, self.fill_from_results)
             if call is not None:
                 return wire.Reply(
                     thinking=f"Step {calls_made + 1}: reading {call.name}.",
@@ -538,7 +542,11 @@ class Brain:
                         used.add(ident)
                         techniques.add(technique)
                         break
-        plain = [i for i in own if i not in used][:2] + [i for i in pack if i not in used][:1]
+        mine = [i for i in own if i not in used]
+        if self.fill_from_results:
+            # A model following its answers cites what they found before what failed.
+            mine.sort(key=lambda i: bool(_FAILED.match(own[i].split(": ", 1)[-1])))
+        plain = mine[:2] + [i for i in pack if i not in used][:1]
         for ident in plain:
             text = own.get(ident) or pack[ident]
             blocks.append(
@@ -910,8 +918,199 @@ def _reports_part(request: wire.Request) -> str:
     return request.last_user_text
 
 
-def _fillable(tool: dict[str, Any], facts: _Facts) -> dict[str, Any] | None:
-    """Arguments for ``tool`` this run can give it, or ``None`` when one cannot be given."""
+# An argument naming a place in the code: an address, a location or a function.
+_PLACE_WORDS = re.compile(r"addr|location|func", re.IGNORECASE)
+# A place as a tool's answer spells it: a hex address, or a name a disassembler
+# gives a function or label it found no name for.
+_PLACE_VALUE = re.compile(r"\b0x[0-9A-Fa-f]{3,16}\b|\b(?:FUN_|fcn\.|sub_)[0-9A-Fa-f]{4,16}\b")
+# The evidence id the product writes before a tool's answer, and the run-state
+# block it may append after one; neither is the tool's own text.
+_RESULT_HEAD = re.compile(r"^\s*\[ev_\d{4,}\]\s*")
+_RESULT_TAIL = "\n\n=== "
+# The product's own envelope for a tool call that failed.
+_FAILED = re.compile(r'^\s*\{\s*"error"\s*:')
+# A tool whose description says it changes what the server holds (closes,
+# renames, sets, writes): a model reading a sample leaves it alone.
+_CHANGES_STATE = re.compile(
+    r"^\s*(?:\[[A-Z]+\]\s*)?(?:this tool\s+|it\s+)?(?:close|rename|set|add|delete|remove|write|"
+    r"save|modify|select|change|update)s?\b",
+    re.IGNORECASE,
+)
+# A leading category tag that says the tool changes what the server holds.
+_STATE_TAG = re.compile(r"^\s*\[(?:MODIFY|WRITE|EDIT|DELETE)\]", re.IGNORECASE)
+# A tool that lists the program's functions or entry points: its name says
+# so, or its description's first sentence opens by listing them. Its answers
+# hold the places the server itself knows as function starts.
+_LISTS_FUNCTIONS = re.compile(r"\bfunctions\b|\bentry\s?points\b", re.IGNORECASE)
+_LISTING_SENTENCE = re.compile(
+    r"^\s*(?:\[[A-Z]+\]\s*)?(?:lists?|shows?|displays?|enumerates?|returns?)\b[^.]*?"
+    r"\b(?:functions|entry\s?points)\b",
+    re.IGNORECASE,
+)
+
+
+def _changes_state(tool: dict[str, Any]) -> bool:
+    """Whether ``tool`` says it changes what its server holds.
+
+    The server's own hints decide when the request carries them
+    (``readOnlyHint``, ``destructiveHint``); otherwise its description's
+    category tag or first verb does.
+    """
+    hints = tool.get("annotations") or {}
+    if hints.get("destructiveHint") is True or hints.get("readOnlyHint") is False:
+        return True
+    if hints.get("readOnlyHint") is True:
+        return False
+    description = str(tool.get("description") or "")
+    return bool(_STATE_TAG.match(description) or _CHANGES_STATE.match(description))
+
+
+def _takes_place(tool: dict[str, Any]) -> bool:
+    """Whether ``tool`` needs a place in the code (an address, a location, a function)."""
+    required = (tool.get("schema") or {}).get("required") or []
+    return any(_PLACE_WORDS.search(str(name)) for name in required)
+
+
+def _lists_functions(tool: dict[str, Any]) -> bool:
+    """Whether ``tool`` lists the program's functions or entry points, needing no place."""
+    name = str(tool.get("name") or "").replace("_", " ")
+    description = str(tool.get("description") or "")
+    says = _LISTS_FUNCTIONS.search(name) or _LISTING_SENTENCE.match(description)
+    return bool(says) and not _takes_place(tool)
+
+
+def _answer_text(result: str) -> str:
+    """A tool answer as the tool wrote it: the product's id and run state taken off."""
+    return _RESULT_HEAD.sub("", result, count=1).split(_RESULT_TAIL, 1)[0]
+
+
+def _answer_json(text: str) -> Any:
+    """The JSON value a tool answer starts with, or ``None``."""
+    start = min((i for i in (text.find("{"), text.find("[")) if i >= 0), default=-1)
+    if start < 0:
+        return None
+    try:
+        value, _end = json.JSONDecoder().raw_decode(text[start:])
+    except ValueError:
+        return None
+    return value
+
+
+def _value_under(value: Any, keys: tuple[str, ...]) -> str:
+    """The first non-empty scalar held under one of ``keys`` in ``value``, shallowest first."""
+    pending = [value]
+    while pending:
+        item = pending.pop(0)
+        if isinstance(item, dict):
+            for key in keys:
+                found = item.get(key)
+                if isinstance(found, (str, int, float)) and not isinstance(found, bool):
+                    if str(found).strip():
+                        return str(found)
+            pending.extend(item.values())
+        elif isinstance(item, list):
+            pending.extend(item)
+    return ""
+
+
+# A key whose place is a bound or a base, never where a function starts.
+_NOT_A_START = re.compile(r"base|size|end|length|count|total|limit", re.IGNORECASE)
+
+
+def _listed_places(text: str) -> list[str]:
+    """The places a listing answer gives as where something starts, in order.
+
+    A JSON answer gives the places held under any key but one naming a base
+    or a bound (an image base is no function); a text answer gives every
+    place it spells.
+    """
+    value = _answer_json(text)
+    if value is None:
+        return [m.group(0) for m in _PLACE_VALUE.finditer(text)]
+    out: list[str] = []
+    pending: list[tuple[str, Any]] = [("", value)]
+    while pending:
+        key, item = pending.pop(0)
+        if isinstance(item, dict):
+            pending.extend((str(k), v) for k, v in item.items())
+        elif isinstance(item, list):
+            pending.extend((key, v) for v in item)
+        elif isinstance(item, str) and not _NOT_A_START.search(key):
+            out.extend(m.group(0) for m in _PLACE_VALUE.finditer(item))
+    return out
+
+
+def _from_answers(
+    name: str,
+    prop: dict[str, Any],
+    answers: list[str],
+    spent: frozenset[str] = frozenset(),
+    starts: tuple[str, ...] = (),
+) -> str:
+    """A value for a required string argument, read from the earlier answers, or empty.
+
+    An argument whose name says it is a place in the code takes the first such
+    place of the latest answer that holds one; any other takes the value under
+    the same key in the latest answer that holds it, else under its last word;
+    an argument only its description calls a place takes a place last. Read
+    from the request's own tool answers, newest first, never from a tool's name.
+    A place in ``spent`` (one an earlier call failed at) is not taken again.
+    ``starts`` are the answers of calls that listed the program's functions or
+    entry points: a place is taken from them before any other answer, as a
+    model reads a function where its server says one starts.
+    """
+    lowered = name.lower()
+    words = tuple(dict.fromkeys((name, lowered, re.split(r"[_\W]+", lowered)[-1])))
+
+    def place() -> str:
+        for text in starts:
+            for found in _listed_places(text):
+                if found not in spent:
+                    return found
+        for text in answers:
+            for match in _PLACE_VALUE.finditer(text):
+                if match.group(0) not in spent:
+                    return match.group(0)
+        return ""
+
+    if _PLACE_WORDS.search(lowered):
+        return place()
+    for word in words:
+        for text in answers:
+            held = _value_under(_answer_json(text), (word,))
+            if held:
+                return held
+            line = re.search(rf'(?im)^\s*"?{re.escape(word)}"?\s*[:=]\s*"?([^\s",]+)', text)
+            if line:
+                return line.group(1)
+    if _PLACE_WORDS.search(str(prop.get("description") or "")):
+        return place()
+    return ""
+
+
+def _fillable(
+    tool: dict[str, Any],
+    facts: _Facts,
+    answers: list[str] | None = None,
+    spent: frozenset[Any] = frozenset(),
+    starts: tuple[str, ...] = (),
+) -> dict[str, Any] | None:
+    """Arguments for ``tool`` this run can give it, or ``None`` when one cannot be given.
+
+    ``answers`` (newest first) are the earlier tool answers of the request: a
+    required argument no rule below covers is read from them
+    (``_from_answers``) when they are given, and makes the tool uncallable
+    when they are not or hold nothing for it. ``spent`` holds the places an
+    earlier call failed at, each a value or a ``(tool, value)`` pair: a pair
+    keeps the place from that tool only, as a model tries another tool at a
+    place where one failed.
+    """
+    own = str(tool.get("name") or "")
+    spent = frozenset(
+        item[1] if isinstance(item, tuple) else item
+        for item in spent
+        if not isinstance(item, tuple) or item[0] == own
+    )
     schema = tool.get("schema") or {}
     properties = schema.get("properties") or {}
     required = list(schema.get("required") or [])
@@ -939,7 +1138,13 @@ def _fillable(tool: dict[str, Any], facts: _Facts) -> dict[str, Any] | None:
         elif kind == "integer":
             value = 0
         else:
-            return None
+            value = (
+                _from_answers(name, properties.get(name) or {}, answers, spent, starts)
+                if answers
+                else ""
+            )
+            if not value:
+                return None
         args[name] = [value] if kind == "array" else value
     return args
 
@@ -955,15 +1160,97 @@ def _varied(args: dict[str, Any], tool: dict[str, Any], step: int) -> dict[str, 
     return args
 
 
-def _next_call(request: wire.Request, facts: _Facts, step: int) -> wire.ToolCall | None:
+def _lead(
+    request: wire.Request,
+    tools: dict[str, dict[str, Any]],
+    facts: _Facts,
+    answers: list[str],
+    order: list[str],
+    spent: frozenset[Any] = frozenset(),
+    starts: tuple[str, ...] = (),
+) -> wire.ToolCall | None:
+    """The call the earlier answers lead to, as a model following them would make it.
+
+    First the tool the latest answer's remediation names, when it is offered;
+    then, while a tool needing a place waits and no answer has listed the
+    program's functions yet, a tool that lists them; then the first tool only
+    the answers make callable (an argument read from them), each with
+    arguments it was not yet called with. ``None`` leaves the choice to the
+    rotation.
+    """
+    made = {(c.name, json.dumps(c.args, sort_keys=True)) for c in request.tool_calls_made}
+
+    def fresh(name: str, args: dict[str, Any] | None) -> wire.ToolCall | None:
+        if args is None or (name, json.dumps(args, sort_keys=True)) in made:
+            return None
+        return wire.ToolCall(name=name, args=args)
+
+    remedy = _value_under(_answer_json(answers[0]), ("remediation",))
+    for name in order:
+        if remedy and not _NEVER_CALL.match(name) and re.search(rf"\b{re.escape(name)}\b", remedy):
+            call = fresh(name, _fillable(tools[name], facts, answers, spent, starts))
+            if call is not None:
+                return call
+    usable = [name for name in order if not _NEVER_CALL.match(name)]
+    waiting = any(_takes_place(tools[n]) and _fillable(tools[n], facts) is None for n in usable)
+    if waiting and not any(_listed_places(text) for text in starts):
+        called = {c.name for c in request.tool_calls_made}
+        for name in usable:
+            if name not in called and _lists_functions(tools[name]):
+                call = fresh(name, _fillable(tools[name], facts))
+                if call is not None:
+                    return call
+    for name in usable:
+        if _fillable(tools[name], facts) is not None:
+            continue
+        call = fresh(name, _fillable(tools[name], facts, answers, spent, starts))
+        if call is not None:
+            return call
+    return None
+
+
+def _next_call(
+    request: wire.Request, facts: _Facts, step: int, fill_from_results: bool = False
+) -> wire.ToolCall | None:
     tools = {str(tool.get("name") or ""): tool for tool in request.tools}
+    answers = (
+        [_answer_text(r.text) for r in reversed(request.tool_results)]
+        if fill_from_results
+        else None
+    )
     order = [name for name in _TOOL_PREFERENCE if name in tools]
     order += sorted(name for name in tools if name not in order)
+    spent: frozenset[Any] = frozenset()
+    starts: tuple[str, ...] = ()
+    if answers is not None:
+        # Following its answers, a model reads and leaves the server's state
+        # alone, and does not go back to a place a call already failed at.
+        order = [n for n in order if not _changes_state(tools[n])]
+        said = {r.id: _answer_text(r.text) for r in request.tool_results}
+        spent = frozenset(
+            (call.name, str(value))
+            for call in request.tool_calls_made
+            if _FAILED.match(said.get(call.id, ""))
+            for value in call.args.values()
+            if isinstance(value, str)
+        )
+        # The answers that listed the program's functions, newest first.
+        starts = tuple(
+            said[call.id]
+            for call in reversed(request.tool_calls_made)
+            if call.id in said
+            and not _FAILED.match(said[call.id])
+            and _lists_functions(tools.get(call.name) or {"name": call.name})
+        )
+    if answers:
+        lead = _lead(request, tools, facts, answers, order, spent, starts)
+        if lead is not None:
+            return lead
     candidates: list[wire.ToolCall] = []
     for name in order:
         if _NEVER_CALL.match(name):
             continue
-        args = _fillable(tools[name], facts)
+        args = _fillable(tools[name], facts, answers, spent, starts)
         if args is not None:
             candidates.append(wire.ToolCall(name=name, args=args))
     if not candidates:
