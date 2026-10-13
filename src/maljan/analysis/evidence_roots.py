@@ -1426,7 +1426,7 @@ def _read_entry(entry: Any, found: EntryRoots, joins: _Joins) -> EntryRoots:
         if facts is not None and facts.rows and facts.places:
             _read_declared_rows(found, facts, data, tool)
         placed = bool(found.roots)
-        for key in () if placed else address_arguments(kind_free_facts(entry)):
+        for key in () if placed else address_arguments(kind_free_facts(entry), args):
             if args.get(key) not in (None, "") and _address_root(found, args[key]):
                 placed = True
                 break

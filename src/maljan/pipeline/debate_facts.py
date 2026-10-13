@@ -735,7 +735,7 @@ def tools_taking_an_address(tools: Iterable[Any]) -> list[str]:
         fields = getattr(getattr(tool, "args_schema", None), "model_fields", None)
         if not isinstance(fields, dict):
             continue
-        taking = {name.lower() for name in address_arguments(declared_facts_of(tool))}
+        taking = {name.lower() for name in address_arguments(declared_facts_of(tool), fields)}
         if any(str(field).strip().lower() in taking for field in fields):
             names.append(str(getattr(tool, "name", "") or ""))
     return [n for n in names if n]

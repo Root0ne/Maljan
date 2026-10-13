@@ -252,7 +252,49 @@ ADDRESS_ARGUMENTS: tuple[str, ...] = (
 )
 
 
-def address_arguments(facts: Any) -> tuple[str, ...]:
+# Words that make an argument named for an address a bound, a size or a base
+# rather than the one place a call asks about (``end_address``, ``max_addr``,
+# ``base_address``, ``address_count``): such an argument is never read as one.
+_NOT_A_PLACE_WORDS = frozenset(
+    {
+        "base",
+        "bound",
+        "count",
+        "end",
+        "last",
+        "len",
+        "length",
+        "limit",
+        "max",
+        "min",
+        "range",
+        "size",
+        "space",
+        "stop",
+        "until",
+    }
+)
+_CAMEL_RE = re.compile(r"([a-z0-9])([A-Z])")
+_WORD_SPLIT_RE = re.compile(r"[^a-z0-9]+")
+
+
+def named_as_address(name: Any) -> bool:
+    """Whether an argument's name says it takes the one address a call asks about.
+
+    One of :data:`ADDRESS_ARGUMENTS`, or a name one of whose words is ``addr``
+    or ``address`` (``name_or_address``, ``func_addr``, ``targetAddress``)
+    and none of whose words makes it a bound, a size or a base
+    (``end_address``, ``base_address``). Read from the name alone, whatever
+    tool it belongs to.
+    """
+    text = str(name or "")
+    if text.lower() in ADDRESS_ARGUMENTS:
+        return True
+    words = {w for w in _WORD_SPLIT_RE.split(_CAMEL_RE.sub(r"\1_\2", text).lower()) if w}
+    return bool({"addr", "address"} & words) and not (_NOT_A_PLACE_WORDS & words)
+
+
+def address_arguments(facts: Any, offered: Iterable[Any] = ()) -> tuple[str, ...]:
     """The arguments a call gives an address in, in the order they are read.
 
     The one the tool declares for the ``address`` role
@@ -260,13 +302,21 @@ def address_arguments(facts: Any) -> tuple[str, ...]:
     declaration names the argument a tool's own name for an address has
     (``offset_va``), and a built-in's declaration does not name every
     argument that takes one (a byte range's ``start_address``), so the shared
-    list still follows it.
+    list still follows it. Then each of ``offered`` (the call's own argument
+    names, or a tool schema's) that is named for an address
+    (:func:`named_as_address`), in its own order: a tool nobody declared
+    whose decompiler takes ``name_or_address`` is read as the one that
+    declares it.
     """
     declared = getattr(facts, "arguments", None)
     held = str(declared.get("address") or "") if isinstance(declared, Mapping) else ""
-    if not held:
-        return ADDRESS_ARGUMENTS
-    return (held, *(name for name in ADDRESS_ARGUMENTS if name != held))
+    known = ADDRESS_ARGUMENTS if not held else (held, *(n for n in ADDRESS_ARGUMENTS if n != held))
+    extra: list[str] = []
+    for name in offered:
+        text = str(name or "")
+        if text and text not in known and text not in extra and named_as_address(text):
+            extra.append(text)
+    return (*known, *extra) if extra else known
 
 
 # The prefixes a decompiler writes before an address when it names a function
@@ -400,8 +450,10 @@ def entry_address_arguments(entry: Any) -> tuple[str, ...]:
     """The arguments an entry's call gave an address in (:func:`address_arguments`).
 
     ``arguments`` is read without a kind, so a record that names none still
-    gives its declared address argument (``declared_reading.kind_free_facts``).
+    gives its declared address argument (``declared_reading.kind_free_facts``);
+    the call's own arguments named for an address follow.
     """
     from maljan.core.declared_reading import kind_free_facts
 
-    return address_arguments(kind_free_facts(entry))
+    args = _field(entry, "args")
+    return address_arguments(kind_free_facts(entry), args if isinstance(args, Mapping) else ())
