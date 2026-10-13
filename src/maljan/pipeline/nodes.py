@@ -1603,22 +1603,61 @@ def _pack_left_out(entries: list[Any], container: ServiceContainer) -> dict[str,
     }
 
 
-def _analysis_server_environ(container: ServiceContainer) -> dict[str, str]:
-    """This process's environment with the analysis server's own ``env`` map over it.
+# The renderer of the pack's decoded-strings step, whose server's environment
+# the in-process decoder and the pack's staging read (``FlossSettings``).
+_DECODER_RENDERER = "emulated_strings"
 
-    What the pack's FLOSS step reads ``MALJAN_FLOSS_PATH`` and the staging base
-    from, so an operator who named the build or the base in the server's
+
+def _decoder_server_key(servers: Mapping[str, Any], steps: Sequence[Any]) -> str:
+    """The key of the server the pack's decoded-strings step declares, ``""`` for none.
+
+    The step's own ``server``, else the first server of ``mcp.servers``, in
+    its order, whose tool declarations name the tool the step calls: the
+    server whose tool the in-process step stands in for. With the step left
+    out of ``steps`` (switched off), its shipped declaration is read, since
+    the pack's staging reads the same environment.
+    """
+    from maljan.core.pack_steps import default_steps
+
+    def _decoder(held: Sequence[Any]) -> Any:
+        return next((s for s in held if getattr(s, "renderer", "") == _DECODER_RENDERER), None)
+
+    step = _decoder(steps) or _decoder(default_steps())
+    if step is None:
+        return ""
+    if step.server:
+        return str(step.server)
+    return next(
+        (
+            str(key)
+            for key, server in servers.items()
+            if step.called in (getattr(server, "tool_facts", None) or {})
+        ),
+        "",
+    )
+
+
+def _decoder_server_environ(container: ServiceContainer, steps: Sequence[Any]) -> dict[str, str]:
+    """This process's environment with the decoder step's server's own ``env`` map over it.
+
+    What the pack's decoded-strings step reads its build path and the staging
+    base from, so an operator who named the build or the base in the server's
     settings gets the same build and the same directory from the pack as from
-    the tool. Never raises: a server entry that cannot be read leaves this
-    process's environment.
+    the tool (:func:`_decoder_server_key`). Never raises: a server entry that
+    cannot be read, or no server declaring the step's tool, leaves this
+    process's environment, and is logged.
     """
     environ = dict(os.environ)
     try:
-        server = container.config.mcp.servers.get("analysis")
+        servers = container.config.mcp.servers
+        key = _decoder_server_key(servers, steps)
+        server = servers.get(key) if key else None
         extra = dict(getattr(server, "env", None) or {})
     except Exception as exc:  # noqa: BLE001 — an unreadable entry adds nothing
-        logger.debug("triage pack: the analysis server's env could not be read (%s).", exc)
+        logger.debug("triage pack: the decoder server's env could not be read (%s).", exc)
         return environ
+    if not key:
+        logger.debug("triage pack: no server declares the decoder step's tool; own env read.")
     environ.update({str(k): str(v) for k, v in extra.items()})
     return environ
 
@@ -1688,6 +1727,7 @@ def make_triage_node(
         from maljan.core.pack_steps import effective_steps
         from maljan.providers import sandbox_tools
 
+        steps = effective_steps(getattr(cfg.triage, "steps", None) or ())
         inputs = PackInputs(
             sample_path=path,
             sha256=str(state.get("file_hash") or ""),
@@ -1705,9 +1745,9 @@ def make_triage_node(
             budget_s=float(cfg.triage.budget_seconds),
             memory_floor_bytes=int(cfg.triage.memory_floor_mb) * 1024 * 1024,
             floss=FlossSettings(
-                environ=_analysis_server_environ(container), job_id=container.job_key()
+                environ=_decoder_server_environ(container, steps), job_id=container.job_key()
             ),
-            steps=effective_steps(getattr(cfg.triage, "steps", None) or ()),
+            steps=steps,
         )
 
         def _elapsed_ms() -> int:

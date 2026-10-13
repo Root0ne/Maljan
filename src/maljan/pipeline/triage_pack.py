@@ -43,9 +43,9 @@ record every reader reads (``core.reputation``).
 A PE's decoded strings come after every other tool. FLOSS runs through
 ``maljan.tools.emulated_strings`` — the function the sidecar's ``floss`` tool
 serves, with its pinned build, its wall clock and its memory limit — with the
-analysis server's ``env`` over this process's environment — a build named
-there is the one both find — and a directory inside this job's staging
-directory, so nothing is left that the job's teardown does not remove. It
+``env`` of the server whose tool the step stands in for over this process's
+environment — a build named there is the one both find — and a directory inside
+this job's staging directory, so nothing is left that the job's teardown does not remove. It
 comes after them so that every id issued before it is the id it was before
 the step existed.
 
@@ -464,7 +464,7 @@ class CapaSettings:
 class FlossSettings:
     """What the decoded-strings step runs FLOSS with.
 
-    ``environ`` is the analysis server's environment — this process's
+    ``environ`` is the decoder step's server's environment — this process's
     overlaid with the server's own ``env`` map — so ``MALJAN_FLOSS_PATH`` and
     ``MALJAN_STAGING_DIR`` mean here what they mean to the server; ``None``
     reads this process's. ``job_id`` names the staging directory the run's
