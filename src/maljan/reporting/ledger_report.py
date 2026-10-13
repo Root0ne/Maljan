@@ -540,6 +540,22 @@ RULE_MATCHES_TITLE = "{tool} rule matches"
 CAPABILITIES_TITLE = "{tool} capabilities"
 
 
+def titled_tool(title: Any, template: str) -> str:
+    """The tool name a rule table's ``title`` gives in ``template``, ``""`` for another title.
+
+    A rule table is titled by the declared display name of the tool whose
+    rows it holds, whichever tool of the kind that is; every label printed
+    for the table's rows is read back from its title, so a tool swapped in
+    for a shipped one is named as itself (a stored report's title is read the
+    same way).
+    """
+    text = str(title or "")
+    prefix, _, suffix = template.partition("{tool}")
+    if len(text) > len(prefix) + len(suffix) and text.startswith(prefix) and text.endswith(suffix):
+        return text[len(prefix) : len(text) - len(suffix)]
+    return ""
+
+
 def _rule_rows(entry: LedgerEntry, data: dict[str, Any], key: str) -> Any:
     """A rule answer's rows: where its declaration says, else under ``key`` as the
     built-in rule tools answer."""

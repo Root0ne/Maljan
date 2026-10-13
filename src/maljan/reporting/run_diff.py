@@ -756,6 +756,17 @@ def _capability_evidence(run: RunRecord) -> list[str]:
     return _ids(_list(static.get("api_capabilities_evidence_ids")))
 
 
+def _titled_engine(title: Any) -> str:
+    """The tool a rule table's title names, lower-cased; ``""`` for a title of neither form."""
+    from maljan.reporting.ledger_report import CAPABILITIES_TITLE, RULE_MATCHES_TITLE, titled_tool
+
+    for template in (RULE_MATCHES_TITLE, CAPABILITIES_TITLE):
+        named = titled_tool(title, template)
+        if named:
+            return named.lower()
+    return ""
+
+
 def _detection_items(run: RunRecord) -> tuple[list[_Item], bool, list[str]]:
     """Rule-match rows, whether any rule section was recorded, and the sections' ids.
 
@@ -772,6 +783,9 @@ def _detection_items(run: RunRecord) -> tuple[list[_Item], bool, list[str]]:
             continue
         recorded = True
         engine, compared = spec
+        # The table is labelled by the tool its title names (any tool of the
+        # kind, a swapped one as itself), else by the engine it was built for.
+        engine = _titled_engine(section.get("title")) or engine
         columns = [_text(c).lower() for c in _list(section.get("columns"))]
         try:
             rule_at = columns.index("rule")
