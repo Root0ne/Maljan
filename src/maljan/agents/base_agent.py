@@ -1515,8 +1515,9 @@ _ONE_TECHNIQUE_RE = re.compile(r"T\d{4}(?:\.\d{3})?", re.IGNORECASE)
 _NO_TECHNIQUE = frozenset({"", "NONE", "—", "–", "-"})
 # A line that opens with "none" and words after it ("none asserted", "none
 # (capability only)"): it claims none whatever the words say, when no
-# technique id stands anywhere on it; with an id on it, the words may name one
-# and the line is asked about.
+# technique id and no catalogue technique name stands anywhere on it; with an
+# id or a name on it ("None; Process Injection is likely"), the words may name
+# one and the line is asked about.
 _NONE_WITH_WORDS_RE = re.compile(r"none\b", re.IGNORECASE)
 _ANY_TECHNIQUE_ID_RE = re.compile(r"(?<![\w.])T\d{4}(?:\.\d{3})?(?!\w)", re.IGNORECASE)
 # What separates the ids of a list on one TECHNIQUE line: a comma, "and", both
@@ -1572,6 +1573,27 @@ def _catalogue_names_for(technique_id: str) -> set[str]:
         if parent is not None and parent.name:
             names.add(_folded_name(f"{parent.name} {entry.name}"))
     return {name for name in names if name}
+
+
+def _names_a_technique(text: str) -> bool:
+    """Whether ``text`` writes a vendored catalogue technique's name anywhere, folded.
+
+    Every run of words up to the longest name's length is looked up once in
+    the set of folded names: linear in the text.
+    """
+    from maljan.memory.attck_loader import _folded_name, technique_names
+
+    names = {_folded_name(name) for name in technique_names().values()}
+    names.discard("")
+    if not names:
+        return False
+    longest = max(len(name.split()) for name in names)
+    words = _folded_name(text).split()
+    for start in range(len(words)):
+        for size in range(1, min(longest, len(words) - start) + 1):
+            if " ".join(words[start : start + size]) in names:
+                return True
+    return False
 
 
 def _without_catalogue_names(text: str) -> str:
@@ -1670,7 +1692,11 @@ def read_technique_line(line: str) -> tuple[tuple[str, ...], str | None]:
     bare = _bare_technique(_without_catalogue_names(_TRAILING_BLOCK_SEPARATOR_RE.sub("", text)))
     if bare.upper() in _NO_TECHNIQUE:
         return (), None
-    if _NONE_WITH_WORDS_RE.match(bare) and not _ANY_TECHNIQUE_ID_RE.search(bare):
+    if (
+        _NONE_WITH_WORDS_RE.match(bare)
+        and not _ANY_TECHNIQUE_ID_RE.search(bare)
+        and not _names_a_technique(bare)
+    ):
         return (), None
     parts = [_bare_technique(part) for part in _TECHNIQUE_LIST_SEPARATOR_RE.split(bare)]
     if parts and all(_ONE_TECHNIQUE_RE.fullmatch(part) for part in parts):

@@ -5,9 +5,10 @@ catalogue's name for it, with no bracket. The bracketed form was read; this one
 was asked about, and kept unread after the retry, so sixteen claims carried no
 technique. A name with no bracket runs to the next comma, semicolon or the
 line's end, and is taken off only when all of it is the id's catalogue name.
-A line that opens with "none" and holds no technique id claims none, whatever
-the words after it say. A qualifier ("candidate"), another name, or an id on a
-"none" line is still asked about.
+A line that opens with "none" and holds no technique id and no catalogue
+technique name claims none, whatever the words after it say. A qualifier
+("candidate"), another name, or an id or a named candidate technique on a
+"none" line ("None; Process Injection is likely") is still asked about.
 """
 
 from __future__ import annotations
@@ -51,10 +52,25 @@ def test_it_is_read(line: str, ids: tuple[str, ...]) -> None:
         "none asserted; T1041 would apply if transmission is shown",
         "nonexistent T1027",
         "T1027 or T1140",
+        "None; Process Injection is likely",
+        "none observed, though native api use is possible",
     ],
 )
 def test_it_is_asked_about(line: str) -> None:
     assert read_technique_line(line) == ((), line)
+
+
+def test_a_long_none_line_is_read_in_linear_time() -> None:
+    def cost(line: str) -> float:
+        start = time.perf_counter()
+        read_technique_line(line)
+        return time.perf_counter() - start
+
+    unit = "none of these words names anything "
+    cost(unit * 60)
+    small = cost(unit * 600)
+    large = cost(unit * 6000)
+    assert large <= max(small, 1e-3) * 30
 
 
 def test_ten_times_the_line_costs_at_most_ten_times_the_time() -> None:

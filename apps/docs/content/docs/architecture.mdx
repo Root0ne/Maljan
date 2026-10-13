@@ -2228,7 +2228,9 @@ in brackets or not (`T1027 (Obfuscated Files or Information)`, `T1106 Native
 API`, the name with no bracket running to the next comma, semicolon or the
 line's end; for a sub-technique its own name, or its parent's and its own
 joined by a colon) is that id. A line that opens with "none" and holds no
-technique id (`none asserted`) claims none. Any other
+technique id and no catalogue technique name (`none asserted`) claims none;
+one that names a candidate ("None; Process Injection is likely") is asked
+about. Any other
 line (bracketed words that are not that name, a qualifier, a negation, ids joined by
 another word) claims no id, is kept on the claim as `technique_line`, and the
 validation turn asks once for the ids alone, an id the claim does not assert
