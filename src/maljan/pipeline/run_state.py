@@ -29,11 +29,11 @@ from typing import Any
 
 from maljan.core.declared_reading import reads_as
 from maljan.pipeline.triage_pack import (
-    INDEX_TOOL,
     NOT_RUN_PREFIX,
     PIPELINE,
     pack_entries,
     render_pack,
+    renderer_of,
 )
 from maljan.schemas.evidence import is_guard_answer
 from maljan.tools.artefact_index import SERVED_BY
@@ -53,6 +53,12 @@ __all__ = [
     "with_run_state_tail",
     "without_run_state_tail",
 ]
+
+# The pack lines the block carries about the sample itself, by the renderer
+# their step declared (``core.pack_steps``): its identity, its digests and its
+# code signature, in that order; and the function index's.
+_IDENTITY_RENDERERS: tuple[str, ...] = ("identity", "digests", "code_signing")
+INDEX_RENDERER = "function_table"
 
 RUN_STATE_BEGIN = "=== RUN STATE (derived from the ledger; regenerated each turn) ==="
 RUN_STATE_END = "=== END RUN STATE ==="
@@ -227,9 +233,11 @@ def _lines(
 
     rows = list(state.get("evidence_ledger") or [])
     pack = pack_entries(rows)
-    by_tool = {entry.tool: entry for entry in pack if entry.ok}
-    for tool in ("identify_file", "hashes", "signing_info"):
-        entry = by_tool.get(tool)
+    # Each pack line by the renderer its step declared (``renderer_of``), never
+    # by a tool name a step running an operator's tool could take.
+    by_renderer = {renderer_of(entry): entry for entry in pack if entry.ok}
+    for renderer in _IDENTITY_RENDERERS:
+        entry = by_renderer.get(renderer)
         if entry is not None:
             lines.append(_cut(render_pack([entry], 0)))
     # A call to any server's reputation lookup, by its declared kind, and the
@@ -260,7 +268,7 @@ def _lines(
         first, last = ids[0], ids[-1]
         span = f"{first}–{last}" if first != last else first
         lines.append(f"ledger: {total} entries ({span}), {len(pack)} from the triage pack")
-    index = by_tool.get(INDEX_TOOL)
+    index = by_renderer.get(INDEX_RENDERER)
     if index is not None:
         lines.append(index_sentence(index.id, index.structured, dropped=index.truncated))
     # A call that was never made — a skipped lookup, a step after the budget,

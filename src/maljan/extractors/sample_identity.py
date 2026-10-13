@@ -426,16 +426,44 @@ def _the_format_tool_answered(ledger: Iterable[Any] | None, routed: str) -> bool
         return False
     for entry in ledger or ():
         if isinstance(entry, dict):
-            tool, ok, data = entry.get("tool"), entry.get("ok"), entry.get("structured")
+            ok, data = entry.get("ok"), entry.get("structured")
         else:
-            tool = getattr(entry, "tool", None)
             ok = getattr(entry, "ok", None)
             data = getattr(entry, "structured", None)
-        if tool != wanted or not ok:
+        if not ok or not _reads_the_format(entry, wanted):
             continue
         if isinstance(data, dict) and not data.get("error"):
             return True
     return False
+
+
+def _reads_the_format(entry: Any, wanted: str) -> bool:
+    """Whether ``entry`` is the answer of the routed format's own reader.
+
+    The table above names the platform's own tools, so it is read only for an
+    entry of a built-in source that ships the tool (``declared_reading.
+    shipped_under_its_source``), or for an entry that recorded no source and no
+    facts (a stored run's), by its name as before. Any other entry is read by
+    the kind its tool declared: an operator's reader declared of the kind the
+    platform's reader of this format is (a format, document or archive
+    reader) counts, and a tool that declared nothing, or was only named like
+    one of the platform's, never does.
+    """
+    from maljan.core.declared_reading import (
+        facts_of,
+        read_by_name,
+        shipped_by_name,
+        shipped_under_its_source,
+    )
+
+    tool = entry.get("tool") if isinstance(entry, dict) else getattr(entry, "tool", None)
+    if read_by_name(entry):
+        return tool == wanted
+    if shipped_under_its_source(entry):
+        return str(tool or "").rsplit("__", 1)[-1] == wanted
+    shipped = shipped_by_name().get(wanted)
+    facts = facts_of(entry)
+    return shipped is not None and facts is not None and facts.kind == shipped.kind
 
 
 def unparsed_container_reason(

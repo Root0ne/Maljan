@@ -42,8 +42,8 @@ STILL_BY_NAME: dict[tuple[str, str, str], tuple[int, str]] = {
     ("pipeline/triage_pack.py", "looks", "_ESTABLISHED.get(tool)"): (1, _PACK_STEP),
     ("pipeline/nodes.py", "looks", "_FORMAT_TOOLS.get(tool)"): (
         1,
-        "the pack's own format step chosen for the routed format; the declared step list "
-        "replaces it",
+        "the format a built-in server's own parser reads, looked up only for a built-in "
+        "server that ships the tool (``declared_reading.ships_tool``)",
     ),
     ("agents/evidence_recorder.py", "compares", "name != tool"): (
         1,
