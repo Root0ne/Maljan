@@ -13,10 +13,6 @@ Decision priority (highest to lowest), in ``debate_route``:
      No change — no analyst was revised in that round (every revision failed,
      wrote nothing, carried no structured report or was not asked): judge, by
      consensus where the mediator stated one, otherwise ``not_revised``.
-     Reworded — every revision of that round states the claims in force
-     again, wording aside (the same values, entry ids and techniques,
-     ``claim_drops.unchanged_in_substance``): another round would argue over
-     wording. Judge (``reworded``); no consensus is claimed.
      Points unchanged — analysts were revised in that round, and this
      mediation's blocking lines are the same contested points as the last
      mediation's (``debate_facts.same_points``: none resolved, none new):
@@ -25,6 +21,11 @@ Decision priority (highest to lowest), in ``debate_route``:
   4. Sycophancy is a fact told to the mediator, never a route of its own.
   5. Genuine LLM consensus (no listed line the mediator marked blocking, or
      left unmarked) — judge.
+     Reworded — no consensus, and every revision of the round right before
+     this mediation states the claims in force again, wording aside (the same
+     values, entry ids and techniques, ``claim_drops.unchanged_in_substance``):
+     another round would argue over wording. Judge (``reworded``); no
+     consensus is claimed.
   6. Adaptive termination — statistical confidence convergence, with no
      contradiction standing → judge.
      No contested point — the mediator's final block was read and lists no
@@ -280,17 +281,6 @@ def route_within_limit(
         )
         return "judge", CONVERGED
 
-    # Every revision of the round before states the claims in force again,
-    # wording aside: what the analysts claim, cite and map did not move, and a
-    # round more would argue over words. The answers in force go to the judge.
-    if revised is not None and int(revised.get("made") or 0) > 0 and revised.get("reworded"):
-        say(
-            "Every revision of the round before round %d states the claims in force again, "
-            "wording aside; routing to judge with the answers in force.",
-            iteration,
-        )
-        return "judge", REWORDED
-
     # No analyst was revised in the round before: every answer this mediation
     # read is the one the last mediation read. The round made no change, and
     # another round is not opened because of it. A consensus the mediator
@@ -326,6 +316,17 @@ def route_within_limit(
     if consensus:
         say("Genuine consensus reached at round %d.", iteration)
         return "judge", CONSENSUS
+
+    # Every revision of the round before states the claims in force again,
+    # wording aside: what the analysts claim, cite and map did not move, and a
+    # round more would argue over words. The answers in force go to the judge.
+    if revised is not None and int(revised.get("made") or 0) > 0 and revised.get("reworded"):
+        say(
+            "Every revision of the round before round %d states the claims in force again, "
+            "wording aside; routing to judge with the answers in force.",
+            iteration,
+        )
+        return "judge", REWORDED
 
     # Adaptive termination on the confidence series, unless the last
     # mediation lists contradictions still standing: a number that stopped
