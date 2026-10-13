@@ -204,13 +204,18 @@ def yara_rule_strings(ledger: Sequence[Any] | None) -> dict[str, list[dict[str, 
     different finding from a rule whose whole condition matched. ``source`` is
     the name the corroboration row gives the asserting tool
     (:func:`asserting_source`), so each row is read with the layer that matched
-    it. Read from the scan's structured answer as the tool wrote it.
+    it; a row of an entry that asserts no technique carries none and is read
+    under the shipped signature-rule label, as a stored row is. Read from the
+    scan's structured answer as the tool wrote it.
     """
     found: dict[str, list[dict[str, Any]]] = {}
     for entry in ledger or []:
         if not reads_as(entry, _SIGNATURE_RULES):
             continue
-        layer = asserting_source(entry) or bare_name(getattr(entry, "tool", ""))
+        # An entry whose declaration asserts no technique gives no layer: its
+        # rows are read as a stored row is, under the shipped signature-rule
+        # label (``corroboration._rule_row_layers``), as they always were.
+        layer = asserting_source(entry)
         structured = getattr(entry, "structured", None)
         matches = structured.get("matches") if isinstance(structured, dict) else None
         for match in matches or []:
@@ -225,11 +230,12 @@ def yara_rule_strings(ledger: Sequence[Any] | None) -> dict[str, list[dict[str, 
             } - {""}
             for tid in technique_ids_in(meta.get("technique_id")):
                 rows = found.setdefault(tid, [])
-                row = {
+                row: dict[str, Any] = {
                     "rule": str(match.get("rule") or ""),
                     "strings": len(identifiers),
-                    "source": layer,
                 }
+                if layer:
+                    row["source"] = layer
                 if row not in rows:
                     rows.append(row)
     return found

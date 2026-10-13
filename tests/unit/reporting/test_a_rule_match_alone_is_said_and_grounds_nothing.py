@@ -126,6 +126,34 @@ class TestEachRowIsReadWithTheLayerThatMatchedIt:
         )
         assert rule_match_only(report) == {"T1003": "rule match only (sigs), no analyst claim"}
 
+    def test_a_signature_entry_asserting_nothing_still_reaches_the_note(self) -> None:
+        from maljan.core.declared_reading import shipped_by_name, stored_record
+
+        # Declared of the signature kind, but asserting no technique itself.
+        facts = shipped_by_name()["yara_scan"].model_copy(
+            update={"asserts_techniques": False, "source": ""}
+        )
+        entry = SimpleNamespace(
+            id="ev_0004",
+            tool="yara_scan",
+            source="mcp:rules",
+            facts=stored_record(facts),
+            structured=_yara_entry().structured,
+        )
+        strings = yara_rule_strings([entry])
+        assert strings == {"T1003": [{"rule": RULE, "strings": 1}]}
+        report = _report([]).model_copy(
+            update={
+                "rule_match_strings": strings,
+                "run_summary": {
+                    "corroboration": {"T1003": {"asserted_by": ["yara"], "claimed_by": []}}
+                },
+            }
+        )
+        assert rule_match_only(report) == {
+            "T1003": f"rule match only (yara `{RULE}`, 1 string), no analyst claim"
+        }
+
     def test_a_stored_row_without_its_layer_is_the_shipped_signature_tools(self) -> None:
         stored = {"T1003": [{"rule": RULE, "strings": 1}]}
         report = _report([]).model_copy(update={"rule_match_strings": stored})
