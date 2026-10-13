@@ -3701,8 +3701,13 @@ registered with `register_static_provider` or `register_sandbox_provider`
 declares its own tools by answering `declaration(cfg)` with the declaration
 fields of a server block (an object or a mapping); they are read under
 `provider:<id>`, wherever a built-in provider's block is read, and switched on
-while the settings select the provider. The built-in providers' blocks
-(`static.ghidra`, `static.r2`, `sandbox.cape2.mcp`) are read as before.
+while the settings select the provider. A class whose settings hold a server
+block of its own names that block's dotted path in `declaration_block`
+instead: the block joins the provider blocks, is read, snapshotted and
+switched on and off as a built-in's is, and leaves them when the provider is
+taken out. The built-in providers' blocks (`static.ghidra`, `static.r2`,
+`sandbox.cape2.mcp`) are read as before, and no class may name another path
+for one of them.
 
 **Saving.** A built-in's stored block takes the shipped value of any field it
 never set, and one the operator set, empty included, is kept. A save stores
