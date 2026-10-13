@@ -935,6 +935,15 @@ def _string_entries(report: MalwareReport) -> list[str]:
     ]
 
 
+# The catalogue categories of the sandbox-called APIs each section is shown,
+# beside the import profile's count of the same category.
+_SANDBOX_CALLED_CATEGORIES: dict[str, tuple[str, ...]] = {
+    "encryption_scheme": ("crypto",),
+    "discovery": ("discovery",),
+    "evasion_antiforensics": ("anti_debug", "evasion"),
+}
+
+
 def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
     """Deterministic measurements for one technical-spine section.
 
@@ -982,9 +991,23 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
         # only when an analyst claim or a captured tool output speaks to it.
         return {}
 
+    # What the sandbox recorded the sample calling, by the catalogue's
+    # categories (``DynamicBehavior.api_capabilities``): counted beside the
+    # import profile, so a run whose imports name no crypto API but whose
+    # sandbox saw one still shows the encryption section a measurement.
+    called = (report.dynamic.api_capabilities if report.dynamic else None) or {}
+    # Only a category the sandbox saw called is named: a section's facts are
+    # what they were on every run whose sandbox called none.
+    observed = {
+        section_key: {
+            f"sandbox_called_{c}_api_count": called[c] for c in categories if called.get(c)
+        }
+        for section_key, categories in _SANDBOX_CALLED_CATEGORIES.items()
+    }
+
     static = report.static
     if static is None:
-        return {}
+        return observed.get(section, {})
 
     caps = static.api_capabilities or {}
     # Distinct ids, in first-seen order. A row is a rule and two rules can
@@ -1020,17 +1043,19 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
     # aggregated. The per-import lists that sat beside them were that table
     # read back one import at a time, and they are gone.
     if section == "encryption_scheme":
-        return {"crypto_api_count": caps.get("crypto", 0)}
+        return {"crypto_api_count": caps.get("crypto", 0), **observed[section]}
     if section == "discovery":
         return {
             "discovery_api_count": caps.get("discovery", 0),
             "discovery_techniques": [t for t in techniques if t in _DISCOVERY_TECHNIQUES],
+            **observed[section],
         }
     if section == "evasion_antiforensics":
         return {
             "anti_debug_api_count": caps.get("anti_debug", 0),
             "evasion_api_count": caps.get("evasion", 0),
             "evasion_techniques": [t for t in techniques if t in _EVASION_TECHNIQUES],
+            **observed[section],
         }
     if section == "cli_flags":
         return {"capability_profile": dict(sorted(caps.items(), key=lambda kv: -kv[1]))}
