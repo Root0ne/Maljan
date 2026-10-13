@@ -76,6 +76,8 @@ from maljan.core.tool_declarations import (
 from maljan.core.undeclared_tools import (
     ADDRESS_ARGUMENTS,
     DEFAULT_AUTO_NAME_WORDS,
+    code_text,
+    holds_code,
     undeclared_code_kind,
 )
 
@@ -932,7 +934,7 @@ def propose_tool(
     # The kind, when something the server said names one; a sandbox's rows, by
     # the shape test, only for a server declared a sandbox source and where
     # nothing else names a kind, with the parts a run reads.
-    found_kind = _kind_of(name, words, word_origin, proposal, reading)
+    found_kind = _kind_of(name, words, word_origin, proposal, reading, answer)
     # A tool asked about an address, a domain or a URL describes that subject
     # (a lookup, a resolution), not what a run did, whatever server serves it.
     subject = bool(_SUBJECT_ROLES & set(proposal.roles))
@@ -1016,8 +1018,16 @@ def _kind_of(
     word_origin: str,
     proposal: ToolProposal,
     reading: _AnswerReading,
+    answer: Any = None,
 ) -> tuple[str, str, list[str]] | None:
-    """The proposed kind, how sure, and what said it; ``None`` when nothing names one."""
+    """The proposed kind, how sure, and what said it; ``None`` when nothing names one.
+
+    A code-listing kind read from the description's words alone (the tool's
+    name says no such thing) is proposed only when the confirmed probe
+    ``answer`` holds code (``undeclared_tools.holds_code``): a search over
+    decompiled code is described with the word too, and its hits are no
+    listing. With no answer, or one holding no code, no code kind is proposed.
+    """
     roles = proposal.roles
     counts = f"a malicious count in the answer ({reading.reputation.get('malicious', '')})"
     if reading.reputation and "hash" in roles:
@@ -1045,13 +1055,29 @@ def _kind_of(
     code = undeclared_code_kind(name)
     if code:
         return code, LOW, ["tool name"]
-    if {"decompile", "decompiled", "decompiles"} & words:
-        return "decompile", LOW, [f"{word_origin} (decompile)"]
-    if {"disassemble", "disassembly"} & words and "address" in roles:
-        return "function_disassembly", LOW, [f"{word_origin} (disassembly)"]
+    answered_code = _answer_holds_code(answer)
+    if {"decompile", "decompiled", "decompiles"} & words and answered_code:
+        return "decompile", LOW, [f"{word_origin} (decompile)", "probe answer holds code"]
+    if {"disassemble", "disassembly"} & words and "address" in roles and answered_code:
+        return (
+            "function_disassembly",
+            LOW,
+            [f"{word_origin} (disassembly)", "probe answer holds code"],
+        )
     if "strings" in words and "text" in reading.values:
         return "strings", LOW, [f"{word_origin} (strings)", "rows with a text value"]
     return None
+
+
+def _answer_holds_code(answer: Any) -> bool:
+    """Whether a probe answer (its text, or the object parsed from it) holds a code listing."""
+    if answer is None:
+        return False
+    if isinstance(answer, str):
+        return bool(code_text(answer)) and holds_code(code_text(answer))
+    if isinstance(answer, Mapping):
+        return any(isinstance(v, str) and holds_code(v) for v in answer.values())
+    return False
 
 
 # The argument roles that name a subject to describe rather than a run or its
