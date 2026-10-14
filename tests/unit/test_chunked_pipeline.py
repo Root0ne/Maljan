@@ -477,7 +477,7 @@ class TestSafeAnalyzeISRChunked:
 
         source = inspect.getsource(base_agent.BaseAnalyst._run_tool_loop)
         assert 'getattr(self, "_prior_chunk_calls", None),' in source
-        assert "earlier_rounds=own_earlier_entries(self)" in source
+        assert "earlier_rounds=repeatable_earlier_entries(self)" in source
 
 
 # ---------------------------------------------------------------------------
