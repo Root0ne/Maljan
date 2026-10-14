@@ -1865,6 +1865,17 @@ authoritative: a clone of the static analyst with the `analysis` reference
 removed really runs without the analysis tools, which could not be true if the
 server also bound itself to the role.
 
+A server's `agents` list holds definition keys, checked against the seeded
+agents and the definition map in force after the same save: one request may
+add an agent and bind a server to it, and a request that removes an agent may
+not keep a server bound to it. The console's server editor offers one box per
+agent of that map (`lead`, `reverser` and `triage` among them), an agent added
+but not yet applied included and one whose removal is staged left out, from
+what the settings schema serves (`agent_keys` and `builtin_agent_keys` on the
+server map's entry). A stored key the map does not hold is drawn, marked as not
+a known agent, and kept by every edit; only unticking it removes it, and a save
+that keeps it is refused with the key named.
+
 The per-format tools of `analysis` rest on optional libraries. Install them
 with `uv sync --extra tools` (the backend image already does); without them
 `apk_info` falls back to the zip-level facts and `macho_info`, the OLE2 half of
@@ -2528,7 +2539,9 @@ would come back with a server the asking stage withholds — a stage with
 **Built-in tools** off cannot reach them through a colleague that no stage
 narrows. A `provider` reference is valid on a `generic` or a `lead` definition,
 and on either it opens the agent's static provider and binds its tools the same
-way; every other role opens its provider itself.
+way; every other role opens its provider itself. A `sandbox` reference is valid on
+any role; the agent editor's Tools tree offers it as **the job's sandbox report
+tools**.
 
 The seeded `lead` definition (role `lead`, prompt in
 `src/maljan/agents/prompts/lead.md`) references `static`, `dynamic`,
@@ -2922,6 +2935,12 @@ network block without becoming a network analyst:
 | `sandbox.behavior` | The behaviour log, through the dynamic parser. |
 | `sandbox.network` | The network block, through the network parser. |
 | `sandbox.full` | The whole sandbox report. |
+
+The console's agent editor shows the list as **Input data**, one box per
+source the settings schema serves (`data_source_choices` on the agent
+definitions' entry). A ticked source is appended, so the list is read in the
+order the boxes were ticked, and the editor prints that order; a list written
+by a JSON import keeps its order and every source through any other edit.
 
 A slice handed over as JSON (`sandbox.target`, `sandbox.full`, and the network
 or behaviour block where no parser reads it) is compact JSON — the same

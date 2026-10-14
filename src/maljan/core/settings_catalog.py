@@ -112,6 +112,18 @@ class CatalogEntry:
     # (``agents.composition.capability_servers``), served so the console draws
     # a capability reference with the servers it reaches, never a copy of the rule.
     capability_servers: dict[str, list[str]] | None = None
+    # For the agent definitions: the input slices a definition may name in its
+    # ``data_sources`` (``config.DATA_SOURCES``), served so the console offers
+    # exactly what the settings model accepts.
+    data_source_choices: list[str] | None = None
+    # For the tool-server map: the agent keys a server may be bound to, the
+    # effective definition map's keys, so the console offers every agent of
+    # the roster rather than a fixed list.
+    agent_keys: list[str] | None = None
+    # The seeded definition keys, which stay known whatever a save does to the
+    # stored map, so the console can tell which agents a staged definition
+    # edit leaves bindable (``server_map._definition_keys``).
+    builtin_agent_keys: list[str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

@@ -118,6 +118,7 @@ export default function FieldRow({
   llmGlobal,
   onChangeLlmAgents,
   definitions,
+  agentRoster,
   activeProfile,
   onSetActive,
   errors,
@@ -142,6 +143,9 @@ export default function FieldRow({
   /** `core.agents.definitions`'s effective value, read-only here — the
    *  profiles editor only offers enabled, non-judge definitions. */
   definitions?: Record<string, AgentDefinitionEntry>;
+  /** For the server map: the agents a server may be bound to, as the next
+   *  apply will judge them (`serverAgentRoster`). */
+  agentRoster?: string[];
   /** `core.agents.profile`'s effective value, for the "active" badge. */
   activeProfile?: string;
   /** Stages `core.agents.profile` — a "Set active" click, distinct from this
@@ -185,6 +189,7 @@ export default function FieldRow({
             current={current}
             staged={staged}
             errors={errors ?? {}}
+            agentRoster={agentRoster ?? []}
             onChange={onChange}
           />
         ) : entry.editor === "agent_definitions" ? (

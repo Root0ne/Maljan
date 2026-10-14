@@ -11,6 +11,7 @@ import DeclarationFields from "./DeclarationFields";
 import DeclarationProposals from "./DeclarationProposals";
 import { readProposals } from "./declarationProposals";
 import Dot from "./Dot";
+import { choiceRows, toggleChoice } from "./choiceRows";
 import {
   addedEnvNames,
   requiredEnvNames,
@@ -25,7 +26,6 @@ import { capabilityCells } from "./toolTableRows";
 const input =
   "w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent";
 
-const ROLES = ["static", "dynamic", "network", "judge"] as const;
 /** What a set token looks like from outside; identical to the API's mask. */
 const TOKEN_MASK = "**********";
 
@@ -296,6 +296,7 @@ export function ServerDetail({
   builtinServers = new Set<string>(),
   editable = true,
   sections = ALL_SERVER_SECTIONS,
+  agentKeys,
 }: {
   serverKey: string;
   /** The whole staged map, staged as a whole: the PATCH body is the full dict. */
@@ -317,6 +318,8 @@ export function ServerDetail({
   /** Whether the token may be replaced — the leaf's own `editable`. */
   editable?: boolean;
   sections?: ServerSection[];
+  /** The agents a server may be bound to: the roster (`rosterAgentKeys`). */
+  agentKeys: readonly string[];
 }) {
   const server = value[serverKey];
   const has = (section: ServerSection) => sections.includes(section);
@@ -620,22 +623,24 @@ export function ServerDetail({
       {has("agents") && (
         <fieldset className="border border-border rounded p-2">
           <legend className="text-xs text-text-muted px-1">Agents</legend>
+          {/* One box per agent of the roster. A stored binding to a key the
+              roster does not hold is drawn too, marked, and kept on save:
+              only unticking it takes it away. */}
           <div className="flex gap-3 flex-wrap">
-            {ROLES.map((role) => (
-              <label key={role} className="text-xs text-text-secondary flex items-center gap-1">
+            {choiceRows(agentKeys, server.agents).map((row) => (
+              <label key={row.key} className="text-xs text-text-secondary flex items-center gap-1">
                 <input
                   type="checkbox"
-                  aria-label={`${serverKey} agent ${role}`}
-                  checked={server.agents.includes(role)}
+                  aria-label={`${serverKey} agent ${row.key}`}
+                  checked={server.agents.includes(row.key)}
                   onChange={(e) =>
                     put(serverKey, {
-                      agents: e.target.checked
-                        ? [...server.agents, role]
-                        : server.agents.filter((r) => r !== role),
+                      agents: toggleChoice(server.agents, row.key, e.target.checked),
                     })
                   }
                 />
-                {role}
+                {row.key}
+                {!row.known && <span className="text-status-red">(not a known agent)</span>}
               </label>
             ))}
           </div>
@@ -681,6 +686,7 @@ export default function ServerMapEditor({
   current,
   staged,
   errors = {},
+  agentRoster = [],
   onChange,
 }: {
   entry: CatalogEntry;
@@ -689,6 +695,10 @@ export default function ServerMapEditor({
   /** The full validation-error map, keyed by dotted path, so an error like
    *  `core.mcp.servers.<key>.command` lands on the server that caused it. */
   errors?: Record<string, string>;
+  /** The agents a server may be bound to, as the next apply will judge them
+   *  (`serverAgentRoster`): an agent added a moment ago included, one whose
+   *  removal is staged left out. */
+  agentRoster?: readonly string[];
   onChange: (value: Record<string, McpServerEntry>) => void;
 }) {
   const value = (staged ?? current?.value ?? entry.default ?? {}) as Record<string, McpServerEntry>;
@@ -829,6 +839,7 @@ export default function ServerMapEditor({
           requiredEnv={entry.required_env ?? {}}
           builtinServers={new Set(entry.builtin_servers ?? [])}
           editable={entry.editable}
+          agentKeys={agentRoster}
         />
       )}
     </div>

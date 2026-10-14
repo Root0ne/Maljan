@@ -332,6 +332,28 @@ def lenient_imported_declarations(
     return out, warnings
 
 
+_DEFINITIONS_KEY = "core.agents.definitions"
+
+
+def definitions_after_save(current: dict[str, Any], changes: dict[str, Any]) -> dict[str, Any]:
+    """The stored overrides with the agent definitions this save puts in force.
+
+    A server's ``agents`` list is checked against the definition keys, and a
+    console apply sends the definition map and the server map in one request:
+    an agent added in it is known to the server binding, and one the request
+    removes is not. The definition map is sent whole, so its value replaces
+    the stored one, an entry set to ``null`` names no agent, and a ``null``
+    map leaves the built-ins alone (``server_map._definition_keys`` adds them).
+    """
+    if _DEFINITIONS_KEY not in changes:
+        return current
+    incoming = changes[_DEFINITIONS_KEY]
+    out = {key: value for key, value in current.items() if key != _DEFINITIONS_KEY}
+    if isinstance(incoming, dict):
+        out[_DEFINITIONS_KEY] = {k: v for k, v in incoming.items() if v is not None}
+    return out
+
+
 class SettingsValidationError(Exception):
     def __init__(self, errors: dict[str, str]) -> None:
         super().__init__("; ".join(f"{k}: {v}" for k, v in errors.items()))
@@ -728,7 +750,7 @@ class SettingsService:
                     changes[SERVER_MAP_KEY], tokens = split_server_secrets(
                         changes[SERVER_MAP_KEY],
                         stored=stored_map if isinstance(stored_map, dict) else None,
-                        stored_settings=current,
+                        stored_settings=definitions_after_save(current, changes),
                     )
                 except ServerMapError as exc:
                     raise SettingsValidationError(

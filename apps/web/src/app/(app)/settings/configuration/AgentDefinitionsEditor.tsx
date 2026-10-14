@@ -36,6 +36,7 @@ import {
   withoutServer,
   type CapabilityServers,
 } from "./capabilityRefs";
+import { SANDBOX_REF, choiceRows, toggleChoice } from "./choiceRows";
 import type {
   AgentDefinitionEntry,
   AgentProbeDetails,
@@ -278,6 +279,7 @@ export function AgentDetail({
   onClone,
   keyErrorMessage,
   capabilityServers = {},
+  dataSourceChoices = [],
 }: {
   agentKey: string;
   /** The whole staged definition map, staged as a whole. */
@@ -305,6 +307,9 @@ export function AgentDetail({
   /** Per capability, the servers a capability reference stands for, as the
    *  API serves them (`CatalogEntry.capability_servers`). */
   capabilityServers?: CapabilityServers;
+  /** The input slices a definition may name, as the API serves them
+   *  (`CatalogEntry.data_source_choices`). */
+  dataSourceChoices?: readonly string[];
 }) {
   const agent = definitions[agentKey];
   const has = (section: AgentSection) => sections.includes(section);
@@ -617,6 +622,49 @@ export function AgentDetail({
               </select>
               <FieldError message={fieldError("tab")} />
             </label>
+            {/* The slices of the job this agent is handed as its input text.
+                None ticked is the role's own input, which is what every
+                definition written before the field reads. A stored slice
+                the served list does not hold is drawn, marked and kept. */}
+            <div role="group" className="sm:col-span-2" aria-label={`${agentKey} input data`}>
+              <span className="text-text-muted">Input data</span>
+              <div className="flex gap-3 flex-wrap mt-0.5">
+                {choiceRows(dataSourceChoices, agent.data_sources ?? []).map((row) => (
+                  <label
+                    key={row.key}
+                    className="text-xs text-text-secondary flex items-center gap-1"
+                  >
+                    <input
+                      type="checkbox"
+                      aria-label={`${agentKey} input ${row.key}`}
+                      disabled={locked}
+                      checked={(agent.data_sources ?? []).includes(row.key)}
+                      onChange={(e) =>
+                        put(agentKey, {
+                          data_sources: toggleChoice(
+                            agent.data_sources ?? [],
+                            row.key,
+                            e.target.checked
+                          ),
+                        })
+                      }
+                    />
+                    <span className="font-mono">{row.key}</span>
+                    {!row.known && (
+                      <span className="text-status-red">(not a source the API offers)</span>
+                    )}
+                  </label>
+                ))}
+              </div>
+              {/* The sources are read in their stored order, the first at
+                  the head of the input, so the order is shown. */}
+              <span className="block text-[11px] text-text-muted mt-0.5">
+                {(agent.data_sources ?? []).length === 0
+                  ? "none ticked: the input its role reads"
+                  : `read in this order: ${(agent.data_sources ?? []).join(", ")}`}
+              </span>
+              <FieldError message={fieldError("data_sources")} />
+            </div>
           </div>
         </fieldset>
       )}
@@ -694,6 +742,21 @@ export function AgentDetail({
                 </label>
               </li>
             )}
+            {/* The job's sandbox report, read through in-process tools. Any
+                role may hold it, a judge cross-checking a claim as much as a
+                dynamic analyst. */}
+            <li role="treeitem" aria-selected={hasRef(agentKey, SANDBOX_REF)}>
+              <label className="text-xs text-text-secondary flex items-center gap-1">
+                <input
+                  type="checkbox"
+                  aria-label={`${agentKey} sandbox tools`}
+                  disabled={locked}
+                  checked={hasRef(agentKey, SANDBOX_REF)}
+                  onChange={(e) => toggleRef(agentKey, SANDBOX_REF, e.target.checked)}
+                />
+                the job&rsquo;s sandbox report tools
+              </label>
+            </li>
             {/* Delegation is a tool like any other, so it sits in the same
                 tree: one row per agent this one may hand a task to. The row
                 is titled by the tool's name because that is what the model
@@ -1123,6 +1186,7 @@ export default function AgentDefinitionsEditor({
           onClone={add}
           keyErrorMessage={keyError?.at === selected ? keyError.message : null}
           capabilityServers={entry.capability_servers ?? {}}
+          dataSourceChoices={entry.data_source_choices ?? []}
         />
       )}
     </div>

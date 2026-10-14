@@ -28,6 +28,29 @@ def client() -> TestClient:
     return TestClient(app)
 
 
+def test_the_schema_route_serves_the_server_map_every_agent_of_the_stored_roster(client):
+    stored = {
+        "core.agents.definitions": {
+            "checker": {"role": "generic", "label": "Checker", "prompt": "p", "tools": []}
+        }
+    }
+    with patch(
+        "app.api.v1.settings.SettingsService.load_overrides", AsyncMock(return_value=stored)
+    ):
+        r = client.get("/api/v1/settings/schema")
+    assert r.status_code == 200
+    entries = {e["key"]: e for g in r.json()["groups"] for e in g["entries"]}
+    served = entries["core.mcp.servers"]["agent_keys"]
+    # The stored agent beside every built-in, the team-lead members included.
+    assert {"checker", "lead", "reverser", "triage", "static", "judge"} <= set(served)
+    assert served == sorted(served)
+    assert entries["core.agents.definitions"]["agent_keys"] is None
+    # The seeds alone stay known whatever a save does to the stored map.
+    seeds = entries["core.mcp.servers"]["builtin_agent_keys"]
+    assert {"lead", "reverser", "triage", "static"} <= set(seeds)
+    assert "checker" not in seeds
+
+
 def test_schema_lists_groups_in_order_and_entries(client):
     with patch("app.api.v1.settings.SettingsService.load_overrides", AsyncMock(return_value={})):
         r = client.get("/api/v1/settings/schema")

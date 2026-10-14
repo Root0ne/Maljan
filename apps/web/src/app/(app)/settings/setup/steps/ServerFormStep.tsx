@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { McpServerEntry } from "@/types/settings";
 import { mapKeyError } from "../../configuration/mapEditorHelpers";
+import { serverAgentRoster } from "../../configuration/fieldRowProps";
 import { EMPTY_SERVER, ServerDetail, useServerProbe } from "../../configuration/ServerMapEditor";
 import { builtinServerKeys, reservedServerKeys } from "@/lib/providerFacts";
 import { useSettingsContext } from "../../configuration/SettingsContext";
@@ -166,6 +167,7 @@ export default function ServerFormStep({
         builtinServers={builtinServerKeys(ctx.schema)}
         editable={entry.editable}
         sections={[section]}
+        agentKeys={serverAgentRoster(ctx)}
       />
     </div>
   );

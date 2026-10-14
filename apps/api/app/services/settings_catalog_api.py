@@ -17,7 +17,7 @@ from dataclasses import replace
 from functools import lru_cache
 from typing import Any, get_args, get_origin
 
-from maljan.core.config import REQUIRED_ENV_ALLOW
+from maljan.core.config import DATA_SOURCES, REQUIRED_ENV_ALLOW, _builtin_definitions
 from maljan.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
 from maljan.core.settings_annotations import GROUP_ORDER
 from maljan.core.settings_catalog import CatalogEntry, FieldType, _bounds, core_catalog
@@ -665,9 +665,15 @@ def resolved_catalog(
                 required_env={key: list(names) for key, names in REQUIRED_ENV_ALLOW.items()},
                 builtin_servers=builtin,
                 reserved_servers=reserved,
+                agent_keys=list(sources["agent_roles"]),
+                builtin_agent_keys=sorted(_builtin_definitions()),
             )
         if entry.editor == "agent_definitions":
-            entry = replace(entry, capability_servers=_capability_servers(servers))
+            entry = replace(
+                entry,
+                capability_servers=_capability_servers(servers),
+                data_source_choices=list(DATA_SOURCES),
+            )
         out.append(entry)
     return out
 
@@ -679,7 +685,7 @@ def _capability_servers(servers: Iterable[str]) -> dict[str, list[str]]:
     the same function resolution reads (``agents.composition``).
     """
     from maljan.agents.composition import servers_of_capability
-    from maljan.core.config import _builtin_definitions, _builtin_servers
+    from maljan.core.config import _builtin_servers
 
     keys = list(dict.fromkeys([*_builtin_servers(), *servers]))
     capabilities = sorted(

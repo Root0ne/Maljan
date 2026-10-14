@@ -45,6 +45,9 @@ class CatalogEntryDTO(BaseModel):
     builtin_servers: list[str] | None = None
     reserved_servers: list[str] | None = None
     capability_servers: dict[str, list[str]] | None = None
+    data_source_choices: list[str] | None = None
+    agent_keys: list[str] | None = None
+    builtin_agent_keys: list[str] | None = None
 
 
 class GroupDTO(BaseModel):
