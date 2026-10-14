@@ -1573,10 +1573,17 @@ together, so they are never joined. An input that does not fit is chunked as
 before, at the room. The sample path and the upstream findings, which go into
 the first chunk afterwards, are kept out of that first chunk only: it is the
 room less what they add, every later chunk is the whole room, so a large
-upstream block adds at most one chunk and no chunk is past the room. A JSON
-head that fits the room on its own is kept whole (cut, it would lose the
-sample path), and where the block alone fills the room the first chunk is
-sized as the others and its prompt shortens it and says so. A source of
+upstream block adds at most one chunk and no chunk is past the room. In a
+list of more than one chunk each is sent behind a one-line header, which every
+chunk leaves room for, and a later chunk behind the calls the earlier ones
+made, which take only what the room leaves (the rest are counted in one line;
+an identical call is still answered from its entry). The overlap between
+chunks is held below three quarters of a chunk, and the hold is logged. A JSON
+head that fits the room on its own stays whole when it is the agent's only
+source (cut, it would lose the sample path; the single chunk's prompt shortens
+it as a document and says so) and is split like any other when another source
+follows. Where the block alone fills the room, the first chunk is cut at the
+room like the rest. A source of
 nothing but whitespace adds no chunk, so no loop runs over nothing. A revision
 whose agent cannot be built to measure its room chunks at the size its first
 analysis measured. With no window learned nothing is derived: a chunk is the
