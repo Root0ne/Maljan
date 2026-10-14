@@ -40,7 +40,7 @@ from maljan.memory.attck_loader import ATTCK_CACHE_DIR, ATTCKTechnique
 # The corpus is static between ATT&CK releases and the vectors are a pure
 # function of it, so the whole cost is recomputation. The cache key is a hash of
 # the exact (id, text) pairs that would be embedded: the STIX bundle
-# auto-refreshes every 30 days (see attck_loader), and a cache keyed on anything
+# auto-refreshes every 7 days (see attck_loader), and a cache keyed on anything
 # looser would silently serve vectors for the previous release.
 _EMB_CACHE_DIR = ATTCK_CACHE_DIR
 _EMB_CACHE_VERSION = 1
