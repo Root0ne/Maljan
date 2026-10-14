@@ -4165,7 +4165,7 @@ class JudgeAgent(BudgetMeter):
         if rates is None:
             return configured
         output = self._output_cap()
-        from maljan.llm.context_window import CHARS_PER_TOKEN
+        from maljan.llm.context_window import tokens_for_chars
 
         seconds = rates.call_timeout(
             call,
@@ -4173,7 +4173,7 @@ class JudgeAgent(BudgetMeter):
             configured,
             output.tokens,
             budget=output.sentence,
-            prompt_tokens=-(-int(prompt_chars) // CHARS_PER_TOKEN),
+            prompt_tokens=tokens_for_chars(prompt_chars),
         )
         return None if seconds is None else float(seconds)
 

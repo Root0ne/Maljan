@@ -45,6 +45,7 @@ from maljan.core.declared_reading import kinds_declared_by
 from maljan.core.exceptions import AnalystError, LLMError, SampleNotOpened
 from maljan.core.logger import logger
 from maljan.core.spend import SpendCeilingStop
+from maljan.llm.context_window import tokens_for_chars
 from maljan.loaders.binary_chunker import (
     SOURCE_SEPARATOR,
     ChunkStrategy,
@@ -991,7 +992,7 @@ def _augment_static_chunks_with_path(
             head,
             content=new_content,
             char_count=len(new_content),
-            token_estimate=len(new_content) // 4,
+            token_estimate=tokens_for_chars(len(new_content), 4, ceil=False),
         )
     except TypeError:
         # Not a dataclass (e.g. a future chunk type) — give up gracefully
@@ -2410,7 +2411,7 @@ def added_to_head(
                 strategy=ChunkStrategy.SLIDING_WINDOW,
                 content=text,
                 char_count=len(text),
-                token_estimate=len(text) // 4,
+                token_estimate=tokens_for_chars(len(text), 4, ceil=False),
                 domain="head",
             )
         ]

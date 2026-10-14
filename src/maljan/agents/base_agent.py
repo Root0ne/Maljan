@@ -66,6 +66,7 @@ from maljan.llm.anthropic_history import (
 from maljan.llm.context_window import (
     CHARS_PER_TOKEN,
     NO_ROOM_RUN_STATE,
+    chars_for_tokens,
     tool_definition_chars,
     window_full_error,
 )
@@ -288,7 +289,10 @@ def synthesis_budget_chars(cfg: Any, agent_name: str, window_tokens: int = 0) ->
     tokens = min(windows) if windows else 0
     if tokens <= 0:
         return _SYNTHESIS_MIN_CHARS
-    return max(_SYNTHESIS_MIN_CHARS, int(tokens * _CHARS_PER_TOKEN * _SYNTHESIS_CONTEXT_SHARE))
+    return max(
+        _SYNTHESIS_MIN_CHARS,
+        int(chars_for_tokens(tokens, _CHARS_PER_TOKEN) * _SYNTHESIS_CONTEXT_SHARE),
+    )
 
 
 def salvage_chars_at_pace(
@@ -402,7 +406,7 @@ def _reported_request(messages: list, per_token: int) -> tuple[int, int]:
             prompt = 0
         if prompt > 0:
             after = _chars_of(messages[index:])
-            return prompt * max(1, per_token) + after, index
+            return chars_for_tokens(prompt, max(1, per_token)) + after, index
     return 0, -1
 
 
@@ -4673,7 +4677,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         """
         window = self._own_window_tokens()
         return ToolAnswerClearing(
-            window_chars=window * self._clearing_per_token() if window else None
+            window_chars=chars_for_tokens(window, self._clearing_per_token()) if window else None
         )
 
     def _cleared_request(
