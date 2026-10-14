@@ -269,7 +269,45 @@ _WORD = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9_.\-']*[A-Za-z0-9])?")
 CONFIDENCE_STEP = 0.05
 # The key of one claim: values, entry ids, technique, negators, confidence
 # step and technical terms.
-ClaimKey = tuple[frozenset[str], frozenset[str], str, tuple[str, ...], int | None, frozenset[str]]
+ClaimKey = tuple[
+    frozenset[str], frozenset[str], str, tuple[str, ...], int | None, frozenset[str], frozenset[str]
+]
+# Words that carry no fact of a claim: articles, prepositions, conjunctions,
+# pronouns and forms of "be", "have" and "do". Anything else a claim writes
+# (a noun, a verb, an adjective, a number word, a modal, a polarity word) is
+# a content word, and a change of one is a change of the claim.
+_STOPWORDS = frozenset(
+    {
+        "a", "an", "the", "of", "to", "in", "on", "at", "by", "for", "with", "from",
+        "into", "onto", "as", "and", "or", "but", "so", "than", "then", "also",
+        "is", "are", "was", "were", "be", "been", "being", "am",
+        "has", "have", "had", "having", "do", "does", "did",
+        "it", "its", "this", "that", "these", "those", "which", "who", "whom", "whose",
+        "there", "here", "they", "them", "their", "he", "she", "his", "her", "we", "our",
+        "us", "i", "you", "your", "itself", "themselves",
+    }
+)  # fmt: skip
+
+
+def _folded_word(word: str) -> str:
+    """A word lower-cased, its plural ending off ("strings" is "string", "entries" "entry")."""
+    w = word.lower()
+    if len(w) > 3 and w.endswith("ies"):
+        return w[:-3] + "y"
+    if len(w) > 3 and w.endswith(("ches", "shes", "sses", "xes", "zes")):
+        return w[:-2]
+    if len(w) > 2 and w.endswith("s") and not w.endswith(("ss", "us", "is")):
+        return w[:-1]
+    return w
+
+
+def content_words(text: str) -> frozenset[str]:
+    """A claim's content words: every word, folded, but the stopwords (:data:`_STOPWORDS`)."""
+    return frozenset(
+        folded
+        for folded in (_folded_word(w) for w in _WORD.findall(text))
+        if folded not in _STOPWORDS
+    )
 
 
 def _technical(word: str) -> bool:
@@ -308,8 +346,11 @@ def claim_substance(isr: Any) -> Counter[ClaimKey]:
     negators it writes ("not", "no", "never", "without", a word ending
     "n't"), its confidence in steps of :data:`CONFIDENCE_STEP`, and its
     technical terms (acronyms, identifiers, names holding a digit, folded:
-    "RC4" against "XOR"). Two claims are one key only when all of these are
-    equal; everything else is wording.
+    "RC4" against "XOR"), and its content words (:func:`content_words`:
+    every word but the stopwords, case and plural folded, so "three" against
+    "four", "explorer" against "svchost" or "packed" against "unpacked" is a
+    change). Two claims are one key only when all of these are equal: a
+    reordering, punctuation or a stopword is wording.
     """
     keys: Counter[ClaimKey] = Counter()
     for claim in getattr(isr, "claims", None) or []:
@@ -325,6 +366,7 @@ def claim_substance(isr: Any) -> Counter[ClaimKey]:
                 _negators(text),
                 _confidence_step(claim),
                 frozenset(w.lower() for w in _WORD.findall(text) if _technical(w)),
+                content_words(text),
             )
         ] += 1
     return keys

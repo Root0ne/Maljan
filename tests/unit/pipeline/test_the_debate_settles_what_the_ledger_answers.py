@@ -258,10 +258,28 @@ def _isr(*claims: ClaimEvidence) -> AgentISR:
 
 
 class TestARoundOfWordingOnly:
-    def test_other_words_for_the_same_values_ids_and_technique_are_unchanged(self) -> None:
+    def test_a_reordering_punctuation_or_stopwords_are_unchanged(self) -> None:
         before = _isr(_claim("Routine 0x1400 decodes 57 blobs with key 'k7q2'."))
-        after = _isr(_claim("The decoder at 0x1400 handles all 57 blobs; its key is 'k7q2'."))
+        after = _isr(_claim("With the key 'k7q2', the routine 0x1400 decodes the 57 blobs"))
         assert unchanged_in_substance(before, after)
+
+    @pytest.mark.parametrize(
+        ("before", "after"),
+        [
+            ("The sample decrypts three strings", "The sample decrypts four strings"),
+            ("Connects on port eighty", "Connects on port four hundred"),
+            ("The sample injects into explorer", "The sample injects into svchost"),
+            ("Persistence via the registry run key", "Persistence via a scheduled task"),
+            ("Beacons to the first server", "Beacons to the second server"),
+            ("The sample is packed", "The sample is unpacked"),
+            ("The loader is signed", "The loader is unsigned"),
+            ("The sample is able to spread", "The sample is unable to spread"),
+            ("Sample runs only on Tuesday", "Sample runs only on Friday"),
+            ("It decrypts the config with a key", "It decrypts the payload with a key"),
+        ],
+    )
+    def test_a_changed_plain_word_is_a_change(self, before: str, after: str) -> None:
+        assert not unchanged_in_substance(_isr(_claim(before)), _isr(_claim(after)))
 
     @pytest.mark.parametrize(
         "after",
@@ -294,10 +312,10 @@ class TestARoundOfWordingOnly:
     def test_a_confidence_beyond_its_step_is_a_change(self) -> None:
         before = _isr(_claim("Routine 0x1400 decodes the blobs.", confidence=0.7))
         assert not unchanged_in_substance(
-            before, _isr(_claim("The blobs are decoded by 0x1400.", confidence=0.5))
+            before, _isr(_claim("The blobs, routine 0x1400 decodes.", confidence=0.5))
         )
         assert unchanged_in_substance(
-            before, _isr(_claim("The blobs are decoded by 0x1400.", confidence=0.71))
+            before, _isr(_claim("The blobs, routine 0x1400 decodes.", confidence=0.71))
         )
 
     def test_an_answer_with_no_claim_is_never_reworded(self) -> None:
