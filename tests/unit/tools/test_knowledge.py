@@ -278,7 +278,14 @@ class TestWhatTheLookupAnswersAboutAnId:
             ("T1583", "Acquire Infrastructure", "enterprise", "resource-development", "PRE"),
             ("T1417", "Input Capture", "mobile", "credential-access", "Android"),
             ("T1633", "Virtualization/Sandbox Evasion", "mobile", "defense-evasion", "iOS"),
-            ("T0800", "Activate Firmware Update Mode", "ics", "inhibit-response-function", None),
+            (
+                "T0800",
+                "Activate Firmware Update Mode",
+                "ics",
+                "inhibit-response-function",
+                "Embedded",
+            ),
+            ("T1701.005", "Python", "ics", "execution", None),
         ],
     )
     def test_the_catalogue_entry_is_what_the_table_says(

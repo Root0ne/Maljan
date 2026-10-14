@@ -200,7 +200,7 @@ class TestTheVendoredTechniqueTable:
         ):
             raw = json.loads(path.read_text(encoding="utf-8"))
             versions.add(raw["_meta"]["attck_version"])
-        assert versions == {"19.2"}
+        assert versions == {"20.0"}
         # The metadata keys are not techniques.
         assert attck_loader.platforms_for("_META") == ()
         assert attck_loader.technique_entry("_TACTICS") is None
