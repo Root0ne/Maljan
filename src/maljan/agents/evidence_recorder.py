@@ -20,8 +20,9 @@ guard inside, recorder outside.
 from __future__ import annotations
 
 import json
+import re
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from maljan.agents.mcp_client import structured_content_of
@@ -782,6 +783,40 @@ class RepeatGuard:
         if self._first.get(key) in retried and key in self._seeded:
             self._first[key] = entry_id
         self._first.setdefault(key, entry_id)
+
+
+# What a structured answer explains an absence with: a field of one of these
+# names beside data fields that are all empty ("families": [], "reason":
+# "backend unavailable") is an answer that holds nothing yet.
+_EXPLANATION_KEY_RE = re.compile(
+    r"(?:^|_)(?:reason|error|errors|message|detail|warning|status)$", re.I
+)
+
+
+def holds_a_settled_answer(entry: Any) -> bool:
+    """Whether an entry's answer may be handed back for an identical call later: never a failure.
+
+    Not for a call that failed (``ok`` false), an answer that only says the
+    call failed (``undeclared_tools.prose_error``), or a structured answer
+    whose data fields are all empty beside an explanation of why: a backend
+    that was unavailable then may answer now. Anything in doubt is not.
+    """
+    from maljan.core.undeclared_tools import prose_error
+
+    if not bool(getattr(entry, "ok", True)) or getattr(entry, "repeated_of", None):
+        return False
+    if prose_error(getattr(entry, "output", "") or ""):
+        return False
+    structured = getattr(entry, "structured", None)
+    if isinstance(structured, Mapping):
+        containers = [v for v in structured.values() if isinstance(v, list | dict)]
+        explained = any(
+            _EXPLANATION_KEY_RE.search(str(k)) and isinstance(v, str) and v.strip()
+            for k, v in structured.items()
+        )
+        if explained and containers and not any(containers):
+            return False
+    return True
 
 
 def entry_server(entry: Any) -> str:

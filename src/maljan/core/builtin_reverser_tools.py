@@ -895,7 +895,9 @@ R2_TOOLS: dict[str, dict[str, Any]] = {
 # searches and strings. Each is declared ``read_only``: an identical call
 # answers the same while nothing changed the program (``ToolFacts.read_only``).
 # A tool that renames, comments, patches, sets, saves, imports, opens,
-# analyses, emulates or polls a status is not, nor one in doubt.
+# analyses, emulates or polls a status is not, nor one in doubt (radare2's
+# ``show_function_details`` and ``show_info`` answer for the current seek,
+# which another read can move, so they are left unmarked).
 GHIDRA_READ_ONLY: frozenset[str] = frozenset(
     {
         "batch_decompile",
@@ -976,8 +978,6 @@ R2_READ_ONLY: frozenset[str] = frozenset(
         "list_sections",
         "list_strings",
         "list_symbols",
-        "show_function_details",
-        "show_info",
         "xrefs_to",
     }
 )

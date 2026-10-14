@@ -410,20 +410,19 @@ class TestARepeatOfAnEarlierRound:
         assert own_earlier_entries(SimpleNamespace(name="beta")) == []
 
 
-def _tool(name: str, *, server_read_only: bool = False) -> Any:
+def _tool(name: str, *, server_read_only: bool = False, server: str = "decompiler") -> Any:
     from langchain_core.tools import StructuredTool
 
-    from maljan.agents.tool_pinning import READ_ONLY_METADATA_KEY
+    from maljan.agents.tool_pinning import READ_ONLY_METADATA_KEY, SERVER_METADATA_KEY
 
     async def _run(**_kwargs: Any) -> str:
         return ""
 
+    metadata: dict[str, Any] = {SERVER_METADATA_KEY: server}
+    if server_read_only:
+        metadata[READ_ONLY_METADATA_KEY] = True
     return StructuredTool.from_function(
-        func=None,
-        coroutine=_run,
-        name=name,
-        description=name,
-        **({"metadata": {READ_ONLY_METADATA_KEY: True}} if server_read_only else {}),
+        func=None, coroutine=_run, name=name, description=name, metadata=metadata
     )
 
 
@@ -627,3 +626,94 @@ class TestAStateChangeMakesAnEarlierRoundsAnswerStale:
         )
         assert guard.forget_round_seeds("dis") == 0, "a chunk's seed is kept"
         assert guard.forget_round_seeds("other") == 1
+
+    def test_a_same_named_tool_of_another_server_is_not_read_only_here(self) -> None:
+        tools = [
+            _tool("decompile_function", server_read_only=True, server="dis"),
+            _tool("apply_thing", server_read_only=True, server="other"),
+        ]
+        rows = [
+            _held(2, "decompile_function", "dis").model_dump(mode="json"),
+            _held(3, "apply_thing", "dis", output="applied").model_dump(mode="json"),
+        ]
+        agent = SimpleNamespace(
+            name="beta", tools=tools, run_state_source={"evidence_ledger": rows}
+        )
+        assert repeatable_earlier_entries(agent) == []
+
+    def test_rows_without_seq_are_read_in_ledger_order(self) -> None:
+        tools = [
+            _tool("decompile_function", server_read_only=True, server="dis"),
+            _tool("rename_function", server="dis"),
+        ]
+        rows = [
+            {**_held(2, "decompile_function", "dis").model_dump(mode="json"), "seq": None},
+            {
+                **_held(3, "rename_function", "dis", output="renamed").model_dump(mode="json"),
+                "seq": None,
+            },
+        ]
+        agent = SimpleNamespace(
+            name="beta", tools=tools, run_state_source={"evidence_ledger": rows}
+        )
+        assert repeatable_earlier_entries(agent) == []
+
+    @pytest.mark.parametrize(
+        "entry",
+        [
+            build_entry(
+                entry_id="ev_0002",
+                seq=2,
+                agent="beta",
+                tool="lookup_family",
+                args={"name": "x"},
+                server="dis",
+                output="",
+                ok=False,
+                error="the backend failed",
+            ),
+            build_entry(
+                entry_id="ev_0002",
+                seq=2,
+                agent="beta",
+                tool="lookup_family",
+                args={"name": "x"},
+                server="dis",
+                output='{"families": [], "reason": "embedding backend unavailable"}',
+            ),
+            build_entry(
+                entry_id="ev_0002",
+                seq=2,
+                agent="beta",
+                tool="lookup_family",
+                args={"name": "x"},
+                server="dis",
+                output="Error: the index is not loaded",
+            ),
+        ],
+        ids=["failed", "empty with a reason", "prose error"],
+    )
+    def test_a_failed_or_transient_answer_is_never_seeded(self, entry: Any) -> None:
+        agent = SimpleNamespace(
+            name="beta",
+            tools=[_tool("lookup_family", server_read_only=True, server="dis")],
+            run_state_source={"evidence_ledger": [entry.model_dump(mode="json")]},
+        )
+        assert repeatable_earlier_entries(agent) == []
+
+    def test_an_answer_with_data_and_a_status_is_seeded(self) -> None:
+        entry = build_entry(
+            entry_id="ev_0002",
+            seq=2,
+            agent="beta",
+            tool="lookup_family",
+            args={"name": "x"},
+            server="dis",
+            output='{"families": ["f"], "status": "ok"}',
+        )
+        agent = SimpleNamespace(
+            name="beta",
+            tools=[_tool("lookup_family", server_read_only=True, server="dis")],
+            run_state_source={"evidence_ledger": [entry.model_dump(mode="json")]},
+        )
+        assert [e.id for e in repeatable_earlier_entries(agent)] == ["ev_0002"]
