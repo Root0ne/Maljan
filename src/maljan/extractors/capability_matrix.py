@@ -67,10 +67,13 @@ from maljan.schemas.stix_models import (
     stated_confidence,
 )
 
-# Fallback MITRE ATT&CK Enterprise tactic catalogue (pre-v19 names). Used only
-# when the live bundle's tactic catalogue is unavailable. ``kill_chain_phases``
-# in the STIX bundle uses the slug form ("defense-evasion"); we map each slug
-# to the canonical TA-id and the human-readable name.
+# Fallback MITRE ATT&CK Enterprise tactic catalogue. Used only when the
+# vendored tactic catalogue is unavailable. ``kill_chain_phases`` in the STIX
+# bundle uses the slug form ("stealth"); we map each slug to the canonical TA-id
+# and the human-readable name. Since v19 the bundle files TA0005 under
+# ``stealth`` and the new TA0112 under ``defense-impairment``; the pre-v19
+# ``defense-evasion`` slug stays for ids a stored run carries from an older
+# release, and every TA0005 slug keeps the one pinned display name.
 _TACTIC_TABLE: tuple[tuple[str, str, str], ...] = (
     ("TA0043", "reconnaissance", "Reconnaissance"),
     ("TA0042", "resource-development", "Resource Development"),
@@ -79,6 +82,8 @@ _TACTIC_TABLE: tuple[tuple[str, str, str], ...] = (
     ("TA0003", "persistence", "Persistence"),
     ("TA0004", "privilege-escalation", "Privilege Escalation"),
     ("TA0005", "defense-evasion", "Defense Evasion"),
+    ("TA0005", "stealth", "Defense Evasion"),
+    ("TA0112", "defense-impairment", "Defense Impairment"),
     ("TA0006", "credential-access", "Credential Access"),
     ("TA0007", "discovery", "Discovery"),
     ("TA0008", "lateral-movement", "Lateral Movement"),

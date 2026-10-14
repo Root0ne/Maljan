@@ -221,6 +221,9 @@ class TestResolveTactic:
         self, _no_vendored_catalogue: None
     ) -> None:
         assert _resolve_tactic("defense-evasion") == _TACTIC_BY_SLUG["defense-evasion"]
+        # The slugs the current catalogue files techniques under resolve too.
+        assert _resolve_tactic("stealth") == ("TA0005", "Defense Evasion")
+        assert _resolve_tactic("defense-impairment") == ("TA0112", "Defense Impairment")
 
     def test_unknown_slug_without_the_catalogue(self, _no_vendored_catalogue: None) -> None:
         # Unknown slug with no catalogue echoes the slug back with an empty id.

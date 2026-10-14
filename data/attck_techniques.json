@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "attck_version": "19.2"
+    "attck_version": "20.0"
   },
   "_tactics": {
     "enterprise": {
@@ -172,7 +172,12 @@
     "tactics": [
       "inhibit-response-function"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0801": {
     "domain": "ics",
@@ -180,7 +185,12 @@
     "tactics": [
       "collection"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0802": {
     "domain": "ics",
@@ -188,7 +198,11 @@
     "tactics": [
       "collection"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Windows"
+    ]
   },
   "T0806": {
     "domain": "ics",
@@ -196,15 +210,11 @@
     "tactics": [
       "impair-process-control"
     ],
-    "platforms": []
-  },
-  "T0807": {
-    "domain": "ics",
-    "name": "Command-Line Interface",
-    "tactics": [
-      "execution"
-    ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Windows"
+    ]
   },
   "T0809": {
     "domain": "ics",
@@ -212,7 +222,12 @@
     "tactics": [
       "inhibit-response-function"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0811": {
     "domain": "ics",
@@ -220,7 +235,11 @@
     "tactics": [
       "collection"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Windows"
+    ]
   },
   "T0813": {
     "domain": "ics",
@@ -236,7 +255,12 @@
     "tactics": [
       "inhibit-response-function"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0815": {
     "domain": "ics",
@@ -252,7 +276,12 @@
     "tactics": [
       "inhibit-response-function"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0817": {
     "domain": "ics",
@@ -260,7 +289,10 @@
     "tactics": [
       "initial-access"
     ],
-    "platforms": []
+    "platforms": [
+      "Linux",
+      "Windows"
+    ]
   },
   "T0819": {
     "domain": "ics",
@@ -268,7 +300,12 @@
     "tactics": [
       "initial-access"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0820": {
     "domain": "ics",
@@ -276,7 +313,12 @@
     "tactics": [
       "evasion"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0821": {
     "domain": "ics",
@@ -284,7 +326,9 @@
     "tactics": [
       "execution"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded"
+    ]
   },
   "T0822": {
     "domain": "ics",
@@ -292,7 +336,12 @@
     "tactics": [
       "initial-access"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0823": {
     "domain": "ics",
@@ -300,7 +349,12 @@
     "tactics": [
       "execution"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0826": {
     "domain": "ics",
@@ -340,7 +394,12 @@
     "tactics": [
       "collection"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0831": {
     "domain": "ics",
@@ -364,7 +423,12 @@
     "tactics": [
       "execution"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0835": {
     "domain": "ics",
@@ -372,7 +436,9 @@
     "tactics": [
       "inhibit-response-function"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded"
+    ]
   },
   "T0836": {
     "domain": "ics",
@@ -380,7 +446,11 @@
     "tactics": [
       "impair-process-control"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Windows"
+    ]
   },
   "T0837": {
     "domain": "ics",
@@ -396,7 +466,12 @@
     "tactics": [
       "inhibit-response-function"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0840": {
     "domain": "ics",
@@ -404,7 +479,12 @@
     "tactics": [
       "discovery"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0842": {
     "domain": "ics",
@@ -412,7 +492,12 @@
     "tactics": [
       "discovery"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0843": {
     "domain": "ics",
@@ -420,7 +505,9 @@
     "tactics": [
       "lateral-movement"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded"
+    ]
   },
   "T0843.001": {
     "domain": "ics",
@@ -428,7 +515,9 @@
     "tactics": [
       "lateral-movement"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded"
+    ]
   },
   "T0843.002": {
     "domain": "ics",
@@ -436,7 +525,9 @@
     "tactics": [
       "lateral-movement"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded"
+    ]
   },
   "T0843.003": {
     "domain": "ics",
@@ -444,7 +535,9 @@
     "tactics": [
       "lateral-movement"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded"
+    ]
   },
   "T0845": {
     "domain": "ics",
@@ -452,7 +545,9 @@
     "tactics": [
       "collection"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded"
+    ]
   },
   "T0846": {
     "domain": "ics",
@@ -460,7 +555,12 @@
     "tactics": [
       "discovery"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0846.001": {
     "domain": "ics",
@@ -468,7 +568,12 @@
     "tactics": [
       "discovery"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0846.002": {
     "domain": "ics",
@@ -476,7 +581,12 @@
     "tactics": [
       "discovery"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0846.003": {
     "domain": "ics",
@@ -484,7 +594,12 @@
     "tactics": [
       "discovery"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0847": {
     "domain": "ics",
@@ -492,7 +607,12 @@
     "tactics": [
       "initial-access"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0848": {
     "domain": "ics",
@@ -500,7 +620,12 @@
     "tactics": [
       "initial-access"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0849": {
     "domain": "ics",
@@ -508,7 +633,12 @@
     "tactics": [
       "evasion"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0851": {
     "domain": "ics",
@@ -517,7 +647,12 @@
       "evasion",
       "inhibit-response-function"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0852": {
     "domain": "ics",
@@ -525,15 +660,11 @@
     "tactics": [
       "collection"
     ],
-    "platforms": []
-  },
-  "T0853": {
-    "domain": "ics",
-    "name": "Scripting",
-    "tactics": [
-      "execution"
-    ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Windows"
+    ]
   },
   "T0858": {
     "domain": "ics",
@@ -542,7 +673,9 @@
       "execution",
       "evasion"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded"
+    ]
   },
   "T0859": {
     "domain": "ics",
@@ -551,7 +684,12 @@
       "persistence",
       "lateral-movement"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0860": {
     "domain": "ics",
@@ -559,7 +697,11 @@
     "tactics": [
       "initial-access"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Windows"
+    ]
   },
   "T0861": {
     "domain": "ics",
@@ -567,7 +709,12 @@
     "tactics": [
       "collection"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0862": {
     "domain": "ics",
@@ -575,7 +722,12 @@
     "tactics": [
       "initial-access"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0863": {
     "domain": "ics",
@@ -583,7 +735,11 @@
     "tactics": [
       "execution"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Windows"
+    ]
   },
   "T0864": {
     "domain": "ics",
@@ -591,7 +747,10 @@
     "tactics": [
       "initial-access"
     ],
-    "platforms": []
+    "platforms": [
+      "Linux",
+      "Windows"
+    ]
   },
   "T0865": {
     "domain": "ics",
@@ -599,7 +758,11 @@
     "tactics": [
       "initial-access"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Windows"
+    ]
   },
   "T0866": {
     "domain": "ics",
@@ -608,7 +771,12 @@
       "initial-access",
       "lateral-movement"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0867": {
     "domain": "ics",
@@ -616,7 +784,11 @@
     "tactics": [
       "lateral-movement"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Windows"
+    ]
   },
   "T0868": {
     "domain": "ics",
@@ -624,11 +796,34 @@
     "tactics": [
       "collection"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded"
+    ]
   },
   "T0869": {
     "domain": "ics",
     "name": "Standard Application Layer Protocol",
+    "tactics": [
+      "command-and-control"
+    ],
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
+  },
+  "T0869.001": {
+    "domain": "ics",
+    "name": "DNS",
+    "tactics": [
+      "command-and-control"
+    ],
+    "platforms": []
+  },
+  "T0869.002": {
+    "domain": "ics",
+    "name": "Publish/Subscribe Protocols",
     "tactics": [
       "command-and-control"
     ],
@@ -640,7 +835,12 @@
     "tactics": [
       "execution"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0872": {
     "domain": "ics",
@@ -648,7 +848,12 @@
     "tactics": [
       "evasion"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0873": {
     "domain": "ics",
@@ -656,7 +861,10 @@
     "tactics": [
       "persistence"
     ],
-    "platforms": []
+    "platforms": [
+      "Linux",
+      "Windows"
+    ]
   },
   "T0873.001": {
     "domain": "ics",
@@ -664,7 +872,10 @@
     "tactics": [
       "persistence"
     ],
-    "platforms": []
+    "platforms": [
+      "Linux",
+      "Windows"
+    ]
   },
   "T0874": {
     "domain": "ics",
@@ -673,7 +884,12 @@
       "execution",
       "privilege-escalation"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0877": {
     "domain": "ics",
@@ -681,7 +897,9 @@
     "tactics": [
       "collection"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded"
+    ]
   },
   "T0878": {
     "domain": "ics",
@@ -689,7 +907,12 @@
     "tactics": [
       "inhibit-response-function"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0879": {
     "domain": "ics",
@@ -713,7 +936,12 @@
     "tactics": [
       "inhibit-response-function"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0882": {
     "domain": "ics",
@@ -729,7 +957,12 @@
     "tactics": [
       "initial-access"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0884": {
     "domain": "ics",
@@ -737,7 +970,12 @@
     "tactics": [
       "command-and-control"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0885": {
     "domain": "ics",
@@ -745,7 +983,12 @@
     "tactics": [
       "command-and-control"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0886": {
     "domain": "ics",
@@ -754,7 +997,12 @@
       "initial-access",
       "lateral-movement"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0887": {
     "domain": "ics",
@@ -763,7 +1011,11 @@
       "discovery",
       "collection"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Windows"
+    ]
   },
   "T0888": {
     "domain": "ics",
@@ -771,7 +1023,12 @@
     "tactics": [
       "discovery"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0889": {
     "domain": "ics",
@@ -779,7 +1036,9 @@
     "tactics": [
       "persistence"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded"
+    ]
   },
   "T0890": {
     "domain": "ics",
@@ -787,7 +1046,12 @@
     "tactics": [
       "privilege-escalation"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0892": {
     "domain": "ics",
@@ -795,7 +1059,12 @@
     "tactics": [
       "inhibit-response-function"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0893": {
     "domain": "ics",
@@ -803,7 +1072,12 @@
     "tactics": [
       "collection"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T0894": {
     "domain": "ics",
@@ -811,7 +1085,11 @@
     "tactics": [
       "evasion"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Windows"
+    ]
   },
   "T0895": {
     "domain": "ics",
@@ -819,7 +1097,11 @@
     "tactics": [
       "execution"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Windows"
+    ]
   },
   "T1001": {
     "domain": "enterprise",
@@ -1204,6 +1486,7 @@
     "platforms": [
       "ESXi",
       "Linux",
+      "Windows",
       "macOS"
     ]
   },
@@ -2253,7 +2536,9 @@
       "execution"
     ],
     "platforms": [
-      "Windows"
+      "Linux",
+      "Windows",
+      "macOS"
     ]
   },
   "T1059.002": {
@@ -4996,6 +5281,17 @@
   "T1474.003": {
     "domain": "mobile",
     "name": "Compromise Software Supply Chain",
+    "tactics": [
+      "initial-access"
+    ],
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1476": {
+    "domain": "mobile",
+    "name": "Deliver Malicious Application via Other Means",
     "tactics": [
       "initial-access"
     ],
@@ -9107,6 +9403,16 @@
       "PRE"
     ]
   },
+  "T1608.007": {
+    "domain": "enterprise",
+    "name": "AI Result Poisoning",
+    "tactics": [
+      "resource-development"
+    ],
+    "platforms": [
+      "PRE"
+    ]
+  },
   "T1609": {
     "domain": "enterprise",
     "name": "Container Administration Command",
@@ -10368,6 +10674,17 @@
       "macOS"
     ]
   },
+  "T1685.007": {
+    "domain": "enterprise",
+    "name": "Impair Autonomous Defenses",
+    "tactics": [
+      "defense-impairment"
+    ],
+    "platforms": [
+      "SaaS",
+      "Windows"
+    ]
+  },
   "T1686": {
     "domain": "enterprise",
     "name": "Disable or Modify System Firewall",
@@ -10468,7 +10785,11 @@
     "tactics": [
       "inhibit-response-function"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Windows"
+    ]
   },
   "T1691.001": {
     "domain": "ics",
@@ -10476,7 +10797,11 @@
     "tactics": [
       "inhibit-response-function"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Windows"
+    ]
   },
   "T1691.002": {
     "domain": "ics",
@@ -10484,7 +10809,12 @@
     "tactics": [
       "inhibit-response-function"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T1692": {
     "domain": "ics",
@@ -10493,7 +10823,11 @@
       "evasion",
       "impair-process-control"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Windows"
+    ]
   },
   "T1692.001": {
     "domain": "ics",
@@ -10502,7 +10836,11 @@
       "evasion",
       "impair-process-control"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Windows"
+    ]
   },
   "T1692.002": {
     "domain": "ics",
@@ -10511,7 +10849,12 @@
       "evasion",
       "impair-process-control"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T1693": {
     "domain": "ics",
@@ -10521,7 +10864,9 @@
       "inhibit-response-function",
       "impair-process-control"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded"
+    ]
   },
   "T1693.001": {
     "domain": "ics",
@@ -10531,7 +10876,12 @@
       "inhibit-response-function",
       "impair-process-control"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T1693.002": {
     "domain": "ics",
@@ -10541,7 +10891,9 @@
       "inhibit-response-function",
       "impair-process-control"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded"
+    ]
   },
   "T1694": {
     "domain": "ics",
@@ -10550,7 +10902,12 @@
       "persistence",
       "lateral-movement"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T1694.001": {
     "domain": "ics",
@@ -10559,7 +10916,12 @@
       "persistence",
       "lateral-movement"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T1694.002": {
     "domain": "ics",
@@ -10568,7 +10930,9 @@
       "persistence",
       "lateral-movement"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded"
+    ]
   },
   "T1695": {
     "domain": "ics",
@@ -10576,7 +10940,12 @@
     "tactics": [
       "inhibit-response-function"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T1695.001": {
     "domain": "ics",
@@ -10584,7 +10953,12 @@
     "tactics": [
       "inhibit-response-function"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T1695.002": {
     "domain": "ics",
@@ -10592,13 +10966,154 @@
     "tactics": [
       "inhibit-response-function"
     ],
-    "platforms": []
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
   },
   "T1695.003": {
     "domain": "ics",
     "name": "Wi-Fi",
     "tactics": [
       "inhibit-response-function"
+    ],
+    "platforms": [
+      "Embedded",
+      "Linux",
+      "Network Devices",
+      "Windows"
+    ]
+  },
+  "T1696": {
+    "domain": "enterprise",
+    "name": "Anti-Automation Evasion",
+    "tactics": [
+      "stealth"
+    ],
+    "platforms": [
+      "SaaS"
+    ]
+  },
+  "T1696.001": {
+    "domain": "enterprise",
+    "name": "Automate CAPTCHA Completion",
+    "tactics": [
+      "stealth"
+    ],
+    "platforms": [
+      "SaaS"
+    ]
+  },
+  "T1696.002": {
+    "domain": "enterprise",
+    "name": "Avoid CAPTCHA",
+    "tactics": [
+      "stealth"
+    ],
+    "platforms": [
+      "SaaS"
+    ]
+  },
+  "T1697": {
+    "domain": "enterprise",
+    "name": "Steal Application Specific Passwords",
+    "tactics": [
+      "credential-access"
+    ],
+    "platforms": [
+      "Identity Provider",
+      "Office Suite",
+      "SaaS"
+    ]
+  },
+  "T1698": {
+    "domain": "enterprise",
+    "name": "Indirect Prompt Injection",
+    "tactics": [
+      "execution"
+    ],
+    "platforms": [
+      "SaaS",
+      "Windows"
+    ]
+  },
+  "T1699": {
+    "domain": "enterprise",
+    "name": "Direct Prompt Injection",
+    "tactics": [
+      "execution"
+    ],
+    "platforms": [
+      "SaaS",
+      "Windows"
+    ]
+  },
+  "T1700": {
+    "domain": "enterprise",
+    "name": "AI-Enabled Exfiltration",
+    "tactics": [
+      "exfiltration"
+    ],
+    "platforms": [
+      "SaaS",
+      "Windows"
+    ]
+  },
+  "T1701": {
+    "domain": "ics",
+    "name": "Command and Scripting Interpreter",
+    "tactics": [
+      "execution"
+    ],
+    "platforms": []
+  },
+  "T1701.001": {
+    "domain": "ics",
+    "name": "PowerShell",
+    "tactics": [
+      "execution"
+    ],
+    "platforms": []
+  },
+  "T1701.002": {
+    "domain": "ics",
+    "name": "Windows Command Shell",
+    "tactics": [
+      "execution"
+    ],
+    "platforms": []
+  },
+  "T1701.003": {
+    "domain": "ics",
+    "name": "Unix Shell",
+    "tactics": [
+      "execution"
+    ],
+    "platforms": []
+  },
+  "T1701.004": {
+    "domain": "ics",
+    "name": "Visual Basic",
+    "tactics": [
+      "execution"
+    ],
+    "platforms": []
+  },
+  "T1701.005": {
+    "domain": "ics",
+    "name": "Python",
+    "tactics": [
+      "execution"
+    ],
+    "platforms": []
+  },
+  "T1701.006": {
+    "domain": "ics",
+    "name": "JavaScript",
+    "tactics": [
+      "execution"
     ],
     "platforms": []
   }
