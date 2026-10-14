@@ -1655,6 +1655,13 @@ def _without_unbracketed_names(text: str) -> str:
     return "".join(out)
 
 
+def _sized_by_room(chunk: Any) -> bool:
+    """Whether the analyst's room sized ``chunk`` (``binary_chunker.SIZED_BY``)."""
+    from maljan.loaders.binary_chunker import SIZED_BY, SIZED_BY_ROOM
+
+    return (getattr(chunk, "metadata", None) or {}).get(SIZED_BY) == SIZED_BY_ROOM
+
+
 def _chunk_header(chunk: Any, open_total: bool) -> str:
     """The header a chunk is sent behind: its total, or that more may follow where it is open."""
     header = getattr(chunk, "to_prompt_header", None)
@@ -1687,11 +1694,13 @@ def _past_overlap(rest: str, after: Any) -> str:
 
     content = str(after.content)
     overlap = (getattr(after, "metadata", None) or {}).get(OVERLAP_IN, 0)
-    if (
-        isinstance(overlap, int)
-        and 0 < overlap <= len(content)
-        and rest.endswith(content[:overlap])
-    ):
+    if not isinstance(overlap, int) or not 0 < overlap <= len(content):
+        return content
+    opening = content[:overlap]
+    # The overlap is the end of the piece before; the rest is the end of what
+    # of it was not sent. Either one ends the other, and the overlap's earlier
+    # part, where the rest is the shorter, was sent with the piece before.
+    if rest.endswith(opening) or (len(rest) < overlap and opening.endswith(rest)):
         return content[overlap:]
     return content
 
@@ -3401,6 +3410,12 @@ EARLIER_CALLS_BY_TOOL = (
     "the result its entry recorded."
 )
 
+# What stands for a call's arguments that no list in the prompt could hold.
+ARGUMENTS_HELD = (
+    "arguments of {chars} characters, as in the call held in {entry}; an identical "
+    "repeat is answered from the ledger"
+)
+
 # A ledger id: a prefix and a number, read so that ids in a row are a range.
 _ENTRY_ID = re.compile(r"^(.*?)(\d+)$")
 
@@ -3479,17 +3494,23 @@ def earlier_chunks_compact(entries: Sequence[Any], held_over: int | None = None)
 def _call_arguments(
     args: dict[str, Any], *, named: bool, held_over: int | None, entry_id: str
 ) -> str:
-    """A call's argument values in canonical JSON, by name where ``named``, none ever cut."""
-    parts: list[str] = []
+    """A call's argument values in canonical JSON, by name where ``named``, none ever cut.
+
+    Arguments longer than ``held_over``, which no list in the prompt could
+    hold, are said as their size and the call that holds them
+    (:data:`ARGUMENTS_HELD`).
+    """
+    values: list[str] = []
     for key in sorted(args):
         try:
             value = json.dumps(args[key], sort_keys=True, default=str, ensure_ascii=False)
         except (TypeError, ValueError):
             value = repr(args[key])
-        if held_over is not None and len(value) > held_over:
-            value = f"args in {entry_id}"
-        parts.append(f"{key}={value}" if named else value)
-    return ", ".join(parts)
+        values.append(f"{key}={value}" if named else value)
+    shown = ", ".join(values)
+    if held_over is not None and len(shown) > held_over:
+        return ARGUMENTS_HELD.format(chars=len(shown), entry=entry_id)
+    return shown
 
 
 def _earlier_call_facts(entries: Sequence[Any]) -> list[tuple[str, dict[str, Any], str, str]]:
@@ -3585,14 +3606,14 @@ def fitted_chunk(
     """
     full = earlier_chunks_block(earlier)
     room = prompt_room(agent, content)
-    if room is None or not full:
+    if room is None:
         return full, content, ""
-    fixed = len(header) + 4
+    # With no earlier call there is no block, and only the header and the
+    # blank line after it stand beside the content.
+    fixed = len(header) + (4 if full else 2)
     counted = earlier_calls_counted(earlier)
-    # Room that holds no whole line of the content is no room for it.
-    need = content.find("\n") + 1 or 1
     avail = room - fixed - len(counted)
-    if avail < need:
+    if avail <= 0:
         # No room even beside the count: it is still said, the content as it came.
         return counted, content, ""
     # The loops are the count form's: what is left of the source over the room
@@ -3604,8 +3625,10 @@ def fitted_chunk(
     if len(content) <= take:
         sent, rest = content, ""
     else:
-        cut = content.rfind("\n", 0, take) + 1 or take
+        cut = _line_cut(content, take, avail, remaining, loops)
         sent, rest = content[:cut], content[cut:]
+    if not full:
+        return "", sent, rest
     slack = room - fixed - len(sent)
     for form in (
         full,
@@ -3615,6 +3638,26 @@ def fitted_chunk(
         if len(form) <= slack:
             return form, sent, rest
     return counted, sent, rest
+
+
+def _line_cut(content: str, take: int, avail: int, remaining: int, loops: int) -> int:
+    """Where this loop's share of ``content`` ends: at a line break when that costs nothing.
+
+    ``take`` is the share. The last line break before it is used when the
+    line it keeps whole fits a later loop's room (``avail``) and what is left
+    after it still fits the loops left; otherwise the cut is at ``take``,
+    inside the line, so no chunk is past the room and no loop is added for a
+    line kept whole.
+    """
+    cut = content.rfind("\n", 0, take) + 1
+    if cut <= 0:
+        return take
+    end = content.find("\n", cut)
+    line = (end + 1 if end >= 0 else len(content)) - cut
+    left = loops - 1
+    if line <= avail and left > 0 and -(-(remaining - cut) // avail) <= left:
+        return cut
+    return take
 
 
 def _earlier_call_lines(entries: Sequence[Any]) -> list[str]:
@@ -7453,7 +7496,12 @@ class BaseAnalyst(BudgetMeter, ABC):
         # Where the room is measured a carry can add a chunk, so the total is
         # not fixed: every header then says more may follow, never a total a
         # later chunk revises.
-        fitting = prompt_room(self, str(queue[0].content)) is not None
+        # Only chunks the analyst's room sized are fitted: an operator's
+        # ``max_tokens_per_chunk`` and the unknown-window size are each the
+        # chunk size as set, and those chunks go as they came.
+        fitting = prompt_room(self, str(queue[0].content)) is not None and all(
+            _sized_by_room(chunk) for chunk in queue
+        )
 
         chunk_isrs: list[AgentISR] = []
         errors: list[str] = []
@@ -7475,13 +7523,16 @@ class BaseAnalyst(BudgetMeter, ABC):
             earlier = list(entries[first_entry:]) if isinstance(entries, list) else []
             # The earlier calls are known now: the chunk takes the room less
             # its header and them, and what does not fit goes on.
-            block, sent, rest = fitted_chunk(
-                self,
-                _chunk_header(chunk, fitting),
-                str(chunk.content),
-                earlier,
-                ahead[position],
-            )
+            if fitting:
+                block, sent, rest = fitted_chunk(
+                    self,
+                    _chunk_header(chunk, fitting),
+                    str(chunk.content),
+                    earlier,
+                    ahead[position],
+                )
+            else:
+                block, sent, rest = earlier_chunks_block(earlier), str(chunk.content), ""
             if rest:
                 queue[position] = _holding(queue[position], sent)
                 if follows[position]:

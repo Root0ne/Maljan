@@ -46,7 +46,7 @@ class TestJoining:
 
     def test_whole_sources_join_while_the_next_still_fits(self) -> None:
         chunks = [_chunk("a" * 400), _chunk("b" * 400), _chunk("c" * 400)]
-        joined = joined_when_it_fits(chunks, ChunkingConfig(), _room(900))
+        joined = joined_when_it_fits(chunks, ChunkingConfig(), _room(1_200))
         assert [c.char_count for c in joined] == [802, 400]
 
     def test_the_head_is_joined_with_the_whole_source_after_it(self) -> None:

@@ -27,8 +27,10 @@ from typing import Any
 import pytest
 
 from maljan.agents.base_agent import (
+    ARGUMENTS_HELD,
     EARLIER_CALLS_BY_TOOL,
     EARLIER_CHUNKS_COMPACT_HEAD,
+    EARLIER_CHUNKS_HEAD,
     BaseAnalyst,
     earlier_chunks_block,
     earlier_chunks_compact,
@@ -483,7 +485,7 @@ class TestTheCompactListKeepsEveryCallsArguments:
             SimpleNamespace(tool="t", id="ev_0009", args={"data": blob}, output="x", ok=True)
         ]
         assert earlier_chunks_compact(entries, 4_000).splitlines()[1] == (
-            "- t(args in ev_0009) \u2192 ev_0009"
+            "- t(" + ARGUMENTS_HELD.format(chars=5_002, entry="ev_0009") + ") \u2192 ev_0009"
         )
         assert blob in earlier_chunks_compact(entries, 6_000)
 
@@ -514,3 +516,143 @@ def test_the_loops_are_the_count_forms_and_lists_take_only_the_slack(
 
     assert len(sent.prompts) == len(projected.prompts)
     assert all(len(p) <= room for p in sent.prompts)
+
+
+def _run_and_project(
+    chunks: list, room: int, calls: int, monkeypatch: pytest.MonkeyPatch
+) -> tuple[list[str], int]:
+    """The prompts a pass sends, and the loops of the same pass with only the count form."""
+    import maljan.agents.base_agent as base
+
+    sent = _Reverser(room, calls_per_chunk=calls)
+    sent.safe_analyze_isr_chunked(chunks)
+    with monkeypatch.context() as patched:
+        huge = "x" * 10 * room
+        patched.setattr(base, "earlier_chunks_block", lambda e: huge if e else "")
+        patched.setattr(base, "earlier_chunks_compact", lambda e, held=None: huge)
+        patched.setattr(base, "earlier_calls_by_tool", lambda e: huge)
+        projected = _Reverser(room, calls_per_chunk=calls)
+        projected.safe_analyze_isr_chunked(chunks)
+    return sent.prompts, len(projected.prompts)
+
+
+def _content_of(prompt: str, first: bool) -> str:
+    return prompt.split("\n\n", 1)[-1] if first else prompt.rsplit("\n\n", 1)[-1]
+
+
+@pytest.mark.parametrize(
+    ("domain", "room", "text"),
+    [
+        (
+            "all_tools_reverser_ghidra",
+            25_832,
+            "".join(f"line {i}\n" for i in range(400))
+            + "b" * (25_832 + 5_000)
+            + "\n"
+            + "".join(f"line {i}\n" for i in range(400, 20_000)),
+        ),
+        (
+            "network",
+            25_832,
+            "".join(f"Flow {i}:\n" + "x" * (25_832 - 300) + "\n" for i in range(8)),
+        ),
+        (
+            "network",
+            25_832,
+            "".join(f"Flow {i}:\n" + "x" * (25_832 - 2_000) + "\n" for i in range(12)),
+        ),
+        (
+            "generic",
+            102_406,
+            "".join(f"line {i}\n" for i in range(300)) + "b" * 107_406 + "\n" + "tail\n" * 20_000,
+        ),
+    ],
+)
+def test_a_line_longer_than_the_room_never_sends_a_chunk_past_it(
+    domain: str, room: int, text: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    chunks = BinaryChunker(ChunkingConfig(overlap_tokens=0)).chunk(domain, text, room=_room(room))
+    prompts, projected = _run_and_project(chunks, room, 12, monkeypatch)
+
+    assert all(len(p) <= room for p in prompts)
+    assert len(prompts) == projected
+    sent = "".join(_content_of(p, i == 0) for i, p in enumerate(prompts))
+    if domain != "network":
+        assert sent == text
+    else:
+        assert sent.replace("\n", "") == text.replace("\n", "")
+    # No loop runs over a sliver: every loop but the last holds at least what
+    # the loops left would hold of what remained.
+    contents = [len(_content_of(p, i == 0)) for i, p in enumerate(prompts)]
+    assert min(contents[1:-1] or [room]) > 2 * 1_000
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_long_lines_of_any_length_keep_every_prompt_in_the_room(
+    seed: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rng = random.Random(seed)
+    room = 25_832
+    parts: list[str] = []
+    used = 0
+    while used < 120_000:
+        size = rng.choice([rng.randrange(1, 80), rng.randrange(1, 40_000)])
+        parts.append("q" * size + "\n")
+        used += size + 1
+    text = "".join(parts)[:120_000]
+    domain = rng.choice(["triage", "network", "static"])
+    chunks = BinaryChunker(ChunkingConfig(overlap_tokens=rng.choice([0, 200]))).chunk(
+        domain, text, room=_room(room)
+    )
+    prompts, projected = _run_and_project(chunks, room, rng.choice([12, 40]), monkeypatch)
+    assert all(len(p) <= room for p in prompts)
+    assert len(prompts) == projected
+
+
+def test_an_operator_figure_sends_its_chunks_as_set() -> None:
+    room = 25_832
+    flows = (f"- 203.0.{i % 250}.{i % 199}:443 flow {i:07d}\n" for i in range(11_000))
+    text = "".join(flows)[:300_000]
+    chunks = BinaryChunker(ChunkingConfig(overlap_tokens=0, max_tokens_per_chunk=15_000)).chunk(
+        "network", text, room=_room(room)
+    )
+    agent = _Reverser(room, calls_per_chunk=12)
+
+    agent.safe_analyze_isr_chunked(chunks)
+
+    assert len(agent.prompts) == len(chunks)
+    for i, (prompt, chunk) in enumerate(zip(agent.prompts, chunks, strict=True)):
+        assert prompt.startswith(chunk.to_prompt_header() if i == 0 else "[CHUNK ")
+        assert "(more may follow)" not in prompt
+        assert prompt.endswith(str(chunk.content))
+        if i:
+            assert EARLIER_CHUNKS_HEAD in prompt
+
+
+def test_near_room_joins_run_one_loop_each() -> None:
+    room = 25_832
+    sources = []
+    for i in range(24):
+        source = _chunk(chr(ord("a") + i % 26) * 12_800)
+        source.metadata.update({SIZED_BY: SIZED_BY_ROOM, CHUNK_CHARS: room})
+        sources.append(source)
+    joined = joined_when_it_fits(sources, ChunkingConfig(overlap_tokens=0), _room(room))
+    agent = _Reverser(room, calls_per_chunk=12)
+
+    agent.safe_analyze_isr_chunked(joined)
+
+    assert len(agent.prompts) == len(joined)
+    assert all(len(p) <= room for p in agent.prompts)
+
+
+def test_a_carried_rest_shorter_than_the_overlap_holds_nothing_twice() -> None:
+    from maljan.agents.base_agent import _past_overlap
+    from maljan.loaders.binary_chunker import OVERLAP_IN
+
+    piece = "abcdefghij" * 10
+    after = _chunk(piece[-40:] + "NEXT", 1, 2)
+    after.metadata[OVERLAP_IN] = 40
+    rest = piece[-15:]
+    assert rest + _past_overlap(rest, after) == piece[-15:] + "NEXT"
+    longer = piece[-60:]
+    assert longer + _past_overlap(longer, after) == piece[-60:] + "NEXT"

@@ -263,6 +263,21 @@ def header_chars(domain: str, count: int, chars: int) -> int:
     return len(header) + len("\n\n")
 
 
+def count_line_chars() -> int:
+    """Characters the shortest form of a later chunk's earlier calls takes, at most, with its break.
+
+    ``EARLIER_CALLS_NOT_LISTED`` (``agents.base_agent``) with the widest count
+    and ledger ids the id format writes (``schemas.evidence``), and the blank
+    line after it.
+    """
+    from maljan.agents.base_agent import EARLIER_CALLS_NOT_LISTED
+    from maljan.schemas.evidence import _ID_DIGITS
+
+    widest = "9" * _ID_DIGITS
+    line = EARLIER_CALLS_NOT_LISTED.format(count=widest, first=f"ev_{widest}", last=f"ev_{widest}")
+    return len(line) + len("\n\n")
+
+
 def first_chunk_chars(text: str, room: Room | None, chars: int, sized_by: str) -> int:
     """Characters the first chunk of ``text`` may hold where a chunk holds ``chars``.
 
@@ -376,7 +391,10 @@ def _joined_run(run: list, config: ChunkingConfig, room: Room | None, *, headed:
     text = SOURCE_SEPARATOR.join(str(chunk.content) for chunk in run)
     limit, sized_by = sized_chunk_chars(config, text, room)
     if headed and limit is not None and sized_by == SIZED_BY_ROOM:
-        reserve = header_chars(str(run[0].domain), headed, limit)
+        # A later chunk is sent behind its header and, at the least, the count
+        # of the calls before it: a join leaves room for both, so it is never
+        # spread over two loops.
+        reserve = header_chars(str(run[0].domain), headed, limit) + count_line_chars()
         if reserve < limit:
             limit -= reserve
     groups: list[list] = [[run[0]]]

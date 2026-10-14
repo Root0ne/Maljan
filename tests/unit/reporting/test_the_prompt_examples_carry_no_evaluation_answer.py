@@ -28,6 +28,7 @@ from typing import Any
 import pytest
 
 from maljan.agents.base_agent import (
+    ARGUMENTS_HELD,
     EARLIER_CALLS_BY_TOOL,
     EARLIER_CALLS_NOT_LISTED,
     EARLIER_CHUNKS_COMPACT_HEAD,
@@ -1757,6 +1758,7 @@ PROMPTS: dict[str, str] = {
         token_estimate=6_400,
         domain="network",
     ).to_prompt_header(more_may_follow=True),
+    "a call's arguments no list could hold": ARGUMENTS_HELD.format(chars=48_000, entry="ev_0031"),
     "a later chunk's earlier calls counted by tool": EARLIER_CALLS_BY_TOOL.format(
         count=38,
         tools="decompile_function \u00d734, list_strings \u00d74",
