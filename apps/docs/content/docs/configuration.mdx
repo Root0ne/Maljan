@@ -1580,9 +1580,11 @@ made. The chunks run one after another, so a later chunk is sized once those
 calls are known: it takes the room less its header and the full list, and what
 does not fit moves on to the next piece, what is left spread evenly over the
 loops it needs. The calls go in the form that leaves the fewest loops, the
-fuller on a tie: the full list, every call's ledger entries by tool as ranges
-(`decompile_function → ev_0012–ev_0051, ev_0060`), or their count with the
-span of their entries. Such a chunk's header says more may follow, since a
+fuller on a tie: the full list; the same calls with their arguments but not
+what they returned, calls with identical arguments sharing a line with their
+entries as ranges (`decompile_function("0x3c7c") → ev_0012–ev_0015`), an
+argument longer than the list could ever hold named by the entry that holds it
+(`args in ev_0012`); or their count with the span of their entries. Such a chunk's header says more may follow, since a
 carry can add a chunk. An identical call is still answered from its entry. Sources are joined against the room less the header,
 so a join is never cut afterwards. The overlap between
 chunks is held below three quarters of a chunk, and the hold is logged. A JSON
