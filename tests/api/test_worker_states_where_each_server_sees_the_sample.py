@@ -62,10 +62,19 @@ def test_a_retired_variable_still_set_is_named_with_the_setting_that_holds_it() 
     assert lines == [
         "GHIDRA_CONTAINER_SAMPLES_PATH is set and no longer read; the setting "
         "core.static.ghidra.sample_mount holds the value now (the migration that retired it "
-        "copied the variable there once only if it was a mount other than the shipped one "
-        "and the store held none)."
+        "copied the variable there once, only if the setting accepts its value, it differs "
+        "from the shipped one and the store held none)."
     ]
     assert "/srv/maljan" not in lines[0]
+
+
+def test_the_retired_attck_age_variable_names_the_refresh_setting() -> None:
+    (line,) = analysis_worker.retired_environment_lines({"MALJAN_ATTCK_MAX_AGE_DAYS": "30"})
+    assert line.startswith(
+        "MALJAN_ATTCK_MAX_AGE_DAYS is set and no longer read; the setting "
+        "core.validation.attck_refresh_days holds the value now"
+    )
+    assert "30" not in line
 
 
 def test_an_unset_or_empty_retired_variable_says_nothing() -> None:

@@ -196,8 +196,8 @@ def retired_environment_lines(environ: Mapping[str, str]) -> list[str]:
 
     return [
         f"{variable} is set and no longer read; the setting {key} holds the value now "
-        "(the migration that retired it copied the variable there once only if it was a "
-        "mount other than the shipped one and the store held none)."
+        "(the migration that retired it copied the variable there once, only if the setting "
+        "accepts its value, it differs from the shipped one and the store held none)."
         for variable, key in RETIRED_ENVIRONMENT.items()
         if str(environ.get(variable, "")).strip()
     ]
@@ -2143,6 +2143,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         Summary dict with verdict and timing info.
     """
     logger.info(f"Analysis task started: job={job_id}", extra={"job_id": job_id})
+    # An ATT&CK update the console ran since the last analysis replaced the
+    # files a warm catalogue in this process was read from.
+    from app.worker.attck_worker import drop_a_replaced_catalogue
+
+    drop_a_replaced_catalogue()
 
     redis_conn: aioredis.Redis = ctx["redis"]
     db_session: async_sessionmaker = ctx["db_session"]
@@ -3765,6 +3770,11 @@ async def startup(ctx: dict) -> None:
     # And one look at the other queue, once the process that reads it has had
     # a health interval to come up beside this one.
     ctx["enrichment_watch_task"] = asyncio.create_task(warn_if_enrichment_is_unmanned(ctx))
+    # The console's ATT&CK cache jobs, read beside this worker's one analysis
+    # slot rather than in it: this is the process that holds the cache.
+    from app.worker.attck_worker import start_attck_worker
+
+    await start_attck_worker(ctx)
 
     logger.info(
         "Worker started: connected to DB and Redis",
@@ -3775,6 +3785,9 @@ async def startup(ctx: dict) -> None:
 async def shutdown(ctx: dict) -> None:
     """Called when the ARQ worker shuts down."""
     # Before the connections they use are closed under them.
+    from app.worker.attck_worker import stop_attck_worker
+
+    await stop_attck_worker(ctx, EXIT_GRACE)
     for name in ("sweep_task", "enrichment_watch_task"):
         task: asyncio.Task | None = ctx.get(name)
         if task is not None:

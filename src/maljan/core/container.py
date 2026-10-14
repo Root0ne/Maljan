@@ -694,6 +694,7 @@ class ServiceContainer:
 
         self._configure_langsmith()
         self._announce_index_retry()
+        self._announce_attck_refresh()
 
     @property
     def is_mock(self) -> bool:
@@ -2147,6 +2148,24 @@ class ServiceContainer:
         seconds = int(getattr(getattr(self.config, "validation", None), "index_retry_seconds", 900))
         os.environ[knowledge_tools.INDEX_RETRY_ENV] = str(seconds)
         knowledge_tools.set_index_retry_after(seconds)
+
+    def _announce_attck_refresh(self) -> None:
+        """Put ``validation.attck_refresh_days`` where the ATT&CK loader reads it.
+
+        The loader runs in this process and in the knowledge sidecar, which
+        has an environment and no settings store (``env_allow`` carries the
+        name), so the value travels the way ``index_retry_seconds`` does. This
+        is the one place that writes it: the store is the only source, and the
+        variable an operator used to set is retired.
+        """
+        from maljan.memory.attck_loader import ATTCK_REFRESH_DAYS_ENV, DEFAULT_MAX_AGE_DAYS
+
+        days = int(
+            getattr(
+                getattr(self.config, "validation", None), "attck_refresh_days", DEFAULT_MAX_AGE_DAYS
+            )
+        )
+        os.environ[ATTCK_REFRESH_DAYS_ENV] = str(days)
 
     def _configure_langsmith(self) -> None:
         """Propagate LangSmith tracing config into the OS environment."""

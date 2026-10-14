@@ -7,10 +7,14 @@ extracts:
   - ``x-mitre-tactic`` objects -> the tactic catalogue, in matrix column order.
 
 The raw STIX bundle is cached locally. The cache AUTO-REFRESHES once it is older
-than ``MALJAN_ATTCK_MAX_AGE_DAYS`` days (default 7), so new ATT&CK releases
+than ``validation.attck_refresh_days`` days (default 7), so new ATT&CK releases
 (e.g. the v19 "Defense Evasion" -> "Stealth" + "Defense Impairment" split) flow
-through with no code changes. If a refresh download fails, the existing (stale)
-cache is reused rather than breaking the analysis run.
+through with no code changes. The setting reaches this module, and the
+knowledge tool server that builds the index, as ``MALJAN_ATTCK_REFRESH_DAYS``,
+which the service container writes from the settings store. If a refresh
+download fails, the existing (stale) cache is reused rather than breaking the
+analysis run. A refreshed bundle is written beside the old one and moved over
+it in one rename (``attck_update``), so a reader never sees half a file.
 
 Cache location: ~/.cache/maljan/attck/ (or MALJAN_ATTCK_CACHE env var).
 Force a refresh: ``python -m maljan.memory.attck_loader`` (or load with
@@ -100,16 +104,35 @@ TACTIC_ID_RE = re.compile(r"\ATA\d{4}\Z")
 # publication instead of up to a month later.
 DEFAULT_MAX_AGE_DAYS = 7
 
+# How ``validation.attck_refresh_days`` reaches this module. The service
+# container writes it from the settings store, and the knowledge tool server —
+# a process with an environment and no settings store — has it on its
+# ``env_allow``. It is a transport, not an operator's knob: the variable an
+# operator used to set, ``MALJAN_ATTCK_MAX_AGE_DAYS``, is retired
+# (``settings_annotations.RETIRED_ENVIRONMENT``).
+ATTCK_REFRESH_DAYS_ENV = "MALJAN_ATTCK_REFRESH_DAYS"
+
 
 def _default_max_age_days() -> int:
-    """Cache auto-refresh threshold in days (env MALJAN_ATTCK_MAX_AGE_DAYS).
+    """Cache auto-refresh threshold in days, as the container announced it.
 
     0 (or negative) disables the age check: the cache is then used until it is
-    missing or a force_refresh is requested.
+    missing or a force_refresh is requested. A process no container announced
+    the setting to (a script, the refresh CLI) uses the shipped default; an
+    unreadable value is said and the default used.
     """
+    raw = os.environ.get(ATTCK_REFRESH_DAYS_ENV, "").strip()
+    if not raw:
+        return DEFAULT_MAX_AGE_DAYS
     try:
-        return int(os.environ.get("MALJAN_ATTCK_MAX_AGE_DAYS", str(DEFAULT_MAX_AGE_DAYS)))
+        return int(raw)
     except ValueError:
+        logger.warning(
+            "%s=%r is not a whole number of days; the ATT&CK cache is checked every %d days.",
+            ATTCK_REFRESH_DAYS_ENV,
+            raw,
+            DEFAULT_MAX_AGE_DAYS,
+        )
         return DEFAULT_MAX_AGE_DAYS
 
 
@@ -171,8 +194,8 @@ def load_attck_data(
     """Load techniques + tactics + version from the ATT&CK bundle.
 
     Uses the local cache when it is fresh; auto-refreshes when it is older than
-    ``max_age_days`` (defaults to MALJAN_ATTCK_MAX_AGE_DAYS / 7). On a failed
-    refresh, falls back to the stale cache instead of raising.
+    ``max_age_days`` (defaults to ``validation.attck_refresh_days``, 7). On a
+    failed refresh, falls back to the stale cache instead of raising.
     """
     raw = _load_raw_bundle(url, cache_file, force_refresh, max_age_days)
     techniques = _parse_bundle(raw)
@@ -230,8 +253,12 @@ def _load_raw_bundle(
     return raw
 
 
-def _fetch_bundle(url: str) -> dict:
-    """Download the STIX bundle from the given URL (HTTP/HTTPS only)."""
+def _fetch_bundle(url: str, timeout: float = 60) -> dict:
+    """Download a JSON document from the given URL (HTTP/HTTPS only).
+
+    The STIX bundles, and the release index ``attck_update`` reads versions
+    from: both are platform constants on the same host.
+    """
     import urllib.request  # stdlib — no requests dependency needed for one-off download
     from urllib.parse import urlparse
 
@@ -245,7 +272,7 @@ def _fetch_bundle(url: str) -> dict:
 
     try:
         # nosemgrep: dynamic-urllib-use-detected — scheme validated; trusted constant URL
-        with urllib.request.urlopen(url, timeout=60) as resp:  # noqa: S310
+        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310
             data = resp.read().decode("utf-8")
         raw: dict[str, Any] = json.loads(data)
         return raw
@@ -253,12 +280,42 @@ def _fetch_bundle(url: str) -> dict:
         raise RuntimeError(f"Failed to fetch ATT&CK bundle from {url}: {exc}") from exc
 
 
-def _save_cache(bundle: dict, cache_file: Path) -> None:
-    """Persist the raw bundle JSON to the local cache file."""
+def _download_bundle_file(url: str, target: Path, timeout: float = 300) -> None:
+    """Stream a bundle from ``url`` into ``target`` (HTTP/HTTPS only).
+
+    The console's update writes the download to a file of its own and checks
+    it there, so a bundle of tens of megabytes is never held twice in memory
+    and never reaches the cache path before it has been read back whole.
+    """
+    import shutil
+    import urllib.request
+    from urllib.parse import urlparse
+
+    scheme = urlparse(url).scheme.lower()
+    if scheme not in ("http", "https"):
+        raise RuntimeError(f"Refusing non-HTTP(S) ATT&CK bundle URL: {url!r}")
     try:
-        cache_file.parent.mkdir(parents=True, exist_ok=True)
-        cache_file.write_text(json.dumps(bundle), encoding="utf-8")
-        logger.info("ATT&CK bundle cached at: %s", cache_file)
+        # nosemgrep: dynamic-urllib-use-detected — scheme validated; trusted constant URL
+        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310
+            with target.open("wb") as out:
+                shutil.copyfileobj(resp, out, length=1 << 20)
+    except Exception as exc:
+        raise RuntimeError(f"Failed to fetch ATT&CK bundle from {url}: {exc}") from exc
+
+
+def _save_cache(bundle: dict, cache_file: Path) -> None:
+    """Persist the raw bundle JSON to the local cache file, in one rename.
+
+    Written beside the cache file and moved over it, under the cache's update
+    lock, so an analysis reading the bundle at that moment reads the old file
+    or the new one and never a half-written one. While the console's update
+    holds the lock this refresh is not written: that update is writing the
+    same files.
+    """
+    from maljan.memory import attck_update
+
+    try:
+        attck_update.save_refreshed_bundle(bundle, cache_file)
     except OSError as e:
         logger.warning("Could not write ATT&CK cache: %s", e)
 

@@ -182,7 +182,7 @@ class TestCacheTTL:
     def test_the_default_check_is_weekly(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.delenv("MALJAN_ATTCK_MAX_AGE_DAYS", raising=False)
+        monkeypatch.delenv(attck_loader.ATTCK_REFRESH_DAYS_ENV, raising=False)
         assert attck_loader._default_max_age_days() == 7
         monkeypatch.setattr(
             "maljan.memory.attck_loader._fetch_bundle",
@@ -198,6 +198,64 @@ class TestCacheTTL:
         _age(eight_days, 8)
         raw = _load_raw_bundle("http://x", eight_days, force_refresh=False, max_age_days=None)
         assert raw["objects"][0]["x_mitre_version"] == "new"
+
+    def test_the_announced_interval_is_the_one_used(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(attck_loader.ATTCK_REFRESH_DAYS_ENV, "30")
+        assert attck_loader._default_max_age_days() == 30
+        monkeypatch.setattr(
+            "maljan.memory.attck_loader._fetch_bundle",
+            lambda url: {"objects": [{"type": "x-mitre-collection", "x_mitre_version": "new"}]},
+        )
+        twenty_days = tmp_path / "twenty.json"
+        _write_bundle(twenty_days, "cached")
+        _age(twenty_days, 20)
+        raw = _load_raw_bundle("http://x", twenty_days, force_refresh=False, max_age_days=None)
+        assert raw["objects"][0]["x_mitre_version"] == "cached"
+
+    def test_an_announced_zero_never_refreshes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(attck_loader.ATTCK_REFRESH_DAYS_ENV, "0")
+
+        def boom(url: str) -> dict:
+            raise AssertionError("an interval of 0 must not refresh")
+
+        monkeypatch.setattr("maljan.memory.attck_loader._fetch_bundle", boom)
+        cache = tmp_path / "old.json"
+        _write_bundle(cache, "ancient")
+        _age(cache, 9999)
+        raw = _load_raw_bundle("http://x", cache, force_refresh=False, max_age_days=None)
+        assert raw["objects"][0]["x_mitre_version"] == "ancient"
+
+    def test_an_unreadable_interval_uses_the_default_and_says_so(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monkeypatch.setenv(attck_loader.ATTCK_REFRESH_DAYS_ENV, "weekly")
+        with caplog.at_level("WARNING"):
+            assert attck_loader._default_max_age_days() == 7
+        assert "not a whole number of days" in caplog.text
+
+    def test_the_retired_variable_is_read_no_more(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv(attck_loader.ATTCK_REFRESH_DAYS_ENV, raising=False)
+        monkeypatch.setenv("MALJAN_ATTCK_MAX_AGE_DAYS", "0")
+        assert attck_loader._default_max_age_days() == 7
+
+    def test_the_container_announces_the_stored_interval(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.core.config import Settings
+        from maljan.core.container import ServiceContainer
+
+        # Set first so the value the container writes is taken back afterwards.
+        monkeypatch.setenv(attck_loader.ATTCK_REFRESH_DAYS_ENV, "7")
+        config = Settings(_env_file=None)
+        assert config.validation.attck_refresh_days == attck_loader.DEFAULT_MAX_AGE_DAYS
+        config.validation.attck_refresh_days = 0
+        ServiceContainer(config=config, mock=True)
+        assert os.environ[attck_loader.ATTCK_REFRESH_DAYS_ENV] == "0"
+        assert attck_loader._default_max_age_days() == 0
 
     def test_missing_cache_offline_raises(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -159,6 +159,51 @@ class ProbeResponse(BaseModel):
     details: dict[str, Any] | None = None
 
 
+class AttckStatusResponse(BaseModel):
+    """The cached ATT&CK bundles as the worker that holds them reads them.
+
+    ``domains`` carries, per domain, whether a bundle is cached, its release
+    and date, when it was written and how old it is, and when the automatic
+    check is next due; ``last_check``, ``last_update`` and ``running`` are
+    the worker's record of the console's check and update.
+    """
+
+    refresh_days: int
+    next_check_at: str | None = None
+    domains: list[dict[str, Any]]
+    last_check: dict[str, Any] | None = None
+    last_update: dict[str, Any] | None = None
+    running: dict[str, Any] | None = None
+
+
+class AttckCheckResponse(BaseModel):
+    """One comparison of the cache with MITRE's release index.
+
+    ``outcome`` is ``up_to_date``, ``outdated`` or ``failed``; a failed read of
+    the index is never reported as up to date.
+    """
+
+    ok: bool
+    outcome: str
+    reason: str = ""
+    checked_at: str | None = None
+    refresh_days: int | None = None
+    next_check_at: str | None = None
+    domains: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class AttckUpdateStarted(BaseModel):
+    job_id: str
+
+
+class AttckUpdateProgress(BaseModel):
+    """Where one update is: ``queued``, ``running``, ``done`` or ``unknown``."""
+
+    job_id: str
+    state: str
+    result: dict[str, Any] | None = None
+
+
 class ContextWindowResponse(BaseModel):
     """The window the configured models serve, and what it buys one answer.
 

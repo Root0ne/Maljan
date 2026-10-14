@@ -30,6 +30,10 @@ from app.logsafe import log_safe
 from app.models.user import User
 from app.runtime_config import runtime_config
 from app.schemas.settings import (
+    AttckCheckResponse,
+    AttckStatusResponse,
+    AttckUpdateProgress,
+    AttckUpdateStarted,
     CatalogEntryDTO,
     ConditionValidateRequest,
     ConditionValidateResponse,
@@ -54,7 +58,7 @@ from app.schemas.settings import (
     ValueDTO,
     ValuesResponse,
 )
-from app.services import credential_bootstrap
+from app.services import attck_cache, credential_bootstrap
 from app.services.audit import record as audit_record
 from app.services.mapping_preview import PREVIEW_MAX_BYTES, preview_mapping
 from app.services.report_formats_lock import (
@@ -1099,3 +1103,107 @@ async def preview_sandbox_mapping(
     payload = await _capped_body(request)
     body = MappingPreviewRequest.model_validate(payload)
     return MappingPreviewResponse(**preview_mapping(body.sample, body.mapping))
+
+
+# ── The ATT&CK cache ────────────────────────────────────────────────────────
+# The cached ATT&CK bundles live on the analysis worker, which is their one
+# writer; these routes ask it (``app.services.attck_cache``) and never touch
+# the files. The upstream address is the platform's constant: nothing a caller
+# sends names a host.
+
+
+async def _attck_refresh_days(db: AsyncSession) -> int:
+    """The saved ``validation.attck_refresh_days``; the read transaction ends here."""
+    core = await core_settings_cache.get(db)
+    await end_read_transaction(db)
+    return int(core.validation.attck_refresh_days)
+
+
+def _attck_caller(user: User) -> dict[str, Any]:
+    """Who asked, as the worker records it and the console shows it."""
+    return {"user_id": str(user.id), "name": str(getattr(user, "full_name", "") or "")}
+
+
+def _worker_silent(exc: attck_cache.WorkerDidNotAnswer) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
+
+
+@router.get("/attck", response_model=AttckStatusResponse)
+async def attck_status(
+    _: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
+) -> AttckStatusResponse:
+    """Per ATT&CK domain: the cached release, its date and age, the next automatic check."""
+    days = await _attck_refresh_days(db)
+    try:
+        answer = await attck_cache.status(days)
+    except attck_cache.WorkerDidNotAnswer as exc:
+        raise _worker_silent(exc) from exc
+    if answer.get("outcome") == "failed":
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=answer.get("reason"))
+    return AttckStatusResponse(**answer)
+
+
+@router.post("/attck/check", response_model=AttckCheckResponse)
+async def attck_check(
+    request: Request,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AttckCheckResponse:
+    """Compare the cache with MITRE's release index now. Downloads and changes nothing."""
+    days = await _attck_refresh_days(db)
+    try:
+        answer = await attck_cache.check(_attck_caller(user), days)
+    except attck_cache.WorkerDidNotAnswer as exc:
+        raise _worker_silent(exc) from exc
+    await audit_record(
+        "settings.attck_check",
+        resource_type="settings",
+        resource_id="attck",
+        user_id=user.id,
+        details={"outcome": answer.get("outcome"), "reason": answer.get("reason") or ""},
+        ip=_client_ip(request),
+    )
+    return AttckCheckResponse(**answer)
+
+
+@router.post(
+    "/attck/update", response_model=AttckUpdateStarted, status_code=status.HTTP_202_ACCEPTED
+)
+async def attck_update(
+    request: Request,
+    user: User = Depends(require_admin),
+) -> AttckUpdateStarted:
+    """Queue the update: download every outdated domain, check it, then swap it in.
+
+    The worker keeps the previous files as a backup and refuses a second
+    update while one runs. Poll ``/attck/update/{job_id}`` for the result.
+    """
+    try:
+        job_id = await attck_cache.start_update(_attck_caller(user))
+    except attck_cache.WorkerDidNotAnswer as exc:
+        raise _worker_silent(exc) from exc
+    logger.info("ATT&CK update queued by user %s as job %s", user.id, job_id)
+    await audit_record(
+        "settings.attck_update",
+        resource_type="settings",
+        resource_id="attck",
+        user_id=user.id,
+        details={"job_id": job_id},
+        ip=_client_ip(request),
+    )
+    return AttckUpdateStarted(job_id=job_id)
+
+
+@router.get("/attck/update/{job_id}", response_model=AttckUpdateProgress)
+async def attck_update_progress(
+    job_id: str,
+    _: User = Depends(require_admin),
+) -> AttckUpdateProgress:
+    """Where one update is, and its result once it is done."""
+    if not attck_cache.is_job_id(job_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such ATT&CK update.")
+    try:
+        progress = await attck_cache.update_progress(job_id)
+    except Exception as exc:  # noqa: BLE001 — Redis down reads as no answer
+        raise _worker_silent(attck_cache.WorkerDidNotAnswer(str(exc))) from exc
+    return AttckUpdateProgress(**progress)
