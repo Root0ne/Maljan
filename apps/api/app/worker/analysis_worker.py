@@ -3665,18 +3665,16 @@ async def warn_if_enrichment_is_unmanned(ctx: dict, delay: float | None = None) 
 # ``WorkerSettings.max_jobs = 1`` is what guarantees.
 PROCESS_WIDE_JOB_STATE = (
     "the job's settings, installed as the process's settings (install_settings)",
-    "the configured values the event scrub masks by value "
-    "(pipeline.events.remember_secret_values, scope 'job')",
+    "the configured values the event scrub masks by value (pipeline.events, scope 'job')",
     "the API names the job's hash resolution read (pipeline.events.remember_resolved_names)",
 )
 
 
 def concurrent_analyses_refusal(max_jobs: object) -> str | None:
     """Why the worker refuses to start with ``max_jobs``, or ``None`` for one job at a time."""
-    try:
-        jobs = int(max_jobs)  # type: ignore[call-overload]
-    except (TypeError, ValueError):
+    if isinstance(max_jobs, bool) or not isinstance(max_jobs, int):
         return f"max_jobs is {max_jobs!r}, which is not a number of jobs; set it to 1."
+    jobs = max_jobs
     if jobs == 1:
         return None
     return (

@@ -48,6 +48,16 @@ def test_more_than_one_job_is_refused_with_the_state_that_is_per_process(jobs: i
     assert "Set max_jobs to 1" in refusal
 
 
+@pytest.mark.parametrize("value", [True, 1.9, "1"])
+def test_a_value_that_only_converts_to_one_is_refused(value: object) -> None:
+    refusal = analysis_worker.concurrent_analyses_refusal(value)
+    assert refusal == f"max_jobs is {value!r}, which is not a number of jobs; set it to 1."
+
+
+def test_the_refusal_names_no_secret_word() -> None:
+    assert "secret" not in (analysis_worker.concurrent_analyses_refusal(2) or "").lower()
+
+
 def test_a_value_that_is_no_number_is_refused() -> None:
     assert analysis_worker.concurrent_analyses_refusal("many") == (
         "max_jobs is 'many', which is not a number of jobs; set it to 1."
