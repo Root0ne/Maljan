@@ -28,6 +28,7 @@ from typing import Any
 import pytest
 
 from maljan.agents.base_agent import (
+    EARLIER_CALLS_BY_TOOL,
     EARLIER_CALLS_NOT_LISTED,
     EARLIER_CHUNKS_COMPACT_HEAD,
     FINAL_ANSWER_NUDGE,
@@ -1756,6 +1757,12 @@ PROMPTS: dict[str, str] = {
         token_estimate=6_400,
         domain="network",
     ).to_prompt_header(more_may_follow=True),
+    "a later chunk's earlier calls counted by tool": EARLIER_CALLS_BY_TOOL.format(
+        count=38,
+        tools="decompile_function \u00d734, list_strings \u00d74",
+        first="ev_0012",
+        last="ev_0049",
+    ),
     "a later chunk's earlier calls in their compact form, or counted": " ".join(
         [
             EARLIER_CHUNKS_COMPACT_HEAD,

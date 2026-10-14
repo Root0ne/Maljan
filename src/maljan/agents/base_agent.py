@@ -3393,6 +3393,14 @@ EARLIER_CALLS_NOT_LISTED = (
     "entry recorded."
 )
 
+# The count with the kind of work done: each tool and how often it was called.
+EARLIER_CALLS_BY_TOOL = (
+    "Earlier chunks of this same input made {count} tool call(s) ({tools}), held in "
+    "ledger entries {first} to {last}; this prompt has no room to list them. Each is "
+    "answered from the ledger: an identical call is not run again, and is answered with "
+    "the result its entry recorded."
+)
+
 # A ledger id: a prefix and a number, read so that ids in a row are a range.
 _ENTRY_ID = re.compile(r"^(.*?)(\d+)$")
 
@@ -3515,6 +3523,20 @@ def earlier_calls_counted(entries: Sequence[Any]) -> str:
     return EARLIER_CALLS_NOT_LISTED.format(count=len(calls), first=calls[0][1], last=calls[-1][1])
 
 
+def earlier_calls_by_tool(entries: Sequence[Any]) -> str:
+    """The earlier calls' count, each tool's share of it and their entries' span, or ``""``."""
+    calls = _earlier_calls(entries)
+    if not calls:
+        return ""
+    counts: dict[str, int] = {}
+    for tool, _entry_id, _ok in calls:
+        counts[tool] = counts.get(tool, 0) + 1
+    tools = ", ".join(f"{tool} \u00d7{n}" for tool, n in counts.items())
+    return EARLIER_CALLS_BY_TOOL.format(
+        count=len(calls), tools=tools, first=calls[0][1], last=calls[-1][1]
+    )
+
+
 def _earlier_calls(entries: Sequence[Any]) -> list[tuple[str, str, bool]]:
     """``(tool, entry id, ok)`` for each earlier call the full list shows, in the order made."""
     calls: list[tuple[str, str, bool]] = []
@@ -3546,47 +3568,53 @@ def fitted_chunk(
     """``(earlier-calls block, content sent now, rest)`` for a later chunk's prompt.
 
     The chunks run one after another, so the earlier calls are known when a
-    chunk is sent: the chunk takes the agent's room less its header and the
-    calls. Of the three forms of the calls — the full list
-    (:data:`EARLIER_CHUNKS_HEAD`), every call with its arguments but not
-    what it returned (:data:`EARLIER_CHUNKS_COMPACT_HEAD`), and their count
-    with the span of their entries (:data:`EARLIER_CALLS_NOT_LISTED`) — the one
-    that leaves the
-    fewest loops over what is left of this source (``content`` and the
-    ``ahead`` characters of its pieces after it) is sent, the more informative
-    on a tie; a form whose room beside it holds no line of the content is
-    none. Never nothing while earlier calls exist. What is left is spread
-    evenly over those loops: content past this loop's share is the ``rest``,
-    cut at a line break where there is one; the caller hands it
-    to the next piece of the same source, or sends it as a chunk of its own.
-    With no room measured, the full list and the content as they came.
+    chunk is sent. The loops are fixed by the shortest form of those calls,
+    their count (:data:`EARLIER_CALLS_NOT_LISTED`): what is left of this
+    source (``content`` and the ``ahead`` characters of its pieces after it)
+    over the room that form leaves beside the header, spread evenly, so the
+    last loop is never a sliver. The slack this loop's share of the content
+    leaves goes to the most informative form that fits it: the full list
+    (:data:`EARLIER_CHUNKS_HEAD`), every call with its arguments but not what
+    it returned (:data:`EARLIER_CHUNKS_COMPACT_HEAD`), the count by tool with
+    the span of the entries (:data:`EARLIER_CALLS_BY_TOOL`), else the count.
+    A list never adds a loop, and never nothing while earlier calls exist.
+    Content past this loop's share is the ``rest``, cut at a line break where
+    there is one; the caller hands it to the next piece of the same source,
+    or sends it as a chunk of its own. With no room measured, the full list
+    and the content as they came.
     """
     full = earlier_chunks_block(earlier)
     room = prompt_room(agent, content)
     if room is None or not full:
         return full, content, ""
     fixed = len(header) + 4
+    counted = earlier_calls_counted(earlier)
     # Room that holds no whole line of the content is no room for it.
     need = content.find("\n") + 1 or 1
-    forms = (
-        full,
-        earlier_chunks_compact(earlier, room - fixed - need),
-        earlier_calls_counted(earlier),
-    )
-    remaining = len(content) + max(0, ahead)
-    fits = [(form, room - fixed - len(form)) for form in forms if room - fixed - len(form) >= need]
-    if not fits:
+    avail = room - fixed - len(counted)
+    if avail < need:
         # No room even beside the count: it is still said, the content as it came.
-        return forms[2], content, ""
-    fewest = min(-(-remaining // avail) for _form, avail in fits)
-    block, avail = next((f, a) for f, a in fits if -(-remaining // a) == fewest)
-    # What is left is spread evenly over those loops, so the last of them is
-    # never a sliver of what the others could not hold.
-    take = min(avail, -(-remaining // fewest))
+        return counted, content, ""
+    # The loops are the count form's: what is left of the source over the room
+    # the shortest form leaves, spread evenly so the last is no sliver. A list
+    # never adds a loop; it takes only the slack this loop's share leaves.
+    remaining = len(content) + max(0, ahead)
+    loops = -(-remaining // avail)
+    take = -(-remaining // loops)
     if len(content) <= take:
-        return block, content, ""
-    cut = content.rfind("\n", 0, take) + 1 or take
-    return block, content[:cut], content[cut:]
+        sent, rest = content, ""
+    else:
+        cut = content.rfind("\n", 0, take) + 1 or take
+        sent, rest = content[:cut], content[cut:]
+    slack = room - fixed - len(sent)
+    for form in (
+        full,
+        earlier_chunks_compact(earlier, slack),
+        earlier_calls_by_tool(earlier),
+    ):
+        if len(form) <= slack:
+            return form, sent, rest
+    return counted, sent, rest
 
 
 def _earlier_call_lines(entries: Sequence[Any]) -> list[str]:

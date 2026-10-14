@@ -27,7 +27,7 @@ from typing import Any
 import pytest
 
 from maljan.agents.base_agent import (
-    EARLIER_CALLS_NOT_LISTED,
+    EARLIER_CALLS_BY_TOOL,
     EARLIER_CHUNKS_COMPACT_HEAD,
     BaseAnalyst,
     earlier_chunks_block,
@@ -167,8 +167,8 @@ class TestTheHeaderIsKeptOutOfTheRoom:
         entries = _entries(6_000)[::2]
         agent = SimpleNamespace(_input_room_chars=lambda _text: 2_000)
         block, sent, _rest = fitted_chunk(agent, "h" * 80, "c" * 1_900, entries)
-        assert block == EARLIER_CALLS_NOT_LISTED.format(
-            count=3_000, first="ev_0000", last="ev_5998"
+        assert block == EARLIER_CALLS_BY_TOOL.format(
+            count=3_000, tools="decompile_function \u00d73000", first="ev_0000", last="ev_5998"
         )
         assert 80 + 4 + len(block) + len(sent) <= 2_000
 
@@ -182,9 +182,7 @@ def _names_every_call(prompt: str, made: int) -> bool:
     """Whether ``prompt`` lists every one of ``made`` earlier calls, or counts them by span."""
     if _entry_ids_in(prompt) >= {f"ev_{i:04d}" for i in range(made)}:
         return True
-    return (
-        f"made {made} tool call(s), held in ledger entries ev_0000 to ev_{made - 1:04d}" in prompt
-    )
+    return f"made {made} tool call(s)" in prompt and f"ev_0000 to ev_{made - 1:04d}" in prompt
 
 
 def _entry_ids_in(text: str) -> set[str]:
@@ -488,3 +486,31 @@ class TestTheCompactListKeepsEveryCallsArguments:
             "- t(args in ev_0009) \u2192 ev_0009"
         )
         assert blob in earlier_chunks_compact(entries, 6_000)
+
+
+@pytest.mark.parametrize("calls", [12, 40, 80])
+@pytest.mark.parametrize("overlap", [0, 200])
+def test_the_loops_are_the_count_forms_and_lists_take_only_the_slack(
+    calls: int, overlap: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import maljan.agents.base_agent as base
+
+    room = 25_832
+    flows = (f"- 203.0.{i % 250}.{i % 199}:443 flow {i:07d}\n" for i in range(11_000))
+    text = "".join(flows)[:300_000]
+    chunks = BinaryChunker(ChunkingConfig(overlap_tokens=overlap)).chunk(
+        "network", text, room=_room(room)
+    )
+    sent = _Reverser(room, calls_per_chunk=calls)
+    sent.safe_analyze_isr_chunked(chunks)
+
+    # The projection: the same pass with only the count form there to send.
+    huge = "x" * 10 * room
+    monkeypatch.setattr(base, "earlier_chunks_block", lambda e: huge if e else "")
+    monkeypatch.setattr(base, "earlier_chunks_compact", lambda e, held=None: huge)
+    monkeypatch.setattr(base, "earlier_calls_by_tool", lambda e: huge)
+    projected = _Reverser(room, calls_per_chunk=calls)
+    projected.safe_analyze_isr_chunked(chunks)
+
+    assert len(sent.prompts) == len(projected.prompts)
+    assert all(len(p) <= room for p in sent.prompts)
