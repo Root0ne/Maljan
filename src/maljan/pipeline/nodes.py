@@ -2525,8 +2525,8 @@ def case_for_the_judge_alone(
     keeps the claimed techniques, is asked the gate on them, and the sentence
     says so.
     """
+    from maljan.analysis.technique_ids import declared_technique_id
     from maljan.memory.long_term_memory import is_thin_case, with_published_techniques
-    from maljan.pipeline.validation import _attack_pattern_technique_id
 
     if not isinstance(bundle, Bundle):
         if is_thin_case(case):
@@ -2539,7 +2539,7 @@ def case_for_the_judge_alone(
         tid
         for obj in bundle.objects
         if str(getattr(obj, "type", "")) == "attack-pattern"
-        for tid in [_attack_pattern_technique_id(obj)]
+        for tid in [declared_technique_id(obj)]
         if tid
     ]
     moved = with_published_techniques(case, published, isr_reports, corroborated)
