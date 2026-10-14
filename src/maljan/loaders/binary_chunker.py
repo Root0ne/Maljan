@@ -221,35 +221,81 @@ def first_chunk_chars(text: str, room: Room | None, chars: int, sized_by: str) -
 
 
 def joined_when_it_fits(chunks: list, config: ChunkingConfig, room: Room | None) -> list:
-    """One chunk holding every source in order, when together they fit one; else ``chunks``.
+    """Sources that fit one chunk together joined into one, in order; ``chunks`` when none join.
 
     An agent reads several sources (the sample context and a sandbox slice),
     each chunked on its own, and every chunk is a full tool loop run after the
-    one before it. Sources the chunk size holds together are one loop. Joined
-    with :data:`SOURCE_SEPARATOR`, each source unchanged; the list is returned
-    as it came when it is one chunk, when the joined text is over the size,
-    when ``skip_if_fits`` is off (chunking forced), or when a chunk is a piece
-    of a source the chunker split (``total`` above 1): pieces are put back
-    together by no one, and a separator inside a source would change it.
+    one before it. Whole sources next to each other that the chunk size holds
+    together are one loop: joined with :data:`SOURCE_SEPARATOR`, each source
+    unchanged, from the first onwards while the next still fits. A piece of a
+    source the chunker split (``total`` above 1) is joined with nothing. Two
+    pieces of one source never fit one chunk together — the chunker cut them
+    apart because they did not — and a piece's header names its place in its
+    own source, which a chunk holding another source beside it would misstate.
+    The list is returned as it came when nothing joins, when it is one chunk,
+    or when ``skip_if_fits`` is off (chunking forced).
     """
     if len(chunks) < 2 or getattr(config, "skip_if_fits", True) is False:
         return chunks
-    if any(getattr(chunk, "total", 1) != 1 for chunk in chunks):
+    runs: list[list] = []
+    whole: list = []
+    for chunk in chunks:
+        if getattr(chunk, "total", 1) == 1:
+            whole.append(chunk)
+            continue
+        if whole:
+            runs.append(whole)
+            whole = []
+        runs.append([chunk])
+    if whole:
+        runs.append(whole)
+    joined: list = []
+    for run in runs:
+        joined.extend(_joined_run(run, config, room))
+    if len(joined) == len(chunks):
         return chunks
-    joined = SOURCE_SEPARATOR.join(str(chunk.content) for chunk in chunks)
-    limit = chunk_chars(config, joined, room)
-    if limit is not None and len(joined) > limit:
-        return chunks
-    return [
-        replace(
-            chunks[0],
-            index=0,
-            total=1,
-            content=joined,
-            char_count=len(joined),
-            token_estimate=tokens_for_chars(len(joined), _CHARS_PER_TOKEN, ceil=False),
-        )
-    ]
+    return joined
+
+
+def _joined_run(run: list, config: ChunkingConfig, room: Room | None) -> list:
+    """One run of whole sources, those next to each other that fit one chunk joined.
+
+    The size is asked once, about the whole run joined, and each join is then
+    a sum of lengths, so the run is read a fixed number of times.
+    """
+    if len(run) < 2:
+        return run
+    limit = chunk_chars(config, SOURCE_SEPARATOR.join(str(chunk.content) for chunk in run), room)
+    groups: list[list] = [[run[0]]]
+    size = len(str(run[0].content))
+    for chunk in run[1:]:
+        grown = size + len(SOURCE_SEPARATOR) + len(str(chunk.content))
+        if limit is None or grown <= limit:
+            groups[-1].append(chunk)
+            size = grown
+        else:
+            groups.append([chunk])
+            size = len(str(chunk.content))
+    return [_one_chunk(group) for group in groups]
+
+
+def _one_chunk(group: list) -> object:
+    """The chunks of ``group`` as one, their contents joined in order."""
+    if len(group) == 1:
+        return group[0]
+    content = SOURCE_SEPARATOR.join(str(chunk.content) for chunk in group)
+    metadata: dict[str, object] = {}
+    for chunk in group:
+        metadata.update(getattr(chunk, "metadata", None) or {})
+    return replace(
+        group[0],
+        index=0,
+        total=1,
+        content=content,
+        char_count=len(content),
+        token_estimate=tokens_for_chars(len(content), _CHARS_PER_TOKEN, ceil=False),
+        metadata=metadata,
+    )
 
 
 class ChunkStrategy(Enum):
