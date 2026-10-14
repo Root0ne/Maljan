@@ -135,15 +135,19 @@ class TestOnTheStructuredPath:
 
 
 class TestTheManualPathAfterAStructuredAttempt:
-    """A structured answer that is not read is asked again on the manual path, head cached.
+    """A structured answer that holds nothing to read is asked again on the manual path.
 
     No section sends a tool there, so every section shares one prefix up to the
     end of its head whatever schema its structured attempt sent: each manual
     request carries the head as one cached block, the non-prose sections too.
+    A structured answer written as text is the section's answer, and is never
+    asked again (``test_a_structured_answer_in_text_is_kept``).
     """
 
     def _bodies(self, monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
         def text_only(body: dict[str, Any]) -> dict[str, Any]:
+            if body.get("tools"):
+                return message([], stop="end_turn", usage=USAGE)
             answer = _answer(_section(body)) if _LEAD in _text_of(body) else {}
             return message(
                 [{"type": "text", "text": json.dumps(answer)}], stop="end_turn", usage=USAGE
