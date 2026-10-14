@@ -19,7 +19,6 @@ import pytest
 from arq.connections import RedisSettings
 from arq.constants import in_progress_key_prefix
 from arq.worker import Worker, func, get_kwargs
-from pydantic import ValidationError
 
 from app.worker.analysis_worker import (
     ARQ_NO_JOB_TIMEOUT,
@@ -65,8 +64,14 @@ class TestTheSetting:
         assert build_job_settings({"job_timeout": 3600}, None).job_timeout == 3600
 
     def test_zero_is_refused(self) -> None:
-        with pytest.raises(ValidationError):
+        """A stored 0 is refused loudly, naming the key and the remedy, never run
+        with the default (no timeout) in its place."""
+        from maljan.core.settings_overrides import StoredValueRefused
+
+        with pytest.raises(StoredValueRefused) as refused:
             build_job_settings({"job_timeout": 0}, None)
+        assert list(refused.value.refused) == ["core.job_timeout"]
+        assert "reset it in the console" in str(refused.value)
 
     def test_the_settings_save_takes_a_number_or_empty_and_refuses_zero(self) -> None:
         from app.services.settings_service import SettingsService, SettingsValidationError

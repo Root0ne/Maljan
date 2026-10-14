@@ -84,6 +84,12 @@ class SchemaResponse(BaseModel):
     # shipped declaration that changed its tool's kind), the shipped step it
     # changed, if any, is in force, and the console marks it on the steps.
     pack_steps_left_out: dict[str, str] = Field(default_factory=dict)
+    # Each stored value the settings model refuses (``core.<path>`` -> why),
+    # read past here so the page can open and the admin repair it
+    # (``core.settings_overrides.stored_settings``, the settings page alone;
+    # every read that runs something refuses it): its default is shown
+    # until it is saved again or reset, and the console says so beside it.
+    stored_values_refused: dict[str, str] = Field(default_factory=dict)
 
 
 class ValueDTO(BaseModel):
@@ -157,6 +163,51 @@ class ProbeResponse(BaseModel):
     # dedicated editor reads. The agent probe is the first user: a prompt hash
     # and a per-server status do not fit in a sentence.
     details: dict[str, Any] | None = None
+
+
+class AttckStatusResponse(BaseModel):
+    """The cached ATT&CK bundles as the worker that holds them reads them.
+
+    ``domains`` carries, per domain, whether a bundle is cached, its release
+    and date, when it was written and how old it is, and when the automatic
+    check is next due; ``last_check``, ``last_update`` and ``running`` are
+    the worker's record of the console's check and update.
+    """
+
+    refresh_days: int
+    next_check_at: str | None = None
+    domains: list[dict[str, Any]]
+    last_check: dict[str, Any] | None = None
+    last_update: dict[str, Any] | None = None
+    running: dict[str, Any] | None = None
+
+
+class AttckCheckResponse(BaseModel):
+    """One comparison of the cache with MITRE's release index.
+
+    ``outcome`` is ``up_to_date``, ``outdated`` or ``failed``; a failed read of
+    the index is never reported as up to date.
+    """
+
+    ok: bool
+    outcome: str
+    reason: str = ""
+    checked_at: str | None = None
+    refresh_days: int | None = None
+    next_check_at: str | None = None
+    domains: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class AttckUpdateStarted(BaseModel):
+    job_id: str
+
+
+class AttckUpdateProgress(BaseModel):
+    """Where one update is: ``queued``, ``running``, ``done`` or ``unknown``."""
+
+    job_id: str
+    state: str
+    result: dict[str, Any] | None = None
 
 
 class ContextWindowResponse(BaseModel):

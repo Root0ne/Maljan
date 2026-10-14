@@ -344,9 +344,12 @@ class TestWhatAStoredRowMayTakeAwayAndWhatItMayNot:
         for key, required in REQUIRED_ENV_ALLOW.items():
             assert set(required) <= set(servers[key].env_allow), key
 
-    def test_nothing_but_the_roots_the_staging_names_and_the_retry_is_required(self) -> None:
+    def test_nothing_but_the_roots_the_staging_names_and_the_attck_knobs_is_required(
+        self,
+    ) -> None:
         """A credential is never a name a stored row is made to carry."""
         from maljan.core.config import REQUIRED_ENV_ALLOW
+        from maljan.memory.attck_loader import ATTCK_REFRESH_DAYS_ENV
         from maljan.tools.knowledge import INDEX_RETRY_ENV
         from maljan.tools.roots import SAMPLE_ROOTS_ENV
 
@@ -357,6 +360,7 @@ class TestWhatAStoredRowMayTakeAwayAndWhatItMayNot:
             "MALJAN_STAGING_DIR",
             "MALJAN_STAGING_TTL_HOURS",
             INDEX_RETRY_ENV,
+            ATTCK_REFRESH_DAYS_ENV,
         }
 
     @pytest.mark.parametrize("name", PATH_TAKING)

@@ -92,6 +92,120 @@ def build_settings(core_overrides: Mapping[str, Any]) -> Settings:
     return _built(core_overrides)[0]
 
 
+class StoredValueRefused(ValueError):
+    """A stored setting value the model refuses: named, with why and the remedy.
+
+    Raised by every read that runs something (a job, an API read, the ATT&CK
+    cron) instead of falling back to a default: a refused spend cap, server
+    map, allow-list or timeout must never quietly become a less safe one.
+    """
+
+    def __init__(self, refused: Mapping[str, str]) -> None:
+        self.refused = {f"core.{key}": reason for key, reason in refused.items()}
+        named = "; ".join(f"{key}: {reason}" for key, reason in self.refused.items())
+        super().__init__(
+            f"A stored setting value is refused ({named}). Fix it or reset it in the "
+            "console (Settings, Configuration); nothing runs on a default in its place."
+        )
+
+
+def settings_from_store(
+    core_overrides: Mapping[str, Any], *, stored_keys: Iterable[str] | None = None
+) -> Settings:
+    """:func:`build_settings` for a read that runs something: a refused stored value
+    fails it loudly, naming the key, the reason and the remedy.
+
+    A refusal not about a key in ``stored_keys`` (all of ``core_overrides``
+    when ``None``), such as a value a job brought itself, is raised as the
+    model raised it.
+    """
+    from pydantic import ValidationError
+
+    try:
+        return build_settings(core_overrides)
+    except ValidationError as exc:
+        eligible = set(core_overrides if stored_keys is None else stored_keys)
+        found = _refused_stored_keys(exc, core_overrides, eligible)
+        if not found:
+            raise
+        refused = StoredValueRefused(found)
+        from maljan.core.logger import logger
+
+        logger.error("%s", refused)
+        # ``from None``: the model's error, whose text holds the refused input
+        # (a secret, possibly), never travels with this one.
+        raise refused from None
+
+
+def stored_settings(
+    core_overrides: Mapping[str, Any], *, stored_keys: Iterable[str] | None = None
+) -> tuple[Settings, dict[str, str]]:
+    """The settings page's read alone: the stored values the model refuses, read past.
+
+    Only so the console can open while a stored value is refused and the admin
+    can repair it there: that key is left out (its default shown), and it is
+    returned with the reason, for the page's banner and the row's notice.
+    Nothing that runs reads settings this way (:func:`settings_from_store`
+    refuses); a save validates with :func:`build_settings`, which refuses.
+    """
+    from pydantic import ValidationError
+
+    remaining = dict(core_overrides)
+    eligible = set(remaining if stored_keys is None else stored_keys)
+    refused: dict[str, str] = {}
+    while True:
+        try:
+            built = build_settings(remaining)
+        except ValidationError as exc:
+            found = _refused_stored_keys(exc, remaining, eligible)
+            if not found:
+                raise
+            for key, reason in found.items():
+                remaining.pop(key, None)
+                refused[key] = reason
+            continue
+        if refused:
+            _warn_refused_values(refused)
+        return built, refused
+
+
+def _refused_stored_keys(
+    exc: Any, remaining: Mapping[str, Any], eligible: set[str]
+) -> dict[str, str]:
+    """Each stored key a validation error is about, with its message."""
+    found: dict[str, str] = {}
+    for error in exc.errors():
+        path = ".".join(str(part) for part in error.get("loc", ()))
+        owners = [
+            key
+            for key in remaining
+            if key in eligible and (path == key or path.startswith(key + "."))
+        ]
+        if owners:
+            found[max(owners, key=len)] = str(error.get("msg") or "refused")
+    return found
+
+
+_WARNED_VALUES: set[tuple[tuple[str, str], ...]] = set()
+
+
+def _warn_refused_values(refused: Mapping[str, str]) -> None:
+    from maljan.core.logger import logger
+
+    marker = tuple(sorted(refused.items()))
+    if marker in _WARNED_VALUES:
+        return
+    if len(_WARNED_VALUES) < _WARNED_STEPS_MAX:
+        _WARNED_VALUES.add(marker)
+    for key, reason in refused.items():
+        logger.warning(
+            "The stored value of %s is not in force (%s); its default is used until it is "
+            "saved again or reset.",
+            key,
+            reason,
+        )
+
+
 # The stored leaf of the triage pack's steps (``core.pack_steps``).
 PACK_STEPS_PATH = "triage.steps"
 

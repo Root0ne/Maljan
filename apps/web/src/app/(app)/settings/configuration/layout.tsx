@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import type { ReactNode } from "react";
 import ChangesBar from "./ChangesBar";
 import SectionRail from "./SectionRail";
+import StoredValuesRefusedBanner from "./StoredValuesRefusedBanner";
 import Toolbar from "./Toolbar";
 
 /** `SettingsProvider` lives in `settings/layout.tsx` (one provider for the
@@ -14,6 +15,7 @@ export default function ConfigurationLayout({ children }: { children: ReactNode 
       <Suspense fallback={null}>
         <Toolbar />
       </Suspense>
+      <StoredValuesRefusedBanner />
       <div className="lg:grid lg:grid-cols-[240px_minmax(0,1fr)] gap-6">
         <SectionRail />
         <div className="min-w-0">{children}</div>

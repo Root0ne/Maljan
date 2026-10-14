@@ -414,6 +414,10 @@ export interface SettingsSchema {
    *  `#<position>`), with why; the shipped step it changed, if any, runs
    *  instead. */
   pack_steps_left_out?: Record<string, string>;
+  /** Each stored value the settings model refuses, by catalog key, with why:
+   *  only this page reads past it; analyses and the routes that read the
+   *  settings fail until it is saved again or reset. */
+  stored_values_refused?: Record<string, string>;
 }
 
 /** The word naming no kind, and each kind-free and kind-dependent field of a
@@ -614,6 +618,102 @@ export interface ChannelPreview {
 export interface MappingPreview {
   target_sha256: string;
   channels: Record<string, ChannelPreview>;
+}
+
+/* ── The ATT&CK cache (`/settings/attck*`) ─────────────────────────────── */
+
+export type AttckDomain = "enterprise" | "mobile" | "ics";
+
+/** What the cache holds for one domain, as the worker that holds it reads it. */
+export interface AttckCached {
+  present: boolean;
+  /** False when a file is there and does not parse; null when what it holds is
+   *  not known right now (its parse did not finish); `reason` says why. */
+  readable?: boolean | null;
+  reason?: string;
+  version?: string;
+  /** The release's own date (its collection's `modified`). */
+  released?: string;
+  techniques?: number;
+  /** When the file was written or last confirmed current. */
+  cached_at?: string;
+  age_days?: number;
+  written_by?: string;
+}
+
+export interface AttckDomainStatus extends AttckCached {
+  domain: AttckDomain;
+  label: string;
+  next_check_at: string | null;
+}
+
+export interface AttckRelease {
+  version: string;
+  released: string;
+}
+
+export interface AttckCaller {
+  user_id?: string;
+  name?: string;
+}
+
+export interface AttckChange {
+  domain: AttckDomain;
+  label: string;
+  from: string;
+  to: string;
+  released: string;
+  techniques: number;
+}
+
+export interface AttckUpdateResult {
+  ok: boolean;
+  /** `updated`, `up_to_date`, `failed` or `busy`. */
+  outcome: string;
+  reason: string;
+  started_at?: string;
+  finished_at?: string;
+  trigger?: string;
+  triggered_by?: AttckCaller;
+  changes: AttckChange[];
+  /** True: nothing changed; false: `changes` were made; null: not known (see the status). */
+  kept_previous?: boolean | null;
+}
+
+export interface AttckCheckRow {
+  domain: AttckDomain;
+  label: string;
+  cached: AttckCached;
+  latest: AttckRelease | null;
+  /** `current`, `outdated`, `missing` or `unlisted`; absent when the check failed. */
+  state?: string;
+}
+
+export interface AttckCheckResult {
+  ok: boolean;
+  /** `up_to_date`, `outdated` or `failed`. A failed check is never up to date. */
+  outcome: string;
+  reason: string;
+  checked_at: string | null;
+  triggered_by?: AttckCaller;
+  refresh_days: number | null;
+  next_check_at: string | null;
+  domains: AttckCheckRow[];
+}
+
+export interface AttckStatus {
+  refresh_days: number;
+  next_check_at: string | null;
+  domains: AttckDomainStatus[];
+  last_check: AttckCheckResult | null;
+  last_update: AttckUpdateResult | null;
+  running: { started_at?: string; trigger?: string; triggered_by?: AttckCaller } | null;
+}
+
+export interface AttckUpdateProgress {
+  job_id: string;
+  state: "queued" | "running" | "done" | "unknown";
+  result: AttckUpdateResult | null;
 }
 
 export class SettingsValidationError extends Error {

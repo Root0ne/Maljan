@@ -63,6 +63,7 @@ RENAMED_SETTINGS: dict[str, str] = {
 # one set says at start which key holds it now, and reads it no more.
 RETIRED_ENVIRONMENT: dict[str, str] = {
     "GHIDRA_CONTAINER_SAMPLES_PATH": "core.static.ghidra.sample_mount",
+    "MALJAN_ATTCK_MAX_AGE_DAYS": "core.validation.attck_refresh_days",
 }
 
 
@@ -1266,6 +1267,18 @@ ANNOTATIONS: dict[str, Annotation] = {
             "every later job in that worker without the index. 0 never re-attempts."
         ),
         "subgroup": "Technique check",
+    },
+    "validation.attck_refresh_days": {
+        "title": "Check for a new ATT&CK release every (days)",
+        "description": (
+            "How many days the cached ATT&CK bundles may age before they are compared with "
+            "MITRE's latest release and replaced by it when it is newer: downloaded, read back "
+            "whole, then swapped in with the previous files kept as a backup. 0 never checks "
+            "on its own; Check now and Update now below work either way. Applies to the worker "
+            "and to the knowledge tool server that builds the ATT&CK index. The longest "
+            "interval accepted is the longest that still has a calendar date to be due on."
+        ),
+        "subgroup": "ATT&CK data",
     },
     "validation.alignment_threshold": {
         "title": "Alignment gate threshold",

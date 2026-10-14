@@ -72,7 +72,7 @@ async def _probe_memory() -> dict[str, Any]:
     answered. A backend id the factory does not know is reported as not
     configured rather than as a failure; every answer names the backend.
     """
-    from maljan.core.settings_overrides import redact_url
+    from maljan.core.settings_overrides import StoredValueRefused, redact_url
     from maljan.memory.store_factory import (
         MemoryBackendNotConfiguredError,
         build_memory_store,
@@ -81,7 +81,15 @@ async def _probe_memory() -> dict[str, Any]:
 
     from app.runtime_config import runtime_config
 
-    core = await runtime_config.core()
+    try:
+        core = await runtime_config.core()
+    except StoredValueRefused:
+        # Unauthenticated: the fact, never the key or the reason.
+        return {
+            "ok": False,
+            "error": "a stored setting is refused; see the settings page",
+            "backend": None,
+        }
     backend = configured_backend(core)
     try:
         store = await asyncio.to_thread(build_memory_store, core)
@@ -383,6 +391,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Database connections closed")
 
 
+async def stored_value_refused_response(_request: Any, exc: Exception) -> Any:
+    """409 for a request that read the settings while a stored value is refused.
+
+    The key, the reason and the remedy, never a bare 500 and never a default
+    in the value's place (``settings_overrides.StoredValueRefused``).
+    """
+    from fastapi.responses import JSONResponse
+
+    refused = getattr(exc, "refused", {})
+    return JSONResponse(status_code=409, content={"detail": str(exc), "refused": refused})
+
+
 def create_app() -> FastAPI:
     """Build and configure the FastAPI application."""
     docs_enabled = settings.debug
@@ -435,6 +455,14 @@ def create_app() -> FastAPI:
         SecurityHeadersMiddleware,
         enable_hsts=not settings.debug,
     )
+
+    # ── A refused stored setting ─────────────────────────────
+    # Any route that reads the core settings while a stored value is refused
+    # answers 409 with the key, the reason and the remedy, rather than a bare
+    # 500 or a default in its place. The settings page itself reads past it.
+    from maljan.core.settings_overrides import StoredValueRefused
+
+    app.add_exception_handler(StoredValueRefused, stored_value_refused_response)
 
     # ── Routes ───────────────────────────────────────────────
     from app.api.v1.audit import router as audit_router

@@ -19,6 +19,7 @@ from maljan.core.settings_overrides import (
     effective_source,
     flatten_leaves,
     pack_step_refusals,
+    settings_from_store,
     shipped_tool_facts,
     split_key,
 )
@@ -1001,7 +1002,9 @@ class _CoreSettingsCache:
             and now - self._loaded_at < self._ttl
         ):
             return self._cached
-        self._cached = build_settings(await load_core_overrides(db))
+        # A stored value the model refuses fails the read loudly, naming the
+        # key and the remedy; only the settings page reads past it.
+        self._cached = settings_from_store(await load_core_overrides(db))
         self._loaded_at = now
         return self._cached
 

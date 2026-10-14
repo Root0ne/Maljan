@@ -1,4 +1,4 @@
-"""What the two worker processes agree on: the queues and how to reach Redis.
+"""What the worker processes and the API agree on: the queues and how to reach Redis.
 
 ``analysis_worker`` imports ``enrich_worker`` to register its task, so anything
 both need lives here rather than in either of them.
@@ -17,6 +17,12 @@ from arq.constants import default_queue_name
 # side by side.
 ANALYSIS_QUEUE = default_queue_name
 ENRICHMENT_QUEUE = f"{default_queue_name}:enrichment"
+# The console's ATT&CK cache status, check and update. Read by a small worker
+# that runs inside the analysis worker's process — the one process that holds
+# the cache volume — beside its single analysis slot, never in it, so a check
+# is answered in seconds while an analysis runs for hours
+# (``attck_worker``).
+ATTCK_QUEUE = f"{default_queue_name}:attck"
 
 
 def build_redis_settings(redis_url: str) -> RedisSettings:

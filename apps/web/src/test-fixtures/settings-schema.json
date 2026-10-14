@@ -7967,7 +7967,8 @@
        "MALJAN_SAMPLE_ROOTS"
       ],
       "knowledge": [
-       "MALJAN_INDEX_RETRY_SECONDS"
+       "MALJAN_INDEX_RETRY_SECONDS",
+       "MALJAN_ATTCK_REFRESH_DAYS"
       ],
       "network": [
        "MALJAN_STAGING_DIR",
@@ -9332,6 +9333,37 @@
      "subgroup": "Technique check",
      "title": "Alignment gate threshold",
      "type": "float"
+    },
+    {
+     "advanced": false,
+     "applies": "next_job",
+     "applies_when": null,
+     "builtin_servers": null,
+     "capability_servers": null,
+     "choice_descriptions": null,
+     "choice_facts": null,
+     "choice_labels": null,
+     "choice_titles": null,
+     "choices": null,
+     "choices_from": null,
+     "editable": true,
+     "editor": null,
+     "group": "analysis",
+     "key": "core.validation.attck_refresh_days",
+     "maximum": 2885414.0,
+     "minimum": 0.0,
+     "namespace": "core",
+     "nullable": false,
+     "order": 0,
+     "path": "validation.attck_refresh_days",
+     "probe": null,
+     "reason": null,
+     "required_env": null,
+     "reserved_servers": null,
+     "secret": false,
+     "subgroup": "ATT&CK data",
+     "title": "Check for a new ATT&CK release every (days)",
+     "type": "int"
     },
     {
      "advanced": false,
@@ -11563,6 +11595,7 @@
   "triage": "Test Triage connection",
   "virustotal": "Test VirusTotal"
  },
+ "stored_values_refused": {},
  "tool_declaration_fields": {
   "kind_dependent": {
    "asserts_techniques": false,

@@ -799,7 +799,7 @@ _SERVER_BLOCKS: dict[str, dict[str, Any]] = {
     },
     "knowledge": {
         "roles": ["reference"],
-        "required_env_allow": ["MALJAN_INDEX_RETRY_SECONDS"],
+        "required_env_allow": ["MALJAN_INDEX_RETRY_SECONDS", "MALJAN_ATTCK_REFRESH_DAYS"],
         "reads_staged_sample": True,
         "tool_facts": _marked_read_only(_KNOWLEDGE_TOOLS, KNOWLEDGE_READ_ONLY),
     },

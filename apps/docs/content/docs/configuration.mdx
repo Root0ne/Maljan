@@ -702,6 +702,86 @@ travels to the knowledge tool server — the process where the build happens —
 `MALJAN_INDEX_RETRY_SECONDS`, which is on that server's `env_allow` and cannot
 be taken off it.
 
+#### Keeping the cached bundles current
+
+`validation.attck_refresh_days` (default 7; **Analysis layers → ATT&CK data**
+in the console) is how many days the cached bundles may age before they are
+compared with MITRE's release index (`index.json` in `attack-stix-data`) and
+replaced when a newer release is out. 0 never checks on its own; the longest
+interval accepted (2,885,414 days) is the longest whose next-check date is
+still a calendar date for a cache written before 2100. The analysis worker runs
+the automatic check hourly and acts only once a bundle is older than the
+interval; a domain found current has its age counted from that check. After a
+failed automatic check it waits one hour, then twice as long after each failure
+in a row, never longer than the interval, and logs when it will try again; the
+console's next-check line shows that time. The loader's own refresh at the first index build after the interval
+reads the same setting, which reaches it and the knowledge tool server as
+`MALJAN_ATTCK_REFRESH_DAYS` (on that server's `env_allow`, written by the
+container from the store). `MALJAN_ATTCK_MAX_AGE_DAYS` is retired: the
+migration that retired it read a whole number other than 7 once into the
+setting, where the store held none (0 or a negative number, which the old
+loader read as "never check", as 0, and so is a number past the setting's
+bound), and a worker that still has it set warns at start and names the
+setting. A stored value the settings model refuses, of this or any key, is
+never replaced by a default where something runs: a job fails (it no longer
+runs on the shipped defaults, for this or any refusal of its settings, nor when
+the stored settings cannot be read from the database; then it says to run it
+again once the database answers), an API read
+answers 409 and the ATT&CK cron skips its hour, each naming the key, the reason
+and the remedy (fix or reset it in the console). The settings page alone reads
+past it so it can open: a banner above every settings page lists the refused
+keys, and each row says its stored value is refused.
+
+Under the setting, the console shows per domain the cached release, its date,
+when the file was written, its age and the next automatic check, and the last
+check and update with who ran them. **Check now** reads the release index and
+downloads nothing: it says the cache is up to date with its versions, says
+plainly when the index could not be read (never "up to date"), or, when a
+newer release is out, opens a dialog naming the cached and the latest release
+with its date and offering **Update now** or **Wait for the scheduled update**,
+which names the date of the next automatic check. **Update now** downloads each
+outdated domain's release from the platform's constant address, reads it back
+whole (it parses, it is the release the index named, it carries techniques)
+and only then renames it over the cached file, keeping the previous one as
+`<domain>-attack.json.bak`; one domain that fails leaves the whole cache as it
+was and says which and why. A swap that fails part way puts the domains it had
+already replaced back from their backups, and names any it could not. An
+update the worker gives up on (its job timeout, a shutdown) is told to stop
+and has a deadline of its own, so it ends before the swap; the console then
+says it stopped and that the table shows what the cache holds. Both need an
+administrator and are audited.
+
+Each download follows a redirect only to HTTPS on the same host and is bounded
+in size by four times the same domain's cached bundle, when that bundle is
+known to have been read whole; otherwise (a domain missing or truncated, the
+release index) by the response's declared length, and with none it is
+unbounded, which is logged as a warning. A download that passes its bound is stopped and
+logged. The download as a whole has a deadline, not only each read.
+
+The cache is on the analysis worker's volume and that process is its only
+writer: the API asks it through a queue of its own (`arq:queue:attck`), read by
+a small worker inside the analysis worker's process beside its one analysis
+slot, so a check is answered in seconds while an analysis runs. Every write of
+a bundle, the update's and the loader's own refresh, takes the cache
+directory's lock, and an update that finds it held says who holds it (another
+update and who started it, or the loader's own refresh) rather than waiting.
+An update record whose lock is free belongs to a process that stopped part
+way, and the console shows it as an update that did not finish, with when it
+started and who started it. An analysis reading a bundle during an update reads
+the old file or the new one, never half of either; analyses already running
+keep the catalogue they loaded, and the next one reads the new files. A whole
+bundle is parsed in a short-lived child process, one at a time, so the half
+gigabyte a parse costs leaves the analysis worker with the child. The child
+gets a time limit from the file's size (30 s plus 2 s per megabyte) and is
+killed past it, only `PATH`, `PYTHONPATH` and `HOME` of the environment, and
+an answer file of its own in the cache directory. A parse that does not finish leaves that domain's
+release "not known right now", which is neither unreadable nor outdated: a
+check then fails with that reason and an update downloads nothing. The
+temporary files a killed process leaves in the cache are removed when the
+worker starts: those written under the update or state lock with both locks
+held, and the facts and answer files only once they are older than the longest
+parse limit, so two workers sharing the volume never remove each other's.
+
 ### The top-level-domain list
 
 `data/tlds-alpha-by-domain.txt` is IANA's root-zone list as published, with its

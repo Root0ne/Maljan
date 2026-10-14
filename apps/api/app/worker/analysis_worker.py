@@ -32,7 +32,13 @@ from maljan.core.config import MEDIATOR_AGENT_NAME
 from maljan.core.config import Settings as _CoreSettings
 from maljan.core.report_formats import declarations_in_effect, recorded_signature_scale
 from maljan.core.settings_catalog import core_catalog
-from maljan.core.settings_overrides import build_settings, public_snapshot, trim_declarations
+from maljan.core.settings_overrides import (
+    StoredValueRefused,
+    build_settings,
+    public_snapshot,
+    settings_from_store,
+    trim_declarations,
+)
 from maljan.pipeline.events import MODEL_USAGE as MODEL_USAGE_EVENT
 from maljan.pipeline.outcome import absent_analysis_message
 from maljan.providers.errors import ProviderError
@@ -175,7 +181,9 @@ def build_job_settings(
             merged["sandbox.provider"] = "upload"
         if job_config.get("profile") is not None:
             merged["agents.profile"] = job_config["profile"]
-    settings = build_settings(merged)
+    # A stored value the model refuses fails the job, naming the key and the
+    # remedy; a run never takes a default in its place.
+    settings = settings_from_store(merged, stored_keys=overrides)
     # The selected provider's role models come from its own block; a job never
     # runs with an empty model name borrowed from nowhere.
     from maljan.llm.provider_base import role_block_problem
@@ -196,8 +204,8 @@ def retired_environment_lines(environ: Mapping[str, str]) -> list[str]:
 
     return [
         f"{variable} is set and no longer read; the setting {key} holds the value now "
-        "(the migration that retired it copied the variable there once only if it was a "
-        "mount other than the shipped one and the store held none)."
+        "(the migration that retired it copied the variable there once, only if the setting "
+        "accepts its value, it differs from the shipped one and the store held none)."
         for variable, key in RETIRED_ENVIRONMENT.items()
         if str(environ.get(variable, "")).strip()
     ]
@@ -2143,6 +2151,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         Summary dict with verdict and timing info.
     """
     logger.info(f"Analysis task started: job={job_id}", extra={"job_id": job_id})
+    # An ATT&CK update the console ran since the last analysis replaced the
+    # files a warm catalogue in this process was read from.
+    from app.worker.attck_worker import drop_a_replaced_catalogue
+
+    drop_a_replaced_catalogue()
 
     redis_conn: aioredis.Redis = ctx["redis"]
     db_session: async_sessionmaker = ctx["db_session"]
@@ -2303,22 +2316,28 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # Build this job's Settings from any stored UI overrides plus
             # model defaults (UI > default; see settings_overrides.
             # build_settings -- the environment is not a layer here), then
-            # the job's own config on top. A DB error loading overrides must
-            # not fail the job -- fall back to default-only settings and say
-            # so, without ever logging a secret value.
+            # the job's own config on top. Stored settings that cannot be read
+            # fail the job before any pipeline starts: running on the shipped
+            # defaults would drop the operator's spend cap, server map and
+            # timeout without the run saying so. The class of the error is
+            # logged, never its text (it can quote a connection string).
             from app.services.settings_service import load_core_overrides
 
             try:
                 overrides = await load_core_overrides(db)
-            except Exception as exc:  # noqa: BLE001 — overrides are best-effort
-                logger.warning(
-                    "Failed to load runtime setting overrides (%s); "
-                    "running job %s on default settings only.",
+            except Exception as exc:  # noqa: BLE001 — any failure to read fails the job
+                logger.error(
+                    "Failed to load the stored settings (%s); job %s fails rather than "
+                    "running on defaults.",
                     type(exc).__name__,
                     job_id,
                     extra={"job_id": job_id},
                 )
-                overrides = {}
+                raise StatedFailure(
+                    "The stored settings could not be read from the database, so the job "
+                    "did not run on defaults in their place. Run it again once the "
+                    "database answers."
+                ) from None
 
             # A job that names an attached report is read here too, for the
             # same reason: the row is wanted before the pipeline starts and
@@ -2368,38 +2387,39 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
 
         from maljan.core.config import install_settings
 
+        # Settings the model refuses fail the job, loudly and before any
+        # pipeline starts. This used to retry on all shipped defaults, which
+        # put a less safe value (no spend cap, the shipped server map, no
+        # timeout) in place of the operator's without the run saying so; a
+        # job runs on the settings it was given, or not at all.
         try:
             core_settings = build_job_settings(overrides, job_config)
-        except (ValidationError, ValueError) as exc:
-            # Stored overrides that validated when saved can stop validating
-            # after a deploy narrows a field, and two orphan rows can nest
-            # into a conflict. One job must not take the queue down: run on
-            # default settings, name the fields.
-            bad = (
-                sorted({".".join(str(x) for x in e["loc"]) for e in exc.errors()})
-                if isinstance(exc, ValidationError)
-                else [type(exc).__name__]
-            )
-            logger.warning(
-                "Runtime settings rejected by the model (%s); "
-                "retrying job %s without the stored overrides.",
-                ", ".join(bad),
-                job_id,
-                extra={"job_id": job_id},
-            )
-            overrides = {}
-            try:
-                core_settings = build_job_settings({}, job_config)
-            except (ValidationError, ValueError):
-                # The rejected value was the job's own config, not a
-                # stored override (the API validates it at submit time,
-                # but a row written another way still reaches here).
-                logger.warning(
-                    "Job %s config rejected by the model; running on default settings only.",
-                    job_id,
-                    extra={"job_id": job_id},
-                )
-                core_settings = build_job_settings({}, None)
+        except StoredValueRefused as exc:
+            raise StatedFailure(
+                "A stored setting value is refused ("
+                + ", ".join(sorted(exc.refused))
+                + "). Fix it or reset it in the console (Settings, Configuration); "
+                "the job did not run on a default in its place."
+            ) from None
+        except ValidationError as exc:
+            # Not a stored key (``settings_from_store`` names those): the
+            # job's own options, or a conflict between stored rows. The fields,
+            # never the refused values.
+            fields = sorted({".".join(str(x) for x in e["loc"]) for e in exc.errors()})
+            raise StatedFailure(
+                "The settings this job would run with are refused ("
+                + ", ".join(fields)
+                + "). Fix them in the console or in the job's options; the job did "
+                "not run on defaults in their place."
+            ) from None
+        except ValueError as exc:
+            # ``role_block_problem`` and the provider checks: sentences this
+            # package composes from setting names. ``StatedFailure`` publishes
+            # one only when it carries nothing the event scrubber would change.
+            raise StatedFailure(
+                f"The settings this job would run with are refused: {exc}. Fix them in "
+                "the console; the job did not run on defaults in their place."
+            ) from None
         # Agents, pipeline nodes and extractors read the process singleton
         # (``get_settings()``), not the config handed to MaljanApp. With
         # ``max_jobs = 1`` installing this job's Settings there is what
@@ -3765,6 +3785,11 @@ async def startup(ctx: dict) -> None:
     # And one look at the other queue, once the process that reads it has had
     # a health interval to come up beside this one.
     ctx["enrichment_watch_task"] = asyncio.create_task(warn_if_enrichment_is_unmanned(ctx))
+    # The console's ATT&CK cache jobs, read beside this worker's one analysis
+    # slot rather than in it: this is the process that holds the cache.
+    from app.worker.attck_worker import start_attck_worker
+
+    await start_attck_worker(ctx)
 
     logger.info(
         "Worker started: connected to DB and Redis",
@@ -3775,6 +3800,9 @@ async def startup(ctx: dict) -> None:
 async def shutdown(ctx: dict) -> None:
     """Called when the ARQ worker shuts down."""
     # Before the connections they use are closed under them.
+    from app.worker.attck_worker import stop_attck_worker
+
+    await stop_attck_worker(ctx, EXIT_GRACE)
     for name in ("sweep_task", "enrichment_watch_task"):
         task: asyncio.Task | None = ctx.get(name)
         if task is not None:
