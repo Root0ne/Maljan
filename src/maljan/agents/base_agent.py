@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import inspect
 import itertools
 import json
@@ -1652,6 +1653,29 @@ def _without_unbracketed_names(text: str) -> str:
         out.append(text[end : end + 1])
         at = end + 1
     return "".join(out)
+
+
+def _continues(chunk: Any, after: Any) -> bool:
+    """Whether ``after`` is the next piece of the same source as ``chunk``."""
+    total = getattr(chunk, "total", 1)
+    return (
+        isinstance(total, int)
+        and total > 1
+        and getattr(after, "total", None) == total
+        and getattr(after, "index", None) == getattr(chunk, "index", -2) + 1
+        and getattr(after, "domain", None) == getattr(chunk, "domain", None)
+    )
+
+
+def _numbered_at(chunk: Any, position: int, total: int) -> Any:
+    """``chunk`` numbered by its place in the list it is sent from, as ``_numbered_in_order`` does."""
+    import dataclasses
+
+    if (getattr(chunk, "index", None), getattr(chunk, "total", None)) == (position, total):
+        return chunk
+    if dataclasses.is_dataclass(chunk) and not isinstance(chunk, type):
+        return dataclasses.replace(chunk, index=position, total=total)
+    return chunk
 
 
 def _numbered_in_order(chunks: list[Any]) -> list[Any]:
@@ -3304,67 +3328,111 @@ EARLIER_CHUNKS_HEAD = (
 )
 
 
-# What a later chunk's list of earlier calls ends with when the prompt has no
-# room for all of them. The repeat guard holds every earlier call whatever the
-# list shows (``_prior_chunk_calls``), so an unlisted one is still answered.
-EARLIER_CALLS_LEFT_OUT = (
-    "{count} more earlier call(s) are not listed, for want of room in this prompt; an "
-    "identical call is still answered with the result its entry recorded."
+# A later chunk's earlier calls in their most compact whole form, for a prompt
+# whose room the full list would cost a loop: every call, its tool and the
+# ledger entry that holds its result, nothing left out.
+EARLIER_CHUNKS_COMPACT_HEAD = (
+    "Earlier chunks of this same input were already analysed. These are the tool calls "
+    "made there, each with the ledger entry that holds its result; the room in this "
+    "prompt does not hold their arguments or what they returned. Cite those entries "
+    "instead of making the same call again: an identical call is not run again, and is "
+    "answered with the result its entry recorded."
+)
+
+# What a later chunk is told when its prompt has no room even for the compact
+# list. The repeat guard holds every earlier call whatever the prompt shows
+# (``_prior_chunk_calls``).
+EARLIER_CALLS_NOT_LISTED = (
+    "Earlier chunks of this same input made {count} tool call(s); this prompt has no "
+    "room to list them. An identical call is not run again, and is answered with the "
+    "result its entry recorded."
 )
 
 
-def earlier_chunks_block(entries: Sequence[Any], room: int | None = None) -> str:
+def earlier_chunks_block(entries: Sequence[Any]) -> str:
     """The earlier chunks' tool calls as ``tool(args) → ev_id`` lines under their head, or ``""``.
 
     Every call that ran, in the order made; a call that failed says so. A
     repeat the guard answered is left out: the entry it names is listed.
-    ``room`` is the characters the block may take beside the chunk and its
-    header in the analyst's prompt: the calls that fit are listed in order
-    and the rest counted in one line (:data:`EARLIER_CALLS_LEFT_OUT`); with
-    no room even for that, no block. ``None`` is no bound.
     """
     lines = _earlier_call_lines(entries)
     if not lines:
         return ""
-    whole = "\n".join([EARLIER_CHUNKS_HEAD, *lines])
-    if room is None or len(whole) <= room:
-        return whole
-    kept: list[str] = []
-    used = len(EARLIER_CHUNKS_HEAD)
-    longest_note = len(EARLIER_CALLS_LEFT_OUT.format(count=len(lines))) + 1
-    for line in lines:
-        if used + 1 + len(line) + longest_note > room:
-            break
-        kept.append(line)
-        used += 1 + len(line)
-    if used + longest_note > room:
+    return "\n".join([EARLIER_CHUNKS_HEAD, *lines])
+
+
+def earlier_chunks_compact(entries: Sequence[Any]) -> str:
+    """Every earlier call as ``tool → ev_id`` under the compact head, or ``""``."""
+    lines = _earlier_call_lines(entries, compact=True)
+    if not lines:
         return ""
-    note = EARLIER_CALLS_LEFT_OUT.format(count=len(lines) - len(kept))
-    return "\n".join([EARLIER_CHUNKS_HEAD, *kept, note])
+    return "\n".join([EARLIER_CHUNKS_COMPACT_HEAD, *lines])
 
 
-def earlier_calls_room(agent: Any, header: str, content: str) -> int | None:
-    """Characters a later chunk's list of earlier calls may take, or ``None`` for no bound.
-
-    The agent's input room (``BaseAnalyst._input_room_chars``) less the chunk,
-    its header and the blank lines between them. ``None`` where no room is
-    measured, as the chunk itself is then sized at the shipped size.
-    """
+def prompt_room(agent: Any, content: str) -> int | None:
+    """The agent's input room for ``content`` (``BaseAnalyst._input_room_chars``), or ``None``."""
     measure = getattr(agent, "_input_room_chars", None)
     if not callable(measure):
         return None
     try:
         room = measure(content)
     except Exception as exc:  # noqa: BLE001 — no measure is no bound, never a lost chunk
-        logger.debug("earlier calls not bounded (%s).", exc)
+        logger.debug("chunk room not measured (%s).", exc)
         return None
-    if not isinstance(room, int) or isinstance(room, bool):
-        return None
-    return max(0, room - len(header) - len(content) - 4)
+    return room if isinstance(room, int) and not isinstance(room, bool) else None
 
 
-def _earlier_call_lines(entries: Sequence[Any]) -> list[str]:
-    """One ``tool(args) → ev_id`` line per earlier call, in the order made."""
+def fitted_chunk(
+    agent: Any, header: str, content: str, earlier: Sequence[Any]
+) -> tuple[str, str, str]:
+    """``(earlier-calls block, content sent now, rest)`` for a later chunk's prompt.
+
+    The chunks run one after another, so the earlier calls are known when a
+    chunk is sent: the chunk takes the agent's room less its header and the
+    calls. The full list (:data:`EARLIER_CHUNKS_HEAD`) is sent whenever the
+    room left beside it holds a line of the content and it costs this chunk
+    no more loops than the compact form, every call with its entry
+    (:data:`EARLIER_CHUNKS_COMPACT_HEAD`); that where the full list does not;
+    their count (:data:`EARLIER_CALLS_NOT_LISTED`) only where neither list
+    leaves room for a line. Never nothing while earlier calls exist. Content past what fits is the ``rest``, cut at a line break where
+    there is one; the caller hands it to the next piece of the same source,
+    or sends it as a chunk of its own. With no room measured, the full list
+    and the content as they came.
+    """
+    full = earlier_chunks_block(earlier)
+    room = prompt_room(agent, content)
+    if room is None or not full:
+        return full, content, ""
+    fixed = len(header) + 4
+    calls = len(_earlier_call_lines(earlier))
+    forms = (full, earlier_chunks_compact(earlier), EARLIER_CALLS_NOT_LISTED.format(count=calls))
+    # Room that holds no whole line of the content is no room for it.
+    need = content.find("\n") + 1 or 1
+    # The listed forms first: the count alone only where neither list leaves
+    # room for a line, so the content still moves on.
+    listed = [
+        (form, room - fixed - len(form)) for form in forms[:2] if room - fixed - len(form) >= need
+    ]
+    if listed:
+        fewest = min(-(-len(content) // avail) for _form, avail in listed)
+        block, avail = next((f, a) for f, a in listed if -(-len(content) // a) == fewest)
+    elif room - fixed - len(forms[2]) >= need:
+        block, avail = forms[2], room - fixed - len(forms[2])
+    else:
+        # No room even beside the count: it is still said, the content as it came.
+        return forms[2], content, ""
+    if len(content) <= avail:
+        return block, content, ""
+    cut = content.rfind("\n", 0, avail) + 1 or avail
+    return block, content[:cut], content[cut:]
+
+
+def _earlier_call_lines(entries: Sequence[Any], *, compact: bool = False) -> list[str]:
+    """One ``tool(args) → ev_id`` line per earlier call, in the order made.
+
+    ``compact`` gives ``tool → ev_id`` and the failed mark alone: every call
+    and its entry, without its arguments or what it returned.
+    """
     lines: list[str] = []
     for entry in entries or ():
         tool = str(getattr(entry, "tool", "") or "")
@@ -3373,6 +3441,10 @@ def _earlier_call_lines(entries: Sequence[Any]) -> list[str]:
             continue
         # A repeat is answered by the entry it names, which is listed itself.
         if getattr(entry, "repeated_of", None):
+            continue
+        if compact:
+            ok = bool(getattr(entry, "ok", True))
+            lines.append(f"- {tool} \u2192 {entry_id}{'' if ok else ' (failed)'}")
             continue
         args = getattr(entry, "args", None) or {}
         try:
@@ -7186,7 +7258,11 @@ class BaseAnalyst(BudgetMeter, ABC):
         # chunks from several data sources each count within their own source
         # ("1 of 1" twice), and a question naming the chunk it was asked in
         # named the wrong one.
-        chunks = _numbered_in_order(chunks)
+        # Each piece keeps its place in its own source until it is sent, so a
+        # piece cut short (``fitted_chunk``) hands the rest of itself to the
+        # piece of the same source after it.
+        queue = list(chunks)
+        follows = [_continues(a, b) for a, b in zip(queue, queue[1:], strict=False)] + [False]
 
         chunk_isrs: list[AgentISR] = []
         errors: list[str] = []
@@ -7195,7 +7271,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         entries = getattr(self, "_evidence_entries", None)
         first_entry = len(entries) if isinstance(entries, list) else 0
 
-        for chunk in chunks:
+        position = -1
+        while position + 1 < len(queue):
+            position += 1
+            chunk = _numbered_at(queue[position], position, len(queue))
             # No new chunk once the job's spend ceiling is reached: what the
             # chunks so far gathered is merged, and the degradation says why.
             if spend_reached(self):
@@ -7203,12 +7282,29 @@ class BaseAnalyst(BudgetMeter, ABC):
                 continue
             entries = getattr(self, "_evidence_entries", None)
             earlier = list(entries[first_entry:]) if isinstance(entries, list) else []
-            header = chunk.to_prompt_header()
-            # The chunk was sized to the room with its header kept out
-            # (``binary_chunker.header_chars``); the earlier calls take what is
-            # left, so the prompt never passes the room for them.
-            block = earlier_chunks_block(earlier, earlier_calls_room(self, header, chunk.content))
-            prompt_text = f"{header}\n\n" + (
+            # The earlier calls are known now: the chunk takes the room less
+            # its header and them, and what does not fit goes on.
+            block, sent, rest = fitted_chunk(
+                self, chunk.to_prompt_header(), str(chunk.content), earlier
+            )
+            if rest:
+                queue[position] = dataclasses.replace(
+                    queue[position], content=sent, char_count=len(sent)
+                )
+                if follows[position]:
+                    after = queue[position + 1]
+                    grown = rest + str(after.content)
+                    queue[position + 1] = dataclasses.replace(
+                        after, content=grown, char_count=len(grown)
+                    )
+                else:
+                    queue.insert(
+                        position + 1,
+                        dataclasses.replace(queue[position], content=rest, char_count=len(rest)),
+                    )
+                    follows.insert(position + 1, False)
+                chunk = _numbered_at(queue[position], position, len(queue))
+            prompt_text = f"{chunk.to_prompt_header()}\n\n" + (
                 f"{block}\n\n{chunk.content}" if block else chunk.content
             )
             try:
@@ -7266,6 +7362,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             raise AnalystError(
                 f"{self.name} chunked analysis failed on all chunks: {'; '.join(errors)}"
             )
+        chunks = queue
 
         if errors:
             self.logger.warning(

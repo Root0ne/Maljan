@@ -17,6 +17,9 @@ import pytest
 
 from maljan.core.config import ChunkingConfig
 from maljan.loaders.binary_chunker import (
+    CHUNK_CHARS,
+    SIZED_BY,
+    SIZED_BY_ROOM,
     SOURCE_SEPARATOR,
     BinaryChunker,
     header_chars,
@@ -27,24 +30,24 @@ from tests.unit._chunking_doubles import _chunk, _room
 
 class TestJoining:
     def test_whole_sources_beside_a_split_one_join_where_they_fit(self) -> None:
-        head = _chunk("H" * 10)
-        pieces = [_chunk("A" * 100, 0, 2), _chunk("A" * 40, 1, 2)]
-        tail = [_chunk("B" * 30), _chunk("C" * 30)]
+        head = _chunk("H" * 100)
+        pieces = [_chunk("A" * 1_000, 0, 2), _chunk("A" * 400, 1, 2)]
+        tail = [_chunk("B" * 300), _chunk("C" * 300)]
 
-        joined = joined_when_it_fits([head, *pieces, *tail], ChunkingConfig(), _room(100))
+        joined = joined_when_it_fits([head, *pieces, *tail], ChunkingConfig(), _room(1_000))
 
         assert [c.content for c in joined] == [
-            "H" * 10,
-            "A" * 100,
-            "A" * 40,
-            "B" * 30 + SOURCE_SEPARATOR + "C" * 30,
+            "H" * 100,
+            "A" * 1_000,
+            "A" * 400,
+            "B" * 300 + SOURCE_SEPARATOR + "C" * 300,
         ]
         assert (joined[-1].index, joined[-1].total) == (0, 1)
 
     def test_whole_sources_join_while_the_next_still_fits(self) -> None:
-        chunks = [_chunk("a" * 40), _chunk("b" * 40), _chunk("c" * 40)]
-        joined = joined_when_it_fits(chunks, ChunkingConfig(), _room(90))
-        assert [c.char_count for c in joined] == [82, 40]
+        chunks = [_chunk("a" * 400), _chunk("b" * 400), _chunk("c" * 400)]
+        joined = joined_when_it_fits(chunks, ChunkingConfig(), _room(900))
+        assert [c.char_count for c in joined] == [802, 400]
 
     def test_the_head_is_joined_with_the_whole_source_after_it(self) -> None:
         chunks = [_chunk("H" * 10), _chunk("B" * 10), _chunk("A" * 100, 0, 2), _chunk("A", 1, 2)]
@@ -79,3 +82,22 @@ class TestJoining:
         small = min(timed(2_000) for _ in range(3))
         large = min(timed(20_000) for _ in range(3))
         assert large < small * 20
+
+
+def test_a_join_near_the_room_leaves_room_for_its_header_and_no_sliver() -> None:
+    # 15,000 + 10,752 fit the 25,832 room together but not behind a header:
+    # joined there, the last pass cut them into a full piece and a sliver loop.
+    room = 25_832
+    sources = []
+    for size, letter in ((15_000, "a"), (10_752, "b"), (5_000, "c")):
+        source = _chunk(letter * size)
+        source.metadata.update({SIZED_BY: SIZED_BY_ROOM, CHUNK_CHARS: room})
+        sources.append(source)
+
+    joined = joined_when_it_fits(sources, ChunkingConfig(overlap_tokens=0), _room(room))
+
+    assert [c.content for c in joined] == [
+        "a" * 15_000,
+        "b" * 10_752 + SOURCE_SEPARATOR + "c" * 5_000,
+    ]
+    assert all(c.char_count + len(c.to_prompt_header()) + 2 <= room for c in joined)

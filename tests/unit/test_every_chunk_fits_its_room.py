@@ -26,10 +26,12 @@ from typing import Any
 import pytest
 
 from maljan.agents.base_agent import (
-    EARLIER_CALLS_LEFT_OUT,
+    EARLIER_CALLS_NOT_LISTED,
+    EARLIER_CHUNKS_COMPACT_HEAD,
     EARLIER_CHUNKS_HEAD,
-    earlier_calls_room,
+    BaseAnalyst,
     earlier_chunks_block,
+    fitted_chunk,
 )
 from maljan.core.config import ChunkingConfig
 from maljan.loaders.binary_chunker import (
@@ -43,6 +45,7 @@ from maljan.loaders.binary_chunker import (
     joined_when_it_fits,
     within_the_room,
 )
+from maljan.schemas.isr_models import AgentISR
 from tests.unit._chunking_doubles import _chunk, _room
 
 DOMAINS = ("triage", "network", "static", "dynamic")
@@ -138,32 +141,104 @@ class TestTheHeaderIsKeptOutOfTheRoom:
         only.metadata.update({SIZED_BY: SIZED_BY_ROOM, CHUNK_CHARS: 10_000})
         assert within_the_room([only], ChunkingConfig()) == [only]
 
-    def test_the_earlier_calls_take_what_is_left_and_count_the_rest(self) -> None:
-        entries = [
-            SimpleNamespace(tool="t", id=f"ev_{i:04d}", args={"a": i}, output="x", ok=True)
-            for i in range(200)
-        ]
+    def test_a_later_chunk_gives_way_to_the_full_list_where_it_costs_no_loop(self) -> None:
+        entries = _entries(12)
         whole = earlier_chunks_block(entries)
-        for room in (len(whole), len(whole) // 2, 2_000, len(EARLIER_CHUNKS_HEAD) + 300):
-            block = earlier_chunks_block(entries, room)
-            assert len(block) <= room
-            if room < len(whole):
-                assert (
-                    block.splitlines()[-1].startswith(
-                        EARLIER_CALLS_LEFT_OUT.split("{count}")[0] or str(len(entries))
-                    )
-                    or "not listed" in block.splitlines()[-1]
-                )
-        assert earlier_chunks_block(entries, 10) == ""
-        assert earlier_chunks_block(entries, None) == whole
+        agent = SimpleNamespace(_input_room_chars=lambda _text: 25_832)
+        block, sent, rest = fitted_chunk(agent, "h" * 80, "c" * 25_745, entries)
+        assert block == whole
+        assert len(sent) + len(rest) == 25_745
+        assert 80 + 4 + len(block) + len(sent) <= 25_832
 
-    def test_the_room_for_earlier_calls_is_the_agent_s_room_less_the_chunk(self) -> None:
-        agent = SimpleNamespace(_input_room_chars=lambda _text: 10_000)
-        assert earlier_calls_room(agent, "h" * 50, "c" * 1_000) == 10_000 - 50 - 1_000 - 4
-        assert earlier_calls_room(SimpleNamespace(), "h", "c") is None
-        assert (
-            earlier_calls_room(SimpleNamespace(_input_room_chars=lambda _t: None), "h", "c") is None
+    def test_the_compact_list_where_the_full_one_would_cost_a_loop(self) -> None:
+        entries = _entries(400)
+        agent = SimpleNamespace(_input_room_chars=lambda _text: 25_832)
+        block, sent, _rest = fitted_chunk(agent, "h" * 80, "c" * 25_745, entries)
+        assert block.startswith(EARLIER_CHUNKS_COMPACT_HEAD)
+        assert all(f"ev_{i:04d}" in block for i in range(400))
+        assert 80 + 4 + len(block) + len(sent) <= 25_832
+
+    def test_never_nothing_while_earlier_calls_exist(self) -> None:
+        entries = _entries(3_000)
+        agent = SimpleNamespace(_input_room_chars=lambda _text: 2_000)
+        block, sent, _rest = fitted_chunk(agent, "h" * 80, "c" * 1_900, entries)
+        assert block == EARLIER_CALLS_NOT_LISTED.format(count=3_000)
+        assert 80 + 4 + len(block) + len(sent) <= 2_000
+
+    def test_with_no_room_measured_the_full_list_and_the_whole_chunk(self) -> None:
+        entries = _entries(5)
+        block, sent, rest = fitted_chunk(SimpleNamespace(), "h", "c" * 90_000, entries)
+        assert (block, sent, rest) == (earlier_chunks_block(entries), "c" * 90_000, "")
+
+
+def _entries(count: int) -> list[SimpleNamespace]:
+    return [
+        SimpleNamespace(
+            tool="decompile_function",
+            id=f"ev_{i:04d}",
+            args={"address": f"0x{4096 + i:x}"},
+            output="int f(void) { return 0; }",
+            ok=True,
         )
+        for i in range(count)
+    ]
+
+
+class _Reverser:
+    """A chunked analyst on the 64K reverser's room: each chunk's loop makes calls."""
+
+    def __init__(self, room: int, calls_per_chunk: int) -> None:
+        self.name = "all_tools_reverser_ghidra"
+        self.logger = logging.getLogger("maljan")
+        self._room = room
+        self._calls = calls_per_chunk
+        self._evidence_entries: list = []
+        self._findings_buffer: list = []
+        self._artifacts_buffer: list = []
+        self.validation_findings: list = []
+        self.validation_retries = 0
+        self.prompts: list[str] = []
+
+    def _input_room_chars(self, _text: str) -> int:
+        return self._room
+
+    def analyze_isr(self, data: str) -> AgentISR:
+        self.prompts.append(data)
+        start = len(self._evidence_entries)
+        self._evidence_entries.extend(_entries(start + self._calls)[start:])
+        return AgentISR(agent_id=self.name, domain="static", claims=[], dissent_items=[])
+
+    def _validate_isr(self, isr: AgentISR, *_a: Any, **_k: Any) -> AgentISR:
+        return isr
+
+    def _apply_consistency_gate(self, isr: AgentISR, _evidence: str) -> AgentISR:
+        return isr
+
+    safe_analyze_isr_chunked = BaseAnalyst.safe_analyze_isr_chunked
+
+
+@pytest.mark.parametrize("domain", ["network", "triage"])
+def test_every_later_chunk_reads_every_earlier_call_at_the_64k_reverser_room(domain: str) -> None:
+    room = 25_832
+    text = "".join(f"- 203.0.{i % 250}.{i % 199}:443 flow {i:07d}\n" for i in range(4_000))[
+        :100_000
+    ]
+    chunks = BinaryChunker(ChunkingConfig(overlap_tokens=0)).chunk(domain, text, room=_room(room))
+    assert len(chunks) > 2
+    agent = _Reverser(room, calls_per_chunk=12)
+
+    agent.safe_analyze_isr_chunked(chunks)
+
+    for number, prompt in enumerate(agent.prompts):
+        assert len(prompt) <= room
+        made = 12 * number
+        if made:
+            assert EARLIER_CHUNKS_HEAD in prompt
+            assert all(f"ev_{i:04d}" in prompt for i in range(made))
+    sent = "".join(
+        p.split("\n\n", 2)[-1] if i else p.split("\n\n", 1)[-1] for i, p in enumerate(agent.prompts)
+    )
+    assert sent == text
 
 
 # ---------------------------------------------------------------------------

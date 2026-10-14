@@ -296,6 +296,13 @@ def joined_when_it_fits(chunks: list, config: ChunkingConfig, room: Room | None)
     joined: list = []
     for run in runs:
         joined.extend(_joined_run(run, config, room))
+    if len(joined) > 1:
+        # More than one chunk: each is sent behind its header, so a join is
+        # made against the room less it, and the last pass has nothing to cut.
+        count = len(chunks) + sum(len(str(chunk.content)) for chunk in chunks)
+        joined = []
+        for run in runs:
+            joined.extend(_joined_run(run, config, room, headed=count))
     if len(joined) == len(chunks):
         joined = chunks
     return within_the_room(joined, config)
@@ -340,15 +347,22 @@ def within_the_room(chunks: list, config: ChunkingConfig | None) -> list:
     return out if cut else chunks
 
 
-def _joined_run(run: list, config: ChunkingConfig, room: Room | None) -> list:
+def _joined_run(run: list, config: ChunkingConfig, room: Room | None, *, headed: int = 0) -> list:
     """One run of whole sources, those next to each other that fit one chunk joined.
 
     The size is asked once, about the whole run joined, and each join is then
-    a sum of lengths, so the run is read a fixed number of times.
+    a sum of lengths, so the run is read a fixed number of times. ``headed``
+    is the bound on the chunks of a list of more than one: a room-sized join
+    then leaves room for the header it is sent behind (:func:`header_chars`).
     """
     if len(run) < 2:
         return run
-    limit = chunk_chars(config, SOURCE_SEPARATOR.join(str(chunk.content) for chunk in run), room)
+    text = SOURCE_SEPARATOR.join(str(chunk.content) for chunk in run)
+    limit, sized_by = sized_chunk_chars(config, text, room)
+    if headed and limit is not None and sized_by == SIZED_BY_ROOM:
+        reserve = header_chars(str(run[0].domain), headed, limit)
+        if reserve < limit:
+            limit -= reserve
     groups: list[list] = [[run[0]]]
     size = len(str(run[0].content))
     for chunk in run[1:]:
