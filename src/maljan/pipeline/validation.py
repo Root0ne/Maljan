@@ -7361,6 +7361,10 @@ def ledger_absence_contradictions(payload: Any, entries: EntryTexts | None) -> l
             before_addresses: list[int] | None = None
             at_start = 0
             done = 0
+            # Where the statement before this one took its subject from: a
+            # relative clause that opens its own clause reads back no further,
+            # so no text is read for more than two statements.
+            last_begins = 0
             # A sentence scoped to the text around it says nothing of the run.
             scoped = _SCOPED_TO_THE_TEXT_RE.search(sentence) is not None
             for match in statements:
@@ -7381,8 +7385,9 @@ def ledger_absence_contradictions(payload: Any, entries: EntryTexts | None) -> l
                 if relative and not subject.strip(" ,"):
                     # The relative word opens the clause: its subject is what
                     # the clause before it names last.
-                    previous = starts[at_start - 2] if at_start >= 2 else 0
+                    previous = max(starts[at_start - 2] if at_start >= 2 else 0, last_begins)
                     subject = sentence[previous:relative_at]
+                last_begins = begins
                 # A clause that negates before its statement says the
                 # opposite of it ("it is not the case that ..."): not judged.
                 if scoped or _CLAUSE_NEGATION_RE.search(sentence, begins, match.start()):

@@ -49,9 +49,11 @@ _ENTRY_ID = re.compile(r"\bev_\d+\b")
 # A decimal number standing alone.
 _NUMBER = re.compile(r"(?<![\w.%])\d+(?![\w%]|\.\d)")
 # The claim numbers after "Claim" or "Claims": "Claim 3", "Claims 4/40".
+# Each run of whitespace is read from its start and possessively, so a long
+# run is read once (linear time).
 _CLAIM_NUMBERS = re.compile(
-    r"\s+(?:ANALYST\s+)?(?:['’]s\s+)?claims?\s*#?\s*"
-    r"(\d+(?:\s*(?:/|,|&|and|\+)\s*#?\d+)*)",
+    r"(?<!\s)\s++(?:ANALYST\s++)?(?:['’]s\s++)?claims?\s*+#?\s*+"
+    r"(\d++(?:\s*+(?:/|,|&|and|\+)\s*+#?\d++)*+)",
     re.IGNORECASE,
 )
 # A key of a tool's structured answer that holds a count, and one that holds a

@@ -127,6 +127,20 @@ LEDGER = [{"id": "ev_0001", "tool": "t", "structured": {"matches": [], "total": 
             ),
             id="absence sentence with brackets",
         ),
+        pytest.param(
+            lambda t: ledger_absence_contradictions(
+                {"body": "is not read, which is not in the ledger. " * (len(t) // 41)}, ENTRIES
+            ),
+            id="one clause of many statements",
+        ),
+        pytest.param(
+            lambda t: ledger_count_facts([" " * len(t) + "x"], {}, LEDGER, ["a"]),
+            id="claim numbers after a run of spaces",
+        ),
+        pytest.param(
+            lambda t: ledger_count_facts(["T1106" + " " * len(t) + "1"], {}, LEDGER, ["a"]),
+            id="claim numbers between an id and a number",
+        ),
     ],
 )
 def test_ten_times_the_hostile_line_costs_at_most_ten_times(read: Callable[[str], object]) -> None:
