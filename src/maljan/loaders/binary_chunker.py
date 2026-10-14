@@ -94,7 +94,11 @@ def head_object(data: str) -> dict | None:
 # split at with no window learned.
 SHIPPED_CHUNK_CHARS = chars_for_tokens(UNKNOWN_WINDOW_CHUNK_TOKENS, _CHARS_PER_TOKEN)
 
-# What sized a chunk (:func:`sized_chunk_chars`).
+# What sized a chunk, kept on every chunk the chunker makes
+# (``TextChunk.metadata``): ``SIZED_BY`` names one of the three, ``CHUNK_CHARS``
+# is the size in characters.
+SIZED_BY = "sized_by"
+CHUNK_CHARS = "chunk_chars"
 SIZED_BY_OPERATOR = "operator"
 SIZED_BY_ROOM = "room"
 SIZED_BY_UNKNOWN_WINDOW = "unknown_window"
@@ -118,8 +122,8 @@ def sized_chunk_chars(
     for ``text`` (:data:`SIZED_BY_ROOM`). With no room measured — no window
     learned, or no analyst to ask — the chunk size the platform shipped with
     (``UNKNOWN_WINDOW_CHUNK_TOKENS``, :data:`SIZED_BY_UNKNOWN_WINDOW`), as a
-    tool answer keeps its old constant on an unknown window.
-    A prompt with no room left for any input is no
+    tool answer keeps its old constant on an unknown window; the run says so
+    where it splits an input. A prompt with no room left for any input is no
     bound: the framing alone does not fit, there is nothing to split at, and
     the prompt that carries the input shortens it and says so
     (``BaseAnalyst._truncate_input``).
@@ -350,7 +354,8 @@ class BinaryChunker:
         (:func:`first_chunk_chars`). A prompt with no room left for input is
         one chunk. When `config.skip_if_fits` is True and the text fits in a
         single chunk, a list with one chunk is returned immediately (no
-        splitting).
+        splitting). Every chunk records what sized it (:data:`SIZED_BY`,
+        :data:`CHUNK_CHARS` in ``metadata``).
 
         Args:
             domain: One of "static", "dynamic", "network", or any custom domain.
@@ -373,7 +378,10 @@ class BinaryChunker:
             return [self._make_single_chunk(domain, text, ChunkStrategy.SLIDING_WINDOW)]
 
         first = first_chunk_chars(text, room, max_chars, sized_by)
-        return self._sized(domain, text, max_chars, first)
+        chunks = self._sized(domain, text, max_chars, first)
+        for chunk in chunks:
+            chunk.metadata.update({SIZED_BY: sized_by, CHUNK_CHARS: max_chars})
+        return chunks
 
     def _sized(self, domain: str, text: str, max_chars: int, first: int) -> list[TextChunk]:
         """``text`` as chunks of ``max_chars``, the first of ``first`` (at most ``max_chars``)."""

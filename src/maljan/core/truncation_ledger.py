@@ -276,6 +276,11 @@ class TruncationLedger:
         # (``BaseAnalyst._truncate_input``): one sentence per shortening, read by
         # the judge node into the run's degradation reasons.
         self.input_shortened: list[str] = []
+        # An analyst's input split at the shipped chunk size because no window
+        # was learned (``loaders.binary_chunker.SHIPPED_CHUNK_CHARS``): one row
+        # per agent, its chunk count the largest it was split into, and the
+        # remedy an operator acts on: ``(chunks, chunk characters, remedy)``.
+        self.input_split_unknown_window: dict[str, tuple[int, int, str]] = {}
         # Function summaries cut at their output limit, counted per limit
         # (tokens): one sentence in ``input_shortened`` per limit states the count.
         self._summary_cuts: dict[int, int] = {}
@@ -410,6 +415,22 @@ class TruncationLedger:
                 self.input_shortened[index] = sentence
         elif sentence not in self.input_shortened:
             self.input_shortened.append(sentence)
+
+    def record_unknown_window_split(
+        self, *, agent: str, chunks: int, chunk_chars: int, remedy: str
+    ) -> bool:
+        """Agent ``agent``'s input split into ``chunks`` at the shipped size, no window learned.
+
+        One row per agent: a later split of the same input (a revision reading
+        it again) keeps the row unless it was split into more chunks. True when
+        the row is new or grew, so a caller logs it once.
+        """
+        with self._lock:
+            row = self.input_split_unknown_window.get(agent)
+            if row is not None and row[0] >= int(chunks):
+                return False
+            self.input_split_unknown_window[agent] = (int(chunks), int(chunk_chars), remedy)
+            return True
 
     def record_summary_cut(self, cap: int) -> None:
         """One function summary ended at its ``cap``-token output limit.
@@ -593,6 +614,10 @@ class TruncationLedger:
                 "evidence_corpus_answers": self.evidence_corpus_answers,
                 "evidence_corpus_bytes_held": self.evidence_corpus_bytes_held,
                 "evidence_corpus_bytes_ceiling": self.evidence_corpus_bytes_ceiling,
+                "input_split_unknown_window": [
+                    {"agent": agent, "chunks": chunks, "chunk_chars": chars, "remedy": remedy}
+                    for agent, (chunks, chars, remedy) in self.input_split_unknown_window.items()
+                ],
             }
 
     @property

@@ -117,7 +117,9 @@ from maljan.analysis.evidence_roots import roots_phrase as _roots_phrase
 from maljan.analysis.function_summarizer import SHORTENED_NOTE as SUMMARISER_SHORTENED_NOTE
 from maljan.analysis.function_summarizer import SUMMARY_CUT_NOTE, SUMMARY_FENCE_STATEMENT
 from maljan.analysis.pcap_summary import CaptureRead
+from maljan.analysis.run_summary import unknown_window_split_sentence
 from maljan.core.config import SampleOpenConfig
+from maljan.core.container import unknown_window_split_line
 from maljan.core.pack_steps import CALLED_API_CATALOGUE, shipped_label
 from maljan.core.reputation import read_answer
 from maljan.extractors.capability_matrix import (
@@ -126,7 +128,7 @@ from maljan.extractors.capability_matrix import (
     not_asked_unknown_id,
     unknown_id_reason,
 )
-from maljan.llm.context_window import no_room_sentence
+from maljan.llm.context_window import no_room_sentence, unknown_window_remedy
 from maljan.llm.tool_replies import NO_REPLY_RECORDED, NOT_RUN_REPLY
 from maljan.memory.technique_cards import card_lines, load_cards
 from maljan.pipeline import function_claims, nodes, triage_pack
@@ -1301,6 +1303,13 @@ def _every_message(found: list[Any]) -> str:
     return " ".join(violation.message for violation in found)
 
 
+class _SplitRows:
+    """A run summary's bounds holding only the unknown-window split rows."""
+
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        self.input_split_unknown_window = rows
+
+
 PROMPTS: dict[str, str] = {
     "example team document prompts": _TEAM_DOCUMENT_PROMPTS,
     "narrative contract": EXPECTED_OBJECT,
@@ -1734,6 +1743,23 @@ PROMPTS: dict[str, str] = {
     "a loop started past the spend ceiling": SPEND_CEILING_QUESTION,
     "an analyst input shortened to its window": INPUT_SHORTENED_NOTICE.format(
         detail="the first 1,000 of 9,000 characters are shown, ending in …"
+    ),
+    "an analyst input split at the shipped size with no window learned": " ".join(
+        [
+            unknown_window_split_line("network", 3, 80_000, unknown_window_remedy()),
+            unknown_window_split_sentence(
+                _SplitRows(
+                    [
+                        {
+                            "agent": "network",
+                            "chunks": 3,
+                            "chunk_chars": 80_000,
+                            "remedy": unknown_window_remedy(),
+                        }
+                    ]
+                )
+            ),
+        ]
     ),
     "the summariser's fence statement": SUMMARY_FENCE_STATEMENT,
     "a summariser prompt shortened to its window": SUMMARISER_SHORTENED_NOTE.format(

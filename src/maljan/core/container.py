@@ -87,6 +87,62 @@ _ACLOSE_BUDGET = 20.0
 _CLOSE_ALL_BUDGET = 45.0
 
 
+def _note_chunking(container: Any, agent_name: str, chunks: list[TextChunk]) -> None:
+    """Agent ``agent_name``'s input split at the shipped size, stated: no window was learned.
+
+    An input the shipped size split, because no window was learned, is a row
+    in the run summary and a log line, each with the remedy: the split is
+    kept, never silent. Split means more than one chunk
+    once whole sources that fit the shipped size together are joined, as the
+    analyst node joins them.
+    """
+    from maljan.llm.context_window import unknown_window_remedy
+    from maljan.loaders.binary_chunker import (
+        SHIPPED_CHUNK_CHARS,
+        SIZED_BY,
+        SIZED_BY_UNKNOWN_WINDOW,
+        joined_when_it_fits,
+    )
+
+    sized = [getattr(chunk, "metadata", None) or {} for chunk in chunks]
+    if len(chunks) < 2 or not any(f.get(SIZED_BY) == SIZED_BY_UNKNOWN_WINDOW for f in sized):
+        return
+    config = getattr(getattr(container, "config", None), "chunking", None)
+    count = len(joined_when_it_fits(chunks, config, None)) if config is not None else len(chunks)
+    if count < 2:
+        return
+    remedy = unknown_window_remedy()
+    ledger = getattr(container, "_truncation_ledger", None)
+    record = getattr(ledger, "record_unknown_window_split", None)
+    new = True
+    if callable(record):
+        try:
+            new = bool(
+                record(
+                    agent=agent_name,
+                    chunks=count,
+                    chunk_chars=SHIPPED_CHUNK_CHARS,
+                    remedy=remedy,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — a record never costs an analysis
+            logger.debug("%s: the unknown-window split was not recorded (%s).", agent_name, exc)
+    if new:
+        logger.warning(
+            "%s",
+            unknown_window_split_line(agent_name, count, SHIPPED_CHUNK_CHARS, remedy),
+        )
+
+
+def unknown_window_split_line(agent_name: str, chunks: int, chunk_chars: int, remedy: str) -> str:
+    """The log line for an input the shipped chunk size split because no window was learned."""
+    return (
+        f"Agent '{agent_name}': input split into {chunks} chunks at the shipped "
+        f"{chunk_chars:,} characters, not at the room a window leaves: no context window "
+        f"was learned. To size chunks from the window, {remedy}."
+    )
+
+
 # Every container that still exists, so a retired agent loop can invalidate the
 # clients that were built on it. Weak, so a finished job's container is gone.
 _LIVE_CONTAINERS: weakref.WeakSet[ServiceContainer] = weakref.WeakSet()
@@ -1740,8 +1796,11 @@ class ServiceContainer:
         with self._lock:
             cached_text = self._data_cache.get(key)
         if cached_text is not None:
-            return self.loader.chunk_text(data_type, cached_text, room=room)
-        return self.loader.load_chunked(sample_id, data_type, room=room)
+            chunks = self.loader.chunk_text(data_type, cached_text, room=room)
+        else:
+            chunks = self.loader.load_chunked(sample_id, data_type, room=room)
+        _note_chunking(self, data_type, chunks)
+        return chunks
 
     def load_data_for_agent(
         self,
@@ -1776,10 +1835,12 @@ class ServiceContainer:
         definition = self.config.agents.definitions.get(agent_name)
         sources = list(definition.data_sources) if definition is not None else []
         if not sources:
-            return self._legacy_role_data(agent_name, file_hash, sandbox_report, room, head_room)
+            chunks = self._legacy_role_data(agent_name, file_hash, sandbox_report, room, head_room)
+            _note_chunking(self, agent_name, chunks)
+            return chunks
 
         head = head_room if head_room is not None else room
-        chunks: list[TextChunk] = []
+        chunks = []
         for source in sources:
             chunks.extend(
                 self._data_source_chunks(
@@ -1791,6 +1852,7 @@ class ServiceContainer:
                     room if chunks else head,
                 )
             )
+        _note_chunking(self, agent_name, chunks)
         return chunks
 
     def _data_source_chunks(

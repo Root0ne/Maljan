@@ -622,6 +622,11 @@ class TruncationMetrics:
     # Empty on a run whose cap was an operator's own number, because no window
     # was consulted then.
     context_window: dict[str, Any] = field(default_factory=dict)
+    # An analyst's input split at the shipped chunk size because no window was
+    # learned: one row per agent (``agent``, ``chunks``, ``chunk_chars``,
+    # ``remedy``). Empty where every input was sized from a window, an
+    # operator's figure, or fitted whole.
+    input_split_unknown_window: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def any_bound_hit(self) -> bool:
@@ -761,6 +766,33 @@ def cap_in_force_sentence(truncation: Any) -> str:
         f"{int(window.get('chars_per_token', 0) or 0)} characters per token, with "
         f"{int(window.get('reply_tokens', 0) or 0):,} tokens held back for the model's reply."
     )
+
+
+def unknown_window_split_sentence(truncation: Any) -> str:
+    """The analysts whose input the shipped size split, no window learned; ``""`` for none.
+
+    Each chunk is a full tool loop, so a split at a size nobody measured is a
+    number of loops the run chose without a window; the run says so, and what
+    would size them from the window instead.
+    """
+    rows = [
+        row
+        for row in getattr(truncation, "input_split_unknown_window", None) or []
+        if isinstance(row, dict) and row.get("agent")
+    ]
+    if not rows:
+        return ""
+    agents = [
+        f"{row['agent']} ({count_label(int(row.get('chunks', 0) or 0), 'chunk')})" for row in rows
+    ]
+    listed = agents[0] if len(agents) == 1 else f"{', '.join(agents[:-1])} and {agents[-1]}"
+    chars = int(rows[0].get("chunk_chars", 0) or 0)
+    remedy = str(rows[0].get("remedy", "") or "")
+    said = (
+        f"No context window was learned, so the input of {listed} was split at the shipped "
+        f"{chars:,} characters rather than at the room a window leaves."
+    )
+    return f"{said} To size chunks from the window, {remedy}." if remedy else said
 
 
 def count_label(count: int, singular: str, plural: str = "") -> str:
@@ -1473,6 +1505,9 @@ class RunSummary:
             cap = cap_in_force_sentence(trunc)
             if cap:
                 lines += [cap, ""]
+            split = unknown_window_split_sentence(trunc)
+            if split:
+                lines += [split, ""]
             # Said only where the two counts could be read against each other
             # and disagree, or where something was actually cut. On a run that
             # hit no bound and counted the same calls twice it is a paragraph
@@ -1677,6 +1712,7 @@ class RunSummary:
                 "tool_output_limit_smallest": t.tool_output_limit_smallest,
                 "tool_output_limit_largest": t.tool_output_limit_largest,
                 "context_window": dict(t.context_window),
+                "input_split_unknown_window": [dict(row) for row in t.input_split_unknown_window],
                 "any_bound_hit": t.any_bound_hit,
             }
             # Absent rather than zero when this run recorded nothing about
@@ -2093,6 +2129,11 @@ class RunSummaryBuilder:
             context_window=(
                 dict(window) if isinstance(window := snapshot.get("context_window"), dict) else {}
             ),
+            input_split_unknown_window=[
+                dict(row)
+                for row in snapshot.get("input_split_unknown_window") or []
+                if isinstance(row, dict)
+            ],
         )
         return self
 

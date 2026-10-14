@@ -279,7 +279,8 @@ UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS = 6000
 # constant above: nothing is derived from a window nobody measured, so the
 # chunk size this platform shipped with applies, and sources are joined only
 # within it. Sending the input whole instead would risk a first request past
-# the window, which loses the analyst before any tool has run.
+# the window, which loses the analyst before any tool has run. A run whose
+# input it split says so, with :func:`unknown_window_remedy`.
 UNKNOWN_WINDOW_CHUNK_TOKENS = 20000
 
 
