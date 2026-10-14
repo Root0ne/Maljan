@@ -47,9 +47,6 @@ _R2_PATTERNS: tuple[ErrorPattern, ...] = tuple(
 )
 _R2_OPEN_FIRST = next(p for p in _R2_PATTERNS if "protocol_error" in p.applies_to)
 _R2_LOG_ENVELOPE = next(p for p in _R2_PATTERNS if p.multiline)
-_R2_ERROR_REPLIES = tuple(
-    p for p in _R2_PATTERNS if p is not _R2_OPEN_FIRST and p is not _R2_LOG_ENVELOPE
-)
 # What a model is told after an answer that says no file is open.
 _R2_OPEN_FILE_FIRST = builtin_declarations.R2_OPEN_FILE_FIRST
 # What a failed open is told: the path it tried and the one radare2 can open.

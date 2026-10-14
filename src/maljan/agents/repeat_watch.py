@@ -52,9 +52,7 @@ __all__ = ["ClaimRepeatReader", "RepeatCount"]
 # ---------------------------------------------------------------------------
 
 _LINE_END = re.compile("\r\n|[\n\r\x0b\x0c\x1c\x1d\x1e\x85  ]")
-_LINE_END_CHARS = frozenset("\n\r\x0b\x0c\x1c\x1d\x1e\x85  ")
 _MARKS = re.compile(r"[*_`#>]")
-_TOKENS = re.compile(r"\s+|\S+")
 _TRIMMED = " .;:"
 # A run of the characters a key's end is trimmed of goes into the hash as its
 # own characters while it is short, and as its hash once it is longer than this:
