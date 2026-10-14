@@ -40,7 +40,12 @@ from maljan.agents.run_evidence_corpus import CorpusState, both_searched
 from maljan.analysis.corroboration import corroboration_row as corroboration_row
 from maljan.analysis.corroboration import corroboration_sources as corroboration_sources
 from maljan.analysis.sandbox_sections import ItemIndex, cited_item_ids, is_item_id, item_ids_in
-from maljan.analysis.technique_ids import MITRE_ATTACK_SOURCES, TECHNIQUE_ID_EXACT_RE
+from maljan.analysis.technique_ids import (
+    ID_BODY,
+    MITRE_ATTACK_SOURCES,
+    TECHNIQUE_ID_EXACT_RE,
+    TECHNIQUE_WORD_RE,
+)
 from maljan.core.declared_reading import (
     bare_name,
     consumer_kinds,
@@ -2316,11 +2321,6 @@ FUNCTION_QUESTION_ASK = (
 )
 
 
-# The id inside an ``isr.ungrounded_technique`` message, which is where the
-# technique the analyst kept is written down.
-_TID_IN_MESSAGE_RE = re.compile(r"\bT\d{4}(?:\.\d{3})?\b")
-
-
 def ungrounded_technique_note(findings: Any) -> str:
     """What the judge is told about technique claims that cite nothing.
 
@@ -2340,7 +2340,7 @@ def ungrounded_technique_note(findings: Any) -> str:
         data = row if isinstance(row, dict) else getattr(row, "__dict__", {}) or {}
         if str(data.get("code") or "") != UNGROUNDED_TECHNIQUE_CODE:
             continue
-        match = _TID_IN_MESSAGE_RE.search(str(data.get("message") or ""))
+        match = TECHNIQUE_WORD_RE.search(str(data.get("message") or ""))
         if match and match.group(0) not in named:
             named.append(match.group(0))
     if not named:
@@ -5342,7 +5342,7 @@ def recommendation_technique_violations(
         text = " ".join(
             str(row.get(key) or "") for key in ("action", "rationale", "detection", "technique_id")
         )
-        named = list(dict.fromkeys(tid.upper() for tid in _TID_IN_MESSAGE_RE.findall(text)))
+        named = list(dict.fromkeys(tid.upper() for tid in TECHNIQUE_WORD_RE.findall(text)))
         unpublished = [tid for tid in named if tid not in known]
         if not unpublished:
             continue
@@ -5796,7 +5796,7 @@ def identifier_citation_violations(
 # A technique id with a name written after it in brackets, the way a report
 # writes one: "T1027 (Obfuscated Files or Information)". The name is words; a
 # bracket holding an id, a count or a list is not a name and is not read.
-_ID_THEN_NAME_RE = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\s*\(([A-Za-z][A-Za-z0-9 ,:/&'\-]{2,80})\)")
+_ID_THEN_NAME_RE = re.compile(rf"\b({ID_BODY})\s*\(([A-Za-z][A-Za-z0-9 ,:/&'\-]{{2,80}})\)")
 
 
 def technique_name_violations(payload: Any) -> list[Violation]:

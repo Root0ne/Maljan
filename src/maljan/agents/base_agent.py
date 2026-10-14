@@ -46,6 +46,7 @@ from maljan.agents.tool_answer_clearing import (
     read_evidence_tool,
 )
 from maljan.analysis.sandbox_sections import item_index_of
+from maljan.analysis.technique_ids import ID_BODY
 from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError, SampleNotOpened
 from maljan.core.logger import logger
@@ -1510,7 +1511,7 @@ def _field(
     return at_line_start.search(tail) or anywhere.search(tail)
 
 
-_ONE_TECHNIQUE_RE = re.compile(r"T\d{4}(?:\.\d{3})?", re.IGNORECASE)
+_ONE_TECHNIQUE_RE = re.compile(ID_BODY, re.IGNORECASE)
 # What a TECHNIQUE line says to claim none.
 _NO_TECHNIQUE = frozenset({"", "NONE", "—", "–", "-"})
 # A line that opens with "none" and words after it ("none asserted", "none
@@ -1519,7 +1520,7 @@ _NO_TECHNIQUE = frozenset({"", "NONE", "—", "–", "-"})
 # id or a name on it ("None; Process Injection is likely"), the words may name
 # one and the line is asked about.
 _NONE_WITH_WORDS_RE = re.compile(r"none\b", re.IGNORECASE)
-_ANY_TECHNIQUE_ID_RE = re.compile(r"(?<![\w.])T\d{4}(?:\.\d{3})?(?!\w)", re.IGNORECASE)
+_ANY_TECHNIQUE_ID_RE = re.compile(rf"(?<![\w.]){ID_BODY}(?!\w)", re.IGNORECASE)
 # What separates the ids of a list on one TECHNIQUE line: a comma, "and", both
 # ("T1027, T1140, and T1106"), or a slash ("T1027 / T1140"). Every part must be
 # an id and nothing else; "or", "and/or", a doubled or trailing slash, or any
@@ -1542,13 +1543,14 @@ def _bare_technique(text: str) -> str:
 
 # An id followed by words in brackets: "T1027 (Obfuscated Files or Information)".
 _ID_WITH_BRACKETED_WORDS_RE = re.compile(
-    r"(?<![\w.])(?P<id>T\d{4}(?:\.\d{3})?)\s*\((?P<words>[^()]*)\)", re.IGNORECASE
+    rf"(?<![\w.])(?P<id>{ID_BODY})\s*\((?P<words>[^()]*)\)", re.IGNORECASE
 )
 # An id at a place in a list item, and what separates it from the words after
 # it: a space, a dash or a colon (``_without_unbracketed_names``). Anchored at
 # the place it is tried, and every part of it possessive, so a try costs the
 # characters it reads.
-_ID_AT_RE = re.compile(r"(?P<id>T\d{4}(?:\.\d{3})?+)(?:\s*+[-–—:]\s*+|\s++)(?=[A-Za-z])", re.I)
+# The id's own optional sub-technique part is possessive too: ``{ID_BODY}+``.
+_ID_AT_RE = re.compile(rf"(?P<id>{ID_BODY}+)(?:\s*+[-–—:]\s*+|\s++)(?=[A-Za-z])", re.I)
 # Where an id may begin in an item: a T after no word character or dot.
 _ID_START_RE = re.compile(r"(?<![\w.])T(?=\d)", re.IGNORECASE)
 # What ends a list item, and what a name with no bracket never holds.

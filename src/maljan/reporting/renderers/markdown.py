@@ -51,6 +51,7 @@ from maljan.analysis.run_summary import (
     stage_duration_lines,
     tokens_sentence,
 )
+from maljan.analysis.technique_ids import ID_BODY
 from maljan.core.logger import logger
 from maljan.reporting import tool_kinds
 from maljan.reporting.dedupe import distinct_processes, distinct_signatures
@@ -3992,7 +3993,7 @@ def _tactic_key(cell: CapabilityCell) -> tuple[int, str]:
 _TECHNIQUE_FINDING_CODES = ("attck.", "stix.credit_without_claim")
 
 # The technique a finding row stored without a ``subject`` opens with.
-_LEADING_TECHNIQUE_RE = re.compile(r"^\s*TECHNIQUE\s+(T\d{4}(?:\.\d{3})?)\b", re.IGNORECASE)
+_LEADING_TECHNIQUE_RE = re.compile(rf"^\s*TECHNIQUE\s+({ID_BODY})\b", re.IGNORECASE)
 
 
 def _finding_technique(row: dict[str, Any]) -> str:

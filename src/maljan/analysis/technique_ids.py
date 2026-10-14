@@ -15,10 +15,20 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-TECHNIQUE_RE = re.compile(r"\bT\d{4}(?:\.\d{3})?\b", re.IGNORECASE)
-SIGMA_TAG_RE = re.compile(r"^attack\.(t\d{4}(?:\.\d{3})?)$", re.IGNORECASE)
+# One technique id: ``T`` and four digits, and a sub-technique's three after a
+# dot. Every reader below is built from it, and so is every other reader of the
+# id in the codebase that needs its own boundaries (a claim line, a message).
+ID_BODY = r"T\d{4}(?:\.\d{3})?"
+TECHNIQUE_RE = re.compile(rf"\b{ID_BODY}\b", re.IGNORECASE)
+# The same id as a word, in the case the platform writes it: the reader of a
+# message or a cell the platform itself filled, where a lower-case ``t1055`` is
+# not how an id was written.
+TECHNIQUE_WORD_RE = re.compile(rf"\b{ID_BODY}\b")
+# Anchored with ``\A`` and ``\Z``, not ``^`` and ``$``: ``$`` also matches before
+# a final newline, so ``"T1055\n"`` read as one id under ``re.match``.
+SIGMA_TAG_RE = re.compile(rf"\Aattack\.({ID_BODY})\Z", re.IGNORECASE)
 # A whole string that is one id, for a field an agent wrote as the id itself.
-TECHNIQUE_ID_EXACT_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
+TECHNIQUE_ID_EXACT_RE = re.compile(rf"\A{ID_BODY}\Z")
 
 # The ``source_name`` values an external reference to an ATT&CK technique is
 # filed under. A reference under any other source — CAPEC, a vendor's own
@@ -41,22 +51,38 @@ def says_no_technique(value: Any) -> bool:
     return str(value or "").strip().upper() in NO_TECHNIQUE_WORDS
 
 
+def is_technique_id(value: Any) -> bool:
+    """Whether ``value`` is one technique id and nothing else (``T1055``, ``T1055.012``).
+
+    Exact and case-sensitive: a caller that accepts ``t1055`` upper-cases it
+    first, and one that accepts surrounding space strips it first.
+    """
+    return isinstance(value, str) and TECHNIQUE_ID_EXACT_RE.match(value) is not None
+
+
+def _attack_reference_ids(obj: Any) -> list[str]:
+    """Every ``external_id`` an object files under an ATT&CK source, upper-cased, in order."""
+    refs = obj.get("external_references") if isinstance(obj, dict) else None
+    if refs is None and not isinstance(obj, dict):
+        refs = getattr(obj, "external_references", None)
+    found: list[str] = []
+    for ref in refs or []:
+        read = ref.get if isinstance(ref, dict) else lambda key, r=ref: getattr(r, key, "")
+        source = str(read("source_name") or "").strip().lower()
+        external = str(read("external_id") or "").strip()
+        if source in MITRE_ATTACK_SOURCES and external:
+            found.append(external.upper())
+    return found
+
+
 def attack_reference_id(obj: Any) -> str:
     """The technique id an object's MITRE ATT&CK reference names, or ``""``.
 
     Only a reference filed under an ATT&CK source counts; the first one found
     answers. Works on a dict or on a model.
     """
-    refs = obj.get("external_references") if isinstance(obj, dict) else None
-    if refs is None and not isinstance(obj, dict):
-        refs = getattr(obj, "external_references", None)
-    for ref in refs or []:
-        read = ref.get if isinstance(ref, dict) else lambda key, r=ref: getattr(r, key, "")
-        source = str(read("source_name") or "").strip().lower()
-        external = str(read("external_id") or "").strip()
-        if source in MITRE_ATTACK_SOURCES and external:
-            return external.upper()
-    return ""
+    found = _attack_reference_ids(obj)
+    return found[0] if found else ""
 
 
 def technique_ids_in(value: Any) -> list[str]:
