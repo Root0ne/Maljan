@@ -91,8 +91,13 @@ def head_object(data: str) -> dict | None:
 
 
 # The chunk size this platform shipped with, in characters: what an input is
-# split at with no window learned, and the least the head source is given.
+# split at with no window learned.
 SHIPPED_CHUNK_CHARS = chars_for_tokens(UNKNOWN_WINDOW_CHUNK_TOKENS, _CHARS_PER_TOKEN)
+
+# What sized a chunk (:func:`sized_chunk_chars`).
+SIZED_BY_OPERATOR = "operator"
+SIZED_BY_ROOM = "room"
+SIZED_BY_UNKNOWN_WINDOW = "unknown_window"
 
 
 def configured_chunk_chars(config: ChunkingConfig | None) -> int | None:
@@ -103,51 +108,112 @@ def configured_chunk_chars(config: ChunkingConfig | None) -> int | None:
     return None
 
 
-def chunk_chars(config: ChunkingConfig, text: str, room: Room | None) -> int | None:
-    """Characters one chunk of ``text`` may hold, or ``None`` for no bound.
+def sized_chunk_chars(
+    config: ChunkingConfig | None, text: str, room: Room | None
+) -> tuple[int | None, str]:
+    """``(characters, what sized them)`` for one chunk of ``text``; ``None`` characters is no bound.
 
-    The operator's ``max_tokens_per_chunk`` where it is set; otherwise the
-    room the analyst's prompt has for ``text``. With no room measured — no
-    window learned, or no analyst to ask — the chunk size the platform shipped
-    with (``UNKNOWN_WINDOW_CHUNK_TOKENS``), as a tool answer keeps its old
-    constant on an unknown window. A prompt with no room left for any input is
-    no bound: the framing alone does not fit, there is nothing to split at,
-    and the prompt that carries the input shortens it and says so
+    The operator's ``max_tokens_per_chunk`` where it is set
+    (:data:`SIZED_BY_OPERATOR`); otherwise the room the analyst's prompt has
+    for ``text`` (:data:`SIZED_BY_ROOM`). With no room measured — no window
+    learned, or no analyst to ask — the chunk size the platform shipped with
+    (``UNKNOWN_WINDOW_CHUNK_TOKENS``, :data:`SIZED_BY_UNKNOWN_WINDOW`), as a
+    tool answer keeps its old constant on an unknown window.
+    A prompt with no room left for any input is no
+    bound: the framing alone does not fit, there is nothing to split at, and
+    the prompt that carries the input shortens it and says so
     (``BaseAnalyst._truncate_input``).
     """
     configured = configured_chunk_chars(config)
     if configured is not None:
-        return configured
+        return configured, SIZED_BY_OPERATOR
     chars = room(text) if room is not None else None
     if chars is None:
-        return SHIPPED_CHUNK_CHARS
+        return SHIPPED_CHUNK_CHARS, SIZED_BY_UNKNOWN_WINDOW
     if isinstance(chars, int) and not isinstance(chars, bool) and chars > 0:
-        return chars
-    return None
+        return chars, SIZED_BY_ROOM
+    return None, SIZED_BY_ROOM
 
 
-def head_room(room: Room | None, added: Callable[[str], int]) -> Room | None:
+def chunk_chars(config: ChunkingConfig, text: str, room: Room | None) -> int | None:
+    """Characters one chunk of ``text`` may hold, ``None`` for none (:func:`sized_chunk_chars`)."""
+    return sized_chunk_chars(config, text, room)[0]
+
+
+def _one_json_object(text: str) -> bool:
+    """Whether ``text`` is one JSON object and nothing else, as the node reads a head chunk."""
+    stripped = text.strip()
+    if not stripped.startswith("{"):
+        return False
+    try:
+        return isinstance(json.loads(stripped), dict)
+    except (json.JSONDecodeError, ValueError, RecursionError):
+        return False
+
+
+class HeadRoom:
     """The room for the source whose first chunk is added to after it is sized.
 
     The node puts the sample path and the upstream block into the head chunk
-    once the input is chunked; ``added`` says, for the source's text, how many
-    characters that adds. The head source is chunked at ``room`` less that, so
-    its first chunk still fits once they are in; every other source keeps the
-    whole room. Never below :data:`SHIPPED_CHUNK_CHARS`, the head's size before
-    chunks were sized from the window: where the addition leaves less, the head
-    is chunked as it was then, so the chunk count is never above that one's.
-    A room not measured (``None``, or nothing left) is passed on unchanged.
+    once the input is chunked; ``added`` says, for a text, how many characters
+    that adds to it. Called, this is the analyst's whole room, which every
+    chunk of the source but the first is sized at; :meth:`first` is what the
+    first chunk may hold so that it still fits once they are in. Only the first
+    chunk is made smaller, so however large the addition is the source gains
+    at most one chunk over a split at the room.
+    """
+
+    def __init__(self, room: Room, added: Callable[[str], int]) -> None:
+        self._room = room
+        self._added = added
+
+    def __call__(self, text: str) -> int | None:
+        return self._room(text)
+
+    def first(self, text: str, chars: int) -> int:
+        """Characters the first chunk of ``text`` may hold where a chunk holds ``chars``.
+
+        ``chars`` where the text fits whole with what is added. ``chars`` too
+        for a JSON head (one JSON object) that fits the room on its own: cut,
+        it is no JSON head and loses the sample path the node writes into it,
+        so it goes whole and the prompt that carries it shortens it as a
+        document and says so. Otherwise ``chars`` less what is added to the
+        first piece — a piece is no JSON head, so that is the block in front
+        of it. Where the addition alone fills the room the first chunk is over
+        it whatever piece it holds; it is then sized as the others are, and
+        its prompt shortens it and says so.
+        """
+        added = max(0, int(self._added(text)))
+        if len(text) + added <= chars:
+            return chars
+        if len(text) <= chars and _one_json_object(text):
+            return chars
+        piece = max(0, int(self._added(text[:chars]))) if len(text) > chars else added
+        left = chars - piece
+        return left if left > 0 else chars
+
+
+def head_room(room: Room | None, added: Callable[[str], int]) -> Room | None:
+    """The room for the source whose first chunk is added to after it is sized (:class:`HeadRoom`).
+
+    A room not measured (``None``) is passed on unchanged.
     """
     if room is None:
         return None
+    return HeadRoom(room, added)
 
-    def measured(text: str) -> int | None:
-        chars = room(text)
-        if not isinstance(chars, int) or isinstance(chars, bool) or chars <= 0:
-            return chars
-        return max(chars - max(0, added(text)), SHIPPED_CHUNK_CHARS)
 
-    return measured
+def first_chunk_chars(text: str, room: Room | None, chars: int, sized_by: str) -> int:
+    """Characters the first chunk of ``text`` may hold where a chunk holds ``chars``.
+
+    ``chars`` unless the room was measured and is a :class:`HeadRoom`, whose
+    first chunk is kept smaller by what the node adds to it. An operator's
+    figure and the unknown-window size are each the chunk size as set, the
+    head's included.
+    """
+    if sized_by != SIZED_BY_ROOM or not isinstance(room, HeadRoom):
+        return chars
+    return room.first(text, chars)
 
 
 def joined_when_it_fits(chunks: list, config: ChunkingConfig, room: Room | None) -> list:
@@ -277,12 +343,14 @@ class BinaryChunker:
     def chunk(self, domain: str, text: str, room: Room | None = None) -> list[TextChunk]:
         """Split `text` into LLM-safe chunks for the given domain.
 
-        A chunk holds what :func:`chunk_chars` allows: the operator's
+        A chunk holds what :func:`sized_chunk_chars` allows: the operator's
         ``max_tokens_per_chunk``, else the ``room`` the analyst's prompt has
-        for this text, else the unknown-window size. A prompt with no room
-        left for input is one chunk. When
-        `config.skip_if_fits` is True and the text fits in a single chunk, a
-        list with one chunk is returned immediately (no splitting).
+        for this text, else the unknown-window size; the first chunk of a
+        :class:`HeadRoom` source holds less by what the node adds to it
+        (:func:`first_chunk_chars`). A prompt with no room left for input is
+        one chunk. When `config.skip_if_fits` is True and the text fits in a
+        single chunk, a list with one chunk is returned immediately (no
+        splitting).
 
         Args:
             domain: One of "static", "dynamic", "network", or any custom domain.
@@ -295,7 +363,7 @@ class BinaryChunker:
         if not text:
             return [self._make_single_chunk(domain, "", ChunkStrategy.SLIDING_WINDOW)]
 
-        max_chars = chunk_chars(self._config, text, room)
+        max_chars, sized_by = sized_chunk_chars(self._config, text, room)
         if max_chars is None:
             logger.debug(
                 "Chunking skipped for domain='%s': no room left for input, %d chars whole.",
@@ -304,16 +372,30 @@ class BinaryChunker:
             )
             return [self._make_single_chunk(domain, text, ChunkStrategy.SLIDING_WINDOW)]
 
-        if self._config.skip_if_fits and len(text) <= max_chars:
+        first = first_chunk_chars(text, room, max_chars, sized_by)
+        return self._sized(domain, text, max_chars, first)
+
+    def _sized(self, domain: str, text: str, max_chars: int, first: int) -> list[TextChunk]:
+        """``text`` as chunks of ``max_chars``, the first of ``first`` (at most ``max_chars``)."""
+        if self._config.skip_if_fits and len(text) <= first:
             logger.debug(
                 "Chunking skipped for domain='%s': %d chars fits in limit (%d chars).",
                 domain,
                 len(text),
-                max_chars,
+                first,
             )
             return [self._make_single_chunk(domain, text, ChunkStrategy.SLIDING_WINDOW)]
+        if first >= max_chars or len(text) <= first:
+            return self._split(domain, text, max_chars)
+        # Only the head piece is smaller: what the node adds goes into it alone.
+        start = first - self._overlap_chars if first > self._overlap_chars else first
+        rest = self._split(domain, text[start:], max_chars)
+        return self._bins_to_chunks(
+            domain, [text[:first], *(chunk.content for chunk in rest)], rest[0].strategy
+        )
 
-        # Try domain-specific splitting first
+    def _split(self, domain: str, text: str, max_chars: int) -> list[TextChunk]:
+        """``text`` split at ``max_chars``: at the domain's boundaries, else by a sliding window."""
         if domain in self._DOMAIN_STRATEGIES:
             pattern, strategy = self._DOMAIN_STRATEGIES[domain]
             segments = self._split_by_boundary(text, pattern)

@@ -35,6 +35,7 @@ from maljan.loaders.binary_chunker import (
     SHIPPED_CHUNK_CHARS,
     BinaryChunker,
     ChunkStrategy,
+    HeadRoom,
     TextChunk,
     head_room,
     joined_when_it_fits,
@@ -342,19 +343,40 @@ class TestTheNode:
 
 
 # ---------------------------------------------------------------------------
-# The head source's room: less what the node adds, never below the shipped size
+# The head source's room: its first chunk less what the node adds, the rest the room
 # ---------------------------------------------------------------------------
 
 
 class TestTheHeadSourceRoom:
-    def test_the_head_source_is_given_the_room_less_what_is_added(self) -> None:
+    def test_the_first_piece_is_given_the_room_less_what_is_added(self) -> None:
         room = head_room(_room(300_000), lambda _text: 20_000)
-        assert room is not None and room("x") == 280_000
+        assert isinstance(room, HeadRoom)
+        assert room("x" * 400_000) == 300_000
+        assert room.first("x" * 400_000, 300_000) == 280_000
 
-    def test_the_head_source_is_never_given_less_than_the_shipped_size(self) -> None:
-        for added in (0, 18_800, 29_500, 29_800, 1_000_000):
+    def test_a_head_that_fits_whole_with_the_addition_is_given_the_room(self) -> None:
+        room = head_room(_room(300_000), lambda _text: 20_000)
+        assert isinstance(room, HeadRoom)
+        assert room.first("x" * 280_000, 300_000) == 300_000
+
+    def test_the_first_piece_is_never_held_to_a_shipped_size(self) -> None:
+        # A small window's room is below the 80,000 characters a chunk shipped
+        # with; the first piece is the room less the addition, never raised to it.
+        room = head_room(_room(29_800), lambda _text: 18_800)
+        assert isinstance(room, HeadRoom)
+        assert room.first("x" * 595_000, 29_800) == 11_000 < SHIPPED_CHUNK_CHARS
+
+    def test_an_addition_that_fills_the_room_sizes_the_first_piece_as_the_rest(self) -> None:
+        for added in (29_800, 1_000_000):
             room = head_room(_room(29_800), lambda _text, n=added: n)
-            assert room is not None and room("x") == SHIPPED_CHUNK_CHARS
+            assert isinstance(room, HeadRoom)
+            assert room.first("x" * 595_000, 29_800) == 29_800
+
+    def test_a_json_head_that_fits_the_room_on_its_own_is_kept_whole(self) -> None:
+        head = json.dumps({f"k{i}": i for i in range(100)})
+        room = head_room(_room(len(head) + 10), lambda text: 3 * len(text))
+        assert isinstance(room, HeadRoom)
+        assert room.first(head, len(head) + 10) == len(head) + 10
 
     def test_a_room_not_measured_is_passed_on(self) -> None:
         assert head_room(None, lambda _text: 10) is None
@@ -432,13 +454,18 @@ def _chunks_shown(agent: MagicMock) -> list[str]:
     return [agent.safe_analyze_isr.call_args[0][0]]
 
 
-class TestAnUpstreamBlockNearTheRoomNeverMultipliesTheChunks:
-    """However much is added to the head, the count stays within the shipped split's."""
+class TestAnUpstreamBlockNearTheRoomAddsAtMostOneChunk:
+    """However much is added to the head, only its first chunk is smaller.
 
-    DEV = len(
-        BinaryChunker(ChunkingConfig(max_tokens_per_chunk=UNKNOWN_WINDOW_CHUNK_TOKENS)).chunk(
-            "network", HOSTILE_INPUT
-        )
+    The shipped size was a floor on the head source's chunks: on this room it
+    cut every chunk of the source at 80,000 characters, nearly three times the
+    29,800 the prompt has room for, and each was shortened there. Only the head
+    piece takes the addition now, so every later chunk fits the room and the
+    count is at most one above a split at the room.
+    """
+
+    AT_THE_ROOM = len(
+        BinaryChunker(ChunkingConfig()).chunk("network", HOSTILE_INPUT, room=_room(HOSTILE_ROOM))
     )
 
     @pytest.mark.parametrize("added", [0, 18_800, 29_500, 29_799, 29_800, 29_801, 60_000])
@@ -448,9 +475,15 @@ class TestAnUpstreamBlockNearTheRoomNeverMultipliesTheChunks:
         with patch("maljan.pipeline.nodes.upstream_findings", lambda *_a: block):
             node(state)
         shown = _chunks_shown(agent)
-        assert 1 < len(shown) <= self.DEV
-        assert all(len(c) <= SHIPPED_CHUNK_CHARS for c in shown[1:])
+        assert 1 < len(shown) <= self.AT_THE_ROOM + 1
+        assert all(len(c) <= HOSTILE_ROOM for c in shown[1:])
         assert shown[0].startswith(block)
+        if added < HOSTILE_ROOM:
+            assert len(shown[0]) <= HOSTILE_ROOM
+
+    def test_the_shipped_floor_cut_chunks_past_this_room(self) -> None:
+        shipped = BinaryChunker(ChunkingConfig(max_tokens_per_chunk=UNKNOWN_WINDOW_CHUNK_TOKENS))
+        assert max(c.char_count for c in shipped.chunk("network", HOSTILE_INPUT)) > HOSTILE_ROOM
 
     def test_a_real_block_under_an_operator_cap_above_the_room(self) -> None:
         agent, node, state, _container_ = _hostile_node(HOSTILE_INPUT, None)
@@ -459,7 +492,8 @@ class TestAnUpstreamBlockNearTheRoomNeverMultipliesTheChunks:
         assert shown[0].startswith("## Upstream findings")
         assert "[upstream findings truncated]" in shown[0]
         assert len(shown[0].split("\n\n[upstream findings truncated]")[0]) >= HOSTILE_ROOM
-        assert 1 < len(shown) <= self.DEV
+        assert 1 < len(shown) <= self.AT_THE_ROOM + 1
+        assert all(len(c) <= HOSTILE_ROOM for c in shown[1:])
 
     def test_ten_times_the_input_takes_about_ten_times_as_long(self) -> None:
         block = "U" * HOSTILE_ROOM
