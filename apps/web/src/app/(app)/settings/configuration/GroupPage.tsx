@@ -109,8 +109,10 @@ function Subgroup({
 
 /** The panel that sits under a subgroup's settings, keyed by a setting it holds:
  *  the ATT&CK refresh interval carries the cache's status, check and update. */
-function panelFor(entries: CatalogEntry[]): ReactNode {
-  return entries.some((e) => e.key === ATTCK_REFRESH_KEY) ? <AttckDataPanel /> : null;
+function panelFor(ctx: SettingsContextValue, entries: CatalogEntry[]): ReactNode {
+  return entries.some((e) => e.key === ATTCK_REFRESH_KEY) ? (
+    <AttckDataPanel savedInterval={ctx.values[ATTCK_REFRESH_KEY]?.value} />
+  ) : null;
 }
 
 /** Splits entries into subgroup buckets, the group's own (null) bucket first
@@ -262,7 +264,7 @@ export default function GroupPage({ section, group }: { section: string; group: 
       name={bucket.name}
       entries={bucket.entries}
       foldId={bucket.name ? slug(bucket.name) : group}
-      panel={panelFor(bucket.entries)}
+      panel={panelFor(ctx, bucket.entries)}
     />
   ));
 

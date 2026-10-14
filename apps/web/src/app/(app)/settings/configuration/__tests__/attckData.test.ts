@@ -14,6 +14,9 @@ import { AttckDataView, type AttckDataViewProps } from "../AttckDataPanel";
 import {
   ATTCK_REFRESH_KEY,
   ageLabel,
+  lostContactText,
+  releaseDate,
+  statusIsStale,
   lastCheckLine,
   lastUpdateLine,
   nextCheckSentence,
@@ -183,7 +186,7 @@ describe("status", () => {
     expect(lastUpdateLine({ ...UPDATED, trigger: "schedule", triggered_by: {} })).toContain(
       "by the automatic check"
     );
-    expect(lastUpdateLine({ ...UPDATED, ok: false, reason: "Mobile: the download carries no techniques", changes: [] })).toContain(
+    expect(lastUpdateLine({ ...UPDATED, ok: false, reason: "Mobile: the download carries no techniques", changes: [], kept_previous: true })).toContain(
       "The previous cache was kept."
     );
   });
@@ -226,12 +229,7 @@ describe("the outdated dialog", () => {
   it("states the cached and latest versions with the release date", () => {
     expect(html).toContain('role="dialog"');
     expect(html).toContain("A newer ATT&amp;CK release is available.");
-    const released = new Date("2026-10-13T17:53:10Z").toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
-    expect(html).toContain(`Enterprise: cached 19.2, latest 20.0 (released ${released})`);
+    expect(html).toContain("Enterprise: cached 19.2, latest 20.0 (released Oct 13, 2026)");
     expect(html).not.toContain("Mobile: cached");
   });
 
@@ -262,7 +260,7 @@ describe("the outdated dialog", () => {
   });
 
   it("reports a failed update with its reason and the cache kept", () => {
-    const failed = { ...UPDATED, ok: false, outcome: "failed", reason: "Enterprise: the download carries no techniques", changes: [] };
+    const failed = { ...UPDATED, ok: false, outcome: "failed", reason: "Enterprise: the download carries no techniques", changes: [], kept_previous: true };
     expect(updateOutcome(failed)).toEqual({
       ok: false,
       text: "The update failed: Enterprise: the download carries no techniques. The previous cache is unchanged.",
@@ -271,5 +269,77 @@ describe("the outdated dialog", () => {
     expect(render({ updateError: "Request failed: 503" })).toContain(
       "The update could not be run: Request failed: 503"
     );
+  });
+});
+
+describe("review fixes", () => {
+  it("shows MITRE's release day as stamped, in UTC, wherever the viewer is", () => {
+    expect(releaseDate("2026-10-13T23:30:00Z")).toBe("Oct 13, 2026");
+    expect(releaseDate("2026-10-14T00:00:00Z")).toBe("Oct 14, 2026");
+  });
+
+  it("an update whose process stopped reads as not finished, with when and who", () => {
+    const line = lastUpdateLine({
+      ok: false,
+      outcome: "interrupted",
+      reason:
+        "the update started 2026-10-14T10:00:00+00:00 by Ada Admin did not finish: " +
+        "the process running it stopped",
+      started_at: "2026-10-14T10:00:00+00:00",
+      triggered_by: { name: "Ada Admin" },
+      changes: [],
+      kept_previous: null,
+    });
+    expect(line).toContain("Last update: did not finish.");
+    expect(line).toContain("started 2026-10-14T10:00:00+00:00 by Ada Admin");
+    expect(line).toContain("What the cache holds now is shown in the table above.");
+  });
+
+  it("a failed swap that replaced a domain names it and claims nothing kept", () => {
+    const partial = {
+      ...UPDATED,
+      ok: false,
+      outcome: "failed",
+      reason: "ICS: the new file could not be moved into place (disk full)",
+      kept_previous: false,
+    };
+    const text = updateOutcome(partial).text;
+    expect(text).toContain("Replaced: Enterprise 19.2 → 20.0; every other domain is unchanged.");
+    expect(text).not.toContain("The previous cache is unchanged");
+  });
+
+  it("an update arq gave up on says stopped and does not guess the result", () => {
+    const stopped = {
+      ok: false,
+      outcome: "stopped",
+      reason: "the worker stopped the update (TimeoutError)",
+      changes: [],
+      kept_previous: null,
+    };
+    expect(updateOutcome(stopped).text).toBe(
+      "The update stopped: the worker stopped the update (TimeoutError). " +
+        "What the cache holds now is shown in the table above."
+    );
+  });
+
+  it("keeps tracking through failed polls and says so", () => {
+    const text = lostContactText(2, "Request failed: 503");
+    expect(text).toContain("2 attempts in a row: Request failed: 503");
+    expect(text).toContain("still asking");
+    expect(render({ updating: true, pollTrouble: text })).toContain("still asking");
+  });
+
+  it("the dialog takes focus and does not claim to be modal", () => {
+    const html = render({ check: OUTDATED, choosing: true });
+    expect(html).toContain('role="dialog"');
+    expect(html).toContain('tabindex="-1"');
+    expect(html).not.toContain("aria-modal");
+  });
+
+  it("reads the status again once the interval is saved", () => {
+    expect(statusIsStale(STATUS, 7)).toBe(false);
+    expect(statusIsStale(STATUS, 30)).toBe(true);
+    expect(statusIsStale(STATUS, undefined)).toBe(false);
+    expect(statusIsStale(null, 30)).toBe(false);
   });
 });

@@ -1,14 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { api } from "@/lib/api";
 import type { AttckCheckResult, AttckStatus, AttckUpdateResult } from "@/types/settings";
 import {
   UPDATE_POLL_MS,
   lastCheckLine,
   lastUpdateLine,
+  lostContactText,
   nextCheckSentence,
   readCheck,
+  statusIsStale,
   statusRows,
   updateOutcome,
   waitSentence,
@@ -27,13 +29,18 @@ export interface AttckDataViewProps {
   updating: boolean;
   update: AttckUpdateResult | null;
   updateError: string | null;
+  /** A poll of the running update keeps failing; tracking goes on. */
+  pollTrouble?: string | null;
+  /** Where focus goes when the dialog opens, and comes back to after it. */
+  dialogRef?: RefObject<HTMLDivElement | null>;
+  checkRef?: RefObject<HTMLButtonElement | null>;
   onCheck: () => void;
   onUpdate: () => void;
   onWait: () => void;
 }
 
 /** The cache's status, the check button, the outdated dialog and the update's outcome. */
-export function AttckDataView(props: AttckDataViewProps) {
+export function AttckDataView({ dialogRef, checkRef, ...props }: AttckDataViewProps) {
   const { status, check } = props;
   const view = check ? readCheck(check) : null;
   const busy = props.checking || props.updating;
@@ -45,6 +52,7 @@ export function AttckDataView(props: AttckDataViewProps) {
           them reads them.
         </p>
         <button
+          ref={checkRef}
           type="button"
           className="h-6 rounded border border-border px-2 text-[11px] text-accent-strong disabled:opacity-50"
           disabled={busy}
@@ -117,10 +125,14 @@ export function AttckDataView(props: AttckDataViewProps) {
 
       {view?.kind === "outdated" && check && props.choosing && (
         <div
+          ref={dialogRef}
           role="dialog"
-          aria-modal="true"
+          tabIndex={-1}
           aria-label="A newer ATT&CK release is available"
           className="mt-3 border border-border rounded bg-bg-deep px-3 py-2"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") props.onWait();
+          }}
         >
           <p className="text-xs text-text-primary">A newer ATT&amp;CK release is available.</p>
           <ul className="text-[11px] text-text-secondary mt-1">
@@ -167,6 +179,12 @@ export function AttckDataView(props: AttckDataViewProps) {
         </p>
       )}
 
+      {props.pollTrouble && (
+        <p role="status" className="text-[11px] text-status-orange mt-2">
+          {props.pollTrouble}
+        </p>
+      )}
+
       {props.updateError && (
         <p role="alert" className="text-[11px] text-status-red mt-2">
           The update could not be run: {props.updateError}
@@ -190,7 +208,7 @@ function message(error: unknown): string {
 }
 
 /** The panel under the "ATT&CK data" settings: reads the status, runs the check and the update. */
-export default function AttckDataPanel() {
+export default function AttckDataPanel({ savedInterval }: { savedInterval?: unknown }) {
   const [status, setStatus] = useState<AttckStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
@@ -201,7 +219,10 @@ export default function AttckDataPanel() {
   const [updating, setUpdating] = useState(false);
   const [update, setUpdate] = useState<AttckUpdateResult | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
+  const [pollTrouble, setPollTrouble] = useState<string | null>(null);
   const alive = useRef(true);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const checkRef = useRef<HTMLButtonElement | null>(null);
 
   const loadStatus = useCallback(async () => {
     try {
@@ -231,6 +252,25 @@ export default function AttckDataPanel() {
     };
   }, []);
 
+  // The interval was saved since the status was read: the next-check line is
+  // read again under the new one.
+  useEffect(() => {
+    if (!statusIsStale(status, savedInterval)) return;
+    api
+      .getAttckStatus()
+      .then((next) => {
+        if (alive.current) setStatus(next);
+      })
+      .catch((e) => {
+        if (alive.current) setStatusError(message(e));
+      });
+  }, [status, savedInterval]);
+
+  // Focus moves into the dialog when it opens.
+  useEffect(() => {
+    if (choosing) dialogRef.current?.focus();
+  }, [choosing]);
+
   const onCheck = useCallback(async () => {
     setChecking(true);
     setCheck(null);
@@ -255,6 +295,7 @@ export default function AttckDataPanel() {
   const onWait = useCallback(() => {
     setChoosing(false);
     setWaited(true);
+    checkRef.current?.focus();
   }, []);
 
   const onUpdate = useCallback(async () => {
@@ -264,10 +305,21 @@ export default function AttckDataPanel() {
     setUpdateError(null);
     try {
       const { job_id } = await api.startAttckUpdate();
+      let failures = 0;
       for (;;) {
         await new Promise((resolve) => setTimeout(resolve, UPDATE_POLL_MS));
         if (!alive.current) return;
-        const progress = await api.getAttckUpdate(job_id);
+        let progress;
+        try {
+          progress = await api.getAttckUpdate(job_id);
+        } catch (e) {
+          // A failed poll is not a failed update: keep asking, and say so.
+          failures += 1;
+          setPollTrouble(lostContactText(failures, message(e)));
+          continue;
+        }
+        failures = 0;
+        setPollTrouble(null);
         if (progress.state === "done" && progress.result) {
           setUpdate(progress.result);
           break;
@@ -283,8 +335,11 @@ export default function AttckDataPanel() {
     } catch (e) {
       if (alive.current) setUpdateError(message(e));
     } finally {
-      if (alive.current) setUpdating(false);
-      void loadStatus();
+      if (alive.current) {
+        setUpdating(false);
+        setPollTrouble(null);
+      }
+      void loadStatus().then(() => checkRef.current?.focus());
     }
   }, [loadStatus]);
 
@@ -300,6 +355,9 @@ export default function AttckDataPanel() {
       updating={updating}
       update={update}
       updateError={updateError}
+      pollTrouble={pollTrouble}
+      dialogRef={dialogRef}
+      checkRef={checkRef}
       onCheck={() => void onCheck()}
       onUpdate={() => void onUpdate()}
       onWait={onWait}

@@ -166,10 +166,20 @@ def test_the_shipped_interval_an_unset_one_and_no_number_write_nothing() -> None
         {},
         {"MALJAN_ATTCK_MAX_AGE_DAYS": ""},
         {"MALJAN_ATTCK_MAX_AGE_DAYS": "7"},
-        {"MALJAN_ATTCK_MAX_AGE_DAYS": "-1"},
         {"MALJAN_ATTCK_MAX_AGE_DAYS": "weekly"},
         {"MALJAN_ATTCK_MAX_AGE_DAYS": "1.5"},
+        {"MALJAN_ATTCK_MAX_AGE_DAYS": "\u00b2"},
     ):
         conn = _connect()
         assert mod.read_environment(conn, environ) == [], environ
         assert _rows(conn) == {}
+
+
+def test_a_negative_attck_interval_is_never_checking_as_the_old_loader_read_it() -> None:
+    for raw in ("-1", " -30 "):
+        conn = _connect()
+        written = _module(ATTCK_MIGRATION).read_environment(
+            conn, {"MALJAN_ATTCK_MAX_AGE_DAYS": raw}
+        )
+        assert written == [ATTCK_KEY]
+        assert _rows(conn) == {ATTCK_KEY: 0}

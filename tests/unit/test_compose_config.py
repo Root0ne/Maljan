@@ -318,3 +318,11 @@ def test_a_down_stops_the_optional_services_too():
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     downs = [line for line in makefile.splitlines() if line.rstrip().endswith(" down")]
     assert downs and all("--profile '*'" in line for line in downs), downs
+
+
+def test_the_migration_sees_the_retired_attck_variable() -> None:
+    # The revision that retired it reads its own process environment, which
+    # in compose is the migrate service's.
+    config = yaml.safe_load((ROOT / "docker" / "docker-compose.yml").read_text())
+    environment = config["services"]["migrate"]["environment"]
+    assert environment["MALJAN_ATTCK_MAX_AGE_DAYS"] == "${MALJAN_ATTCK_MAX_AGE_DAYS:-}"

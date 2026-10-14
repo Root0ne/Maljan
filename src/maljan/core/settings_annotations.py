@@ -1275,7 +1275,8 @@ ANNOTATIONS: dict[str, Annotation] = {
             "MITRE's latest release and replaced by it when it is newer: downloaded, read back "
             "whole, then swapped in with the previous files kept as a backup. 0 never checks "
             "on its own; Check now and Update now below work either way. Applies to the worker "
-            "and to the knowledge tool server that builds the ATT&CK index."
+            "and to the knowledge tool server that builds the ATT&CK index. The longest "
+            "interval accepted is the longest that still has a calendar date to be due on."
         ),
         "subgroup": "ATT&CK data",
     },

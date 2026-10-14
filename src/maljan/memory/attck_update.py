@@ -4,22 +4,32 @@ Three questions and one action, each answered from the cache directory
 ``attck_loader`` reads (``ATTCK_CACHE_DIR``), on the process that owns it:
 
 * ``status`` — per domain, the cached release, its date, the cache's age and
-  when the next automatic check is due; and the last check and update.
+  when the next automatic check is due; and the last check and update. An
+  update record whose process is gone (the lock is free) is reported as an
+  update that did not finish, never as one still running.
 * ``check`` — read MITRE's release index and compare it with the cache. It
   downloads no bundle and leaves the cache files as they are; the only thing
   written is the record of the check itself, so the console can show it.
 * ``update`` — download each outdated domain's release, read it back whole
   (it parses, it is the release the index named, it carries techniques), and
   only then move it over the cached file in one rename, after keeping the
-  previous file beside it as ``<name>.bak``.
+  previous file beside it as ``<name>.bak``. A swap that fails part way puts
+  the domains already replaced back from those backups.
 * ``scheduled_update`` — the same update, run when the cache is older than
-  ``validation.attck_refresh_days``; 0 never runs it.
+  ``validation.attck_refresh_days``; 0 never runs it. After a failure it
+  waits before trying again, twice as long after each failure in a row, never
+  longer than the interval.
 
 One writer at a time: every write of a bundle — this module's update and the
 loader's own refresh — takes the cache directory's lock first, and an update
-that finds it held says so instead of waiting or writing alongside. A reader
-needs no lock: a bundle is only ever replaced by a rename, so a reader holds
-the old file or the new one, never half of either.
+that finds it held says who holds it instead of waiting or writing alongside.
+A reader needs no lock: a bundle is only ever replaced by a rename, so a
+reader holds the old file or the new one, never half of either.
+
+A whole bundle is parsed in a short-lived child process, one at a time per
+process (``_PARSE_LOCK``): the half gigabyte a parse costs leaves with the
+child instead of staying in the analysis worker, and the worker's event loop
+is not held by a parse that keeps the interpreter lock for seconds.
 
 The release index and the bundles are fetched from the loader's constant base
 URL; nothing here takes an address from a caller.
@@ -31,11 +41,13 @@ import json
 import os
 import re
 import shutil
+import subprocess
+import sys
 import tempfile
 import threading
 import time
 import uuid
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
@@ -55,6 +67,12 @@ ATTCK_INDEX_URL = f"{attck_loader._BUNDLE_BASE_URL}/index.json"
 INDEX_TIMEOUT_SECONDS = 20.0
 BUNDLE_TIMEOUT_SECONDS = 300.0
 
+# How often the worker's cron asks whether the automatic check is due
+# (``app.worker.attck_worker``: every hour). The first wait after a failed
+# automatic check is one period; each failure in a row doubles it, up to the
+# interval itself.
+SCHEDULE_PERIOD_SECONDS = 3600.0
+
 DOMAIN_LABELS: dict[str, str] = {"enterprise": "Enterprise", "mobile": "Mobile", "ics": "ICS"}
 
 # A release number as MITRE writes them (``19.2``, ``20.0``). The only part of
@@ -62,10 +80,14 @@ DOMAIN_LABELS: dict[str, str] = {"enterprise": "Enterprise", "mobile": "Mobile",
 _VERSION_RE = re.compile(r"\A\d{1,4}(?:\.\d{1,4}){0,3}\Z")
 
 LOCK_NAME = ".update.lock"
+HOLDER_NAME = ".update.holder.json"
 STATE_LOCK_NAME = ".state.lock"
 STATE_NAME = "update-state.json"
 
 _THREAD_LOCKS: dict[str, threading.Lock] = {}
+
+# One whole-bundle parse at a time in this process (see the module docstring).
+_PARSE_LOCK = threading.Lock()
 
 
 class ReleaseIndexError(RuntimeError):
@@ -74,6 +96,10 @@ class ReleaseIndexError(RuntimeError):
 
 class BundleRejected(RuntimeError):
     """A downloaded bundle failed its check and was not moved into the cache."""
+
+
+class UpdateStopped(RuntimeError):
+    """The update was told to stop, or ran past its deadline, before the swap."""
 
 
 # ── small helpers ────────────────────────────────────────────────────────
@@ -127,36 +153,6 @@ def release_url(domain: str, version: str) -> str:
     return f"{base}/{domain}-attack/{domain}-attack-{version}.json"
 
 
-@contextmanager
-def _locked(path: Path, *, blocking: bool) -> Iterator[bool]:
-    """An exclusive lock on ``path``, shared by every process on this host.
-
-    Yields whether it was taken. ``flock`` locks an open file description, so
-    two threads of one process that each open the file exclude each other as
-    two processes do.
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if fcntl is None:  # pragma: no cover - see the import
-        lock = _THREAD_LOCKS.setdefault(str(path), threading.Lock())
-        taken = lock.acquire(blocking)
-        try:
-            yield taken
-        finally:
-            if taken:
-                lock.release()
-        return
-    with path.open("a+") as handle:
-        try:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
-        except BlockingIOError:
-            yield False
-            return
-        try:
-            yield True
-        finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-
-
 def _write_atomically(target: Path, text: str) -> None:
     """Write ``text`` beside ``target`` and rename it over ``target``."""
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -185,6 +181,77 @@ def _read_json(path: Path) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+
+
+@contextmanager
+def _locked(
+    path: Path, *, blocking: bool, holder: Mapping[str, Any] | None = None
+) -> Iterator[bool]:
+    """An exclusive lock on ``path``, shared by every process on this host.
+
+    Yields whether it was taken. ``flock`` locks an open file description, so
+    two threads of one process that each open the file exclude each other as
+    two processes do. ``holder``, when given, is written beside the lock once
+    it is taken, so a caller that finds the lock held can say who holds it.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if fcntl is None:  # pragma: no cover - see the import
+        lock = _THREAD_LOCKS.setdefault(str(path), threading.Lock())
+        taken = lock.acquire(blocking)
+        try:
+            if taken and holder is not None:
+                _note_holder(path, holder)
+            yield taken
+        finally:
+            if taken:
+                lock.release()
+        return
+    with path.open("a+") as handle:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+        except BlockingIOError:
+            yield False
+            return
+        try:
+            if holder is not None:
+                _note_holder(path, holder)
+            yield True
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _note_holder(lock: Path, holder: Mapping[str, Any]) -> None:
+    with suppress(OSError):
+        _write_atomically(
+            lock.with_name(HOLDER_NAME), json.dumps({**holder, "since": _iso(_now())})
+        )
+
+
+def _holder_of(directory: Path) -> dict[str, Any]:
+    raw = _read_json(directory / HOLDER_NAME)
+    return raw if isinstance(raw, dict) else {}
+
+
+def _who(triggered_by: Mapping[str, Any] | None) -> str:
+    if not triggered_by:
+        return "unknown"
+    return str(triggered_by.get("user_id") or triggered_by.get("name") or "unknown")
+
+
+def _busy_reason(directory: Path) -> str:
+    """Why the cache lock is held, in the holder's own words."""
+    holder = _holder_of(directory)
+    since = holder.get("since")
+    when = f" (since {since})" if since else ""
+    kind = holder.get("holder")
+    if kind == "update":
+        by = (holder.get("triggered_by") or {}).get("name") or _who(holder.get("triggered_by"))
+        return f"another ATT&CK update is running{when}, started by {by}"
+    if kind == "loader refresh":
+        return f"the cache is being written by the loader's own refresh{when}; try again shortly"
+    if kind == "status read":
+        return f"the cache's status is being read{when}; try again shortly"
+    return "the cache is being written; try again shortly"
 
 
 # ── the record of checks and updates ─────────────────────────────────────
@@ -230,19 +297,70 @@ def bundle_facts(raw: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def read_facts(path: str) -> dict[str, Any]:
+    """Parse one bundle file and say what it is: ``{"facts"}`` or ``{"kind", "error"}``.
+
+    What the child process runs (``_child_main``); callable in process too.
+    """
+    try:
+        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    except OSError as exc:
+        return {"kind": "unreadable", "error": f"the file cannot be read ({exc})"}
+    except ValueError as exc:
+        return {"kind": "json", "error": f"does not parse as JSON ({exc})"}
+    if not isinstance(raw, dict) or not isinstance(raw.get("objects"), list):
+        return {"kind": "shape", "error": "is not a STIX bundle (no object list)"}
+    return {"facts": bundle_facts(raw)}
+
+
+def _child_main() -> None:
+    """``python -c '…_child_main()' <path>``: print the facts of one bundle as JSON."""
+    import logging
+
+    logging.disable(logging.CRITICAL)
+    sys.stdout.write(json.dumps(read_facts(sys.argv[1])))
+
+
+def _parse_in_child(path: Path) -> dict[str, Any]:
+    """``read_facts`` in a short-lived child process, so its memory leaves with it."""
+    command = [
+        sys.executable,
+        "-c",
+        "from maljan.memory.attck_update import _child_main; _child_main()",
+        str(path),
+    ]
+    done = subprocess.run(  # noqa: S603 - our own interpreter and module, a path we chose
+        command, capture_output=True, text=True, check=False
+    )
+    try:
+        answer = json.loads(done.stdout)
+    except ValueError:
+        tail = (done.stderr or "").strip().splitlines()[-1:] or ["no output"]
+        return {"kind": "child", "error": f"the parse did not finish ({tail[0]})"}
+    return answer if isinstance(answer, dict) else {"kind": "child", "error": "no answer"}
+
+
+# The parse runner. A test may hand ``read_facts`` in its place to stay in
+# process; the shipped one is always the child.
+_run_parse: Callable[[Path], dict[str, Any]] = _parse_in_child
+
+
+def _facts_of_file(path: Path) -> dict[str, Any]:
+    """One whole-bundle parse, never two at once in this process."""
+    with _PARSE_LOCK:
+        return _run_parse(path)
+
+
 def validate_bundle_file(path: Path, expected_version: str) -> dict[str, Any]:
     """Read a downloaded bundle back whole and say what it is, or refuse it.
 
     It has to parse, be a STIX bundle, be the release the index named and
     carry at least one technique.
     """
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise BundleRejected(f"the download does not parse as JSON ({exc})") from exc
-    if not isinstance(raw, dict) or not isinstance(raw.get("objects"), list):
-        raise BundleRejected("the download is not a STIX bundle (no object list)")
-    facts = bundle_facts(raw)
+    answer = _facts_of_file(path)
+    if "facts" not in answer:
+        raise BundleRejected(f"the download {answer.get('error') or 'cannot be read'}")
+    facts: dict[str, Any] = answer["facts"]
     if facts["version"] != expected_version:
         raise BundleRejected(
             f"the download is release {facts['version'] or 'with no version'}, "
@@ -268,36 +386,49 @@ def _write_meta(bundle: Path, facts: Mapping[str, Any], written_by: str) -> None
         logger.warning("Could not write the facts of %s: %s", bundle.name, exc)
 
 
+def _kept_meta(bundle: Path) -> tuple[os.stat_result, dict[str, Any] | None]:
+    """The bundle's stat and its kept facts, when they still describe this file."""
+    stat = bundle.stat()
+    meta = _read_json(meta_file(bundle))
+    fresh = (
+        isinstance(meta, dict)
+        and meta.get("inode") == stat.st_ino
+        and meta.get("size") == stat.st_size
+    )
+    return stat, (meta if fresh else None)
+
+
 def cached_facts(domain: str) -> dict[str, Any]:
     """What the cache holds for one domain, without a network.
 
     The release and its date are read once out of the bundle and kept beside
-    it; a bundle replaced since (a new file, so a new inode) is read again.
+    it; a bundle replaced since (a new file, so a new inode) is read again,
+    once: a caller that waited for another's parse finds the facts it kept.
     """
     bundle = cache_file(domain)
     try:
-        stat = bundle.stat()
+        stat, meta = _kept_meta(bundle)
     except FileNotFoundError:
         return {"present": False}
-    meta = _read_json(meta_file(bundle))
-    if not (
-        isinstance(meta, dict)
-        and meta.get("inode") == stat.st_ino
-        and meta.get("size") == stat.st_size
-    ):
-        try:
-            raw = attck_loader._read_cache(bundle)
-        except (OSError, ValueError) as exc:
-            return {
-                "present": True,
-                "readable": False,
-                "reason": f"the cached file does not parse ({exc})",
-                "cached_at": _iso_ts(stat.st_mtime),
-            }
-        facts = bundle_facts(raw)
-        written_by = meta.get("written_by") if isinstance(meta, dict) else None
-        _write_meta(bundle, facts, str(written_by or "unknown"))
-        meta = {**facts, "written_by": written_by or "unknown"}
+    if meta is None:
+        with _PARSE_LOCK:
+            try:
+                stat, meta = _kept_meta(bundle)
+            except FileNotFoundError:
+                return {"present": False}
+            if meta is None:
+                answer = _run_parse(bundle)
+                if "facts" not in answer:
+                    return {
+                        "present": True,
+                        "readable": False,
+                        "reason": f"the cached file {answer.get('error') or 'cannot be read'}",
+                        "cached_at": _iso_ts(stat.st_mtime),
+                    }
+                old = _read_json(meta_file(bundle))
+                written_by = str((old or {}).get("written_by") or "unknown")
+                _write_meta(bundle, answer["facts"], written_by)
+                meta = {**answer["facts"], "written_by": written_by}
     age_days = max(0.0, (time.time() - stat.st_mtime) / 86400.0)
     return {
         "present": True,
@@ -367,7 +498,11 @@ def latest_releases(index: Any) -> dict[str, dict[str, str]]:
 
 
 def fetch_latest_releases() -> dict[str, dict[str, str]]:
-    raw = attck_loader._fetch_bundle(ATTCK_INDEX_URL, timeout=INDEX_TIMEOUT_SECONDS)
+    raw = attck_loader._fetch_bundle(
+        ATTCK_INDEX_URL,
+        timeout=INDEX_TIMEOUT_SECONDS,
+        deadline=time.monotonic() + INDEX_TIMEOUT_SECONDS,
+    )
     return latest_releases(raw)
 
 
@@ -391,12 +526,66 @@ _NEEDS_UPDATE = ("outdated", "missing")
 
 
 def _next_check(cached: Mapping[str, Any], refresh_days: int | None) -> str | None:
+    """When the interval makes this domain due; ``None`` off, uncached or past any date."""
     if refresh_days is None or refresh_days <= 0:
         return None
     if not cached.get("present"):
         return None
-    stamp = datetime.fromisoformat(str(cached["cached_at"])).timestamp()
-    return _iso_ts(stamp + refresh_days * 86400)
+    try:
+        stamp = datetime.fromisoformat(str(cached["cached_at"])).timestamp()
+        return _iso_ts(stamp + refresh_days * 86400)
+    except (KeyError, OverflowError, OSError, ValueError):
+        return None
+
+
+def _schedule_line(domains: Sequence[Mapping[str, Any]], refresh_days: int | None) -> str | None:
+    """The overall next automatic check: the earliest due domain, or the back-off's end."""
+    if refresh_days is None or refresh_days <= 0:
+        return None
+    due = [str(d["next_check_at"]) for d in domains if d.get("next_check_at")]
+    earliest = min(due) if due else None
+    retry_after = (read_state().get("schedule_failures") or {}).get("retry_after")
+    if retry_after and (earliest is None or str(retry_after) > earliest):
+        return str(retry_after)
+    return earliest
+
+
+def _running_now() -> dict[str, Any] | None:
+    """The running update's record, only while its lock is really held.
+
+    A record whose lock is free belongs to a process that stopped mid-update
+    (killed, recycled, restarted): it is turned, once, into the last update's
+    record, saying it did not finish, when it started and who started it.
+    """
+    directory = cache_dir()
+    running = read_state().get("running")
+    if not running:
+        return None
+    with _locked(directory / LOCK_NAME, blocking=False, holder={"holder": "status read"}) as held:
+        if not held:
+            return dict(running)
+        stale = read_state().get("running")
+        if stale:
+            by = (stale.get("triggered_by") or {}).get("name") or _who(stale.get("triggered_by"))
+            _record(
+                running=None,
+                last_update={
+                    "ok": False,
+                    "outcome": "interrupted",
+                    "reason": (
+                        f"the update started {stale.get('started_at') or 'at an unknown time'} "
+                        f"by {by} did not finish: the process running it stopped"
+                    ),
+                    "started_at": stale.get("started_at"),
+                    "finished_at": None,
+                    "trigger": stale.get("trigger"),
+                    "triggered_by": stale.get("triggered_by") or {},
+                    "changes": [],
+                    "kept_previous": None,
+                },
+            )
+            logger.warning("ATT&CK update record without a running update: marked as interrupted.")
+    return None
 
 
 def status(refresh_days: int) -> dict[str, Any]:
@@ -412,15 +601,15 @@ def status(refresh_days: int) -> dict[str, Any]:
                 "next_check_at": _next_check(cached, refresh_days),
             }
         )
+    running = _running_now()
     state = read_state()
-    due = [d["next_check_at"] for d in domains if d.get("next_check_at")]
     return {
         "refresh_days": refresh_days,
-        "next_check_at": min(due) if due else None,
+        "next_check_at": _schedule_line(domains, refresh_days),
         "domains": domains,
         "last_check": state.get("last_check"),
         "last_update": state.get("last_update"),
-        "running": state.get("running"),
+        "running": running,
     }
 
 
@@ -436,14 +625,10 @@ def check(
     """
     checked_at = _iso(_now())
     cached = {domain: cached_facts(domain) for domain in attck_loader.DOMAINS}
-    due = [
-        stamp
-        for stamp in (_next_check(c, refresh_days) for c in cached.values())
-        if refresh_days is not None and stamp
-    ]
+    rows_for_schedule = [{"next_check_at": _next_check(c, refresh_days)} for c in cached.values()]
     schedule = {
         "refresh_days": refresh_days,
-        "next_check_at": min(due) if due else None,
+        "next_check_at": _schedule_line(rows_for_schedule, refresh_days),
     }
     try:
         latest = fetch_latest_releases()
@@ -506,6 +691,19 @@ def _keep_backup(bundle: Path) -> None:
     os.replace(staging, backup)
 
 
+def _restore_backup(bundle: Path, had_previous: bool) -> None:
+    """Put the file a swap replaced back, from its ``.bak`` (the backup is kept)."""
+    if not had_previous:
+        bundle.unlink(missing_ok=True)
+        return
+    staging = bundle.with_name(f".{bundle.name}.{uuid.uuid4().hex}.part")
+    try:
+        os.link(backup_file(bundle), staging)
+    except OSError:
+        shutil.copy2(backup_file(bundle), staging)
+    os.replace(staging, bundle)
+
+
 def _clear_leftovers(directory: Path) -> None:
     """Remove the partial files of an update a stopped process left behind.
 
@@ -521,30 +719,29 @@ def _clear_leftovers(directory: Path) -> None:
                     leftover.unlink()
 
 
-def _who(triggered_by: Mapping[str, Any] | None) -> str:
-    if not triggered_by:
-        return "unknown"
-    return str(triggered_by.get("user_id") or triggered_by.get("name") or "unknown")
-
-
 def update(
-    triggered_by: Mapping[str, Any] | None = None, *, trigger: str = "console"
+    triggered_by: Mapping[str, Any] | None = None,
+    *,
+    trigger: str = "console",
+    deadline: float | None = None,
+    stop: threading.Event | None = None,
 ) -> dict[str, Any]:
     """Bring every outdated domain to MITRE's latest release, all or none.
 
     Every outdated domain is downloaded and checked before any cached file is
     touched; one that fails leaves the whole cache as it was, and says which
-    domain and why. An update that finds another one running says so and
-    writes nothing.
+    domain and why. An update that finds the cache lock held says who holds it
+    and writes nothing. ``deadline`` (a ``time.monotonic`` instant) bounds the
+    downloads as a whole, and ``stop`` is set by a caller that gave up on the
+    update: either way it ends before the swap, with nothing replaced.
     """
     directory = cache_dir()
     started_at = _iso(_now())
     who = dict(triggered_by or {})
-    with _locked(directory / LOCK_NAME, blocking=False) as held:
+    holder = {"holder": "update", "trigger": trigger, "triggered_by": who}
+    with _locked(directory / LOCK_NAME, blocking=False, holder=holder) as held:
         if not held:
-            running = read_state().get("running") or {}
-            since = running.get("started_at")
-            reason = "another ATT&CK update is running" + (f" (started {since})" if since else "")
+            reason = _busy_reason(directory)
             logger.info("ATT&CK update by %s not started: %s.", _who(who), reason)
             return {
                 "ok": False,
@@ -561,7 +758,7 @@ def update(
         _record(running={"started_at": started_at, "trigger": trigger, "triggered_by": who})
         result: dict[str, Any] = {}
         try:
-            result = _update_held(directory, started_at, trigger, who)
+            result = _update_held(directory, started_at, trigger, who, deadline, stop)
         finally:
             if not result:
                 result = {
@@ -573,9 +770,12 @@ def update(
                     "trigger": trigger,
                     "triggered_by": who,
                     "changes": [],
-                    "kept_previous": True,
+                    "kept_previous": None,
                 }
-            _record(running=None, last_update=result)
+            changes: dict[str, Any] = {"running": None, "last_update": result}
+            if result.get("ok"):
+                changes["schedule_failures"] = None
+            _record(**changes)
         if result.get("ok"):
             logger.info(
                 "ATT&CK update by %s finished: %s.",
@@ -586,19 +786,24 @@ def update(
                 or "already current",
             )
         else:
-            logger.warning(
-                "ATT&CK update by %s failed: %s; the previous cache is kept.",
-                _who(who),
-                result.get("reason"),
-            )
+            logger.warning("ATT&CK update by %s failed: %s", _who(who), result.get("reason"))
         return result
 
 
 def _update_held(
-    directory: Path, started_at: str, trigger: str, who: dict[str, Any]
+    directory: Path,
+    started_at: str,
+    trigger: str,
+    who: dict[str, Any],
+    deadline: float | None,
+    stop: threading.Event | None,
 ) -> dict[str, Any]:
     def finished(
-        ok: bool, outcome: str, reason: str, changes: list[dict[str, Any]]
+        ok: bool,
+        outcome: str,
+        reason: str,
+        changes: list[dict[str, Any]],
+        kept_previous: bool | None = None,
     ) -> dict[str, Any]:
         return {
             "ok": ok,
@@ -609,8 +814,14 @@ def _update_held(
             "trigger": trigger,
             "triggered_by": who,
             "changes": changes,
-            "kept_previous": not ok,
+            "kept_previous": (not changes) if kept_previous is None else kept_previous,
         }
+
+    def go_on() -> None:
+        if stop is not None and stop.is_set():
+            raise UpdateStopped("the update was stopped before anything was replaced")
+        if deadline is not None and time.monotonic() > deadline:
+            raise UpdateStopped("the update ran past its time limit before anything was replaced")
 
     try:
         latest = fetch_latest_releases()
@@ -630,14 +841,23 @@ def _update_held(
     part: Path | None = None
     try:
         for domain in plan:
+            go_on()
             current = domain
             version = latest[domain]["version"]
             part = directory / f".{domain}-attack.json.{uuid.uuid4().hex}.part"
             attck_loader._download_bundle_file(
-                release_url(domain, version), part, timeout=BUNDLE_TIMEOUT_SECONDS
+                release_url(domain, version),
+                part,
+                timeout=BUNDLE_TIMEOUT_SECONDS,
+                deadline=deadline,
             )
             staged[domain] = (part, validate_bundle_file(part, version))
             part = None
+        go_on()
+    except UpdateStopped as exc:
+        for leftover in [p for p, _ in staged.values()] + ([part] if part else []):
+            leftover.unlink(missing_ok=True)
+        return finished(False, "stopped", str(exc), [])
     except (RuntimeError, OSError, ValueError) as exc:
         for leftover in [p for p, _ in staged.values()] + ([part] if part else []):
             leftover.unlink(missing_ok=True)
@@ -645,23 +865,17 @@ def _update_held(
         return finished(False, "failed", f"{label}: {exc}", [])
 
     changes: list[dict[str, Any]] = []
+    swapped: list[tuple[str, bool]] = []
     for domain, (path, facts) in staged.items():
         target = cache_file(domain)
+        had_previous = target.exists()
         try:
-            if target.exists():
+            if had_previous:
                 _keep_backup(target)
             os.replace(path, target)
         except OSError as exc:
-            for leftover, _ in staged.values():
-                leftover.unlink(missing_ok=True)
-            done = ", ".join(c["label"] for c in changes)
-            return finished(
-                False,
-                "failed",
-                f"{DOMAIN_LABELS[domain]}: the new file could not be moved into place ({exc})"
-                + (f"; already replaced: {done}" if done else ""),
-                changes,
-            )
+            return _undo_swap(finished, staged, swapped, changes, domain, exc)
+        swapped.append((domain, had_previous))
         _write_meta(target, facts, trigger)
         changes.append(
             {
@@ -681,12 +895,49 @@ def _update_held(
     for domain in attck_loader.DOMAINS:
         if domain not in staged and cached[domain].get("present"):
             if compare(cached[domain], latest.get(domain)) == "current":
-                try:
+                with suppress(OSError):
                     os.utime(cache_file(domain), (now, now))
-                except OSError:
-                    pass
 
     return finished(True, "updated" if changes else "up_to_date", "", changes)
+
+
+def _undo_swap(
+    finished: Callable[..., dict[str, Any]],
+    staged: Mapping[str, tuple[Path, dict[str, Any]]],
+    swapped: list[tuple[str, bool]],
+    changes: list[dict[str, Any]],
+    failed: str,
+    exc: OSError,
+) -> dict[str, Any]:
+    """A swap that failed part way: put back what it replaced, and say exactly what holds."""
+    for leftover, _ in staged.values():
+        leftover.unlink(missing_ok=True)
+    restored: list[str] = []
+    still_new: list[dict[str, Any]] = []
+    for domain, had_previous in swapped:
+        try:
+            _restore_backup(cache_file(domain), had_previous)
+            restored.append(DOMAIN_LABELS[domain])
+        except OSError as restore_exc:
+            logger.warning(
+                "ATT&CK %s could not be restored from its backup: %s", domain, restore_exc
+            )
+            still_new.extend(c for c in changes if c["domain"] == domain)
+    reason = f"{DOMAIN_LABELS[failed]}: the new file could not be moved into place ({exc})"
+    if still_new:
+        unchanged = [
+            DOMAIN_LABELS[d]
+            for d in attck_loader.DOMAINS
+            if d not in {c["domain"] for c in still_new}
+        ]
+        reason += (
+            f"; replaced and not restored: {', '.join(c['label'] for c in still_new)}"
+            f"; unchanged: {', '.join(unchanged)}"
+        )
+        return finished(False, "failed", reason, still_new, kept_previous=False)
+    if restored:
+        reason += f"; nothing is replaced: {', '.join(restored)} restored from the backup"
+    return finished(False, "failed", reason, [], kept_previous=True)
 
 
 # ── the automatic check ──────────────────────────────────────────────────
@@ -710,11 +961,47 @@ def scheduled_update_due(refresh_days: int) -> bool:
     return False
 
 
+def backoff_seconds(failures: int, refresh_days: int) -> float:
+    """How long to wait after ``failures`` failed automatic checks in a row.
+
+    One cron period after the first, doubling with each one after it, never
+    longer than the interval: an unreachable MITRE costs one attempt per
+    interval at worst, and a host that comes back online is checked soon.
+    """
+    interval = refresh_days * 86400.0
+    exponent = min(max(failures - 1, 0), 64)
+    return min(interval, SCHEDULE_PERIOD_SECONDS * (2.0**exponent))
+
+
 def scheduled_update(refresh_days: int) -> dict[str, Any] | None:
     """Run the update when the interval says it is due; ``None`` when it is not."""
     if not scheduled_update_due(refresh_days):
         return None
-    return update({"name": "automatic check"}, trigger="schedule")
+    failures = read_state().get("schedule_failures") or {}
+    retry_after = failures.get("retry_after")
+    if retry_after and _iso(_now()) < str(retry_after):
+        return {
+            "ok": True,
+            "outcome": "backing_off",
+            "reason": f"waiting after {failures.get('count')} failed automatic check(s)",
+            "retry_after": retry_after,
+        }
+    result = update({"name": "automatic check"}, trigger="schedule")
+    if result.get("outcome") in ("failed", "stopped"):
+        count = int(failures.get("count") or 0) + 1
+        wait = backoff_seconds(count, refresh_days)
+        retry_at = _iso_ts(time.time() + wait)
+        _record(schedule_failures={"count": count, "retry_after": retry_at})
+        logger.warning(
+            "ATT&CK automatic check failed (%d in a row): %s. Next attempt not before %s "
+            "(back-off %.1f h, doubling per failure up to the %d-day interval).",
+            count,
+            result.get("reason"),
+            retry_at,
+            wait / 3600.0,
+            refresh_days,
+        )
+    return result
 
 
 # ── the loader's own refresh ─────────────────────────────────────────────
@@ -724,14 +1011,21 @@ def save_refreshed_bundle(bundle: Mapping[str, Any], target: Path) -> bool:
     """Write a bundle the loader just downloaded, in one rename, under the lock.
 
     Returns whether it was written. While an update holds the lock it is not:
-    that update is replacing the same files with a checked copy.
+    that update is replacing the same files with a checked copy. The facts the
+    console shows are written beside it from the bundle already in memory, so
+    no later status read has to parse the file again.
     """
-    with _locked(target.parent / LOCK_NAME, blocking=False) as held:
+    with _locked(
+        target.parent / LOCK_NAME, blocking=False, holder={"holder": "loader refresh"}
+    ) as held:
         if not held:
             logger.info(
-                "An ATT&CK update holds the cache; the refreshed %s is not written.", target.name
+                "The ATT&CK cache is busy (%s); the refreshed %s is not written.",
+                _busy_reason(target.parent),
+                target.name,
             )
             return False
         _write_atomically(target, json.dumps(bundle))
+        _write_meta(target, bundle_facts(bundle), "loader refresh")
         logger.info("ATT&CK bundle cached at: %s", target)
         return True

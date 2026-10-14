@@ -9350,7 +9350,7 @@
      "editor": null,
      "group": "analysis",
      "key": "core.validation.attck_refresh_days",
-     "maximum": null,
+     "maximum": 2885414.0,
      "minimum": 0.0,
      "namespace": "core",
      "nullable": false,

@@ -29,12 +29,32 @@ export function ageLabel(days: number | undefined): string {
   return whole === 1 ? "1 day" : `${whole} days`;
 }
 
-/** A release date as MITRE stamps it, shown as a date. */
+/** A release date as MITRE stamps it (UTC), shown as that day wherever the viewer is. */
 export function releaseDate(iso: string | undefined | null): string {
   if (!iso) return "";
   const at = new Date(iso);
   if (Number.isNaN(at.getTime())) return iso;
-  return at.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return at.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/** Whether the status on screen was read under another interval than the saved one. */
+export function statusIsStale(status: AttckStatus | null, savedInterval: unknown): boolean {
+  if (!status || savedInterval === undefined || savedInterval === null) return false;
+  return Number(savedInterval) !== status.refresh_days;
+}
+
+/** What the console says while a poll of a running update keeps failing. */
+export function lostContactText(failures: number, error: string): string {
+  return (
+    `Lost contact with the worker while tracking the update (${failures} ` +
+    `${failures === 1 ? "attempt" : "attempts"} in a row: ${error}). ` +
+    "The update may still be running; still asking."
+  );
 }
 
 export interface StatusRow {
@@ -165,12 +185,26 @@ function changesText(result: AttckUpdateResult): string {
     .join(", ");
 }
 
+/** What a failed update did to the cache, in the words of its own record. */
+function keptClause(update: AttckUpdateResult, tense: "was" | "is"): string {
+  if (update.kept_previous === true) {
+    return tense === "was" ? "The previous cache was kept." : "The previous cache is unchanged.";
+  }
+  if (update.changes.length) {
+    return `Replaced: ${changesText(update)}; every other domain is unchanged.`;
+  }
+  return "What the cache holds now is shown in the table above.";
+}
+
 export function lastUpdateLine(update: AttckUpdateResult | null): string {
   if (!update) return "Last update: never.";
+  if (update.outcome === "interrupted") {
+    return `Last update: did not finish. ${update.reason}. ${keptClause(update, "was")}`;
+  }
   const when = formatDateTime(update.finished_at ?? update.started_at);
   const by = who(update.triggered_by, update.trigger);
   if (!update.ok) {
-    return `Last update: ${when} by ${by}, failed: ${update.reason}. The previous cache was kept.`;
+    return `Last update: ${when} by ${by}, failed: ${update.reason}. ${keptClause(update, "was")}`;
   }
   if (!update.changes.length) {
     return `Last update: ${when} by ${by}, every domain was already current.`;
@@ -181,9 +215,10 @@ export function lastUpdateLine(update: AttckUpdateResult | null): string {
 /** The sentence an update ends with. */
 export function updateOutcome(result: AttckUpdateResult): { ok: boolean; text: string } {
   if (!result.ok) {
+    const verb = result.outcome === "stopped" ? "stopped" : "failed";
     return {
       ok: false,
-      text: `The update failed: ${result.reason}. The previous cache is unchanged.`,
+      text: `The update ${verb}: ${result.reason}. ${keptClause(result, "is")}`,
     };
   }
   if (!result.changes.length) {

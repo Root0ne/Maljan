@@ -324,7 +324,10 @@ its cached and latest release and the release date, and the next automatic
 check) or `failed` with the reason, never up to date when the index could not
 be read. `POST /settings/attck/update` queues the update and answers `202`
 with a `job_id`; `GET /settings/attck/update/{job_id}` answers `queued`,
-`running`, `done` with the result, or `unknown`. Each answers `503` when the
+`running`, `done` with the result, or `unknown`; a result's `outcome` is
+`updated`, `up_to_date`, `failed`, `busy` (with who holds the cache), or
+`stopped` (the worker gave up on it; `kept_previous` is then `null` and the
+status says what the cache holds). Each answers `503` when the
 worker does not answer in time. Neither takes an address: the upstream URL is
 the platform's.
 

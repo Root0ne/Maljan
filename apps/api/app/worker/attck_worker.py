@@ -24,6 +24,8 @@ and shows it as it is.
 from __future__ import annotations
 
 import asyncio
+import threading
+import time
 from contextlib import suppress
 from typing import Any
 
@@ -45,6 +47,9 @@ ATTCK_MAX_JOBS = 4
 ATTCK_JOB_TIMEOUT = 1800
 # The poll after an update reads its result from here.
 ATTCK_KEEP_RESULT = 3600
+# The share of the job's time the downloads and their read-back may take; the
+# rest is for the swap and for the answer to reach arq before it gives up.
+ATTCK_DOWNLOAD_SHARE = 0.9
 
 
 def _failed(kind: str, exc: BaseException) -> dict[str, Any]:
@@ -75,8 +80,18 @@ async def attck_check(
 async def attck_update_now(ctx: dict, triggered_by: dict[str, Any]) -> dict[str, Any]:
     """Download, read back and swap in every outdated domain, as one administrator asked."""
     logger.info("ATT&CK update requested by user %s.", triggered_by.get("user_id") or "unknown")
+    # The thread outlives a cancelled job, so it is told to stop, and it has a
+    # deadline of its own inside the job's: either way it ends before the
+    # swap, and a job arq gave up on never replaces files afterwards.
+    stop = threading.Event()
+    deadline = time.monotonic() + ATTCK_JOB_TIMEOUT * ATTCK_DOWNLOAD_SHARE
     try:
-        return await asyncio.to_thread(attck_update.update, triggered_by, trigger="console")
+        return await asyncio.to_thread(
+            attck_update.update, triggered_by, trigger="console", deadline=deadline, stop=stop
+        )
+    except asyncio.CancelledError:
+        stop.set()
+        raise
     except Exception as exc:  # noqa: BLE001 — answered, never raised
         logger.warning("ATT&CK update stopped: %s", exc)
         return _failed("update", exc)
@@ -131,7 +146,8 @@ def build_attck_worker(db_session: Any) -> Worker:
     return Worker(
         functions=list(ATTCK_FUNCTIONS),
         queue_name=ATTCK_QUEUE,
-        # Hourly, off the minute the nightly purge and most deployments use.
+        # Hourly (``attck_update.SCHEDULE_PERIOD_SECONDS``, the back-off's
+        # unit), off the minute the nightly purge and most deployments use.
         cron_jobs=[cron(attck_scheduled_update, minute=41)],
         redis_settings=build_redis_settings(settings.redis_url),
         handle_signals=False,

@@ -85,7 +85,7 @@ def _seed(cache: Path, versions: dict[str, str]) -> None:
 def _index_answers(monkeypatch: pytest.MonkeyPatch, index: Any) -> list[str]:
     asked: list[str] = []
 
-    def fetch(url: str, timeout: float = 60) -> Any:
+    def fetch(url: str, timeout: float = 60, **_kw: Any) -> Any:
         asked.append(url)
         if isinstance(index, Exception):
             raise index
@@ -101,7 +101,7 @@ def _downloads_serve(
     """Each download writes the release its URL names, unless ``bodies`` says otherwise."""
     fetched: list[str] = []
 
-    def download(url: str, target: Path, timeout: float = 300) -> None:
+    def download(url: str, target: Path, timeout: float = 300, **_kw: Any) -> None:
         fetched.append(url)
         name = url.rsplit("/", 1)[-1]
         if bodies and name in bodies:
@@ -343,7 +343,7 @@ class TestUpdate:
         release = threading.Event()
         fetched: list[str] = []
 
-        def slow_download(url: str, target: Path, timeout: float = 300) -> None:
+        def slow_download(url: str, target: Path, timeout: float = 300, **_kw: Any) -> None:
             fetched.append(url)
             inside.set()
             release.wait(10)
@@ -511,3 +511,259 @@ class TestTheCacheSignature:
         _downloads_serve(monkeypatch)
         attck_update.update()
         assert attck_update.cache_signature() != before
+
+
+class TestAnUpdateWhoseProcessStopped:
+    def test_a_record_with_a_free_lock_reads_as_not_finished(self, cache: Path) -> None:
+        _seed(cache, {"enterprise": "19.2"})
+        attck_update._record(
+            running={
+                "started_at": "2026-10-14T10:00:00+00:00",
+                "trigger": "console",
+                "triggered_by": {"user_id": "u1", "name": "Ada"},
+            }
+        )
+
+        status = attck_update.status(7)
+
+        assert status["running"] is None
+        last = status["last_update"]
+        assert last["outcome"] == "interrupted" and last["ok"] is False
+        assert last["started_at"] == "2026-10-14T10:00:00+00:00"
+        assert last["triggered_by"]["name"] == "Ada"
+        assert "did not finish" in last["reason"] and "Ada" in last["reason"]
+        assert "running" not in attck_update.read_state()
+
+    def test_a_record_whose_lock_is_held_is_running(self, cache: Path) -> None:
+        record = {"started_at": "2026-10-14T10:00:00+00:00", "trigger": "console"}
+        attck_update._record(running=record)
+        with attck_update._locked(cache / attck_update.LOCK_NAME, blocking=False) as held:
+            assert held
+            assert attck_update.status(7)["running"] == record
+
+
+class TestOneParseAtATime:
+    def test_two_readers_of_a_stale_bundle_parse_it_once(
+        self, cache: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _seed(cache, {"enterprise": "19.2"})
+        inside = 0
+        most = 0
+        calls = 0
+        guard = threading.Lock()
+
+        def parse(path: Path) -> dict[str, Any]:
+            nonlocal inside, most, calls
+            with guard:
+                inside += 1
+                calls += 1
+                most = max(most, inside)
+            time.sleep(0.2)
+            with guard:
+                inside -= 1
+            return attck_update.read_facts(str(path))
+
+        monkeypatch.setattr(attck_update, "_run_parse", parse)
+        answers: list[dict[str, Any]] = []
+        readers = [
+            threading.Thread(target=lambda: answers.append(attck_update.cached_facts("enterprise")))
+            for _ in range(2)
+        ]
+        for reader in readers:
+            reader.start()
+        for reader in readers:
+            reader.join(10)
+
+        assert most == 1 and calls == 1
+        assert [a["version"] for a in answers] == ["19.2", "19.2"]
+
+    def test_the_shipped_parse_runs_in_a_child_process(self, cache: Path) -> None:
+        _seed(cache, {"enterprise": "19.2"})
+        assert attck_update._run_parse is attck_update._parse_in_child
+        answer = attck_update._parse_in_child(cache / "enterprise-attack.json")
+        assert answer == {"facts": attck_update.bundle_facts(_bundle("19.2"))}
+        (cache / "broken.json").write_text("{ half", encoding="utf-8")
+        assert attck_update._parse_in_child(cache / "broken.json")["kind"] == "json"
+
+    def test_the_loader_s_refresh_leaves_facts_no_reader_must_parse(
+        self, cache: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        target = cache / "enterprise-attack.json"
+        assert attck_update.save_refreshed_bundle(_bundle("20.0"), target)
+
+        def no_parse(path: Path) -> dict[str, Any]:
+            raise AssertionError("the refresh wrote the facts")
+
+        monkeypatch.setattr(attck_update, "_run_parse", no_parse)
+        facts = attck_update.cached_facts("enterprise")
+        assert facts["version"] == "20.0" and facts["written_by"] == "loader refresh"
+
+
+def _fail_replace_onto(monkeypatch: pytest.MonkeyPatch, *names: str) -> None:
+    """``os.replace`` of a downloaded or restored file onto ``names`` fails."""
+    real = os.replace
+
+    def replace(src: Any, dst: Any) -> None:
+        if Path(dst).name in names and str(src).endswith(".part"):
+            raise OSError("disk full")
+        real(src, dst)
+
+    monkeypatch.setattr(attck_update.os, "replace", replace)
+
+
+class TestASwapThatFailsPartWay:
+    def test_the_domains_already_replaced_are_put_back(
+        self, cache: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _seed(cache, {"enterprise": "19.2", "mobile": "20.0", "ics": "19.2"})
+        before = {p.name: p.read_bytes() for p in cache.glob("*-attack.json")}
+        _index_answers(monkeypatch, LATEST)
+        _downloads_serve(monkeypatch)
+        _fail_replace_onto(monkeypatch, "ics-attack.json")
+
+        result = attck_update.update()
+
+        assert not result["ok"] and result["kept_previous"] is True and result["changes"] == []
+        assert "ICS: the new file could not be moved into place" in result["reason"]
+        assert "nothing is replaced: Enterprise restored from the backup" in result["reason"]
+        assert {p.name: p.read_bytes() for p in cache.glob("*-attack.json")} == before
+
+    def test_what_could_not_be_put_back_is_named(
+        self, cache: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _seed(cache, {"enterprise": "19.2", "mobile": "20.0", "ics": "19.2"})
+        _index_answers(monkeypatch, LATEST)
+        _downloads_serve(monkeypatch)
+        real = os.replace
+        swapped: list[str] = []
+
+        def replace(src: Any, dst: Any) -> None:
+            name = Path(dst).name
+            if name == "ics-attack.json" and str(src).endswith(".part"):
+                raise OSError("disk full")
+            if name == "enterprise-attack.json" and str(src).endswith(".part"):
+                if swapped:  # the restore, after the first swap
+                    raise OSError("disk still full")
+                swapped.append(name)
+            real(src, dst)
+
+        monkeypatch.setattr(attck_update.os, "replace", replace)
+
+        result = attck_update.update()
+
+        assert not result["ok"] and result["kept_previous"] is False
+        assert [c["domain"] for c in result["changes"]] == ["enterprise"]
+        assert "replaced and not restored: Enterprise; unchanged: Mobile, ICS" in result["reason"]
+
+
+class TestAnUpdateThatIsStopped:
+    def test_a_set_stop_ends_it_before_the_swap(
+        self, cache: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _seed(cache, {"enterprise": "19.2", "mobile": "20.0", "ics": "20.0"})
+        before = (cache / "enterprise-attack.json").read_bytes()
+        _index_answers(monkeypatch, LATEST)
+        stop = threading.Event()
+        fetched = _downloads_serve(monkeypatch)
+        real = attck_loader._download_bundle_file
+
+        def download_then_stop(*args: Any, **kwargs: Any) -> None:
+            real(*args, **kwargs)
+            stop.set()
+
+        monkeypatch.setattr(attck_loader, "_download_bundle_file", download_then_stop)
+
+        result = attck_update.update(stop=stop)
+
+        assert result["outcome"] == "stopped" and result["kept_previous"] is True
+        assert "before anything was replaced" in result["reason"]
+        assert (cache / "enterprise-attack.json").read_bytes() == before
+        assert len(fetched) == 1 and not list(cache.glob(".*.part"))
+
+    def test_a_passed_deadline_ends_it_before_the_swap(
+        self, cache: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _seed(cache, {"enterprise": "19.2"})
+        _index_answers(monkeypatch, LATEST)
+        fetched = _downloads_serve(monkeypatch)
+        result = attck_update.update(deadline=time.monotonic() - 1)
+        assert result["outcome"] == "stopped" and "time limit" in result["reason"]
+        assert fetched == []
+
+
+class TestATooLongInterval:
+    def test_the_status_never_fails_on_a_date(self, cache: Path) -> None:
+        from maljan.core.config import ATTCK_REFRESH_DAYS_MAX
+
+        _seed(cache, {"enterprise": "19.2"})
+        status = attck_update.status(ATTCK_REFRESH_DAYS_MAX * 10)
+        assert status["domains"][0]["next_check_at"] is None
+        assert attck_update.status(ATTCK_REFRESH_DAYS_MAX)["domains"][0]["next_check_at"]
+
+    def test_the_setting_refuses_one_past_the_bound(self) -> None:
+        from pydantic import ValidationError
+
+        from maljan.core.config import ATTCK_REFRESH_DAYS_MAX, ValidationConfig
+
+        assert ValidationConfig(attck_refresh_days=ATTCK_REFRESH_DAYS_MAX)
+        with pytest.raises(ValidationError):
+            ValidationConfig(attck_refresh_days=ATTCK_REFRESH_DAYS_MAX + 1)
+
+
+class TestTheAutomaticCheckBacksOff:
+    def test_the_wait_doubles_up_to_the_interval(self) -> None:
+        period = attck_update.SCHEDULE_PERIOD_SECONDS
+        assert attck_update.backoff_seconds(1, 7) == period
+        assert attck_update.backoff_seconds(3, 7) == 4 * period
+        assert attck_update.backoff_seconds(40, 7) == 7 * 86400
+        assert attck_update.backoff_seconds(400, 1) == 86400
+
+    def test_a_failure_is_not_retried_until_the_back_off_ends(
+        self, cache: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        asked = _index_answers(monkeypatch, RuntimeError("Network is unreachable"))
+        with caplog.at_level("WARNING"):
+            first = attck_update.scheduled_update(7)
+        assert first is not None and first["outcome"] == "failed"
+        failures = attck_update.read_state()["schedule_failures"]
+        assert failures["count"] == 1
+        assert "Next attempt not before" in caplog.text and "back-off 1.0 h" in caplog.text
+
+        second = attck_update.scheduled_update(7)
+        assert second is not None and second["outcome"] == "backing_off"
+        assert len(asked) == 1
+
+    def test_the_next_check_line_shows_the_back_off(self, cache: Path) -> None:
+        _seed(cache, {"enterprise": "20.0"})
+        old = time.time() - 30 * 86400
+        os.utime(cache / "enterprise-attack.json", (old, old))
+        later = attck_update._iso_ts(time.time() + 3600)
+        attck_update._record(schedule_failures={"count": 1, "retry_after": later})
+        assert attck_update.status(7)["next_check_at"] == later
+
+    def test_a_success_clears_the_back_off(
+        self, cache: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _seed(cache, {"enterprise": "20.0", "mobile": "20.0", "ics": "20.0"})
+        attck_update._record(
+            schedule_failures={"count": 3, "retry_after": "2000-01-01T00:00:00+00:00"}
+        )
+        _index_answers(monkeypatch, LATEST)
+        assert attck_update.update()["ok"]
+        assert "schedule_failures" not in attck_update.read_state()
+
+
+class TestBusyNamesItsHolder:
+    def test_the_loader_s_refresh(self, cache: Path) -> None:
+        holder = {"holder": "loader refresh"}
+        with attck_update._locked(cache / attck_update.LOCK_NAME, blocking=False, holder=holder):
+            result = attck_update.update()
+        assert result["outcome"] == "busy"
+        assert "being written by the loader's own refresh" in result["reason"]
+
+    def test_another_update(self, cache: Path) -> None:
+        holder = {"holder": "update", "triggered_by": {"user_id": "u1", "name": "Ada"}}
+        with attck_update._locked(cache / attck_update.LOCK_NAME, blocking=False, holder=holder):
+            result = attck_update.update()
+        assert "another ATT&CK update is running" in result["reason"]
+        assert "started by Ada" in result["reason"]

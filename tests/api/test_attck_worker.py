@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import threading
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -69,13 +71,40 @@ class TestTheJobs:
     ) -> None:
         seen: dict[str, Any] = {}
 
-        def update(triggered_by: Any, *, trigger: str) -> dict[str, Any]:
+        def update(triggered_by: Any, *, trigger: str, **_kw: Any) -> dict[str, Any]:
             seen.update(triggered_by=triggered_by, trigger=trigger)
             return {"ok": True}
 
         monkeypatch.setattr(attck_update, "update", update)
         asyncio.run(attck_worker.attck_update_now({}, {"user_id": "u1", "name": "Ada"}))
         assert seen == {"triggered_by": {"user_id": "u1", "name": "Ada"}, "trigger": "console"}
+
+
+class TestACancelledUpdate:
+    def test_its_thread_is_told_to_stop_before_the_swap(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: dict[str, Any] = {}
+        entered = threading.Event()
+
+        def update(triggered_by: Any, *, trigger: str, deadline: float, stop: Any) -> dict:
+            seen.update(deadline=deadline, stop=stop)
+            entered.set()
+            stop.wait(5)
+            return {"ok": False, "outcome": "stopped"}
+
+        monkeypatch.setattr(attck_update, "update", update)
+
+        async def cancel_it() -> None:
+            job = asyncio.create_task(attck_worker.attck_update_now({}, {"user_id": "u"}))
+            await asyncio.to_thread(entered.wait, 5)
+            job.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await job
+
+        asyncio.run(cancel_it())
+        assert seen["stop"].is_set()
+        assert seen["deadline"] - time.monotonic() < attck_worker.ATTCK_JOB_TIMEOUT
 
 
 class TestTheAutomaticCheck:

@@ -194,6 +194,9 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-maljan}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in docker/.env (see README)}@postgres:5432/${POSTGRES_DB:-maljan}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY in docker/.env}
       SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?set SETTINGS_ENCRYPTION_KEY in docker/.env}
+      # Retired; read once into core.validation.attck_refresh_days by the
+      # revision that retired it, when docker/.env still sets it.
+      MALJAN_ATTCK_MAX_AGE_DAYS: ${MALJAN_ATTCK_MAX_AGE_DAYS:-}
     volumes:
       - ../src:/app/src
       - ../apps:/app/apps

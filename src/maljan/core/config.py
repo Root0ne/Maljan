@@ -25,6 +25,7 @@ import re
 import sys
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from datetime import date as _date
 from pathlib import PurePosixPath
 from typing import Annotated, Any, Literal
 
@@ -4124,6 +4125,13 @@ class EventsConfig(BaseModel):
     retention_days: Annotated[int, Field(ge=1)] = 30
 
 
+# The longest ATT&CK refresh interval: the one whose next-check date is still a
+# calendar date (year 9999 at most) for a cache written at the start of 2100.
+# A validity bound, not a default limit: any interval up to it is accepted,
+# and every longer one has no date to be due on.
+ATTCK_REFRESH_DAYS_MAX = (_date(9999, 12, 31) - _date(2100, 1, 1)).days
+
+
 class ValidationConfig(BaseModel):
     """The technique check's one heuristic part, and when it is allowed to run.
 
@@ -4156,7 +4164,7 @@ class ValidationConfig(BaseModel):
     alignment_gate: Literal["auto", "off"] = "auto"
     alignment_gate_build: bool = False
     index_retry_seconds: Annotated[int, Field(ge=0)] = 900
-    attck_refresh_days: Annotated[int, Field(ge=0)] = 7
+    attck_refresh_days: Annotated[int, Field(ge=0, le=ATTCK_REFRESH_DAYS_MAX)] = 7
     alignment_threshold: Annotated[float, Field(ge=0.0, le=1.0)] = 0.05
     alignment_margin: Annotated[float, Field(ge=0.0, le=1.0)] = 0.20
     weak_alignment: bool = False

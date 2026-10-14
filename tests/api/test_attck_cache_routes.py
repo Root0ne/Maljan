@@ -117,13 +117,13 @@ def _seed(cache: Path, versions: dict[str, str]) -> None:
 def _upstream(
     monkeypatch: pytest.MonkeyPatch, index: Any = INDEX, bodies: dict[str, Any] | None = None
 ) -> None:
-    def fetch(url: str, timeout: float = 60) -> Any:
+    def fetch(url: str, timeout: float = 60, **_kw: Any) -> Any:
         assert url == attck_update.ATTCK_INDEX_URL
         if isinstance(index, Exception):
             raise index
         return index
 
-    def download(url: str, target: Path, timeout: float = 300) -> None:
+    def download(url: str, target: Path, timeout: float = 300, **_kw: Any) -> None:
         name = url.rsplit("/", 1)[-1]
         body = (bodies or {}).get(name)
         if isinstance(body, Exception):
@@ -271,10 +271,10 @@ class TestUpdate:
         release = threading.Event()
         plain = attck_loader._download_bundle_file
 
-        def slow(url: str, target: Path, timeout: float = 300) -> None:
+        def slow(url: str, target: Path, timeout: float = 300, **kw: Any) -> None:
             inside.set()
             release.wait(10)
-            plain(url, target, timeout)
+            plain(url, target, timeout, **kw)
 
         monkeypatch.setattr(attck_loader, "_download_bundle_file", slow)
 
@@ -370,3 +370,15 @@ class TestTheQueue:
         jobs["job"] = FakeJob(attck_cache.UPDATE_FUNCTION, JobStatus.complete, {"ok": True})
         done = asyncio.run(attck_cache.update_progress(JOB_ID))
         assert done == {"job_id": JOB_ID, "state": "done", "result": {"ok": True}}
+
+    def test_a_job_arq_gave_up_on_is_stopped_with_its_result_unknown(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from arq.jobs import JobStatus
+
+        job = FakeJob(attck_cache.UPDATE_FUNCTION, JobStatus.complete, TimeoutError())
+        monkeypatch.setattr(attck_cache, "_arq", AsyncMock(return_value=MagicMock()))
+        monkeypatch.setattr(attck_cache, "Job", lambda *a, **k: job)
+        result = asyncio.run(attck_cache.update_progress(JOB_ID))["result"]
+        assert result["outcome"] == "stopped" and result["kept_previous"] is None
+        assert result["reason"].startswith("the worker stopped the update")

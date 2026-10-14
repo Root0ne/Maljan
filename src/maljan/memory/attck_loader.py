@@ -60,6 +60,11 @@ ATTCK_CACHE_FILES: dict[str, Path] = {
 }
 ATTCK_CACHE_FILE = ATTCK_CACHE_FILES["enterprise"]
 
+# How many times the largest cached bundle one download may be (``_size_bound``).
+# A release grows the catalogue by a few per cent; four times is room for any
+# real one and still stops a response that does not end.
+DOWNLOAD_SIZE_FACTOR = 4
+
 # The vendored technique universe, shipped so validation works with no network.
 # New shape: one sorted id list per domain. The former flat list (and the
 # ``{"count", "technique_ids"}`` wrapper it grew) is still read, as enterprise.
@@ -253,13 +258,56 @@ def _load_raw_bundle(
     return raw
 
 
-def _fetch_bundle(url: str, timeout: float = 60) -> dict:
-    """Download a JSON document from the given URL (HTTP/HTTPS only).
+def _size_bound() -> int | None:
+    """How many bytes one download may be: a multiple of the largest cached bundle.
 
-    The STIX bundles, and the release index ``attck_update`` reads versions
-    from: both are platform constants on the same host.
+    The bundles grow by a few per cent a release, so ``DOWNLOAD_SIZE_FACTOR``
+    times the largest one this cache holds is room for any real release and
+    still stops a response that never ends. ``None`` when nothing is cached to
+    derive it from; the declared length of the response then bounds it.
     """
-    import urllib.request  # stdlib — no requests dependency needed for one-off download
+    sizes = []
+    for path in ATTCK_CACHE_FILES.values():
+        try:
+            sizes.append(Path(path).stat().st_size)
+        except OSError:
+            continue
+    return DOWNLOAD_SIZE_FACTOR * max(sizes) if sizes else None
+
+
+def _guarded_opener() -> Any:
+    """An opener that follows a redirect only to HTTPS on the same host."""
+    import urllib.error
+    import urllib.request
+    from urllib.parse import urlparse
+
+    class _SameHostRedirects(urllib.request.HTTPRedirectHandler):
+        def redirect_request(  # type: ignore[override]
+            self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str
+        ) -> Any:
+            old, new = urlparse(req.full_url), urlparse(newurl)
+            if new.scheme.lower() != "https" or new.hostname != old.hostname:
+                raise urllib.error.HTTPError(
+                    newurl, code, f"redirect to {new.scheme}://{new.hostname} refused", headers, fp
+                )
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+    return urllib.request.build_opener(_SameHostRedirects)
+
+
+def _stream(
+    url: str,
+    out: Any,
+    *,
+    timeout: float,
+    deadline: float | None,
+    max_bytes: int | None,
+) -> None:
+    """Copy ``url``'s body into ``out``, within a total deadline and a size bound.
+
+    ``timeout`` bounds each read; ``deadline`` (a ``time.monotonic`` instant)
+    bounds the whole transfer, so a trickling response cannot last for ever.
+    """
     from urllib.parse import urlparse
 
     # Defense-in-depth for CWE-939: ``url`` is a module constant or an explicit
@@ -269,36 +317,85 @@ def _fetch_bundle(url: str, timeout: float = 60) -> dict:
     scheme = urlparse(url).scheme.lower()
     if scheme not in ("http", "https"):
         raise RuntimeError(f"Refusing non-HTTP(S) ATT&CK bundle URL: {url!r}")
+    # nosemgrep: dynamic-urllib-use-detected — scheme validated; trusted constant URL
+    with _guarded_opener().open(url, timeout=timeout) as resp:
+        declared = resp.headers.get("Content-Length") if getattr(resp, "headers", None) else None
+        bound = max_bytes
+        if bound is None and declared and str(declared).isdigit():
+            bound = int(declared)
+        read = 0
+        while True:
+            if deadline is not None and time.monotonic() > deadline:
+                raise RuntimeError("the download did not finish in the time it was given")
+            chunk = resp.read(1 << 20)
+            if not chunk:
+                break
+            read += len(chunk)
+            if bound is not None and read > bound:
+                logger.warning(
+                    "ATT&CK download from %s passed its size bound of %d bytes; stopped.",
+                    url,
+                    bound,
+                )
+                raise RuntimeError(f"the download passed its size bound of {bound} bytes")
+            out.write(chunk)
+
+
+def _fetch_bundle(
+    url: str,
+    timeout: float = 60,
+    *,
+    deadline: float | None = None,
+    max_bytes: int | None = None,
+) -> dict:
+    """Download a JSON document from the given URL (HTTP/HTTPS only).
+
+    The STIX bundles, and the release index ``attck_update`` reads versions
+    from: both are platform constants on the same host. A redirect is
+    followed only to HTTPS on the same host, and the body is bounded by
+    ``max_bytes`` or, when none is given, by ``_size_bound``.
+    """
+    import io
 
     try:
-        # nosemgrep: dynamic-urllib-use-detected — scheme validated; trusted constant URL
-        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310
-            data = resp.read().decode("utf-8")
-        raw: dict[str, Any] = json.loads(data)
+        buffer = io.BytesIO()
+        _stream(
+            url,
+            buffer,
+            timeout=timeout,
+            deadline=deadline,
+            max_bytes=max_bytes if max_bytes is not None else _size_bound(),
+        )
+        raw: dict[str, Any] = json.loads(buffer.getvalue().decode("utf-8"))
         return raw
     except Exception as exc:
         raise RuntimeError(f"Failed to fetch ATT&CK bundle from {url}: {exc}") from exc
 
 
-def _download_bundle_file(url: str, target: Path, timeout: float = 300) -> None:
+def _download_bundle_file(
+    url: str,
+    target: Path,
+    timeout: float = 300,
+    *,
+    deadline: float | None = None,
+    max_bytes: int | None = None,
+) -> None:
     """Stream a bundle from ``url`` into ``target`` (HTTP/HTTPS only).
 
     The console's update writes the download to a file of its own and checks
     it there, so a bundle of tens of megabytes is never held twice in memory
-    and never reaches the cache path before it has been read back whole.
+    and never reaches the cache path before it has been read back whole. The
+    same redirect rule, size bound and total deadline as ``_fetch_bundle``.
     """
-    import shutil
-    import urllib.request
-    from urllib.parse import urlparse
-
-    scheme = urlparse(url).scheme.lower()
-    if scheme not in ("http", "https"):
-        raise RuntimeError(f"Refusing non-HTTP(S) ATT&CK bundle URL: {url!r}")
     try:
-        # nosemgrep: dynamic-urllib-use-detected — scheme validated; trusted constant URL
-        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310
-            with target.open("wb") as out:
-                shutil.copyfileobj(resp, out, length=1 << 20)
+        with target.open("wb") as out:
+            _stream(
+                url,
+                out,
+                timeout=timeout,
+                deadline=deadline,
+                max_bytes=max_bytes if max_bytes is not None else _size_bound(),
+            )
     except Exception as exc:
         raise RuntimeError(f"Failed to fetch ATT&CK bundle from {url}: {exc}") from exc
 

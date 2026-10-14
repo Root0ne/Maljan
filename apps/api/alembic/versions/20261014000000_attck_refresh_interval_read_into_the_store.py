@@ -5,10 +5,11 @@ were kept before the loader downloaded them again. The interval is the
 ``core.validation.attck_refresh_days`` setting now, edited in the console, and
 the variable is read no more.
 
-A deployment that set it to a whole number of days, 0 or more, other than the
-shipped 7 has its value written to that setting here, once, when the store
-holds nothing for the key: a value an operator saved in the console is kept.
-Anything else is left unwritten. The revision reads the environment of the
+A deployment that set it to a whole number of days other than the shipped 7
+has its value written to that setting here, once, when the store holds nothing
+for the key: a value an operator saved in the console is kept. 0 or a negative
+number, which the old loader read as "never check", is written as 0, which
+means the same. Anything that is not a whole number is left unwritten. The revision reads the environment of the
 process that runs it, which is the one ``make migrate`` sources from
 ``bootstrap.env``.
 
@@ -48,11 +49,15 @@ _INSERT_OTHER = sa.text(
 
 
 def _days(raw: str) -> int | None:
-    """``raw`` as a whole number of days, 0 or more, or ``None`` when it is not one."""
+    """``raw`` as days, 0 for 0 or less (never check), ``None`` when not a whole number."""
     value = raw.strip()
-    if not value.isdigit():
+    if not value:
         return None
-    return int(value)
+    try:
+        days = int(value)
+    except ValueError:
+        return None
+    return max(days, 0)
 
 
 def _held(conn: sa.engine.Connection, key: str) -> bool:

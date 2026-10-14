@@ -671,7 +671,8 @@ export interface AttckUpdateResult {
   trigger?: string;
   triggered_by?: AttckCaller;
   changes: AttckChange[];
-  kept_previous?: boolean;
+  /** True: nothing changed; false: `changes` were made; null: not known (see the status). */
+  kept_previous?: boolean | null;
 }
 
 export interface AttckCheckRow {

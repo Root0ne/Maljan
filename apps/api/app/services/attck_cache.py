@@ -129,5 +129,14 @@ async def update_progress(job_id: str) -> dict[str, Any]:
     outcome = await job.result_info()
     result = getattr(outcome, "result", None)
     if not isinstance(result, dict):
-        result = {"ok": False, "outcome": "failed", "reason": f"the update stopped: {result}"}
+        # arq gave up on the job (its timeout, a worker shutdown): the update
+        # was told to stop before its swap, but what the cache holds is read
+        # from the status, not assumed.
+        result = {
+            "ok": False,
+            "outcome": "stopped",
+            "reason": f"the worker stopped the update ({result or type(result).__name__})",
+            "changes": [],
+            "kept_previous": None,
+        }
     return {"job_id": job_id, "state": "done", "result": result}
