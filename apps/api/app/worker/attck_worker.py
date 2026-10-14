@@ -179,6 +179,12 @@ async def stop_attck_worker(ctx: dict, grace: float) -> None:
     if worker is not None:
         with suppress(asyncio.CancelledError, Exception):
             await asyncio.wait_for(worker.close(), timeout=grace)
+        # arq's close stops at the cancelled jobs it waits for; the pool it
+        # would have closed after them is closed here.
+        pool = getattr(worker, "_pool", None)
+        if pool is not None:
+            with suppress(asyncio.CancelledError, Exception):
+                await asyncio.wait_for(pool.close(close_connection_pool=True), timeout=grace)
     if task is not None and not task.done():
         task.cancel()
         with suppress(asyncio.CancelledError, Exception):

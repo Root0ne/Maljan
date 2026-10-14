@@ -139,3 +139,47 @@ class TestTheCatalogueInThisProcess:
         assert attck_worker.drop_a_replaced_catalogue() is True
         assert dropped == ["loader", "index"]
         assert attck_worker.drop_a_replaced_catalogue() is False
+
+
+class FakeWorker:
+    def __init__(self) -> None:
+        self.closed = False
+        self.main_task: Any = None
+        self._pool: Any = None
+
+    async def main(self) -> None:
+        await asyncio.Event().wait()
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class TestItsLife:
+    def test_it_starts_beside_the_analyses_and_stops_with_them(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake = FakeWorker()
+        monkeypatch.setattr(attck_worker, "build_attck_worker", lambda db_session: fake)
+
+        async def life() -> dict[str, Any]:
+            ctx: dict[str, Any] = {"db_session": None}
+            await attck_worker.start_attck_worker(ctx)
+            assert fake.main_task is ctx["attck_worker_task"]
+            await attck_worker.stop_attck_worker(ctx, grace=1.0)
+            return ctx
+
+        ctx = asyncio.run(life())
+        assert fake.closed
+        assert ctx["attck_worker_task"].done()
+
+    def test_a_worker_that_cannot_start_leaves_the_analyses_running(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def broken(db_session: Any) -> Any:
+            raise RuntimeError("no redis settings")
+
+        monkeypatch.setattr(attck_worker, "build_attck_worker", broken)
+        ctx: dict[str, Any] = {}
+        asyncio.run(attck_worker.start_attck_worker(ctx))
+        assert "attck_worker" not in ctx
+        asyncio.run(attck_worker.stop_attck_worker(ctx, grace=1.0))
