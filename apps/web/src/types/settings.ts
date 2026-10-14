@@ -616,6 +616,100 @@ export interface MappingPreview {
   channels: Record<string, ChannelPreview>;
 }
 
+/* ── The ATT&CK cache (`/settings/attck*`) ─────────────────────────────── */
+
+export type AttckDomain = "enterprise" | "mobile" | "ics";
+
+/** What the cache holds for one domain, as the worker that holds it reads it. */
+export interface AttckCached {
+  present: boolean;
+  /** False when a file is there and does not parse; `reason` says why. */
+  readable?: boolean;
+  reason?: string;
+  version?: string;
+  /** The release's own date (its collection's `modified`). */
+  released?: string;
+  techniques?: number;
+  /** When the file was written or last confirmed current. */
+  cached_at?: string;
+  age_days?: number;
+  written_by?: string;
+}
+
+export interface AttckDomainStatus extends AttckCached {
+  domain: AttckDomain;
+  label: string;
+  next_check_at: string | null;
+}
+
+export interface AttckRelease {
+  version: string;
+  released: string;
+}
+
+export interface AttckCaller {
+  user_id?: string;
+  name?: string;
+}
+
+export interface AttckChange {
+  domain: AttckDomain;
+  label: string;
+  from: string;
+  to: string;
+  released: string;
+  techniques: number;
+}
+
+export interface AttckUpdateResult {
+  ok: boolean;
+  /** `updated`, `up_to_date`, `failed` or `busy`. */
+  outcome: string;
+  reason: string;
+  started_at?: string;
+  finished_at?: string;
+  trigger?: string;
+  triggered_by?: AttckCaller;
+  changes: AttckChange[];
+  kept_previous?: boolean;
+}
+
+export interface AttckCheckRow {
+  domain: AttckDomain;
+  label: string;
+  cached: AttckCached;
+  latest: AttckRelease | null;
+  /** `current`, `outdated`, `missing` or `unlisted`; absent when the check failed. */
+  state?: string;
+}
+
+export interface AttckCheckResult {
+  ok: boolean;
+  /** `up_to_date`, `outdated` or `failed`. A failed check is never up to date. */
+  outcome: string;
+  reason: string;
+  checked_at: string | null;
+  triggered_by?: AttckCaller;
+  refresh_days: number | null;
+  next_check_at: string | null;
+  domains: AttckCheckRow[];
+}
+
+export interface AttckStatus {
+  refresh_days: number;
+  next_check_at: string | null;
+  domains: AttckDomainStatus[];
+  last_check: AttckCheckResult | null;
+  last_update: AttckUpdateResult | null;
+  running: { started_at?: string; trigger?: string; triggered_by?: AttckCaller } | null;
+}
+
+export interface AttckUpdateProgress {
+  job_id: string;
+  state: "queued" | "running" | "done" | "unknown";
+  result: AttckUpdateResult | null;
+}
+
 export class SettingsValidationError extends Error {
   constructor(public errors: Record<string, string>) {
     super("validation failed");

@@ -1732,6 +1732,61 @@ export async function installApiMocks(
   await page.route("**/api/v1/settings/schema", (route) =>
     json(route, options.settingsSchema ?? MOCK_SETTINGS_SCHEMA)
   );
+  // The ATT&CK cache panel under "Analysis layers": registered after the
+  // generic `settings/*` handler so `/settings/attck` is not answered as a
+  // per-key reset. Every domain current; a check says so; an update is done
+  // at the first poll with nothing to change. A spec that wants the outdated
+  // dialog or a failure overrides these with its own `page.route(...)`.
+  await page.route("**/api/v1/settings/attck", (route) =>
+    json(route, {
+      refresh_days: 7,
+      next_check_at: "2026-08-08T00:00:00+00:00",
+      domains: ["enterprise", "mobile", "ics"].map((domain) => ({
+        domain,
+        label: domain === "ics" ? "ICS" : domain[0].toUpperCase() + domain.slice(1),
+        present: true,
+        readable: true,
+        version: "20.0",
+        released: "2026-07-28T00:00:00Z",
+        techniques: 100,
+        cached_at: "2026-08-01T00:00:00+00:00",
+        age_days: 0.5,
+        next_check_at: "2026-08-08T00:00:00+00:00",
+      })),
+      last_check: null,
+      last_update: null,
+      running: null,
+    })
+  );
+  await page.route("**/api/v1/settings/attck/check", (route) =>
+    json(route, {
+      ok: true,
+      outcome: "up_to_date",
+      reason: "",
+      checked_at: "2026-08-01T00:00:00+00:00",
+      refresh_days: 7,
+      next_check_at: "2026-08-08T00:00:00+00:00",
+      domains: [
+        {
+          domain: "enterprise",
+          label: "Enterprise",
+          cached: { present: true, version: "20.0" },
+          latest: { version: "20.0", released: "2026-07-28T00:00:00Z" },
+          state: "current",
+        },
+      ],
+    })
+  );
+  await page.route("**/api/v1/settings/attck/update", (route) =>
+    json(route, { job_id: "0".repeat(32) }, 202)
+  );
+  await page.route("**/api/v1/settings/attck/update/*", (route) =>
+    json(route, {
+      job_id: "0".repeat(32),
+      state: "done",
+      result: { ok: true, outcome: "up_to_date", reason: "", changes: [] },
+    })
+  );
   await page.route("**/api/v1/settings/export", (route) =>
     route.fulfill({
       status: 200,

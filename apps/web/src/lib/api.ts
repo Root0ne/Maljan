@@ -10,6 +10,9 @@ import type {
 import { ApiError } from "@/lib/errors";
 import { SettingsValidationError } from "@/types/settings";
 import type {
+  AttckCheckResult,
+  AttckStatus,
+  AttckUpdateProgress,
   ContextWindow,
   CredentialBootstrapResult,
   EffortOptions,
@@ -673,6 +676,27 @@ class ApiClient {
   getEffortOptions(provider: string, model: string) {
     const query = new URLSearchParams({ provider, model });
     return this.request<EffortOptions>(`/api/v1/settings/effort-options?${query}`);
+  }
+
+  /** The cached ATT&CK bundles, per domain, as the worker that holds them reads them. */
+  getAttckStatus() {
+    return this.request<AttckStatus>("/api/v1/settings/attck");
+  }
+
+  /** Compare the cache with MITRE's release index now; downloads and changes nothing. */
+  checkAttck() {
+    return this.request<AttckCheckResult>("/api/v1/settings/attck/check", { method: "POST" });
+  }
+
+  /** Queue the update; poll `getAttckUpdate` with the id it returns. */
+  startAttckUpdate() {
+    return this.request<{ job_id: string }>("/api/v1/settings/attck/update", { method: "POST" });
+  }
+
+  getAttckUpdate(jobId: string) {
+    return this.request<AttckUpdateProgress>(
+      `/api/v1/settings/attck/update/${encodeURIComponent(jobId)}`
+    );
   }
 
   testSettingsProbe(probe: string, values: Record<string, unknown>) {

@@ -1,7 +1,9 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import type { CatalogEntry } from "@/types/settings";
+import AttckDataPanel from "./AttckDataPanel";
+import { ATTCK_REFRESH_KEY } from "./attckData";
 import FieldRow from "./FieldRow";
 import { buildFieldRowProps } from "./fieldRowProps";
 import GroupHeader from "./GroupHeader";
@@ -72,17 +74,20 @@ function AdvancedFold({
   );
 }
 
-/** One subgroup: its heading, its plain rows, then its advanced fold. */
+/** One subgroup: its heading, its plain rows, then its advanced fold, then
+ *  whatever panel belongs under its settings. */
 function Subgroup({
   ctx,
   name,
   entries,
   foldId,
+  panel,
 }: {
   ctx: SettingsContextValue;
   name: string | null;
   entries: CatalogEntry[];
   foldId: string;
+  panel?: ReactNode;
 }) {
   const plain = entries.filter((e) => !e.advanced);
   const advanced = entries.filter((e) => e.advanced);
@@ -97,8 +102,15 @@ function Subgroup({
       {advanced.length > 0 && (
         <AdvancedFold ctx={ctx} testId={foldId} entries={advanced} />
       )}
+      {panel}
     </div>
   );
+}
+
+/** The panel that sits under a subgroup's settings, keyed by a setting it holds:
+ *  the ATT&CK refresh interval carries the cache's status, check and update. */
+function panelFor(entries: CatalogEntry[]): ReactNode {
+  return entries.some((e) => e.key === ATTCK_REFRESH_KEY) ? <AttckDataPanel /> : null;
 }
 
 /** Splits entries into subgroup buckets, the group's own (null) bucket first
@@ -250,6 +262,7 @@ export default function GroupPage({ section, group }: { section: string; group: 
       name={bucket.name}
       entries={bucket.entries}
       foldId={bucket.name ? slug(bucket.name) : group}
+      panel={panelFor(bucket.entries)}
     />
   ));
 
