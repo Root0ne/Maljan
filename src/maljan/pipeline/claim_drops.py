@@ -275,11 +275,12 @@ ClaimKey = tuple[
 # Words that carry no fact of a claim: articles, prepositions, conjunctions,
 # pronouns and forms of "be", "have" and "do". Anything else a claim writes
 # (a noun, a verb, an adjective, a number word, a modal, a polarity word) is
-# a content word, and a change of one is a change of the claim.
+# a content word, and a change of one is a change of the claim. "or", "nor"
+# and "but" are content words: "RC4 and XOR" against "RC4 or XOR" is a change.
 _STOPWORDS = frozenset(
     {
         "a", "an", "the", "of", "to", "in", "on", "at", "by", "for", "with", "from",
-        "into", "onto", "as", "and", "or", "but", "so", "than", "then", "also",
+        "into", "onto", "as", "and", "so", "than", "then", "also",
         "is", "are", "was", "were", "be", "been", "being", "am",
         "has", "have", "had", "having", "do", "does", "did",
         "it", "its", "this", "that", "these", "those", "which", "who", "whom", "whose",
@@ -303,11 +304,17 @@ def _folded_word(word: str) -> str:
 
 def content_words(text: str) -> frozenset[str]:
     """A claim's content words: every word, folded, but the stopwords (:data:`_STOPWORDS`)."""
-    return frozenset(
-        folded
-        for folded in (_folded_word(w) for w in _WORD.findall(text))
-        if folded not in _STOPWORDS
-    )
+    found: set[str] = set()
+    for word in _WORD.findall(text):
+        lower = word.lower()
+        # The stopword test reads the word as written first: "was", "has"
+        # and "does" are stopwords, and folded they would not be.
+        if lower in _STOPWORDS:
+            continue
+        folded = _folded_word(lower)
+        if folded not in _STOPWORDS:
+            found.add(folded)
+    return frozenset(found)
 
 
 def _technical(word: str) -> bool:
