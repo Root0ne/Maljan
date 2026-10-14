@@ -49,6 +49,7 @@ from sigma.conditions import (
 from sigma.rule import SigmaRule
 from sigma.types import SigmaNumber, SigmaRegularExpression, SigmaString, SpecialChars
 
+from maljan.analysis.technique_ids import sigma_technique_ids
 from maljan.core.logger import logger
 from maljan.providers.call_arguments import pick_argument
 
@@ -402,11 +403,7 @@ class SigmaLayer:
     def techniques_covered(self) -> set[str]:
         covered: set[str] = set()
         for rule in self._collection.rules:
-            for tag in rule.tags:
-                tag_str = str(tag).lower()
-                if tag_str.startswith("attack.t"):
-                    tech_id = ".".join(tag_str.split(".")[1:]).upper()
-                    covered.add(tech_id)
+            covered.update(sigma_technique_ids({"tags": [str(tag) for tag in rule.tags]}))
         return covered
 
     def _extract_technique_id(self, rule: SigmaRule) -> str | None:
@@ -416,12 +413,13 @@ class SigmaLayer:
         placeholder id reads as a technique everywhere it goes, and the one
         thing an untagged rule is certain about is that it names no technique.
         Every consumer accepts ``Optional[str]`` and treats it as untagged.
+
+        Read by ``sigma_technique_ids``: a tactic tag (``attack.ta0005``) and a
+        group or software tag start with ``attack.`` too, and none of them is
+        a technique.
         """
-        for tag in rule.tags:
-            tag_str = str(tag).lower()
-            if tag_str.startswith("attack.t"):
-                return ".".join(tag_str.split(".")[1:]).upper()
-        return None
+        found = sigma_technique_ids({"tags": [str(tag) for tag in rule.tags]})
+        return found[0] if found else None
 
     def _get_confidence(self, rule: SigmaRule) -> float:
         status = str(rule.status.name).lower() if rule.status else "experimental"

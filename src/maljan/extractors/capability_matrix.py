@@ -48,7 +48,7 @@ from typing import Any
 from maljan.analysis.corroboration import corroborated as stands_on_two
 from maljan.analysis.corroboration import corroboration_row
 from maljan.analysis.evidence_roots import RootCount, layers_and_roots, run_roots
-from maljan.analysis.technique_ids import attack_reference_id, says_no_technique
+from maljan.analysis.technique_ids import says_no_technique, written_technique_id
 from maljan.core.logger import logger
 from maljan.reporting.models import CapabilityCell, TTPMapping
 from maljan.schemas.evidence import ENTRY_ID_RE, entry_ids_in
@@ -741,8 +741,11 @@ def _judge_technique_ids(stix_output: dict[str, Any] | None) -> list[str]:
         if obj.get("type") != "attack-pattern":
             continue
         # Only a reference filed under ATT&CK names a technique: a CAPEC
-        # reference listed first was read as technique ``CAPEC-…``.
-        tid = attack_reference_id(obj)
+        # reference listed first was read as technique ``CAPEC-…``. The id is
+        # read as written, so a misshapen one is a row marked invalid. A name
+        # that opens with an id declares it too, as it does to the validator
+        # and the export; a name that merely begins with a ``T`` declares none.
+        tid = written_technique_id(obj)
         if tid and tid not in found:
             found.append(tid)
     return found
@@ -762,13 +765,13 @@ def unmapped_behaviours(stix_output: dict[str, Any] | None) -> list[str]:
     for obj in _judge_objects(stix_output):
         if obj.get("type") != "attack-pattern":
             continue
-        if attack_reference_id(obj):
+        if written_technique_id(obj):
+            # A technique the matrix reads (``_judge_technique_ids``), from its
+            # reference or from an id its name opens with. "Token
+            # Impersonation" opens with no id: it is a behaviour, listed here,
+            # and not lost from both lists.
             continue
         name = str(obj.get("name") or "").strip()
-        if name and name.upper().split()[0].rstrip(":").startswith("T"):
-            # The id is in the name, which ``_attack_pattern_technique_id``
-            # reads; it is a mapped technique and belongs to the matrix.
-            continue
         if name and name not in names:
             names.append(name)
     return names
@@ -791,7 +794,7 @@ def _judge_relationship_rows(
     for obj in objects:
         if obj.get("type") != "attack-pattern":
             continue
-        declared = attack_reference_id(obj)
+        declared = written_technique_id(obj)
         if declared:
             technique_of[str(obj.get("id") or "")] = declared
     rows: list[tuple[str, float | None]] = []

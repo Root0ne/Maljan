@@ -42,9 +42,10 @@ from maljan.analysis.corroboration import corroboration_sources as corroboration
 from maljan.analysis.sandbox_sections import ItemIndex, cited_item_ids, is_item_id, item_ids_in
 from maljan.analysis.technique_ids import (
     ID_BODY,
-    MITRE_ATTACK_SOURCES,
     TECHNIQUE_ID_EXACT_RE,
     TECHNIQUE_WORD_RE,
+    declared_technique_id,
+    written_technique_id,
 )
 from maljan.core.declared_reading import (
     bare_name,
@@ -8118,9 +8119,11 @@ def unconfirmed_credits(
     technique_of: dict[str, str] = {}
     for obj in objects:
         if str(getattr(obj, "type", "") or "") == "attack-pattern":
-            declared = _attack_pattern_technique_id(obj)
+            # A credit is keyed by a technique id or not at all: a malformed
+            # reference is asked about on the attack-pattern itself.
+            declared = declared_technique_id(obj)
             if declared:
-                technique_of[str(getattr(obj, "id", "") or "")] = declared.upper()
+                technique_of[str(getattr(obj, "id", "") or "")] = declared
     out: list[UnconfirmedCredit] = []
     for index, obj in enumerate(objects):
         if str(getattr(obj, "type", "") or "") != "relationship":
@@ -9347,26 +9350,18 @@ def _url_host(raw_url: str) -> str | None:
         return None
 
 
-# The ``source_name`` values that mean "this external_id is an ATT&CK id".
-# Only these are read: an attack-pattern may legitimately carry a Sigma rule id
-# or a CVE first in its reference list, and holding the judge to the ATT&CK
-# vocabulary for one of those would burn the single retry on nothing.
-_MITRE_SOURCES = MITRE_ATTACK_SOURCES
-
-
 def _attack_pattern_technique_id(obj: Any) -> str:
-    """The ATT&CK id an attack-pattern declares, from its MITRE ref or its name."""
-    for ref in getattr(obj, "external_references", None) or []:
-        if not isinstance(ref, dict):
-            continue
-        if str(ref.get("source_name") or "").strip().lower() not in _MITRE_SOURCES:
-            continue
-        external_id = ref.get("external_id")
-        if external_id:
-            return str(external_id).strip().upper()
-    name = str(getattr(obj, "name", "") or "").strip().upper()
-    first = name.split()[0].rstrip(":") if name else ""
-    return first if first.startswith("T") else ""
+    """The ATT&CK id an attack-pattern declares, from its MITRE ref or its name.
+
+    The reference's id is read as written, whatever its shape, so a malformed
+    one (``TA0005``, ``T1055.1``) is asked about as malformed. Only a
+    reference filed under an ATT&CK source counts: an attack-pattern may carry
+    a Sigma rule id or a CVE first in its list, and holding the judge to the
+    ATT&CK vocabulary for one of those would burn the single retry on nothing.
+    The name counts only when its first word is a technique id: "Timestomp"
+    and "Token Impersonation" name no technique, and are asked for one.
+    """
+    return written_technique_id(obj)
 
 
 def drop_ungrounded_indicators(

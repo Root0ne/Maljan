@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 import pytest
 
@@ -80,6 +81,24 @@ class TestOneStrictReader:
         small = min(took(20_000) for _ in range(3))
         large = took(200_000)
         assert large < 20 * small + 0.05
+
+    def test_no_reader_outside_this_module_writes_the_id_again(self) -> None:
+        import maljan
+
+        root = Path(maljan.__file__).parent
+        holders = {
+            str(path.relative_to(root))
+            for path in root.rglob("*.py")
+            if ID_BODY in path.read_text(encoding="utf-8")
+        }
+        # Every other reader is built from ``ID_BODY``. Left: this module, and
+        # two copies whose code is retired whole elsewhere (the base agent's
+        # test-only extractor and the ledger projection's dead reader).
+        assert holders <= {
+            "analysis/technique_ids.py",
+            "agents/base_agent.py",
+            "reporting/ledger_projection.py",
+        }
 
 
 class TestTechniqueIdsIn:

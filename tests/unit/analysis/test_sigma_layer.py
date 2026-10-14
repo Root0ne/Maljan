@@ -130,6 +130,24 @@ class TestSigmaLayerMetadata:
         assert layer._extract_technique_id(rule) == "T1003.001"
         assert layer._get_confidence(rule) == 0.88  # stable
 
+    def test_a_tactic_tag_is_not_read_as_a_technique(self, tmp_rules_dir: Path) -> None:
+        tagged = VALID_RULE_CONTENT.replace(
+            "    - attack.credential_access\n",
+            "    - attack.ta0006\n    - attack.g0016\n",
+        )
+        _write_rule(tmp_rules_dir, "rule1.yml", tagged)
+        layer = SigmaLayer.from_rules_dir(tmp_rules_dir)
+        rule = layer._collection.rules[0]
+        assert layer._extract_technique_id(rule) == "T1003.001"
+        assert layer.techniques_covered() == {"T1003.001"}
+
+    def test_a_rule_with_only_a_tactic_tag_names_no_technique(self, tmp_rules_dir: Path) -> None:
+        tagged = VALID_RULE_CONTENT.replace("    - attack.t1003.001\n", "    - attack.ta0006\n")
+        _write_rule(tmp_rules_dir, "rule1.yml", tagged)
+        layer = SigmaLayer.from_rules_dir(tmp_rules_dir)
+        assert layer._extract_technique_id(layer._collection.rules[0]) is None
+        assert layer.techniques_covered() == set()
+
 
 # ---------------------------------------------------------------------------
 # scan_events() tests (Structured)
