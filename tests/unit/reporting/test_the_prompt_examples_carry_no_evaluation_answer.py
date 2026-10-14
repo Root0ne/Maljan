@@ -42,7 +42,11 @@ from maljan.agents.delegation import (
     _what_an_ask_gets_sentence,
 )
 from maljan.agents.dynamic_analyst import sandbox_server_label
-from maljan.agents.evidence_recorder import earlier_chunk_answer, same_function_notice
+from maljan.agents.evidence_recorder import (
+    EARLIER_ROUND,
+    earlier_chunk_answer,
+    same_function_notice,
+)
 from maljan.agents.judge_agent import (
     COMPACT_BUNDLE_RULES,
     CONTRADICTION_DEFINITION,
@@ -131,8 +135,10 @@ from maljan.pipeline.debate_facts import (
     BLOCK_NOT_READ_NOTE,
     analysts_field_unknown_note,
     ledger_count_facts,
+    ledger_stated_sentence,
     place_facts,
     with_ledger_facts,
+    with_ledger_stated,
     with_place_facts,
 )
 from maljan.pipeline.evidence_summary import summarise
@@ -185,6 +191,7 @@ from maljan.pipeline.validation import (
     flow_voice_violations,
     gate_removed_note,
     kept_after_the_sandbox_fact,
+    ledger_absence_contradictions,
     library_only_claims_violation,
     malware_object_violations,
     misstated_entry_contents,
@@ -2070,6 +2077,20 @@ PROMPTS: dict[str, str] = {
     "a later chunk's answer from an earlier chunk's recorded result": earlier_chunk_answer(
         "a", "ev_0001", "a recorded result"
     ),
+    "a revision's answer from an earlier round's recorded result": earlier_chunk_answer(
+        "a", "ev_0001", "a recorded result", origin=EARLIER_ROUND
+    ),
+    "blocking lines the ledger states, told before, shown to the next mediation": (
+        with_ledger_stated(
+            "",
+            [
+                ledger_stated_sentence(
+                    "[analysts: A] A claim 2 reports 0 hits of 9 rules [ev_0001]. [blocking: x]",
+                    ("entry ev_0001 (scan) states matches = 0 items, rule_count = 9",),
+                )
+            ],
+        )
+    ),
     "a decompile answered with a function an earlier entry holds": same_function_notice(
         "FUN_00401000", "ev_0001"
     ),
@@ -2221,6 +2242,38 @@ PROMPTS: dict[str, str] = {
             EntryTexts(
                 texts={"ev_0001": '{"summary": "a\\nb", "packets_read": 3}'},
                 tools={"ev_0001": "pcap_summary"},
+            ),
+        )
+    ),
+    "question for a sentence saying the ledger lacks what an entry holds": " ".join(
+        v.message
+        for v in ledger_absence_contradictions(
+            {
+                "body": "Routine 0x1400, which is not read, calls 0x1800. "
+                "Its callers are not in the ledger. The names (OpenThing, CloseThing) "
+                "are not confirmed by the parser output [ev_0003]."
+            },
+            EntryTexts.from_ledger(
+                [
+                    build_entry(
+                        entry_id="ev_0001",
+                        seq=1,
+                        agent="a",
+                        server="a",
+                        tool="decompile_function",
+                        args={"address": "0x1400"},
+                        output="undefined8 FUN_00001400(void)\n{ FUN_00001800(); }",
+                    ),
+                    build_entry(
+                        entry_id="ev_0003",
+                        seq=3,
+                        agent="a",
+                        server="a",
+                        tool="pe_info",
+                        args={},
+                        output='{"imports": ["OpenThing", "CloseThing"]}',
+                    ),
+                ]
             ),
         )
     ),

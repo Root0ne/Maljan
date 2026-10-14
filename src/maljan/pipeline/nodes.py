@@ -59,6 +59,7 @@ from maljan.pipeline.claim_drops import (
     answer_unchanged,
     dropped_values,
     dropped_values_sentence,
+    unchanged_in_substance,
 )
 from maljan.pipeline.conditions import (
     ConditionError,
@@ -74,6 +75,8 @@ from maljan.pipeline.debate_facts import (
     contested_input,
     facts_naming,
     ledger_count_facts,
+    ledger_stated,
+    ledger_stated_sentence,
     names_an_unlisted_place,
     place_facts,
     place_facts_for,
@@ -2081,6 +2084,10 @@ def brief_agent(agent: Any, state: AnalysisState, container: ServiceContainer) -
     agent.pack_ledger_ids = pack_ledger_ids(state)
     agent.pack_image_bases = pack_image_bases(state)
     agent.run_state_block = render_run_state(state)
+    # And the state it was rendered from: every turn the agent sends renders
+    # it again with the entries the agent files after this (the tool loop's,
+    # and those a turn after the loop cites), never the block of this moment.
+    agent.run_state_source = state
     # What the analysis server tied to each function, read once from the pack:
     # the function map joins it to the functions the agent reads.
     agent.pack_function_artefacts = pack_function_artefacts(state)
@@ -3880,6 +3887,32 @@ def _ledger_counts(state: AnalysisState, agent_names: Sequence[str], argument: A
         return []
 
 
+def _ledger_stated_lines(
+    state: AnalysisState, agent_names: Sequence[str], argument: Any
+) -> list[tuple[str, tuple[str, ...]]]:
+    """The blocking lines the ledger states, with facts told before. Never raises."""
+    lines = list(getattr(argument, "contradictions", None) or [])
+    told = [
+        str(fact)
+        for earlier in state.get("discussion_history") or []
+        if getattr(earlier, "agent_name", "") == "Mediator"
+        for fact in getattr(earlier, "ledger_facts", None) or []
+    ]
+    if not lines or not told:
+        return []
+    try:
+        return ledger_stated(
+            lines,
+            dict(state.get("isr_reports") or {}),
+            list(state.get("evidence_ledger") or []),
+            list(agent_names),
+            told,
+        )
+    except Exception as exc:  # noqa: BLE001 — no line is read as stated
+        logger.debug("negotiation: the stated lines were not read (%s).", exc)
+        return []
+
+
 def _place_facts(state: AnalysisState, agent_names: Sequence[str], argument: Any) -> list[str]:
     """The functions the blocking lines name and whether each was listed. Never raises."""
     lines = list(getattr(argument, "contradictions", None) or [])
@@ -4153,6 +4186,30 @@ def make_negotiation_node(
             # analysts each line names and on the next mediation's prompt, and
             # a debate that ends here spends nothing on them.
             platform_said = _ledger_counts(state, agent_names, argument)
+            # A blocking line every count of which the ledger states, whose
+            # facts an earlier mediation told the analysts, is recorded with
+            # them. The line stays among the blocking lines: the next mediation
+            # is shown it was told and decides whether it still blocks, and
+            # the router ends the debate when every blocking line is such a
+            # line (``routing.LEDGER_STATED``).
+            if measured and argument.status == "complete":
+                stated = _ledger_stated_lines(state, agent_names, argument)
+                if stated:
+                    argument.ledger_stated = [
+                        ledger_stated_sentence(line, facts) for line, facts in stated
+                    ]
+                    for sentence in argument.ledger_stated:
+                        logger.info("negotiation: %s", sentence)
+                    emit_agent_message(
+                        container.event_sink,
+                        speaker=ROOM_SPEAKER,
+                        role="system",
+                        text="\n".join(argument.ledger_stated),
+                        round_index=iteration + 1,
+                        status="complete",
+                        stage=stage_key_of(stage, "debate"),
+                        kind="system",
+                    )
             # Who the mediation asks to revise: the analysts its blocking lines
             # name in their [analysts: ...] field, read and never guessed.
             if measured and argument.status == "complete":
@@ -4548,6 +4605,9 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         # answer in force again, word for word: the router's convergence test.
         made = 0
         identical = True
+        # And whether every one states the claims in force again, wording
+        # aside: the same values, entry ids and techniques (``claim_drops``).
+        reworded = True
         # Who was revised in this round, and why each other analyst was not:
         # the sycophancy check judges only the answers revised in the round.
         revised_names: list[str] = []
@@ -4664,6 +4724,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     made += 1
                     revised_names.append(name)
                     identical = identical and answer_unchanged(in_force_text, revised_text)
+                    reworded = reworded and unchanged_in_substance(kept_isrs.get(name), isr)
                 dropped_here = dropped_values(
                     kept_isrs.get(name), isr, revised_text, revision_round=iteration
                 )
@@ -4736,6 +4797,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 "stage": stage_key_of(stage, "debate"),
                 "made": made,
                 "identical": bool(made) and identical,
+                "reworded": bool(made) and reworded,
                 "revised": revised_names,
                 "not_revised": not_revised,
                 "converged": _round_convergence(

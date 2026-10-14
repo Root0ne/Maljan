@@ -34,6 +34,7 @@ _GOOD: dict[str, Any] = {
     "long_running": True,
     "memory_peak_mb": 100,
     "discloses_sample": True,
+    "read_only": True,
     "arguments": {"path": "file_path"},
     "asserts_techniques": True,
     "source": "sigma",

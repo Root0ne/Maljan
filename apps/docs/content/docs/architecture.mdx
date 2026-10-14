@@ -355,11 +355,14 @@ The debate ends when nothing is left to settle (`pipeline/debate_facts.py`,
 `pipeline/claim_drops.py`, `pipeline/routing.py`):
 
 - The mediator ends each line of its block with `[blocking: <reason>]` or `[not blocking: <reason>]`; consensus is its confidence at the threshold with no line marked blocking, an unmarked line blocks, and the platform overrides a mark in neither direction. The reason may hold one level of brackets (`[not blocking: see [ev_0021]]`); a `[not blocking]` mark with no reason, conflicting marks and a mark that cannot be read block and go to `negotiation.unread_marks`, and a `[blocking]` mark with no reason blocks as it asks.
-- For a listed line whose cited entries (cited by the line or by a claim it names) hold, in a field named for a count or a total, a number the line itself states, every such value is stated; a size or a time is not a count. No call is made for them: they ride on the revision directive of the analysts the line names and on the next mediation's prompt, and a debate that ends at this mediation spends nothing on them.
+- For a listed line whose cited entries (cited by the line or by a claim it names) hold, in a field named for a count or a total, a number the line itself states, every such value is stated; the length of a list field (a match list: `matches = 0 items`) only where its key names the noun the line counts with that number ("0 hits" for `matches`, a hit being a match; "3 domains" for `domains`). A size or a time is not a count. No call is made for them: they ride on the revision directive of the analysts the line names and on the next mediation's prompt, and a debate that ends at this mediation spends nothing on them.
+- A blocking line the ledger states, told before, is recorded and shown, never taken away (`debate_facts.ledger_stated`). Its dispute must be about a count itself: two sides of the line (split at "while", "whereas", "but", "against", "versus", "although", "however" or a semicolon) each write one number, in digits or a number word, directly before one noun (at most one word between), and the numbers differ ("three matches" against "0 hits"). Two numbers on one side ("31 rules loaded, 3 matched") are two quantities, and a partitive or a ratio ("one of the rules", "0 hits of 31 rules", "3 out of 31", "3/31") is no count of its noun. "Hit" and "match" are one noun, a closed and deliberately minimal vocabulary; a line whose sides read counts both accept differently ("0 matches as benign" against "31 rules as malicious") is a dispute about meaning and is never stated. Every count it states (a number before a plural noun, "0 hits", "31 rules") is stated by a cited entry in a key naming that noun, the cited entries agree (every cited field of a counted noun holds one value) and are one record (an entry naming one of the line's nouns names all of them, so "0 connections" in one entry against "2 domains" in another is a dispute about meaning, not a count), and every fact stating one of its counts was stated by an earlier mediation of the debate. The line stays among the blocking lines, so the mediator, the judge and the report see it; it is said to the room, recorded in `AgentArgument.ledger_stated` and `run_summary.negotiation.ledger_stated`, and shown to the next mediation, which decides whether it still blocks. When every blocking line of a mediation is such a line, the debate ends as `ledger_stated`, with no consensus claimed. A line with a count no entry states, or with no count, is never stated, and a fact not yet told keeps the line out for the one round that tells it.
 - The mediator opens each line with `[analysts: <name>, <name>]`, the analysts who must revise over it, written as their reports are headed. A revision round asks only the analysts the blocking lines name; every other analyst keeps its answer in force, recorded in the round's `not_revised` as `not asked: not named by the mediator`. A named analyst's revision is shown the blocking lines that name it, with the mediator's summary and confidence, and of its peers only the ones those lines name, in the field or by key or label in any case or form; each is shown exactly as a round asking every analyst shows it, its answer in force whole, with no claim picked out by its number. A block that lists no blocking line holds no revision round: the debate goes to the judge as `consensus`; below the threshold, a stable confidence series still ends it as `convergence`, and otherwise it ends as `no_contested_point`. A blocking line without the field or naming no analyst of the debate, or a block that was not read, asks every analyst with every peer's answer, as before, and the round's record says why under `asked_all`.
 - Sycophancy is a rise in likeness beyond shared sources, told and never enforced (`pipeline/sycophancy_detector.py`, `convergence_flags`). After each revision round, for each analyst revised that made no tool call and whose revision cites nothing its answer before the round did not, the words of every ledger entry or sandbox item it and a peer both cite are left out of both, and its answer before the round and its revision are each compared with the peer's answer in force (bag-of-words cosine); a revision above the threshold and above its answer before the round is flagged and recorded on the round (`revision_rounds[].converged`). Two answers alike because they restate the same rows, or alike before the round, are not flagged. A flag is put to the next mediation as a sentence beside the facts block (`convergence_sentence`) and kept on the mediation (`AgentArgument.converged`); no analyst's prompt carries it, it never overrides the mediator's consensus or a block with no contested point, opens no round and never widens a round that asks only the analysts the mediator named. A stage with `sycophancy_check` off is told nothing. A round record stored before the flags existed is read by whole-answer likeness, as before, and decides no route either.
 - For a blocking line naming a function the run knows (an address the line writes, or one a claim it names writes, that is a row of the function index or a function a decompile or disassembly call listed; an offset and its virtual address are one function where an image base the run read joins them), the platform states whether the ledger holds a listing of it and which entries hold it (`debate_facts.place_facts`, `AgentArgument.place_facts`, said to the room as a notice). The analysts the line names in its field (every analyst, for a line with no field) are told it in their revision. An analyst with a tool whose declared arguments take an address (`validation._ADDRESS_ARGUMENTS`, read from each tool's own schema) is also told it can read a function the ledger never listed in this round, and its revision is given its tools: a configurable analyst's revision is its tool loop already, and a built-in analyst's revision runs its tool loop in place of its one tools-free call (`BaseAnalyst.revision_answer`, `safe_revise_isr(read_places=True)`). The model decides whether to read; nothing is adopted or rejected for it, and no call is made for the facts.
 - A revision round whose every revision is the answer in force again, whitespace aside, ends the debate as `converged`; the router reads only the record of the round right before the mediation it routes.
+- A revision round whose every revision states the claims in force again, wording aside, ends the debate as `reworded`, with no consensus claimed: another round would argue over words. Nothing factual may change: each claim's values (numbers, hex addresses, technique ids, quoted values), the entry ids its evidence line cites, its technique, its negators ("not", "no", "never", "without", a word ending "n't"), its confidence in steps of 0.05, its technical terms (acronyms, identifiers and names holding a digit, folded: RC4 against XOR is a change) and its content words (every word but articles, prepositions, "and", "so", pronouns and forms of be, have and do, read before the plural fold; "or", "nor" and "but" count; case and plural folded: "three" against "four", "explorer" against "svchost", "packed" against "unpacked" is a change) are the same, claim for claim; a reordering, punctuation or a stopword is wording (`claim_drops.unchanged_in_substance`, recorded as `reworded` in the round's record). A claim that cannot be read so, or any difference, leaves the round not reworded, and the debate goes on as before.
+- A revision's tool loop is seeded with the calls the analyst made in the run's earlier rounds to a tool that changes nothing and answers an identical call the same: one its server marks read-only (MCP `readOnlyHint`) or its declaration marks `read_only` (`base_agent.repeatable_earlier_entries`, `tool_pinning.answers_again`). A call of any other tool (a rename, a status poll, a submission) runs again, and so does a call whose earlier answer was a failure, carried a reason, an error or a message, or a status other than a word of completion such as "pending" (`evidence_recorder.holds_a_settled_answer`); an empty answer that nothing explains, alone or beside a status "ok", is settled and seeded. A tool is matched by its server and its name together, never by its name alone. A seed holds only while no call that is not read-only has run on the same server (its server key, else its source) since its entry was recorded, by any agent in any earlier round (`base_agent._stale_after`, newest first by `seq`, or by ledger order where a row has none) or in the current loop (`RepeatGuard.forget_round_seeds`): a rename or a patch makes a later decompile of that server a new call. An identical call (same tool, same arguments) is answered with the result its entry recorded, stamped with that entry's id and a sentence saying it was made in an earlier round, and no tool runs; the call is filed as a repeat of that entry. A failed call, and one whose result the run did not keep whole, is served once more, as for a chunked analysis.
 - A revision round that revised analysts and left the contested points as they were ends the debate as `contested_points_unchanged`, with no consensus claimed. A point is read from its blocking line alone (`debate_facts.point_key`): the analysts its field names, the ledger ids, hex values and decimal numbers it writes (claim numbers aside, since a revision renumbers claims; the mark and its reason aside), and its words where it writes none of those; two mediations whose blocking lines hold the same points, none resolved and none new, are unchanged however the mediator reworded them.
 - A revision is made against the analyst's answer in force and its peers'; each value of the answer in force it states nowhere is recorded in `run_summary.negotiation.dropped_claims` (a decimal only as a stated value, never a claim, round, step, stage, phase or list number, nor the round's own number; nor a cross-reference to the answer's own numbering such as "#3" or "item 3"; a number after any other word, such as "line 75", is compared as a value), the report's run appendix prints one count line per analyst and round (`dropped_value_counts`), the worker log one count line per analyst and round at INFO with each claim's sentence at DEBUG, and nothing is asked.
 - The debate stage's duration adds the revision rounds' time to the mediations', and `termination_reason` comes from the router's own rules, `hard_limit` only when the debate would have gone on.
@@ -1009,7 +1012,12 @@ and puts them at the end of a request's last message, between
 `=== RUN STATE … ===` markers: the task on a loop's first turn, the latest tool
 answer after a tool call, the question a nudge, a forced synthesis, a revision
 or a validation retry asks. It is regenerated on every model turn of a tool
-loop (the executor's prompt hook writes the current budget line) and comes off
+loop (the executor's prompt hook writes the current budget line) and on every
+turn after it: the node briefs the agent with the state it rendered the block
+from, and each turn renders it again with the entries the agent filed since
+appended (`base_agent.current_run_state`), so the ledger line and the failed
+tools are those of that turn, and a retry is never told the ledger ends before
+the entries its answer cites. It comes off
 a message again, leaving its bytes exactly as they were, once that message is
 no longer last, so a prompt carries exactly one block. It goes at the end
 because it changes every turn: anywhere earlier, the changed line would change
@@ -1208,7 +1216,31 @@ Two producers use it:
   the entry's text holds a value (or more than one), counted through its JSON
   with a zero, an empty string and an empty list holding nothing; the model is
   asked once, a partial entry is never judged, and the sentence is never
-  rewritten. **A technique written with another technique's name**
+  rewritten. **A sentence saying the ledger lacks what it holds**
+  (`report.absence_contradicts_ledger`, composer and narrative): a routine
+  said to be "not read" (or decompiled) whose decompile answered; an address,
+  an entry id or a value said to be "not in the ledger" that an answered entry
+  holds (for an address, an entry given it whose answer names another address,
+  or a decompile of it); a value said to be "not confirmed by", "not shown
+  in" or "not listed in" the entry the sentence cites, which that entry holds.
+  Only the head of the statement's subject is judged: the identifier the
+  subject opens with, after a determiner and a kind noun ("routine 0x1400",
+  "the routine at 0x1400"), with identifiers coordinated to it; a closing
+  bracketed list of identifiers after a head noun no modifier follows ("the
+  import names … (A, B)"); for a relative clause, the identifier that ends the
+  words before it; a singular pronoun alone ("it", "this"), or "its" before
+  a relation noun for a statement about the ledger ("its callers"), is the
+  one address the sentence before it names ("they", "these" and "their" may
+  stand for several things and are not judged). A head followed by a
+  bracketed modifier ("Routine X (the unpacked copy)") and an identifier
+  inside a modifier ("the caller
+  of X", "X, called by Y", "the return value of X", "the call site of X"), a
+  sentence scoped to the text around it ("in this section"), and a clause
+  that negates before its statement are not judged; an offset and its virtual
+  address are one routine, and a statement whose subject cannot be read is
+  not judged. The model is asked
+  once with the entry named; the sentence is never rewritten.
+  **A technique written with another technique's name**
   (`report.technique_name`): an id followed by a name in brackets whose name
   the vendored ATT&CK table does not give that id — its own name, or its
   parent's name before a sub-technique's, stands — is asked about with the
@@ -2109,7 +2141,8 @@ not a claim either: it is counted and asked about
 (`isr.claim_without_confidence`), where the parsers used to write 0.5.
 Every path that reads claims reads them through one reader,
 `base_agent.read_claim_blocks`: it splits an answer at every claim heading
-(`CLAIM:`, `CLAIM 3:`, `**CLAIM 4 (REVISED):**`, `CLAIM 2 [REVISED — retracts
+(`CLAIM:`, `CLAIM 3:`, `CLAIM R3:` with a label of letters before its number,
+`**CLAIM 4 (REVISED):**`, `CLAIM 2 [REVISED — retracts
 claim 5]:`, `CLAIM 5 -`, and a heading whose round- or square-bracketed note is
 its whole line, its fields on the lines after it; the rule is
 `agents/claim_headings.py`) where a block can begin, and at the model's own
@@ -2122,7 +2155,8 @@ claim events, and never put in the claim's sentence, which every check and the
 published report and STIX read as before. A heading that is its note alone has
 that note as its sentence, and its block's key in the repeated-claims check
 starts with it. The heading's number is never part of the claim, and no number
-is given to a heading without one. The static, dynamic and network analysts read it with an
+is given to a heading without one; a label written before the number stays in
+the claim's name (`R3`, never claim 3), so a retry is never merged into it by place. The static, dynamic and network analysts read it with an
 EVIDENCE line required; the base analyst's path records a block without one as
 unsourced. Each read counts the claim headings the answer began before its
 DISPUTES section against the claims it read and the blocks that stated no
@@ -2192,9 +2226,14 @@ validation findings list each claim. A TECHNIQUE line is one
 id, a list of ids separated by commas, "and" or slashes (read as one claim per id, each
 with the claim's sentence, evidence and confidence, and each checked as a
 technique), or `NONE` or a dash for none; a closing block separator (`· ---`)
-is no part of it. An id followed by the vendored catalogue's own name for it
-in brackets (`T1027 (Obfuscated Files or Information)`; for a sub-technique its
-own name, or its parent's and its own joined by a colon) is that id. Any other
+is no part of it. An id followed by the vendored catalogue's own name for it,
+in brackets or not (`T1027 (Obfuscated Files or Information)`, `T1106 Native
+API`, the name with no bracket running to the next comma, semicolon or the
+line's end; for a sub-technique its own name, or its parent's and its own
+joined by a colon) is that id. A line that opens with "none" and holds no
+technique id and no catalogue technique name (`none asserted`) claims none;
+one that names a candidate ("None; Process Injection is likely") is asked
+about. Any other
 line (bracketed words that are not that name, a qualifier, a negation, ids joined by
 another word) claims no id, is kept on the claim as `technique_line`, and the
 validation turn asks once for the ids alone, an id the claim does not assert

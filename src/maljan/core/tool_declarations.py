@@ -448,6 +448,7 @@ KIND_FREE_FIELDS: tuple[str, ...] = (
     "long_running",
     "memory_peak_mb",
     "discloses_sample",
+    "read_only",
     "arguments",
 )
 KIND_DEPENDENT_FIELDS: tuple[str, ...] = (
@@ -829,7 +830,10 @@ class ToolFacts(BaseModel):
     wall clock of its own; ``timeout_seconds`` is the budget the tool itself
     keeps and ``memory_peak_mb`` its measured peak, where known.
     ``discloses_sample`` marks a tool that sends the sample, or its bytes, out
-    of the deployment. ``holds_strings`` marks a tool whose answer holds the
+    of the deployment. ``read_only`` marks a tool that changes nothing and
+    answers an identical call the same (read-only or idempotent): a revision
+    that repeats an identical call of an earlier round is answered from that
+    round's entry. ``holds_strings`` marks a tool whose answer holds the
     sample's strings as data though its kind is not a strings kind (a report
     that anchors strings to the functions referring to them).
 
@@ -869,6 +873,7 @@ class ToolFacts(BaseModel):
     timeout_seconds: float | None = Field(default=None, gt=0)
     memory_peak_mb: int | None = Field(default=None, gt=0)
     discloses_sample: bool = False
+    read_only: bool = False
     holds_strings: bool = False
     rows: str = ""
     places: dict[str, str] = Field(default_factory=dict)

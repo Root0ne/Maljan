@@ -4941,6 +4941,11 @@ STATED_VALUE_UNHELD_CODE = "report.value_not_in_cited_entry"
 # sentence kept after it is marked where it stands with the state.
 UNPUBLISHED_VALUE_CODE = "report.unpublished_value"
 TECHNIQUE_NAME_CODE = "report.technique_name"
+# A report sentence that says a routine was not read, or that something is not
+# in the ledger, or that a cited entry does not confirm a value, while an
+# answered entry of this run holds it (``ledger_absence_contradictions``).
+# Asked once, naming the entry; a sentence kept after it is recorded.
+ABSENCE_CONTRADICTS_LEDGER_CODE = "report.absence_contradicts_ledger"
 
 # The codes a report round's answer is kept with. A broken shape leaves nothing
 # to print; each of these leaves a printable answer with a finding beside it.
@@ -4958,6 +4963,7 @@ KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
         CITATION_NOT_EVIDENCE_CODE,
         CITATION_WRONG_ENTRY_CODE,
         ENTRY_CONTENTS_MISSTATED_CODE,
+        ABSENCE_CONTRADICTS_LEDGER_CODE,
         UNCITED_IDENTIFIER_CODE,
         STATED_VALUE_UNHELD_CODE,
         UNPUBLISHED_VALUE_CODE,
@@ -6825,6 +6831,677 @@ def misstated_entry_contents(
             )
         )
     return violations
+
+
+# ---------------------------------------------------------------------------
+# A sentence that says the ledger lacks what an answered entry holds
+# ---------------------------------------------------------------------------
+
+# The three statements of absence read, each by what makes it false: a routine
+# "not read" is false when a decompile of it answered; a thing "not in the
+# ledger" when an answered entry holds it; a value "not confirmed by" (or "not
+# shown in", "not listed in") the entry a sentence cites when that entry
+# holds the value.
+_NOT_READ = "read"
+_NOT_IN_LEDGER = "ledger"
+_NOT_CONFIRMED = "confirmed"
+_ABSENCE_RE = re.compile(
+    r"\b(?:is|are|was|were|be|been)\s++(?:not|never)\s++(?:yet\s++)?(?:been\s++)?"
+    r"(?P<read>read|decompiled|disassembled)\b"
+    r"|\b(?:has|have|had)\s++(?:not|never)\s++(?:yet\s++)?been\s++"
+    r"(?P<read_perfect>read|decompiled|disassembled)\b"
+    r"|\b(?:is|are|was|were)\s++(?:not\s++(?:in|on|among|found\s++in)|absent\s++from|"
+    r"missing\s++from)\s++(?:the\s++)?(?P<ledger>ledger|evidence)\b"
+    r"|\b(?:is|are|was|were)\s++not\s++(?P<confirmed>confirmed|shown|listed|named)\s++(?:by|in)\b",
+    re.IGNORECASE,
+)
+# Where the clause a statement belongs to begins, so its subject is the
+# clause's own words: a semicolon, a colon, a dash, or a comma before a word
+# that joins two clauses. Commas inside brackets are not read: a bracketed
+# list is one part of the subject.
+_CLAUSE_START_RE = re.compile(
+    r"[;:]|\s[—–]\s|,\s*(?:and|but|so|while|whereas|although|though|because|since|yet)\b",
+    re.IGNORECASE,
+)
+# A relative clause's word just before the statement: its subject is the last
+# thing the clause before it names (``_relative_word_at``).
+_RELATIVE_WORDS = ("which", "that")
+# A value a subject writes: in quotes or backticks, or an identifier of three
+# characters or more with a capital after its first letter, a digit or an
+# underscore in it (``CreateMutexW``, ``update_data``), never a plain word.
+_QUOTED_VALUE_RE = re.compile(r"`([^`\n]{2,})`|\"([^\"\n]{2,})\"|“([^”\n]{2,})”")
+_IDENTIFIER_VALUE_RE = re.compile(
+    r"(?<![\w.$])(?=[A-Za-z_]\w*(?:[a-z][A-Z]|\d|_))[A-Za-z_]\w{2,}(?![\w$])"
+)
+# Addresses below this are offsets, flags and counts in prose, not routines.
+_LEAST_ROUTINE_ADDRESS = 0x100
+
+
+def _outside_brackets(text: str) -> str:
+    """``text`` with every character inside round or square brackets turned to a space."""
+    out: list[str] = []
+    depth = 0
+    for ch in text:
+        if ch in "([":
+            depth += 1
+        elif ch in ")]" and depth:
+            depth -= 1
+            out.append(" ")
+            continue
+        out.append(" " if depth else ch)
+    return "".join(out)
+
+
+def _prose_addresses(text: str) -> list[int]:
+    """The routine addresses ``text`` writes: ``0x…`` or inside a decompiler's generic name."""
+    found = [
+        int(match.group(1), 16)
+        for pattern in (_HEX_ADDRESS, generic_function_name())
+        for match in pattern.finditer(text)
+    ]
+    return [address for address in found if address >= _LEAST_ROUTINE_ADDRESS]
+
+
+class _AddressIndex:
+    """Ledger entries by the routine address they hold, folded by the image bases the run read.
+
+    An offset and its virtual address are one routine (:func:`_one_function`):
+    they differ by an image base the run read, or, with none read, by a multiple
+    of 64 KiB, which is a shared low half-word. Each address is filed under every
+    form it is one routine with, so a lookup is one dictionary read.
+    """
+
+    def __init__(self, bases: Sequence[int]) -> None:
+        self.bases = tuple(bases)
+        self.by_form: dict[int, list[str]] = {}
+
+    def _forms(self, address: int) -> list[int]:
+        if not self.bases:
+            return [address % _IMAGE_BASE_ALIGNMENT]
+        return [
+            address,
+            *(address + base for base in self.bases),
+            *(address - base for base in self.bases if address > base),
+        ]
+
+    def add(self, address: int, entry_id: str) -> None:
+        for form in self._forms(address):
+            held = self.by_form.setdefault(form, [])
+            if entry_id not in held:
+                held.append(entry_id)
+
+    def holders(self, address: int) -> list[str]:
+        key = address % _IMAGE_BASE_ALIGNMENT if not self.bases else address
+        return list(self.by_form.get(key, ()))
+
+
+@dataclass
+class _LedgerHolds:
+    """What this run's answered entries hold, read once per report when a statement needs it."""
+
+    read: _AddressIndex
+    named: _AddressIndex
+    answered: frozenset[str]
+
+    @classmethod
+    def of(cls, entries: EntryTexts) -> _LedgerHolds:
+        values = list(entries.entries.values())
+        bases = image_bases_in(values)
+        read = _AddressIndex(bases)
+        for function in decompiled_functions(values):
+            if function.address is not None:
+                for entry_id in function.entries:
+                    read.add(function.address, entry_id.lower())
+        named = _AddressIndex(bases)
+        answered: set[str] = set()
+        for key, entry in entries.entries.items():
+            if not getattr(entry, "ok", True) or getattr(entry, "repeated_of", None):
+                continue
+            answered.add(key)
+            for address in _argument_addresses(entry):
+                # An answer about an address holds something of it only when
+                # it names another one (a caller, a callee, a listing's own
+                # calls): "no callers found" holds nothing to contradict.
+                text = entries.texts.get(key, "")
+                if any(other != address for other in _prose_addresses(text)):
+                    named.add(address, key)
+        for form, ids in read.by_form.items():
+            for entry_id in ids:
+                held = named.by_form.setdefault(form, [])
+                if entry_id not in held:
+                    held.append(entry_id)
+        return cls(read=read, named=named, answered=frozenset(answered))
+
+
+def _argument_addresses(entry: Any) -> list[int]:
+    """The addresses a call was given: its declared address arguments and any ``0x…`` argument."""
+    args = getattr(entry, "args", None) or {}
+    if not isinstance(args, Mapping):
+        return []
+    found: list[int] = []
+    declared = set(entry_address_arguments(entry))
+    for name, value in args.items():
+        if name in declared:
+            address = _address_value(value)
+            if address is not None and address >= _LEAST_ROUTINE_ADDRESS:
+                found.append(address)
+        elif isinstance(value, str) and value.strip().lower().startswith("0x"):
+            found.extend(_prose_addresses(value))
+    return list(dict.fromkeys(found))
+
+
+def _relative_word_at(text: str, end: int) -> int | None:
+    """Where a relative word (``which``, ``that``) ending ``text[:end]`` begins, its comma included.
+
+    Read backwards from ``end`` over whitespace only, so a call costs the
+    whitespace and the word it reads, never the text before them.
+    """
+    at = end
+    while at > 0 and text[at - 1].isspace():
+        at -= 1
+    for word in _RELATIVE_WORDS:
+        begin = at - len(word)
+        if (
+            begin >= 0
+            and text[begin:at].lower() == word
+            and (begin == 0 or not (text[begin - 1].isalnum() or text[begin - 1] == "_"))
+        ):
+            comma = begin
+            while comma > 0 and text[comma - 1].isspace():
+                comma -= 1
+            return comma - 1 if comma > 0 and text[comma - 1] == "," else begin
+    return None
+
+
+def _clause_starts(sentence: str) -> list[int]:
+    """Where each clause of ``sentence`` begins after the first, read once outside brackets."""
+    return [match.end() for match in _CLAUSE_START_RE.finditer(_outside_brackets(sentence))]
+
+
+# The tokens of a subject: a quoted or backticked value, a word (an address,
+# an identifier, a possessive), a separator, a bracket, or other marks.
+_SUBJECT_TOKEN_RE = re.compile(
+    r"`[^`\n]++`|\"[^\"\n]++\"|“[^”\n]++”|[A-Za-z0-9_$.]++(?:['’]s\b)?|[,&]|[(\[]|[)\]]"
+    r"|[^\sA-Za-z0-9_$.,&()\[\]`\"“]++"
+)
+# Words a subject may open with before its head.
+_DETERMINERS = frozenset(
+    {"the", "a", "an", "this", "these", "that", "those", "both", "all", "each"}
+)
+# Nouns that only say what kind of thing the head identifier after them is
+# ("routine 0x1400", "the import CreateMutexW").
+_KIND_NOUNS = frozenset(
+    {
+        "routine",
+        "routines",
+        "function",
+        "functions",
+        "subroutine",
+        "subroutines",
+        "procedure",
+        "procedures",
+        "method",
+        "methods",
+        "address",
+        "addresses",
+        "import",
+        "imports",
+        "export",
+        "exports",
+        "api",
+        "apis",
+        "symbol",
+        "symbols",
+        "string",
+        "strings",
+        "value",
+        "values",
+        "name",
+        "names",
+        "entry",
+        "entries",
+    }
+)
+# Of those, the ones a routine is named by: "the routine at 0x1400" is 0x1400.
+_ROUTINE_NOUNS = frozenset(
+    {"routine", "routines", "function", "functions", "subroutine", "subroutines", "procedure"}
+)
+# Words that make what follows them a modifier of the head, not the head
+# ("the caller of 0x1400", "called by 0x1400", "the constant at offset 0x1400").
+_MODIFIER_WORDS = frozenset(
+    {
+        "of",
+        "by",
+        "from",
+        "at",
+        "in",
+        "on",
+        "beyond",
+        "than",
+        "besides",
+        "except",
+        "within",
+        "inside",
+        "for",
+        "after",
+        "before",
+        "via",
+        "through",
+        "with",
+        "without",
+    }
+)
+# Separators of coordinated head identifiers ("0x1c38 and 0x1a08").
+_COORDINATORS = frozenset({",", "&", "and", "or"})
+# A pronoun subject and a possessive one, read from the sentence before. Only
+# the singular ones: "they", "these" or "their" may stand for several things,
+# never for the one address the sentence before names.
+_PRONOUNS = frozenset({"it", "this"})
+_POSSESSIVES = frozenset({"its"})
+# What an answer about an address holds of it besides the address: the
+# relation a possessive pronoun's noun may name ("its callers").
+_RELATION_NOUNS = frozenset(
+    {
+        "caller",
+        "callers",
+        "callee",
+        "callees",
+        "xref",
+        "xrefs",
+        "cross-reference",
+        "cross-references",
+        "reference",
+        "references",
+        "referrer",
+        "referrers",
+    }
+)
+# A sentence scoped to the text around it ("not read in this section"): what
+# it says is absent is absent from that text, not from the run.
+_SCOPED_TO_THE_TEXT_RE = re.compile(
+    r"\bin\s++this\s++(?:section|subsection|paragraph|part|table|list|report|chapter)\b",
+    re.IGNORECASE,
+)
+# A negation before a statement in its own clause ("it is not the case that
+# 0x1400 was not read"): the clause says the opposite of its statement.
+_CLAUSE_NEGATION_RE = re.compile(
+    r"\b(?:not|never|no|nor|neither|cannot|none)\b|n['’]t\b", re.IGNORECASE
+)
+# The subject's head as read: identifiers, a pronoun to resolve, or nothing.
+_HEAD_IDS = "ids"
+_HEAD_PRONOUN = "pronoun"
+
+
+def _subject_tokens(subject: str) -> list[str]:
+    tokens: list[str] = []
+    for token in _SUBJECT_TOKEN_RE.findall(subject):
+        if token[:1] in '`"“':
+            tokens.append(token)
+            continue
+        token = token.rstrip(".")
+        if token and not all(ch in "*~>#-–—:!?;" for ch in token):
+            tokens.append(token)
+    return tokens
+
+
+def _is_head_identifier(token: str) -> bool:
+    """Whether a token names one thing: an address, an entry id, a quoted value, an identifier."""
+    if token[:1] in '`"“':
+        return True
+    return bool(
+        _HEX_ADDRESS.fullmatch(token)
+        or generic_function_name().fullmatch(token)
+        or _EVIDENCE_ID_RE.fullmatch(token)
+        or _IDENTIFIER_VALUE_RE.fullmatch(token)
+    )
+
+
+def _possessive(token: str) -> bool:
+    return token.lower().endswith(("'s", "’s"))
+
+
+def _modifies(tokens: Sequence[str]) -> bool:
+    """Whether any token makes what follows it a modifier (``of``, ``by``, a possessive)."""
+    return any(t.lower() in _MODIFIER_WORDS or _possessive(t) for t in tokens)
+
+
+def _bracket_list(tokens: list[str]) -> tuple[list[str], list[str]] | None:
+    """A closing bracketed list of identifiers and what comes before it, or ``None``.
+
+    The bracket must close the tokens and hold identifiers and separators
+    only ("(PeekNamedPipe, CreateMutexW)", "(0x1c38 and 0x1a08)"): a bracket
+    with any other word ("(called by 0x1400)") is no list.
+    """
+    if not tokens or tokens[-1] not in (")", "]"):
+        return None
+    depth = 0
+    for at in range(len(tokens) - 1, -1, -1):
+        if tokens[at] in (")", "]"):
+            depth += 1
+        elif tokens[at] in ("(", "["):
+            depth -= 1
+            if depth == 0:
+                inner = tokens[at + 1 : -1]
+                ids = [t for t in inner if t.lower() not in _COORDINATORS]
+                if ids and all(_is_head_identifier(t) and not _possessive(t) for t in ids):
+                    return ids, tokens[:at]
+                return [], tokens[:at]
+    return None
+
+
+def _ids_from(tokens: list[str], at: int) -> tuple[list[str], int]:
+    """The coordinated identifiers from ``at`` on ("A, B and C"), and where they end."""
+    ids: list[str] = []
+    while at < len(tokens) and _is_head_identifier(tokens[at]):
+        if _possessive(tokens[at]):
+            return [], at
+        ids.append(tokens[at])
+        at += 1
+        if at + 1 < len(tokens) and tokens[at].lower() in _COORDINATORS:
+            if not _is_head_identifier(tokens[at + 1]):
+                break
+            at += 1
+    return ids, at
+
+
+def _subject_head(subject: str, relative: bool, kind: str) -> tuple[str, list[str]]:
+    """The head of a statement's subject: ``("ids", tokens)``, ``("pronoun", [])`` or ``("", [])``.
+
+    Only the head of the subject phrase is judged, never an identifier inside
+    a modifier ("the caller of 0x1400", "0x1800, called by 0x1400", "the
+    return value of X", "the arguments X receives"). The head is the
+    identifier the subject opens with, after a determiner and a kind noun
+    ("routine 0x1400", "the routine at 0x1400"), with identifiers coordinated
+    to it, and nothing after them but a bracket; or a closing bracketed list
+    of identifiers after a head noun no modifier follows ("the import names
+    … (A, B)"); for a relative clause, the identifier that ends the words
+    before it, no modifier word before its kind noun. A singular pronoun
+    alone, and "its" before a relation noun for a statement about the ledger
+    ("its callers"), stand for the sentence before; a plural one may stand
+    for several things. A head a bracketed modifier follows is not judged.
+    Anything else is not read: nothing is judged.
+    """
+    tokens = _subject_tokens(subject)
+    while tokens and tokens[-1] == ",":
+        tokens.pop()
+    if not tokens:
+        return "", []
+    bracketed = _bracket_list(tokens)
+    if relative:
+        if bracketed is not None:
+            ids, before = bracketed
+            return (_HEAD_IDS, ids) if ids and not _modifies(before[-1:]) else ("", [])
+        end = len(tokens)
+        start = end
+        while start > 0 and (
+            _is_head_identifier(tokens[start - 1])
+            or (tokens[start - 1].lower() in _COORDINATORS and start < end)
+        ):
+            start -= 1
+        ids = [t for t in tokens[start:end] if t.lower() not in _COORDINATORS]
+        if not ids or any(_possessive(t) for t in ids):
+            return "", []
+        at = start
+        if at > 0 and tokens[at - 1].lower() == "at" and at > 1:
+            if tokens[at - 2].lower() in _ROUTINE_NOUNS:
+                at -= 1
+        while at > 0 and tokens[at - 1].lower() in _KIND_NOUNS:
+            at -= 1
+        if at > 0 and _modifies(tokens[at - 1 : at]):
+            return "", []
+        return _HEAD_IDS, ids
+    # A closing bracket that is no list of identifiers is a modifier of what
+    # it follows ("Routine 0x1400 (the unpacked copy)"): it may name another
+    # object, so a head it follows is not judged.
+    parenthetical = bracketed is not None and not bracketed[0]
+    if bracketed is not None:
+        listed, before = bracketed
+        tokens = before
+    else:
+        listed = []
+    at = 0
+    while at < len(tokens) and tokens[at].lower() in _DETERMINERS:
+        at += 1
+    if at >= len(tokens):
+        return (_HEAD_IDS, listed) if listed else ("", [])
+    word = tokens[at].lower()
+    if word in _PRONOUNS and at == len(tokens) - 1 and not listed:
+        return _HEAD_PRONOUN, []
+    if word in _POSSESSIVES:
+        rest = [t.lower() for t in tokens[at + 1 :]]
+        if (
+            kind == _NOT_IN_LEDGER
+            and not listed
+            and rest
+            and any(t in _RELATION_NOUNS for t in rest)
+            and all(t.isalpha() or t in _COORDINATORS for t in rest)
+            and not _modifies(rest)
+        ):
+            return _HEAD_PRONOUN, []
+        return "", []
+    kind_noun = False
+    while at < len(tokens) and tokens[at].lower() in _KIND_NOUNS:
+        kind_noun = kind_noun or tokens[at].lower() in _ROUTINE_NOUNS
+        at += 1
+    if kind_noun and at < len(tokens) and tokens[at].lower() == "at":
+        at += 1
+    ids, end = _ids_from(tokens, at)
+    if ids:
+        return (_HEAD_IDS, ids) if end == len(tokens) and not parenthetical else ("", [])
+    if listed and not _modifies(tokens):
+        return _HEAD_IDS, listed
+    return "", []
+
+
+def _head_values(tokens: Sequence[str]) -> list[str]:
+    """The values among head tokens: quoted, backticked or identifier-shaped, no address or id."""
+    values: list[str] = []
+    for token in tokens:
+        if token[:1] in '`"“':
+            inner = token[1:-1].strip()
+            if len(inner) >= 2:
+                values.append(inner)
+        elif (
+            _IDENTIFIER_VALUE_RE.fullmatch(token)
+            and generic_function_name().fullmatch(token) is None
+            and not _EVIDENCE_ID_RE.fullmatch(token)
+        ):
+            values.append(token)
+    return list(dict.fromkeys(values))
+
+
+def _head_addresses(tokens: Sequence[str]) -> list[int]:
+    return list(dict.fromkeys(a for token in tokens for a in _prose_addresses(token)))
+
+
+def _head_entry_ids(tokens: Sequence[str]) -> list[str]:
+    return [t.lower() for t in tokens if _EVIDENCE_ID_RE.fullmatch(t)]
+
+
+def ledger_absence_contradictions(payload: Any, entries: EntryTexts | None) -> list[Violation]:
+    """Sentences that say the ledger lacks what an answered entry of this run holds.
+
+    Read in every string of the answer, sentence by sentence. Three statements
+    are read, each for the head of its subject, taken from its own clause
+    (:func:`_subject_head`: never an identifier inside a modifier; a relative
+    clause's head is the identifier that ends the words before it; a
+    pronoun's, the one address the sentence before it names). A sentence
+    scoped to the text around it ("in this section") and a clause that
+    negates before its statement are not judged:
+
+    * a routine "not read" (or decompiled): false when a decompile of that
+      address answered;
+    * an address, an entry id or a value "not in the ledger": false when an
+      answered entry holds it (for an address, an entry given it whose answer
+      names another address, or a decompile of it);
+    * a value "not confirmed by", "not shown in" or "not listed in" the entry
+      the sentence cites: false when that entry holds the value.
+
+    The model is asked once, with the entry named; the sentence is never
+    rewritten, and a statement whose subject this cannot read is not judged.
+    """
+    if payload is None or entries is None or not entries.entries:
+        return []
+    found: list[tuple[str, list[str], list[str], str]] = []
+    holds: list[_LedgerHolds] = []
+    asked: set[tuple[str, str]] = set()
+
+    def _holds() -> _LedgerHolds:
+        if not holds:
+            holds.append(_LedgerHolds.of(entries))
+        return holds[0]
+
+    def _read(text: str) -> None:
+        sentences = _SENTENCE_END_RE.split(text)
+        for index, sentence in enumerate(sentences):
+            statements = list(_ABSENCE_RE.finditer(sentence))
+            if not statements:
+                continue
+            # Read once per sentence: its clause starts, its citations and the
+            # addresses of the sentence before it. A statement's subject runs
+            # from its clause's start, or from the statement before it in the
+            # same clause, to the statement: no text is read for two of them.
+            starts = _clause_starts(sentence)
+            cited = [
+                entry_id for _line, ids in _sentences_with_citations(sentence) for entry_id in ids
+            ]
+            before_addresses: list[int] | None = None
+            at_start = 0
+            done = 0
+            # Where the statement before this one took its subject from: a
+            # relative clause that opens its own clause reads back no further,
+            # so no text is read for more than two statements.
+            last_begins = 0
+            # A sentence scoped to the text around it says nothing of the run.
+            scoped = _SCOPED_TO_THE_TEXT_RE.search(sentence) is not None
+            for match in statements:
+                kind = (
+                    _NOT_READ
+                    if match.group("read") or match.group("read_perfect")
+                    else _NOT_IN_LEDGER
+                    if match.group("ledger")
+                    else _NOT_CONFIRMED
+                )
+                while at_start < len(starts) and starts[at_start] <= match.start():
+                    at_start += 1
+                begins = max(starts[at_start - 1] if at_start else 0, done)
+                done = match.end()
+                relative_at = _relative_word_at(sentence, match.start())
+                relative = relative_at is not None and relative_at >= begins
+                subject = sentence[begins : relative_at if relative else match.start()]
+                if relative and not subject.strip(" ,"):
+                    # The relative word opens the clause: its subject is what
+                    # the clause before it names last.
+                    previous = max(starts[at_start - 2] if at_start >= 2 else 0, last_begins)
+                    subject = sentence[previous:relative_at]
+                last_begins = begins
+                # A clause that negates before its statement says the
+                # opposite of it ("it is not the case that ..."): not judged.
+                if scoped or _CLAUSE_NEGATION_RE.search(sentence, begins, match.start()):
+                    continue
+                head, tokens = _subject_head(subject, relative, kind)
+                if head == _HEAD_PRONOUN and index:
+                    if before_addresses is None:
+                        before_addresses = list(
+                            dict.fromkeys(_prose_addresses(sentences[index - 1]))
+                        )
+                    tokens = (
+                        [hex(a) for a in before_addresses] if len(before_addresses) == 1 else []
+                    )
+                elif head != _HEAD_IDS:
+                    tokens = []
+                if not tokens:
+                    continue
+                whats: list[str] = []
+                held: list[str] = []
+                for what, holders in _contradicted(kind, tokens, cited):
+                    if holders and (kind, what) not in asked:
+                        asked.add((kind, what))
+                        whats.append(what)
+                        held.extend(i for i in holders if i not in held)
+                if whats:
+                    found.append((kind, whats, held, sentence.strip()))
+
+    def _contradicted(
+        kind: str, tokens: list[str], cited: list[str]
+    ) -> list[tuple[str, list[str]]]:
+        out: list[tuple[str, list[str]]] = []
+        addresses = _head_addresses(tokens)
+        if kind == _NOT_READ:
+            for address in addresses:
+                out.append((hex(address), _holds().read.holders(address)))
+            return out
+        if kind == _NOT_IN_LEDGER:
+            ledger = _holds()
+            for address in addresses:
+                out.append((hex(address), ledger.named.holders(address)))
+            for key in _head_entry_ids(tokens):
+                out.append((key, [key] if key in ledger.answered else []))
+            for value in _head_values(tokens):
+                if not decidable(value):
+                    continue
+                candidates = entries.may_hold(value) & ledger.answered
+                out.append(
+                    (
+                        value,
+                        [i for i in entries.texts if i in candidates and entries.holds(i, value)],
+                    )
+                )
+            return out
+        for value in _head_values(tokens):
+            if not decidable(value):
+                continue
+            out.append(
+                (
+                    value,
+                    [
+                        entry_id
+                        for entry_id in dict.fromkeys(cited)
+                        if entry_id not in entries.partial and entries.holds(entry_id, value)
+                    ],
+                )
+            )
+        return out
+
+    def _walk(node: Any, depth: int = 0) -> None:
+        if depth > 4:
+            return
+        if isinstance(node, str):
+            if _ABSENCE_RE.search(node):
+                _read(node)
+        elif isinstance(node, list | tuple):
+            for item in node:
+                _walk(item, depth + 1)
+        elif isinstance(node, dict):
+            for value in node.values():
+                _walk(value, depth + 1)
+
+    data = payload if isinstance(payload, dict) else getattr(payload, "__dict__", {}) or {}
+    _walk(data)
+    said = {
+        _NOT_READ: ("was not read", "were not read"),
+        _NOT_IN_LEDGER: ("is not in the ledger", "are not in the ledger"),
+        _NOT_CONFIRMED: (
+            "is not confirmed by the entry it cites",
+            "are not confirmed by the entry they cite",
+        ),
+    }
+    return [
+        Violation(
+            code=ABSENCE_CONTRADICTS_LEDGER_CODE,
+            message=(
+                f"The text says {safe_finding_value(_named_ids(whats))} "
+                f"{safe_finding_value(said[kind][len(whats) > 1])} "
+                f"({safe_finding_value(marked_cut(sentence, 200))!r}); "
+                f"{safe_finding_value(_named_ids(entries.named(i) for i in holders))} "
+                f"{safe_finding_value('holds' if len(holders) == 1 else 'hold')} "
+                f"{safe_finding_value('it' if len(whats) == 1 else 'them')} in this run. State "
+                "what that entry shows, or say exactly what is absent."
+            ),
+            path="prose",
+        )
+        for kind, whats, holders, sentence in found
+    ]
 
 
 # ---------------------------------------------------------------------------

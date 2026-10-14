@@ -889,3 +889,107 @@ R2_TOOLS: dict[str, dict[str, Any]] = {
     "use_decompiler": {"category": "tool", "kind": "decompiler_choice"},
     "xrefs_to": {"arguments": {"address": "address"}, "category": "tool", "kind": "xrefs"},
 }
+
+# The tools of each server that only read the open program: decompiles,
+# disassembly, cross-references, program and function facts, listings,
+# searches and strings. Each is declared ``read_only``: an identical call
+# answers the same while nothing changed the program (``ToolFacts.read_only``).
+# A tool that renames, comments, patches, sets, saves, imports, opens,
+# analyses, emulates or polls a status is not, nor one in doubt (radare2's
+# ``show_function_details`` and ``show_info`` answer for the current seek,
+# which another read can move, so they are left unmarked).
+GHIDRA_READ_ONLY: frozenset[str] = frozenset(
+    {
+        "batch_decompile",
+        "batch_string_anchor_report",
+        "decompile_function",
+        "disassemble_bytes",
+        "disassemble_function",
+        "get_address_spaces",
+        "get_assembly_context",
+        "get_bulk_function_hashes",
+        "get_bulk_xrefs",
+        "get_current_program_info",
+        "get_entry_points",
+        "get_enum_values",
+        "get_external_location",
+        "get_field_access_context",
+        "get_full_call_graph",
+        "get_function_by_address",
+        "get_function_call_graph",
+        "get_function_callees",
+        "get_function_callers",
+        "get_function_count",
+        "get_function_documentation",
+        "get_function_hash",
+        "get_function_jump_targets",
+        "get_function_labels",
+        "get_function_signature",
+        "get_function_variables",
+        "get_function_xrefs",
+        "get_metadata",
+        "get_plate_comment",
+        "get_struct_layout",
+        "get_type_size",
+        "get_xrefs_from",
+        "get_xrefs_to",
+        "inspect_memory_content",
+        "list_bookmarks",
+        "list_calling_conventions",
+        "list_classes",
+        "list_data_items",
+        "list_data_items_by_xrefs",
+        "list_data_type_categories",
+        "list_data_types",
+        "list_exports",
+        "list_external_locations",
+        "list_functions",
+        "list_functions_enhanced",
+        "list_globals",
+        "list_imports",
+        "list_methods",
+        "list_namespaces",
+        "list_segments",
+        "list_strings",
+        "read_memory",
+        "search_byte_patterns",
+        "search_data_types",
+        "search_functions",
+        "search_functions_enhanced",
+        "search_strings",
+    }
+)
+R2_READ_ONLY: frozenset[str] = frozenset(
+    {
+        "decompile_function",
+        "disassemble",
+        "disassemble_function",
+        "get_function_prototype",
+        "list_all_strings",
+        "list_classes",
+        "list_entrypoints",
+        "list_exports",
+        "list_functions",
+        "list_functions_tree",
+        "list_imports",
+        "list_libraries",
+        "list_memory_maps",
+        "list_methods",
+        "list_sections",
+        "list_strings",
+        "list_symbols",
+        "xrefs_to",
+    }
+)
+
+
+def _mark_read_only(tools: dict[str, dict[str, Any]], names: frozenset[str]) -> None:
+    missing = sorted(names - set(tools))
+    if missing:
+        raise KeyError(f"read-only marks for undeclared tools: {missing}")
+    for name in names:
+        tools[name] = {**tools[name], "read_only": True}
+
+
+_mark_read_only(GHIDRA_TOOLS, GHIDRA_READ_ONLY)
+_mark_read_only(R2_TOOLS, R2_READ_ONLY)

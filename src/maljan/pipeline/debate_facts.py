@@ -7,9 +7,21 @@ things:
 - **states facts**: for a listed line whose cited ledger entries (cited by
   the line itself, or by a claim the line names) hold, in a field whose name
   says count or total, a number the line itself states, it states every such
-  value, also when two entries disagree. No call is made for them: they ride
-  on the calls the debate makes anyway, the revision directive of the analysts
-  the line names and the next mediation's prompt;
+  value, also when two entries disagree; the length of a list field only
+  where its key names the noun the line counts with that number ("0 hits"
+  for ``matches``). No call is made for them: they ride on the calls the
+  debate makes anyway, the revision directive of the analysts the line names
+  and the next mediation's prompt;
+- **says what the ledger already stated**: a blocking line that disputes a
+  count itself (two numbers for one noun: "three matches" against "0 hits"),
+  every count of which (a number before a plural noun: "0 hits", "31 rules") the cited
+  entries state, in keys naming its nouns, as one record that agrees with
+  itself, and whose facts an earlier mediation of the debate told the
+  analysts, is stated and told (``ledger_stated``). The line stays a blocking
+  line, and the next mediation is shown it was told, so the mediator decides
+  whether it still blocks. When every blocking line of a mediation is stated
+  and told, the debate ends on its own reason (``routing.LEDGER_STATED``),
+  never as consensus. A line with a count no entry states is never stated;
 - **reads marks**: the mediator ends each line with ``[blocking: <reason>]`` or
   ``[not blocking: <reason>]``. A line marked not blocking does not stand
   against consensus. An unmarked line blocks, as every line did before marks
@@ -26,6 +38,7 @@ size are left out.
 
 from __future__ import annotations
 
+import bisect
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -38,9 +51,11 @@ _ENTRY_ID = re.compile(r"\bev_\d+\b")
 # A decimal number standing alone.
 _NUMBER = re.compile(r"(?<![\w.%])\d+(?![\w%]|\.\d)")
 # The claim numbers after "Claim" or "Claims": "Claim 3", "Claims 4/40".
+# Each run of whitespace is read from its start and possessively, so a long
+# run is read once (linear time).
 _CLAIM_NUMBERS = re.compile(
-    r"\s+(?:ANALYST\s+)?(?:['’]s\s+)?claims?\s*#?\s*"
-    r"(\d+(?:\s*(?:/|,|&|and|\+)\s*#?\d+)*)",
+    r"(?<!\s)\s++(?:ANALYST\s++)?(?:['’]s\s++)?claims?\s*+#?\s*+"
+    r"(\d++(?:\s*+(?:/|,|&|and|\+)\s*+#?\d++)*+)",
     re.IGNORECASE,
 )
 # A key of a tool's structured answer that holds a count, and one that holds a
@@ -137,18 +152,98 @@ def _entry_fields(entry: Any) -> tuple[str, str, Any]:
     )
 
 
-def _counts_of(structured: Any) -> list[tuple[str, int]]:
-    """The integer count fields at the top of a tool's structured answer."""
+def _counts_of(structured: Any) -> list[tuple[str, int, str, bool]]:
+    """The counts at the top of a tool's structured answer: ``(key, count, as stated, listed)``.
+
+    An integer field whose name says count or total, and the length of a list
+    field (a match list, a hit list), which is how many items the answer holds
+    (``listed``).
+    """
     if not isinstance(structured, Mapping):
         return []
-    return [
-        (str(key), int(value))
-        for key, value in structured.items()
-        if _COUNT_KEY.search(str(key))
-        and not _NOT_A_COUNT_KEY.search(str(key))
-        and isinstance(value, int)
-        and not isinstance(value, bool)
-    ]
+    found: list[tuple[str, int, str, bool]] = []
+    for key, value in structured.items():
+        if _NOT_A_COUNT_KEY.search(str(key)):
+            continue
+        if isinstance(value, list):
+            found.append((str(key), len(value), f"{len(value)} items", True))
+        elif _COUNT_KEY.search(str(key)) and isinstance(value, int) and not isinstance(value, bool):
+            found.append((str(key), int(value), str(int(value)), False))
+    return found
+
+
+# The number words a count may be written with ("three YARA matches").
+_NUMBER_WORDS: dict[str, int] = {
+    word: value
+    for value, word in enumerate(
+        "zero one two three four five six seven eight nine ten eleven twelve thirteen "
+        "fourteen fifteen sixteen seventeen eighteen nineteen twenty".split()
+    )
+} | {"thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
+# A count a line states: a number, in digits or a number word, directly
+# before a plural noun, at most one word (an adjective) between them ("0
+# hits", "31 rules", "three YARA matches"). The noun is the first plural word
+# after the number. Every run is read possessively, so a start scans each word
+# once. A number after a slash is a ratio's (``_PARTITIVE_BEFORE``).
+_STATED_COUNT = re.compile(
+    r"(?<![\w.%#/])(\d++|(?i:" + "|".join(sorted(_NUMBER_WORDS, key=len, reverse=True)) + r")\b)"
+    r"\s++(?:[A-Za-z][\w-]*+\s++)??([A-Za-z][\w-]*+)(?<=s)\b"
+)
+# What makes a number the whole of a partitive or a ratio, never a count of
+# the noun after it: "of" or "out of" before it ("0 hits of 31 rules", "two of
+# the three rules", "3 out of 31 rules"), or a slash ("3/31 rules"). Read in
+# a short window before the number, so a line is read once.
+_PARTITIVE_BEFORE = re.compile(r"(?:\bout\s++)?\bof(?:\s++the)?\s*+$|/\s*+$", re.IGNORECASE)
+_PARTITIVE_WINDOW = 24
+# What separates the sides of a disputed line: a count dispute needs two
+# numbers for one noun written by two sides ("A reports three matches while B
+# reports 0 hits"); two numbers in one side's own statement ("31 rules
+# loaded, 3 matched") are two quantities, not a dispute.
+_SIDE_BREAK = re.compile(
+    r"\b(?:while|whereas|but|against|versus|vs|although|though|however|yet)\b|;",
+    re.IGNORECASE,
+)
+
+
+def _count_value(written: str) -> int:
+    """A count as written: digits, or a number word."""
+    return int(written) if written.isdecimal() else _NUMBER_WORDS[written.lower()]
+
+
+# The words of a key's name ("rule_count", "hitCount"), and the ones that only
+# say the field is a count.
+_KEY_WORD = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])")
+_COUNT_WORDS = frozenset({"count", "counts", "total", "totals", "num", "number", "n"})
+# Two count nouns that name one thing: a rule scan's hit is its match. A
+# closed, deliberately minimal vocabulary: any other pair ("detections",
+# "alerts" against "matches") is not joined, which leaves such a line
+# unstated, never wrongly stated. Not to be widened without a review.
+_SAME_COUNT_NOUN = {"hit": "match"}
+
+
+def _singular(word: str) -> str:
+    """``word`` lower-cased, its plural ending off ("matches" is "match", "entries" "entry")."""
+    w = word.lower()
+    if len(w) > 3 and w.endswith("ies"):
+        return w[:-3] + "y"
+    if w.endswith(("ches", "shes", "sses", "xes", "zes")):
+        return w[:-2]
+    if w.endswith("s") and not w.endswith("ss"):
+        return w[:-1]
+    return w
+
+
+def _count_noun(word: str) -> str:
+    """The noun a count names, folded: its last run of letters, singular."""
+    letters = re.findall(r"[A-Za-z]+", word)
+    noun = _singular(letters[-1]) if letters else ""
+    return _SAME_COUNT_NOUN.get(noun, noun)
+
+
+def _key_noun(key: str) -> str:
+    """The noun a count key names ("rule_count" is "rule", "matches" "match"), or ``""``."""
+    words = [w for w in _KEY_WORD.findall(str(key)) if w.lower() not in _COUNT_WORDS]
+    return _count_noun(words[-1]) if words else ""
 
 
 def ledger_count_facts(
@@ -160,48 +255,250 @@ def ledger_count_facts(
     """One sentence per listed line whose cited entries state a count the line states.
 
     The numbers a line states are its decimal numbers, its claim numbers, hex
-    values and ledger ids aside; only a count equal to one of them is stated,
-    every such count of every cited entry. Never raises on a line it cannot
-    read.
+    values and ledger ids aside. A field whose name says count or total is
+    stated when its value is one of them, every such count of every cited
+    entry; a list field's length only when, besides, its key names the noun
+    the line counts with that number ("0 hits" for ``matches``, "3 domains"
+    for ``domains``). Never raises on a line it cannot read.
     """
     names = list(agent_names) or [str(k) for k in isr_reports]
+    entries = _ledger_counts_by_id(ledger)
+    facts: list[str] = []
+    for line in lines:
+        text = str(line)
+        stated = _line_counts(text, names, entries, isr_reports).said
+        if stated:
+            facts.append(f'For the line "{text}": {"; ".join(stated)}.')
+    return facts
+
+
+@dataclass(frozen=True)
+class _LineCounts:
+    """What the cited entries state for one line, and whether they state every count of it."""
+
+    said: tuple[str, ...] = ()
+    # Whether the line states at least one count (a number before a plural
+    # noun) and the cited entries state each one as one record that agrees
+    # with itself (``_answers``).
+    answered: bool = False
+    # ``(entry id, "key = value")`` for each fact that states one of the
+    # line's counts: the ones the analysts must have been told.
+    atoms: frozenset[tuple[str, str]] = frozenset()
+
+
+def _ledger_counts_by_id(ledger: Iterable[Any]) -> dict[str, tuple[str, Any]]:
     entries: dict[str, tuple[str, Any]] = {}
     for entry in ledger or ():
         entry_id, tool, structured = _entry_fields(entry)
         if entry_id:
             entries[entry_id] = (tool, structured)
-    facts: list[str] = []
-    for line in lines:
-        text = str(line)
-        try:
-            bare = _CLAIM_NUMBERS.sub(
-                " ", re.sub(r"\b0x[0-9a-fA-F]+\b", " ", _ENTRY_ID.sub(" ", text))
-            )
-            numbers = {int(n) for n in _NUMBER.findall(bare)}
-            if not numbers:
+    return entries
+
+
+def _answers(
+    sided: set[tuple[int, str, int]],
+    by_entry: Sequence[tuple[str, list[tuple[str, int, str, bool]]]],
+) -> tuple[bool, frozenset[tuple[str, str]]]:
+    """Whether the line disputes a count the cited entries state, and the facts that state it.
+
+    The dispute must be about the count itself: two sides of the line
+    (``_SIDE_BREAK``) write two different numbers directly before one noun
+    ("three matches" against "0 hits"); ``sided`` holds each count with the
+    side it was written on. Two numbers on one side ("31 rules loaded, 3
+    matched") are two quantities, and a partitive is no count. A line whose
+    sides read different facts differently ("0 matches as benign" against
+    "31 rules as malicious") writes one number per noun and is a dispute
+    about meaning the ledger does not answer. Each noun the line counts must
+    be stated by the cited entries in a field whose key names it, with one
+    value: for a disputed noun one of the line's numbers, for any other the
+    line's own. The entries must agree (every cited field of a counted noun
+    holds one value) and be one record: an entry that states one of the
+    line's nouns states all of them (0 connections in one entry against 2
+    domains in another is no record).
+    """
+    written: dict[str, set[int]] = {}
+    by_side: dict[str, dict[int, set[int]]] = {}
+    for value, noun, side in sided:
+        written.setdefault(noun, set()).add(value)
+        by_side.setdefault(noun, {}).setdefault(side, set()).add(value)
+
+    def _two_sides_differ(sides: dict[int, set[int]]) -> bool:
+        # Two sides each write one number for the noun, and they differ. A
+        # side writing two numbers for it ("31 rules loaded, 3 matched") is
+        # two quantities of its own: unsure, so no dispute.
+        if len(sides) < 2 or any(len(values) > 1 for values in sides.values()):
+            return False
+        return len({next(iter(values)) for values in sides.values()}) > 1
+
+    if not any(_two_sides_differ(sides) for sides in by_side.values()):
+        return False, frozenset()
+    nouns = set(written)
+    values: dict[str, set[int]] = {}
+    facts: list[tuple[str, str, int, str]] = []
+    for entry_id, counts in by_entry:
+        held = {(_key_noun(key), value, f"{key} = {shown}") for key, value, shown, _l in counts}
+        named = {noun for noun, _value, _shown in held if noun in nouns}
+        if named and named != nouns:
+            return False, frozenset()
+        for noun, value, shown in held:
+            if noun in nouns:
+                values.setdefault(noun, set()).add(value)
+                facts.append((entry_id, noun, value, shown))
+    for noun, line_values in written.items():
+        stated = values.get(noun, set())
+        if len(stated) != 1 or not stated <= line_values:
+            return False, frozenset()
+    return True, frozenset((entry_id, shown) for entry_id, _noun, _value, shown in facts)
+
+
+def _count_or_reference(match: re.Match[str]) -> str:
+    """A claim reference taken out of a line, or kept where it may be a count.
+
+    "claims" with one number after it ("the analyst claims 2 domains") reads
+    as a verb as well as a reference, so it is kept for the counts.
+    """
+    head = match.group(0)[: match.start(1) - match.start(0)]
+    if match.group(1).isdecimal() and re.search(r"claims\s*+$", head, re.IGNORECASE):
+        return match.group(0)
+    return " "
+
+
+def _line_counts(
+    text: str,
+    names: Sequence[str],
+    entries: Mapping[str, tuple[str, Any]],
+    isr_reports: Mapping[str, Any],
+) -> _LineCounts:
+    """The counts the entries a line cites state that the line states too. Never raises."""
+    try:
+        idless = re.sub(r"\b0x[0-9a-fA-F]+\b", " ", _ENTRY_ID.sub(" ", text))
+        bare = _CLAIM_NUMBERS.sub(" ", idless)
+        numbers = {int(n) for n in _NUMBER.findall(bare)}
+        if not numbers:
+            return _LineCounts()
+        # The counts are read with one number after "claims" kept: "the
+        # analyst claims 2 domains" may be a count, and a count read that the
+        # ledger does not state leaves the line unstated.
+        read = _CLAIM_NUMBERS.sub(_count_or_reference, idless)
+        breaks = [m.start() for m in _SIDE_BREAK.finditer(read)]
+        sided: set[tuple[int, str, int]] = set()
+        for match in _STATED_COUNT.finditer(read):
+            if _PARTITIVE_BEFORE.search(
+                read, max(0, match.start() - _PARTITIVE_WINDOW), match.start()
+            ):
                 continue
-            cited = list(dict.fromkeys(_ENTRY_ID.findall(text)))
-            for name, claim_numbers in _claims_named(text, names):
-                claims = _claims_of(isr_reports, name)
-                for number in claim_numbers:
-                    place = _claim_place(number, len(claims))
-                    if place is not None:
-                        ref = str(getattr(claims[place], "evidence_ref", "") or "")
-                        cited.extend(i for i in _ENTRY_ID.findall(ref) if i not in cited)
-            stated = []
-            for entry_id in cited:
-                if entry_id not in entries:
-                    continue
-                tool, structured = entries[entry_id]
-                counts = [(key, value) for key, value in _counts_of(structured) if value in numbers]
-                if counts:
-                    said = ", ".join(f"{key} = {value}" for key, value in counts)
-                    stated.append(f"entry {entry_id}{f' ({tool})' if tool else ''} states {said}")
-        except Exception:  # noqa: BLE001 — a line that cannot be read gets no fact
-            continue
-        if stated:
-            facts.append(f'For the line "{text}": {"; ".join(stated)}.')
-    return facts
+            side = bisect.bisect_right(breaks, match.start())
+            sided.add((_count_value(match.group(1)), _count_noun(match.group(2)), side))
+        counted = {(value, noun) for value, noun, _side in sided}
+        nouns_of: dict[int, set[str]] = {}
+        for value, noun in counted:
+            nouns_of.setdefault(value, set()).add(noun)
+        cited = list(dict.fromkeys(_ENTRY_ID.findall(text)))
+        for name, claim_numbers in _claims_named(text, names):
+            claims = _claims_of(isr_reports, name)
+            for number in claim_numbers:
+                place = _claim_place(number, len(claims))
+                if place is not None:
+                    ref = str(getattr(claims[place], "evidence_ref", "") or "")
+                    cited.extend(i for i in _ENTRY_ID.findall(ref) if i not in cited)
+        stated: list[str] = []
+        by_entry: list[tuple[str, list[tuple[str, int, str, bool]]]] = []
+        for entry_id in cited:
+            if entry_id not in entries:
+                continue
+            tool, structured = entries[entry_id]
+            held = _counts_of(structured)
+            by_entry.append((entry_id, held))
+            counts = [
+                (key, shown)
+                for key, value, shown, listed in held
+                if value in numbers and (not listed or _key_noun(key) in nouns_of.get(value, ()))
+            ]
+            if counts:
+                said = ", ".join(f"{key} = {shown}" for key, shown in counts)
+                stated.append(f"entry {entry_id}{f' ({tool})' if tool else ''} states {said}")
+        answered, atoms = _answers(sided, by_entry)
+        return _LineCounts(said=tuple(stated), answered=answered, atoms=atoms)
+    except Exception:  # noqa: BLE001 — a line that cannot be read gets no fact
+        return _LineCounts()
+
+
+# One entry's part of a stated fact: its id, its tool and the counts it lists.
+# The facts are split on the part separator first and each part is read with
+# one anchored match, so a long fact is read in one pass.
+_PART_SEPARATOR = re.compile(r"; entry (?=ev_\d++ )")
+_STATED_PART = re.compile(r"(ev_\d++)(?: \([^)]*+\))? states (.*)", re.DOTALL)
+
+
+def fact_atoms(facts: Iterable[str]) -> frozenset[tuple[str, str]]:
+    """``(entry id, "key = value")`` for every count these stated facts carry."""
+    atoms: set[tuple[str, str]] = set()
+    for fact in facts:
+        text = str(fact)
+        head = text.rfind('": entry ev_')
+        body = text[head + 3 :] if head >= 0 else text
+        body = body.removeprefix("entry ").removesuffix(".")
+        for part in _PART_SEPARATOR.split(body):
+            match = _STATED_PART.match(part)
+            if match is None:
+                continue
+            for count in match.group(2).split(", "):
+                atoms.add((match.group(1), count.strip()))
+    return frozenset(atoms)
+
+
+def ledger_stated(
+    lines: Sequence[str],
+    isr_reports: Mapping[str, Any],
+    ledger: Iterable[Any],
+    agent_names: Iterable[str],
+    told: Iterable[str],
+) -> list[tuple[str, tuple[str, ...]]]:
+    """``(line, facts)`` for each blocking line the ledger states and the analysts were told.
+
+    A line is stated when the cited entries state every count it states
+    (``_answers``: a key naming the counted noun, entries that agree, one
+    record). It is told when, besides, every fact stating one of its counts
+    was stated by an earlier mediation of the debate (``told``). The line is
+    never taken away: it stays among the mediation's blocking lines, and the
+    next mediation is shown that it was told. When every blocking line of a
+    mediation is stated and told, another round would argue counts the
+    analysts already heard, and the debate ends on its own reason
+    (``routing.LEDGER_STATED``). Each line once. Linear in the lines, the
+    claims they name and the ledger.
+    """
+    names = list(agent_names) or [str(k) for k in isr_reports]
+    entries = _ledger_counts_by_id(ledger)
+    heard = fact_atoms(told)
+    found: list[tuple[str, tuple[str, ...]]] = []
+    if not heard:
+        return found
+    for text in dict.fromkeys(str(line) for line in lines):
+        counts = _line_counts(text, names, entries, isr_reports)
+        if counts.answered and counts.atoms <= heard:
+            found.append((text, counts.said))
+    return found
+
+
+# The head of the lines the next mediation is shown as stated and told.
+LEDGER_STATED_HEAD = (
+    "The ledger states every count these blocking lines of the last mediation state, and "
+    "the analysts they name were told those counts in an earlier round:"
+)
+
+
+def ledger_stated_sentence(line: str, facts: Sequence[str]) -> str:
+    """The run's record of one blocking line the ledger states, told before."""
+    return f'Stated by the ledger and told to the analysts before: "{line}": {"; ".join(facts)}.'
+
+
+def with_ledger_stated(text: str, sentences: Sequence[str]) -> str:
+    """``text`` with the stated-and-told lines after it under their head, or as it was."""
+    said = [str(s) for s in sentences if str(s).strip()]
+    if not said:
+        return text
+    block = "\n".join([LEDGER_STATED_HEAD, *(f"- {s}" for s in said)])
+    return f"{text}\n\n{block}" if text else block
 
 
 def facts_naming(name: str, facts: Iterable[str]) -> list[str]:

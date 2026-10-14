@@ -82,6 +82,7 @@ def _char_test(pattern: str, flags: int = 0) -> Callable[[str], bool]:
 _SPACE = _char_test(r"\s")
 _WORD = _char_test(r"\w")
 _DIGIT = _char_test(r"\d")
+_LETTER = _char_test(r"[A-Za-z]")
 
 
 @lru_cache(maxsize=4096)
@@ -365,7 +366,22 @@ _STARS = _opt(_seq(_one("*"), _one("*")))
 _HEAD_LABEL = _seq(
     _LINE_PREFIX,
     _word("CLAIM"),
-    _opt(_seq(_star(_SPACE_OR_TAB), _opt(_one("#")), ("plus", ("char", _DIGIT)))),
+    _opt(
+        _seq(
+            (
+                "alt",
+                [
+                    _seq(_star(_SPACE_OR_TAB), _opt(_one("#"))),
+                    _seq(
+                        ("plus", _SPACE_OR_TAB),
+                        _opt(_one("#")),
+                        ("plus", ("char", _LETTER)),
+                    ),
+                ],
+            ),
+            ("plus", ("char", _DIGIT)),
+        )
+    ),
 )
 _HEAD_NOTE = _seq(
     _star(_SPACE_OR_TAB),

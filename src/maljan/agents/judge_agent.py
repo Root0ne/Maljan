@@ -34,7 +34,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
@@ -79,7 +79,7 @@ from maljan.core.spend import SpendCeilingStop, call_deadline_of
 from maljan.core.token_ledger import TokenLedger, structured_answer
 from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
 from maljan.llm.answer_text import answer_text
-from maljan.llm.anthropic_history import keeps_turns_as_received
+from maljan.llm.anthropic_history import TOOL_LOOP_TURN, keeps_turns_as_received
 from maljan.llm.context_window import (
     ContextBudget,
     tool_definition_chars,
@@ -90,7 +90,7 @@ from maljan.llm.transient import as_call
 from maljan.memory.attck_loader import technique_label
 from maljan.memory.long_term_memory import a_past_case_technique
 from maljan.memory.technique_cards import technique_card_lines
-from maljan.pipeline.debate_facts import read_marks, with_ledger_facts
+from maljan.pipeline.debate_facts import read_marks, with_ledger_facts, with_ledger_stated
 from maljan.pipeline.events import emit_judge_question, safe_finding_value, scrub
 from maljan.pipeline.mediation_models import (
     CONTRADICTIONS_BLOCK_MISSING_NOTE,
@@ -1548,11 +1548,16 @@ def _seconds_or_none(value: Any) -> float | None:
     return None if value is None else float(value)
 
 
-def _last_ledger_facts(history: Sequence[Any]) -> list[str]:
-    """The ledger counts the platform stated for the last mediation's lines, or none."""
+def _last_ledger_facts(history: Sequence[Any], field: str = "ledger_facts") -> list[str]:
+    """What the platform recorded in ``field`` for the last mediation's lines, or none.
+
+    ``ledger_facts`` are the ledger counts it stated; ``ledger_stated`` the
+    blocking lines every count of which the ledger states and the analysts
+    were told before.
+    """
     for argument in reversed(list(history or [])):
         if getattr(argument, "agent_name", "") == "Mediator":
-            return [str(f) for f in getattr(argument, "ledger_facts", None) or []]
+            return [str(f) for f in getattr(argument, field, None) or []]
     return []
 
 
@@ -2088,6 +2093,22 @@ class JudgeAgent(BudgetMeter):
             )
             _hold_the_turn(held_binding, self.llm, held)
             self._publish_questions(conversation, asked)
+            # Each turn after the loop's first tool round says it is a loop
+            # turn, as an analyst's does, for a provider that caches a
+            # conversation it will send again (``anthropic_history``): that
+            # turn writes the prompt's prefix and every later turn reads it.
+            # The first request is not noted: most mediations answer on it, and
+            # a single-turn call pays no write premium for a prefix nothing
+            # reads. The note rides the request alone, never the loop's own
+            # messages.
+            if conversation and any(isinstance(m, AIMessage) for m in conversation):
+                last = conversation[-1]
+                sent = last.model_copy()
+                sent.response_metadata = {
+                    **(getattr(last, "response_metadata", None) or {}),
+                    TOOL_LOOP_TURN: True,
+                }
+                return [*conversation[:-1], sent]
             return conversation
 
         # The key this loop's turns are counted and reserved under.
@@ -2529,7 +2550,13 @@ class JudgeAgent(BudgetMeter):
         # benign even when YARA had a hit.
         # The counts the ledger states for the lines the last mediation listed,
         # carried on this call rather than asked in one of their own.
-        last_counts = with_ledger_facts("", _last_ledger_facts(history))
+        # And the blocking lines of it every count of which the ledger states
+        # and the analysts were told: the mediator decides whether each still
+        # blocks.
+        last_counts = with_ledger_stated(
+            with_ledger_facts("", _last_ledger_facts(history)),
+            _last_ledger_facts(history, "ledger_stated"),
+        )
         carried_facts = f"{last_counts}\n\n" if last_counts else ""
         prompt_messages = [
             (

@@ -1424,7 +1424,9 @@ _BLOCK_EVIDENCE_LABEL_RE = re.compile(_INLINE + r"EVIDENCE:[ \t]*", re.MULTILINE
 _EVIDENCE_ENDS_AT_LINE_START_RE = re.compile(
     r"\n" + LINE_PREFIX + r"(?:CONFIDENCE|(?i:TECHNIQUE)):"
 )
-_EVIDENCE_ENDS_INLINE_RE = re.compile(r"\s+" + LINE_PREFIX + r"(?:CONFIDENCE|TECHNIQUE):")
+# A run of whitespace is read from its start and possessively, so a long run
+# is read once, not once per character of it.
+_EVIDENCE_ENDS_INLINE_RE = re.compile(r"(?<!\s)\s++" + LINE_PREFIX + r"(?:CONFIDENCE|TECHNIQUE):")
 # The CONFIDENCE value as written: what follows the label on its line, read
 # by ``_stated_confidence``. A label present with nothing readable after it is
 # a confidence the reader could not read, not one the analyst left out.
@@ -1511,16 +1513,26 @@ def _field(
 _ONE_TECHNIQUE_RE = re.compile(r"T\d{4}(?:\.\d{3})?", re.IGNORECASE)
 # What a TECHNIQUE line says to claim none.
 _NO_TECHNIQUE = frozenset({"", "NONE", "—", "–", "-"})
+# A line that opens with "none" and words after it ("none asserted", "none
+# (capability only)"): it claims none whatever the words say, when no
+# technique id and no catalogue technique name stands anywhere on it; with an
+# id or a name on it ("None; Process Injection is likely"), the words may name
+# one and the line is asked about.
+_NONE_WITH_WORDS_RE = re.compile(r"none\b", re.IGNORECASE)
+_ANY_TECHNIQUE_ID_RE = re.compile(r"(?<![\w.])T\d{4}(?:\.\d{3})?(?!\w)", re.IGNORECASE)
 # What separates the ids of a list on one TECHNIQUE line: a comma, "and", both
 # ("T1027, T1140, and T1106"), or a slash ("T1027 / T1140"). Every part must be
 # an id and nothing else; "or", "and/or", a doubled or trailing slash, or any
 # word beside an id leaves the line whole and asked about.
-_TECHNIQUE_LIST_SEPARATOR_RE = re.compile(r"\s*,\s*(?:and\s+)?|\s+and\s+|\s*/\s*", re.IGNORECASE)
+# Each run of whitespace is read from its start and possessively (linear time).
+_TECHNIQUE_LIST_SEPARATOR_RE = re.compile(
+    r"(?<!\s)\s*+,\s*+(?:and\s++)?|(?<!\s)\s++and\s++|(?<!\s)\s*+/\s*+", re.IGNORECASE
+)
 # The claim format's own block separator, "---", written at the end of a
 # TECHNIQUE line with a dot or bar before it ("TECHNIQUE: T1027 · ---", the
 # next claim on the line after). It is no part of what the line claims. A
 # next claim written on the same line after it is not read by this.
-_TRAILING_BLOCK_SEPARATOR_RE = re.compile(r"[\s·•|]*-{3,}\s*$")
+_TRAILING_BLOCK_SEPARATOR_RE = re.compile(r"(?<![\s·•|])[\s·•|]*+-{3,}+\s*+$")
 
 
 def _bare_technique(text: str) -> str:
@@ -1532,6 +1544,16 @@ def _bare_technique(text: str) -> str:
 _ID_WITH_BRACKETED_WORDS_RE = re.compile(
     r"(?<![\w.])(?P<id>T\d{4}(?:\.\d{3})?)\s*\((?P<words>[^()]*)\)", re.IGNORECASE
 )
+# An id at a place in a list item, and what separates it from the words after
+# it: a space, a dash or a colon (``_without_unbracketed_names``). Anchored at
+# the place it is tried, and every part of it possessive, so a try costs the
+# characters it reads.
+_ID_AT_RE = re.compile(r"(?P<id>T\d{4}(?:\.\d{3})?+)(?:\s*+[-–—:]\s*+|\s++)(?=[A-Za-z])", re.I)
+# Where an id may begin in an item: a T after no word character or dot.
+_ID_START_RE = re.compile(r"(?<![\w.])T(?=\d)", re.IGNORECASE)
+# What ends a list item, and what a name with no bracket never holds.
+_ITEM_END_RE = re.compile(r"[,;]")
+_NOT_IN_A_NAME = frozenset("()[]\n")
 
 
 def _catalogue_names_for(technique_id: str) -> set[str]:
@@ -1553,12 +1575,35 @@ def _catalogue_names_for(technique_id: str) -> set[str]:
     return {name for name in names if name}
 
 
+def _names_a_technique(text: str) -> bool:
+    """Whether ``text`` writes a vendored catalogue technique's name anywhere, folded.
+
+    Every run of words up to the longest name's length is looked up once in
+    the set of folded names: linear in the text.
+    """
+    from maljan.memory.attck_loader import _folded_name, technique_names
+
+    names = {_folded_name(name) for name in technique_names().values()}
+    names.discard("")
+    if not names:
+        return False
+    longest = max(len(name.split()) for name in names)
+    words = _folded_name(text).split()
+    for start in range(len(words)):
+        for size in range(1, min(longest, len(words) - start) + 1):
+            if " ".join(words[start : start + size]) in names:
+                return True
+    return False
+
+
 def _without_catalogue_names(text: str) -> str:
-    """``text`` with each bracketed catalogue name after its own id taken off.
+    """``text`` with each catalogue name after its own id taken off, bracketed or not.
 
     Only words that are the vendored catalogue's own name for the id they
-    follow are taken off; any other bracketed words stay where they are, and
-    the line is read as it always was.
+    follow are taken off; any other words stay where they are, and the line
+    is read as it always was. A name with no bracket runs to the next comma,
+    semicolon or the line's end, and is taken off only when all of it is the
+    id's name.
     """
     from maljan.memory.attck_loader import _folded_name
 
@@ -1568,7 +1613,42 @@ def _without_catalogue_names(text: str) -> str:
             return match.group("id")
         return match.group(0)
 
-    return _ID_WITH_BRACKETED_WORDS_RE.sub(_plain, text)
+    return _without_unbracketed_names(_ID_WITH_BRACKETED_WORDS_RE.sub(_plain, text))
+
+
+def _without_unbracketed_names(text: str) -> str:
+    """``text`` with an id's catalogue name written after it with no bracket taken off.
+
+    Read item by item (the text between commas and semicolons), each once:
+    the name runs from after the id's space, dash or colon to the item's end,
+    trailing whitespace aside, and is the first id of the item whose words to
+    the end hold no bracket or line break. Taken off only when all of it is
+    the id's catalogue name; any other item is kept as written. Linear in the
+    text.
+    """
+    from maljan.memory.attck_loader import _folded_name
+
+    out: list[str] = []
+    at = 0
+    for end in [m.start() for m in _ITEM_END_RE.finditer(text)] + [len(text)]:
+        item = text[at:end]
+        # The last bracket or line break of the item: a name runs past none.
+        last_stop = max((i for i, ch in enumerate(item) if ch in _NOT_IN_A_NAME), default=-1)
+        replaced = item
+        for start in _ID_START_RE.finditer(item):
+            found = _ID_AT_RE.match(item, start.start())
+            if found is None or found.end() <= last_stop:
+                continue
+            words = item[found.end() :].rstrip()
+            folded = _folded_name(words)
+            if folded and folded in _catalogue_names_for(found.group("id").upper()):
+                trailing = item[found.end() + len(words) :]
+                replaced = item[: start.start()] + found.group("id") + trailing
+            break
+        out.append(replaced)
+        out.append(text[end : end + 1])
+        at = end + 1
+    return "".join(out)
 
 
 def _numbered_in_order(chunks: list[Any]) -> list[Any]:
@@ -1603,12 +1683,20 @@ def read_technique_line(line: str) -> tuple[tuple[str, ...], str | None]:
     reader could name without deciding what the words mean, so no id is read
     and the line is returned as written, for the validation turn to ask about
     (``isr.technique_line_unread``). An id followed by the vendored
-    catalogue's own name for it in brackets ("T1027 (Obfuscated Files or
-    Information)") is that id: the bracket names the id and decides nothing.
+    catalogue's own name for it, in brackets or not ("T1027 (Obfuscated Files
+    or Information)", "T1106 Native API"), is that id: the name names the id
+    and decides nothing. A line that opens with "none" and holds no technique
+    id ("none asserted") claims none.
     """
     text = str(line or "").strip()
     bare = _bare_technique(_without_catalogue_names(_TRAILING_BLOCK_SEPARATOR_RE.sub("", text)))
     if bare.upper() in _NO_TECHNIQUE:
+        return (), None
+    if (
+        _NONE_WITH_WORDS_RE.match(bare)
+        and not _ANY_TECHNIQUE_ID_RE.search(bare)
+        and not _names_a_technique(bare)
+    ):
         return (), None
     parts = [_bare_technique(part) for part in _TECHNIQUE_LIST_SEPARATOR_RE.split(bare)]
     if parts and all(_ONE_TECHNIQUE_RE.fullmatch(part) for part in parts):
@@ -1703,7 +1791,7 @@ def evidence_ref_width() -> int:
 # The start of an id the cut sliced through, at the end of the kept text: any
 # prefix of ``[ev_NNNN``, from the bare bracket up to a whole id whose closing
 # bracket was cut, and the space before it. The whole id is written back.
-_PARTIAL_ID_AT_END_RE = re.compile(r"\s*(?:\[(?:e(?:v(?:_\d{0,4})?)?)?)?$", re.IGNORECASE)
+_PARTIAL_ID_AT_END_RE = re.compile(r"(?<!\s)\s*+(?:\[(?:e(?:v(?:_\d{0,4})?)?)?)?$", re.IGNORECASE)
 
 
 def evidence_ref_text(evidence_text: str) -> str:
@@ -2797,6 +2885,176 @@ def prompt_to_messages(prompt_messages: list[tuple[str, str]]) -> list[BaseMessa
     return built
 
 
+def current_run_state(agent: Any) -> str:
+    """``agent``'s run-state lines as of now, its budget aside; never raises.
+
+    The node renders the block once from the run's state when it briefs the
+    agent (``pipeline.nodes.brief_agent``), and the agent's own calls of this
+    node are filed after that: in its tool loop, and before every turn sent
+    after it (the nudge, the forced synthesis, a validation retry, a drops
+    question). So the block is rendered again from that state with the
+    entries the agent has filed since appended, and every turn reads the
+    ledger as it stands at that turn: a claim citing an entry the agent filed
+    is never told the ledger ends before it. An agent briefed without the
+    state (``run_state_source``), or with no entry of its own yet, reads the
+    block it was briefed with.
+    """
+    body = str(getattr(agent, "run_state_block", "") or "")
+    source = getattr(agent, "run_state_source", None)
+    if not body or not isinstance(source, Mapping):
+        return body
+    try:
+        own = [
+            *(getattr(agent, "_evidence_entries", None) or ()),
+            *(getattr(agent, "_live_map_entries", None) or ()),
+        ]
+        if not own:
+            return body
+        rows = list(source.get("evidence_ledger") or [])
+        held = {_row_id(row) for row in rows}
+        added: list[Any] = []
+        for entry in own:
+            entry_id = _row_id(entry)
+            if entry_id and entry_id not in held:
+                held.add(entry_id)
+                added.append(entry)
+        if not added:
+            return body
+        from maljan.pipeline.run_state import render_run_state
+
+        return render_run_state({**source, "evidence_ledger": [*rows, *added]}) or body
+    except Exception:  # noqa: BLE001 — the block the agent was briefed with still holds
+        return body
+
+
+def own_earlier_entries(agent: Any) -> list[LedgerEntry]:
+    """The entries ``agent`` filed in the run's earlier rounds, from the state it was briefed with.
+
+    Its own calls the run's ledger already held when the node briefed it
+    (``run_state_source``): a revision's first answer and the revisions before
+    it. None for an agent briefed without the state. Never raises.
+    """
+    source = getattr(agent, "run_state_source", None)
+    name = str(getattr(agent, "name", "") or "")
+    if not isinstance(source, Mapping) or not name:
+        return []
+    found: list[LedgerEntry] = []
+    try:
+        for row in source.get("evidence_ledger") or ():
+            owner = row.get("agent") if isinstance(row, Mapping) else getattr(row, "agent", None)
+            if owner != name:
+                continue
+            try:
+                entry = row if isinstance(row, LedgerEntry) else LedgerEntry.model_validate(row)
+            except Exception:  # noqa: BLE001 — one unreadable row is not a lost guard
+                continue
+            found.append(entry)
+    except Exception:  # noqa: BLE001 — no seed is the guard as it was
+        return []
+    return found
+
+
+def repeatable_earlier_entries(agent: Any) -> list[LedgerEntry]:
+    """The agent's own earlier-round entries whose answer still holds, for tools that answer the same.
+
+    Of :func:`own_earlier_entries`, those of a tool the agent holds, on the
+    same server, that its server marks read-only or its declaration marks
+    read-only or idempotent (``tool_pinning.answers_again``), whose answer is
+    no failure (``evidence_recorder.holds_a_settled_answer``), and only while
+    no call that is not read-only ran on the same server after the entry was
+    recorded, by any agent of the run (:func:`_stale_after`): a rename or a
+    patch makes a later decompile of that server's program a new question. A
+    call of any other tool (a rename, a status poll, a submission) runs again
+    in a revision. Never raises.
+    """
+    from maljan.agents.evidence_recorder import entry_server, holds_a_settled_answer
+    from maljan.agents.tool_pinning import answers_again, declared_source_of, server_of
+
+    try:
+        repeatable = {
+            (
+                server_of(tool) or declared_source_of(tool) or "",
+                str(getattr(tool, "name", "") or ""),
+            )
+            for tool in getattr(agent, "tools", None) or ()
+            if answers_again(tool)
+        }
+    except Exception:  # noqa: BLE001 — no tool read is no tool seeded
+        return []
+    if not repeatable:
+        return []
+    candidates = [
+        entry
+        for entry in own_earlier_entries(agent)
+        if (entry_server(entry), entry.tool) in repeatable and holds_a_settled_answer(entry)
+    ]
+    if not candidates:
+        return []
+    stale = _stale_after(agent, repeatable)
+    return [entry for entry in candidates if entry.id not in stale]
+
+
+def _entry_reads_only(row: Any, server: str, repeatable: set[tuple[str, str]]) -> bool:
+    """Whether a ledger row's call changed nothing: a read-only tool the agent holds on that
+    server, or one its stored source declares ``read_only``. Anything unknown may have changed
+    state; a tool is never judged by its name alone."""
+    tool = str(row.get("tool") if isinstance(row, Mapping) else getattr(row, "tool", "") or "")
+    if (server, tool) in repeatable:
+        return True
+    source = row.get("source") if isinstance(row, Mapping) else getattr(row, "source", None)
+    if not source:
+        return False
+    try:
+        from maljan.core.declared_reading import declarations
+
+        facts = declarations().declaration_for((str(source), tool))
+    except Exception:  # noqa: BLE001 — an unreadable declaration declares nothing
+        return False
+    return bool(facts is not None and getattr(facts, "read_only", False) is True)
+
+
+def _stale_after(agent: Any, repeatable: set[tuple[str, str]]) -> set[str]:
+    """The ids of the ledger's entries after which a call that is not read-only ran on their server.
+
+    Read once, newest first, from the state the agent was briefed with: a
+    server is marked changed at the first such call met, and every entry
+    older than it on that server is stale. Newest is the highest ``seq``, or,
+    when any row has none, the later place in the ledger. A call answered
+    from the record (``repeated_of``) ran nothing. Linear in the ledger.
+    """
+    from maljan.agents.evidence_recorder import entry_server
+
+    source = getattr(agent, "run_state_source", None)
+    if not isinstance(source, Mapping):
+        return set()
+
+    def _field(row: Any, name: str) -> Any:
+        return row.get(name) if isinstance(row, Mapping) else getattr(row, name, None)
+
+    rows = list(source.get("evidence_ledger") or ())
+    if all(isinstance(_field(row, "seq"), int) and _field(row, "seq") > 0 for row in rows):
+        rows.sort(key=lambda row: int(_field(row, "seq")))
+    changed: set[str] = set()
+    stale: set[str] = set()
+    for row in reversed(rows):
+        server = entry_server(
+            SimpleNamespace(server=_field(row, "server"), source=_field(row, "source"))
+        )
+        if server in changed:
+            stale.add(str(_field(row, "id") or ""))
+        if _field(row, "repeated_of"):
+            continue
+        if not _entry_reads_only(row, server, repeatable):
+            changed.add(server)
+    return stale
+
+
+def _row_id(row: Any) -> str:
+    """A ledger row's id, whether the row is an entry or its stored mapping."""
+    value = row.get("id") if isinstance(row, Mapping) else getattr(row, "id", None)
+    return str(value or "")
+
+
 def frame_messages(
     messages: list[BaseMessage], *, facts_block: str = "", run_state: str = ""
 ) -> list[BaseMessage]:
@@ -3433,6 +3691,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         # The run-state block's body, derived from the state by the node and
         # regenerated with the remaining budget on every turn of a tool loop.
         self.run_state_block: str = ""
+        # The state the node rendered that block from, so each turn renders it
+        # again with this agent's own new entries (:func:`current_run_state`).
+        self.run_state_source: Mapping[str, Any] | None = None
         # Per-run token ledger (findings-log §4 Item 1). The container attaches
         # the shared ledger in get_agent(); None when an agent runs standalone.
         self.token_ledger: TokenLedger | None = None
@@ -4084,14 +4345,14 @@ class BaseAnalyst(BudgetMeter, ABC):
     def _run_state_body(
         self, steps_left: int | NoLimit | None, seconds_left: float | NoLimit | None
     ) -> str:
-        """The node's run-state lines plus this loop's remaining budget.
+        """The run-state lines as of this turn (:func:`current_run_state`) plus this loop's budget.
 
         Once the conversation has no room left for a tool answer the block
         says so. Regenerated rather than appended, like the rest of it, so the
         fact costs the same whether the loop reads it once or forty times —
         which is what makes telling the model cheaper than refusing its calls.
         """
-        body = str(getattr(self, "run_state_block", "") or "").rstrip()
+        body = current_run_state(self).rstrip()
         if not body:
             return ""
         line = budget_line(steps_left, seconds_left)
@@ -4658,8 +4919,15 @@ class BaseAnalyst(BudgetMeter, ABC):
         # The repeat guard is per loop, like the recorder, and a later chunk's
         # starts with the calls the earlier chunks of the same analysis made:
         # an identical one is answered with the entry that holds it, as the
-        # chunk's prompt lists them (``earlier_chunks_block``).
-        repeats = seeded_repeat_guard(getattr(self, "_prior_chunk_calls", None))
+        # chunk's prompt lists them (``earlier_chunks_block``). A revision's
+        # starts with the calls this agent made in the run's earlier rounds,
+        # answered the same way (``own_earlier_entries``), for the tools that
+        # change nothing and answer an identical call the same
+        # (``repeatable_earlier_entries``): any other tool runs again.
+        repeats = seeded_repeat_guard(
+            getattr(self, "_prior_chunk_calls", None),
+            earlier_rounds=repeatable_earlier_entries(self),
+        )
         # The function map reads this loop's calls as they are made.
         self._live_map_entries = recorder.entries
         # The arguments this loop had to close off, so the ledger entry for
@@ -7495,7 +7763,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         messages = frame_messages(
             messages,
             facts_block=str(getattr(self, "facts_block", "") or ""),
-            run_state=str(getattr(self, "run_state_block", "") or ""),
+            run_state=current_run_state(self),
         )
 
         # An answer that repeated its claims is sent back as written up to the
@@ -7595,7 +7863,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             # The block moves to the retry's own question, the last message,
             # and the turn that carried it before is sent as it was written.
             return self._invoke_llm_with_timeout(
-                frame_messages(turns, run_state=str(getattr(self, "run_state_block", "") or "")),
+                frame_messages(turns, run_state=current_run_state(self)),
                 left,
                 what="validation retry",
             )
@@ -7720,9 +7988,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             self.validation_retries += 1
             try:
                 answer = self._invoke_llm_with_timeout(
-                    frame_messages(
-                        turns, run_state=str(getattr(self, "run_state_block", "") or "")
-                    ),
+                    frame_messages(turns, run_state=current_run_state(self)),
                     left,
                     what="whole answer after an unmerged retry",
                 )
@@ -8388,7 +8654,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 HumanMessage(content=question),
             ]
             reply = self._invoke_llm_with_timeout(
-                frame_messages(turns, run_state=str(getattr(self, "run_state_block", "") or "")),
+                frame_messages(turns, run_state=current_run_state(self)),
                 left,
                 what="kept-retry drops question",
             )
@@ -8989,7 +9255,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         except Exception:  # noqa: BLE001 — a prompt that cannot be built weighs nothing here
             framing = 0
         framing += len(str(getattr(self, "facts_block", "") or ""))
-        framing += len(str(getattr(self, "run_state_block", "") or ""))
+        framing += len(current_run_state(self))
         framing += self._definitions_sent() or tool_definition_chars(list(self.tools or []))
         room = int(budget.tool_budget_chars())
         answers = int(room * ANSWER_SHARE)
