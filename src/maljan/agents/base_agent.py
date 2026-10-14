@@ -1655,6 +1655,47 @@ def _without_unbracketed_names(text: str) -> str:
     return "".join(out)
 
 
+def _chunk_header(chunk: Any, open_total: bool) -> str:
+    """The header a chunk is sent behind: its total, or that more may follow where it is open."""
+    header = getattr(chunk, "to_prompt_header", None)
+    if not callable(header):
+        return ""
+    return str(header(more_may_follow=True) if open_total else header())
+
+
+def _holding(chunk: Any, content: str) -> Any:
+    """``chunk`` holding ``content``, its count and its token estimate made from it."""
+    from maljan.llm.context_window import tokens_for_chars
+    from maljan.loaders.binary_chunker import _CHARS_PER_TOKEN
+
+    return dataclasses.replace(
+        chunk,
+        content=content,
+        char_count=len(content),
+        token_estimate=tokens_for_chars(len(content), _CHARS_PER_TOKEN, ceil=False),
+    )
+
+
+def _past_overlap(rest: str, after: Any) -> str:
+    """``after``'s content without the overlap it opens with where ``rest`` already ends in it.
+
+    The chunker records how many characters a piece repeats of the piece
+    before it (``binary_chunker.OVERLAP_IN``); carried in front of it, the end
+    of that piece is already there, and would be held twice.
+    """
+    from maljan.loaders.binary_chunker import OVERLAP_IN
+
+    content = str(after.content)
+    overlap = (getattr(after, "metadata", None) or {}).get(OVERLAP_IN, 0)
+    if (
+        isinstance(overlap, int)
+        and 0 < overlap <= len(content)
+        and rest.endswith(content[:overlap])
+    ):
+        return content[overlap:]
+    return content
+
+
 def _continues(chunk: Any, after: Any) -> bool:
     """Whether ``after`` is the next piece of the same source as ``chunk``."""
     total = getattr(chunk, "total", 1)
@@ -3332,21 +3373,27 @@ EARLIER_CHUNKS_HEAD = (
 # whose room the full list would cost a loop: every call, its tool and the
 # ledger entry that holds its result, nothing left out.
 EARLIER_CHUNKS_COMPACT_HEAD = (
-    "Earlier chunks of this same input were already analysed. These are the tool calls "
-    "made there, each with the ledger entry that holds its result; the room in this "
+    "Earlier chunks of this same input were already analysed. These are the tools "
+    "called there, each with the ledger entries that hold its results (a range "
+    "ev_0012\u2013ev_0015 is every entry from the first to the last); the room in this "
     "prompt does not hold their arguments or what they returned. Cite those entries "
     "instead of making the same call again: an identical call is not run again, and is "
     "answered with the result its entry recorded."
 )
 
-# What a later chunk is told when its prompt has no room even for the compact
-# list. The repeat guard holds every earlier call whatever the prompt shows
+# What a later chunk is told when its prompt has no room for either list: how
+# many calls, and the span of ledger entries that hold their results. The
+# repeat guard holds every earlier call whatever the prompt shows
 # (``_prior_chunk_calls``).
 EARLIER_CALLS_NOT_LISTED = (
-    "Earlier chunks of this same input made {count} tool call(s); this prompt has no "
-    "room to list them. An identical call is not run again, and is answered with the "
-    "result its entry recorded."
+    "Earlier chunks of this same input made {count} tool call(s), held in ledger entries "
+    "{first} to {last}; this prompt has no room to list them. Each is answered from the "
+    "ledger: an identical call is not run again, and is answered with the result its "
+    "entry recorded."
 )
+
+# A ledger id: a prefix and a number, read so that ids in a row are a range.
+_ENTRY_ID = re.compile(r"^(.*?)(\d+)$")
 
 
 def earlier_chunks_block(entries: Sequence[Any]) -> str:
@@ -3361,12 +3408,80 @@ def earlier_chunks_block(entries: Sequence[Any]) -> str:
     return "\n".join([EARLIER_CHUNKS_HEAD, *lines])
 
 
+def entry_ranges(ids: Sequence[str]) -> str:
+    """``ids`` in order, each run of consecutive numbers with one prefix as ``first–last``.
+
+    Every id is recoverable: a range names every entry from its first to its
+    last, and an id that is not a prefix and a number stands as it is.
+    """
+    parts: list[str] = []
+    run: list[str] = []
+    last: tuple[str, int, int] | None = None
+    for entry_id in ids:
+        found = _ENTRY_ID.match(entry_id)
+        key = (found.group(1), int(found.group(2)), len(found.group(2))) if found else None
+        if (
+            key is not None
+            and last is not None
+            and key[0] == last[0]
+            and key[2] == last[2]
+            and key[1] == last[1] + 1
+        ):
+            run.append(entry_id)
+        else:
+            if run:
+                parts.append(run[0] if len(run) == 1 else f"{run[0]}\u2013{run[-1]}")
+            run = [entry_id]
+        last = key
+    if run:
+        parts.append(run[0] if len(run) == 1 else f"{run[0]}\u2013{run[-1]}")
+    return ", ".join(parts)
+
+
 def earlier_chunks_compact(entries: Sequence[Any]) -> str:
-    """Every earlier call as ``tool → ev_id`` under the compact head, or ``""``."""
-    lines = _earlier_call_lines(entries, compact=True)
-    if not lines:
+    """Every earlier call by tool, its entries as ranges, under the compact head, or ``""``.
+
+    One line a tool, in the order the tools were first called: the entries of
+    its calls, consecutive ones as a range, and those that failed after it.
+    """
+    calls = _earlier_calls(entries)
+    if not calls:
         return ""
+    tools: dict[str, tuple[list[str], list[str]]] = {}
+    for tool, entry_id, ok in calls:
+        done, failed = tools.setdefault(tool, ([], []))
+        (done if ok else failed).append(entry_id)
+    lines = []
+    for tool, (done, failed) in tools.items():
+        said = entry_ranges(done)
+        if failed:
+            said = (
+                f"{said} (failed: {entry_ranges(failed)})"
+                if said
+                else f"failed: {entry_ranges(failed)}"
+            )
+        lines.append(f"- {tool} \u2192 {said}")
     return "\n".join([EARLIER_CHUNKS_COMPACT_HEAD, *lines])
+
+
+def earlier_calls_counted(entries: Sequence[Any]) -> str:
+    """The earlier calls' count and the span of their entries (:data:`EARLIER_CALLS_NOT_LISTED`)."""
+    calls = _earlier_calls(entries)
+    if not calls:
+        return ""
+    return EARLIER_CALLS_NOT_LISTED.format(count=len(calls), first=calls[0][1], last=calls[-1][1])
+
+
+def _earlier_calls(entries: Sequence[Any]) -> list[tuple[str, str, bool]]:
+    """``(tool, entry id, ok)`` for each earlier call the full list shows, in the order made."""
+    calls: list[tuple[str, str, bool]] = []
+    for entry in entries or ():
+        tool = str(getattr(entry, "tool", "") or "")
+        entry_id = str(getattr(entry, "id", "") or "")
+        if not tool or not entry_id or getattr(entry, "repeated_of", None):
+            continue
+        calls.append((tool, entry_id, bool(getattr(entry, "ok", True))))
+    return calls
 
 
 def prompt_room(agent: Any, content: str) -> int | None:
@@ -3383,56 +3498,51 @@ def prompt_room(agent: Any, content: str) -> int | None:
 
 
 def fitted_chunk(
-    agent: Any, header: str, content: str, earlier: Sequence[Any]
+    agent: Any, header: str, content: str, earlier: Sequence[Any], ahead: int = 0
 ) -> tuple[str, str, str]:
     """``(earlier-calls block, content sent now, rest)`` for a later chunk's prompt.
 
     The chunks run one after another, so the earlier calls are known when a
     chunk is sent: the chunk takes the agent's room less its header and the
-    calls. The full list (:data:`EARLIER_CHUNKS_HEAD`) is sent whenever the
-    room left beside it holds a line of the content and it costs this chunk
-    no more loops than the compact form, every call with its entry
-    (:data:`EARLIER_CHUNKS_COMPACT_HEAD`); that where the full list does not;
-    their count (:data:`EARLIER_CALLS_NOT_LISTED`) only where neither list
-    leaves room for a line. Never nothing while earlier calls exist. Content past what fits is the ``rest``, cut at a line break where
-    there is one; the caller hands it to the next piece of the same source,
-    or sends it as a chunk of its own. With no room measured, the full list
-    and the content as they came.
+    calls. Of the three forms of the calls — the full list
+    (:data:`EARLIER_CHUNKS_HEAD`), every call's entries by tool as ranges
+    (:data:`EARLIER_CHUNKS_COMPACT_HEAD`), and their count with the span of
+    their entries (:data:`EARLIER_CALLS_NOT_LISTED`) — the one that leaves the
+    fewest loops over what is left of this source (``content`` and the
+    ``ahead`` characters of its pieces after it) is sent, the more informative
+    on a tie; a form whose room beside it holds no line of the content is
+    none. Never nothing while earlier calls exist. What is left is spread
+    evenly over those loops: content past this loop's share is the ``rest``,
+    cut at a line break where there is one; the caller hands it
+    to the next piece of the same source, or sends it as a chunk of its own.
+    With no room measured, the full list and the content as they came.
     """
     full = earlier_chunks_block(earlier)
     room = prompt_room(agent, content)
     if room is None or not full:
         return full, content, ""
     fixed = len(header) + 4
-    calls = len(_earlier_call_lines(earlier))
-    forms = (full, earlier_chunks_compact(earlier), EARLIER_CALLS_NOT_LISTED.format(count=calls))
+    forms = (full, earlier_chunks_compact(earlier), earlier_calls_counted(earlier))
     # Room that holds no whole line of the content is no room for it.
     need = content.find("\n") + 1 or 1
-    # The listed forms first: the count alone only where neither list leaves
-    # room for a line, so the content still moves on.
-    listed = [
-        (form, room - fixed - len(form)) for form in forms[:2] if room - fixed - len(form) >= need
-    ]
-    if listed:
-        fewest = min(-(-len(content) // avail) for _form, avail in listed)
-        block, avail = next((f, a) for f, a in listed if -(-len(content) // a) == fewest)
-    elif room - fixed - len(forms[2]) >= need:
-        block, avail = forms[2], room - fixed - len(forms[2])
-    else:
+    remaining = len(content) + max(0, ahead)
+    fits = [(form, room - fixed - len(form)) for form in forms if room - fixed - len(form) >= need]
+    if not fits:
         # No room even beside the count: it is still said, the content as it came.
         return forms[2], content, ""
-    if len(content) <= avail:
+    fewest = min(-(-remaining // avail) for _form, avail in fits)
+    block, avail = next((f, a) for f, a in fits if -(-remaining // a) == fewest)
+    # What is left is spread evenly over those loops, so the last of them is
+    # never a sliver of what the others could not hold.
+    take = min(avail, -(-remaining // fewest))
+    if len(content) <= take:
         return block, content, ""
-    cut = content.rfind("\n", 0, avail) + 1 or avail
+    cut = content.rfind("\n", 0, take) + 1 or take
     return block, content[:cut], content[cut:]
 
 
-def _earlier_call_lines(entries: Sequence[Any], *, compact: bool = False) -> list[str]:
-    """One ``tool(args) → ev_id`` line per earlier call, in the order made.
-
-    ``compact`` gives ``tool → ev_id`` and the failed mark alone: every call
-    and its entry, without its arguments or what it returned.
-    """
+def _earlier_call_lines(entries: Sequence[Any]) -> list[str]:
+    """One ``tool(args) → ev_id`` line per earlier call, in the order made."""
     lines: list[str] = []
     for entry in entries or ():
         tool = str(getattr(entry, "tool", "") or "")
@@ -3441,10 +3551,6 @@ def _earlier_call_lines(entries: Sequence[Any], *, compact: bool = False) -> lis
             continue
         # A repeat is answered by the entry it names, which is listed itself.
         if getattr(entry, "repeated_of", None):
-            continue
-        if compact:
-            ok = bool(getattr(entry, "ok", True))
-            lines.append(f"- {tool} \u2192 {entry_id}{'' if ok else ' (failed)'}")
             continue
         args = getattr(entry, "args", None) or {}
         try:
@@ -7263,6 +7369,15 @@ class BaseAnalyst(BudgetMeter, ABC):
         # piece of the same source after it.
         queue = list(chunks)
         follows = [_continues(a, b) for a, b in zip(queue, queue[1:], strict=False)] + [False]
+        # What is left of each piece's source after it, for the choice of form.
+        ahead = [0] * len(queue)
+        for i in range(len(queue) - 2, -1, -1):
+            if follows[i]:
+                ahead[i] = len(str(queue[i + 1].content)) + ahead[i + 1]
+        # Where the room is measured a carry can add a chunk, so the total is
+        # not fixed: every header then says more may follow, never a total a
+        # later chunk revises.
+        fitting = prompt_room(self, str(queue[0].content)) is not None
 
         chunk_isrs: list[AgentISR] = []
         errors: list[str] = []
@@ -7285,26 +7400,23 @@ class BaseAnalyst(BudgetMeter, ABC):
             # The earlier calls are known now: the chunk takes the room less
             # its header and them, and what does not fit goes on.
             block, sent, rest = fitted_chunk(
-                self, chunk.to_prompt_header(), str(chunk.content), earlier
+                self,
+                _chunk_header(chunk, fitting),
+                str(chunk.content),
+                earlier,
+                ahead[position],
             )
             if rest:
-                queue[position] = dataclasses.replace(
-                    queue[position], content=sent, char_count=len(sent)
-                )
+                queue[position] = _holding(queue[position], sent)
                 if follows[position]:
                     after = queue[position + 1]
-                    grown = rest + str(after.content)
-                    queue[position + 1] = dataclasses.replace(
-                        after, content=grown, char_count=len(grown)
-                    )
+                    queue[position + 1] = _holding(after, rest + _past_overlap(rest, after))
                 else:
-                    queue.insert(
-                        position + 1,
-                        dataclasses.replace(queue[position], content=rest, char_count=len(rest)),
-                    )
+                    queue.insert(position + 1, _holding(queue[position], rest))
                     follows.insert(position + 1, False)
+                    ahead.insert(position + 1, 0)
                 chunk = _numbered_at(queue[position], position, len(queue))
-            prompt_text = f"{chunk.to_prompt_header()}\n\n" + (
+            prompt_text = f"{_chunk_header(chunk, fitting)}\n\n" + (
                 f"{block}\n\n{chunk.content}" if block else chunk.content
             )
             try:
@@ -7341,7 +7453,11 @@ class BaseAnalyst(BudgetMeter, ABC):
                         isr = self._validate_isr(
                             isr,
                             prompt_text,
-                            chunk=f"chunk {chunk.index + 1} of {chunk.total}",
+                            chunk=(
+                                f"chunk {chunk.index + 1}"
+                                if fitting
+                                else f"chunk {chunk.index + 1} of {chunk.total}"
+                            ),
                             only_cut=True,
                         )
                 chunk_isrs.append(isr)

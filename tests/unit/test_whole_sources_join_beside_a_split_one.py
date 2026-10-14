@@ -50,10 +50,15 @@ class TestJoining:
         assert [c.char_count for c in joined] == [802, 400]
 
     def test_the_head_is_joined_with_the_whole_source_after_it(self) -> None:
-        chunks = [_chunk("H" * 10), _chunk("B" * 10), _chunk("A" * 100, 0, 2), _chunk("A", 1, 2)]
-        joined = joined_when_it_fits(chunks, ChunkingConfig(), _room(100))
-        head = "H" * 10 + SOURCE_SEPARATOR + "B" * 10
-        assert [c.content for c in joined] == [head, "A" * 100, "A"]
+        chunks = [
+            _chunk("H" * 100),
+            _chunk("B" * 100),
+            _chunk("A" * 1_000, 0, 2),
+            _chunk("A", 1, 2),
+        ]
+        joined = joined_when_it_fits(chunks, ChunkingConfig(), _room(1_000))
+        head = "H" * 100 + SOURCE_SEPARATOR + "B" * 100
+        assert [c.content for c in joined] == [head, "A" * 1_000, "A"]
 
     @pytest.mark.parametrize("domain", ["triage", "network", "static", "dynamic"])
     @pytest.mark.parametrize("room", [1_000, 7_919, 30_000])

@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import random
+import re
 from types import SimpleNamespace
 from typing import Any
 
@@ -28,7 +29,6 @@ import pytest
 from maljan.agents.base_agent import (
     EARLIER_CALLS_NOT_LISTED,
     EARLIER_CHUNKS_COMPACT_HEAD,
-    EARLIER_CHUNKS_HEAD,
     BaseAnalyst,
     earlier_chunks_block,
     fitted_chunk,
@@ -155,20 +155,34 @@ class TestTheHeaderIsKeptOutOfTheRoom:
         agent = SimpleNamespace(_input_room_chars=lambda _text: 25_832)
         block, sent, _rest = fitted_chunk(agent, "h" * 80, "c" * 25_745, entries)
         assert block.startswith(EARLIER_CHUNKS_COMPACT_HEAD)
-        assert all(f"ev_{i:04d}" in block for i in range(400))
+        assert _entry_ids_in(block) >= {f"ev_{i:04d}" for i in range(400)}
         assert 80 + 4 + len(block) + len(sent) <= 25_832
 
     def test_never_nothing_while_earlier_calls_exist(self) -> None:
-        entries = _entries(3_000)
+        # Every other id, so no range can shorten the compact list.
+        entries = _entries(6_000)[::2]
         agent = SimpleNamespace(_input_room_chars=lambda _text: 2_000)
         block, sent, _rest = fitted_chunk(agent, "h" * 80, "c" * 1_900, entries)
-        assert block == EARLIER_CALLS_NOT_LISTED.format(count=3_000)
+        assert block == EARLIER_CALLS_NOT_LISTED.format(
+            count=3_000, first="ev_0000", last="ev_5998"
+        )
         assert 80 + 4 + len(block) + len(sent) <= 2_000
 
     def test_with_no_room_measured_the_full_list_and_the_whole_chunk(self) -> None:
         entries = _entries(5)
         block, sent, rest = fitted_chunk(SimpleNamespace(), "h", "c" * 90_000, entries)
         assert (block, sent, rest) == (earlier_chunks_block(entries), "c" * 90_000, "")
+
+
+def _entry_ids_in(text: str) -> set[str]:
+    """Every ledger id ``text`` names, a range ``ev_a–ev_b`` read as every id from a to b."""
+    ids: set[str] = set()
+    for first, last in re.findall(r"(ev_\d{4})(?:\u2013(ev_\d{4}))?", text):
+        if not last:
+            ids.add(first)
+            continue
+        ids.update(f"ev_{n:04d}" for n in range(int(first[3:]), int(last[3:]) + 1))
+    return ids
 
 
 def _entries(count: int) -> list[SimpleNamespace]:
@@ -233,8 +247,10 @@ def test_every_later_chunk_reads_every_earlier_call_at_the_64k_reverser_room(dom
         assert len(prompt) <= room
         made = 12 * number
         if made:
-            assert EARLIER_CHUNKS_HEAD in prompt
-            assert all(f"ev_{i:04d}" in prompt for i in range(made))
+            assert _entry_ids_in(prompt) >= {f"ev_{i:04d}" for i in range(made)}
+        header, content = prompt.split("\n\n", 1)[0], prompt.rsplit("\n\n", 1)[-1]
+        # The header states the token estimate of what it is in front of.
+        assert f"~{len(content) // 4} tokens]" in header or number == 0
     sent = "".join(
         p.split("\n\n", 2)[-1] if i else p.split("\n\n", 1)[-1] for i, p in enumerate(agent.prompts)
     )
@@ -340,3 +356,67 @@ def test_joined_whole_sources_still_fit_behind_their_headers() -> None:
         sources.append(piece)
     joined = joined_when_it_fits(sources, ChunkingConfig(overlap_tokens=0), _room(room))
     assert all(size <= room for size in _sent(joined))
+
+
+@pytest.mark.parametrize("calls", [12, 40, 80])
+def test_many_calls_a_loop_never_starve_a_loop_of_its_content(calls: int) -> None:
+    # The reviewer's probe: 300k of flows at the 64K reverser's room. The
+    # calls are listed by tool as ranges, and the form that leaves the fewest
+    # loops is sent, so the list never squeezes a loop down to a sliver.
+    room = 25_832
+    flows = (f"- 203.0.{i % 250}.{i % 199}:443 flow {i:07d}\n" for i in range(11_000))
+    text = "".join(flows)[:300_000]
+    chunks = BinaryChunker(ChunkingConfig()).chunk("network", text, room=_room(room))
+    agent = _Reverser(room, calls_per_chunk=calls)
+
+    agent.safe_analyze_isr_chunked(chunks)
+
+    contents = [p.rsplit("\n\n", 1)[-1] for p in agent.prompts]
+    assert all(len(p) <= room for p in agent.prompts)
+    assert len(agent.prompts) <= len(chunks) + 2
+    assert min(len(c) for c in contents[:-1]) > room // 2
+    for number, prompt in enumerate(agent.prompts[1:], start=1):
+        assert _entry_ids_in(prompt) >= {f"ev_{i:04d}" for i in range(calls * number)} or (
+            "held in ledger entries ev_0000 to" in prompt
+        )
+
+
+def test_a_carried_rest_never_holds_the_overlap_twice() -> None:
+    room = 25_832
+    flows = (f"- 203.0.{i % 250}.{i % 199}:443 flow {i:07d}\n" for i in range(4_000))
+    text = "".join(flows)[:100_000]
+    chunks = BinaryChunker(ChunkingConfig(overlap_tokens=200)).chunk(
+        "triage", text, room=_room(room)
+    )
+    agent = _Reverser(room, calls_per_chunk=12)
+
+    agent.safe_analyze_isr_chunked(chunks)
+
+    sent = [p.rsplit("\n\n", 1)[-1] for p in agent.prompts]
+    for content in sent:
+        for line in content.splitlines():
+            assert content.count(line + "\n") <= 1 or not line
+
+
+@pytest.mark.parametrize(("sources", "room"), [(9, 25_832), (99, 2_500)])
+def test_whole_sources_without_line_breaks_stay_within_the_room(sources: int, room: int) -> None:
+    # Carries add chunks; the header names the chunk and says more may follow,
+    # so no total gains a digit after the chunk was fitted, and each header
+    # states the token estimate of what it is in front of.
+    chunks = []
+    for i in range(sources):
+        source = _chunk(chr(ord("a") + i % 26) * (room - 120))
+        source.metadata.update({SIZED_BY: SIZED_BY_ROOM, CHUNK_CHARS: room})
+        chunks.append(source)
+    agent = _Reverser(room, calls_per_chunk=12)
+
+    agent.safe_analyze_isr_chunked(chunks)
+
+    assert "".join(p.rsplit("\n\n", 1)[-1] for p in agent.prompts) == "".join(
+        str(c.content) for c in chunks
+    )
+    for prompt in agent.prompts:
+        assert len(prompt) <= room
+        header = prompt.split("\n\n", 1)[0]
+        assert "(more may follow)" in header
+        assert f"~{len(prompt.rsplit(chr(10) * 2, 1)[-1]) // 4} tokens]" in header

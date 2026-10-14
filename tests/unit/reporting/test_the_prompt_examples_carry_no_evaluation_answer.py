@@ -132,6 +132,7 @@ from maljan.extractors.capability_matrix import (
 )
 from maljan.llm.context_window import no_room_sentence, unknown_window_remedy
 from maljan.llm.tool_replies import NO_REPLY_RECORDED, NOT_RUN_REPLY
+from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
 from maljan.memory.technique_cards import card_lines, load_cards
 from maljan.pipeline import function_claims, nodes, triage_pack
 from maljan.pipeline.debate_facts import (
@@ -1746,8 +1747,21 @@ PROMPTS: dict[str, str] = {
     "an analyst input shortened to its window": INPUT_SHORTENED_NOTICE.format(
         detail="the first 1,000 of 9,000 characters are shown, ending in …"
     ),
+    "a chunk header whose total may still grow": TextChunk(
+        index=2,
+        total=5,
+        strategy=ChunkStrategy.SLIDING_WINDOW,
+        content="",
+        char_count=0,
+        token_estimate=6_400,
+        domain="network",
+    ).to_prompt_header(more_may_follow=True),
     "a later chunk's earlier calls in their compact form, or counted": " ".join(
-        [EARLIER_CHUNKS_COMPACT_HEAD, EARLIER_CALLS_NOT_LISTED.format(count=7)]
+        [
+            EARLIER_CHUNKS_COMPACT_HEAD,
+            EARLIER_CALLS_NOT_LISTED.format(count=7, first="ev_0001", last="ev_0007"),
+            "- decompile_function \u2192 ev_0001\u2013ev_0006 (failed: ev_0007)",
+        ]
     ),
     "an analyst input split at the shipped size with no window learned": " ".join(
         [

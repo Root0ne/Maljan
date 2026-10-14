@@ -104,6 +104,9 @@ SHIPPED_CHUNK_CHARS = chars_for_tokens(UNKNOWN_WINDOW_CHUNK_TOKENS, _CHARS_PER_T
 # is the size in characters.
 SIZED_BY = "sized_by"
 CHUNK_CHARS = "chunk_chars"
+# How many characters a piece opens with that repeat the end of the piece
+# before it in its source (the overlap), so a carry never holds them twice.
+OVERLAP_IN = "overlap_in"
 SIZED_BY_OPERATOR = "operator"
 SIZED_BY_ROOM = "room"
 SIZED_BY_UNKNOWN_WINDOW = "unknown_window"
@@ -247,7 +250,16 @@ def header_chars(domain: str, count: int, chars: int) -> int:
     n = max(1, int(count))
     longest = max((strategy.name for strategy in ChunkStrategy), key=len)
     tokens = tokens_for_chars(max(0, int(chars)), _CHARS_PER_TOKEN, ceil=False)
-    header = f"[CHUNK {n}/{n} | domain={domain} | strategy={longest} | ~{tokens} tokens]"
+    widest = TextChunk(
+        index=n - 1,
+        total=n,
+        strategy=ChunkStrategy[longest],
+        content="",
+        char_count=0,
+        token_estimate=tokens,
+        domain=domain,
+    )
+    header = max(widest.to_prompt_header(), widest.to_prompt_header(more_may_follow=True), key=len)
     return len(header) + len("\n\n")
 
 
@@ -341,7 +353,11 @@ def within_the_room(chunks: list, config: ChunkingConfig | None) -> list:
         chunker = chunker or BinaryChunker(config or ChunkingConfig())
         pieces = chunker._split(str(chunk.domain), content, limit - reserve)
         for piece in pieces:
-            piece.metadata.update(facts)
+            piece.metadata.update({k: v for k, v in facts.items() if k != OVERLAP_IN})
+        if facts.get(OVERLAP_IN):
+            pieces[0].metadata[OVERLAP_IN] = facts[OVERLAP_IN]
+        else:
+            pieces[0].metadata.pop(OVERLAP_IN, None)
         out.extend(pieces)
         cut = True
     return out if cut else chunks
@@ -384,6 +400,7 @@ def _one_chunk(group: list) -> object:
     metadata: dict[str, object] = {}
     for chunk in group:
         metadata.update(getattr(chunk, "metadata", None) or {})
+    metadata.pop(OVERLAP_IN, None)
     return replace(
         group[0],
         index=0,
@@ -435,10 +452,21 @@ class TextChunk:
     def is_last(self) -> bool:
         return self.index == self.total - 1
 
-    def to_prompt_header(self) -> str:
-        """Return a header line injected before the chunk in the LLM prompt."""
+    def to_prompt_header(self, *, more_may_follow: bool = False) -> str:
+        """Return a header line injected before the chunk in the LLM prompt.
+
+        ``more_may_follow`` is for a list whose total is not fixed when the
+        chunk is sent (a later chunk sized once its earlier calls are known can
+        add one): the header then names the chunk and says more may follow,
+        never a total a later chunk revises.
+        """
+        place = (
+            f"{self.index + 1} (more may follow)"
+            if more_may_follow
+            else f"{self.index + 1}/{self.total}"
+        )
         return (
-            f"[CHUNK {self.index + 1}/{self.total} | "
+            f"[CHUNK {place} | "
             f"domain={self.domain} | strategy={self.strategy.name} | "
             f"~{self.token_estimate} tokens]"
         )
@@ -558,8 +586,11 @@ class BinaryChunker:
         overlap = self._overlap_within(first)
         start = first - overlap if first > overlap else first
         rest = self._split(domain, text[start:], max_chars)
+        overlaps = [0, first - start] + [
+            int(str(chunk.metadata.get(OVERLAP_IN, 0))) for chunk in rest[1:]
+        ]
         return self._bins_to_chunks(
-            domain, [text[:first], *(chunk.content for chunk in rest)], rest[0].strategy
+            domain, [text[:first], *(chunk.content for chunk in rest)], rest[0].strategy, overlaps
         )
 
     def _split(self, domain: str, text: str, max_chars: int) -> list[TextChunk]:
@@ -645,6 +676,7 @@ class BinaryChunker:
         # bin is past ``max_chars``.
         overlap = self._overlap_within(max_chars)
         bins: list[str] = []
+        tails: list[int] = [0]
         current_parts: list[str] = []
         current_len = 0
 
@@ -657,6 +689,7 @@ class BinaryChunker:
                 # as much of it as fits beside the segment that opens the next.
                 take = min(overlap, max_chars - len(seg) - 1)
                 tail = bins[-1][-take:] if take > 0 else ""
+                tails.append(len(tail))
                 current_parts = [tail, seg] if tail else [seg]
                 current_len = len(tail) + 1 + len(seg) if tail else len(seg)
             else:
@@ -666,7 +699,7 @@ class BinaryChunker:
         if current_parts:
             bins.append("\n".join(current_parts))
 
-        return self._bins_to_chunks(domain, bins, strategy)
+        return self._bins_to_chunks(domain, bins, strategy, tails[: len(bins)])
 
     def _overlap_within(self, max_chars: int) -> int:
         """The overlap carried between chunks of ``max_chars``, at most what a sliding step leaves.
@@ -690,7 +723,11 @@ class BinaryChunker:
     def _sliding_window(self, domain: str, text: str, max_chars: int) -> list[TextChunk]:
         """Pure sliding-window split — domain-agnostic fallback."""
         windows = self._raw_sliding_windows(text, max_chars)
-        return self._bins_to_chunks(domain, windows, ChunkStrategy.SLIDING_WINDOW)
+        # Every window before the last is ``max_chars`` long and the next one
+        # starts a step on: each after the first repeats the rest of it.
+        step = max(max_chars - self._overlap_chars, max(1, max_chars // 4))
+        overlaps = [0] + [max(0, max_chars - step)] * (len(windows) - 1)
+        return self._bins_to_chunks(domain, windows, ChunkStrategy.SLIDING_WINDOW, overlaps)
 
     def _raw_sliding_windows(self, text: str, max_chars: int) -> list[str]:
         """Split text into overlapping fixed-size character windows.
@@ -727,21 +764,23 @@ class BinaryChunker:
         domain: str,
         bins: list[str],
         strategy: ChunkStrategy,
+        overlaps: list[int] | None = None,
     ) -> list[TextChunk]:
         total = len(bins)
         chunks: list[TextChunk] = []
         for i, content in enumerate(bins):
-            chunks.append(
-                TextChunk(
-                    index=i,
-                    total=total,
-                    strategy=strategy,
-                    content=content,
-                    char_count=len(content),
-                    token_estimate=tokens_for_chars(len(content), _CHARS_PER_TOKEN, ceil=False),
-                    domain=domain,
-                )
+            chunk = TextChunk(
+                index=i,
+                total=total,
+                strategy=strategy,
+                content=content,
+                char_count=len(content),
+                token_estimate=tokens_for_chars(len(content), _CHARS_PER_TOKEN, ceil=False),
+                domain=domain,
             )
+            if overlaps is not None and i < len(overlaps) and overlaps[i] > 0:
+                chunk.metadata[OVERLAP_IN] = overlaps[i]
+            chunks.append(chunk)
         logger.info(
             "Chunked domain='%s' into %d chunks using %s.",
             domain,
