@@ -57,7 +57,6 @@ from maljan.core.declared_reading import (
 from maljan.core.logger import logger
 from maljan.core.spend import validation_retry
 from maljan.core.undeclared_tools import (
-    ADDRESS_ARGUMENTS,
     auto_name_pattern,
     declared_auto_name_pattern,
     entry_address_arguments,
@@ -4221,11 +4220,10 @@ def chunk_cut_unread_sentence(chunk: str) -> str:
 # either. The functions its ledger entries decompiled are listed to it, once.
 DECOMPILED_NOT_DESCRIBED_CODE = "isr.decompiled_not_described"
 
-# The argument names a decompile call gives its function under: an address
-# (the one its tool declares, then the shared list,
-# ``core.undeclared_tools.address_arguments``), a list of addresses (a batch),
+# The argument names a decompile call gives its function under, besides an
+# address (the one its tool declares, then the shared list,
+# ``core.undeclared_tools.address_arguments``): a list of addresses (a batch),
 # or a name.
-_ADDRESS_ARGUMENTS = ADDRESS_ARGUMENTS
 _ADDRESS_LIST_ARGUMENTS = ("functions", "addresses")
 _NAME_ARGUMENTS = ("name", "function_name", "function", "symbol")
 # A decompiler's own name for a function it was given no name for: the address
@@ -6867,10 +6865,9 @@ _CLAUSE_START_RE = re.compile(
 # A relative clause's word just before the statement: its subject is the last
 # thing the clause before it names (``_relative_word_at``).
 _RELATIVE_WORDS = ("which", "that")
-# A value a subject writes: in quotes or backticks, or an identifier of three
-# characters or more with a capital after its first letter, a digit or an
-# underscore in it (``CreateMutexW``, ``update_data``), never a plain word.
-_QUOTED_VALUE_RE = re.compile(r"`([^`\n]{2,})`|\"([^\"\n]{2,})\"|“([^”\n]{2,})”")
+# A value a subject writes as an identifier: three characters or more with a
+# capital after its first letter, a digit or an underscore in it
+# (``CreateMutexW``, ``update_data``), never a plain word.
 _IDENTIFIER_VALUE_RE = re.compile(
     r"(?<![\w.$])(?=[A-Za-z_]\w*(?:[a-z][A-Z]|\d|_))[A-Za-z_]\w{2,}(?![\w$])"
 )
@@ -10412,14 +10409,6 @@ def validation_metrics(
     if withdrawn:
         out["retry_withdrawals"] = withdrawn
     return out
-
-
-# A technique whose sources are all artefacts of the file: what the sample can
-# do, not what it was seen doing (``support_of``).
-CAPABILITY_SUPPORT = "capability"
-# A technique no source of which is behaviour, one of them an external
-# assessment of the file or none placed in it.
-UNOBSERVED_SUPPORT = "unobserved"
 
 
 def corroboration(
