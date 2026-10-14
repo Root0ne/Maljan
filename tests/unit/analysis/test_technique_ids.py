@@ -91,14 +91,8 @@ class TestOneStrictReader:
             for path in root.rglob("*.py")
             if ID_BODY in path.read_text(encoding="utf-8")
         }
-        # Every other reader is built from ``ID_BODY``. Left: this module, and
-        # two copies whose code is retired whole elsewhere (the base agent's
-        # test-only extractor and the ledger projection's dead reader).
-        assert holders <= {
-            "analysis/technique_ids.py",
-            "agents/base_agent.py",
-            "reporting/ledger_projection.py",
-        }
+        # Every other reader is built from ``ID_BODY``.
+        assert holders == {"analysis/technique_ids.py"}
 
 
 class TestTechniqueIdsIn:

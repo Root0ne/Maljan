@@ -159,9 +159,6 @@ from maljan.utils.marked_cut import CUT_MARK
 # for the owner of a name an in-process tool claimed.
 IN_PROCESS_SOURCE = "in-process:agent"
 
-# Regex: matches MITRE ATT&CK technique IDs like T1055 or T1055.001.
-_TECHNIQUE_RE = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\b")
-
 # Regex: the ReAct stop message emitted when an agent exhausts its
 # ``recursion_limit`` while still tool-calling (it never wrote a final answer).
 # The static analyst's Ghidra loop hits this after spending its whole step
@@ -2072,11 +2069,6 @@ def _confidence_as_written(match: re.Match[str]) -> str:
 
 # A field label written after the value on the same line, where the value ends.
 _LABEL_AFTER_VALUE_RE = re.compile(r"\s+(?:TECHNIQUE|EVIDENCE):")
-
-
-def _extract_technique_ids(text: str) -> list[str]:
-    """Every distinct technique id mentioned in the text, in order, as written."""
-    return list(dict.fromkeys(_TECHNIQUE_RE.findall(text)))
 
 
 # ---------------------------------------------------------------------------
