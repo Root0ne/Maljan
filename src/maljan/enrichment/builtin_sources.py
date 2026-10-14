@@ -114,7 +114,3 @@ def _deep(value: Any) -> Any:
 def builtin_source_entries() -> dict[str, dict[str, Any]]:
     """A fresh copy of every shipped source declaration, in the order they ship."""
     return {key: _deep(entry) for key, entry in _BUILTIN_SOURCES.items()}
-
-
-def builtin_source_keys() -> tuple[str, ...]:
-    return tuple(_BUILTIN_SOURCES)

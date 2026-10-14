@@ -638,11 +638,6 @@ def records(path: str) -> Iterator[Record]:
         yield from capture.records()
 
 
-def count_records(path: str) -> int:
-    """How many records the capture at ``path`` holds, none of them decoded."""
-    return sum(1 for _record in records(path))
-
-
 # ---------------------------------------------------------------- decoding
 
 

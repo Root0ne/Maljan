@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import io
 from collections.abc import Iterable
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -532,22 +531,6 @@ def _guess_mime(path: Path) -> str | None:
             return str(mime) if mime is not None else None
     except Exception:  # noqa: BLE001
         pass
-    return None
-
-
-def _extract_compile_timestamp(blob: bytes | None) -> datetime | None:
-    """Read the PE ``TimeDateStamp`` field (when applicable) as aware UTC."""
-    if blob is None or len(blob) < 64 or blob[:2] != b"MZ":
-        return None
-    try:
-        import pefile  # type: ignore[import-not-found]
-
-        pe = pefile.PE(data=blob, fast_load=True)
-        ts = getattr(pe.FILE_HEADER, "TimeDateStamp", 0)
-        if ts and 946684800 <= ts < 4102444800:  # plausibility window 2000-2100
-            return datetime.fromtimestamp(int(ts), tz=UTC)
-    except Exception:  # noqa: BLE001
-        return None
     return None
 
 

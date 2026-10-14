@@ -119,7 +119,6 @@ OPERATIONS = (
 )
 AES_MODES = ("ecb", "cbc", "ctr")
 AES_PADDINGS = ("none", "pkcs7")
-BASE64_ALPHABETS = ("standard", "urlsafe")
 
 # The arguments and operations as the capabilities answer states them.
 CAPABILITY_FACTS = (

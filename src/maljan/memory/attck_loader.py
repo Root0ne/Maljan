@@ -181,23 +181,6 @@ def load_attck_data(
     return ATTCKData(techniques=techniques, tactics=tactics, version=version)
 
 
-def load_attck_bundle(
-    url: str = ATTCK_BUNDLE_URL,
-    cache_file: Path = ATTCK_CACHE_FILE,
-    force_refresh: bool = False,
-    max_age_days: int | None = None,
-) -> list[ATTCKTechnique]:
-    """Back-compat wrapper returning only the technique list.
-
-    Returns:
-        List of parsed ATTCKTechnique objects.
-
-    Raises:
-        RuntimeError: If the bundle cannot be fetched and no cache exists.
-    """
-    return load_attck_data(url, cache_file, force_refresh, max_age_days).techniques
-
-
 def _read_cache(cache_file: Path) -> dict:
     """Read + parse the cached bundle JSON (typed for strict mypy)."""
     cached: dict[str, Any] = json.loads(cache_file.read_text(encoding="utf-8"))

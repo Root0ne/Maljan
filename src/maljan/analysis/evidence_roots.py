@@ -777,12 +777,6 @@ def layouts_of(entries: Iterable[Any], files: _Files) -> dict[str, Layout]:
     return out
 
 
-def layout_of(entries: Iterable[Any]) -> Layout:
-    """The sample's layout as the ledger states it."""
-    listed = list(entries)
-    return layouts_of(listed, _Files(listed)).get("") or Layout()
-
-
 # -- facts one answer states that place another's rows ------------------------------
 
 

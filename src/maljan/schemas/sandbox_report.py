@@ -538,11 +538,6 @@ class Reading:
     # source published its rows.
     rendered: bool = True
 
-    @property
-    def overview_only(self) -> bool:
-        """Whether the reader read part of what its sandbox gives (``partial``)."""
-        return bool(self.partial)
-
 
 # What a report read by a reader that keeps its source's arrangement reached
 # its readers as (``reader_of``): as its source published it, or laid out from

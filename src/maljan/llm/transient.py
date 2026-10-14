@@ -747,11 +747,6 @@ def retry_on_connection_error_sync(
     raise AssertionError("unreachable")  # pragma: no cover
 
 
-def inside_a_retry() -> bool:
-    """Whether the current call is already being retried by the policy around it."""
-    return _INSIDE.get()
-
-
 _RETRYING_CLASSES: dict[type, type] = {}
 
 
