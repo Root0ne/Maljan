@@ -1576,8 +1576,13 @@ room less what they add, every later chunk is the whole room, so a large
 upstream block adds at most one chunk and no chunk is past the room. In a
 list of more than one chunk each is sent behind a one-line header, which every
 chunk leaves room for, and a later chunk behind the calls the earlier ones
-made, which take only what the room leaves (the rest are counted in one line;
-an identical call is still answered from its entry). The overlap between
+made. The chunks run one after another, so a later chunk is sized once those
+calls are known: it takes the room less its header and the full list, and what
+does not fit moves on to the next piece. Where the full list would cost the
+chunk a loop, every call is listed with its ledger entry alone; where neither
+list leaves room for a line, their count is said. An identical call is still
+answered from its entry. Sources are joined against the room less the header,
+so a join is never cut afterwards. The overlap between
 chunks is held below three quarters of a chunk, and the hold is logged. A JSON
 head that fits the room on its own stays whole when it is the agent's only
 source (cut, it would lose the sample path; the single chunk's prompt shortens
