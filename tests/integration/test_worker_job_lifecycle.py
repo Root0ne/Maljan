@@ -7,6 +7,7 @@ needing a real ARQ worker process.
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -441,6 +442,41 @@ async def test_a_refused_stored_value_fails_the_job_by_name_and_runs_nothing(
     assert len(failed) == 1 and named in failed[0]["error_message"]
     published = " ".join(str(call.args) for call in mock_ctx["redis"].publish.await_args_list)
     assert '"error"' in published or "'error'" in published
+
+
+@pytest.mark.asyncio
+async def test_unreadable_stored_settings_fail_the_job_and_run_nothing(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A database that cannot give the stored settings fails the job: running
+    on the shipped defaults would drop the operator's caps without a word."""
+    from app.services import settings_service
+
+    async def _unreadable(_db: Any) -> dict[str, Any]:
+        raise ConnectionError("postgresql://maljan:hunter2@db:5432 refused")
+
+    monkeypatch.setattr(settings_service, "load_core_overrides", _unreadable)
+    job = _make_job()
+    sample = _make_sample()
+    recorded = _answer_reads(mock_db_session, _job_rows(job, sample))
+    pipeline = AsyncMock(return_value={"final_decision": "Malware"})
+
+    with patch("maljan.app.MaljanApp.arun", new=pipeline):
+        result = await run_analysis(mock_ctx, str(job.id))
+
+    assert result["status"] == "failed", result
+    assert "The stored settings could not be read" in result["error"]
+    assert "did not run on defaults" in result["error"]
+    assert "once the database answers" in result["error"]
+    assert "hunter2" not in result["error"]
+    pipeline.assert_not_awaited()
+    failed = [u for u in updates_in(recorded, "analysis_jobs") if u["status"] == "failed"]
+    assert len(failed) == 1
+    assert "The stored settings could not be read" in failed[0]["error_message"]
+    published = [json.loads(call.args[1]) for call in mock_ctx["redis"].publish.await_args_list]
+    assert any(event.get("type") == "error" for event in published)
 
 
 @pytest.mark.asyncio
@@ -957,18 +993,17 @@ def test_upload_temp_dir_resolves_to_absolute_path() -> None:
 
 
 @pytest.mark.asyncio
-async def test_override_load_failure_falls_back_to_default_settings(
+async def test_override_load_failure_fails_the_job_and_logs_no_secret(
     mock_ctx: dict[str, Any],
     mock_db_session: AsyncMock,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """A DB error while loading UI overrides must not fail the job.
+    """A DB error while loading the stored settings fails the job.
 
-    The job runs on default settings (Task 3: build_settings is store-only,
-    so "default" replaces what used to be "environment") and one warning
-    names the exception type only -- never a value, never a connection
-    string.
+    Running on the shipped defaults would drop the operator's spend cap,
+    server map and timeout without a word. One error names the exception type
+    only -- never a value, never a connection string.
     """
     job = _make_job()
     sample = _make_sample()
@@ -1004,8 +1039,9 @@ async def test_override_load_failure_falls_back_to_default_settings(
         result = await run_analysis(mock_ctx, str(job.id))
     api_config._settings = None
 
-    assert result["status"] == "completed"
-    warnings = [r for r in caplog.records if "default settings only" in r.getMessage()]
-    assert len(warnings) == 1
-    assert "ConnectionError" in warnings[0].getMessage()
+    assert result["status"] == "failed"
+    errors = [r for r in caplog.records if "rather than running on defaults" in r.getMessage()]
+    assert len(errors) == 1
+    assert "ConnectionError" in errors[0].getMessage()
     assert "s3cret" not in caplog.text
+    assert "s3cret" not in result["error"]

@@ -2316,22 +2316,28 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # Build this job's Settings from any stored UI overrides plus
             # model defaults (UI > default; see settings_overrides.
             # build_settings -- the environment is not a layer here), then
-            # the job's own config on top. A DB error loading overrides must
-            # not fail the job -- fall back to default-only settings and say
-            # so, without ever logging a secret value.
+            # the job's own config on top. Stored settings that cannot be read
+            # fail the job before any pipeline starts: running on the shipped
+            # defaults would drop the operator's spend cap, server map and
+            # timeout without the run saying so. The class of the error is
+            # logged, never its text (it can quote a connection string).
             from app.services.settings_service import load_core_overrides
 
             try:
                 overrides = await load_core_overrides(db)
-            except Exception as exc:  # noqa: BLE001 — overrides are best-effort
-                logger.warning(
-                    "Failed to load runtime setting overrides (%s); "
-                    "running job %s on default settings only.",
+            except Exception as exc:  # noqa: BLE001 — any failure to read fails the job
+                logger.error(
+                    "Failed to load the stored settings (%s); job %s fails rather than "
+                    "running on defaults.",
                     type(exc).__name__,
                     job_id,
                     extra={"job_id": job_id},
                 )
-                overrides = {}
+                raise StatedFailure(
+                    "The stored settings could not be read from the database, so the job "
+                    "did not run on defaults in their place. Run it again once the "
+                    "database answers."
+                ) from None
 
             # A job that names an attached report is read here too, for the
             # same reason: the row is wanted before the pipeline starts and
