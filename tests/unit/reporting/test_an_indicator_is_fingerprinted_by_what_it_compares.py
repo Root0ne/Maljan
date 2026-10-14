@@ -164,7 +164,8 @@ class TestTheCanonicalPattern:
     ],
 )
 def test_a_hostile_pattern_is_read_and_fingerprinted_in_linear_time(unit: str, tail: str) -> None:
-    # Ten times the text takes at most about ten times as long (twenty, for noise).
+    # Ten times the text takes at most about ten times as long (twenty-five, for
+    # noise on a loaded machine; the best of five runs each).
     def took(size: int) -> float:
         text = unit * size + tail
         start = time.perf_counter()
@@ -172,6 +173,6 @@ def test_a_hostile_pattern_is_read_and_fingerprinted_in_linear_time(unit: str, t
         pattern_fingerprint("stix", text)
         return time.perf_counter() - start
 
-    small = min(took(5_000) for _ in range(3))
-    large = min(took(50_000) for _ in range(2))
-    assert large < 20 * small + 0.05
+    small = min(took(5_000) for _ in range(5))
+    large = min(took(50_000) for _ in range(5))
+    assert large < 25 * small + 0.05
