@@ -87,6 +87,11 @@ _ACLOSE_BUDGET = 20.0
 _CLOSE_ALL_BUDGET = 45.0
 
 
+def _with_content(chunks: list[TextChunk]) -> list[TextChunk]:
+    """The chunks that hold something: one of nothing but whitespace is no input to loop over."""
+    return [chunk for chunk in chunks if str(getattr(chunk, "content", "") or "").strip()]
+
+
 def _first_pass_room(container: Any, agent_name: str, room: Room | None) -> Room | None:
     """``room``, with the chunk size the agent's first analysis used where it measures nothing.
 
@@ -1879,17 +1884,26 @@ class ServiceContainer:
 
         head = head_room if head_room is not None else room
         chunks = []
+        # A source that yields nothing but whitespace adds no chunk: beside
+        # another source it would be a loop over nothing. The source after it
+        # is then the head. Only an input of nothing at all keeps one such
+        # chunk, the single input it always was.
+        empty: list[TextChunk] = []
         for source in sources:
-            chunks.extend(
-                self._data_source_chunks(
-                    agent_name,
-                    source,
-                    file_hash,
-                    sandbox_report,
-                    sample_path,
-                    room if chunks else head,
-                )
+            got = self._data_source_chunks(
+                agent_name,
+                source,
+                file_hash,
+                sandbox_report,
+                sample_path,
+                room if chunks else head,
             )
+            held = _with_content(got)
+            if got and not held:
+                empty.append(got[0])
+            chunks.extend(held)
+        if not chunks and empty:
+            chunks = empty[:1]
         _note_chunking(self, agent_name, chunks)
         return chunks
 
@@ -1981,13 +1995,21 @@ class ServiceContainer:
         role = self.agent_role(agent_name)
         head = head_room if head_room is not None else room
         if role in PROMPT_ROLES:
-            static_context = self.load_chunked(file_hash, agent_name, room=head)
+            loaded = self.load_chunked(file_hash, agent_name, room=head)
+            static_context = _with_content(loaded)
             sandbox_chunks: list[TextChunk] = []
             if sandbox_report:
-                sandbox_chunks = self._sandbox_slice(
-                    agent_name, "sandbox.full", sandbox_report, room
+                # The sandbox report is the head where the static context
+                # holds nothing, and a context of nothing is no chunk of its own.
+                sandbox_chunks = _with_content(
+                    self._sandbox_slice(
+                        agent_name,
+                        "sandbox.full",
+                        sandbox_report,
+                        room if static_context else head,
+                    )
                 )
-            return [*static_context, *sandbox_chunks]
+            return [*static_context, *sandbox_chunks] or loaded[:1]
         if sandbox_report:
             slice_name = {
                 "static": "sandbox.target",

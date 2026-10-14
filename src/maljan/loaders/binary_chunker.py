@@ -442,6 +442,9 @@ class BinaryChunker:
         if first >= max_chars or len(text) <= first:
             return self._split(domain, text, max_chars)
         # Only the head piece is smaller: what the node adds goes into it alone.
+        # A rest of nothing but whitespace is no chunk of its own.
+        if not text[first:].strip():
+            return [self._make_single_chunk(domain, text[:first], ChunkStrategy.SLIDING_WINDOW)]
         start = first - self._overlap_chars if first > self._overlap_chars else first
         rest = self._split(domain, text[start:], max_chars)
         return self._bins_to_chunks(
@@ -576,11 +579,14 @@ class BinaryChunker:
             )
             step = min_step
         windows: list[str] = []
+        # Past this, the text is whitespace: a window of the overlap and
+        # whitespace alone is a loop over nothing new, and is no window.
+        held = len(text.rstrip())
         start = 0
         while start < len(text):
             end = min(start + max_chars, len(text))
             windows.append(text[start:end])
-            if end == len(text):
+            if end >= held:
                 break
             start += step
         return windows or [text]
