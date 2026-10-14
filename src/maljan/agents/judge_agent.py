@@ -1521,6 +1521,34 @@ def _standing_blocks(run_state: str, facts_block: str) -> str:
     return "".join(f"{part}\n\n" for part in parts if part)
 
 
+def mediation_reports_text(
+    reports: dict[str, str], isr_reports: dict[str, AgentISR] | None = None
+) -> str:
+    """The analysts' reports as the mediator reads them, each analyst's claims once.
+
+    Each report under its analyst's heading, then the structured claims of
+    every ISR whose summary is not already one of those reports word for
+    word. An analyst's first answer is its ISR summary, so in a first
+    mediation every report was sent a second time; a revised report is the
+    analyst's own words and its ISR the claims in force, which differ and are
+    both kept. Empty ISRs are left out, as before.
+    """
+    reports_text = "\n\n".join(
+        f"--- {name.upper()} ANALYST ---\n{report}" for name, report in reports.items()
+    )
+    if not isr_reports:
+        return reports_text
+    shown = set(reports.values())
+    isr_block = "\n\n".join(
+        f"[ISR] {summary}"
+        for summary in (isr.to_text_summary() for isr in isr_reports.values() if isr.claims)
+        if summary not in shown
+    )
+    if not isr_block:
+        return reports_text
+    return f"{reports_text}\n\n=== STRUCTURED CLAIMS (ISR) ===\n{isr_block}"
+
+
 def _sha256_of(sample: Any) -> str:
     """The sha256 the identity block carries, for a sentence that names it."""
     data = sample if isinstance(sample, dict) else {}
@@ -2525,21 +2553,9 @@ class JudgeAgent(BudgetMeter):
             await self._initialize_mcp_client()
         lookup_attached = self._holds_attached_lookup_tool()
 
-        # Build a human-readable summary of all reports
-        reports_text = "\n\n".join(
-            f"--- {name.upper()} ANALYST ---\n{report}" for name, report in reports.items()
-        )
-
-        # Append ISR summaries when available — gives judge access to per-claim
-        # confidence scores and explicit dissent signals from each agent.
-        if isr_reports:
-            isr_block = "\n\n".join(
-                f"[ISR] {isr.to_text_summary()}"
-                for isr in isr_reports.values()
-                if isr.claims  # skip empty ISRs
-            )
-            if isr_block:
-                reports_text = f"{reports_text}\n\n=== STRUCTURED CLAIMS (ISR) ===\n{isr_block}"
+        # The reports, then the ISR summaries that are not one of them word
+        # for word: per-claim confidence and dissent, each analyst's once.
+        reports_text = mediation_reports_text(reports, isr_reports)
 
         # The mediator is NOT allowed to state a
         # verdict or describe the sample as "clean". Its only job is to
