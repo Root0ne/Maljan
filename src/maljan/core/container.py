@@ -87,24 +87,54 @@ _ACLOSE_BUDGET = 20.0
 _CLOSE_ALL_BUDGET = 45.0
 
 
-def _note_chunking(container: Any, agent_name: str, chunks: list[TextChunk]) -> None:
-    """Agent ``agent_name``'s input split at the shipped size, stated: no window was learned.
+def _first_pass_room(container: Any, agent_name: str, room: Room | None) -> Room | None:
+    """``room``, with the chunk size the agent's first analysis used where it measures nothing.
 
-    An input the shipped size split, because no window was learned, is a row
-    in the run summary and a log line, each with the remedy: the split is
-    kept, never silent. Split means more than one chunk
+    A revision asks for the agent's room by its name; an agent that cannot be
+    built then has no room to give. Its first analysis did measure one, and
+    chunking the same input again at that size is what the revision is meant
+    to read, so it is used in place of the unknown-window size.
+    """
+    store = getattr(container, "_first_pass_chunk_chars", None)
+    remembered = store.get(agent_name) if isinstance(store, dict) else None
+    if not isinstance(remembered, int) or isinstance(remembered, bool):
+        return room
+
+    def measured(text: str) -> int | None:
+        chars = room(text) if room is not None else None
+        return remembered if chars is None else chars
+
+    return measured
+
+
+def _note_chunking(container: Any, agent_name: str, chunks: list[TextChunk]) -> None:
+    """What sized agent ``agent_name``'s chunks, kept for its revision and stated where unknown.
+
+    The first chunk size sized from the agent's window is kept
+    (``_first_pass_room``). An input the shipped size split, because no window
+    was learned, is a row in the run summary and a log line, each with the
+    remedy: the split is kept, never silent. Split means more than one chunk
     once whole sources that fit the shipped size together are joined, as the
     analyst node joins them.
     """
     from maljan.llm.context_window import unknown_window_remedy
     from maljan.loaders.binary_chunker import (
+        CHUNK_CHARS,
         SHIPPED_CHUNK_CHARS,
         SIZED_BY,
+        SIZED_BY_ROOM,
         SIZED_BY_UNKNOWN_WINDOW,
         joined_when_it_fits,
     )
 
     sized = [getattr(chunk, "metadata", None) or {} for chunk in chunks]
+    store = getattr(container, "_first_pass_chunk_chars", None)
+    if isinstance(store, dict) and agent_name not in store:
+        for facts in sized:
+            chars = facts.get(CHUNK_CHARS)
+            if facts.get(SIZED_BY) == SIZED_BY_ROOM and isinstance(chars, int):
+                store[agent_name] = chars
+                break
     if len(chunks) < 2 or not any(f.get(SIZED_BY) == SIZED_BY_UNKNOWN_WINDOW for f in sized):
         return
     config = getattr(getattr(container, "config", None), "chunking", None)
@@ -458,6 +488,12 @@ class ServiceContainer:
         # the lock can recursively call another guarded getter (e.g. agent
         # creation may call get_agent_llm()).
         self._lock = threading.RLock()
+
+        # The chunk size, in characters, each agent's first analysis sized its
+        # input at from its window, by agent name. A revision whose agent
+        # cannot be built to measure its room chunks at this rather than at the
+        # unknown-window size (``_first_pass_room``).
+        self._first_pass_chunk_chars: dict[str, int] = {}
 
         # --- Caches ---
         # Every chat-model cache is keyed by the event loop the caller is on
@@ -1792,6 +1828,7 @@ class ServiceContainer:
         analyst's input room (``BaseAnalyst._input_room_chars``), which sizes
         a chunk where ``chunking.max_tokens_per_chunk`` is unset.
         """
+        room = _first_pass_room(self, data_type, room)
         key = (sample_id, data_type)
         with self._lock:
             cached_text = self._data_cache.get(key)
@@ -1834,6 +1871,7 @@ class ServiceContainer:
         """
         definition = self.config.agents.definitions.get(agent_name)
         sources = list(definition.data_sources) if definition is not None else []
+        room = _first_pass_room(self, agent_name, room)
         if not sources:
             chunks = self._legacy_role_data(agent_name, file_hash, sandbox_report, room, head_room)
             _note_chunking(self, agent_name, chunks)
