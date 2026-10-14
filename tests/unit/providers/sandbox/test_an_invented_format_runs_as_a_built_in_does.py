@@ -170,7 +170,7 @@ def _submitted(tmp_path: Path, provider: Any) -> tuple[Any, dict[str, Any] | Non
 class TestTheUploadIsSniffedAndRead:
     def test_the_registry_names_it(self, acme: Any) -> None:
         assert sniff_format(_payload()) == "acmebox"
-        assert "acmebox" in readers.sandbox_format_ids()
+        assert "acmebox" in [fmt.name for fmt in readers.sandbox_formats()]
         assert "acmebox" in readers.choosable_reader_ids()
 
     def test_the_upload_provider_reads_it(self, acme: Any) -> None:

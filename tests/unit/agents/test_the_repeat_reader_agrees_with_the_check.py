@@ -19,9 +19,9 @@ import time
 import pytest
 
 from maljan.agents.base_agent import strip_tool_call_scaffolding
-from maljan.agents.claim_headings import claim_heading_counts
 from maljan.agents.repeat_watch import ClaimRepeatReader
 from maljan.pipeline.validation import claims_repeated
+from tests.claim_block_counts import begun_and_distinct
 
 SENTENCES = [
     "The file reads its configuration from a resource.",
@@ -206,7 +206,7 @@ def _pieces(rng: random.Random, text: str) -> list[str]:
 
 def _expected(prefix: str, margin: int | None) -> tuple[int, int, bool]:
     stripped = strip_tool_call_scaffolding(prefix)
-    begun, distinct = claim_heading_counts(stripped)
+    begun, distinct = begun_and_distinct(stripped)
     return begun, distinct, claims_repeated(stripped, margin) is not None
 
 

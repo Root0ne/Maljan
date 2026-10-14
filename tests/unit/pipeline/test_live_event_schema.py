@@ -1198,6 +1198,6 @@ class TestRoster:
 
     def test_the_roster_is_emitted_under_its_own_type(self) -> None:
         recorded, sink = _sink()
-        ev.emit_roster(sink, ev.roster_payload(self._profile(), self._definitions()))
+        ev.emit(sink, ev.ROSTER, ev.roster_payload(self._profile(), self._definitions()))
         assert recorded[0][0] == "roster"
         assert set(recorded[0][1]) == {"agents", "stages"}

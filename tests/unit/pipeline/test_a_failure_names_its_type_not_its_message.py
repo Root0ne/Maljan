@@ -94,7 +94,6 @@ class TestOnlyTheSafeHelperReachesAPublishSite:
             "emit_agent_message_delta",
             "emit_budget_tick",
             "emit_judge_question",
-            "emit_roster",
             "emit_stage_ended_at_cap",
             "emit_tool_call_finished",
             "emit_tool_call_started",

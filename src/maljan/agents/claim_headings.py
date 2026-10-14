@@ -220,9 +220,3 @@ def claim_blocks(text: str) -> list[tuple[int, str]]:
                 current.append(bare)
         offset += len(line)
     return [(start, _block_key(lines)) for start, lines in blocks]
-
-
-def claim_heading_counts(text: str) -> tuple[int, int]:
-    """``(claims begun, distinct claims)`` of an answer, each claim keyed by its block."""
-    blocks = claim_blocks(text)
-    return len(blocks), len({key for _start, key in blocks})
