@@ -335,7 +335,6 @@ class TestTheMark:
             mp.setattr(
                 "maljan.reporting.composer.structured_output_supported_for_llm", lambda _l: True
             )
-            mp.setattr("maljan.reporting.composer.structured_answer", lambda r, *a, **k: r)
             asyncio.run(
                 composer._invoke([HumanMessage(content="x")], _FlowOut, section="execution_flow")
             )

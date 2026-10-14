@@ -76,9 +76,9 @@ from maljan.agents.tool_fence import (
 from maljan.core.config import MEDIATOR_AGENT_KEY, MEDIATOR_AGENT_NAME, get_settings
 from maljan.core.logger import logger
 from maljan.core.spend import SpendCeilingStop, call_deadline_of
-from maljan.core.token_ledger import TokenLedger, structured_answer
+from maljan.core.token_ledger import TokenLedger, read_structured_reply, say_structured_reply
 from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
-from maljan.llm.answer_text import answer_text
+from maljan.llm.answer_text import answer_text, structured_answer_text, tool_call_arguments
 from maljan.llm.anthropic_history import TOOL_LOOP_TURN, keeps_turns_as_received
 from maljan.llm.context_window import (
     ContextBudget,
@@ -1267,19 +1267,6 @@ def _structured_decisions(parsed: Any, asked: Sequence[str]) -> list[Any]:
             technique_id=stated[0], decision=stated[1], reason=stated[2]
         )
     return sorted(found.values(), key=lambda d: wanted.index(d.technique_id))
-
-
-def _tool_call_arguments(raw: Any) -> Any:
-    """The arguments of the first tool call an answer made, or ``None``.
-
-    A provider that answers a schema by function calling leaves ``content``
-    empty and the answer in the call's arguments.
-    """
-    for call in list(getattr(raw, "tool_calls", None) or []):
-        args = call.get("args") if isinstance(call, dict) else getattr(call, "args", None)
-        if isinstance(args, dict):
-            return args
-    return None
 
 
 def fit_shown_evidence(
@@ -3621,17 +3608,21 @@ class JudgeAgent(BudgetMeter):
                     )
                 else:
                     if isinstance(result, dict) and "raw" in result:
-                        raw = result.get("raw")
-                        try:
-                            parsed = structured_answer(
-                                result,
-                                self.token_ledger,
-                                agent=str(self.name),
-                                model=self._model_label(),
-                                call=TECHNIQUE_QUESTION_CALL,
-                            )
-                        except Exception:  # noqa: BLE001 — the call's own arguments are read
-                            parsed = _tool_call_arguments(raw)
+                        read = read_structured_reply(
+                            result,
+                            self.token_ledger,
+                            agent=str(self.name),
+                            model=self._model_label(),
+                            call=TECHNIQUE_QUESTION_CALL,
+                        )
+                        raw = read.raw
+                        # A refused object is read from the call's own
+                        # arguments; an answer with no call, from its text.
+                        parsed = read.parsed
+                        if parsed is None:
+                            parsed = tool_call_arguments(raw)
+                            if read.kept is not None:
+                                say_structured_reply("JudgeAgent technique question", read)
                         record_judge_response(
                             getattr(self, "truncation_ledger", None), raw, cap=cap
                         )
@@ -3835,7 +3826,7 @@ class JudgeAgent(BudgetMeter):
             try:
                 llm_structured = self.llm.with_structured_output(MediatorVerdict, include_raw=True)
                 try:
-                    result = structured_answer(
+                    read = read_structured_reply(
                         await (extract_prompt | llm_structured).ainvoke(
                             {"reasoning_log": reasoning_text}
                         ),
@@ -3846,8 +3837,24 @@ class JudgeAgent(BudgetMeter):
                     )
                 finally:
                     self._spend_release(extraction_slot)
+                result = read.parsed
                 if isinstance(result, MediatorVerdict):
                     return result
+                if read.kept is not None:
+                    # The verdict written as text, or a call the schema refused:
+                    # the model's answer, read rather than asked again.
+                    from maljan.utils.json_cleaner import safe_parse_json
+
+                    written = safe_parse_json(structured_answer_text(read.kept))
+                    verdict: MediatorVerdict | None = None
+                    if isinstance(written, dict):
+                        try:
+                            verdict = MediatorVerdict.model_validate(written)
+                        except Exception:  # noqa: BLE001 — not the verdict: asked again below
+                            verdict = None
+                    if verdict is not None:
+                        say_structured_reply("JudgeAgent mediation extraction", read)
+                        return verdict
                 raise ValueError(
                     f"Structured output produced unexpected type: {type(result).__name__}"
                 )

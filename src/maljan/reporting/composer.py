@@ -47,7 +47,8 @@ from maljan.core.spend import (
     spend_preview,
     spend_release,
 )
-from maljan.core.token_ledger import structured_answer
+from maljan.core.token_ledger import read_structured_reply, say_structured_reply
+from maljan.llm.answer_text import structured_answer_text
 from maljan.llm.anthropic_history import SHARED_HEAD
 from maljan.llm.registry import structured_output_supported_for_llm
 from maljan.pipeline.validation import (
@@ -1782,23 +1783,14 @@ class ReportComposer:
                 reply = await retry_on_connection_error(
                     lambda: structured.ainvoke(messages), what="ReportComposer structured"
                 )
-                raw = reply.get("raw") if isinstance(reply, dict) and "raw" in reply else None
-                unread = "carries no object the schema reads"
-                try:
-                    result = structured_answer(
-                        reply,
-                        self.token_ledger,
-                        agent=REPORTER_AGENT_KEY,
-                        model=self.model_label,
-                        call="report section",
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    if raw is None:
-                        raise
-                    result = None
-                    unread = (
-                        f"carries an object that does not fit the schema ({type(exc).__name__})"
-                    )
+                read = read_structured_reply(
+                    reply,
+                    self.token_ledger,
+                    agent=REPORTER_AGENT_KEY,
+                    model=self.model_label,
+                    call="report section",
+                )
+                result = read.parsed
             if isinstance(result, dict):
                 result = schema.model_validate(result)
             if isinstance(result, schema):
@@ -1822,21 +1814,8 @@ class ReportComposer:
                 self._tally().count(found)
                 self._record_ungrounded(section or schema.__name__, found, asked=False)
                 return result
-            if raw is not None and _answer_text(raw).strip():
-                kept = raw
-                logger.info(
-                    "ReportComposer: section '%s': the structured answer %s; its text is read "
-                    "as the section's answer, and the section is not asked again.",
-                    section or schema.__name__,
-                    unread,
-                )
-            else:
-                logger.warning(
-                    "ReportComposer: section '%s': the structured answer %s and holds no text; "
-                    "the section is asked again without the schema's tool.",
-                    section or schema.__name__,
-                    unread,
-                )
+            kept = read.kept
+            say_structured_reply(f"ReportComposer: section '{section or schema.__name__}'", read)
         except _StructuredOutputUnavailable:
             pass
         except Exception as exc:  # noqa: BLE001
@@ -1872,7 +1851,7 @@ class ReportComposer:
             cut = _reached_the_cap(raw, held)
             if cut:
                 cut_at = held
-                cut_text = _answer_text(raw)
+                cut_text = structured_answer_text(raw)
                 cut_why = why if bound is not None and held == bound else self._cap_said(raw)
                 shape = cut_answer_shape(cut_text)
                 cut_shapes.append(shape)
@@ -1946,7 +1925,7 @@ class ReportComposer:
 
         def _parse(answer: Any) -> Any:
             nonlocal declined, answer_read
-            answer_read = _answer_text(answer)
+            answer_read = structured_answer_text(answer)
             payload = safe_parse_json(answer_read)
             declined = bool(payload) and _section_declined(payload, schema)
             if not payload or declined:
@@ -2291,27 +2270,6 @@ def _message_text(msg: Any) -> str:
     from maljan.llm.answer_text import answer_text
 
     return answer_text(getattr(msg, "content", msg))
-
-
-def _answer_text(msg: Any) -> str:
-    """The text a section's answer is read from: its tool call's arguments, else its text.
-
-    An answer to a request that offered the schema's tool may call it, with
-    arguments the schema did not take, or write the object as text; either is
-    the model's answer to the section. An answer that calls no tool is read
-    as its text, as every manual-path answer is.
-    """
-    import json
-
-    for call in getattr(msg, "tool_calls", None) or ():
-        args = call.get("args") if isinstance(call, dict) else None
-        if isinstance(args, dict) and args:
-            return json.dumps(args, ensure_ascii=False)
-    for call in getattr(msg, "invalid_tool_calls", None) or ():
-        args = call.get("args") if isinstance(call, dict) else None
-        if isinstance(args, str) and args.strip():
-            return args
-    return _message_text(msg)
 
 
 def _has_content(model: BaseModel) -> bool:

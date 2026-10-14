@@ -180,3 +180,73 @@ class TestAnAnswerWithNothingInIt:
             assert bodies[0].get("tools"), section
             assert not bodies[1].get("tools"), section
         assert len([line for line in said if "holds no text" in line]) == len(COMPOSED_SECTIONS)
+
+
+def _verdict_text(body: dict[str, Any]) -> dict[str, Any]:
+    from maljan.pipeline.mediation_models import MediatorVerdict
+
+    verdict = MediatorVerdict(contradictions=[], resolution_summary="Agreed.", confidence=0.9)
+    text = verdict.model_dump_json()
+    return message([_thinking(), {"type": "text", "text": text}], stop="end_turn", usage=USAGE)
+
+
+class TestTheNarrativeRound:
+    """The narrative's structured answer is read by the same rule as a section's."""
+
+    @staticmethod
+    def _generate(monkeypatch: pytest.MonkeyPatch, answer: Any) -> tuple[Wire, Any]:
+        from maljan.reporting import narrative_agent
+        from tests.unit.reporting.test_narrative_agent import _make_report, _valid_narrative
+
+        text = _valid_narrative().model_dump_json()
+
+        def reply(body: dict[str, Any]) -> dict[str, Any]:
+            return answer(body, text)
+
+        wire = Wire(reply)
+        install(monkeypatch, wire)
+        monkeypatch.setattr(narrative_agent, "structured_output_supported_for_llm", lambda _l: True)
+        out = asyncio.run(narrative_agent.NarrativeAgent(llm=_model()).generate(_make_report()))
+        return wire, out
+
+    def test_an_answer_in_text_is_the_round_s_answer(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def in_text(body: dict[str, Any], text: str) -> dict[str, Any]:
+            return message(
+                [_thinking(), {"type": "text", "text": text}], stop="end_turn", usage=USAGE
+            )
+
+        wire, out = self._generate(monkeypatch, in_text)
+        assert out is not None and len(out.key_findings) >= 2
+        assert all(body.get("tools") for body in wire.bodies)
+        assert len(wire.bodies[0]["messages"]) == 1
+        assert wire.refused == [] and wire.dropped == []
+
+    def test_an_answer_with_nothing_in_it_is_asked_again_without_the_tool(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def empty_then_text(body: dict[str, Any], text: str) -> dict[str, Any]:
+            if body.get("tools"):
+                return message([], stop="end_turn", usage=USAGE)
+            return message([{"type": "text", "text": text}], stop="end_turn", usage=USAGE)
+
+        wire, out = self._generate(monkeypatch, empty_then_text)
+        assert out is not None
+        assert wire.bodies[0].get("tools") and not wire.bodies[1].get("tools")
+
+
+class TestTheMediationExtraction:
+    def test_a_verdict_in_text_is_read_and_not_asked_again(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from langchain_core.prompts import ChatPromptTemplate
+
+        from maljan.agents.judge_agent import JudgeAgent
+
+        wire = Wire(_verdict_text)
+        install(monkeypatch, wire)
+        judge = JudgeAgent(llm=_model())
+        monkeypatch.setattr(judge, "_supports_structured_output", lambda: True)
+        prompt = ChatPromptTemplate.from_messages([("human", "Extract: {reasoning_log}")])
+        verdict = asyncio.run(judge._extract_mediator_verdict(prompt, "All agree.", base_delay=0))
+        assert verdict.resolution_summary == "Agreed."
+        assert len(wire.bodies) == 1 and wire.bodies[0].get("tools")
