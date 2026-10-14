@@ -60,9 +60,9 @@ ATTCK_CACHE_FILES: dict[str, Path] = {
 }
 ATTCK_CACHE_FILE = ATTCK_CACHE_FILES["enterprise"]
 
-# How many times the largest cached bundle one download may be (``_size_bound``).
-# A release grows the catalogue by a few per cent; four times is room for any
-# real one and still stops a response that does not end.
+# How many times its own domain's cached bundle one download may be
+# (``_size_bound``). A release grows a catalogue by a few per cent; four times
+# is room for any real one and still stops a response that does not end.
 DOWNLOAD_SIZE_FACTOR = 4
 
 # The vendored technique universe, shipped so validation works with no network.
@@ -258,21 +258,54 @@ def _load_raw_bundle(
     return raw
 
 
-def _size_bound() -> int | None:
-    """How many bytes one download may be: a multiple of the largest cached bundle.
+def meta_path(bundle: Path) -> Path:
+    """Where the facts read out of a cached bundle are kept, beside it (``attck_update``)."""
+    return bundle.with_name(f"{bundle.stem}.meta.json")
 
-    The bundles grow by a few per cent a release, so ``DOWNLOAD_SIZE_FACTOR``
-    times the largest one this cache holds is room for any real release and
-    still stops a response that never ends. ``None`` when nothing is cached to
-    derive it from; the declared length of the response then bounds it.
+
+def _known_good_size(bundle: Path) -> int | None:
+    """The bundle's size when its kept facts say it was read whole; else ``None``.
+
+    A truncated or hand-edited file has no matching facts, so its size never
+    bounds the download that is meant to replace it.
     """
-    sizes = []
-    for path in ATTCK_CACHE_FILES.values():
-        try:
-            sizes.append(Path(path).stat().st_size)
-        except OSError:
-            continue
-    return DOWNLOAD_SIZE_FACTOR * max(sizes) if sizes else None
+    try:
+        stat = bundle.stat()
+        meta = json.loads(meta_path(bundle).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if (
+        isinstance(meta, dict)
+        and meta.get("inode") == stat.st_ino
+        and meta.get("size") == stat.st_size
+        and int(meta.get("techniques") or 0) > 0
+    ):
+        return stat.st_size
+    return None
+
+
+def _domain_of_url(url: str) -> str | None:
+    for domain in DOMAINS:
+        if f"/{domain}-attack/" in url:
+            return domain
+    return None
+
+
+def _size_bound(url: str) -> int | None:
+    """How many bytes a download of ``url`` may be: a multiple of its own domain's bundle.
+
+    ``DOWNLOAD_SIZE_FACTOR`` times the size of the same domain's cached bundle,
+    when that bundle is known to have been read whole. Another domain's size
+    is never used: a missing Enterprise bundle must not be held to a bound
+    made from the far smaller Mobile one. ``None`` otherwise (the release
+    index, a domain not cached or not known good): the response's declared
+    length then bounds it, and with none it is unbounded, which is logged.
+    """
+    domain = _domain_of_url(url)
+    if domain is None or domain not in ATTCK_CACHE_FILES:
+        return None
+    size = _known_good_size(Path(ATTCK_CACHE_FILES[domain]))
+    return DOWNLOAD_SIZE_FACTOR * size if size else None
 
 
 def _guarded_opener() -> Any:
@@ -323,6 +356,12 @@ def _stream(
         bound = max_bytes
         if bound is None and declared and str(declared).isdigit():
             bound = int(declared)
+        if bound is None:
+            logger.info(
+                "ATT&CK download from %s has no size bound: nothing to derive one from "
+                "and no declared length.",
+                url,
+            )
         read = 0
         while True:
             if deadline is not None and time.monotonic() > deadline:
@@ -353,7 +392,7 @@ def _fetch_bundle(
     The STIX bundles, and the release index ``attck_update`` reads versions
     from: both are platform constants on the same host. A redirect is
     followed only to HTTPS on the same host, and the body is bounded by
-    ``max_bytes`` or, when none is given, by ``_size_bound``.
+    ``max_bytes`` or, when none is given, by ``_size_bound(url)``.
     """
     import io
 
@@ -364,7 +403,7 @@ def _fetch_bundle(
             buffer,
             timeout=timeout,
             deadline=deadline,
-            max_bytes=max_bytes if max_bytes is not None else _size_bound(),
+            max_bytes=max_bytes if max_bytes is not None else _size_bound(url),
         )
         raw: dict[str, Any] = json.loads(buffer.getvalue().decode("utf-8"))
         return raw
@@ -394,7 +433,7 @@ def _download_bundle_file(
                 out,
                 timeout=timeout,
                 deadline=deadline,
-                max_bytes=max_bytes if max_bytes is not None else _size_bound(),
+                max_bytes=max_bytes if max_bytes is not None else _size_bound(url),
             )
     except Exception as exc:
         raise RuntimeError(f"Failed to fetch ATT&CK bundle from {url}: {exc}") from exc

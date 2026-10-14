@@ -10,7 +10,7 @@ import {
   lostContactText,
   nextCheckSentence,
   readCheck,
-  statusIsStale,
+  shouldRefetch,
   statusRows,
   updateOutcome,
   waitSentence,
@@ -254,8 +254,12 @@ export default function AttckDataPanel({ savedInterval }: { savedInterval?: unkn
 
   // The interval was saved since the status was read: the next-check line is
   // read again under the new one.
+  // Once per saved value: another API replica can still answer with the old
+  // interval for a few seconds, and asking again on each such answer would loop.
+  const askedFor = useRef<unknown>(undefined);
   useEffect(() => {
-    if (!statusIsStale(status, savedInterval)) return;
+    if (!shouldRefetch(status, savedInterval, askedFor.current)) return;
+    askedFor.current = savedInterval;
     api
       .getAttckStatus()
       .then((next) => {

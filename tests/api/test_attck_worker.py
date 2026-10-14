@@ -189,6 +189,10 @@ class TestItsLife:
     ) -> None:
         fake = FakeWorker()
         monkeypatch.setattr(attck_worker, "build_attck_worker", lambda db_session: fake)
+        cleared: list[bool] = []
+        monkeypatch.setattr(
+            attck_update, "clear_leftovers_at_start", lambda: cleared.append(True) or []
+        )
 
         async def life() -> dict[str, Any]:
             ctx: dict[str, Any] = {"db_session": None}
@@ -198,6 +202,7 @@ class TestItsLife:
             return ctx
 
         ctx = asyncio.run(life())
+        assert cleared == [True]
         assert fake.closed
         assert ctx["attck_worker_task"].done()
 

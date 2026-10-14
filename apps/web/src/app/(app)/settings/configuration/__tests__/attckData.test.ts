@@ -11,12 +11,14 @@ import served from "@/test-fixtures/settings-schema.json";
 import { formatDateTime } from "@/lib/report-utils";
 import type { AttckCheckResult, AttckStatus, AttckUpdateResult, SettingsSchema } from "@/types/settings";
 import { AttckDataView, type AttckDataViewProps } from "../AttckDataPanel";
+import { refusedNote } from "../StoredValueRefusedNote";
 import {
   ATTCK_REFRESH_KEY,
   ageLabel,
   lostContactText,
   releaseDate,
   statusIsStale,
+  shouldRefetch,
   lastCheckLine,
   lastUpdateLine,
   nextCheckSentence,
@@ -341,5 +343,46 @@ describe("review fixes", () => {
     expect(statusIsStale(STATUS, 30)).toBe(true);
     expect(statusIsStale(STATUS, undefined)).toBe(false);
     expect(statusIsStale(null, 30)).toBe(false);
+  });
+});
+
+describe("verification fixes", () => {
+  it("asks again once per saved interval, not on every stale answer", () => {
+    expect(shouldRefetch(STATUS, 30, undefined)).toBe(true);
+    expect(shouldRefetch(STATUS, 30, 30)).toBe(false);
+    expect(shouldRefetch(STATUS, 14, 30)).toBe(true);
+    expect(shouldRefetch(STATUS, 7, undefined)).toBe(false);
+  });
+
+  it("a bundle whose parse did not finish is not known, not unreadable", () => {
+    const rows = statusRows({
+      ...STATUS,
+      domains: [
+        {
+          domain: "enterprise",
+          label: "Enterprise",
+          present: true,
+          readable: null,
+          reason: "the release the cache holds is not known right now: the parse did not finish (signal 9)",
+          cached_at: "2026-10-14T09:00:00+00:00",
+          age_days: 1,
+          next_check_at: NEXT,
+        },
+      ],
+    });
+    expect(rows[0].version).toBe("not known right now");
+  });
+
+  it("says beside a setting that its stored value is not in force", () => {
+    const schema = {
+      ...(served as unknown as SettingsSchema),
+      stored_values_refused: { [ATTCK_REFRESH_KEY]: "Input should be less than or equal to 2885414" },
+    };
+    expect(refusedNote(schema, ATTCK_REFRESH_KEY)).toBe(
+      "The stored value is not in force: Input should be less than or equal to 2885414. " +
+        "Its default is used until a value is saved here again or the stored one is reset."
+    );
+    expect(refusedNote(schema, "core.llm.provider")).toBe("");
+    expect(refusedNote(null, ATTCK_REFRESH_KEY)).toBe("");
   });
 });

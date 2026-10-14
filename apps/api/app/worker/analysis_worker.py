@@ -32,7 +32,12 @@ from maljan.core.config import MEDIATOR_AGENT_NAME
 from maljan.core.config import Settings as _CoreSettings
 from maljan.core.report_formats import declarations_in_effect, recorded_signature_scale
 from maljan.core.settings_catalog import core_catalog
-from maljan.core.settings_overrides import build_settings, public_snapshot, trim_declarations
+from maljan.core.settings_overrides import (
+    build_settings,
+    public_snapshot,
+    stored_settings,
+    trim_declarations,
+)
 from maljan.pipeline.events import MODEL_USAGE as MODEL_USAGE_EVENT
 from maljan.pipeline.outcome import absent_analysis_message
 from maljan.providers.errors import ProviderError
@@ -175,7 +180,10 @@ def build_job_settings(
             merged["sandbox.provider"] = "upload"
         if job_config.get("profile") is not None:
             merged["agents.profile"] = job_config["profile"]
-    settings = build_settings(merged)
+    # A stored value the model refuses is read past with a warning (its
+    # default in force), as every settings read does; a value the job itself
+    # brought is still refused.
+    settings, _refused = stored_settings(merged, stored_keys=overrides)
     # The selected provider's role models come from its own block; a job never
     # runs with an empty model name borrowed from nowhere.
     from maljan.llm.provider_base import role_block_problem

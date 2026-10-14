@@ -9,7 +9,9 @@ A deployment that set it to a whole number of days other than the shipped 7
 has its value written to that setting here, once, when the store holds nothing
 for the key: a value an operator saved in the console is kept. 0 or a negative
 number, which the old loader read as "never check", is written as 0, which
-means the same. Anything that is not a whole number is left unwritten. The revision reads the environment of the
+means the same; so is a number past the setting's upper bound, which could only
+have meant "effectively never" and which the setting would refuse. Anything
+that is not a whole number is left unwritten. The revision reads the environment of the
 process that runs it, which is the one ``make migrate`` sources from
 ``bootstrap.env``.
 
@@ -24,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import date
 
 import sqlalchemy as sa
 from alembic import op
@@ -40,6 +43,10 @@ READS: dict[str, tuple[str, int]] = {
     "MALJAN_ATTCK_MAX_AGE_DAYS": ("core.validation.attck_refresh_days", 7),
 }
 
+# The setting's upper bound (``maljan.core.config.ATTCK_REFRESH_DAYS_MAX``,
+# derived the same way here: a revision imports no application code).
+REFRESH_DAYS_MAX = (date(9999, 12, 31) - date(2100, 1, 1)).days
+
 _INSERT_PG = sa.text(
     "INSERT INTO runtime_settings (key, value, is_secret) VALUES (:k, CAST(:v AS JSONB), false)"
 )
@@ -49,7 +56,7 @@ _INSERT_OTHER = sa.text(
 
 
 def _days(raw: str) -> int | None:
-    """``raw`` as days, 0 for 0 or less (never check), ``None`` when not a whole number."""
+    """``raw`` as days; 0 (never check) for 0 or less and past the bound; ``None`` if no number."""
     value = raw.strip()
     if not value:
         return None
@@ -57,7 +64,9 @@ def _days(raw: str) -> int | None:
         days = int(value)
     except ValueError:
         return None
-    return max(days, 0)
+    if days <= 0 or days > REFRESH_DAYS_MAX:
+        return 0
+    return days
 
 
 def _held(conn: sa.engine.Connection, key: str) -> bool:

@@ -720,8 +720,13 @@ reads the same setting, which reaches it and the knowledge tool server as
 container from the store). `MALJAN_ATTCK_MAX_AGE_DAYS` is retired: the
 migration that retired it read a whole number other than 7 once into the
 setting, where the store held none (0 or a negative number, which the old
-loader read as "never check", as 0), and a worker that still has it set warns
-at start and names the setting.
+loader read as "never check", as 0, and so is a number past the setting's
+bound), and a worker that still has it set warns at start and names the
+setting. A stored value the settings model refuses, of this or any key, no
+longer fails every read of the settings: that key is left out with a warning,
+its default is in force, and the console says so beside the setting until a
+value is saved there again or the stored one is reset; a save is still
+refused.
 
 Under the setting, the console shows per domain the cached release, its date,
 when the file was written, its age and the next automatic check, and the last
@@ -743,9 +748,11 @@ says it stopped and that the table shows what the cache holds. Both need an
 administrator and are audited.
 
 Each download follows a redirect only to HTTPS on the same host and is bounded
-in size by four times the largest cached bundle (with none cached, by its own
-declared length); the bound is logged when a download passes it. The download
-as a whole has a deadline, not only each read.
+in size by four times the same domain's cached bundle, when that bundle is
+known to have been read whole; otherwise (a domain missing or truncated, the
+release index) by the response's declared length, and with none it is
+unbounded, which is logged. A download that passes its bound is stopped and
+logged. The download as a whole has a deadline, not only each read.
 
 The cache is on the analysis worker's volume and that process is its only
 writer: the API asks it through a queue of its own (`arq:queue:attck`), read by
@@ -760,7 +767,14 @@ started and who started it. An analysis reading a bundle during an update reads
 the old file or the new one, never half of either; analyses already running
 keep the catalogue they loaded, and the next one reads the new files. A whole
 bundle is parsed in a short-lived child process, one at a time, so the half
-gigabyte a parse costs leaves the analysis worker with the child.
+gigabyte a parse costs leaves the analysis worker with the child. The child
+gets a time limit from the file's size (30 s plus 2 s per megabyte) and is
+killed past it, only `PATH`, `PYTHONPATH` and `HOME` of the environment, and
+an answer file of its own. A parse that does not finish leaves that domain's
+release "not known right now", which is neither unreadable nor outdated: a
+check then fails with that reason and an update downloads nothing. The
+temporary files a killed process leaves in the cache are removed when the
+worker starts.
 
 ### The top-level-domain list
 

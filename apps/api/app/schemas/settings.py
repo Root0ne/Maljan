@@ -84,6 +84,11 @@ class SchemaResponse(BaseModel):
     # shipped declaration that changed its tool's kind), the shipped step it
     # changed, if any, is in force, and the console marks it on the steps.
     pack_steps_left_out: dict[str, str] = Field(default_factory=dict)
+    # Each stored value the settings model refuses (``core.<path>`` -> why),
+    # read past rather than failing every read
+    # (``core.settings_overrides.stored_settings``): its default is in force
+    # until it is saved again or reset, and the console says so beside it.
+    stored_values_refused: dict[str, str] = Field(default_factory=dict)
 
 
 class ValueDTO(BaseModel):

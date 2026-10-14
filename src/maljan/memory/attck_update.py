@@ -128,7 +128,7 @@ def cache_file(domain: str) -> Path:
 
 def meta_file(bundle: Path) -> Path:
     """Where the facts read out of a cached bundle are kept, beside it."""
-    return bundle.with_name(f"{bundle.stem}.meta.json")
+    return attck_loader.meta_path(bundle)
 
 
 def backup_file(bundle: Path) -> Path:
@@ -217,6 +217,9 @@ def _locked(
                 _note_holder(path, holder)
             yield True
         finally:
+            if holder is not None:
+                with suppress(OSError):
+                    path.with_name(HOLDER_NAME).unlink()
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
@@ -230,6 +233,36 @@ def _note_holder(lock: Path, holder: Mapping[str, Any]) -> None:
 def _holder_of(directory: Path) -> dict[str, Any]:
     raw = _read_json(directory / HOLDER_NAME)
     return raw if isinstance(raw, dict) else {}
+
+
+def clear_leftovers_at_start() -> list[Path]:
+    """Remove every temporary file a killed process left in the cache directory.
+
+    The bundles', the facts', the state's and the holder's. Called when the
+    worker that owns the cache starts, before it takes any job, so no write it
+    could cut short is in progress; the update lock is taken all the same, and
+    nothing is removed while another process holds it.
+    """
+    directory = cache_dir()
+    removed: list[Path] = []
+    if not directory.is_dir():
+        return removed
+    with _locked(directory / LOCK_NAME, blocking=False) as held:
+        if not held:
+            return removed
+        names = [STATE_NAME, HOLDER_NAME]
+        for domain in attck_loader.DOMAINS:
+            bundle = cache_file(domain)
+            names += [bundle.name, meta_file(bundle).name]
+        for name in names:
+            for pattern in (f".{name}.*.part", f".{name}.*.bak"):
+                for leftover in directory.glob(pattern):
+                    with suppress(OSError):
+                        leftover.unlink()
+                        removed.append(leftover)
+    if removed:
+        logger.info("Removed %d leftover temporary file(s) from the ATT&CK cache.", len(removed))
+    return removed
 
 
 def _who(triggered_by: Mapping[str, Any] | None) -> str:
@@ -314,30 +347,91 @@ def read_facts(path: str) -> dict[str, Any]:
 
 
 def _child_main() -> None:
-    """``python -c '…_child_main()' <path>``: print the facts of one bundle as JSON."""
+    """``python -P -c '…_child_main()' <bundle> <answer file>``: write one bundle's facts.
+
+    The answer goes to a file of its own, never stdout, so nothing a module
+    prints on import can be mistaken for it.
+    """
     import logging
 
     logging.disable(logging.CRITICAL)
-    sys.stdout.write(json.dumps(read_facts(sys.argv[1])))
+    Path(sys.argv[2]).write_text(json.dumps(read_facts(sys.argv[1])), encoding="utf-8")
+
+
+# How long a child parse may take: a start-up allowance plus a rate far below
+# what ``json.loads`` does on this kind of file (tens of megabytes a second),
+# so a slow disk is never cut short and a hung one is.
+PARSE_START_SECONDS = 30.0
+PARSE_SECONDS_PER_MB = 2.0
+
+# What the child is handed of the environment: enough to find the interpreter's
+# packages, nothing of the worker's credentials.
+_CHILD_ENV_NAMES = ("PATH", "PYTHONPATH", "HOME")
+
+
+def parse_timeout(path: Path) -> float:
+    """The seconds a child parse of ``path`` may take, from its size."""
+    try:
+        size_mb = path.stat().st_size / 1_000_000
+    except OSError:
+        size_mb = 0.0
+    return PARSE_START_SECONDS + PARSE_SECONDS_PER_MB * size_mb
+
+
+def _not_known(error: str) -> dict[str, Any]:
+    return {"kind": "child", "error": error}
 
 
 def _parse_in_child(path: Path) -> dict[str, Any]:
-    """``read_facts`` in a short-lived child process, so its memory leaves with it."""
+    """``read_facts`` in a short-lived child process, so its memory leaves with it.
+
+    The child gets a timeout derived from the file's size and is killed when it
+    runs past it, a minimal environment, ``-P`` (the working directory is not
+    on its path) and an answer file of its own. A child that dies, runs out of
+    time or cannot be started answers ``kind: "child"``: what the file holds
+    is then not known, which is not the same as the file being unreadable.
+    """
+    timeout = parse_timeout(path)
+    logger.debug("ATT&CK parse of %s in a child, at most %.0f s.", path.name, timeout)
+    handle, answer_name = tempfile.mkstemp(prefix=".attck-parse.", suffix=".json")
+    os.close(handle)
+    answer_file = Path(answer_name)
     command = [
         sys.executable,
+        "-P",
         "-c",
         "from maljan.memory.attck_update import _child_main; _child_main()",
         str(path),
+        str(answer_file),
     ]
-    done = subprocess.run(  # noqa: S603 - our own interpreter and module, a path we chose
-        command, capture_output=True, text=True, check=False
-    )
+    env = {name: os.environ[name] for name in _CHILD_ENV_NAMES if name in os.environ}
     try:
-        answer = json.loads(done.stdout)
-    except ValueError:
-        tail = (done.stderr or "").strip().splitlines()[-1:] or ["no output"]
-        return {"kind": "child", "error": f"the parse did not finish ({tail[0]})"}
-    return answer if isinstance(answer, dict) else {"kind": "child", "error": "no answer"}
+        try:
+            child = subprocess.Popen(  # noqa: S603 - our own interpreter and module, our paths
+                command, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True
+            )
+        except OSError as exc:
+            logger.warning("ATT&CK parse of %s could not be started: %s", path.name, exc)
+            return _not_known(f"the parse could not be started ({exc})")
+        try:
+            _, stderr = child.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.communicate()
+            logger.warning(
+                "ATT&CK parse of %s passed its %.0f s limit and was stopped.", path.name, timeout
+            )
+            return _not_known(f"the parse did not finish within {timeout:.0f} s and was stopped")
+        if child.returncode < 0:
+            return _not_known(f"the parse did not finish (signal {-child.returncode})")
+        try:
+            answer = json.loads(answer_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            tail = (stderr or "").strip().splitlines()[-1:] or [f"exit status {child.returncode}"]
+            return _not_known(f"the parse did not finish ({tail[0]})")
+        return answer if isinstance(answer, dict) else _not_known("the parse gave no answer")
+    finally:
+        answer_file.unlink(missing_ok=True)
 
 
 # The parse runner. A test may hand ``read_facts`` in its place to stay in
@@ -358,6 +452,8 @@ def validate_bundle_file(path: Path, expected_version: str) -> dict[str, Any]:
     carry at least one technique.
     """
     answer = _facts_of_file(path)
+    if answer.get("kind") == "child":
+        raise BundleRejected(f"the download could not be checked: {answer.get('error')}")
     if "facts" not in answer:
         raise BundleRejected(f"the download {answer.get('error') or 'cannot be read'}")
     facts: dict[str, Any] = answer["facts"]
@@ -418,6 +514,19 @@ def cached_facts(domain: str) -> dict[str, Any]:
                 return {"present": False}
             if meta is None:
                 answer = _run_parse(bundle)
+                if answer.get("kind") == "child":
+                    # Not known right now, which is not unreadable: nothing is
+                    # written, and the next read tries again.
+                    return {
+                        "present": True,
+                        "readable": None,
+                        "reason": (
+                            "the release the cache holds is not known right now: "
+                            f"{answer.get('error')}"
+                        ),
+                        "cached_at": _iso_ts(stat.st_mtime),
+                        "age_days": round(max(0.0, (time.time() - stat.st_mtime) / 86400.0), 2),
+                    }
                 if "facts" not in answer:
                     return {
                         "present": True,
@@ -510,6 +619,8 @@ def compare(cached: Mapping[str, Any], latest: Mapping[str, str] | None) -> str:
     """``current``, ``outdated``, ``missing`` (nothing cached) or ``unlisted`` (not upstream)."""
     if latest is None:
         return "unlisted"
+    if cached.get("present") and cached.get("readable", True) is None:
+        return "unknown"
     if not cached.get("present") or not cached.get("readable", True):
         return "missing"
     have = version_key(str(cached.get("version") or ""))
@@ -659,10 +770,13 @@ def check(
                 }
             )
         outdated = any(row["state"] in _NEEDS_UPDATE for row in rows)
+        unknown = [row for row in rows if row["state"] == "unknown"]
         result = {
-            "ok": True,
-            "outcome": "outdated" if outdated else "up_to_date",
-            "reason": "",
+            "ok": not unknown or outdated,
+            "outcome": "outdated" if outdated else ("failed" if unknown else "up_to_date"),
+            "reason": "; ".join(
+                f"{row['label']}: {cached[str(row['domain'])].get('reason')}" for row in unknown
+            ),
             "checked_at": checked_at,
             "triggered_by": dict(triggered_by or {}),
             "domains": rows,
@@ -829,7 +943,19 @@ def _update_held(
         return finished(False, "failed", f"the ATT&CK release index could not be read: {exc}", [])
 
     _clear_leftovers(directory)
-    cached = {domain: cached_facts(domain) for domain in attck_loader.DOMAINS}
+    try:
+        cached = {domain: cached_facts(domain) for domain in attck_loader.DOMAINS}
+    except OSError as exc:
+        return finished(False, "failed", f"the cache could not be read: {exc}", [])
+    unknown = [d for d in attck_loader.DOMAINS if compare(cached[d], latest.get(d)) == "unknown"]
+    if unknown:
+        return finished(
+            False,
+            "failed",
+            "; ".join(f"{DOMAIN_LABELS[d]}: {cached[d].get('reason')}" for d in unknown)
+            + "; nothing was downloaded",
+            [],
+        )
     plan = [
         domain
         for domain in attck_loader.DOMAINS

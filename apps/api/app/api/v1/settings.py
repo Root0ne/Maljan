@@ -128,6 +128,7 @@ async def get_schema(
         build_settings,
         pack_steps_left_out,
         refused_tool_changes,
+        stored_settings,
     )
 
     from app.services.enrichment_sources import ENRICHMENT_SOURCES_KEY
@@ -136,8 +137,10 @@ async def get_schema(
     profiles, agents = await _effective_agents(db)
     stored = await SettingsService(db).load_overrides()
     core = await load_core_overrides(db)
+    refused: dict[str, str] = {}
     try:
-        configs = build_settings(core).mcp.servers
+        built, refused = stored_settings(core)
+        configs = built.mcp.servers
     except (ValueError, ValidationError):
         configs = build_settings({}).mcp.servers
     try:
@@ -154,6 +157,7 @@ async def get_schema(
         server_configs=configs,
         tool_facts_conflicts=refused_tool_changes(core),
         pack_steps_left_out=left_out,
+        stored_values_refused={f"core.{key}": reason for key, reason in refused.items()},
     )
 
 
@@ -166,6 +170,7 @@ def served_schema(
     server_configs: dict[str, Any] | None = None,
     tool_facts_conflicts: dict[str, list[str]] | None = None,
     pack_steps_left_out: dict[str, str] | None = None,
+    stored_values_refused: dict[str, str] | None = None,
 ) -> SchemaResponse:
     """The settings schema as ``GET /settings/schema`` serves it for these choices.
 
@@ -177,7 +182,8 @@ def served_schema(
     ``tool_facts_conflicts`` names, per block, the tools whose stored change
     is refused over what ships now (``refused_tool_changes``), and
     ``pack_steps_left_out`` each stored triage pack step left out, with why
-    (``pack_steps_left_out``).
+    (``pack_steps_left_out``), and ``stored_values_refused`` each stored
+    value the model refuses, with why (``stored_settings``).
     """
     from app.services.credential_bootstrap import bootstrap_facts
     from app.services.enrichment_sources import source_facts
@@ -206,6 +212,7 @@ def served_schema(
         tool_declaration_fields=declaration_fields(),
         tool_facts_conflicts=tool_facts_conflicts or {},
         pack_steps_left_out=pack_steps_left_out or {},
+        stored_values_refused=stored_values_refused or {},
     )
 
 

@@ -414,6 +414,9 @@ export interface SettingsSchema {
    *  `#<position>`), with why; the shipped step it changed, if any, runs
    *  instead. */
   pack_steps_left_out?: Record<string, string>;
+  /** Each stored value the settings model refuses, by catalog key, with why:
+   *  its default is in force until it is saved again or reset. */
+  stored_values_refused?: Record<string, string>;
 }
 
 /** The word naming no kind, and each kind-free and kind-dependent field of a
@@ -623,8 +626,9 @@ export type AttckDomain = "enterprise" | "mobile" | "ics";
 /** What the cache holds for one domain, as the worker that holds it reads it. */
 export interface AttckCached {
   present: boolean;
-  /** False when a file is there and does not parse; `reason` says why. */
-  readable?: boolean;
+  /** False when a file is there and does not parse; null when what it holds is
+   *  not known right now (its parse did not finish); `reason` says why. */
+  readable?: boolean | null;
   reason?: string;
   version?: string;
   /** The release's own date (its collection's `modified`). */

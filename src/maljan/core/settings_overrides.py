@@ -92,6 +92,78 @@ def build_settings(core_overrides: Mapping[str, Any]) -> Settings:
     return _built(core_overrides)[0]
 
 
+def stored_settings(
+    core_overrides: Mapping[str, Any], *, stored_keys: Iterable[str] | None = None
+) -> tuple[Settings, dict[str, str]]:
+    """The settings a read builds from the store, and the stored values it could not use.
+
+    A stored value the model refuses (one a migration wrote past a bound added
+    later, one an older release accepted) used to fail every build, so every
+    route and job that reads settings failed with it. Here that one key is
+    left out, its default is in force, and it is returned with the reason, so
+    the caller reports it and the console shows it beside the setting. Only
+    keys in ``stored_keys`` (all of ``core_overrides`` when ``None``) are
+    left out this way; any other refusal is raised as before. A save still
+    validates with :func:`build_settings`, which refuses.
+    """
+    from pydantic import ValidationError
+
+    remaining = dict(core_overrides)
+    eligible = set(remaining if stored_keys is None else stored_keys)
+    refused: dict[str, str] = {}
+    while True:
+        try:
+            built = build_settings(remaining)
+        except ValidationError as exc:
+            found = _refused_stored_keys(exc, remaining, eligible)
+            if not found:
+                raise
+            for key, reason in found.items():
+                remaining.pop(key, None)
+                refused[key] = reason
+            continue
+        if refused:
+            _warn_refused_values(refused)
+        return built, refused
+
+
+def _refused_stored_keys(
+    exc: Any, remaining: Mapping[str, Any], eligible: set[str]
+) -> dict[str, str]:
+    """Each stored key a validation error is about, with its message."""
+    found: dict[str, str] = {}
+    for error in exc.errors():
+        path = ".".join(str(part) for part in error.get("loc", ()))
+        owners = [
+            key
+            for key in remaining
+            if key in eligible and (path == key or path.startswith(key + "."))
+        ]
+        if owners:
+            found[max(owners, key=len)] = str(error.get("msg") or "refused")
+    return found
+
+
+_WARNED_VALUES: set[tuple[tuple[str, str], ...]] = set()
+
+
+def _warn_refused_values(refused: Mapping[str, str]) -> None:
+    from maljan.core.logger import logger
+
+    marker = tuple(sorted(refused.items()))
+    if marker in _WARNED_VALUES:
+        return
+    if len(_WARNED_VALUES) < _WARNED_STEPS_MAX:
+        _WARNED_VALUES.add(marker)
+    for key, reason in refused.items():
+        logger.warning(
+            "The stored value of %s is not in force (%s); its default is used until it is "
+            "saved again or reset.",
+            key,
+            reason,
+        )
+
+
 # The stored leaf of the triage pack's steps (``core.pack_steps``).
 PACK_STEPS_PATH = "triage.steps"
 

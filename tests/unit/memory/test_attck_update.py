@@ -767,3 +767,176 @@ class TestBusyNamesItsHolder:
             result = attck_update.update()
         assert "another ATT&CK update is running" in result["reason"]
         assert "started by Ada" in result["reason"]
+
+
+def _child_cannot(error: str) -> Any:
+    def parse(path: Path) -> dict[str, Any]:
+        return {"kind": "child", "error": error}
+
+    return parse
+
+
+class TestAParseThatDidNotFinish:
+    def test_the_cache_is_not_known_rather_than_unreadable(
+        self, cache: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _seed(cache, {"enterprise": "19.2"})
+        monkeypatch.setattr(
+            attck_update, "_run_parse", _child_cannot("the parse did not finish (signal 9)")
+        )
+
+        facts = attck_update.cached_facts("enterprise")
+
+        assert facts["present"] and facts["readable"] is None
+        assert facts["reason"] == (
+            "the release the cache holds is not known right now: the parse did not finish "
+            "(signal 9)"
+        )
+        assert not (cache / "enterprise-attack.meta.json").exists()
+        assert attck_update.compare(facts, {"version": "20.0", "released": ""}) == "unknown"
+
+    def test_a_check_does_not_call_it_outdated(
+        self, cache: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _seed(cache, {"enterprise": "20.0", "mobile": "20.0", "ics": "20.0"})
+        monkeypatch.setattr(
+            attck_update, "_run_parse", _child_cannot("the parse did not finish (signal 9)")
+        )
+        _index_answers(monkeypatch, LATEST)
+
+        result = attck_update.check()
+
+        assert result["outcome"] == "failed" and not result["ok"]
+        assert "Enterprise: the release the cache holds is not known right now" in result["reason"]
+
+    def test_an_update_downloads_nothing_it_cannot_compare(
+        self, cache: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _seed(cache, {"enterprise": "19.2"})
+        monkeypatch.setattr(
+            attck_update, "_run_parse", _child_cannot("the parse could not be started (ENOMEM)")
+        )
+        _index_answers(monkeypatch, LATEST)
+        fetched = _downloads_serve(monkeypatch)
+
+        result = attck_update.update()
+
+        assert not result["ok"] and fetched == []
+        assert "the parse could not be started (ENOMEM); nothing was downloaded" in result["reason"]
+
+    def test_the_two_sentences_read_as_sentences(
+        self, cache: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (cache / "enterprise-attack.json").write_text("{ half", encoding="utf-8")
+        reason = attck_update.cached_facts("enterprise")["reason"]
+        assert reason.startswith("the cached file does not parse as JSON (")
+
+        part = cache / "download.part"
+        part.write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(
+            attck_update, "_run_parse", _child_cannot("the parse did not finish (signal 9)")
+        )
+        with pytest.raises(attck_update.BundleRejected) as refused:
+            attck_update.validate_bundle_file(part, "20.0")
+        assert str(refused.value) == (
+            "the download could not be checked: the parse did not finish (signal 9)"
+        )
+
+
+class TestTheChildProcess:
+    def test_its_time_limit_comes_from_the_file_size(self, cache: Path) -> None:
+        bundle = cache / "enterprise-attack.json"
+        with bundle.open("wb") as out:
+            out.truncate(55_000_000)
+        expected = attck_update.PARSE_START_SECONDS + attck_update.PARSE_SECONDS_PER_MB * 55
+        assert attck_update.parse_timeout(bundle) == pytest.approx(expected)
+
+    def test_one_past_its_limit_is_killed_and_said(
+        self, cache: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        _seed(cache, {"enterprise": "19.2"})
+        monkeypatch.setattr(attck_update, "PARSE_START_SECONDS", 0.0)
+        monkeypatch.setattr(attck_update, "PARSE_SECONDS_PER_MB", 0.0)
+        with caplog.at_level("WARNING"):
+            answer = attck_update._parse_in_child(cache / "enterprise-attack.json")
+        assert answer == {
+            "kind": "child",
+            "error": "the parse did not finish within 0 s and was stopped",
+        }
+        assert "passed its 0 s limit and was stopped" in caplog.text
+
+    def test_it_gets_a_minimal_environment_no_cwd_path_and_its_own_answer_file(
+        self, cache: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import subprocess
+
+        seen: dict[str, Any] = {}
+        real = subprocess.Popen
+
+        def popen(command: list[str], **kwargs: Any) -> Any:
+            seen.update(command=command, **kwargs)
+            return real(command, **kwargs)
+
+        monkeypatch.setattr(attck_update.subprocess, "Popen", popen)
+        monkeypatch.setenv("SETTINGS_ENCRYPTION_KEY", "kept-from-the-child")
+        _seed(cache, {"enterprise": "19.2"})
+
+        answer = attck_update._parse_in_child(cache / "enterprise-attack.json")
+
+        assert answer["facts"]["version"] == "19.2"
+        assert seen["command"][1] == "-P"
+        assert set(seen["env"]) <= {"PATH", "PYTHONPATH", "HOME"}
+        assert seen["stdout"] is subprocess.DEVNULL
+        assert not Path(seen["command"][-1]).exists()
+
+    def test_a_spawn_that_fails_says_why(
+        self, cache: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def no_fork(*_args: Any, **_kwargs: Any) -> Any:
+            raise OSError(12, "Cannot allocate memory")
+
+        monkeypatch.setattr(attck_update.subprocess, "Popen", no_fork)
+        _seed(cache, {"enterprise": "19.2"})
+        answer = attck_update._parse_in_child(cache / "enterprise-attack.json")
+        assert answer["kind"] == "child"
+        assert answer["error"].startswith("the parse could not be started (")
+        assert "Cannot allocate memory" in answer["error"]
+
+
+class TestTheHolderFile:
+    def test_it_goes_when_the_lock_is_released(self, cache: Path) -> None:
+        holder_file = cache / attck_update.HOLDER_NAME
+        with attck_update._locked(
+            cache / attck_update.LOCK_NAME, blocking=False, holder={"holder": "update"}
+        ):
+            assert holder_file.is_file()
+        assert not holder_file.exists()
+
+
+class TestLeftoversAtStart:
+    def test_every_temporary_file_goes_and_nothing_else(self, cache: Path) -> None:
+        _seed(cache, {"enterprise": "19.2"})
+        leftovers = [
+            cache / ".update-state.json.abc.part",
+            cache / ".enterprise-attack.meta.json.abc.part",
+            cache / "..update.holder.json.abc.part",  # the holder name starts with a dot
+            cache / ".enterprise-attack.json.abc.part",
+            cache / ".mobile-attack.json.abc.bak",
+        ]
+        for path in leftovers:
+            path.write_text("x")
+        kept = [cache / "enterprise-attack.json", cache / "notes.txt"]
+        kept[1].write_text("mine")
+
+        removed = attck_update.clear_leftovers_at_start()
+
+        assert sorted(removed) == sorted(leftovers)
+        assert all(not p.exists() for p in leftovers)
+        assert all(p.exists() for p in kept)
+
+    def test_nothing_goes_while_another_process_holds_the_cache(self, cache: Path) -> None:
+        leftover = cache / ".update-state.json.abc.part"
+        leftover.write_text("x")
+        with attck_update._locked(cache / attck_update.LOCK_NAME, blocking=False):
+            assert attck_update.clear_leftovers_at_start() == []
+        assert leftover.exists()

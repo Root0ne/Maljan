@@ -21,6 +21,7 @@ from maljan.core.settings_overrides import (
     pack_step_refusals,
     shipped_tool_facts,
     split_key,
+    stored_settings,
 )
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -992,6 +993,7 @@ class _CoreSettingsCache:
         self._clock = clock
         self._cached: Settings | None = None
         self._loaded_at: float | None = None
+        self.refused: dict[str, str] = {}
 
     async def get(self, db: AsyncSession) -> Settings:
         now = self._clock()
@@ -1001,7 +1003,9 @@ class _CoreSettingsCache:
             and now - self._loaded_at < self._ttl
         ):
             return self._cached
-        self._cached = build_settings(await load_core_overrides(db))
+        # A stored value the model refuses is read past, with a warning, and
+        # its default is in force: one bad row must not fail every read.
+        self._cached, self.refused = stored_settings(await load_core_overrides(db))
         self._loaded_at = now
         return self._cached
 

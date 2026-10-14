@@ -9,6 +9,7 @@ each read. No network: the opener is a stand-in.
 from __future__ import annotations
 
 import io
+import json
 import time
 import urllib.error
 import urllib.request
@@ -56,11 +57,75 @@ def cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
-def test_the_bound_is_a_multiple_of_the_largest_cached_bundle(cache: Path) -> None:
-    assert attck_loader._size_bound() is None
-    (cache / "enterprise-attack.json").write_bytes(b"x" * 100)
-    (cache / "ics-attack.json").write_bytes(b"x" * 10)
-    assert attck_loader._size_bound() == attck_loader.DOWNLOAD_SIZE_FACTOR * 100
+# The sizes of the bundles the deployment's cache holds today.
+REAL_SIZES = {"enterprise": 55_271_014, "mobile": 6_095_145, "ics": 5_266_683}
+
+
+def _cached_known_good(cache: Path, domain: str, size: int) -> Path:
+    """A sparse file of ``size`` bytes with the facts a whole read leaves beside it."""
+    bundle = cache / f"{domain}-attack.json"
+    with bundle.open("wb") as out:
+        out.truncate(size)
+    stat = bundle.stat()
+    attck_loader.meta_path(bundle).write_text(
+        json.dumps({"inode": stat.st_ino, "size": size, "techniques": 10, "version": "19.2"}),
+        encoding="utf-8",
+    )
+    return bundle
+
+
+def _url(domain: str) -> str:
+    return f"{attck_loader._BUNDLE_BASE_URL}/{domain}-attack/{domain}-attack-20.0.json"
+
+
+def test_each_domain_is_bounded_by_its_own_cached_bundle(cache: Path) -> None:
+    for domain, size in REAL_SIZES.items():
+        _cached_known_good(cache, domain, size)
+    for domain, size in REAL_SIZES.items():
+        assert attck_loader._size_bound(_url(domain)) == attck_loader.DOWNLOAD_SIZE_FACTOR * size
+
+
+def test_a_missing_enterprise_is_not_held_to_the_mobile_bound(
+    cache: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _cached_known_good(cache, "mobile", REAL_SIZES["mobile"])
+    _cached_known_good(cache, "ics", REAL_SIZES["ics"])
+
+    assert attck_loader._size_bound(_url("enterprise")) is None
+    # Its own declared length bounds it instead, so the real 55 MB release fits.
+    body = b"e" * 4096
+    _serve(monkeypatch, FakeResponse(body, length=str(REAL_SIZES["enterprise"])))
+    out = io.BytesIO()
+    attck_loader._stream(
+        _url("enterprise"),
+        out,
+        timeout=5,
+        deadline=None,
+        max_bytes=attck_loader._size_bound(_url("enterprise")),
+    )
+    assert out.getvalue() == body
+
+
+def test_a_truncated_bundle_does_not_bound_its_replacement(cache: Path) -> None:
+    bundle = _cached_known_good(cache, "enterprise", REAL_SIZES["enterprise"])
+    with bundle.open("r+b") as out:
+        out.truncate(1000)
+    assert attck_loader._size_bound(_url("enterprise")) is None
+
+
+def test_with_no_bound_at_all_the_download_says_so(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _serve(monkeypatch, FakeResponse(b"{}"))
+    with caplog.at_level("INFO"):
+        attck_loader._stream(
+            attck_loader._BUNDLE_BASE_URL + "/index.json",
+            io.BytesIO(),
+            timeout=5,
+            deadline=None,
+            max_bytes=attck_loader._size_bound(attck_loader._BUNDLE_BASE_URL + "/index.json"),
+        )
+    assert "has no size bound" in caplog.text
 
 
 def test_a_body_past_the_bound_is_stopped_and_said(

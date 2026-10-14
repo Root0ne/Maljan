@@ -183,3 +183,21 @@ def test_a_negative_attck_interval_is_never_checking_as_the_old_loader_read_it()
         )
         assert written == [ATTCK_KEY]
         assert _rows(conn) == {ATTCK_KEY: 0}
+
+
+def test_an_attck_interval_past_the_setting_s_bound_is_never_checking() -> None:
+    from maljan.core.config import ATTCK_REFRESH_DAYS_MAX
+    from maljan.core.settings_overrides import build_settings
+
+    mod = _module(ATTCK_MIGRATION)
+    assert mod.REFRESH_DAYS_MAX == ATTCK_REFRESH_DAYS_MAX
+    for raw, expected in (
+        ("99999999", 0),
+        (str(ATTCK_REFRESH_DAYS_MAX + 1), 0),
+        (str(ATTCK_REFRESH_DAYS_MAX), ATTCK_REFRESH_DAYS_MAX),
+    ):
+        conn = _connect()
+        mod.read_environment(conn, {"MALJAN_ATTCK_MAX_AGE_DAYS": raw})
+        (value,) = _rows(conn).values()
+        assert value == expected
+        assert build_settings({"validation.attck_refresh_days": value})

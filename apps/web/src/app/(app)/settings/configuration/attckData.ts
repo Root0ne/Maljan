@@ -48,6 +48,15 @@ export function statusIsStale(status: AttckStatus | null, savedInterval: unknown
   return Number(savedInterval) !== status.refresh_days;
 }
 
+/** Whether to read the status again: it is stale, and not already asked for this saved value. */
+export function shouldRefetch(
+  status: AttckStatus | null,
+  savedInterval: unknown,
+  askedFor: unknown
+): boolean {
+  return statusIsStale(status, savedInterval) && askedFor !== savedInterval;
+}
+
 /** What the console says while a poll of a running update keeps failing. */
 export function lostContactText(failures: number, error: string): string {
   return (
@@ -83,7 +92,12 @@ export function statusRows(status: AttckStatus): StatusRow[] {
     return {
       domain: d.domain,
       label: d.label,
-      version: d.readable === false ? "unreadable" : d.version || "unknown",
+      version:
+        d.readable === false
+          ? "unreadable"
+          : d.readable === null
+            ? "not known right now"
+            : d.version || "unknown",
       released: releaseDate(d.released),
       cachedAt: d.cached_at ? formatDateTime(d.cached_at) : "",
       age: ageLabel(d.age_days),

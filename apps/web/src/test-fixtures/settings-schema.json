@@ -11595,6 +11595,7 @@
   "triage": "Test Triage connection",
   "virustotal": "Test VirusTotal"
  },
+ "stored_values_refused": {},
  "tool_declaration_fields": {
   "kind_dependent": {
    "asserts_techniques": false,

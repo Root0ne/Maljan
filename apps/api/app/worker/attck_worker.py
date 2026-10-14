@@ -165,6 +165,11 @@ async def start_attck_worker(ctx: dict) -> None:
     A worker that cannot start leaves the analyses running: the console then
     says the worker did not answer, which is the truth.
     """
+    # Before any job: the temporary files a killed process left in the cache.
+    try:
+        await asyncio.to_thread(attck_update.clear_leftovers_at_start)
+    except Exception as exc:  # noqa: BLE001 — a cache that cannot be tidied still serves
+        logger.warning("ATT&CK cache leftovers not cleared: %s", exc)
     try:
         worker = build_attck_worker(ctx.get("db_session"))
         ctx["attck_worker"] = worker
