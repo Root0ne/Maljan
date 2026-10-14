@@ -1566,15 +1566,46 @@ which also keeps the tool definitions out of it and one tool answer's share
 Every chunk is a full tool loop, run after the one before it, so an input that
 fits is one chunk: the agent's sources (the sample context and a sandbox slice)
 are joined into one when they fit the room together, and the agent runs one
-loop over all of them, with the prompt a single-chunk input has always had.
-An input that does not fit is chunked as before, at the room. The sample path
-and the upstream findings, which go into the first chunk afterwards, are kept
-out of the room of the source that chunk comes from — never below the 20,000
-tokens a chunk shipped with, so a large upstream block never raises the chunk
-count above the old split's; the other sources keep the whole room. With no window
-learned nothing is derived: a chunk is the 20,000 tokens the setting shipped
-with, and sources are joined only within it, as a tool answer keeps its old
-6,000 characters. A number you set wins, for splitting and joining.
+loop over all of them, with the prompt a single-chunk input has always had;
+where one source is split, the whole sources next to each other that fit
+together are still joined, leaving room for the header and the count of earlier
+calls a later chunk carries. The pieces of one split source never fit one chunk
+together, so they are never joined. An input that does not fit is chunked at
+the room. The sample path and the upstream findings, which go into the first
+chunk afterwards, are kept out of that first chunk only; every later chunk is
+the whole room, so a large upstream block adds at most one chunk. In a list of
+more than one chunk each is sent behind a one-line header, which every chunk
+leaves room for, and a later chunk behind the calls the earlier ones made.
+The chunks run one after another, so a later chunk is sized when it is sent:
+the loops are those the shortest form of the earlier calls, their count, leaves
+room for, with what is left of the source spread evenly over them and cut at a
+line break only where that adds no loop (a line longer than the room is cut
+inside the line), so every prompt stays within the room and a list never adds
+a loop. The slack each chunk's share leaves goes to the most informative form
+that fits it: the full list; the same calls with their arguments but not what
+they returned, calls with identical arguments sharing a line with their
+entries as ranges (`decompile_function("0x3c7c") → ev_0012–ev_0015`), arguments
+longer than the list could ever hold said as their size and the call that holds
+them; the count with each tool's calls and the span of their entries
+(`38 tool call(s) (decompile_function ×34, list_strings ×4)`); or the count
+alone. Such a chunk's header says more may follow, since a carry can add a
+chunk. An identical call is still answered from its entry. The overlap between
+chunks is held below three quarters of a chunk, and the hold is logged. A JSON
+head that fits the room on its own stays whole when it is the agent's only
+source (cut, it would lose the sample path; the single chunk's prompt shortens
+it as a document and says so) and is split like any other when another source
+follows. Where the block alone fills the room, the first chunk is cut at the
+room like the rest. A source of nothing but whitespace adds no chunk, so no
+loop runs over nothing. A revision whose agent cannot be built to measure its
+room chunks at the size its first analysis measured. A number you set wins, for
+splitting and joining: chunks of `max_tokens_per_chunk` go as they are set,
+with the full list of earlier calls. With no window learned nothing is derived:
+a chunk is the 20,000 tokens the setting shipped with, and sources are joined
+only within it, as a tool answer keeps its old 6,000 characters; a run whose
+input that size split says so in its run summary and its log, with the setting
+that would size it from the window. With no room measured the prompts are
+built as before; two chunk boundaries differ on purpose: whole sources beside a
+split one are joined, and a packed bin counts the overlap it carries.
 
 **What the report leaves out, it says.** The markdown report keeps its layout
 bounds — a long table value is cut to fit the page, a long list shows its

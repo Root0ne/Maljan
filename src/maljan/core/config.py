@@ -877,7 +877,8 @@ class ChunkingConfig(BaseModel):
     # fit that room together are one chunk, so the analyst runs one loop over
     # all of them. With no window learned nothing is derived: a chunk is the
     # size this setting shipped with (``UNKNOWN_WINDOW_CHUNK_TOKENS``), as a
-    # tool answer keeps its old constant. A number set here wins over the
+    # tool answer keeps its old constant, and a run whose input it split says
+    # so in its summary with the remedy. A number set here wins over the
     # derived room, for splitting and for joining.
     #
     # Each chunk is a full tool loop, run one after another, so a figure below

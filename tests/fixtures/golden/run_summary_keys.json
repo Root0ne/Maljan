@@ -146,6 +146,7 @@
     "evidence_corpus_partial_reason": null,
     "indicator_cap_invocations": null,
     "indicator_cap_removed": null,
+    "input_split_unknown_window": [],
     "integrity_dropped": "<data-keyed map>",
     "integrity_invocations": null,
     "integrity_objects_removed": null,

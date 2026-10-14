@@ -2355,8 +2355,10 @@ def input_room_of(agent: Any) -> Room:
     window leaves before the reply, less the prompt around the input and one
     tool answer's share, or the operator's ``max_token_limit``. The same bound
     an input is shortened at, so a chunk of this size reaches the model whole.
-    An agent that cannot say has no room to give: ``None``, and the chunker
-    uses the unknown-window size (``UNKNOWN_WINDOW_CHUNK_TOKENS``).
+    An agent that cannot say has no room to give: ``None``. The container then
+    uses the size the agent's first analysis measured where it has one, and
+    otherwise the unknown-window size (``UNKNOWN_WINDOW_CHUNK_TOKENS``), which
+    the run states where it splits an input.
     """
     measure = getattr(agent, "_input_room_chars", None)
 
@@ -2379,7 +2381,9 @@ def agent_input_room(container: Any, agent_name: str) -> Room:
     What a revision path hands ``container.load_chunked`` and
     ``container.load_data_for_agent`` (``room=``) so its input is chunked
     where the agent's first analysis chunked it. An agent that cannot be built
-    has no room to give, and the chunker uses the unknown-window size.
+    has no room to give; the container then chunks at the size the first
+    analysis measured (``container._first_pass_room``), or with none at the
+    unknown-window size, stated.
     """
     try:
         agent = container.get_agent(agent_name)
@@ -3209,8 +3213,8 @@ def make_stage_agent_node(
             # by the analyst from its own window once the pack is on it.
             room = input_room_of(agent)
             # What goes into the head chunk after it is sized — the sample
-            # path and the upstream block — is kept out of the head source's
-            # room before it is chunked, never below the shipped size.
+            # path and the upstream block — is kept out of the first chunk of
+            # the head source only; every later chunk takes the whole room.
             upstream_block = upstream_findings(stage, state, container)
             chunks = container.load_data_for_agent(
                 agent_name,

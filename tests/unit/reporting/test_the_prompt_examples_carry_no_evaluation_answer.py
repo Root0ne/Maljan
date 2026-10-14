@@ -28,6 +28,10 @@ from typing import Any
 import pytest
 
 from maljan.agents.base_agent import (
+    ARGUMENTS_HELD,
+    EARLIER_CALLS_BY_TOOL,
+    EARLIER_CALLS_NOT_LISTED,
+    EARLIER_CHUNKS_COMPACT_HEAD,
     FINAL_ANSWER_NUDGE,
     INPUT_SHORTENED_NOTICE,
     SPEND_CEILING_QUESTION,
@@ -117,7 +121,9 @@ from maljan.analysis.evidence_roots import roots_phrase as _roots_phrase
 from maljan.analysis.function_summarizer import SHORTENED_NOTE as SUMMARISER_SHORTENED_NOTE
 from maljan.analysis.function_summarizer import SUMMARY_CUT_NOTE, SUMMARY_FENCE_STATEMENT
 from maljan.analysis.pcap_summary import CaptureRead
+from maljan.analysis.run_summary import unknown_window_split_sentence
 from maljan.core.config import SampleOpenConfig
+from maljan.core.container import unknown_window_split_line
 from maljan.core.pack_steps import CALLED_API_CATALOGUE, shipped_label
 from maljan.core.reputation import read_answer
 from maljan.extractors.capability_matrix import (
@@ -126,8 +132,9 @@ from maljan.extractors.capability_matrix import (
     not_asked_unknown_id,
     unknown_id_reason,
 )
-from maljan.llm.context_window import no_room_sentence
+from maljan.llm.context_window import no_room_sentence, unknown_window_remedy
 from maljan.llm.tool_replies import NO_REPLY_RECORDED, NOT_RUN_REPLY
+from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
 from maljan.memory.technique_cards import card_lines, load_cards
 from maljan.pipeline import function_claims, nodes, triage_pack
 from maljan.pipeline.debate_facts import (
@@ -1301,6 +1308,13 @@ def _every_message(found: list[Any]) -> str:
     return " ".join(violation.message for violation in found)
 
 
+class _SplitRows:
+    """A run summary's bounds holding only the unknown-window split rows."""
+
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        self.input_split_unknown_window = rows
+
+
 PROMPTS: dict[str, str] = {
     "example team document prompts": _TEAM_DOCUMENT_PROMPTS,
     "narrative contract": EXPECTED_OBJECT,
@@ -1734,6 +1748,46 @@ PROMPTS: dict[str, str] = {
     "a loop started past the spend ceiling": SPEND_CEILING_QUESTION,
     "an analyst input shortened to its window": INPUT_SHORTENED_NOTICE.format(
         detail="the first 1,000 of 9,000 characters are shown, ending in …"
+    ),
+    "a chunk header whose total may still grow": TextChunk(
+        index=2,
+        total=5,
+        strategy=ChunkStrategy.SLIDING_WINDOW,
+        content="",
+        char_count=0,
+        token_estimate=6_400,
+        domain="network",
+    ).to_prompt_header(more_may_follow=True),
+    "a call's arguments no list could hold": ARGUMENTS_HELD.format(chars=48_000, entry="ev_0031"),
+    "a later chunk's earlier calls counted by tool": EARLIER_CALLS_BY_TOOL.format(
+        count=38,
+        tools="decompile_function \u00d734, list_strings \u00d74",
+        first="ev_0012",
+        last="ev_0049",
+    ),
+    "a later chunk's earlier calls in their compact form, or counted": " ".join(
+        [
+            EARLIER_CHUNKS_COMPACT_HEAD,
+            EARLIER_CALLS_NOT_LISTED.format(count=7, first="ev_0001", last="ev_0007"),
+            '- decompile_function("0x3c7c") \u2192 ev_0001\u2013ev_0003, ev_0006 (failed)',
+        ]
+    ),
+    "an analyst input split at the shipped size with no window learned": " ".join(
+        [
+            unknown_window_split_line("network", 3, 80_000, unknown_window_remedy()),
+            unknown_window_split_sentence(
+                _SplitRows(
+                    [
+                        {
+                            "agent": "network",
+                            "chunks": 3,
+                            "chunk_chars": 80_000,
+                            "remedy": unknown_window_remedy(),
+                        }
+                    ]
+                )
+            ),
+        ]
     ),
     "the summariser's fence statement": SUMMARY_FENCE_STATEMENT,
     "a summariser prompt shortened to its window": SUMMARISER_SHORTENED_NOTE.format(
