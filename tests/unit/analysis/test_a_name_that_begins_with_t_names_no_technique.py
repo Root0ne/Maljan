@@ -88,9 +88,30 @@ class TestTheReader:
         assert name_technique_id({"name": name}) == ""
         assert declared_technique_id(_pattern(name=name)) == ""
 
-    @pytest.mark.parametrize("name", ["T1055 Process Injection", "t1055: Process Injection"])
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "T1055 Process Injection",
+            "t1055: Process Injection",
+            "T1055-Process Injection",
+            "T1055, Process Injection",
+            "[T1055] Process Injection",
+            "(T1055) Process Injection",
+            "T1055",
+            "T1055.",
+        ],
+    )
     def test_a_name_that_opens_with_an_id_declares_it(self, name: str) -> None:
         assert name_technique_id({"name": name}) == "T1055"
+
+    @pytest.mark.parametrize(
+        "name", ["T1055.0123 x", "T1055.012x", "T1055_x", "AT1055 x", "x T1055", "T10555"]
+    )
+    def test_a_name_that_opens_with_no_whole_id_declares_none(self, name: str) -> None:
+        assert name_technique_id({"name": name}) == ""
+
+    def test_a_sub_technique_opens_a_name_whole(self) -> None:
+        assert name_technique_id({"name": "T1055.012: Process Hollowing"}) == "T1055.012"
 
     @pytest.mark.parametrize("external_id", ["TA0005", "S0154", "G0016", "T1055.1", "CAPEC-1"])
     def test_an_attack_reference_that_is_no_technique_is_not_read_as_one(

@@ -47,9 +47,11 @@ from dataclasses import dataclass
 # ``network-traffic:dst_ref.value``, ``domain-name:resolves_to_refs[*].value``
 # and ``file:extensions['pe'].pe_imphash`` are all one path. Case carries no
 # meaning in a STIX object path and a judge writes ``[URL:value = …]`` often
-# enough that reading it as some other kind would be a hole.
+# enough that reading it as some other kind would be a hole. A type starts
+# only where a run of type characters starts: tried from inside a long run with
+# no colon, every try read to the end of the run, which cost the square of it.
 _OBJECT_PATH_RE = re.compile(
-    r"([a-z0-9-]+):([a-z0-9_]+(?:\.[a-z0-9_]+|\.'(?:\\.|[^'\\])*'|\['(?:\\.|[^'\\])*'\]|\[[^\]']*\])*)",
+    r"(?<![a-z0-9-])([a-z0-9-]+):([a-z0-9_]+(?:\.[a-z0-9_]+|\.'(?:\\.|[^'\\])*'|\['(?:\\.|[^'\\])*'\]|\[[^\]']*\])*)",
     re.IGNORECASE,
 )
 

@@ -98,17 +98,23 @@ def attack_reference_id(obj: Any) -> str:
     return next((tid for tid in _attack_reference_ids(obj) if is_technique_id(tid)), "")
 
 
+# A name that opens with one id, bracketed or not, and then ends or goes on
+# with anything but a word character or a dot and a digit: "T1055 Process
+# Injection", "T1055: …", "T1055-Process Injection", "[T1055] …". "T1055.0123"
+# and "T1055_x" open with no id.
+_NAME_OPENS_WITH_ID_RE = re.compile(rf"[\[(]?({ID_BODY})(?!\w|\.\d)")
+
+
 def name_technique_id(obj: Any) -> str:
     """The technique id an object's name opens with (``T1055 Process Injection``), or ``""``.
 
-    The first word, upper-cased and without a trailing colon, and only when it
-    is one id: a name that merely begins with a ``T`` (``Timestomp``,
+    Upper-cased, and only a whole id at the very start (``_NAME_OPENS_WITH_ID_RE``):
+    a name that merely begins with a ``T`` (``Timestomp``,
     ``Token Impersonation``) names a behaviour, not a technique.
     """
     name = obj.get("name") if isinstance(obj, dict) else getattr(obj, "name", "")
-    words = str(name or "").strip().upper().split(maxsplit=1)
-    first = words[0].rstrip(":") if words else ""
-    return first if is_technique_id(first) else ""
+    opening = _NAME_OPENS_WITH_ID_RE.match(str(name or "").strip().upper())
+    return opening.group(1) if opening else ""
 
 
 def declared_technique_id(obj: Any) -> str:

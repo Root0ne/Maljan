@@ -5402,9 +5402,11 @@ comparison. `pattern_fingerprint` reads the pattern with the one pattern reader
 its whitespace closed up, and each value is folded by the kind of its own
 object path — a digest or a host name folds its case, a path follows the path
 rule, a URL or any other property keeps its case, and defanging is undone. A
-`LIKE` or `MATCHES` value, a value the reader cannot read and a pattern in
-another language are kept as written, so a doubt leaves two rows rather than
-one.
+space at a value's edge is dropped only for a digest, an address, a host, a
+mailbox or a URL; a mutex or a file name keeps it. A `LIKE` value folds only
+its case, for a case-blind kind or a Windows path, and is never refanged. A
+`MATCHES` value, a value the reader cannot read and a pattern in another
+language are kept as written, so a doubt leaves two rows rather than one.
 
 Whether an endpoint that *could* exist is published stays
 `corroboration_reason`'s decision. A URL, a name or an address the host

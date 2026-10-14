@@ -16,7 +16,7 @@ import time
 import pytest
 
 from maljan.reporting.dedupe import pattern_fingerprint
-from maljan.schemas.stix_pattern import canonical_pattern
+from maljan.schemas.stix_pattern import canonical_pattern, read_comparisons
 
 
 def _same(a: str, b: str, pattern_type: str = "stix") -> bool:
@@ -45,12 +45,28 @@ class TestDistinctIndicatorsStayTwo:
         assert not _same("[file:name = 'it\\'s.exe']", "[file:name = 'it\\'S.exe']")
         assert not _same("[file:name = 'it\\'s.exe']", "[file:name = 'it']")
 
-    def test_a_like_or_matches_value_is_kept_as_written(self) -> None:
+    def test_a_like_or_matches_value_is_never_refanged(self) -> None:
         # ``[.]`` in a LIKE value is three characters and in a regex a class.
         assert not _same(
             "[process:command_line LIKE '%a[.]exe%']", "[process:command_line LIKE '%a.exe%']"
         )
+        assert not _same("[domain-name:value LIKE '%a[.]com']", "[domain-name:value LIKE '%a.com']")
         assert not _same("[file:name MATCHES '^\\\\D']", "[file:name MATCHES '^\\\\d']")
+
+    def test_a_like_value_of_a_case_sensitive_kind_keeps_its_case(self) -> None:
+        assert not _same(
+            "[process:command_line LIKE '%Setup.EXE%']", "[process:command_line LIKE '%setup.exe%']"
+        )
+        assert not _same("[url:value LIKE '%/Gate.php']", "[url:value LIKE '%/gate.php']")
+        assert not _same("[file:name LIKE '/tmp/A%']", "[file:name LIKE '/tmp/a%']")
+
+    def test_a_matches_value_keeps_its_case_whatever_the_kind(self) -> None:
+        assert not _same("[domain-name:value MATCHES 'A']", "[domain-name:value MATCHES 'a']")
+
+    def test_a_space_at_the_edge_of_a_mutex_or_a_file_name_is_kept(self) -> None:
+        assert not _same("[mutex:name = ' x']", "[mutex:name = 'x']")
+        assert not _same("[process:command_line = 'a.exe ']", "[process:command_line = 'a.exe']")
+        assert not _same("[file:name = ' a.exe']", "[file:name = 'a.exe']")
 
     def test_an_unterminated_value_is_not_the_closed_one(self) -> None:
         assert not _same("[file:name = 'abc", "[file:name = 'abc']")
@@ -82,6 +98,24 @@ class TestOneIndicatorWrittenTwoWaysIsOne:
             "[domain-name:value = 'a.example' AND url:value = 'http://a.example/X']",
             "[domain-name:value = 'a.example' AND url:value = 'http://a.example/x']",
         )
+
+    def test_a_like_value_of_a_case_blind_kind_folds_its_case(self) -> None:
+        assert _same(
+            "[domain-name:value LIKE '%.EVIL.com']", "[domain-name:value LIKE '%.evil.com']"
+        )
+        assert _same("[file:name LIKE 'C:\\\\Users\\\\%']", "[file:name LIKE 'c:\\\\users\\\\%']")
+        assert _same("[file:hashes.MD5 LIKE 'AB%']", "[file:hashes.md5 LIKE 'ab%']")
+
+    def test_a_digest_folds_its_case_in_any_object(self) -> None:
+        assert _same("[artifact:hashes.'SHA-256' = 'AB']", "[artifact:hashes.'SHA-256' = 'ab']")
+        assert _same(
+            "[x509-certificate:hashes.'SHA-1' = 'CD']", "[x509-certificate:hashes.'SHA-1' = 'cd']"
+        )
+
+    def test_a_space_at_the_edge_of_a_host_or_a_digest_is_no_part_of_it(self) -> None:
+        assert _same("[domain-name:value = ' a.example ']", "[domain-name:value = 'a.example']")
+        assert _same("[file:hashes.MD5 = 'ab ']", "[file:hashes.MD5 = 'ab']")
+        assert _same("[url:value = ' http://a/b']", "[url:value = 'http://a/b']")
 
     def test_a_defanged_value_is_its_plain_spelling(self) -> None:
         assert _same(
@@ -117,20 +151,24 @@ class TestTheCanonicalPattern:
 
 
 @pytest.mark.parametrize(
-    "unit",
+    ("unit", "tail"),
     [
-        "[url:value = 'a'] AND ",
-        "  \t ",
-        "' '",
-        "[file:hashes.'k'.'k' = 'v' ",
-        "[a:b IN ('x', 'y', ",
+        ("[url:value = 'a'] AND ", ""),
+        ("  \t ", ""),
+        ("' '", ""),
+        ("[file:hashes.'k'.'k' = 'v' ", ""),
+        ("[a:b IN ('x', 'y', ", ""),
+        # A long run of path characters with no colon: an object path tried
+        # from inside the run read to its end every time.
+        ("a", "'x'"),
     ],
 )
-def test_a_hostile_pattern_is_fingerprinted_in_linear_time(unit: str) -> None:
+def test_a_hostile_pattern_is_read_and_fingerprinted_in_linear_time(unit: str, tail: str) -> None:
     # Ten times the text takes at most about ten times as long (twenty, for noise).
     def took(size: int) -> float:
-        text = unit * size
+        text = unit * size + tail
         start = time.perf_counter()
+        read_comparisons(text)
         pattern_fingerprint("stix", text)
         return time.perf_counter() - start
 
