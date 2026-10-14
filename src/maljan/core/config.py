@@ -1710,6 +1710,8 @@ BUILTIN_AGENTS: tuple[str, ...] = ("static", "dynamic", "network", "judge", "rep
 # always has; a judge entry does not move the mediator. No definition may take
 # either key, because its ``llm.agents`` entry would then be read twice.
 MEDIATOR_AGENT_KEY = "mediator"
+# The name the mediator's debate arguments are written under, and read back by.
+MEDIATOR_AGENT_NAME = "Mediator"
 SUMMARIZER_AGENT_KEY = "summarizer"
 ROLE_ENTRY_KEYS: tuple[str, ...] = (MEDIATOR_AGENT_KEY, SUMMARIZER_AGENT_KEY)
 

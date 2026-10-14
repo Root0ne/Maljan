@@ -61,7 +61,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from maljan.core.config import Settings
+from maljan.core.config import MEDIATOR_AGENT_NAME, Settings
 from maljan.core.logger import logger
 from maljan.pipeline.state import AnalysisState
 
@@ -197,7 +197,7 @@ def last_two_mediations(history: Any) -> tuple[Any, Any] | None:
     """The two latest mediator contributions of ``history``, earlier first, or ``None``."""
     found: list[Any] = []
     for argument in reversed(list(history or [])):
-        if getattr(argument, "agent_name", "") == "Mediator":
+        if getattr(argument, "agent_name", "") == MEDIATOR_AGENT_NAME:
             found.append(argument)
             if len(found) == 2:
                 return found[1], found[0]
@@ -234,7 +234,7 @@ def only_ledger_stated(state: Any) -> bool:
     """
     history = state.get("discussion_history") or []
     last = history[-1] if history else None
-    if last is None or getattr(last, "agent_name", "") != "Mediator":
+    if last is None or getattr(last, "agent_name", "") != MEDIATOR_AGENT_NAME:
         return False
     if getattr(last, "status", "complete") != "complete":
         return False
@@ -373,7 +373,7 @@ def route_within_limit(
     # moving is not agreement while the mediator says what is disputed. The
     # round limit still bounds the debate.
     standing = bool(getattr(last, "contradictions", None)) and (
-        getattr(last, "agent_name", "") == "Mediator"
+        getattr(last, "agent_name", "") == MEDIATOR_AGENT_NAME
     )
     if not standing and is_confidence_stable(confidence_history):
         say("Adaptive termination triggered at round %d (stable confidence).", iteration)
@@ -384,7 +384,7 @@ def route_within_limit(
     # it names, so it would ask nobody. Not read (``None``) is not this.
     if (
         bool(last)
-        and getattr(last, "agent_name", "") == "Mediator"
+        and getattr(last, "agent_name", "") == MEDIATOR_AGENT_NAME
         and getattr(last, "revise", None) == []
     ):
         say(

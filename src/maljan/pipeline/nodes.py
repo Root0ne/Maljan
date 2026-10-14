@@ -39,7 +39,7 @@ from maljan.agents.run_evidence_corpus import (
 )
 from maljan.analysis.corroboration import corroborated, corroboration_row
 from maljan.analysis.run_summary import RunSummaryBuilder, summary_counts_line, tool_asks_of
-from maljan.core.config import BUILTIN_AGENTS, JUDGE_AGENT_KEY, PROMPT_ROLES
+from maljan.core.config import BUILTIN_AGENTS, JUDGE_AGENT_KEY, MEDIATOR_AGENT_NAME, PROMPT_ROLES
 from maljan.core.container import ServiceContainer
 from maljan.core.declared_reading import kinds_declared_by
 from maljan.core.exceptions import AnalystError, LLMError, SampleNotOpened
@@ -3896,7 +3896,7 @@ def _ledger_stated_lines(
     told = [
         str(fact)
         for earlier in state.get("discussion_history") or []
-        if getattr(earlier, "agent_name", "") == "Mediator"
+        if getattr(earlier, "agent_name", "") == MEDIATOR_AGENT_NAME
         for fact in getattr(earlier, "ledger_facts", None) or []
     ]
     if not lines or not told:
@@ -4010,7 +4010,7 @@ def make_negotiation_node(
                 "sycophancy_detected": False,
                 "discussion_history": [
                     AgentArgument(
-                        agent_name="Mediator",
+                        agent_name=MEDIATOR_AGENT_NAME,
                         finding="MOCK: fewer than two analysts produced claims.",
                         confidence_score=None,
                     )
@@ -4028,7 +4028,7 @@ def make_negotiation_node(
                 "confidence_history": [mean_conf],
                 "discussion_history": [
                     AgentArgument(
-                        agent_name="Mediator",
+                        agent_name=MEDIATOR_AGENT_NAME,
                         finding=(
                             "MOCK: All experts agree. Confidence: 0.95"
                             if is_consensus
@@ -4340,7 +4340,7 @@ def make_negotiation_node(
                 "sycophancy_detected": syco,
                 "discussion_history": [
                     AgentArgument(
-                        agent_name="Mediator",
+                        agent_name=MEDIATOR_AGENT_NAME,
                         finding=f"[ERROR] Mediation {label}: {describe_exception(e)}",
                         confidence_score=None,
                         # The structured signal. The "[ERROR] Mediation " prefix
@@ -4422,7 +4422,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         places: list[str] = []
         mediation: Any = None
         for arg in reversed(history):
-            if arg.agent_name == "Mediator":
+            if arg.agent_name == MEDIATOR_AGENT_NAME:
                 mediator_feedback = arg.finding
                 ledger_facts = list(getattr(arg, "ledger_facts", None) or [])
                 places = list(getattr(arg, "place_facts", None) or [])
