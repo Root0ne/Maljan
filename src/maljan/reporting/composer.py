@@ -47,7 +47,8 @@ from maljan.core.spend import (
     spend_preview,
     spend_release,
 )
-from maljan.core.token_ledger import structured_answer
+from maljan.core.token_ledger import read_structured_reply, say_structured_reply
+from maljan.llm.answer_text import structured_answer_text
 from maljan.llm.anthropic_history import SHARED_HEAD
 from maljan.llm.registry import structured_output_supported_for_llm
 from maljan.pipeline.validation import (
@@ -1732,9 +1733,13 @@ class ReportComposer:
     ) -> BaseModel | None:
         """One section's answer: the structured path, else the manual parse.
 
+        A structured answer that carries no object the schema reads is not
+        thrown away: its text, or its tool call's arguments, is the manual
+        parse's first answer, and a retry goes the way that answer went.
+
         ``manual_messages`` are ``messages`` noted for the manual path's
         cached head (:meth:`_head_groups` with ``manual``), sent in their
-        place once the structured path is not taken or not read.
+        place once the structured path is not taken or holds nothing to read.
         """
         # Skipped outright on endpoints where structured output does not work
         # — see ``structured_output_supported``. The per-section timeout below
@@ -1744,6 +1749,14 @@ class ReportComposer:
         prose = _PROSE_FIELDS.get(schema, ())
         entries = getattr(self, "_entries", None)
         answers = getattr(self, "_answers", None)
+        # The structured attempt's answer when it carries no object the schema
+        # reads but does carry text or a tool call's arguments: the model was
+        # asked for the object in the prompt as well, so that answer is the
+        # validation loop's first answer and the section is not asked again.
+        # ``structured`` then sends the loop's retry, so the retry's request
+        # is the kept answer's own plus its new turns.
+        kept: Any = None
+        structured: Any = None
         try:
             # A call that has to be held under its budget goes by the manual
             # path, where the hold can be passed with the call.
@@ -1767,15 +1780,17 @@ class ReportComposer:
                 cap_tokens=int(getattr(self, "output_cap", 0) or self.section_max_tokens or 0),
                 holdable=False,
             ):
-                result = structured_answer(
-                    await retry_on_connection_error(
-                        lambda: structured.ainvoke(messages), what="ReportComposer structured"
-                    ),
+                reply = await retry_on_connection_error(
+                    lambda: structured.ainvoke(messages), what="ReportComposer structured"
+                )
+                read = read_structured_reply(
+                    reply,
                     self.token_ledger,
                     agent=REPORTER_AGENT_KEY,
                     model=self.model_label,
                     call="report section",
                 )
+                result = read.parsed
             if isinstance(result, dict):
                 result = schema.model_validate(result)
             if isinstance(result, schema):
@@ -1799,9 +1814,18 @@ class ReportComposer:
                 self._tally().count(found)
                 self._record_ungrounded(section or schema.__name__, found, asked=False)
                 return result
+            kept = read.kept
+            say_structured_reply(f"ReportComposer: section '{section or schema.__name__}'", read)
+        except _StructuredOutputUnavailable:
+            pass
         except Exception as exc:  # noqa: BLE001
-            logger.debug("ReportComposer: structured path failed (%s); manual parse.", exc)
-        if manual_messages is not None:
+            logger.warning(
+                "ReportComposer: section '%s': the structured request failed (%s); the section "
+                "is asked again without the schema's tool.",
+                section or schema.__name__,
+                type(exc).__name__,
+            )
+        if kept is None and manual_messages is not None:
             messages = manual_messages
         # Manual JSON fallback for local servers returning fenced JSON, through
         # the validation loop: a section whose shape is wrong is a section
@@ -1820,8 +1844,33 @@ class ReportComposer:
 
         from maljan.llm.context_window import output_bound_kwargs
 
-        async def _run(turns: list[BaseMessage]) -> Any:
+        def _read_cut(raw: Any, bound: int | None, why: str) -> Any:
             nonlocal cut, cut_at, cut_text, cut_why
+            # Per answer: a retry that closes inside the cap is not a cut one.
+            held = self._cap_of(raw) if bound is None else min(self._cap_of(raw), bound)
+            cut = _reached_the_cap(raw, held)
+            if cut:
+                cut_at = held
+                cut_text = structured_answer_text(raw)
+                cut_why = why if bound is not None and held == bound else self._cap_said(raw)
+                shape = cut_answer_shape(cut_text)
+                cut_shapes.append(shape)
+                logger.warning(
+                    "ReportComposer: section '%s' was cut at its output cap (%d, %s) — %s.",
+                    section or schema.__name__,
+                    cut_at,
+                    cut_why,
+                    shape,
+                )
+            return raw
+
+        # The kept structured answer stands for the loop's first call, which is
+        # then never sent; its usage is already on the ledger.
+        pending = [kept] if kept is not None else []
+
+        async def _run(turns: list[BaseMessage]) -> Any:
+            if pending:
+                return _read_cut(pending.pop(), None, "")
             slot = object()
             bound, why = self._call_limit(turns, slot=slot)
             if bound is not None:
@@ -1832,12 +1881,20 @@ class ReportComposer:
                     why,
                 )
             try:
-                raw = await retry_on_connection_error(
-                    (lambda: self.llm.ainvoke(turns, **output_bound_kwargs(self.llm, bound)))
+                # The retry of a kept structured answer goes as that answer
+                # went, so its request only appends to the one answered; held
+                # under an output bound it goes by the plain model. One call is
+                # chosen, and made once.
+                as_kept = kept is not None and bound is None
+                reply = await retry_on_connection_error(
+                    (lambda: structured.ainvoke(turns))
+                    if as_kept
+                    else (lambda: self.llm.ainvoke(turns, **output_bound_kwargs(self.llm, bound)))
                     if bound is not None
                     else (lambda: self.llm.ainvoke(turns)),
-                    what="ReportComposer raw",
+                    what="ReportComposer structured" if as_kept else "ReportComposer raw",
                 )
+                raw = reply.get("raw") if isinstance(reply, dict) and "raw" in reply else reply
                 # On the ledger before the reservation goes.
                 if self.token_ledger is not None:
                     try:
@@ -1860,23 +1917,7 @@ class ReportComposer:
                         logger.debug("ReportComposer: token usage not recorded (%s).", exc)
             finally:
                 spend_release(getattr(self, "token_ledger", None), slot)
-            # Per answer: a retry that closes inside the cap is not a cut one.
-            held = self._cap_of(raw) if bound is None else min(self._cap_of(raw), bound)
-            cut = _reached_the_cap(raw, held)
-            if cut:
-                cut_at = held
-                cut_text = _message_text(raw)
-                cut_why = why if bound is not None and held == bound else self._cap_said(raw)
-                shape = cut_answer_shape(cut_text)
-                cut_shapes.append(shape)
-                logger.warning(
-                    "ReportComposer: section '%s' was cut at its output cap (%d, %s) — %s.",
-                    section or schema.__name__,
-                    cut_at,
-                    cut_why,
-                    shape,
-                )
-            return raw
+            return _read_cut(raw, bound, why)
 
         # The text the latest answer was read from: an answer that gives the
         # reader nothing is told why (``schema_violations``' ``answer``).
@@ -1884,7 +1925,7 @@ class ReportComposer:
 
         def _parse(answer: Any) -> Any:
             nonlocal declined, answer_read
-            answer_read = _message_text(answer)
+            answer_read = structured_answer_text(answer)
             payload = safe_parse_json(answer_read)
             declined = bool(payload) and _section_declined(payload, schema)
             if not payload or declined:

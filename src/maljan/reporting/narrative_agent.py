@@ -43,7 +43,8 @@ from maljan.core.spend import (
     spend_preview,
     spend_release,
 )
-from maljan.core.token_ledger import structured_answer
+from maljan.core.token_ledger import read_structured_reply, say_structured_reply
+from maljan.llm.answer_text import structured_answer_text
 from maljan.llm.registry import structured_output_supported_for_llm
 from maljan.pipeline.validation import (
     KEPT_WITH_A_FINDING,
@@ -328,7 +329,7 @@ def _narrative_payload(answer: Any) -> dict[str, Any] | None:
     ``schema_violations`` reports as its own violation rather than treating as
     an empty answer.
     """
-    text = _message_text(answer)
+    text = structured_answer_text(answer, _message_text)
     payload = _parse_keeping_duplicate_keys(text) or safe_parse_json(text)
     if not isinstance(payload, dict):
         return None
@@ -843,6 +844,12 @@ class NarrativeAgent:
         # in seconds instead of an hour and a half.
         # A call that has to be held under its budget goes by the manual path,
         # where the hold can be passed with the call.
+        # A structured answer that parsed to nothing but holds text or a tool
+        # call's arguments is the round's first answer below, not asked again;
+        # ``structured`` then sends the round's retry, so the retry's request
+        # only appends to the one answered.
+        kept: Any = None
+        structured: Any = None
         if (
             structured_output_supported_for_llm(self.llm)
             and not spend_ceiling_set(getattr(self, "token_ledger", None))
@@ -861,7 +868,7 @@ class NarrativeAgent:
                     cap_tokens=int(getattr(self, "output_cap", 0) or 0),
                     holdable=False,
                 ):
-                    result = structured_answer(
+                    read = read_structured_reply(
                         await retry_on_connection_error(
                             lambda: structured.ainvoke(messages),
                             what="NarrativeAgent structured",
@@ -871,6 +878,7 @@ class NarrativeAgent:
                         model=self.model_label,
                         call="narrative",
                     )
+                result = read.parsed
                 if isinstance(result, NarrativeOutput):
                     return self._kept_with_ungrounded_recorded(
                         result, grounding, known_ids, citable, evidence, answers, published
@@ -886,11 +894,8 @@ class NarrativeAgent:
                         answers,
                         published,
                     )
-                logger.warning(
-                    "NarrativeAgent: unexpected structured-output type %s; "
-                    "falling back to manual parse.",
-                    type(result).__name__,
-                )
+                kept = read.kept
+                say_structured_reply("NarrativeAgent", read)
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "NarrativeAgent: structured_output path failed (%s); trying manual JSON parse.",
@@ -907,18 +912,32 @@ class NarrativeAgent:
         # is still retried separately (``retry_on_connection_error``).
         from maljan.llm.context_window import output_bound_kwargs
 
+        # The kept structured answer stands for the round's first call, which
+        # is then never sent; its usage is already on the ledger.
+        pending = [kept] if kept is not None else []
+
         async def _run(turns: list[BaseMessage]) -> Any:
+            if pending:
+                return pending.pop()
             slot = object()
             bound, why = self._call_limit(turns, slot=slot)
             if bound is not None:
                 logger.info("NarrativeAgent: output limit on this call: %d — %s.", bound, why)
             try:
-                raw = await retry_on_connection_error(
-                    (lambda: self.llm.ainvoke(turns, **output_bound_kwargs(self.llm, bound)))
+                # The retry of a kept structured answer goes as that answer
+                # went, so its request only appends to the one answered; held
+                # under an output bound it goes by the plain model. One call is
+                # chosen, and made once.
+                as_kept = kept is not None and bound is None
+                reply = await retry_on_connection_error(
+                    (lambda: structured.ainvoke(turns))
+                    if as_kept
+                    else (lambda: self.llm.ainvoke(turns, **output_bound_kwargs(self.llm, bound)))
                     if bound is not None
                     else (lambda: self.llm.ainvoke(turns)),
-                    what="NarrativeAgent raw",
+                    what="NarrativeAgent structured" if as_kept else "NarrativeAgent raw",
                 )
+                raw = reply.get("raw") if isinstance(reply, dict) and "raw" in reply else reply
                 # On the ledger before the reservation goes.
                 if self.token_ledger is not None:
                     try:
@@ -948,7 +967,7 @@ class NarrativeAgent:
         answer_read = [""]
 
         def _parse(answer: Any) -> dict[str, Any] | None:
-            answer_read[0] = _message_text(answer)
+            answer_read[0] = structured_answer_text(answer, _message_text)
             return _narrative_payload(answer)
 
         try:

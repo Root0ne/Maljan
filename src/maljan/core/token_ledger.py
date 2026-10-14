@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from maljan.llm.context_window import tokens_for_chars
@@ -579,6 +580,93 @@ def record_lost_retries(
             ledger.add_retry(agent=agent, model=model, reason=reason)
     except Exception:  # noqa: BLE001 — telemetry must never break analysis
         return
+
+
+@dataclass(frozen=True)
+class StructuredReply:
+    """A structured request's answer as read: the parsed object, the raw answer, why none parsed.
+
+    ``unread`` is empty when ``parsed`` holds the object; otherwise it says
+    why nothing parsed, as a phrase that follows "the structured answer".
+    """
+
+    parsed: Any
+    raw: Any = None
+    unread: str = ""
+
+    @property
+    def kept(self) -> Any:
+        """The raw answer when nothing parsed and it holds an object, else ``None``.
+
+        The request asked for the object in its prompt too, so an object the
+        answer holds — a tool call's arguments, or JSON in its text — is the
+        model's answer to it, and the caller reads it rather than asking again.
+        Text that holds no object (a preamble, a one-line refusal) is no answer
+        to read: its caller asks again, as for an empty one.
+        """
+        from maljan.llm.answer_text import structured_answer_text
+        from maljan.utils.json_cleaner import safe_parse_json
+
+        if self.parsed is not None or self.raw is None:
+            return None
+        text = structured_answer_text(self.raw)
+        if not text.strip():
+            return None
+        payload = safe_parse_json(text)
+        return self.raw if isinstance(payload, dict | list) and payload else None
+
+
+def read_structured_reply(
+    answer: Any,
+    ledger: TokenLedger | None,
+    *,
+    agent: str = "",
+    model: str = "",
+    call: str = "",
+) -> StructuredReply:
+    """:func:`structured_answer`, keeping the raw answer a failed parse leaves behind.
+
+    The raw turn is recorded on ``ledger`` either way. A parse that failed on
+    an answer that carries its raw turn is not raised: the raw turn is handed
+    back with why, so a caller can read it as text. An answer in any other
+    shape raises as :func:`structured_answer` does.
+    """
+    raw = answer.get("raw") if isinstance(answer, dict) and "raw" in answer else None
+    try:
+        parsed = structured_answer(answer, ledger, agent=agent, model=model, call=call)
+    except Exception as exc:  # noqa: BLE001 - the raw turn is read instead
+        if raw is None:
+            raise
+        why = f"carries an object that does not fit the schema ({type(exc).__name__})"
+        return StructuredReply(None, raw, why)
+    return StructuredReply(
+        parsed, raw, "" if parsed is not None else "carries no object the schema reads"
+    )
+
+
+def say_structured_reply(owner: str, reply: StructuredReply) -> None:
+    """Log what becomes of a structured answer that parsed to nothing: kept, or asked again.
+
+    ``owner`` leads the line ("NarrativeAgent", "ReportComposer: section 'x'").
+    A kept answer is said at INFO; one with no object in it, which its caller
+    asks again without the schema's tool, at WARNING.
+    """
+    from maljan.core.logger import logger
+
+    if reply.kept is not None:
+        logger.info(
+            "%s: the structured answer %s; its text is read as the answer, and it is not "
+            "asked again.",
+            owner,
+            reply.unread,
+        )
+    else:
+        logger.warning(
+            "%s: the structured answer %s and holds no object to read; it is asked again "
+            "without the schema's tool.",
+            owner,
+            reply.unread or "carries no object the schema reads",
+        )
 
 
 def structured_answer(
