@@ -38,6 +38,7 @@ size are left out.
 
 from __future__ import annotations
 
+import bisect
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -179,13 +180,28 @@ _NUMBER_WORDS: dict[str, int] = {
         "fourteen fifteen sixteen seventeen eighteen nineteen twenty".split()
     )
 } | {"thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
-# A count a line states: a number, in digits or a number word, before a plural
-# noun, with at most two words between them ("0 hits", "31 rules", "three
-# matches", "11 distinct DNS names"). The noun is the first plural word after
-# the number. Every run is read possessively, so a start scans each word once.
+# A count a line states: a number, in digits or a number word, directly
+# before a plural noun, at most one word (an adjective) between them ("0
+# hits", "31 rules", "three YARA matches"). The noun is the first plural word
+# after the number. Every run is read possessively, so a start scans each word
+# once. A number after a slash is a ratio's (``_PARTITIVE_BEFORE``).
 _STATED_COUNT = re.compile(
-    r"(?<![\w.%#])(\d++|(?i:" + "|".join(sorted(_NUMBER_WORDS, key=len, reverse=True)) + r")\b)"
-    r"\s++(?:[A-Za-z][\w-]*+\s++){0,2}?([A-Za-z][\w-]*+)(?<=s)\b"
+    r"(?<![\w.%#/])(\d++|(?i:" + "|".join(sorted(_NUMBER_WORDS, key=len, reverse=True)) + r")\b)"
+    r"\s++(?:[A-Za-z][\w-]*+\s++)??([A-Za-z][\w-]*+)(?<=s)\b"
+)
+# What makes a number the whole of a partitive or a ratio, never a count of
+# the noun after it: "of" or "out of" before it ("0 hits of 31 rules", "two of
+# the three rules", "3 out of 31 rules"), or a slash ("3/31 rules"). Read in
+# a short window before the number, so a line is read once.
+_PARTITIVE_BEFORE = re.compile(r"(?:\bout\s++)?\bof(?:\s++the)?\s*+$|/\s*+$", re.IGNORECASE)
+_PARTITIVE_WINDOW = 24
+# What separates the sides of a disputed line: a count dispute needs two
+# numbers for one noun written by two sides ("A reports three matches while B
+# reports 0 hits"); two numbers in one side's own statement ("31 rules
+# loaded, 3 matched") are two quantities, not a dispute.
+_SIDE_BREAK = re.compile(
+    r"\b(?:while|whereas|but|against|versus|vs|although|though|however|yet)\b|;",
+    re.IGNORECASE,
 )
 
 
@@ -198,7 +214,10 @@ def _count_value(written: str) -> int:
 # say the field is a count.
 _KEY_WORD = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])")
 _COUNT_WORDS = frozenset({"count", "counts", "total", "totals", "num", "number", "n"})
-# Two count nouns that name one thing: a rule scan's hit is its match.
+# Two count nouns that name one thing: a rule scan's hit is its match. A
+# closed, deliberately minimal vocabulary: any other pair ("detections",
+# "alerts" against "matches") is not joined, which leaves such a line
+# unstated, never wrongly stated. Not to be widened without a review.
 _SAME_COUNT_NOUN = {"hit": "match"}
 
 
@@ -277,13 +296,16 @@ def _ledger_counts_by_id(ledger: Iterable[Any]) -> dict[str, tuple[str, Any]]:
 
 
 def _answers(
-    counted: set[tuple[int, str]],
+    sided: set[tuple[int, str, int]],
     by_entry: Sequence[tuple[str, list[tuple[str, int, str, bool]]]],
 ) -> tuple[bool, frozenset[tuple[str, str]]]:
     """Whether the line disputes a count the cited entries state, and the facts that state it.
 
-    The dispute must be about the count itself: the line writes two different
-    numbers for one noun ("three matches" against "0 hits"). A line whose
+    The dispute must be about the count itself: two sides of the line
+    (``_SIDE_BREAK``) write two different numbers directly before one noun
+    ("three matches" against "0 hits"); ``sided`` holds each count with the
+    side it was written on. Two numbers on one side ("31 rules loaded, 3
+    matched") are two quantities, and a partitive is no count. A line whose
     sides read different facts differently ("0 matches as benign" against
     "31 rules as malicious") writes one number per noun and is a dispute
     about meaning the ledger does not answer. Each noun the line counts must
@@ -295,9 +317,20 @@ def _answers(
     domains in another is no record).
     """
     written: dict[str, set[int]] = {}
-    for value, noun in counted:
+    by_side: dict[str, dict[int, set[int]]] = {}
+    for value, noun, side in sided:
         written.setdefault(noun, set()).add(value)
-    if not any(len(values) > 1 for values in written.values()):
+        by_side.setdefault(noun, {}).setdefault(side, set()).add(value)
+
+    def _two_sides_differ(sides: dict[int, set[int]]) -> bool:
+        # Two sides each write one number for the noun, and they differ. A
+        # side writing two numbers for it ("31 rules loaded, 3 matched") is
+        # two quantities of its own: unsure, so no dispute.
+        if len(sides) < 2 or any(len(values) > 1 for values in sides.values()):
+            return False
+        return len({next(iter(values)) for values in sides.values()}) > 1
+
+    if not any(_two_sides_differ(sides) for sides in by_side.values()):
         return False, frozenset()
     nouns = set(written)
     values: dict[str, set[int]] = {}
@@ -346,10 +379,17 @@ def _line_counts(
         # The counts are read with one number after "claims" kept: "the
         # analyst claims 2 domains" may be a count, and a count read that the
         # ledger does not state leaves the line unstated.
-        counted = {
-            (_count_value(n), _count_noun(noun))
-            for n, noun in _STATED_COUNT.findall(_CLAIM_NUMBERS.sub(_count_or_reference, idless))
-        }
+        read = _CLAIM_NUMBERS.sub(_count_or_reference, idless)
+        breaks = [m.start() for m in _SIDE_BREAK.finditer(read)]
+        sided: set[tuple[int, str, int]] = set()
+        for match in _STATED_COUNT.finditer(read):
+            if _PARTITIVE_BEFORE.search(
+                read, max(0, match.start() - _PARTITIVE_WINDOW), match.start()
+            ):
+                continue
+            side = bisect.bisect_right(breaks, match.start())
+            sided.add((_count_value(match.group(1)), _count_noun(match.group(2)), side))
+        counted = {(value, noun) for value, noun, _side in sided}
         nouns_of: dict[int, set[str]] = {}
         for value, noun in counted:
             nouns_of.setdefault(value, set()).add(noun)
@@ -377,7 +417,7 @@ def _line_counts(
             if counts:
                 said = ", ".join(f"{key} = {shown}" for key, shown in counts)
                 stated.append(f"entry {entry_id}{f' ({tool})' if tool else ''} states {said}")
-        answered, atoms = _answers(counted, by_entry)
+        answered, atoms = _answers(sided, by_entry)
         return _LineCounts(said=tuple(stated), answered=answered, atoms=atoms)
     except Exception:  # noqa: BLE001 — a line that cannot be read gets no fact
         return _LineCounts()
