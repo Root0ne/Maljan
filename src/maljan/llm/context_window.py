@@ -116,6 +116,7 @@ __all__ = [
     "unknown_window_remedy",
     "UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS",
     "believable",
+    "chars_for_tokens",
     "declared_window",
     "derive_tool_output_chars",
     "forget_learned_windows",
@@ -136,6 +137,7 @@ __all__ = [
     "built_output_cap",
     "table_window",
     "tool_definition_chars",
+    "tokens_for_chars",
     "window_full_error",
     "unknown_window",
     "window_for_settings",
@@ -163,6 +165,23 @@ __all__ = [
 # JSON from a tool server and decompiled C, and both tokenise denser than prose
 # — which is exactly what the measurement above says.
 CHARS_PER_TOKEN = 3
+
+
+def tokens_for_chars(chars: int, per_token: int = CHARS_PER_TOKEN, *, ceil: bool = True) -> int:
+    """The tokens ``chars`` characters take at ``per_token`` characters a token.
+
+    Rounded up unless ``ceil`` is false, then rounded down; a count below zero
+    is zero. The figure is the caller's to choose: :data:`CHARS_PER_TOKEN` for
+    tool output and prompts, four for the prose estimates that use it.
+    """
+    count = max(0, int(chars))
+    return -(-count // per_token) if ceil else count // per_token
+
+
+def chars_for_tokens(tokens: int, per_token: int = CHARS_PER_TOKEN) -> int:
+    """The characters ``tokens`` tokens hold at ``per_token`` characters a token."""
+    return int(tokens) * per_token
+
 
 # What one tool answer may take of the room that is left when it arrives.
 #
@@ -385,7 +404,7 @@ def derive_tool_output_chars(
     # round trip through integer division loses up to two characters a call,
     # and those add up to a loop that finishes a character past the room it
     # was measuring itself against.
-    free_chars = max(0, (window - reserve) * per_token - max(0, int(held_chars)))
+    free_chars = max(0, chars_for_tokens(window - reserve, per_token) - max(0, int(held_chars)))
     share_of_it = int(free_chars * max(0.0, float(share)))
     cap = share_of_it if share_of_it >= floor else min(floor, free_chars)
     return cap if cap >= NO_ROOM_BELOW_CHARS else 0
@@ -1486,7 +1505,7 @@ def call_output_bound(cap: int, window_tokens: int, prompt_chars: int) -> int | 
     """
     if int(window_tokens) <= 0 or int(cap) <= 0:
         return None
-    left = int(window_tokens) - -(-max(0, int(prompt_chars)) // CHARS_PER_TOKEN)
+    left = int(window_tokens) - tokens_for_chars(prompt_chars)
     if int(cap) <= left:
         return None
     return max(1, left)
@@ -1535,7 +1554,7 @@ def prompt_overflow_sentence(what: str, prompt_chars: int, window_tokens: int) -
     """
     if int(window_tokens) <= 0:
         return None
-    tokens = -(-max(0, int(prompt_chars)) // CHARS_PER_TOKEN)
+    tokens = tokens_for_chars(prompt_chars)
     if tokens <= int(window_tokens):
         return None
     return (
@@ -2068,7 +2087,9 @@ class ContextBudget:
 
     def tool_budget_chars(self) -> int:
         """Everything a conversation may hold before the reply reserve begins."""
-        return max(0, self.window.tokens - self.reply_tokens) * self.chars_per_token
+        return chars_for_tokens(
+            max(0, self.window.tokens - self.reply_tokens), self.chars_per_token
+        )
 
     def room_for(self, chars: int, agent: str = "") -> bool:
         """Whether ``chars`` of the platform's own text still fits the tool budget.

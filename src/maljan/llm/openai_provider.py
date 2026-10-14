@@ -726,11 +726,11 @@ def _estimate_usage(result: Any, messages: Any, kwargs: dict[str, Any], pieces: 
     the stream carried, reasoning included, as output; it is labelled as an
     estimate and kept apart from any reported figure.
     """
-    from maljan.llm.context_window import CHARS_PER_TOKEN
+    from maljan.llm.context_window import tokens_for_chars
     from maljan.llm.stream_watch import ESTIMATED_USAGE_KEY, ESTIMATED_USAGE_SOURCE
 
     estimate = {
-        "input_tokens": -(-max(0, _prompt_chars(messages, kwargs)) // CHARS_PER_TOKEN),
+        "input_tokens": tokens_for_chars(_prompt_chars(messages, kwargs)),
         "output_tokens": max(0, int(pieces)),
         "source": ESTIMATED_USAGE_SOURCE,
     }

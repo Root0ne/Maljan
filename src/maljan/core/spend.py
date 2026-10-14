@@ -1495,10 +1495,10 @@ class SpendMeter:
         """
         if self.ceiling_usd is None:
             return None
-        from maljan.llm.context_window import CHARS_PER_TOKEN
+        from maljan.llm.context_window import tokens_for_chars
 
         now = self._clock()
-        prompt_tokens = -(-max(0, int(prompt_chars)) // CHARS_PER_TOKEN)
+        prompt_tokens = tokens_for_chars(prompt_chars)
         price = self._admission_price(model, now, deadline_s, prompt_tokens)
         with self._lock:
             decision = self._decide_locked(
@@ -1557,10 +1557,10 @@ class SpendMeter:
         if self.ceiling_usd is None:
             return None
         from maljan.core import cancellation
-        from maljan.llm.context_window import CHARS_PER_TOKEN
+        from maljan.llm.context_window import tokens_for_chars
 
         job = cancellation.current()
-        prompt_tokens = -(-max(0, int(prompt_chars)) // CHARS_PER_TOKEN)
+        prompt_tokens = tokens_for_chars(prompt_chars)
         cap = max(0, int(cap_tokens or 0))
         name = _clean(model) or "the model"
         retrying = _RETRYING.get()

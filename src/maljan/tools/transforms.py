@@ -57,9 +57,9 @@ import numpy as np
 
 from maljan.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
 from maljan.llm.context_window import (
-    CHARS_PER_TOKEN,
     MAX_BELIEVABLE_WINDOW_TOKENS,
     UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS,
+    chars_for_tokens,
 )
 from maljan.tools import pe_image
 from maljan.tools.errors import BAD_ARGUMENT, tool_error
@@ -94,7 +94,7 @@ SHOWN_ROOM = UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS
 SHOWN_BYTES = _bytes_for(SHOWN_ROOM)
 # The most a call is shown: what the largest tool answer any model gets
 # carries, the characters of the largest window this platform believes in.
-MAX_SHOWN_ROOM = MAX_BELIEVABLE_WINDOW_TOKENS * CHARS_PER_TOKEN
+MAX_SHOWN_ROOM = chars_for_tokens(MAX_BELIEVABLE_WINDOW_TOKENS)
 MAX_SHOWN_BYTES = _bytes_for(MAX_SHOWN_ROOM)
 
 # How many leading bytes of the output are shown in hex. The whole output is

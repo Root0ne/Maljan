@@ -451,10 +451,10 @@ class RetryRecorder(BaseCallbackHandler):
             if pieces <= 0:
                 return
             from maljan.core.spend import AT_CACHED_SHARE
-            from maljan.llm.context_window import CHARS_PER_TOKEN
+            from maljan.llm.context_window import tokens_for_chars
 
             estimate = {
-                "input_tokens": -(-max(0, _prompt_chars(prompt)) // CHARS_PER_TOKEN),
+                "input_tokens": tokens_for_chars(_prompt_chars(prompt)),
                 "output_tokens": pieces,
                 "source": FAILED_ATTEMPT_ESTIMATE,
                 # A long conversation reads most of its prompt from the cache:
@@ -469,7 +469,7 @@ class RetryRecorder(BaseCallbackHandler):
 
         from maljan.core.spend import OUTPUT_ESTIMATED
         from maljan.core.token_ledger import turn_usage
-        from maljan.llm.context_window import CHARS_PER_TOKEN
+        from maljan.llm.context_window import tokens_for_chars
         from maljan.llm.generation_rate import STREAM_USAGE_ATTRIBUTE
 
         streamed = getattr(exc, STREAM_USAGE_ATTRIBUTE, None)
@@ -488,7 +488,7 @@ class RetryRecorder(BaseCallbackHandler):
             return True
         chars = int(streamed.get("output_chars") or 0)
         pieces = int(getattr(exc, PIECES_ATTRIBUTE, 0) or 0)
-        estimated_output = -(-chars // CHARS_PER_TOKEN) if chars > 0 else pieces
+        estimated_output = tokens_for_chars(chars) if chars > 0 else pieces
         if estimated_output <= 0:
             # Nothing of the answer arrived: the prompt as reported, no output.
             self._charge({**reported, "output_tokens": 0}, None)

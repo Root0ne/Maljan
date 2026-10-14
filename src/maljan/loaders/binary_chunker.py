@@ -51,7 +51,11 @@ from enum import Enum, auto
 
 from maljan.core.config import ChunkingConfig
 from maljan.core.logger import logger
-from maljan.llm.context_window import UNKNOWN_WINDOW_CHUNK_TOKENS
+from maljan.llm.context_window import (
+    UNKNOWN_WINDOW_CHUNK_TOKENS,
+    chars_for_tokens,
+    tokens_for_chars,
+)
 
 # Characters per token approximation (GPT-4 average)
 _CHARS_PER_TOKEN: int = 4
@@ -88,14 +92,14 @@ def head_object(data: str) -> dict | None:
 
 # The chunk size this platform shipped with, in characters: what an input is
 # split at with no window learned, and the least the head source is given.
-SHIPPED_CHUNK_CHARS = UNKNOWN_WINDOW_CHUNK_TOKENS * _CHARS_PER_TOKEN
+SHIPPED_CHUNK_CHARS = chars_for_tokens(UNKNOWN_WINDOW_CHUNK_TOKENS, _CHARS_PER_TOKEN)
 
 
 def configured_chunk_chars(config: ChunkingConfig | None) -> int | None:
     """The operator's ``max_tokens_per_chunk`` in characters, or ``None`` where it is unset."""
     configured = getattr(config, "max_tokens_per_chunk", None)
     if isinstance(configured, int) and not isinstance(configured, bool) and configured > 0:
-        return configured * _CHARS_PER_TOKEN
+        return chars_for_tokens(configured, _CHARS_PER_TOKEN)
     return None
 
 
@@ -173,7 +177,7 @@ def joined_when_it_fits(chunks: list, config: ChunkingConfig, room: Room | None)
             total=1,
             content=joined,
             char_count=len(joined),
-            token_estimate=len(joined) // _CHARS_PER_TOKEN,
+            token_estimate=tokens_for_chars(len(joined), _CHARS_PER_TOKEN, ceil=False),
         )
     ]
 
@@ -268,7 +272,7 @@ class BinaryChunker:
 
     def __init__(self, config: ChunkingConfig) -> None:
         self._config = config
-        self._overlap_chars = config.overlap_tokens * _CHARS_PER_TOKEN
+        self._overlap_chars = chars_for_tokens(config.overlap_tokens, _CHARS_PER_TOKEN)
 
     def chunk(self, domain: str, text: str, room: Room | None = None) -> list[TextChunk]:
         """Split `text` into LLM-safe chunks for the given domain.
@@ -461,7 +465,7 @@ class BinaryChunker:
                     strategy=strategy,
                     content=content,
                     char_count=len(content),
-                    token_estimate=len(content) // _CHARS_PER_TOKEN,
+                    token_estimate=tokens_for_chars(len(content), _CHARS_PER_TOKEN, ceil=False),
                     domain=domain,
                 )
             )
@@ -480,6 +484,6 @@ class BinaryChunker:
             strategy=strategy,
             content=content,
             char_count=len(content),
-            token_estimate=len(content) // _CHARS_PER_TOKEN,
+            token_estimate=tokens_for_chars(len(content), _CHARS_PER_TOKEN, ceil=False),
             domain=domain,
         )

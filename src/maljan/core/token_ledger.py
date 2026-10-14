@@ -36,6 +36,8 @@ import threading
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from maljan.llm.context_window import tokens_for_chars
+
 
 def estimate_tokens(text: str) -> int:
     """Cheap, dependency-free token estimate (~4 chars/token).
@@ -45,7 +47,7 @@ def estimate_tokens(text: str) -> int:
     """
     if not text:
         return 0
-    return max(1, len(text) // 4)
+    return max(1, tokens_for_chars(len(text), 4, ceil=False))
 
 
 def _cost_of(response: Any) -> float | None:

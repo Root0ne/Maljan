@@ -682,7 +682,7 @@ class NarrativeAgent:
         rates = getattr(self, "generation_rates", None)
         if rates is None:
             return configured
-        from maljan.llm.context_window import CHARS_PER_TOKEN
+        from maljan.llm.context_window import tokens_for_chars
         from maljan.llm.generation_rate import model_name_of
 
         per_call = float(
@@ -692,7 +692,7 @@ class NarrativeAgent:
                 configured,
                 int(getattr(self, "output_cap", 0) or 0),
                 budget=str(getattr(self, "budget_note", "") or ""),
-                prompt_tokens=-(-int(prompt_chars) // CHARS_PER_TOKEN),
+                prompt_tokens=tokens_for_chars(prompt_chars),
             )
         )
         if per_call <= configured:
@@ -753,12 +753,12 @@ class NarrativeAgent:
         fit is said, and its calls are held to what the window leaves
         (:meth:`_call_bound`), rather than a fact being left out.
         """
-        from maljan.llm.context_window import CHARS_PER_TOKEN
+        from maljan.llm.context_window import chars_for_tokens
 
         window = int(getattr(self, "window_tokens", 0) or 0)
         if window <= 0:
             return
-        room = max(0, (window - int(getattr(self, "output_cap", 0) or 0)) * CHARS_PER_TOKEN)
+        room = max(0, chars_for_tokens(window - int(getattr(self, "output_cap", 0) or 0)))
         if int(prompt_chars) <= room:
             return
         reason = (
