@@ -712,3 +712,62 @@ class TestAnAgentReference:
         cfg.agents.profile = "team_lead"
         tool = resolve_agent("lead", _Container(cfg)).tools[0]
         assert tool.description.startswith("Ask Static analyst (static, role static)")
+
+
+class TestALeadWithAProviderReference:
+    """A ``lead`` opens its provider from a reference on the same path a ``generic`` agent does."""
+
+    @staticmethod
+    def _settings() -> Settings:
+        shipped = Settings(_env_file=None).agents.definitions["lead"].model_dump()
+        return Settings(
+            _env_file=None,
+            agents={
+                "definitions": {
+                    "lead_r2": {
+                        **shipped,
+                        "label": "Lead on r2",
+                        "static_provider": "r2",
+                        "tools": [*shipped["tools"], {"kind": "provider"}],
+                    }
+                },
+                "profiles": {"one": {"analysts": ["lead_r2"]}},
+                "profile": "one",
+            },
+        )
+
+    def test_the_lead_resolves_its_providers_tools(self):
+        from maljan.agents.composition import reads_static_provider
+
+        cfg = self._settings()
+        container = _Container(cfg)
+        resolved = resolve_agent("lead_r2", container)
+        names = [t.name for t in resolved.tools]
+        assert names[:2] == ["r2_open", "r2_analyze"]
+        assert "ask_static" in names
+        assert resolved.role == "lead"
+        assert resolved.static_provider_id == "r2"
+        assert reads_static_provider(cfg.agents.definitions["lead_r2"]) is True
+        # Opened under the job, exactly as a generic agent's provider is.
+        job = container._provider.job
+        assert job.job_key == "job-under-test"
+        assert job.truncation_ledger is container.get_truncation_ledger()
+        # The provider text the prompt carries describes tools the lead now has.
+        assert "R2-FRAGMENT" in resolved.prompt
+
+    def test_the_async_resolver_binds_the_same_provider_tools(self):
+        import asyncio
+
+        resolved = asyncio.run(aresolve_agent("lead_r2", _Container(self._settings())))
+        assert [t.name for t in resolved.tools][:2] == ["r2_open", "r2_analyze"]
+
+    def test_a_lead_without_a_provider_reference_opens_nothing(self):
+        from maljan.agents.composition import reads_static_provider
+
+        cfg = Settings(_env_file=None)
+        cfg.agents.profile = "team_lead"
+        provider = _Provider()
+        resolved = resolve_agent("lead", _Container(cfg, provider=provider))
+        assert not hasattr(provider, "opened")
+        assert not any(t.name.startswith("r2_") for t in resolved.tools)
+        assert reads_static_provider(cfg.agents.definitions["lead"]) is False
