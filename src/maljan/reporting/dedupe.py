@@ -30,6 +30,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from maljan.schemas.stix_pattern import Comparison, canonical_pattern
+
 # The two ways an analyst writes an address it does not want a reader to open,
 # undone so the defanged spelling and the plain one fingerprint alike. Only
 # these: a substitution table that guessed would merge indicators that differ.
@@ -123,8 +125,6 @@ _PATH_LIKE = frozenset(
 # A path whose separators and case are Windows': a drive letter, or a UNC root.
 _WINDOWS_PATH_RE = re.compile(r"[A-Za-z]:[\\/]|\\\\[^\\/]")
 _RUNS_OF_SEPARATOR_RE = re.compile(r"/{2,}")
-# One literal a STIX pattern quotes.
-_QUOTED_RE = re.compile(r"'([^']*)'")
 
 
 def folds_case(kind: Any) -> bool:
@@ -166,38 +166,58 @@ def indicator_fingerprint(kind: Any, value: Any) -> tuple[str, str]:
     return (name, canonical_value(value, fold_case=folds_case(name)))
 
 
-# The object path a STIX comparison expression opens with, mapped to the kind
-# ``folds_case`` knows. A pattern this cannot read keeps its case.
-_STIX_PATHS: tuple[tuple[str, str], ...] = (
-    ("file:hashes", "hash"),
-    ("file:name", "path"),
-    ("directory:path", "path"),
-    ("windows-registry-key:key", "registry"),
-    ("domain-name:value", "domain"),
-    ("ipv4-addr:value", "ipv4"),
-    ("ipv6-addr:value", "ipv6"),
-    ("email-addr:value", "email"),
-)
+# The object path a STIX comparison is made against, mapped to the kind
+# ``indicator_fingerprint`` knows. Every other path keeps its value's case.
+_STIX_PATH_KINDS = {
+    "file:name": "path",
+    "directory:path": "path",
+    "windows-registry-key:key": "registry",
+    "domain-name:value": "domain",
+    "ipv4-addr:value": "ipv4",
+    "ipv6-addr:value": "ipv6",
+    "email-addr:value": "email",
+}
+# The operators whose value is a pattern of its own: a ``LIKE`` wildcard or a
+# ``MATCHES`` regular expression changes meaning when it is folded or defanged
+# (``\D`` is not ``\d``, ``[.]`` is a character class), so it is kept as written.
+_PATTERN_OPERATORS = ("like", "matches")
+
+
+def _comparison_value(comparison: Comparison) -> str:
+    """One comparison's value in the spelling two copies of it share, by the kind of its path."""
+    if any(word in comparison.operator for word in _PATTERN_OPERATORS):
+        return comparison.literal
+    if comparison.object_type == "file" and comparison.prop.startswith("hashes"):
+        kind = "hash"
+    else:
+        kind = _STIX_PATH_KINDS.get(comparison.path, "")
+    return indicator_fingerprint(kind, comparison.literal)[1]
 
 
 def pattern_fingerprint(pattern_type: Any, pattern: Any) -> tuple[str, str]:
     """What makes two STIX indicators the same indicator.
 
-    The same rule the report's table uses, read off the pattern itself: a
-    pattern over a digest or a host name folds its case, a pattern over a path
-    is normalised the way a path is, and a pattern over a URL or anything this
-    cannot read keeps what it was written with. Defanging is undone either way,
-    because ``[.]`` never meant anything but ``.``.
+    The same rule the report's table uses, applied to each comparison the
+    pattern makes (``schemas.stix_pattern``): a value compared with a digest
+    or a host name folds its case, a value compared with a path is normalised
+    the way a path is, and a value compared with a URL or any other property
+    keeps the case it was written in. Defanging is undone, because ``[.]``
+    never meant anything but ``.``. The syntax around the values is folded
+    and its whitespace closed up, so ``[URL:value = …]`` and
+    ``[url:value=…]`` are one pattern.
+
+    Each value by the kind of its own path, not by the first path found
+    anywhere in the text: a URL quoting ``file:name`` or ``C:/`` is a URL, and
+    two URLs that differ in case stay two indicators. A value the reader
+    cannot read keeps its written text, and a pattern in any language other
+    than STIX is compared as written: two rows where there might be one,
+    never one where there are two.
     """
-    text = str(pattern or "")
-    lowered = text.lower()
-    kind = next((name for path, name in _STIX_PATHS if path in lowered), "")
     family = str(pattern_type or "stix").strip().lower()
-    if kind in _PATH_LIKE:
-        # Each quoted literal on its own: a trailing separator sits inside the
-        # quotes, where normalising the whole pattern string cannot reach it.
-        return (family, _QUOTED_RE.sub(lambda hit: f"'{canonical_path(hit.group(1))}'", text))
-    return (family, canonical_value(text, fold_case=folds_case(kind)))
+    text = str(pattern or "").strip()
+    if family != "stix":
+        return (family, text)
+    return (family, canonical_pattern(text, _comparison_value))
 
 
 def normalised_title(title: Any) -> str:

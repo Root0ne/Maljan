@@ -5396,6 +5396,16 @@ union of the sources, as every merge in this project works. One recorded bundle
 carried the same directory twice, once with the trailing slash and once
 without.
 
+Two STIX indicators are one when each comparison they make is the same
+comparison. `pattern_fingerprint` reads the pattern with the one pattern reader
+(`stix_pattern.canonical_pattern`): the syntax around the values is folded and
+its whitespace closed up, and each value is folded by the kind of its own
+object path — a digest or a host name folds its case, a path follows the path
+rule, a URL or any other property keeps its case, and defanging is undone. A
+`LIKE` or `MATCHES` value, a value the reader cannot read and a pattern in
+another language are kept as written, so a doubt leaves two rows rather than
+one.
+
 Whether an endpoint that *could* exist is published stays
 `corroboration_reason`'s decision. A URL, a name or an address the host
 question refuses is recorded as `stix.unpublishable_endpoint` when a sandbox,
