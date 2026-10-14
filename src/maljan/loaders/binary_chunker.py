@@ -24,11 +24,16 @@ Chunking strategy selection:
 
 Chunk size: what the analyst's prompt has room for, measured by the analyst
 from its own window (``BaseAnalyst._input_room_chars``) and handed in as
-``room``. ``chunking.max_tokens_per_chunk``, where an operator set it, wins, at
+``room``; the first chunk of the source the node adds the sample path and the
+upstream block to is that room less what they add (:class:`HeadRoom`).
+``chunking.max_tokens_per_chunk``, where an operator set it, wins, at
 1 token ≈ 4 characters (GPT-4 average). With no window learned, the size the
-platform shipped with (``UNKNOWN_WINDOW_CHUNK_TOKENS``).
-Sources that fit the size together are joined into one chunk
-(:func:`joined_when_it_fits`), so an analyst whose input fits runs one loop.
+platform shipped with (``UNKNOWN_WINDOW_CHUNK_TOKENS``), which every chunk
+records (``metadata``) so the run can say where it split an input.
+Whole sources next to each other that fit the size together are joined into
+one chunk (:func:`joined_when_it_fits`), so an analyst whose input fits runs
+one loop. No chunk holds nothing: a window of the overlap and trailing
+whitespace is not made.
 
 Usage:
     from maljan.loaders.binary_chunker import BinaryChunker
