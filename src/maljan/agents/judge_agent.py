@@ -73,7 +73,7 @@ from maljan.agents.tool_fence import (
     json_view,
     needs_fence,
 )
-from maljan.core.config import MEDIATOR_AGENT_KEY, get_settings
+from maljan.core.config import MEDIATOR_AGENT_KEY, MEDIATOR_AGENT_NAME, get_settings
 from maljan.core.logger import logger
 from maljan.core.spend import SpendCeilingStop, call_deadline_of
 from maljan.core.token_ledger import TokenLedger, structured_answer
@@ -1584,7 +1584,7 @@ def _last_ledger_facts(history: Sequence[Any], field: str = "ledger_facts") -> l
     were told before.
     """
     for argument in reversed(list(history or [])):
-        if getattr(argument, "agent_name", "") == "Mediator":
+        if getattr(argument, "agent_name", "") == MEDIATOR_AGENT_NAME:
             return [str(f) for f in getattr(argument, field, None) or []]
     return []
 
@@ -2698,7 +2698,7 @@ class JudgeAgent(BudgetMeter):
             )
             return (
                 AgentArgument(
-                    agent_name="Mediator",
+                    agent_name=MEDIATOR_AGENT_NAME,
                     # The mediator's words whole, and the platform's own
                     # sentence in a field of its own rather than inside them.
                     finding=reasoning_text.strip(),
@@ -2755,7 +2755,7 @@ class JudgeAgent(BudgetMeter):
             )
             return (
                 AgentArgument(
-                    agent_name="Mediator",
+                    agent_name=MEDIATOR_AGENT_NAME,
                     finding="",
                     confidence_score=None,
                     status=MEDIATOR_NO_ANSWER,
@@ -2868,7 +2868,7 @@ class JudgeAgent(BudgetMeter):
             f"Confidence: {verdict.confidence:.2f}"
         )
         argument = AgentArgument(
-            agent_name="Mediator",
+            agent_name=MEDIATOR_AGENT_NAME,
             finding=finding,
             confidence_score=verdict.confidence,
             contradictions=blocking,
@@ -4165,7 +4165,7 @@ class JudgeAgent(BudgetMeter):
         if rates is None:
             return configured
         output = self._output_cap()
-        from maljan.llm.context_window import CHARS_PER_TOKEN
+        from maljan.llm.context_window import tokens_for_chars
 
         seconds = rates.call_timeout(
             call,
@@ -4173,7 +4173,7 @@ class JudgeAgent(BudgetMeter):
             configured,
             output.tokens,
             budget=output.sentence,
-            prompt_tokens=-(-int(prompt_chars) // CHARS_PER_TOKEN),
+            prompt_tokens=tokens_for_chars(prompt_chars),
         )
         return None if seconds is None else float(seconds)
 

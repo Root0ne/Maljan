@@ -1561,9 +1561,9 @@ class ReportComposer:
         pairs = self._room_pairs()
         if not pairs:
             return None
-        from maljan.llm.context_window import CHARS_PER_TOKEN
+        from maljan.llm.context_window import chars_for_tokens
 
-        return min(max(0, (window - cap) * CHARS_PER_TOKEN) for window, cap in pairs)
+        return min(max(0, chars_for_tokens(window - cap)) for window, cap in pairs)
 
     def _call_bound(self, turns: Sequence[BaseMessage]) -> int | None:
         """The ``max_tokens`` one call of this section is held to, or ``None``.
@@ -1590,10 +1590,10 @@ class ReportComposer:
         the spend ceiling does not admit the call.
         """
         from maljan.llm.context_window import (
-            CHARS_PER_TOKEN,
             accepts_output_bound,
             call_output_bound,
             prompt_overflow_sentence,
+            tokens_for_chars,
         )
 
         cap = int(getattr(self, "output_cap", 0) or self.section_max_tokens or 0)
@@ -1612,7 +1612,7 @@ class ReportComposer:
         # A model whose whole window the prompt already passes cannot answer
         # it (the overflow is recorded above); it does not hold the call of a
         # model that can. With none that can, every model still holds it.
-        prompt_tokens = -(-chars // CHARS_PER_TOKEN)
+        prompt_tokens = tokens_for_chars(chars)
         rooms = [room for room in rooms if prompt_tokens < room[1]] or rooms
         bound = None
         if any(call_output_bound(c, w, chars) is not None for _label, w, c in rooms):
@@ -1704,7 +1704,7 @@ class ReportComposer:
         rates = getattr(self, "generation_rates", None)
         if rates is None:
             return configured
-        from maljan.llm.context_window import CHARS_PER_TOKEN
+        from maljan.llm.context_window import tokens_for_chars
         from maljan.llm.generation_rate import model_name_of
 
         per_call = float(
@@ -1714,7 +1714,7 @@ class ReportComposer:
                 configured,
                 int(getattr(self, "output_cap", 0) or self.section_max_tokens or 0),
                 budget=str(getattr(self, "budget_note", "") or ""),
-                prompt_tokens=-(-int(prompt_chars) // CHARS_PER_TOKEN),
+                prompt_tokens=tokens_for_chars(prompt_chars),
             )
         )
         if per_call <= configured:

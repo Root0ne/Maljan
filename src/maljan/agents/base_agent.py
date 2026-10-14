@@ -66,6 +66,7 @@ from maljan.llm.anthropic_history import (
 from maljan.llm.context_window import (
     CHARS_PER_TOKEN,
     NO_ROOM_RUN_STATE,
+    chars_for_tokens,
     tool_definition_chars,
     window_full_error,
 )
@@ -158,9 +159,6 @@ from maljan.utils.marked_cut import CUT_MARK
 # key admits (``core.config.SERVER_KEY_PATTERN``), so no server is ever taken
 # for the owner of a name an in-process tool claimed.
 IN_PROCESS_SOURCE = "in-process:agent"
-
-# Regex: matches MITRE ATT&CK technique IDs like T1055 or T1055.001.
-_TECHNIQUE_RE = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\b")
 
 # Regex: the ReAct stop message emitted when an agent exhausts its
 # ``recursion_limit`` while still tool-calling (it never wrote a final answer).
@@ -291,7 +289,10 @@ def synthesis_budget_chars(cfg: Any, agent_name: str, window_tokens: int = 0) ->
     tokens = min(windows) if windows else 0
     if tokens <= 0:
         return _SYNTHESIS_MIN_CHARS
-    return max(_SYNTHESIS_MIN_CHARS, int(tokens * _CHARS_PER_TOKEN * _SYNTHESIS_CONTEXT_SHARE))
+    return max(
+        _SYNTHESIS_MIN_CHARS,
+        int(chars_for_tokens(tokens, _CHARS_PER_TOKEN) * _SYNTHESIS_CONTEXT_SHARE),
+    )
 
 
 def salvage_chars_at_pace(
@@ -405,7 +406,7 @@ def _reported_request(messages: list, per_token: int) -> tuple[int, int]:
             prompt = 0
         if prompt > 0:
             after = _chars_of(messages[index:])
-            return prompt * max(1, per_token) + after, index
+            return chars_for_tokens(prompt, max(1, per_token)) + after, index
     return 0, -1
 
 
@@ -2072,11 +2073,6 @@ def _confidence_as_written(match: re.Match[str]) -> str:
 
 # A field label written after the value on the same line, where the value ends.
 _LABEL_AFTER_VALUE_RE = re.compile(r"\s+(?:TECHNIQUE|EVIDENCE):")
-
-
-def _extract_technique_ids(text: str) -> list[str]:
-    """Every distinct technique id mentioned in the text, in order, as written."""
-    return list(dict.fromkeys(_TECHNIQUE_RE.findall(text)))
 
 
 # ---------------------------------------------------------------------------
@@ -4681,7 +4677,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         """
         window = self._own_window_tokens()
         return ToolAnswerClearing(
-            window_chars=window * self._clearing_per_token() if window else None
+            window_chars=chars_for_tokens(window, self._clearing_per_token()) if window else None
         )
 
     def _cleared_request(

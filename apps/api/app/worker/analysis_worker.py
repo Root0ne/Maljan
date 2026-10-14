@@ -28,6 +28,7 @@ import redis.asyncio as aioredis
 from arq import cron
 from maljan.agents.base_agent import CANCEL_DELIVERY_GRACE
 from maljan.core.cancellation import Cancellation, JobCancelled
+from maljan.core.config import MEDIATOR_AGENT_NAME
 from maljan.core.config import Settings as _CoreSettings
 from maljan.core.report_formats import declarations_in_effect, recorded_signature_scale
 from maljan.core.settings_catalog import core_catalog
@@ -4143,7 +4144,7 @@ async def _store_the_report(
             "mediation_failed": any(
                 getattr(a, "status", "complete") in ("failed", "timeout")
                 for a in (pipeline_result.get("discussion_history") or [])
-                if getattr(a, "agent_name", "") == "Mediator"
+                if getattr(a, "agent_name", "") == MEDIATOR_AGENT_NAME
             ),
             # Whether the last round's agreement was flagged as
             # sycophantic — agents converging without new evidence. It

@@ -35,6 +35,7 @@ from maljan.analysis.corroboration import (
     published_count,
     technique_label,
 )
+from maljan.core.config import MEDIATOR_AGENT_NAME
 from maljan.core.token_ledger import CALL_PARTS
 from maljan.pipeline.mediation_models import (
     CONTRADICTIONS_BLOCK_MISSING_NOTE,
@@ -2168,7 +2169,7 @@ class RunSummaryBuilder:
         sycophancy_events = sum(
             1
             for arg in discussion_history
-            if getattr(arg, "agent_name", "") == "Mediator"
+            if getattr(arg, "agent_name", "") == MEDIATOR_AGENT_NAME
             and "sycophancy" in getattr(arg, "finding", "").lower()
         )
         if sycophancy_detected and sycophancy_events == 0:
@@ -2214,7 +2215,7 @@ class RunSummaryBuilder:
                 dict.fromkeys(
                     str(getattr(arg, "note", ""))
                     for arg in discussion_history
-                    if getattr(arg, "agent_name", "") == "Mediator"
+                    if getattr(arg, "agent_name", "") == MEDIATOR_AGENT_NAME
                     and getattr(arg, "note", "")
                     and (
                         getattr(arg, "note", "")
@@ -2226,14 +2227,14 @@ class RunSummaryBuilder:
             not_blocking=[
                 defanged(str(line))
                 for arg in discussion_history
-                if getattr(arg, "agent_name", "") == "Mediator"
+                if getattr(arg, "agent_name", "") == MEDIATOR_AGENT_NAME
                 for line in getattr(arg, "not_blocking", None) or []
             ],
             ledger_facts=list(
                 dict.fromkeys(
                     defanged(str(fact))
                     for arg in discussion_history
-                    if getattr(arg, "agent_name", "") == "Mediator"
+                    if getattr(arg, "agent_name", "") == MEDIATOR_AGENT_NAME
                     for fact in getattr(arg, "ledger_facts", None) or []
                 )
             ),
@@ -2246,21 +2247,21 @@ class RunSummaryBuilder:
             unread_marks=[
                 defanged(str(line))
                 for arg in discussion_history
-                if getattr(arg, "agent_name", "") == "Mediator"
+                if getattr(arg, "agent_name", "") == MEDIATOR_AGENT_NAME
                 for line in getattr(arg, "unread_marks", None) or []
             ],
             not_blocking_at_end=next(
                 (
                     len(getattr(arg, "not_blocking", None) or [])
                     for arg in reversed(discussion_history)
-                    if getattr(arg, "agent_name", "") == "Mediator"
+                    if getattr(arg, "agent_name", "") == MEDIATOR_AGENT_NAME
                 ),
                 0,
             ),
             ledger_stated=[
                 defanged(str(sentence))
                 for arg in discussion_history
-                if getattr(arg, "agent_name", "") == "Mediator"
+                if getattr(arg, "agent_name", "") == MEDIATOR_AGENT_NAME
                 for sentence in getattr(arg, "ledger_stated", None) or []
             ],
         )

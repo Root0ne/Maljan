@@ -3428,7 +3428,8 @@ alone: the judge does not ask it of the claimed set when a report node follows
 (`nodes.a_report_node_follows`), and the report node drops a case thin in
 what was published. A run with no report node (`reporting.enabled` off, or a
 profile without a report stage) publishes the judge's bundle, so the judge
-moves the case to that bundle's attack-pattern ids and asks the gate of them
+moves the case to the technique ids of that bundle's attack-patterns (a reference
+to a tactic, group or software is none) and asks the gate of them
 (`nodes.case_for_the_judge_alone`); when the bundle cannot be read there is no
 published set, and the case keeps the claimed techniques and the log says so.
 The judge still skips a run with failed analysts or no negotiation round. An

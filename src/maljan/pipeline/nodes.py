@@ -39,12 +39,13 @@ from maljan.agents.run_evidence_corpus import (
 )
 from maljan.analysis.corroboration import corroborated, corroboration_row
 from maljan.analysis.run_summary import RunSummaryBuilder, summary_counts_line, tool_asks_of
-from maljan.core.config import BUILTIN_AGENTS, JUDGE_AGENT_KEY, PROMPT_ROLES
+from maljan.core.config import BUILTIN_AGENTS, JUDGE_AGENT_KEY, MEDIATOR_AGENT_NAME, PROMPT_ROLES
 from maljan.core.container import ServiceContainer
 from maljan.core.declared_reading import kinds_declared_by
 from maljan.core.exceptions import AnalystError, LLMError, SampleNotOpened
 from maljan.core.logger import logger
 from maljan.core.spend import SpendCeilingStop
+from maljan.llm.context_window import tokens_for_chars
 from maljan.loaders.binary_chunker import (
     SOURCE_SEPARATOR,
     ChunkStrategy,
@@ -991,7 +992,7 @@ def _augment_static_chunks_with_path(
             head,
             content=new_content,
             char_count=len(new_content),
-            token_estimate=len(new_content) // 4,
+            token_estimate=tokens_for_chars(len(new_content), 4, ceil=False),
         )
     except TypeError:
         # Not a dataclass (e.g. a future chunk type) — give up gracefully
@@ -2410,7 +2411,7 @@ def added_to_head(
                 strategy=ChunkStrategy.SLIDING_WINDOW,
                 content=text,
                 char_count=len(text),
-                token_estimate=len(text) // 4,
+                token_estimate=tokens_for_chars(len(text), 4, ceil=False),
                 domain="head",
             )
         ]
@@ -2524,8 +2525,8 @@ def case_for_the_judge_alone(
     keeps the claimed techniques, is asked the gate on them, and the sentence
     says so.
     """
+    from maljan.analysis.technique_ids import declared_technique_id
     from maljan.memory.long_term_memory import is_thin_case, with_published_techniques
-    from maljan.pipeline.validation import _attack_pattern_technique_id
 
     if not isinstance(bundle, Bundle):
         if is_thin_case(case):
@@ -2538,7 +2539,7 @@ def case_for_the_judge_alone(
         tid
         for obj in bundle.objects
         if str(getattr(obj, "type", "")) == "attack-pattern"
-        for tid in [_attack_pattern_technique_id(obj)]
+        for tid in [declared_technique_id(obj)]
         if tid
     ]
     moved = with_published_techniques(case, published, isr_reports, corroborated)
@@ -3895,7 +3896,7 @@ def _ledger_stated_lines(
     told = [
         str(fact)
         for earlier in state.get("discussion_history") or []
-        if getattr(earlier, "agent_name", "") == "Mediator"
+        if getattr(earlier, "agent_name", "") == MEDIATOR_AGENT_NAME
         for fact in getattr(earlier, "ledger_facts", None) or []
     ]
     if not lines or not told:
@@ -4009,7 +4010,7 @@ def make_negotiation_node(
                 "sycophancy_detected": False,
                 "discussion_history": [
                     AgentArgument(
-                        agent_name="Mediator",
+                        agent_name=MEDIATOR_AGENT_NAME,
                         finding="MOCK: fewer than two analysts produced claims.",
                         confidence_score=None,
                     )
@@ -4027,7 +4028,7 @@ def make_negotiation_node(
                 "confidence_history": [mean_conf],
                 "discussion_history": [
                     AgentArgument(
-                        agent_name="Mediator",
+                        agent_name=MEDIATOR_AGENT_NAME,
                         finding=(
                             "MOCK: All experts agree. Confidence: 0.95"
                             if is_consensus
@@ -4339,7 +4340,7 @@ def make_negotiation_node(
                 "sycophancy_detected": syco,
                 "discussion_history": [
                     AgentArgument(
-                        agent_name="Mediator",
+                        agent_name=MEDIATOR_AGENT_NAME,
                         finding=f"[ERROR] Mediation {label}: {describe_exception(e)}",
                         confidence_score=None,
                         # The structured signal. The "[ERROR] Mediation " prefix
@@ -4421,7 +4422,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         places: list[str] = []
         mediation: Any = None
         for arg in reversed(history):
-            if arg.agent_name == "Mediator":
+            if arg.agent_name == MEDIATOR_AGENT_NAME:
                 mediator_feedback = arg.finding
                 ledger_facts = list(getattr(arg, "ledger_facts", None) or [])
                 places = list(getattr(arg, "place_facts", None) or [])
