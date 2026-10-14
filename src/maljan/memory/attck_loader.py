@@ -7,7 +7,7 @@ extracts:
   - ``x-mitre-tactic`` objects -> the tactic catalogue, in matrix column order.
 
 The raw STIX bundle is cached locally. The cache AUTO-REFRESHES once it is older
-than ``MALJAN_ATTCK_MAX_AGE_DAYS`` days (default 30), so new ATT&CK releases
+than ``MALJAN_ATTCK_MAX_AGE_DAYS`` days (default 7), so new ATT&CK releases
 (e.g. the v19 "Defense Evasion" -> "Stealth" + "Defense Impairment" split) flow
 through with no code changes. If a refresh download fails, the existing (stale)
 cache is reused rather than breaking the analysis run.
@@ -96,6 +96,11 @@ TECHNIQUE_ID_RE = TECHNIQUE_ID_EXACT_RE
 TACTIC_ID_RE = re.compile(r"\ATA\d{4}\Z")
 
 
+# A week: an ATT&CK release reaches the cache within seven days of its
+# publication instead of up to a month later.
+DEFAULT_MAX_AGE_DAYS = 7
+
+
 def _default_max_age_days() -> int:
     """Cache auto-refresh threshold in days (env MALJAN_ATTCK_MAX_AGE_DAYS).
 
@@ -103,9 +108,9 @@ def _default_max_age_days() -> int:
     missing or a force_refresh is requested.
     """
     try:
-        return int(os.environ.get("MALJAN_ATTCK_MAX_AGE_DAYS", "30"))
+        return int(os.environ.get("MALJAN_ATTCK_MAX_AGE_DAYS", str(DEFAULT_MAX_AGE_DAYS)))
     except ValueError:
-        return 30
+        return DEFAULT_MAX_AGE_DAYS
 
 
 @dataclass
@@ -166,7 +171,7 @@ def load_attck_data(
     """Load techniques + tactics + version from the ATT&CK bundle.
 
     Uses the local cache when it is fresh; auto-refreshes when it is older than
-    ``max_age_days`` (defaults to MALJAN_ATTCK_MAX_AGE_DAYS / 30). On a failed
+    ``max_age_days`` (defaults to MALJAN_ATTCK_MAX_AGE_DAYS / 7). On a failed
     refresh, falls back to the stale cache instead of raising.
     """
     raw = _load_raw_bundle(url, cache_file, force_refresh, max_age_days)

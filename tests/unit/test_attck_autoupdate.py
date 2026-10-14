@@ -179,6 +179,26 @@ class TestCacheTTL:
         raw = _load_raw_bundle("http://x", cache, force_refresh=False, max_age_days=0)
         assert raw["objects"][0]["x_mitre_version"] == "ancient"
 
+    def test_the_default_check_is_weekly(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("MALJAN_ATTCK_MAX_AGE_DAYS", raising=False)
+        assert attck_loader._default_max_age_days() == 7
+        monkeypatch.setattr(
+            "maljan.memory.attck_loader._fetch_bundle",
+            lambda url: {"objects": [{"type": "x-mitre-collection", "x_mitre_version": "new"}]},
+        )
+        six_days = tmp_path / "six.json"
+        _write_bundle(six_days, "cached")
+        _age(six_days, 6)
+        raw = _load_raw_bundle("http://x", six_days, force_refresh=False, max_age_days=None)
+        assert raw["objects"][0]["x_mitre_version"] == "cached"
+        eight_days = tmp_path / "eight.json"
+        _write_bundle(eight_days, "cached")
+        _age(eight_days, 8)
+        raw = _load_raw_bundle("http://x", eight_days, force_refresh=False, max_age_days=None)
+        assert raw["objects"][0]["x_mitre_version"] == "new"
+
     def test_missing_cache_offline_raises(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
