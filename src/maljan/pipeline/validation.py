@@ -7093,9 +7093,11 @@ _MODIFIER_WORDS = frozenset(
 )
 # Separators of coordinated head identifiers ("0x1c38 and 0x1a08").
 _COORDINATORS = frozenset({",", "&", "and", "or"})
-# A pronoun subject and a possessive one, read from the sentence before.
-_PRONOUNS = frozenset({"it", "they", "this", "these"})
-_POSSESSIVES = frozenset({"its", "their"})
+# A pronoun subject and a possessive one, read from the sentence before. Only
+# the singular ones: "they", "these" or "their" may stand for several things,
+# never for the one address the sentence before names.
+_PRONOUNS = frozenset({"it", "this"})
+_POSSESSIVES = frozenset({"its"})
 # What an answer about an address holds of it besides the address: the
 # relation a possessive pronoun's noun may name ("its callers").
 _RELATION_NOUNS = frozenset(
@@ -7213,10 +7215,11 @@ def _subject_head(subject: str, relative: bool, kind: str) -> tuple[str, list[st
     to it, and nothing after them but a bracket; or a closing bracketed list
     of identifiers after a head noun no modifier follows ("the import names
     … (A, B)"); for a relative clause, the identifier that ends the words
-    before it, no modifier word before its kind noun. A pronoun alone, and a
-    possessive pronoun before a relation noun for a statement about the
-    ledger ("its callers"), stand for the sentence before. Anything else is
-    not read: nothing is judged.
+    before it, no modifier word before its kind noun. A singular pronoun
+    alone, and "its" before a relation noun for a statement about the ledger
+    ("its callers"), stand for the sentence before; a plural one may stand
+    for several things. A head a bracketed modifier follows is not judged.
+    Anything else is not read: nothing is judged.
     """
     tokens = _subject_tokens(subject)
     while tokens and tokens[-1] == ",":
@@ -7247,6 +7250,10 @@ def _subject_head(subject: str, relative: bool, kind: str) -> tuple[str, list[st
         if at > 0 and _modifies(tokens[at - 1 : at]):
             return "", []
         return _HEAD_IDS, ids
+    # A closing bracket that is no list of identifiers is a modifier of what
+    # it follows ("Routine 0x1400 (the unpacked copy)"): it may name another
+    # object, so a head it follows is not judged.
+    parenthetical = bracketed is not None and not bracketed[0]
     if bracketed is not None:
         listed, before = bracketed
         tokens = before
@@ -7280,7 +7287,7 @@ def _subject_head(subject: str, relative: bool, kind: str) -> tuple[str, list[st
         at += 1
     ids, end = _ids_from(tokens, at)
     if ids:
-        return (_HEAD_IDS, ids) if end == len(tokens) else ("", [])
+        return (_HEAD_IDS, ids) if end == len(tokens) and not parenthetical else ("", [])
     if listed and not _modifies(tokens):
         return _HEAD_IDS, listed
     return "", []

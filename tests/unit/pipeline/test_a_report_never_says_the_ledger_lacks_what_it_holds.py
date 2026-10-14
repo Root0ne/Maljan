@@ -168,6 +168,11 @@ class TestAStatementThatStands:
             "The arguments ReadThingW receives are not in the ledger.",
             "Callers of 0x7c40 beyond the two listed are not in the ledger.",
             "The return value of MakeThingW is not confirmed by the parser output [ev_0004].",
+            "The sample uses routine 0x7c40 and two other routines. "
+            "Their callers are not in the ledger.",
+            "The loader calls 0x7c40 and several helper routines. "
+            "Their callers are not in the ledger.",
+            "Routine 0x5a10 (the unpacked copy) was not read.",
         ],
     )
     def test_an_identifier_outside_the_subject_s_head_is_not_judged(self, text: str) -> None:
