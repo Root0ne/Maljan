@@ -167,3 +167,34 @@ def test_the_console_still_loads_and_is_served_the_refused_keys() -> None:
     assert r.status_code == 200
     refused = r.json()["stored_values_refused"]
     assert list(refused) == ["core.validation.attck_refresh_days"]
+
+
+def test_the_refusal_carries_no_refused_value_in_its_traceback() -> None:
+    import traceback
+
+    from maljan.core.settings_overrides import settings_from_store
+
+    secret = "sk-PROBE-" + "x" * 40
+    stored = {"llm.max_spend_usd_per_job": secret}
+    with pytest.raises(StoredValueRefused) as refused:
+        settings_from_store(stored)
+    assert refused.value.__cause__ is None and refused.value.__suppress_context__
+    rendered = "".join(traceback.format_exception(refused.value))
+    assert secret not in rendered
+    assert "core.llm.max_spend_usd_per_job" in rendered
+
+
+def test_the_unauthenticated_deep_health_says_only_that_one_is_refused() -> None:
+    from app import main
+
+    async def refused() -> Any:
+        raise StoredValueRefused({"llm.openai.api_key": "a reason naming a value"})
+
+    with patch("app.runtime_config.runtime_config.core", refused):
+        answer = asyncio.run(main._probe_memory())
+    assert answer == {
+        "ok": False,
+        "error": "a stored setting is refused; see the settings page",
+        "backend": None,
+    }
+    assert "api_key" not in str(answer) and "reason" not in str(answer)

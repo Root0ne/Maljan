@@ -377,6 +377,93 @@ async def test_reporting_disabled_completes_without_a_malware_report(
     assert "error_message" not in statuses[-1]
 
 
+def _job_rows(job: Any, sample: Any) -> list[MagicMock]:
+    rows = []
+    for obj in (job, sample):
+        m = MagicMock()
+        if isinstance(getattr(obj, "status", None), str):
+            m.scalar_one_or_none.return_value = obj
+        else:
+            m.scalar_one.return_value = obj
+        rows.append(m)
+    return rows
+
+
+@pytest.mark.parametrize(
+    ("stored", "named"),
+    [
+        ({"llm.max_spend_usd_per_job": -5.0}, "core.llm.max_spend_usd_per_job"),
+        (
+            {
+                "mcp.servers": {
+                    "custom": {
+                        "enabled": True,
+                        "transport": "stdio",
+                        "command": "x",
+                        "env_allow": 5,
+                    }
+                }
+            },
+            "core.mcp.servers",
+        ),
+        ({"job_timeout": 0}, "core.job_timeout"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_refused_stored_value_fails_the_job_by_name_and_runs_nothing(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+    stored: dict[str, Any],
+    named: str,
+) -> None:
+    """No retry on the shipped defaults: the job fails, says which stored key
+    and what to do, and the pipeline never starts."""
+    from app.services import settings_service
+
+    async def _stored(_db: Any) -> dict[str, Any]:
+        return dict(stored)
+
+    monkeypatch.setattr(settings_service, "load_core_overrides", _stored)
+    job = _make_job()
+    sample = _make_sample()
+    recorded = _answer_reads(mock_db_session, _job_rows(job, sample))
+    pipeline = AsyncMock(return_value={"final_decision": "Malware"})
+
+    with patch("maljan.app.MaljanApp.arun", new=pipeline):
+        result = await run_analysis(mock_ctx, str(job.id))
+
+    assert result["status"] == "failed", result
+    assert named in result["error"]
+    assert "Fix it or reset it in the console" in result["error"]
+    pipeline.assert_not_awaited()
+    failed = [u for u in updates_in(recorded, "analysis_jobs") if u["status"] == "failed"]
+    assert len(failed) == 1 and named in failed[0]["error_message"]
+    published = " ".join(str(call.args) for call in mock_ctx["redis"].publish.await_args_list)
+    assert '"error"' in published or "'error'" in published
+
+
+@pytest.mark.asyncio
+async def test_a_refused_job_option_fails_the_job_by_field_without_its_value(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+) -> None:
+    """The other arm: a refusal that is no stored key also fails loudly, naming
+    the field, never running on defaults and never quoting the value."""
+    job = _make_job(config={"max_iterations": -7777})
+    sample = _make_sample()
+    _answer_reads(mock_db_session, _job_rows(job, sample))
+    pipeline = AsyncMock(return_value={"final_decision": "Malware"})
+
+    with patch("maljan.app.MaljanApp.arun", new=pipeline):
+        result = await run_analysis(mock_ctx, str(job.id))
+
+    assert result["status"] == "failed", result
+    assert "negotiation.max_iterations" in result["error"]
+    assert "-7777" not in result["error"]
+    pipeline.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_pipeline_failure_sets_failed_status(
     mock_ctx: dict[str, Any], mock_db_session: AsyncMock

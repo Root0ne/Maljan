@@ -33,6 +33,7 @@ from maljan.core.config import Settings as _CoreSettings
 from maljan.core.report_formats import declarations_in_effect, recorded_signature_scale
 from maljan.core.settings_catalog import core_catalog
 from maljan.core.settings_overrides import (
+    StoredValueRefused,
     build_settings,
     public_snapshot,
     settings_from_store,
@@ -2380,38 +2381,39 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
 
         from maljan.core.config import install_settings
 
+        # Settings the model refuses fail the job, loudly and before any
+        # pipeline starts. This used to retry on all shipped defaults, which
+        # put a less safe value (no spend cap, the shipped server map, no
+        # timeout) in place of the operator's without the run saying so; a
+        # job runs on the settings it was given, or not at all.
         try:
             core_settings = build_job_settings(overrides, job_config)
-        except (ValidationError, ValueError) as exc:
-            # Stored overrides that validated when saved can stop validating
-            # after a deploy narrows a field, and two orphan rows can nest
-            # into a conflict. One job must not take the queue down: run on
-            # default settings, name the fields.
-            bad = (
-                sorted({".".join(str(x) for x in e["loc"]) for e in exc.errors()})
-                if isinstance(exc, ValidationError)
-                else [type(exc).__name__]
-            )
-            logger.warning(
-                "Runtime settings rejected by the model (%s); "
-                "retrying job %s without the stored overrides.",
-                ", ".join(bad),
-                job_id,
-                extra={"job_id": job_id},
-            )
-            overrides = {}
-            try:
-                core_settings = build_job_settings({}, job_config)
-            except (ValidationError, ValueError):
-                # The rejected value was the job's own config, not a
-                # stored override (the API validates it at submit time,
-                # but a row written another way still reaches here).
-                logger.warning(
-                    "Job %s config rejected by the model; running on default settings only.",
-                    job_id,
-                    extra={"job_id": job_id},
-                )
-                core_settings = build_job_settings({}, None)
+        except StoredValueRefused as exc:
+            raise StatedFailure(
+                "A stored setting value is refused ("
+                + ", ".join(sorted(exc.refused))
+                + "). Fix it or reset it in the console (Settings, Configuration); "
+                "the job did not run on a default in its place."
+            ) from None
+        except ValidationError as exc:
+            # Not a stored key (``settings_from_store`` names those): the
+            # job's own options, or a conflict between stored rows. The fields,
+            # never the refused values.
+            fields = sorted({".".join(str(x) for x in e["loc"]) for e in exc.errors()})
+            raise StatedFailure(
+                "The settings this job would run with are refused ("
+                + ", ".join(fields)
+                + "). Fix them in the console or in the job's options; the job did "
+                "not run on defaults in their place."
+            ) from None
+        except ValueError as exc:
+            # ``role_block_problem`` and the provider checks: sentences this
+            # package composes from setting names. ``StatedFailure`` publishes
+            # one only when it carries nothing the event scrubber would change.
+            raise StatedFailure(
+                f"The settings this job would run with are refused: {exc}. Fix them in "
+                "the console; the job did not run on defaults in their place."
+            ) from None
         # Agents, pipeline nodes and extractors read the process singleton
         # (``get_settings()``), not the config handed to MaljanApp. With
         # ``max_jobs = 1`` installing this job's Settings there is what

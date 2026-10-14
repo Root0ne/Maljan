@@ -72,7 +72,7 @@ async def _probe_memory() -> dict[str, Any]:
     answered. A backend id the factory does not know is reported as not
     configured rather than as a failure; every answer names the backend.
     """
-    from maljan.core.settings_overrides import redact_url
+    from maljan.core.settings_overrides import StoredValueRefused, redact_url
     from maljan.memory.store_factory import (
         MemoryBackendNotConfiguredError,
         build_memory_store,
@@ -81,7 +81,15 @@ async def _probe_memory() -> dict[str, Any]:
 
     from app.runtime_config import runtime_config
 
-    core = await runtime_config.core()
+    try:
+        core = await runtime_config.core()
+    except StoredValueRefused:
+        # Unauthenticated: the fact, never the key or the reason.
+        return {
+            "ok": False,
+            "error": "a stored setting is refused; see the settings page",
+            "backend": None,
+        }
     backend = configured_backend(core)
     try:
         store = await asyncio.to_thread(build_memory_store, core)

@@ -132,7 +132,9 @@ def settings_from_store(
         from maljan.core.logger import logger
 
         logger.error("%s", refused)
-        raise refused from exc
+        # ``from None``: the model's error, whose text holds the refused input
+        # (a secret, possibly), never travels with this one.
+        raise refused from None
 
 
 def stored_settings(
