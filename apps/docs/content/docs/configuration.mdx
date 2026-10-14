@@ -2020,7 +2020,12 @@ identical up to the end of the head can share a cache entry. On the
 structured path, the default on the `anthropic` provider, each section sends
 its own answer schema as a tool: only the seven prose subsections, which
 answer with one schema, share a prefix. On the manual path (no tool) every
-section shares one. For each such group, the head is sent as its own text
+section shares one, and a section whose structured answer is not read is
+asked again there with its head noted for that group, whatever schema its
+structured request sent: on haiku4's composer timing every section went this
+way, and the manual path's requests read the head 14 times and wrote it twice
+instead of reading it 6 times, 0.11 USD less net of the extra write. For each
+such group, the head is sent as its own text
 block with a cache breakpoint (`llm.anthropic.prompt_cache_ttl`) and the rest
 of the prompt as a second block; joined, the two are the prompt's text
 character for character. The group's first section writes the entry and the
