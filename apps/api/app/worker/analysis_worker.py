@@ -3660,6 +3660,33 @@ async def warn_if_enrichment_is_unmanned(ctx: dict, delay: float | None = None) 
         )
 
 
+# What a running analysis keeps for the whole process rather than for its job.
+# Each is right only while one analysis runs in the process at a time, which
+# ``WorkerSettings.max_jobs = 1`` is what guarantees.
+PROCESS_WIDE_JOB_STATE = (
+    "the job's settings, installed as the process's settings (install_settings)",
+    "the configured values the event scrub masks by value "
+    "(pipeline.events.remember_secret_values, scope 'job')",
+    "the API names the job's hash resolution read (pipeline.events.remember_resolved_names)",
+)
+
+
+def concurrent_analyses_refusal(max_jobs: object) -> str | None:
+    """Why the worker refuses to start with ``max_jobs``, or ``None`` for one job at a time."""
+    try:
+        jobs = int(max_jobs)  # type: ignore[call-overload]
+    except (TypeError, ValueError):
+        return f"max_jobs is {max_jobs!r}, which is not a number of jobs; set it to 1."
+    if jobs == 1:
+        return None
+    return (
+        f"max_jobs is {jobs}; the analysis worker runs one analysis at a time, because "
+        + "; ".join(PROCESS_WIDE_JOB_STATE)
+        + " are held for the whole process, and two analyses at once would read each "
+        "other's. Set max_jobs to 1 and run more worker processes for more analyses at once."
+    )
+
+
 async def startup(ctx: dict) -> None:
     """Called when the ARQ worker starts up."""
     # Initialize logging for the worker process first: the CRITICAL bootstrap
@@ -3667,6 +3694,13 @@ async def startup(ctx: dict) -> None:
     # not the ``logging.lastResort`` stderr handler a bare logger falls back
     # to before ``setup_logging()`` attaches one.
     setup_logging()
+
+    # Refused before any job is taken: the state an analysis keeps per
+    # process is not per job yet, so a second analysis at once is never run.
+    refusal = concurrent_analyses_refusal(WorkerSettings.max_jobs)
+    if refusal is not None:
+        logger.critical(refusal, extra={"component": "worker.lifecycle"})
+        raise RuntimeError(refusal)
 
     from app.bootstrap import BootstrapProblem, require_bootstrap
 
@@ -3882,7 +3916,9 @@ class WorkerSettings:
     #
     # ``max_jobs`` is arq's CONCURRENCY limit — how many jobs run at once — not
     # a "recycle the worker after N jobs" counter. arq has no such counter;
-    # ``after_job_end`` above is what bounds process lifetime here.
+    # ``after_job_end`` above is what bounds process lifetime here. Any other
+    # value is refused at startup (``concurrent_analyses_refusal``): the state
+    # ``PROCESS_WIDE_JOB_STATE`` names is held per process, not per job.
     max_jobs = 1
     # No job timeout at arq's level: a job's limit is the operator's
     # ``core.job_timeout``, empty by default, which ``run_analysis`` reads from
