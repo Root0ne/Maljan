@@ -70,13 +70,22 @@ def _model() -> Any:
     return AnthropicProvider(settings).build_model(MODEL, 0.1, max_tokens=4096)
 
 
-def _compose(monkeypatch: pytest.MonkeyPatch, answer: Any) -> tuple[Wire, Any]:
+def _composed(
+    monkeypatch: pytest.MonkeyPatch, answer: Any, *, structured: bool = True
+) -> tuple[Wire, Any, ReportComposer]:
     wire = Wire(answer)
     install(monkeypatch, wire)
     report = _report()
     composer = ReportComposer(llm=_model(), per_section_timeout=60)
-    with patch("maljan.reporting.composer.structured_output_supported_for_llm", return_value=True):
+    with patch(
+        "maljan.reporting.composer.structured_output_supported_for_llm", return_value=structured
+    ):
         asyncio.run(composer.compose(report, _isr(), facts_block=FACTS, concurrent=True))
+    return wire, report, composer
+
+
+def _compose(monkeypatch: pytest.MonkeyPatch, answer: Any) -> tuple[Wire, Any]:
+    wire, report, _composer = _composed(monkeypatch, answer)
     return wire, report
 
 
@@ -179,7 +188,9 @@ class TestAnAnswerWithNothingInIt:
         for section, bodies in _by_section(wire).items():
             assert bodies[0].get("tools"), section
             assert not bodies[1].get("tools"), section
-        assert len([line for line in said if "holds no text" in line]) == len(COMPOSED_SECTIONS)
+        assert len([line for line in said if "holds no object to read" in line]) == len(
+            COMPOSED_SECTIONS
+        )
 
 
 def _verdict_text(body: dict[str, Any]) -> dict[str, Any]:
@@ -250,3 +261,72 @@ class TestTheMediationExtraction:
         verdict = asyncio.run(judge._extract_mediator_verdict(prompt, "All agree.", base_delay=0))
         assert verdict.resolution_summary == "Agreed."
         assert len(wire.bodies) == 1 and wire.bodies[0].get("tools")
+
+
+class TestTextWithNoObjectInIt:
+    """A preamble or a one-line refusal is no answer to read: asked again, as before."""
+
+    @staticmethod
+    def _answer(body: dict[str, Any]) -> dict[str, Any]:
+        if body.get("tools"):
+            preamble = {"type": "text", "text": "I will write the section with the tool."}
+            return message([_thinking(), preamble], stop="end_turn", usage=USAGE)
+        return _in_text(body)
+
+    def test_it_is_asked_again_without_the_tool(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        wire, report = _compose(monkeypatch, self._answer)
+        for section, bodies in _by_section(wire).items():
+            assert bodies[0].get("tools"), section
+            assert not bodies[1].get("tools"), section
+            assert len(bodies[1]["messages"]) == 1, "a fresh ask, not a correction"
+        assert report.technical_analysis is not None
+        assert report.technical_analysis.packing_obfuscation is not None
+
+
+class TestAKeptAnswerIsCountedAsAManualOne:
+    def test_the_findings_and_retries_are_the_manual_path_s(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _wire, kept_report, kept = _composed(monkeypatch, _in_text, structured=True)
+        _wire, manual_report, manual = _composed(monkeypatch, _in_text, structured=False)
+        assert kept.validation_tally.by_code
+        assert kept.validation_tally.by_code == manual.validation_tally.by_code
+        assert kept.validation_tally.retries == manual.validation_tally.retries
+        assert kept.validation_tally.unresolved == manual.validation_tally.unresolved
+        assert [row.model_dump() for row in kept_report.flagged_statements] == [
+            row.model_dump() for row in manual_report.flagged_statements
+        ]
+
+
+class TestAMediationVerdictTheSchemaRefuses:
+    def test_it_is_asked_again_and_falls_back_as_before_saying_why(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from langchain_core.prompts import ChatPromptTemplate
+
+        from maljan.agents.judge_agent import JudgeAgent
+
+        def refused(body: dict[str, Any]) -> dict[str, Any]:
+            text = json.dumps(
+                {"contradictions": [], "resolution_summary": "Agreed.", "confidence": 1.5}
+            )
+            return message(
+                [_thinking(), {"type": "text", "text": text}], stop="end_turn", usage=USAGE
+            )
+
+        wire = Wire(refused)
+        install(monkeypatch, wire)
+        judge = JudgeAgent(llm=_model())
+        monkeypatch.setattr(judge, "_supports_structured_output", lambda: True)
+        said: list[str] = []
+        monkeypatch.setattr(
+            judge.logger, "warning", lambda message, *args: said.append(message % args)
+        )
+        reasoning = "The analysts agree.\nagreement_confidence: 0.8"
+        prompt = ChatPromptTemplate.from_messages([("human", "Extract: {reasoning_log}")])
+        verdict = asyncio.run(judge._extract_mediator_verdict(prompt, reasoning, base_delay=0))
+        assert len(wire.bodies) == 3
+        assert verdict.resolution_summary == reasoning, "the reasoning-text fallback, as before"
+        failed = [line for line in said if "Structured mediator output failed" in line]
+        assert len(failed) == 3
+        assert all("does not fit the schema: confidence" in line for line in failed)

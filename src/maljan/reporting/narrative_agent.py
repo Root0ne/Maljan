@@ -924,20 +924,20 @@ class NarrativeAgent:
             if bound is not None:
                 logger.info("NarrativeAgent: output limit on this call: %d — %s.", bound, why)
             try:
-                if kept is not None and bound is None:
-                    # The retry of a kept structured answer goes as that answer
-                    # went, so its request only appends to the one answered.
-                    reply = await retry_on_connection_error(
-                        lambda: structured.ainvoke(turns), what="NarrativeAgent structured"
-                    )
-                    raw = reply.get("raw") if isinstance(reply, dict) and "raw" in reply else reply
-                else:
-                    raw = await retry_on_connection_error(
-                        (lambda: self.llm.ainvoke(turns, **output_bound_kwargs(self.llm, bound)))
-                        if bound is not None
-                        else (lambda: self.llm.ainvoke(turns)),
-                        what="NarrativeAgent raw",
-                    )
+                # The retry of a kept structured answer goes as that answer
+                # went, so its request only appends to the one answered; held
+                # under an output bound it goes by the plain model. One call is
+                # chosen, and made once.
+                as_kept = kept is not None and bound is None
+                reply = await retry_on_connection_error(
+                    (lambda: structured.ainvoke(turns))
+                    if as_kept
+                    else (lambda: self.llm.ainvoke(turns, **output_bound_kwargs(self.llm, bound)))
+                    if bound is not None
+                    else (lambda: self.llm.ainvoke(turns)),
+                    what="NarrativeAgent structured" if as_kept else "NarrativeAgent raw",
+                )
+                raw = reply.get("raw") if isinstance(reply, dict) and "raw" in reply else reply
                 # On the ledger before the reservation goes.
                 if self.token_ledger is not None:
                     try:

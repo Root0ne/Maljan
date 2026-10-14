@@ -596,16 +596,24 @@ class StructuredReply:
 
     @property
     def kept(self) -> Any:
-        """The raw answer when nothing parsed and it holds text or tool arguments, else ``None``.
+        """The raw answer when nothing parsed and it holds an object, else ``None``.
 
-        The request asked for the object in its prompt too, so that text is the
+        The request asked for the object in its prompt too, so an object the
+        answer holds — a tool call's arguments, or JSON in its text — is the
         model's answer to it, and the caller reads it rather than asking again.
+        Text that holds no object (a preamble, a one-line refusal) is no answer
+        to read: its caller asks again, as for an empty one.
         """
         from maljan.llm.answer_text import structured_answer_text
+        from maljan.utils.json_cleaner import safe_parse_json
 
         if self.parsed is not None or self.raw is None:
             return None
-        return self.raw if structured_answer_text(self.raw).strip() else None
+        text = structured_answer_text(self.raw)
+        if not text.strip():
+            return None
+        payload = safe_parse_json(text)
+        return self.raw if isinstance(payload, dict | list) and payload else None
 
 
 def read_structured_reply(
@@ -640,7 +648,7 @@ def say_structured_reply(owner: str, reply: StructuredReply) -> None:
     """Log what becomes of a structured answer that parsed to nothing: kept, or asked again.
 
     ``owner`` leads the line ("NarrativeAgent", "ReportComposer: section 'x'").
-    A kept answer is said at INFO; one with nothing in it, which its caller
+    A kept answer is said at INFO; one with no object in it, which its caller
     asks again without the schema's tool, at WARNING.
     """
     from maljan.core.logger import logger
@@ -654,8 +662,8 @@ def say_structured_reply(owner: str, reply: StructuredReply) -> None:
         )
     else:
         logger.warning(
-            "%s: the structured answer %s and holds no text; it is asked again without the "
-            "schema's tool.",
+            "%s: the structured answer %s and holds no object to read; it is asked again "
+            "without the schema's tool.",
             owner,
             reply.unread or "carries no object the schema reads",
         )

@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from maljan.agents.base_agent import (
     TOOL_LOOP_TURN_CALL,
@@ -3846,15 +3846,25 @@ class JudgeAgent(BudgetMeter):
                     from maljan.utils.json_cleaner import safe_parse_json
 
                     written = safe_parse_json(structured_answer_text(read.kept))
-                    verdict: MediatorVerdict | None = None
-                    if isinstance(written, dict):
-                        try:
-                            verdict = MediatorVerdict.model_validate(written)
-                        except Exception:  # noqa: BLE001 — not the verdict: asked again below
-                            verdict = None
-                    if verdict is not None:
-                        say_structured_reply("JudgeAgent mediation extraction", read)
-                        return verdict
+                    if not isinstance(written, dict):
+                        raise ValueError(
+                            "the verdict written in the answer is not an object "
+                            f"({type(written).__name__})"
+                        )
+                    try:
+                        verdict = MediatorVerdict.model_validate(written)
+                    except ValidationError as refused:
+                        # Not the verdict: asked again, saying why.
+                        raise ValueError(
+                            "the verdict written in the answer does not fit the schema: "
+                            + "; ".join(
+                                f"{'.'.join(str(part) for part in error['loc']) or 'verdict'}: "
+                                f"{error['msg']}"
+                                for error in refused.errors()
+                            )
+                        ) from refused
+                    say_structured_reply("JudgeAgent mediation extraction", read)
+                    return verdict
                 raise ValueError(
                     f"Structured output produced unexpected type: {type(result).__name__}"
                 )
