@@ -30,6 +30,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from maljan.schemas.stix_pattern import Comparison, canonical_pattern
+
 # The two ways an analyst writes an address it does not want a reader to open,
 # undone so the defanged spelling and the plain one fingerprint alike. Only
 # these: a substitution table that guessed would merge indicators that differ.
@@ -55,7 +57,7 @@ _WHITESPACE = re.compile(r"\s+")
 _TITLE_TAIL = ".,;:!-–— "
 
 
-def canonical_value(value: Any, *, fold_case: bool = True) -> str:
+def canonical_value(value: Any, *, fold_case: bool = True, strip: bool = True) -> str:
     """One indicator value in the spelling two copies of it share.
 
     ``fold_case`` is false where the case is part of the value. A URL path is
@@ -68,8 +70,14 @@ def canonical_value(value: Any, *, fold_case: bool = True) -> str:
     keeps its own: ``hXXp://a[.]com/Gate.php`` and ``http://a.com/Gate.php``
     are one endpoint, and the only thing the writer changed is the part that
     was never meant to be read literally.
+
+    ``strip`` is false where a space at the edge is part of the value: a mutex
+    named `` x`` is not the mutex named ``x``.
     """
-    text = _DEFANGED_RE.sub(lambda hit: _DEFANGED[hit.group(0).lower()], str(value or "").strip())
+    raw = str(value or "")
+    text = _DEFANGED_RE.sub(
+        lambda hit: _DEFANGED[hit.group(0).lower()], raw.strip() if strip else raw
+    )
     return text.lower() if fold_case else text
 
 
@@ -123,8 +131,6 @@ _PATH_LIKE = frozenset(
 # A path whose separators and case are Windows': a drive letter, or a UNC root.
 _WINDOWS_PATH_RE = re.compile(r"[A-Za-z]:[\\/]|\\\\[^\\/]")
 _RUNS_OF_SEPARATOR_RE = re.compile(r"/{2,}")
-# One literal a STIX pattern quotes.
-_QUOTED_RE = re.compile(r"'([^']*)'")
 
 
 def folds_case(kind: Any) -> bool:
@@ -132,7 +138,13 @@ def folds_case(kind: Any) -> bool:
     return str(kind or "").strip().lower() in _CASE_BLIND
 
 
-def canonical_path(value: Any) -> str:
+def is_windows_path(text: str) -> bool:
+    """Whether a path is written the Windows way: a drive, a UNC root, or backslashes alone."""
+    unc = text.startswith("\\\\") or text.startswith("//")
+    return unc or bool(_WINDOWS_PATH_RE.search(text)) or ("\\" in text and "/" not in text)
+
+
+def canonical_path(value: Any, *, strip: bool = True) -> str:
     """One path in the spelling two writers of it share.
 
     Separators written one way, runs of them collapsed, no trailing separator,
@@ -147,9 +159,9 @@ def canonical_path(value: Any) -> str:
     also what the POSIX path ``/srv/share/f`` canonicalises to — two locations
     that cannot be the same file merging into one indicator row.
     """
-    text = canonical_value(value, fold_case=False)
+    text = canonical_value(value, fold_case=False, strip=strip)
     unc = text.startswith("\\\\") or text.startswith("//")
-    windows = unc or bool(_WINDOWS_PATH_RE.search(text)) or ("\\" in text and "/" not in text)
+    windows = is_windows_path(text)
     text = text.replace("\\", "/")
     if windows:
         text = text.lower()
@@ -166,38 +178,77 @@ def indicator_fingerprint(kind: Any, value: Any) -> tuple[str, str]:
     return (name, canonical_value(value, fold_case=folds_case(name)))
 
 
-# The object path a STIX comparison expression opens with, mapped to the kind
-# ``folds_case`` knows. A pattern this cannot read keeps its case.
-_STIX_PATHS: tuple[tuple[str, str], ...] = (
-    ("file:hashes", "hash"),
-    ("file:name", "path"),
-    ("directory:path", "path"),
-    ("windows-registry-key:key", "registry"),
-    ("domain-name:value", "domain"),
-    ("ipv4-addr:value", "ipv4"),
-    ("ipv6-addr:value", "ipv6"),
-    ("email-addr:value", "email"),
-)
+# The object path a STIX comparison is made against, mapped to the kind
+# ``indicator_fingerprint`` knows. Every other path keeps its value's case. A
+# ``hashes`` property of any object is a digest (``_comparison_kind``).
+_STIX_PATH_KINDS = {
+    "url:value": "url",
+    "file:name": "path",
+    "directory:path": "path",
+    "windows-registry-key:key": "registry",
+    "domain-name:value": "domain",
+    "ipv4-addr:value": "ipv4",
+    "ipv6-addr:value": "ipv6",
+    "email-addr:value": "email",
+}
+# The kinds whose value means nothing by a space at its edge: a digest, an
+# address, a host, a mailbox, a URL. Any other value (a mutex, a file name, a
+# command line, a registry value) keeps its spaces, as the pattern wrote them.
+_EDGE_SPACE_BLIND = frozenset({"hash", "domain", "ipv4", "ipv6", "email", "url"})
+
+
+def _comparison_kind(comparison: Comparison) -> str:
+    if comparison.prop.startswith("hashes"):
+        return "hash"
+    return _STIX_PATH_KINDS.get(comparison.path, "")
+
+
+def _comparison_value(comparison: Comparison) -> str:
+    r"""One comparison's value in the spelling two copies of it share, by the kind of its path.
+
+    A ``MATCHES`` value is a regular expression and is kept exactly as written
+    (``\D`` is not ``\d``). A ``LIKE`` value has two wildcards, ``%`` and ``_``,
+    and nothing in it is defanging: its case is folded where the kind's is (a
+    host, a digest, a Windows path) and nothing else is touched.
+    """
+    literal = comparison.literal
+    kind = _comparison_kind(comparison)
+    if "matches" in comparison.operator:
+        return literal
+    if "like" in comparison.operator:
+        windows = kind in _PATH_LIKE and is_windows_path(literal)
+        return literal.lower() if folds_case(kind) or windows else literal
+    if kind in _EDGE_SPACE_BLIND:
+        return indicator_fingerprint(kind, literal)[1]
+    if kind in _PATH_LIKE:
+        return canonical_path(literal, strip=False)
+    return canonical_value(literal, fold_case=False, strip=False)
 
 
 def pattern_fingerprint(pattern_type: Any, pattern: Any) -> tuple[str, str]:
     """What makes two STIX indicators the same indicator.
 
-    The same rule the report's table uses, read off the pattern itself: a
-    pattern over a digest or a host name folds its case, a pattern over a path
-    is normalised the way a path is, and a pattern over a URL or anything this
-    cannot read keeps what it was written with. Defanging is undone either way,
-    because ``[.]`` never meant anything but ``.``.
+    The same rule the report's table uses, applied to each comparison the
+    pattern makes (``schemas.stix_pattern``): a value compared with a digest
+    or a host name folds its case, a value compared with a path is normalised
+    the way a path is, and a value compared with a URL or any other property
+    keeps the case it was written in. Defanging is undone, because ``[.]``
+    never meant anything but ``.``. The syntax around the values is folded
+    and its whitespace closed up, so ``[URL:value = …]`` and
+    ``[url:value=…]`` are one pattern.
+
+    Each value by the kind of its own path, not by the first path found
+    anywhere in the text: a URL quoting ``file:name`` or ``C:/`` is a URL, and
+    two URLs that differ in case stay two indicators. A value the reader
+    cannot read keeps its written text, and a pattern in any language other
+    than STIX is compared as written: two rows where there might be one,
+    never one where there are two.
     """
-    text = str(pattern or "")
-    lowered = text.lower()
-    kind = next((name for path, name in _STIX_PATHS if path in lowered), "")
     family = str(pattern_type or "stix").strip().lower()
-    if kind in _PATH_LIKE:
-        # Each quoted literal on its own: a trailing separator sits inside the
-        # quotes, where normalising the whole pattern string cannot reach it.
-        return (family, _QUOTED_RE.sub(lambda hit: f"'{canonical_path(hit.group(1))}'", text))
-    return (family, canonical_value(text, fold_case=folds_case(kind)))
+    text = str(pattern or "").strip()
+    if family != "stix":
+        return (family, text)
+    return (family, canonical_pattern(text, _comparison_value))
 
 
 def normalised_title(title: Any) -> str:

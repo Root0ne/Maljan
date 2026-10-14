@@ -40,7 +40,13 @@ from maljan.agents.run_evidence_corpus import CorpusState, both_searched
 from maljan.analysis.corroboration import corroboration_row as corroboration_row
 from maljan.analysis.corroboration import corroboration_sources as corroboration_sources
 from maljan.analysis.sandbox_sections import ItemIndex, cited_item_ids, is_item_id, item_ids_in
-from maljan.analysis.technique_ids import MITRE_ATTACK_SOURCES, TECHNIQUE_ID_EXACT_RE
+from maljan.analysis.technique_ids import (
+    ID_BODY,
+    TECHNIQUE_ID_EXACT_RE,
+    TECHNIQUE_WORD_RE,
+    declared_technique_id,
+    written_technique_id,
+)
 from maljan.core.declared_reading import (
     bare_name,
     consumer_kinds,
@@ -51,7 +57,6 @@ from maljan.core.declared_reading import (
 from maljan.core.logger import logger
 from maljan.core.spend import validation_retry
 from maljan.core.undeclared_tools import (
-    ADDRESS_ARGUMENTS,
     auto_name_pattern,
     declared_auto_name_pattern,
     entry_address_arguments,
@@ -2316,11 +2321,6 @@ FUNCTION_QUESTION_ASK = (
 )
 
 
-# The id inside an ``isr.ungrounded_technique`` message, which is where the
-# technique the analyst kept is written down.
-_TID_IN_MESSAGE_RE = re.compile(r"\bT\d{4}(?:\.\d{3})?\b")
-
-
 def ungrounded_technique_note(findings: Any) -> str:
     """What the judge is told about technique claims that cite nothing.
 
@@ -2340,7 +2340,7 @@ def ungrounded_technique_note(findings: Any) -> str:
         data = row if isinstance(row, dict) else getattr(row, "__dict__", {}) or {}
         if str(data.get("code") or "") != UNGROUNDED_TECHNIQUE_CODE:
             continue
-        match = _TID_IN_MESSAGE_RE.search(str(data.get("message") or ""))
+        match = TECHNIQUE_WORD_RE.search(str(data.get("message") or ""))
         if match and match.group(0) not in named:
             named.append(match.group(0))
     if not named:
@@ -4220,11 +4220,10 @@ def chunk_cut_unread_sentence(chunk: str) -> str:
 # either. The functions its ledger entries decompiled are listed to it, once.
 DECOMPILED_NOT_DESCRIBED_CODE = "isr.decompiled_not_described"
 
-# The argument names a decompile call gives its function under: an address
-# (the one its tool declares, then the shared list,
-# ``core.undeclared_tools.address_arguments``), a list of addresses (a batch),
+# The argument names a decompile call gives its function under, besides an
+# address (the one its tool declares, then the shared list,
+# ``core.undeclared_tools.address_arguments``): a list of addresses (a batch),
 # or a name.
-_ADDRESS_ARGUMENTS = ADDRESS_ARGUMENTS
 _ADDRESS_LIST_ARGUMENTS = ("functions", "addresses")
 _NAME_ARGUMENTS = ("name", "function_name", "function", "symbol")
 # A decompiler's own name for a function it was given no name for: the address
@@ -5342,7 +5341,7 @@ def recommendation_technique_violations(
         text = " ".join(
             str(row.get(key) or "") for key in ("action", "rationale", "detection", "technique_id")
         )
-        named = list(dict.fromkeys(tid.upper() for tid in _TID_IN_MESSAGE_RE.findall(text)))
+        named = list(dict.fromkeys(tid.upper() for tid in TECHNIQUE_WORD_RE.findall(text)))
         unpublished = [tid for tid in named if tid not in known]
         if not unpublished:
             continue
@@ -5796,7 +5795,7 @@ def identifier_citation_violations(
 # A technique id with a name written after it in brackets, the way a report
 # writes one: "T1027 (Obfuscated Files or Information)". The name is words; a
 # bracket holding an id, a count or a list is not a name and is not read.
-_ID_THEN_NAME_RE = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\s*\(([A-Za-z][A-Za-z0-9 ,:/&'\-]{2,80})\)")
+_ID_THEN_NAME_RE = re.compile(rf"\b({ID_BODY})\s*\(([A-Za-z][A-Za-z0-9 ,:/&'\-]{{2,80}})\)")
 
 
 def technique_name_violations(payload: Any) -> list[Violation]:
@@ -6866,10 +6865,9 @@ _CLAUSE_START_RE = re.compile(
 # A relative clause's word just before the statement: its subject is the last
 # thing the clause before it names (``_relative_word_at``).
 _RELATIVE_WORDS = ("which", "that")
-# A value a subject writes: in quotes or backticks, or an identifier of three
-# characters or more with a capital after its first letter, a digit or an
-# underscore in it (``CreateMutexW``, ``update_data``), never a plain word.
-_QUOTED_VALUE_RE = re.compile(r"`([^`\n]{2,})`|\"([^\"\n]{2,})\"|“([^”\n]{2,})”")
+# A value a subject writes as an identifier: three characters or more with a
+# capital after its first letter, a digit or an underscore in it
+# (``CreateMutexW``, ``update_data``), never a plain word.
 _IDENTIFIER_VALUE_RE = re.compile(
     r"(?<![\w.$])(?=[A-Za-z_]\w*(?:[a-z][A-Z]|\d|_))[A-Za-z_]\w{2,}(?![\w$])"
 )
@@ -8118,9 +8116,11 @@ def unconfirmed_credits(
     technique_of: dict[str, str] = {}
     for obj in objects:
         if str(getattr(obj, "type", "") or "") == "attack-pattern":
-            declared = _attack_pattern_technique_id(obj)
+            # A credit is keyed by a technique id or not at all: a malformed
+            # reference is asked about on the attack-pattern itself.
+            declared = declared_technique_id(obj)
             if declared:
-                technique_of[str(getattr(obj, "id", "") or "")] = declared.upper()
+                technique_of[str(getattr(obj, "id", "") or "")] = declared
     out: list[UnconfirmedCredit] = []
     for index, obj in enumerate(objects):
         if str(getattr(obj, "type", "") or "") != "relationship":
@@ -9347,26 +9347,18 @@ def _url_host(raw_url: str) -> str | None:
         return None
 
 
-# The ``source_name`` values that mean "this external_id is an ATT&CK id".
-# Only these are read: an attack-pattern may legitimately carry a Sigma rule id
-# or a CVE first in its reference list, and holding the judge to the ATT&CK
-# vocabulary for one of those would burn the single retry on nothing.
-_MITRE_SOURCES = MITRE_ATTACK_SOURCES
-
-
 def _attack_pattern_technique_id(obj: Any) -> str:
-    """The ATT&CK id an attack-pattern declares, from its MITRE ref or its name."""
-    for ref in getattr(obj, "external_references", None) or []:
-        if not isinstance(ref, dict):
-            continue
-        if str(ref.get("source_name") or "").strip().lower() not in _MITRE_SOURCES:
-            continue
-        external_id = ref.get("external_id")
-        if external_id:
-            return str(external_id).strip().upper()
-    name = str(getattr(obj, "name", "") or "").strip().upper()
-    first = name.split()[0].rstrip(":") if name else ""
-    return first if first.startswith("T") else ""
+    """The ATT&CK id an attack-pattern declares, from its MITRE ref or its name.
+
+    The reference's id is read as written, whatever its shape, so a malformed
+    one (``TA0005``, ``T1055.1``) is asked about as malformed. Only a
+    reference filed under an ATT&CK source counts: an attack-pattern may carry
+    a Sigma rule id or a CVE first in its list, and holding the judge to the
+    ATT&CK vocabulary for one of those would burn the single retry on nothing.
+    The name counts only when its first word is a technique id: "Timestomp"
+    and "Token Impersonation" name no technique, and are asked for one.
+    """
+    return written_technique_id(obj)
 
 
 def drop_ungrounded_indicators(
@@ -10417,14 +10409,6 @@ def validation_metrics(
     if withdrawn:
         out["retry_withdrawals"] = withdrawn
     return out
-
-
-# A technique whose sources are all artefacts of the file: what the sample can
-# do, not what it was seen doing (``support_of``).
-CAPABILITY_SUPPORT = "capability"
-# A technique no source of which is behaviour, one of them an external
-# assessment of the file or none placed in it.
-UNOBSERVED_SUPPORT = "unobserved"
 
 
 def corroboration(

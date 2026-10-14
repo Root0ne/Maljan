@@ -3966,9 +3966,8 @@ class JudgeAgent(BudgetMeter):
         # where it worked. Identifiers scraped from the raw text are real ATT&CK
         # identifiers no evidence source claimed, which is exactly what a schema
         # check cannot catch. They are recorded for audit and are not emitted.
-        import re
+        from maljan.analysis.technique_ids import TECHNIQUE_WORD_RE, is_technique_id
 
-        _VALID_TID_RE = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\b")
         tids: set[str] = set()
         # Who claimed each one, named the way the evidence summary names them.
         # A relationship this pipeline builds names the agents whose claims it
@@ -3978,12 +3977,12 @@ class JudgeAgent(BudgetMeter):
             for name, isr in isr_reports.items():
                 source = str(getattr(isr, "agent_id", "") or name)
                 for claim in isr.claims:
-                    if claim.technique_id and _VALID_TID_RE.match(claim.technique_id):
+                    if is_technique_id(claim.technique_id):
                         tids.add(claim.technique_id)
                         agents = claimed_by.setdefault(claim.technique_id, [])
                         if source not in agents:
                             agents.append(source)
-        model_only = sorted(set(_VALID_TID_RE.findall(text)) - tids)
+        model_only = sorted(set(TECHNIQUE_WORD_RE.findall(text)) - tids)
         if model_only:
             self.logger.warning(
                 "Fallback Bundle: %d technique identifier(s) appeared in the model's raw "

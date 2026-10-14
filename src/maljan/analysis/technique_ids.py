@@ -13,12 +13,22 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Mapping
-from typing import Any
+from typing import Any, TypeGuard
 
-TECHNIQUE_RE = re.compile(r"\bT\d{4}(?:\.\d{3})?\b", re.IGNORECASE)
-SIGMA_TAG_RE = re.compile(r"^attack\.(t\d{4}(?:\.\d{3})?)$", re.IGNORECASE)
+# One technique id: ``T`` and four digits, and a sub-technique's three after a
+# dot. Every reader below is built from it, and so is every other reader of the
+# id in the codebase that needs its own boundaries (a claim line, a message).
+ID_BODY = r"T\d{4}(?:\.\d{3})?"
+TECHNIQUE_RE = re.compile(rf"\b{ID_BODY}\b", re.IGNORECASE)
+# The same id as a word, in the case the platform writes it: the reader of a
+# message or a cell the platform itself filled, where a lower-case ``t1055`` is
+# not how an id was written.
+TECHNIQUE_WORD_RE = re.compile(rf"\b{ID_BODY}\b")
+# Anchored with ``\A`` and ``\Z``, not ``^`` and ``$``: ``$`` also matches before
+# a final newline, so ``"T1055\n"`` read as one id under ``re.match``.
+SIGMA_TAG_RE = re.compile(rf"\Aattack\.({ID_BODY})\Z", re.IGNORECASE)
 # A whole string that is one id, for a field an agent wrote as the id itself.
-TECHNIQUE_ID_EXACT_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
+TECHNIQUE_ID_EXACT_RE = re.compile(rf"\A{ID_BODY}\Z")
 
 # The ``source_name`` values an external reference to an ATT&CK technique is
 # filed under. A reference under any other source — CAPEC, a vendor's own
@@ -41,22 +51,91 @@ def says_no_technique(value: Any) -> bool:
     return str(value or "").strip().upper() in NO_TECHNIQUE_WORDS
 
 
-def attack_reference_id(obj: Any) -> str:
-    """The technique id an object's MITRE ATT&CK reference names, or ``""``.
+def is_technique_id(value: Any) -> TypeGuard[str]:
+    """Whether ``value`` is one technique id and nothing else (``T1055``, ``T1055.012``).
 
-    Only a reference filed under an ATT&CK source counts; the first one found
-    answers. Works on a dict or on a model.
+    Exact and case-sensitive: a caller that accepts ``t1055`` upper-cases it
+    first, and one that accepts surrounding space strips it first.
     """
+    return isinstance(value, str) and TECHNIQUE_ID_EXACT_RE.match(value) is not None
+
+
+def _attack_reference_ids(obj: Any) -> list[str]:
+    """Every ``external_id`` an object files under an ATT&CK source, upper-cased, in order."""
     refs = obj.get("external_references") if isinstance(obj, dict) else None
     if refs is None and not isinstance(obj, dict):
         refs = getattr(obj, "external_references", None)
+    found: list[str] = []
     for ref in refs or []:
         read = ref.get if isinstance(ref, dict) else lambda key, r=ref: getattr(r, key, "")
         source = str(read("source_name") or "").strip().lower()
         external = str(read("external_id") or "").strip()
         if source in MITRE_ATTACK_SOURCES and external:
-            return external.upper()
-    return ""
+            found.append(external.upper())
+    return found
+
+
+def declared_reference_id(obj: Any) -> str:
+    """The ``external_id`` of an object's first ATT&CK reference, as written, or ``""``.
+
+    Whatever its shape: the reader for a check that has to say an id is
+    malformed (``TA0005`` is a tactic, ``T1055.1`` is no id), where
+    :func:`attack_reference_id` would answer that the object names nothing.
+    """
+    found = _attack_reference_ids(obj)
+    return found[0] if found else ""
+
+
+def attack_reference_id(obj: Any) -> str:
+    """The technique id an object's MITRE ATT&CK reference names, or ``""``.
+
+    Only a reference filed under an ATT&CK source counts, and only an id
+    shaped like a technique: an ATT&CK reference also files a tactic
+    (``TA0005``), a software entry (``S0154``) or a group (``G0016``), and none
+    of those is a technique. The first technique id found answers. Works on a
+    dict or on a model.
+    """
+    return next((tid for tid in _attack_reference_ids(obj) if is_technique_id(tid)), "")
+
+
+# A name that opens with one id, bracketed or not, and then ends or goes on
+# with anything but a word character or a dot and a digit: "T1055 Process
+# Injection", "T1055: …", "T1055-Process Injection", "[T1055] …". "T1055.0123"
+# and "T1055_x" open with no id.
+_NAME_OPENS_WITH_ID_RE = re.compile(rf"[\[(]?({ID_BODY})(?!\w|\.\d)")
+
+
+def name_technique_id(obj: Any) -> str:
+    """The technique id an object's name opens with (``T1055 Process Injection``), or ``""``.
+
+    Upper-cased, and only a whole id at the very start (``_NAME_OPENS_WITH_ID_RE``):
+    a name that merely begins with a ``T`` (``Timestomp``,
+    ``Token Impersonation``) names a behaviour, not a technique.
+    """
+    name = obj.get("name") if isinstance(obj, dict) else getattr(obj, "name", "")
+    opening = _NAME_OPENS_WITH_ID_RE.match(str(name or "").strip().upper())
+    return opening.group(1) if opening else ""
+
+
+def declared_technique_id(obj: Any) -> str:
+    """The technique an attack-pattern declares: its ATT&CK reference, else its name's id.
+
+    A technique id or ``""``, for a reader that keys something by the
+    technique (a credit, a remap).
+    """
+    return attack_reference_id(obj) or name_technique_id(obj)
+
+
+def written_technique_id(obj: Any) -> str:
+    """The id an attack-pattern writes: its ATT&CK reference as written, else its name's id.
+
+    For a reader that shows or checks what was declared and marks a malformed
+    id rather than hiding it (the validator's question, the capability matrix's
+    invalid row): a ``TA0005`` reference comes back as ``TA0005``. A name
+    counts only when it opens with a technique id, so "Token Impersonation"
+    writes none.
+    """
+    return declared_reference_id(obj) or name_technique_id(obj)
 
 
 def technique_ids_in(value: Any) -> list[str]:

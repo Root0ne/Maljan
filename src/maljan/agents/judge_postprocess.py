@@ -34,12 +34,11 @@ drop is recorded in the run summary rather than happening quietly.
 
 from __future__ import annotations
 
-import re
 import uuid
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-from maljan.analysis.technique_ids import attack_reference_id
+from maljan.analysis.technique_ids import attack_reference_id, is_technique_id
 from maljan.core.logger import logger
 from maljan.core.truncation_ledger import EXPORT_PASS, JUDGE_PASS
 from maljan.reporting.dedupe import pattern_fingerprint
@@ -392,7 +391,6 @@ def postprocess_judge_bundle(
         _rewrite_references(objects, id_remap)
 
     # ── back-fill external_references on AttackPatterns ────────────
-    _VALID_TID_RE_LOCAL = re.compile(r"^T\d{4}(?:\.\d{3})?$")
     _CURATED_PLACEHOLDERS = frozenset({"T0000", "T0000.000", "T9999", "T1234"})
     for obj in objects:
         if not isinstance(obj, dict) or obj.get("type") != "attack-pattern":
@@ -405,7 +403,7 @@ def postprocess_judge_bundle(
         # with a placeholder or non-MITRE-shaped value. Without this guard,
         # ``attack-pattern--<uuid>(name=T0000)`` would gain a synthesized
         # MITRE reference that links to a non-existent technique page.
-        if not tid or tid in _CURATED_PLACEHOLDERS or not _VALID_TID_RE_LOCAL.match(tid):
+        if not tid or tid in _CURATED_PLACEHOLDERS or not is_technique_id(tid):
             continue
         name = _technique_display_name(tid) or obj.get("name") or tid
         url = f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}/"
@@ -454,9 +452,7 @@ def _mint_id(obj: dict[str, Any], old_id: str) -> str:
     stix_type = obj.get("type") or _parse_type(old_id) or "indicator"
     if stix_type == "attack-pattern":
         suffix = _parse_type_suffix(old_id) or ""
-        tid = _attack_pattern_technique_id(obj) or (
-            suffix if re.match(r"^T\d{4}(?:\.\d{3})?$", suffix) else None
-        )
+        tid = _attack_pattern_technique_id(obj) or (suffix if is_technique_id(suffix) else None)
         if tid:
             from maljan.schemas.stix_models import attack_pattern_id
 
@@ -485,13 +481,13 @@ def _attack_pattern_technique_id(obj: dict[str, Any]) -> str | None:
     3. ``x_maljan_technique_id`` (Maljan custom field).
     """
     declared = attack_reference_id(obj)
-    if re.match(r"^T\d{4}(?:\.\d{3})?$", declared):
+    if is_technique_id(declared):
         return declared
     name = obj.get("name", "")
-    if isinstance(name, str) and re.match(r"^T\d{4}(?:\.\d{3})?$", name.strip()):
+    if isinstance(name, str) and is_technique_id(name.strip()):
         return name.strip()
     custom = obj.get("x_maljan_technique_id")
-    if isinstance(custom, str) and re.match(r"^T\d{4}(?:\.\d{3})?$", custom.strip()):
+    if isinstance(custom, str) and is_technique_id(custom.strip()):
         return custom.strip()
     return None
 
@@ -538,10 +534,10 @@ def _oset(o: Any, key: str, value: Any) -> None:
 def _technique_id_poly(o: Any) -> str | None:
     """Technique ID from an attack-pattern (dict or pydantic), via refs or name."""
     declared = attack_reference_id(o)
-    if re.match(r"^T\d{4}(?:\.\d{3})?$", declared):
+    if is_technique_id(declared):
         return declared
     name = _oget(o, "name", "") or ""
-    if isinstance(name, str) and re.match(r"^T\d{4}(?:\.\d{3})?$", name.strip()):
+    if isinstance(name, str) and is_technique_id(name.strip()):
         return name.strip()
     return None
 

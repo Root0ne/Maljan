@@ -57,6 +57,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from maljan.analysis.technique_ids import SIGMA_TAG_RE, is_technique_id
 from maljan.core.report_shapes import (
     DNS_TYPE_KEYS,
     host_names,
@@ -198,11 +199,6 @@ def _tokens(name: str) -> tuple[str, ...]:
     return tuple(part for part in spaced.lower().split("_") if part)
 
 
-# A technique id as ATT&CK writes it, and a Sigma tag naming one.
-_TECHNIQUE_VALUE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
-_SIGMA_TAG_VALUE = re.compile(r"^attack\.t\d{4}(?:\.\d{3})?$", re.IGNORECASE)
-
-
 # ---------------------------------------------------------------------------
 # A schema or an answer, as one shape
 # ---------------------------------------------------------------------------
@@ -325,9 +321,10 @@ def shape_of_value(value: Any) -> _Shape:
             shape.type = "string"
             text = node.strip()
             if len(text) <= 32:
-                if _TECHNIQUE_VALUE.match(text):
+                # A technique id as ATT&CK writes it, and a Sigma tag naming one.
+                if is_technique_id(text):
                     shape.value_hint = "attck"
-                elif _SIGMA_TAG_VALUE.match(text):
+                elif SIGMA_TAG_RE.match(text):
                     shape.value_hint = "sigma_tag"
         elif isinstance(node, bool):
             shape.type = "boolean"

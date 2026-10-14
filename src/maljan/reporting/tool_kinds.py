@@ -23,18 +23,15 @@ section builders' are ``BUILDER_OF_KIND``.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable, Mapping
 from functools import cache
 from typing import Any
 
+from maljan.analysis.technique_ids import TECHNIQUE_WORD_RE
 from maljan.core import declared_reading
 from maljan.core.builtin_declarations import BUILDER_OF_KIND, CONSUMER_KINDS
 from maljan.core.tool_declarations import SourceRef, ToolDeclarations, ToolFacts, renamed_tool
 from maljan.reporting import legacy_tool_names as legacy
-
-# A technique id as an ATT&CK label carries it, written as ATT&CK writes it.
-_TECHNIQUE_ID = re.compile(r"\bT\d{4}(?:\.\d{3})?\b")
 
 
 def tool_of(entry: Any) -> str:
@@ -145,7 +142,7 @@ def row_technique_ids(row: Mapping[str, Any], facts: ToolFacts) -> list[str]:
                 out.extend(sigma_technique_ids({"tags": items}))
                 continue
             for item in items:
-                match = _TECHNIQUE_ID.search(str(item or ""))
+                match = TECHNIQUE_WORD_RE.search(str(item or ""))
                 if match:
                     out.append(match.group(0))
     return out

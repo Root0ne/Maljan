@@ -39,7 +39,7 @@ from maljan.agents._indicator_denylists import (
     whole_value_in,
 )
 from maljan.analysis.corroboration import support_sentence
-from maljan.analysis.technique_ids import attack_reference_id
+from maljan.analysis.technique_ids import written_technique_id
 from maljan.core.logger import logger
 from maljan.core.tool_declarations import select
 from maljan.extractors.network_extractor import (
@@ -1531,13 +1531,13 @@ def _published_ids(report: MalwareReport) -> dict[str, str]:
 
 
 def _declared_technique(obj: Any) -> str:
-    """The ATT&CK id an attack-pattern declares, from its reference or its name."""
-    declared = attack_reference_id(obj)
-    if declared:
-        return declared
-    name = str(getattr(obj, "name", "") or "").strip().upper()
-    first = name.split()[0].rstrip(":") if name else ""
-    return first if first.startswith("T") else ""
+    """The ATT&CK id an attack-pattern declares, from its reference or its name.
+
+    The reference as written, else an id the name opens with: a name that
+    merely begins with a ``T`` ("Token Impersonation") is no id, and an
+    attack-pattern the export does not carry is then named by its name.
+    """
+    return written_technique_id(obj)
 
 
 def _technique_remap(report: MalwareReport, base_bundle: Bundle) -> dict[str, str]:

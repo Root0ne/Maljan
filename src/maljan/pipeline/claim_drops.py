@@ -32,9 +32,10 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
+from maljan.analysis.technique_ids import TECHNIQUE_WORD_RE, is_technique_id
+
 _HEX = re.compile(r"(?<![0-9A-Za-z_])0x([0-9a-fA-F]+)(?![0-9A-Za-z_])")
 _DECIMAL = re.compile(r"(?<![\w.%-])(\d+)(?![\w%]|\.\d)")
-_TECHNIQUE = re.compile(r"\bT\d{4}(?:\.\d{3})?\b")
 _QUOTED = re.compile(r"`([^`\s]{2,})`|\"([^\"\s]{2,})\"")
 # A decompiler's own name for a function or a label: a fixed prefix and the
 # address in hex.
@@ -71,7 +72,7 @@ _LIST_NUMBER = re.compile(r"(?m)^\s*\(?\d+[.)](?=\s)")
 def _without_hex_and_ids(text: str) -> str:
     text = _HEX.sub(" ", text)
     text = _DECOMPILER_NAME.sub(" ", text)
-    text = _TECHNIQUE.sub(" ", text)
+    text = TECHNIQUE_WORD_RE.sub(" ", text)
     return re.sub(r"\bev_\d+\b", " ", text)
 
 
@@ -85,8 +86,8 @@ def claim_values(text: str, technique_id: str | None = "") -> frozenset[str]:
     """The values a claim states: numbers (hex as ``0x…``), technique ids, quoted values."""
     plain = _refanged(text)
     values: set[str] = {f"0x{int(m.group(1), 16):x}" for m in _HEX.finditer(plain)}
-    values.update(_TECHNIQUE.findall(plain))
-    if technique_id and _TECHNIQUE.fullmatch(str(technique_id).strip()):
+    values.update(TECHNIQUE_WORD_RE.findall(plain))
+    if technique_id and is_technique_id(str(technique_id).strip()):
         values.add(str(technique_id).strip())
     for match in _QUOTED.finditer(plain):
         quoted = (match.group(1) or match.group(2) or "").strip().casefold()
@@ -112,13 +113,13 @@ def _searched(text: str) -> _Searched:
     return _Searched(
         numbers=numbers | names,
         names=names,
-        techniques=set(_TECHNIQUE.findall(plain)),
+        techniques=set(TECHNIQUE_WORD_RE.findall(plain)),
         folded=plain.casefold(),
     )
 
 
 def _is_stated(value: str, searched: _Searched) -> bool:
-    if _TECHNIQUE.fullmatch(value):
+    if is_technique_id(value):
         return value in searched.techniques
     number: int | None = None
     if re.fullmatch(r"0x[0-9a-f]+", value):

@@ -21,10 +21,10 @@ after this deterministic phase.
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING, Any
 
 from maljan.analysis.run_summary import NOT_APPLICABLE
+from maljan.analysis.technique_ids import TECHNIQUE_WORD_RE
 from maljan.core.logger import logger
 from maljan.core.reputation import reputation_of
 from maljan.extractors.attribution import build_family_attribution
@@ -1140,13 +1140,10 @@ def _domain_context(d: Any) -> str:
     return "; ".join(notes)
 
 
-_TECHNIQUE_RE = re.compile(r"\bT\d{4}(?:\.\d{3})?\b")
-
-
 def _first_report_technique(text: str, valid_tids: set[str]) -> str | None:
     """Return the first T#### in ``text`` that is mapped in the report, else the
     first T#### found, else ``None``."""
-    found: list[str] = _TECHNIQUE_RE.findall(text or "")
+    found: list[str] = TECHNIQUE_WORD_RE.findall(text or "")
     if not found:
         return None
     for tid in found:

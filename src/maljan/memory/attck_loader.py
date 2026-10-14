@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from maljan.analysis.technique_ids import TECHNIQUE_ID_EXACT_RE
 from maljan.core.logger import logger
 
 # Official, maintained MITRE ATT&CK STIX 2.1 source. The version-less
@@ -90,9 +91,9 @@ def mitre_platforms(sample_platform: str | None) -> tuple[str, ...]:
     return MITRE_PLATFORM_MAP.get((sample_platform or "").strip().lower(), ())
 
 
-# Regexes for ATT&CK IDs
-TECHNIQUE_ID_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
-TACTIC_ID_RE = re.compile(r"^TA\d{4}$")
+# Regexes for ATT&CK IDs: the whole string, so an id with a newline after it is no id.
+TECHNIQUE_ID_RE = TECHNIQUE_ID_EXACT_RE
+TACTIC_ID_RE = re.compile(r"\ATA\d{4}\Z")
 
 
 def _default_max_age_days() -> int:
