@@ -151,6 +151,31 @@ class TestALineTheLedgerStates:
         assert told, "the counts are still stated to the analysts"
         assert ledger_stated([line], {}, [SCAN], AGENTS, told) == []
 
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "[analysts: ALPHA, BETA] ALPHA says 31 rules were loaded, BETA says 3 rules matched "
+            "as malicious [ev_0007]. [blocking: the reading]",
+            "[analysts: ALPHA, BETA] ALPHA reads 0 hits of 31 rules, BETA says one of the rules "
+            "is malicious [ev_0007]. [blocking: the reading]",
+            "[analysts: ALPHA, BETA] ALPHA reads 0 matches while BETA says two of the three "
+            "rules fired [ev_0007]. [blocking: the reading]",
+        ],
+    )
+    def test_two_quantities_or_a_partitive_are_no_count_dispute(self, line: str) -> None:
+        told = ledger_count_facts([line, LINE], {}, [SCAN], AGENTS)
+        assert ledger_stated([line], {}, [SCAN], AGENTS, told) == []
+
+    def test_a_dispute_written_like_the_baseline_s_is_stated(self) -> None:
+        line = (
+            "[analysts: ALPHA] Claim 7 reports three rule matches in this run (one @0x10, "
+            "another @0x20), while BETA claim 23 and ledger ev_0007 report 0 hits of 31 rules. "
+            "[blocking: the match count conflicts]"
+        )
+        told = ledger_count_facts([line], {}, [SCAN], AGENTS)
+        [(stated, _facts)] = ledger_stated([line], {}, [SCAN], AGENTS, told)
+        assert stated == line
+
     def test_scanners_that_disagree_are_not_stated(self) -> None:
         ledger = [SCANNER_A, SCANNER_B]
         told = ledger_count_facts([SCANNERS], {}, ledger, AGENTS)
@@ -272,9 +297,18 @@ class TestARoundOfWordingOnly:
         after = _isr(_claim("With the key 'k7q2', the routine 0x1400 decodes the 57 blobs"))
         assert unchanged_in_substance(before, after)
 
+    def test_a_tense_of_be_have_or_do_is_wording(self) -> None:
+        assert unchanged_in_substance(
+            _isr(_claim("The sample is packed")), _isr(_claim("The sample was packed"))
+        )
+        assert unchanged_in_substance(
+            _isr(_claim("The loader has a decoder")), _isr(_claim("The loader had a decoder"))
+        )
+
     @pytest.mark.parametrize(
         ("before", "after"),
         [
+            ("The sample uses RC4 and XOR", "The sample uses RC4 or XOR"),
             ("The sample decrypts three strings", "The sample decrypts four strings"),
             ("Connects on port eighty", "Connects on port four hundred"),
             ("The sample injects into explorer", "The sample injects into svchost"),
@@ -700,6 +734,34 @@ class TestAStateChangeMakesAnEarlierRoundsAnswerStale:
             run_state_source={"evidence_ledger": [entry.model_dump(mode="json")]},
         )
         assert repeatable_earlier_entries(agent) == []
+
+    @pytest.mark.parametrize(
+        ("output", "seeded"),
+        [
+            ('{"matches": [], "status": "ok"}', True),
+            ('{"matches": []}', True),
+            ('{"callers": [], "status": "success", "total": 0}', True),
+            ('{"matches": [], "reason": "no rule matched"}', False),
+            ('{"status": "pending"}', False),
+            ('{"status": "running", "result": null}', False),
+        ],
+    )
+    def test_an_empty_answer_is_seeded_only_when_settled(self, output: str, seeded: bool) -> None:
+        entry = build_entry(
+            entry_id="ev_0002",
+            seq=2,
+            agent="beta",
+            tool="lookup_family",
+            args={"name": "x"},
+            server="dis",
+            output=output,
+        )
+        agent = SimpleNamespace(
+            name="beta",
+            tools=[_tool("lookup_family", server_read_only=True, server="dis")],
+            run_state_source={"evidence_ledger": [entry.model_dump(mode="json")]},
+        )
+        assert bool(repeatable_earlier_entries(agent)) is seeded
 
     def test_an_answer_with_data_and_a_status_is_seeded(self) -> None:
         entry = build_entry(

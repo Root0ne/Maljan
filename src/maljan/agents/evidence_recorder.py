@@ -785,21 +785,28 @@ class RepeatGuard:
         self._first.setdefault(key, entry_id)
 
 
-# What a structured answer explains an absence with: a field of one of these
-# names beside data fields that are all empty ("families": [], "reason":
-# "backend unavailable") is an answer that holds nothing yet.
+# A structured answer's fields that explain an outcome: a reason, an error or
+# a message makes the answer one not to hand back later (the backend may have
+# been unavailable then); a status is settled only with a word of completion.
 _EXPLANATION_KEY_RE = re.compile(
-    r"(?:^|_)(?:reason|error|errors|message|detail|warning|status)$", re.I
+    r"(?:^|_)(?:reason|error|errors|message|detail|details|warning)$", re.IGNORECASE
+)
+_STATUS_KEY_RE = re.compile(r"(?:^|_)status$", re.IGNORECASE)
+_SETTLED_STATUS = frozenset(
+    {"ok", "success", "succeeded", "complete", "completed", "done", "finished"}
 )
 
 
 def holds_a_settled_answer(entry: Any) -> bool:
-    """Whether an entry's answer may be handed back for an identical call later: never a failure.
+    """Whether an entry's answer may be handed back for an identical call later: a settled one.
 
     Not for a call that failed (``ok`` false), an answer that only says the
     call failed (``undeclared_tools.prose_error``), or a structured answer
-    whose data fields are all empty beside an explanation of why: a backend
-    that was unavailable then may answer now. Anything in doubt is not.
+    that carries a reason, an error or a message, or a status that is not a
+    word of completion ("pending", "running"): what it answered then may not
+    be what it answers now. An empty answer is settled when nothing explains
+    it ("matches": [] alone, or beside a status "ok"). Anything in doubt is
+    not.
     """
     from maljan.core.undeclared_tools import prose_error
 
@@ -809,13 +816,12 @@ def holds_a_settled_answer(entry: Any) -> bool:
         return False
     structured = getattr(entry, "structured", None)
     if isinstance(structured, Mapping):
-        containers = [v for v in structured.values() if isinstance(v, list | dict)]
-        explained = any(
-            _EXPLANATION_KEY_RE.search(str(k)) and isinstance(v, str) and v.strip()
-            for k, v in structured.items()
-        )
-        if explained and containers and not any(containers):
-            return False
+        for key, value in structured.items():
+            if _EXPLANATION_KEY_RE.search(str(key)) and value:
+                return False
+            if _STATUS_KEY_RE.search(str(key)) and value is not None:
+                if not isinstance(value, str) or value.strip().lower() not in _SETTLED_STATUS:
+                    return False
     return True
 
 
