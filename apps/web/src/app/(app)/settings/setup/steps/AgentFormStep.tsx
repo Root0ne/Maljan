@@ -223,6 +223,7 @@ export default function AgentFormStep({
         entryKey={DEFINITIONS_KEY}
         sections={[section]}
         capabilityServers={entry?.capability_servers ?? {}}
+        dataSourceChoices={entry?.data_source_choices ?? []}
       />
     </div>
   );

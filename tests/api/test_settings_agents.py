@@ -23,6 +23,8 @@ from app.services.agent_map import (  # noqa: E402
 from maljan.core.config import (
     BUILTIN_AGENTS,
     BUILTIN_PROFILES,
+    DATA_SOURCES,
+    AgentDefinition,
     Settings,
     seeded_generic_agents,
 )
@@ -288,6 +290,19 @@ def test_a_server_binding_offers_the_effective_definition_keys():
         "static",
         "strings",
     ]
+
+
+def test_the_agent_definitions_serve_the_data_source_vocabulary():
+    from app.services.settings_catalog_api import resolved_catalog
+
+    entries = {e.key: e for e in resolved_catalog([])}
+    assert entries["core.agents.definitions"].data_source_choices == list(DATA_SOURCES)
+    # Each served source is one the settings model accepts on a definition.
+    definition = AgentDefinition(role="generic", prompt="p", data_sources=list(DATA_SOURCES))
+    assert definition.data_sources == list(DATA_SOURCES)
+    # Served on its own editor's entry only.
+    assert entries["core.mcp.servers"].data_source_choices is None
+    assert entries["core.agents.definitions"].agent_keys is None
 
 
 def _settings_from_changes(changes: dict, stored: dict) -> Settings:

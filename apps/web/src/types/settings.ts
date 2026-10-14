@@ -89,6 +89,16 @@ export interface CatalogEntry {
    *  them. Absent from an API older than the field: a capability row is then
    *  drawn without the servers it reaches. */
   capability_servers?: Record<string, readonly string[]> | null;
+  /** For the agent definitions: the input slices a definition may name in
+   *  its `data_sources`, as the settings model accepts them. Absent from an
+   *  API older than the field: only the stored slices are then drawn. */
+  data_source_choices?: string[] | null;
+  /** For the tool-server map: the agent keys a server may be bound to, the
+   *  effective definition map's keys. */
+  agent_keys?: string[] | null;
+  /** For the tool-server map: the seeded definition keys, known whatever a
+   *  save does to the stored map. */
+  builtin_agent_keys?: string[] | null;
 }
 
 /** What a provider declares about itself, served on its selector's entry.
@@ -261,6 +271,10 @@ export interface AgentDefinitionEntry {
    *  on when the tool's kind places none (`AgentDefinition.tab`); `null`
    *  places nothing. Optional because an API older than the field sends none. */
   tab?: string | null;
+  /** Which slices of the job this agent is handed as its input text
+   *  (`AgentDefinition.data_sources`); empty or absent is the role's own
+   *  default. Optional because an API older than the field sends none. */
+  data_sources?: string[];
 }
 
 /** How hard one debate stage argues before it hands over, mirroring
