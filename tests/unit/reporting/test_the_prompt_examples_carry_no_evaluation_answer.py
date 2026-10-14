@@ -1760,7 +1760,7 @@ PROMPTS: dict[str, str] = {
         [
             EARLIER_CHUNKS_COMPACT_HEAD,
             EARLIER_CALLS_NOT_LISTED.format(count=7, first="ev_0001", last="ev_0007"),
-            "- decompile_function \u2192 ev_0001\u2013ev_0006 (failed: ev_0007)",
+            '- decompile_function("0x3c7c") \u2192 ev_0001\u2013ev_0003, ev_0006 (failed)',
         ]
     ),
     "an analyst input split at the shipped size with no window learned": " ".join(

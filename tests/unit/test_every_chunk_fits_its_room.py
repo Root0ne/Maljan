@@ -31,6 +31,7 @@ from maljan.agents.base_agent import (
     EARLIER_CHUNKS_COMPACT_HEAD,
     BaseAnalyst,
     earlier_chunks_block,
+    earlier_chunks_compact,
     fitted_chunk,
 )
 from maljan.core.config import ChunkingConfig
@@ -92,7 +93,7 @@ def _text(rng: random.Random, size: int) -> str:
 class TestABinNeverPassesItsSize:
     @pytest.mark.parametrize("overlap_tokens", [0, 200, 501, 2_000])
     def test_flows_at_a_small_room(self, overlap_tokens: int) -> None:
-        text = "".join(f"Flow {i}:\n" + "x" * (i % 1_990) + "\n" for i in range(150))
+        text = "".join(f"Flow {i}:\n" + "x" * (i % 1_990) + "\n" for i in range(200))
         chunks = BinaryChunker(ChunkingConfig(overlap_tokens=overlap_tokens)).chunk(
             "network", text, room=_room(2_000)
         )
@@ -151,11 +152,14 @@ class TestTheHeaderIsKeptOutOfTheRoom:
         assert 80 + 4 + len(block) + len(sent) <= 25_832
 
     def test_the_compact_list_where_the_full_one_would_cost_a_loop(self) -> None:
-        entries = _entries(400)
+        # The full list takes a third loop over this chunk; with its
+        # arguments kept and its results left out it does not.
+        entries = _entries(200)
         agent = SimpleNamespace(_input_room_chars=lambda _text: 25_832)
         block, sent, _rest = fitted_chunk(agent, "h" * 80, "c" * 25_745, entries)
         assert block.startswith(EARLIER_CHUNKS_COMPACT_HEAD)
-        assert _entry_ids_in(block) >= {f"ev_{i:04d}" for i in range(400)}
+        assert _entry_ids_in(block) >= {f"ev_{i:04d}" for i in range(200)}
+        assert all(f'"0x{4096 + i:x}"' in block for i in range(200))
         assert 80 + 4 + len(block) + len(sent) <= 25_832
 
     def test_never_nothing_while_earlier_calls_exist(self) -> None:
@@ -172,6 +176,15 @@ class TestTheHeaderIsKeptOutOfTheRoom:
         entries = _entries(5)
         block, sent, rest = fitted_chunk(SimpleNamespace(), "h", "c" * 90_000, entries)
         assert (block, sent, rest) == (earlier_chunks_block(entries), "c" * 90_000, "")
+
+
+def _names_every_call(prompt: str, made: int) -> bool:
+    """Whether ``prompt`` lists every one of ``made`` earlier calls, or counts them by span."""
+    if _entry_ids_in(prompt) >= {f"ev_{i:04d}" for i in range(made)}:
+        return True
+    return (
+        f"made {made} tool call(s), held in ledger entries ev_0000 to ev_{made - 1:04d}" in prompt
+    )
 
 
 def _entry_ids_in(text: str) -> set[str]:
@@ -247,7 +260,7 @@ def test_every_later_chunk_reads_every_earlier_call_at_the_64k_reverser_room(dom
         assert len(prompt) <= room
         made = 12 * number
         if made:
-            assert _entry_ids_in(prompt) >= {f"ev_{i:04d}" for i in range(made)}
+            assert _names_every_call(prompt, made)
         header, content = prompt.split("\n\n", 1)[0], prompt.rsplit("\n\n", 1)[-1]
         # The header states the token estimate of what it is in front of.
         assert f"~{len(content) // 4} tokens]" in header or number == 0
@@ -376,9 +389,7 @@ def test_many_calls_a_loop_never_starve_a_loop_of_its_content(calls: int) -> Non
     assert len(agent.prompts) <= len(chunks) + 2
     assert min(len(c) for c in contents[:-1]) > room // 2
     for number, prompt in enumerate(agent.prompts[1:], start=1):
-        assert _entry_ids_in(prompt) >= {f"ev_{i:04d}" for i in range(calls * number)} or (
-            "held in ledger entries ev_0000 to" in prompt
-        )
+        assert _names_every_call(prompt, calls * number)
 
 
 def test_a_carried_rest_never_holds_the_overlap_twice() -> None:
@@ -420,3 +431,60 @@ def test_whole_sources_without_line_breaks_stay_within_the_room(sources: int, ro
         header = prompt.split("\n\n", 1)[0]
         assert "(more may follow)" in header
         assert f"~{len(prompt.rsplit(chr(10) * 2, 1)[-1]) // 4} tokens]" in header
+
+
+class TestTheCompactListKeepsEveryCallsArguments:
+    def test_each_call_with_its_arguments_and_entry_without_its_result(self) -> None:
+        entries = [
+            SimpleNamespace(
+                tool="decompile_function",
+                id="ev_0001",
+                args={"address": "0x10"},
+                output="int f(void)",
+                ok=True,
+            ),
+            SimpleNamespace(
+                tool="decompile_function",
+                id="ev_0002",
+                args={"address": "0x20"},
+                output="int g(void)",
+                ok=True,
+            ),
+            SimpleNamespace(tool="list_strings", id="ev_0003", args={}, output="a b", ok=True),
+            SimpleNamespace(tool="list_strings", id="ev_0004", args={}, output="a b", ok=True),
+            SimpleNamespace(
+                tool="decompile_function",
+                id="ev_0005",
+                args={"address": "0x10"},
+                output="int f(void)",
+                ok=False,
+            ),
+        ]
+        block = earlier_chunks_compact(entries)
+        assert block.splitlines()[1:] == [
+            '- decompile_function("0x10") \u2192 ev_0001',
+            '- decompile_function("0x20") \u2192 ev_0002',
+            "- list_strings() \u2192 ev_0003\u2013ev_0004",
+            '- decompile_function("0x10") \u2192 ev_0005 (failed)',
+        ]
+        assert "int f" not in block
+
+    def test_names_are_given_where_the_tool_s_calls_name_different_arguments(self) -> None:
+        entries = [
+            SimpleNamespace(tool="t", id="ev_0001", args={"a": 1}, output="x", ok=True),
+            SimpleNamespace(tool="t", id="ev_0002", args={"b": 1}, output="x", ok=True),
+        ]
+        assert earlier_chunks_compact(entries).splitlines()[1:] == [
+            "- t(a=1) \u2192 ev_0001",
+            "- t(b=1) \u2192 ev_0002",
+        ]
+
+    def test_an_argument_no_list_could_hold_is_named_by_its_entry_never_cut(self) -> None:
+        blob = "A" * 5_000
+        entries = [
+            SimpleNamespace(tool="t", id="ev_0009", args={"data": blob}, output="x", ok=True)
+        ]
+        assert earlier_chunks_compact(entries, 4_000).splitlines()[1] == (
+            "- t(args in ev_0009) \u2192 ev_0009"
+        )
+        assert blob in earlier_chunks_compact(entries, 6_000)

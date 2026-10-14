@@ -3373,12 +3373,13 @@ EARLIER_CHUNKS_HEAD = (
 # whose room the full list would cost a loop: every call, its tool and the
 # ledger entry that holds its result, nothing left out.
 EARLIER_CHUNKS_COMPACT_HEAD = (
-    "Earlier chunks of this same input were already analysed. These are the tools "
-    "called there, each with the ledger entries that hold its results (a range "
-    "ev_0012\u2013ev_0015 is every entry from the first to the last); the room in this "
-    "prompt does not hold their arguments or what they returned. Cite those entries "
-    "instead of making the same call again: an identical call is not run again, and is "
-    "answered with the result its entry recorded."
+    "Earlier chunks of this same input were already analysed. These are the tool calls "
+    "made there, each with its arguments and the ledger entry that holds its result "
+    "(calls with the same arguments share a line, a range ev_0012\u2013ev_0015 being every "
+    "entry from the first to the last); the room in this prompt does not hold what they "
+    "returned. Cite those entries instead of making the same call again: an identical "
+    "call is not run again, and is answered with the result its entry recorded. A call "
+    "marked failed, or marked as one whose result was not kept, may be made once more."
 )
 
 # What a later chunk is told when its prompt has no room for either list: how
@@ -3438,30 +3439,72 @@ def entry_ranges(ids: Sequence[str]) -> str:
     return ", ".join(parts)
 
 
-def earlier_chunks_compact(entries: Sequence[Any]) -> str:
-    """Every earlier call by tool, its entries as ranges, under the compact head, or ``""``.
+def earlier_chunks_compact(entries: Sequence[Any], held_over: int | None = None) -> str:
+    """Every earlier call with its arguments, without what it returned, under the compact head.
 
-    One line a tool, in the order the tools were first called: the entries of
-    its calls, consecutive ones as a range, and those that failed after it.
+    One line a call: the tool, its argument values in canonical JSON (by
+    name only where the tool's calls do not all name the same arguments),
+    its mark where it failed or its result was not kept, and the entry. Calls
+    with identical arguments and mark share one line, their entries as
+    ranges. Nothing is cut: an argument value longer than ``held_over`` (the
+    most a list could take in the prompt) can never be listed, and is named by
+    the entry that holds it verbatim ("args in ev_x"). ``""`` with no calls.
     """
-    calls = _earlier_calls(entries)
+    calls = _earlier_call_facts(entries)
     if not calls:
         return ""
-    tools: dict[str, tuple[list[str], list[str]]] = {}
-    for tool, entry_id, ok in calls:
-        done, failed = tools.setdefault(tool, ([], []))
-        (done if ok else failed).append(entry_id)
-    lines = []
-    for tool, (done, failed) in tools.items():
-        said = entry_ranges(done)
-        if failed:
-            said = (
-                f"{said} (failed: {entry_ranges(failed)})"
-                if said
-                else f"failed: {entry_ranges(failed)}"
-            )
-        lines.append(f"- {tool} \u2192 {said}")
+    keys_by_tool: dict[str, set[tuple[str, ...]]] = {}
+    for tool, args, _entry_id, _mark in calls:
+        keys_by_tool.setdefault(tool, set()).add(tuple(sorted(args)))
+    grouped: dict[tuple[str, str, str], list[str]] = {}
+    for tool, args, entry_id, mark in calls:
+        named = len(keys_by_tool[tool]) > 1
+        shown = _call_arguments(args, named=named, held_over=held_over, entry_id=entry_id)
+        grouped.setdefault((tool, shown, mark), []).append(entry_id)
+    lines = [
+        f"- {tool}({shown}) \u2192 {entry_ranges(ids)}{mark}"
+        for (tool, shown, mark), ids in grouped.items()
+    ]
     return "\n".join([EARLIER_CHUNKS_COMPACT_HEAD, *lines])
+
+
+def _call_arguments(
+    args: dict[str, Any], *, named: bool, held_over: int | None, entry_id: str
+) -> str:
+    """A call's argument values in canonical JSON, by name where ``named``, none ever cut."""
+    parts: list[str] = []
+    for key in sorted(args):
+        try:
+            value = json.dumps(args[key], sort_keys=True, default=str, ensure_ascii=False)
+        except (TypeError, ValueError):
+            value = repr(args[key])
+        if held_over is not None and len(value) > held_over:
+            value = f"args in {entry_id}"
+        parts.append(f"{key}={value}" if named else value)
+    return ", ".join(parts)
+
+
+def _earlier_call_facts(entries: Sequence[Any]) -> list[tuple[str, dict[str, Any], str, str]]:
+    """``(tool, args, entry id, mark)`` for each earlier call the full list shows, in order."""
+    from maljan.schemas.evidence import holds_its_answer
+
+    facts: list[tuple[str, dict[str, Any], str, str]] = []
+    for entry in entries or ():
+        tool = str(getattr(entry, "tool", "") or "")
+        entry_id = str(getattr(entry, "id", "") or "")
+        if not tool or not entry_id or getattr(entry, "repeated_of", None):
+            continue
+        args = getattr(entry, "args", None)
+        ok = bool(getattr(entry, "ok", True))
+        mark = (
+            " (failed)"
+            if not ok
+            else ""
+            if holds_its_answer(entry)
+            else " (result not kept; may be made once more)"
+        )
+        facts.append((tool, dict(args) if isinstance(args, dict) else {}, entry_id, mark))
+    return facts
 
 
 def earlier_calls_counted(entries: Sequence[Any]) -> str:
@@ -3505,9 +3548,10 @@ def fitted_chunk(
     The chunks run one after another, so the earlier calls are known when a
     chunk is sent: the chunk takes the agent's room less its header and the
     calls. Of the three forms of the calls — the full list
-    (:data:`EARLIER_CHUNKS_HEAD`), every call's entries by tool as ranges
-    (:data:`EARLIER_CHUNKS_COMPACT_HEAD`), and their count with the span of
-    their entries (:data:`EARLIER_CALLS_NOT_LISTED`) — the one that leaves the
+    (:data:`EARLIER_CHUNKS_HEAD`), every call with its arguments but not
+    what it returned (:data:`EARLIER_CHUNKS_COMPACT_HEAD`), and their count
+    with the span of their entries (:data:`EARLIER_CALLS_NOT_LISTED`) — the one
+    that leaves the
     fewest loops over what is left of this source (``content`` and the
     ``ahead`` characters of its pieces after it) is sent, the more informative
     on a tie; a form whose room beside it holds no line of the content is
@@ -3522,9 +3566,13 @@ def fitted_chunk(
     if room is None or not full:
         return full, content, ""
     fixed = len(header) + 4
-    forms = (full, earlier_chunks_compact(earlier), earlier_calls_counted(earlier))
     # Room that holds no whole line of the content is no room for it.
     need = content.find("\n") + 1 or 1
+    forms = (
+        full,
+        earlier_chunks_compact(earlier, room - fixed - need),
+        earlier_calls_counted(earlier),
+    )
     remaining = len(content) + max(0, ahead)
     fits = [(form, room - fixed - len(form)) for form in forms if room - fixed - len(form) >= need]
     if not fits:
