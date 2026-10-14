@@ -888,6 +888,8 @@ class TestTheChildProcess:
         assert set(seen["env"]) <= {"PATH", "PYTHONPATH", "HOME"}
         assert seen["stdout"] is subprocess.DEVNULL
         assert not Path(seen["command"][-1]).exists()
+        assert Path(seen["command"][-1]).parent == cache
+        assert Path(seen["command"][-1]).name.startswith(attck_update.ANSWER_PREFIX)
 
     def test_a_spawn_that_fails_says_why(
         self, cache: Path, monkeypatch: pytest.MonkeyPatch
@@ -922,9 +924,12 @@ class TestLeftoversAtStart:
             cache / "..update.holder.json.abc.part",  # the holder name starts with a dot
             cache / ".enterprise-attack.json.abc.part",
             cache / ".mobile-attack.json.abc.bak",
+            cache / ".attck-parse.abc.json",
         ]
+        settled = time.time() - attck_update._settled_age() - 60
         for path in leftovers:
             path.write_text("x")
+            os.utime(path, (settled, settled))
         kept = [cache / "enterprise-attack.json", cache / "notes.txt"]
         kept[1].write_text("mine")
 
@@ -940,3 +945,36 @@ class TestLeftoversAtStart:
         with attck_update._locked(cache / attck_update.LOCK_NAME, blocking=False):
             assert attck_update.clear_leftovers_at_start() == []
         assert leftover.exists()
+
+
+class TestTheSweepAndAnotherWorker:
+    def test_files_written_without_a_shared_lock_are_left_while_young(self, cache: Path) -> None:
+        young = [
+            cache / ".enterprise-attack.meta.json.live.part",
+            cache / ".attck-parse.live.json",
+        ]
+        for path in young:
+            path.write_text("x")
+        assert attck_update.clear_leftovers_at_start() == []
+        assert all(path.exists() for path in young)
+
+    def test_the_settled_age_comes_from_the_largest_parse_limit(self, cache: Path) -> None:
+        bundle = cache / "enterprise-attack.json"
+        with bundle.open("wb") as out:
+            out.truncate(55_000_000)
+        assert attck_update._settled_age() == attck_update.parse_timeout(bundle)
+
+    def test_the_state_files_go_only_under_the_state_lock(
+        self, cache: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        taken: list[str] = []
+        real = attck_update._locked
+
+        def recording(path: Path, **kwargs: Any) -> Any:
+            taken.append(path.name)
+            return real(path, **kwargs)
+
+        monkeypatch.setattr(attck_update, "_locked", recording)
+        (cache / ".update-state.json.abc.part").write_text("x")
+        attck_update.clear_leftovers_at_start()
+        assert taken == [attck_update.LOCK_NAME, attck_update.STATE_LOCK_NAME]

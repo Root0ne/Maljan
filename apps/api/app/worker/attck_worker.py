@@ -31,6 +31,7 @@ from typing import Any
 
 from arq import cron
 from arq.worker import Worker
+from maljan.core.settings_overrides import StoredValueRefused
 from maljan.memory import attck_update
 
 from app.config import settings
@@ -113,6 +114,11 @@ async def _stored_refresh_days(ctx: dict) -> int | None:
         async with factory() as db:
             core = await core_settings_cache.get(db)
         return int(core.validation.attck_refresh_days)
+    except StoredValueRefused as exc:
+        # Never a default in its place: the hour is skipped, loudly, with the
+        # key and the remedy.
+        logger.error("ATT&CK automatic check skipped: %s", exc)
+        return None
     except Exception as exc:  # noqa: BLE001 — a skipped hour, said
         logger.warning("ATT&CK automatic check skipped: the interval is not readable (%s).", exc)
         return None

@@ -3,19 +3,19 @@
 import type { SettingsSchema } from "@/types/settings";
 import { useOptionalSettingsContext } from "./SettingsContext";
 
-/** What the console says beside a stored value the API reads past, or `""`.
+/** What the console says beside a refused stored value, or `""`.
  *
  *  The API serves each stored value the settings model refuses
- *  (`SchemaResponse.stored_values_refused`): it is not in force, its default
- *  is, until it is saved again or reset. Saying so beside the row is what
- *  keeps a read past it from being silent. */
+ *  (`SchemaResponse.stored_values_refused`). Only this page reads past it, so
+ *  the admin can repair it; everything that runs fails until then. */
 export function refusedNote(schema: SettingsSchema | null | undefined, key: string): string {
   const reason = schema?.stored_values_refused?.[key];
   if (reason === undefined) return "";
   const why = typeof reason === "string" && reason ? `: ${reason}` : "";
   return (
-    `The stored value is not in force${why}. Its default is used until a value is saved ` +
-    "here again or the stored one is reset."
+    `The stored value is refused${why}. Analyses and the routes that read the settings ` +
+    "fail until a value is saved here again or the stored one is reset; this page shows " +
+    "the default meanwhile."
   );
 }
 

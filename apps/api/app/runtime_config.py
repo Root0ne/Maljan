@@ -79,11 +79,15 @@ class RuntimeConfig:
         reason every read here does: a settings read must not take a request
         down.
         """
-        from maljan.core.settings_overrides import build_settings
+        from maljan.core.settings_overrides import StoredValueRefused, build_settings
 
         try:
             async with self._factory() as db:
                 return await core_settings_cache.get(db)
+        except StoredValueRefused:
+            # A refused stored value is never replaced by a default here: the
+            # caller fails with the key named and the remedy.
+            raise
         except Exception as exc:  # noqa: BLE001 - fall back to static settings
             logger.warning("core settings unavailable, using defaults: %s", exc)
             return build_settings({})

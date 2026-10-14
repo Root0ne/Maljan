@@ -85,8 +85,9 @@ class SchemaResponse(BaseModel):
     # changed, if any, is in force, and the console marks it on the steps.
     pack_steps_left_out: dict[str, str] = Field(default_factory=dict)
     # Each stored value the settings model refuses (``core.<path>`` -> why),
-    # read past rather than failing every read
-    # (``core.settings_overrides.stored_settings``): its default is in force
+    # read past here so the page can open and the admin repair it
+    # (``core.settings_overrides.stored_settings``, the settings page alone;
+    # every read that runs something refuses it): its default is shown
     # until it is saved again or reset, and the console says so beside it.
     stored_values_refused: dict[str, str] = Field(default_factory=dict)
 

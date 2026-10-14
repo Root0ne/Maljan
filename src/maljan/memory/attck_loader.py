@@ -357,7 +357,7 @@ def _stream(
         if bound is None and declared and str(declared).isdigit():
             bound = int(declared)
         if bound is None:
-            logger.info(
+            logger.warning(
                 "ATT&CK download from %s has no size bound: nothing to derive one from "
                 "and no declared length.",
                 url,

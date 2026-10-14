@@ -92,19 +92,59 @@ def build_settings(core_overrides: Mapping[str, Any]) -> Settings:
     return _built(core_overrides)[0]
 
 
+class StoredValueRefused(ValueError):
+    """A stored setting value the model refuses: named, with why and the remedy.
+
+    Raised by every read that runs something (a job, an API read, the ATT&CK
+    cron) instead of falling back to a default: a refused spend cap, server
+    map, allow-list or timeout must never quietly become a less safe one.
+    """
+
+    def __init__(self, refused: Mapping[str, str]) -> None:
+        self.refused = {f"core.{key}": reason for key, reason in refused.items()}
+        named = "; ".join(f"{key}: {reason}" for key, reason in self.refused.items())
+        super().__init__(
+            f"A stored setting value is refused ({named}). Fix it or reset it in the "
+            "console (Settings, Configuration); nothing runs on a default in its place."
+        )
+
+
+def settings_from_store(
+    core_overrides: Mapping[str, Any], *, stored_keys: Iterable[str] | None = None
+) -> Settings:
+    """:func:`build_settings` for a read that runs something: a refused stored value
+    fails it loudly, naming the key, the reason and the remedy.
+
+    A refusal not about a key in ``stored_keys`` (all of ``core_overrides``
+    when ``None``), such as a value a job brought itself, is raised as the
+    model raised it.
+    """
+    from pydantic import ValidationError
+
+    try:
+        return build_settings(core_overrides)
+    except ValidationError as exc:
+        eligible = set(core_overrides if stored_keys is None else stored_keys)
+        found = _refused_stored_keys(exc, core_overrides, eligible)
+        if not found:
+            raise
+        refused = StoredValueRefused(found)
+        from maljan.core.logger import logger
+
+        logger.error("%s", refused)
+        raise refused from exc
+
+
 def stored_settings(
     core_overrides: Mapping[str, Any], *, stored_keys: Iterable[str] | None = None
 ) -> tuple[Settings, dict[str, str]]:
-    """The settings a read builds from the store, and the stored values it could not use.
+    """The settings page's read alone: the stored values the model refuses, read past.
 
-    A stored value the model refuses (one a migration wrote past a bound added
-    later, one an older release accepted) used to fail every build, so every
-    route and job that reads settings failed with it. Here that one key is
-    left out, its default is in force, and it is returned with the reason, so
-    the caller reports it and the console shows it beside the setting. Only
-    keys in ``stored_keys`` (all of ``core_overrides`` when ``None``) are
-    left out this way; any other refusal is raised as before. A save still
-    validates with :func:`build_settings`, which refuses.
+    Only so the console can open while a stored value is refused and the admin
+    can repair it there: that key is left out (its default shown), and it is
+    returned with the reason, for the page's banner and the row's notice.
+    Nothing that runs reads settings this way (:func:`settings_from_store`
+    refuses); a save validates with :func:`build_settings`, which refuses.
     """
     from pydantic import ValidationError
 

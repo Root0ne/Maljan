@@ -415,7 +415,8 @@ export interface SettingsSchema {
    *  instead. */
   pack_steps_left_out?: Record<string, string>;
   /** Each stored value the settings model refuses, by catalog key, with why:
-   *  its default is in force until it is saved again or reset. */
+   *  only this page reads past it; analyses and the routes that read the
+   *  settings fail until it is saved again or reset. */
   stored_values_refused?: Record<string, string>;
 }
 

@@ -19,7 +19,6 @@ import pytest
 from arq.connections import RedisSettings
 from arq.constants import in_progress_key_prefix
 from arq.worker import Worker, func, get_kwargs
-from pydantic import ValidationError
 
 from app.worker.analysis_worker import (
     ARQ_NO_JOB_TIMEOUT,
@@ -64,24 +63,15 @@ class TestTheSetting:
     def test_a_saved_value_reaches_the_job(self) -> None:
         assert build_job_settings({"job_timeout": 3600}, None).job_timeout == 3600
 
-    def test_a_stored_zero_is_read_past_with_the_default_in_force(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """A save refuses 0 (below); a 0 that reached the store anyway is not in
-        force, is said, and no longer stops every job (``stored_settings``)."""
-        from maljan.core import settings_overrides
+    def test_zero_is_refused(self) -> None:
+        """A stored 0 is refused loudly, naming the key and the remedy, never run
+        with the default (no timeout) in its place."""
+        from maljan.core.settings_overrides import StoredValueRefused
 
-        settings_overrides._WARNED_VALUES.clear()
-        with caplog.at_level("WARNING"):
-            built = build_job_settings({"job_timeout": 0}, None)
-        assert built.job_timeout is None
-        assert "The stored value of job_timeout is not in force" in caplog.text
-
-    def test_zero_is_refused_when_built_strictly(self) -> None:
-        from maljan.core.settings_overrides import build_settings
-
-        with pytest.raises(ValidationError):
-            build_settings({"job_timeout": 0})
+        with pytest.raises(StoredValueRefused) as refused:
+            build_job_settings({"job_timeout": 0}, None)
+        assert list(refused.value.refused) == ["core.job_timeout"]
+        assert "reset it in the console" in str(refused.value)
 
     def test_the_settings_save_takes_a_number_or_empty_and_refuses_zero(self) -> None:
         from app.services.settings_service import SettingsService, SettingsValidationError

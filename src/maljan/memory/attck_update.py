@@ -235,31 +235,65 @@ def _holder_of(directory: Path) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
+ANSWER_PREFIX = ".attck-parse."
+
+
+def _settled_age() -> float:
+    """How old a file written without a cross-process lock must be to be dead.
+
+    The facts files and a child's answer file are written right after a parse,
+    and a parse is killed past its own limit (:func:`parse_timeout`), so one
+    older than the longest limit any cached bundle gives is no write in
+    progress, in this process or another sharing the volume.
+    """
+    limits = [parse_timeout(cache_file(domain)) for domain in attck_loader.DOMAINS]
+    return max(limits) if limits else PARSE_START_SECONDS
+
+
 def clear_leftovers_at_start() -> list[Path]:
     """Remove every temporary file a killed process left in the cache directory.
 
-    The bundles', the facts', the state's and the holder's. Called when the
-    worker that owns the cache starts, before it takes any job, so no write it
-    could cut short is in progress; the update lock is taken all the same, and
-    nothing is removed while another process holds it.
+    The bundles' and the holder's are written under the update lock and the
+    state's under the state lock, so both locks are held while they are
+    removed: another worker sharing the volume cannot be writing one. The
+    facts files and the child parses' answer files are written under neither,
+    so only those older than :func:`_settled_age` go. Nothing is removed while
+    another process holds the update lock.
     """
     directory = cache_dir()
     removed: list[Path] = []
     if not directory.is_dir():
         return removed
+
+    def remove(leftover: Path) -> None:
+        with suppress(OSError):
+            leftover.unlink()
+            removed.append(leftover)
+
     with _locked(directory / LOCK_NAME, blocking=False) as held:
         if not held:
             return removed
-        names = [STATE_NAME, HOLDER_NAME]
-        for domain in attck_loader.DOMAINS:
-            bundle = cache_file(domain)
-            names += [bundle.name, meta_file(bundle).name]
-        for name in names:
-            for pattern in (f".{name}.*.part", f".{name}.*.bak"):
-                for leftover in directory.glob(pattern):
-                    with suppress(OSError):
-                        leftover.unlink()
-                        removed.append(leftover)
+        with _locked(directory / STATE_LOCK_NAME, blocking=True):
+            locked_names = [STATE_NAME, HOLDER_NAME]
+            unlocked_names = []
+            for domain in attck_loader.DOMAINS:
+                bundle = cache_file(domain)
+                locked_names.append(bundle.name)
+                unlocked_names.append(meta_file(bundle).name)
+            for name in locked_names:
+                for pattern in (f".{name}.*.part", f".{name}.*.bak"):
+                    for leftover in directory.glob(pattern):
+                        remove(leftover)
+            settled_before = time.time() - _settled_age()
+            unlocked = [
+                leftover
+                for name in unlocked_names
+                for leftover in directory.glob(f".{name}.*.part")
+            ] + list(directory.glob(f"{ANSWER_PREFIX}*.json"))
+            for leftover in unlocked:
+                with suppress(OSError):
+                    if leftover.stat().st_mtime < settled_before:
+                        remove(leftover)
     if removed:
         logger.info("Removed %d leftover temporary file(s) from the ATT&CK cache.", len(removed))
     return removed
@@ -393,7 +427,10 @@ def _parse_in_child(path: Path) -> dict[str, Any]:
     """
     timeout = parse_timeout(path)
     logger.debug("ATT&CK parse of %s in a child, at most %.0f s.", path.name, timeout)
-    handle, answer_name = tempfile.mkstemp(prefix=".attck-parse.", suffix=".json")
+    # In the cache directory, so a child a killed worker left behind leaves its
+    # answer where the start-up sweep finds it.
+    cache_dir().mkdir(parents=True, exist_ok=True)
+    handle, answer_name = tempfile.mkstemp(prefix=ANSWER_PREFIX, suffix=".json", dir=cache_dir())
     os.close(handle)
     answer_file = Path(answer_name)
     command = [

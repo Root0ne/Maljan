@@ -12,6 +12,7 @@ import { formatDateTime } from "@/lib/report-utils";
 import type { AttckCheckResult, AttckStatus, AttckUpdateResult, SettingsSchema } from "@/types/settings";
 import { AttckDataView, type AttckDataViewProps } from "../AttckDataPanel";
 import { refusedNote } from "../StoredValueRefusedNote";
+import StoredValuesRefusedBanner, { REFUSED_HEADLINE, refusedRows } from "../StoredValuesRefusedBanner";
 import {
   ATTCK_REFRESH_KEY,
   ageLabel,
@@ -379,10 +380,41 @@ describe("verification fixes", () => {
       stored_values_refused: { [ATTCK_REFRESH_KEY]: "Input should be less than or equal to 2885414" },
     };
     expect(refusedNote(schema, ATTCK_REFRESH_KEY)).toBe(
-      "The stored value is not in force: Input should be less than or equal to 2885414. " +
-        "Its default is used until a value is saved here again or the stored one is reset."
+      "The stored value is refused: Input should be less than or equal to 2885414. " +
+        "Analyses and the routes that read the settings fail until a value is saved here " +
+        "again or the stored one is reset; this page shows the default meanwhile."
     );
     expect(refusedNote(schema, "core.llm.provider")).toBe("");
     expect(refusedNote(null, ATTCK_REFRESH_KEY)).toBe("");
+  });
+});
+
+describe("the settings-wide banner", () => {
+  const schema = {
+    ...(served as unknown as SettingsSchema),
+    stored_values_refused: {
+      [ATTCK_REFRESH_KEY]: "Input should be less than or equal to 2885414",
+      "core.not.in.the.catalogue": "refused",
+    },
+  };
+
+  it("lists every refused key with its setting's title and why", () => {
+    const rows = refusedRows(schema);
+    expect(rows[0]).toEqual({
+      key: ATTCK_REFRESH_KEY,
+      title: "Check for a new ATT&CK release every (days)",
+      reason: "Input should be less than or equal to 2885414",
+    });
+    expect(rows[1]).toEqual({
+      key: "core.not.in.the.catalogue",
+      title: "core.not.in.the.catalogue",
+      reason: "refused",
+    });
+    expect(refusedRows(served as unknown as SettingsSchema)).toEqual([]);
+  });
+
+  it("renders as an alert naming them, and nothing when none is refused", () => {
+    expect(REFUSED_HEADLINE).toContain("fail until each is fixed or reset here");
+    expect(renderToStaticMarkup(createElement(StoredValuesRefusedBanner))).toBe("");
   });
 });

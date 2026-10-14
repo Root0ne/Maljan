@@ -117,7 +117,7 @@ def test_with_no_bound_at_all_the_download_says_so(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     _serve(monkeypatch, FakeResponse(b"{}"))
-    with caplog.at_level("INFO"):
+    with caplog.at_level("WARNING"):
         attck_loader._stream(
             attck_loader._BUNDLE_BASE_URL + "/index.json",
             io.BytesIO(),

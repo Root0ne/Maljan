@@ -35,7 +35,7 @@ from maljan.core.settings_catalog import core_catalog
 from maljan.core.settings_overrides import (
     build_settings,
     public_snapshot,
-    stored_settings,
+    settings_from_store,
     trim_declarations,
 )
 from maljan.pipeline.events import MODEL_USAGE as MODEL_USAGE_EVENT
@@ -180,10 +180,9 @@ def build_job_settings(
             merged["sandbox.provider"] = "upload"
         if job_config.get("profile") is not None:
             merged["agents.profile"] = job_config["profile"]
-    # A stored value the model refuses is read past with a warning (its
-    # default in force), as every settings read does; a value the job itself
-    # brought is still refused.
-    settings, _refused = stored_settings(merged, stored_keys=overrides)
+    # A stored value the model refuses fails the job, naming the key and the
+    # remedy; a run never takes a default in its place.
+    settings = settings_from_store(merged, stored_keys=overrides)
     # The selected provider's role models come from its own block; a job never
     # runs with an empty model name borrowed from nowhere.
     from maljan.llm.provider_base import role_block_problem

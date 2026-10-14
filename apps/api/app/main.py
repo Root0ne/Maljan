@@ -383,6 +383,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Database connections closed")
 
 
+async def stored_value_refused_response(_request: Any, exc: Exception) -> Any:
+    """409 for a request that read the settings while a stored value is refused.
+
+    The key, the reason and the remedy, never a bare 500 and never a default
+    in the value's place (``settings_overrides.StoredValueRefused``).
+    """
+    from fastapi.responses import JSONResponse
+
+    refused = getattr(exc, "refused", {})
+    return JSONResponse(status_code=409, content={"detail": str(exc), "refused": refused})
+
+
 def create_app() -> FastAPI:
     """Build and configure the FastAPI application."""
     docs_enabled = settings.debug
@@ -435,6 +447,14 @@ def create_app() -> FastAPI:
         SecurityHeadersMiddleware,
         enable_hsts=not settings.debug,
     )
+
+    # ── A refused stored setting ─────────────────────────────
+    # Any route that reads the core settings while a stored value is refused
+    # answers 409 with the key, the reason and the remedy, rather than a bare
+    # 500 or a default in its place. The settings page itself reads past it.
+    from maljan.core.settings_overrides import StoredValueRefused
+
+    app.add_exception_handler(StoredValueRefused, stored_value_refused_response)
 
     # ── Routes ───────────────────────────────────────────────
     from app.api.v1.audit import router as audit_router
