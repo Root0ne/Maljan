@@ -62,11 +62,11 @@ LINE = (
     "reports 0 hits of 31 rules. [blocking: the match count conflicts]"
 )
 REWORDED_LINE = (
-    "[analysts: ALPHA] ALPHA claim 9 still reports matches at 0x5f0c, against 0 hits in "
+    "[analysts: ALPHA] ALPHA claim 9 still reports three matches at 0x5f0c, against 0 hits in "
     "ev_0007 over its 31 rules. [blocking: the rule sets are not reconciled]"
 )
 WITH_RESCAN = (
-    "[analysts: ALPHA] ALPHA claim 9 reports matches, against 0 hits in ev_0007 and "
+    "[analysts: ALPHA] ALPHA claim 9 reports 2 matches, against 0 hits in ev_0007 and "
     "ev_0009 over 31 rules. [blocking: x]"
 )
 UNANSWERED = (
@@ -141,6 +141,15 @@ class TestALineTheLedgerStates:
         told = ledger_count_facts([C2_CONTACT], {}, ledger, AGENTS)
         assert told, "each count is still stated to the analysts"
         assert ledger_stated([C2_CONTACT], {}, ledger, AGENTS, told) == []
+
+    def test_an_interpretive_dispute_over_counts_both_sides_accept_is_not_stated(self) -> None:
+        line = (
+            "[analysts: ALPHA, BETA] ALPHA reads 0 matches [ev_0007] as benign while BETA reads "
+            "31 rules as a strong signal of malicious intent [ev_0007]. [blocking: the reading]"
+        )
+        told = ledger_count_facts([line], {}, [SCAN], AGENTS)
+        assert told, "the counts are still stated to the analysts"
+        assert ledger_stated([line], {}, [SCAN], AGENTS, told) == []
 
     def test_scanners_that_disagree_are_not_stated(self) -> None:
         ledger = [SCANNER_A, SCANNER_B]

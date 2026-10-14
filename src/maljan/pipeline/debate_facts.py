@@ -12,8 +12,9 @@ things:
   for ``matches``). No call is made for them: they ride on the calls the
   debate makes anyway, the revision directive of the analysts the line names
   and the next mediation's prompt;
-- **says what the ledger already stated**: a blocking line every count of
-  which (a number before a plural noun: "0 hits", "31 rules") the cited
+- **says what the ledger already stated**: a blocking line that disputes a
+  count itself (two numbers for one noun: "three matches" against "0 hits"),
+  every count of which (a number before a plural noun: "0 hits", "31 rules") the cited
   entries state, in keys naming its nouns, as one record that agrees with
   itself, and whose facts an earlier mediation of the debate told the
   analysts, is stated and told (``ledger_stated``). The line stays a blocking
@@ -170,13 +171,29 @@ def _counts_of(structured: Any) -> list[tuple[str, int, str, bool]]:
     return found
 
 
-# A count a line states: a number before a plural noun, with at most two words
-# between them ("0 hits", "31 rules", "11 distinct DNS names"). The noun is the
-# first plural word after the number. Every run is read possessively, so a
-# start scans each word once.
+# The number words a count may be written with ("three YARA matches").
+_NUMBER_WORDS: dict[str, int] = {
+    word: value
+    for value, word in enumerate(
+        "zero one two three four five six seven eight nine ten eleven twelve thirteen "
+        "fourteen fifteen sixteen seventeen eighteen nineteen twenty".split()
+    )
+} | {"thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
+# A count a line states: a number, in digits or a number word, before a plural
+# noun, with at most two words between them ("0 hits", "31 rules", "three
+# matches", "11 distinct DNS names"). The noun is the first plural word after
+# the number. Every run is read possessively, so a start scans each word once.
 _STATED_COUNT = re.compile(
-    r"(?<![\w.%#])(\d+)\s++(?:[A-Za-z][\w-]*+\s++){0,2}?([A-Za-z][\w-]*+)(?<=s)\b"
+    r"(?<![\w.%#])(\d++|(?i:" + "|".join(sorted(_NUMBER_WORDS, key=len, reverse=True)) + r")\b)"
+    r"\s++(?:[A-Za-z][\w-]*+\s++){0,2}?([A-Za-z][\w-]*+)(?<=s)\b"
 )
+
+
+def _count_value(written: str) -> int:
+    """A count as written: digits, or a number word."""
+    return int(written) if written.isdecimal() else _NUMBER_WORDS[written.lower()]
+
+
 # The words of a key's name ("rule_count", "hitCount"), and the ones that only
 # say the field is a count.
 _KEY_WORD = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])")
@@ -263,22 +280,28 @@ def _answers(
     counted: set[tuple[int, str]],
     by_entry: Sequence[tuple[str, list[tuple[str, int, str, bool]]]],
 ) -> tuple[bool, frozenset[tuple[str, str]]]:
-    """Whether the cited entries state every count of a line, and the facts that do.
+    """Whether the line disputes a count the cited entries state, and the facts that state it.
 
-    Each count ``(value, noun)`` must be stated by a cited entry in a field
-    whose key names the noun. The entries must agree: every cited field of a
-    counted noun holds one value. And they must be one record: an entry that
-    states one of the line's nouns states all of them, so a line setting one
-    entry's count against another entry's count of something else (0
-    connections against 2 domains) is a dispute about meaning the ledger does
-    not answer.
+    The dispute must be about the count itself: the line writes two different
+    numbers for one noun ("three matches" against "0 hits"). A line whose
+    sides read different facts differently ("0 matches as benign" against
+    "31 rules as malicious") writes one number per noun and is a dispute
+    about meaning the ledger does not answer. Each noun the line counts must
+    be stated by the cited entries in a field whose key names it, with one
+    value: for a disputed noun one of the line's numbers, for any other the
+    line's own. The entries must agree (every cited field of a counted noun
+    holds one value) and be one record: an entry that states one of the
+    line's nouns states all of them (0 connections in one entry against 2
+    domains in another is no record).
     """
-    if not counted:
+    written: dict[str, set[int]] = {}
+    for value, noun in counted:
+        written.setdefault(noun, set()).add(value)
+    if not any(len(values) > 1 for values in written.values()):
         return False, frozenset()
-    nouns = {noun for _value, noun in counted}
+    nouns = set(written)
     values: dict[str, set[int]] = {}
-    atoms: set[tuple[str, str]] = set()
-    met: set[tuple[int, str]] = set()
+    facts: list[tuple[str, str, int, str]] = []
     for entry_id, counts in by_entry:
         held = {(_key_noun(key), value, f"{key} = {shown}") for key, value, shown, _l in counts}
         named = {noun for noun, _value, _shown in held if noun in nouns}
@@ -287,12 +310,12 @@ def _answers(
         for noun, value, shown in held:
             if noun in nouns:
                 values.setdefault(noun, set()).add(value)
-                if (value, noun) in counted:
-                    met.add((value, noun))
-                    atoms.add((entry_id, shown))
-    if met != counted or any(len(seen) != 1 for seen in values.values()):
-        return False, frozenset()
-    return True, frozenset(atoms)
+                facts.append((entry_id, noun, value, shown))
+    for noun, line_values in written.items():
+        stated = values.get(noun, set())
+        if len(stated) != 1 or not stated <= line_values:
+            return False, frozenset()
+    return True, frozenset((entry_id, shown) for entry_id, _noun, _value, shown in facts)
 
 
 def _count_or_reference(match: re.Match[str]) -> str:
@@ -324,7 +347,7 @@ def _line_counts(
         # analyst claims 2 domains" may be a count, and a count read that the
         # ledger does not state leaves the line unstated.
         counted = {
-            (int(n), _count_noun(noun))
+            (_count_value(n), _count_noun(noun))
             for n, noun in _STATED_COUNT.findall(_CLAIM_NUMBERS.sub(_count_or_reference, idless))
         }
         nouns_of: dict[int, set[str]] = {}
