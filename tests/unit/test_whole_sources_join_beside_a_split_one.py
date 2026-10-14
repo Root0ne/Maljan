@@ -16,7 +16,12 @@ import time
 import pytest
 
 from maljan.core.config import ChunkingConfig
-from maljan.loaders.binary_chunker import SOURCE_SEPARATOR, BinaryChunker, joined_when_it_fits
+from maljan.loaders.binary_chunker import (
+    SOURCE_SEPARATOR,
+    BinaryChunker,
+    header_chars,
+    joined_when_it_fits,
+)
 from tests.unit._chunking_doubles import _chunk, _room
 
 
@@ -59,7 +64,8 @@ class TestJoining:
         )
         assert len(chunks) > 1
         for before, after in zip(chunks, chunks[1:], strict=False):
-            assert before.char_count + len(SOURCE_SEPARATOR) + after.char_count > room
+            cut_at = room - header_chars(domain, 10 * len(text), room)
+            assert before.char_count + len(SOURCE_SEPARATOR) + after.char_count > cut_at
         assert joined_when_it_fits(chunks, ChunkingConfig(), _room(room)) is chunks
 
     def test_ten_times_the_sources_take_about_ten_times_as_long(self) -> None:

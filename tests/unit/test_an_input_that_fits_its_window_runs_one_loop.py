@@ -38,6 +38,7 @@ from maljan.loaders.binary_chunker import (
     HeadRoom,
     TextChunk,
     head_room,
+    header_chars,
     joined_when_it_fits,
 )
 from maljan.pipeline.nodes import agent_input_room, make_stage_agent_node
@@ -51,6 +52,15 @@ def _derived(**over: Any) -> BinaryChunker:
 
 def _room(chars: int | None) -> Any:
     return lambda _text: chars
+
+
+def _piece(room: int, text: str, domain: str = "triage") -> int:
+    """The size a piece of ``text`` is cut at on ``room``: the room less its header's bound."""
+    return room - header_chars(domain, 10 * len(text), room)
+
+
+def _cuts(size: int, text: str) -> list[int]:
+    return [min(size, len(text) - i) for i in range(0, len(text), size)]
 
 
 def _chunk(content: str, index: int = 0, total: int = 1) -> TextChunk:
@@ -86,7 +96,9 @@ class TestTheChunkIsTheRoom:
     def test_an_input_over_the_room_is_cut_at_the_room(self) -> None:
         text = "C" * 250_000
         chunks = _derived(overlap_tokens=0).chunk("triage", text, room=_room(100_000))
-        assert [c.char_count for c in chunks] == [100_000, 100_000, 50_000]
+        # Every piece leaves room for the header it is sent behind.
+        assert [c.char_count for c in chunks] == _cuts(_piece(100_000, text), text)
+        assert all(c.char_count + len(c.to_prompt_header()) + 2 <= 100_000 for c in chunks)
         assert "".join(c.content for c in chunks) == text
 
     def test_the_room_is_asked_about_the_text_it_sizes(self) -> None:
@@ -198,6 +210,7 @@ def _container(agent: MagicMock, *, role: str, settings: Settings | None = None)
     for name in (
         "load_data_for_agent",
         "_data_source_chunks",
+        "_sources_data",
         "_sandbox_slice",
         "_legacy_role_data",
     ):
@@ -398,9 +411,7 @@ class TestTheHeadSourceRoom:
 
         (chunks,) = agent.safe_analyze_isr_chunked.call_args[0]
         sandbox = json.dumps(report, separators=(",", ":"), default=str)
-        assert [c.char_count for c in chunks[1:]] == [
-            min(room, len(sandbox) - i) for i in range(0, len(sandbox), room)
-        ]
+        assert [c.char_count for c in chunks[1:]] == _cuts(_piece(room, sandbox), sandbox)
         assert json.loads(chunks[0].content)["upstream_findings"] == block
 
 
@@ -459,9 +470,10 @@ class TestAnUpstreamBlockNearTheRoomAddsAtMostOneChunk:
 
     The shipped size was a floor on the head source's chunks: on this room it
     cut every chunk of the source at 80,000 characters, nearly three times the
-    29,800 the prompt has room for, and each was shortened there. Only the head
-    piece takes the addition now, so every later chunk fits the room and the
-    count is at most one above a split at the room.
+    29,800 the prompt has room for, and each was sent whole past it. Only the
+    head piece takes the addition now; every chunk fits the room behind its
+    header, and the count is at most one above a split at the room, and the
+    chunks of the addition itself where it alone fills the room.
     """
 
     AT_THE_ROOM = len(
@@ -475,11 +487,9 @@ class TestAnUpstreamBlockNearTheRoomAddsAtMostOneChunk:
         with patch("maljan.pipeline.nodes.upstream_findings", lambda *_a: block):
             node(state)
         shown = _chunks_shown(agent)
-        assert 1 < len(shown) <= self.AT_THE_ROOM + 1
-        assert all(len(c) <= HOSTILE_ROOM for c in shown[1:])
-        assert shown[0].startswith(block)
-        if added < HOSTILE_ROOM:
-            assert len(shown[0]) <= HOSTILE_ROOM
+        assert 1 < len(shown) <= self.AT_THE_ROOM + 1 + -(-added // HOSTILE_ROOM)
+        assert all(len(c) <= HOSTILE_ROOM for c in shown)
+        assert "".join(shown).startswith(block)
 
     def test_the_shipped_floor_cut_chunks_past_this_room(self) -> None:
         shipped = BinaryChunker(ChunkingConfig(max_tokens_per_chunk=UNKNOWN_WINDOW_CHUNK_TOKENS))
@@ -490,10 +500,9 @@ class TestAnUpstreamBlockNearTheRoomAddsAtMostOneChunk:
         node(state)
         shown = _chunks_shown(agent)
         assert shown[0].startswith("## Upstream findings")
-        assert "[upstream findings truncated]" in shown[0]
-        assert len(shown[0].split("\n\n[upstream findings truncated]")[0]) >= HOSTILE_ROOM
-        assert 1 < len(shown) <= self.AT_THE_ROOM + 1
-        assert all(len(c) <= HOSTILE_ROOM for c in shown[1:])
+        assert "[upstream findings truncated]" in "".join(shown[:4])
+        assert 1 < len(shown) <= self.AT_THE_ROOM + 4
+        assert all(len(c) <= HOSTILE_ROOM for c in shown)
 
     def test_ten_times_the_input_takes_about_ten_times_as_long(self) -> None:
         block = "U" * HOSTILE_ROOM
@@ -545,7 +554,8 @@ class TestARevisionChunksWhereTheFirstAnalysisDid:
             room=agent_input_room(container, "network"),
         )
         assert [c.content for c in again] == [c.content for c in first]
-        assert [c.char_count for c in again] == [100_000, 100_000, 50_000]
+        text = "r" * 250_000
+        assert [c.char_count for c in again] == _cuts(_piece(100_000, text, "network"), text)
 
     def test_an_agent_that_cannot_be_built_gives_the_unknown_window_size(self) -> None:
         container = self._container(room=100_000)

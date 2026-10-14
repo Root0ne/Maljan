@@ -30,6 +30,7 @@ from maljan.loaders.binary_chunker import (
     SIZED_BY_ROOM,
     SIZED_BY_UNKNOWN_WINDOW,
     BinaryChunker,
+    head_room,
 )
 from tests.unit._chunking_doubles import _container, _room, _rows
 
@@ -146,3 +147,42 @@ class TestTheRunSummaryRow:
         assert summary.to_dict()["truncation"]["input_split_unknown_window"] == []
         assert unknown_window_split_sentence(summary.truncation) == ""
         assert "No context window was learned" not in summary.to_markdown()
+
+
+class TestTheSplitIsStatedOnceAndCountedAsTheNodeSendsIt:
+    def test_one_line_per_agent_where_an_inner_load_split_first(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # The generic role's static context is a load of its own inside the
+        # agent's load: only the outermost states the split, with the whole count.
+        container = _container(role="generic", sample="s" * 200_000)
+        with caplog.at_level(logging.WARNING, logger="maljan"):
+            chunks = container.load_data_for_agent(
+                "agent", file_hash="abc", sandbox_report={"rows": ["r" * 150_000]}, room=_room(None)
+            )
+        lines = [r.getMessage() for r in caplog.records if "shipped" in r.getMessage()]
+        assert len(lines) == 1
+        assert [row["chunks"] for row in _rows(container)] == [len(chunks)]
+        assert f"into {len(chunks)} chunks" in lines[0]
+
+    def test_the_head_addition_is_counted_before_the_join(self) -> None:
+        # Together the two sources fit the shipped size; with the block the node
+        # puts in front of the first they do not, and the node runs two loops.
+        container = _container(network="n" * 29_000, sources=["sandbox.target", "sandbox.network"])
+        report = {"target": {"x": "a" * 50_000}, "network": {}}
+        container.load_data_for_agent(
+            "agent",
+            file_hash="abc",
+            sandbox_report=report,
+            room=_room(None),
+            head_room=head_room(_room(None), lambda _text: 5_000),
+        )
+        assert [row["chunks"] for row in _rows(container)] == [2]
+
+    def test_without_the_addition_the_same_sources_are_one_loop_and_no_row(self) -> None:
+        container = _container(network="n" * 29_000, sources=["sandbox.target", "sandbox.network"])
+        report = {"target": {"x": "a" * 50_000}, "network": {}}
+        container.load_data_for_agent(
+            "agent", file_hash="abc", sandbox_report=report, room=_room(None)
+        )
+        assert _rows(container) == []

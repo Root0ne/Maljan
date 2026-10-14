@@ -170,35 +170,59 @@ class HeadRoom:
     first chunk may hold so that it still fits once they are in. Only the first
     chunk is made smaller, so however large the addition is the source gains
     at most one chunk over a split at the room.
+
+    ``alone`` says the source is the agent's only one, so a head that is not
+    split is the analyst's single chunk; the container sets it
+    (:meth:`alone_as`).
     """
 
-    def __init__(self, room: Room, added: Callable[[str], int]) -> None:
+    def __init__(self, room: Room, added: Callable[[str], int], *, alone: bool = False) -> None:
         self._room = room
         self._added = added
+        self.alone = alone
 
     def __call__(self, text: str) -> int | None:
         return self._room(text)
+
+    def alone_as(self, alone: bool) -> HeadRoom:
+        """This head room for a source that is, or is not, the agent's only one."""
+        return HeadRoom(self._room, self._added, alone=alone)
+
+    def added_to(self, text: str) -> int:
+        """Characters the node adds to a head chunk holding ``text``."""
+        return max(0, int(self._added(text)))
+
+    def over(self, room: Room) -> HeadRoom:
+        """The same head room, what is added and whether alone, over ``room``."""
+        return HeadRoom(room, self._added, alone=self.alone)
 
     def first(self, text: str, chars: int) -> int:
         """Characters the first chunk of ``text`` may hold where a chunk holds ``chars``.
 
         ``chars`` where the text fits whole with what is added. ``chars`` too
-        for a JSON head (one JSON object) that fits the room on its own: cut,
-        it is no JSON head and loses the sample path the node writes into it,
-        so it goes whole and the prompt that carries it shortens it as a
-        document and says so. Otherwise ``chars`` less what is added to the
-        first piece — a piece is no JSON head, so that is the block in front
-        of it. Where the addition alone fills the room the first chunk is over
-        it whatever piece it holds; it is then sized as the others are, and
-        its prompt shortens it and says so.
+        for a JSON head (one JSON object) that fits the room on its own and is
+        the agent's only source: it is then the analyst's single chunk, whose
+        prompt shortens it as a document and says so, where cut it would be
+        no JSON head and lose the sample path the node writes into it. A JSON
+        head another source follows is split as any other head: the chunked
+        path shortens nothing, and whole it would reach the model past the
+        room. Otherwise ``chars`` less what is added to the first piece,
+        measured on that piece (a piece is no JSON head, so that is the block
+        in front of it). Where the addition alone fills the room the first
+        chunk is sized as the others are, and the node's last pass
+        (:func:`joined_when_it_fits`) cuts it at the room.
         """
         added = max(0, int(self._added(text)))
         if len(text) + added <= chars:
             return chars
-        if len(text) <= chars and _one_json_object(text):
+        if self.alone and len(text) <= chars and _one_json_object(text):
             return chars
-        piece = max(0, int(self._added(text[:chars]))) if len(text) > chars else added
+        piece = added if len(text) <= chars else max(0, int(self._added(text[:chars])))
         left = chars - piece
+        if 0 < left < len(text):
+            # Measured on the piece actually cut: the larger addition of the two
+            # holds for it, so the head never passes the room by a difference.
+            left = chars - max(piece, int(self._added(text[:left])))
         return left if left > 0 else chars
 
 
@@ -210,6 +234,21 @@ def head_room(room: Room | None, added: Callable[[str], int]) -> Room | None:
     if room is None:
         return None
     return HeadRoom(room, added)
+
+
+def header_chars(domain: str, count: int, chars: int) -> int:
+    """Characters a chunk's header and the break after it take in a chunked prompt, at most.
+
+    The header is ``TextChunk.to_prompt_header`` for a chunk of at most
+    ``chars`` characters among at most ``count`` chunks, with the longest
+    strategy name; the analyst puts it and a blank line in front of every
+    chunk of a list of more than one (``BaseAnalyst.safe_analyze_isr_chunked``).
+    """
+    n = max(1, int(count))
+    longest = max((strategy.name for strategy in ChunkStrategy), key=len)
+    tokens = tokens_for_chars(max(0, int(chars)), _CHARS_PER_TOKEN, ceil=False)
+    header = f"[CHUNK {n}/{n} | domain={domain} | strategy={longest} | ~{tokens} tokens]"
+    return len(header) + len("\n\n")
 
 
 def first_chunk_chars(text: str, room: Room | None, chars: int, sized_by: str) -> int:
@@ -241,7 +280,7 @@ def joined_when_it_fits(chunks: list, config: ChunkingConfig, room: Room | None)
     or when ``skip_if_fits`` is off (chunking forced).
     """
     if len(chunks) < 2 or getattr(config, "skip_if_fits", True) is False:
-        return chunks
+        return within_the_room(chunks, config)
     runs: list[list] = []
     whole: list = []
     for chunk in chunks:
@@ -258,8 +297,47 @@ def joined_when_it_fits(chunks: list, config: ChunkingConfig, room: Room | None)
     for run in runs:
         joined.extend(_joined_run(run, config, room))
     if len(joined) == len(chunks):
+        joined = chunks
+    return within_the_room(joined, config)
+
+
+def within_the_room(chunks: list, config: ChunkingConfig | None) -> list:
+    """``chunks``, each one its header would take past the room it was sized at cut to fit.
+
+    In a list of more than one chunk each is sent behind its header
+    (:func:`header_chars`). The chunker keeps that out of a piece it cuts; a
+    whole source sized at the room, or a head chunk the node has added to,
+    can still be past the room once the header is in front. Such a chunk is
+    cut at the room less its header, losslessly, the pieces in its place. Only
+    a chunk sized from a measured room is held to it: an operator's figure and
+    the shipped size are each the chunk size as set. A list of one chunk has
+    no header and is returned as it came.
+    """
+    if len(chunks) < 2:
         return chunks
-    return joined
+    chunker: BinaryChunker | None = None
+    out: list = []
+    cut = False
+    # However many chunks the cuts make, each holds a character at least.
+    count = len(chunks) + sum(len(str(chunk.content)) for chunk in chunks)
+    for chunk in chunks:
+        facts = getattr(chunk, "metadata", None) or {}
+        limit = facts.get(CHUNK_CHARS)
+        if facts.get(SIZED_BY) != SIZED_BY_ROOM or not isinstance(limit, int) or limit <= 0:
+            out.append(chunk)
+            continue
+        content = str(chunk.content)
+        reserve = header_chars(str(chunk.domain), count, limit)
+        if len(content) + reserve <= limit or reserve >= limit:
+            out.append(chunk)
+            continue
+        chunker = chunker or BinaryChunker(config or ChunkingConfig())
+        pieces = chunker._split(str(chunk.domain), content, limit - reserve)
+        for piece in pieces:
+            piece.metadata.update(facts)
+        out.extend(pieces)
+        cut = True
+    return out if cut else chunks
 
 
 def _joined_run(run: list, config: ChunkingConfig, room: Room | None) -> list:
@@ -426,10 +504,23 @@ class BinaryChunker:
                 domain,
                 len(text),
             )
-            return [self._make_single_chunk(domain, text, ChunkStrategy.SLIDING_WINDOW)]
+            only = self._make_single_chunk(domain, text, ChunkStrategy.SLIDING_WINDOW)
+            # Measured, and nothing left: a revision reads this, not an unknown window.
+            only.metadata.update({SIZED_BY: SIZED_BY_ROOM, CHUNK_CHARS: 0})
+            return [only]
 
         first = first_chunk_chars(text, room, max_chars, sized_by)
-        chunks = self._sized(domain, text, max_chars, first)
+        size, head = max_chars, first
+        if sized_by == SIZED_BY_ROOM and not (self._config.skip_if_fits and len(text) <= first):
+            # Split, every piece is sent behind its header: kept out of the room.
+            # The count is bounded by ten times this source's characters, the
+            # list it joins renumbers its chunks, and the node's last pass
+            # measures the header on the list itself (``within_the_room``).
+            reserve = header_chars(domain, 10 * len(text), max_chars)
+            if reserve < max_chars:
+                size = max_chars - reserve
+                head = first - reserve if reserve < first else min(first, size)
+        chunks = self._sized(domain, text, size, head)
         for chunk in chunks:
             chunk.metadata.update({SIZED_BY: sized_by, CHUNK_CHARS: max_chars})
         return chunks
@@ -450,7 +541,8 @@ class BinaryChunker:
         # A rest of nothing but whitespace is no chunk of its own.
         if not text[first:].strip():
             return [self._make_single_chunk(domain, text[:first], ChunkStrategy.SLIDING_WINDOW)]
-        start = first - self._overlap_chars if first > self._overlap_chars else first
+        overlap = self._overlap_within(first)
+        start = first - overlap if first > overlap else first
         rest = self._split(domain, text[start:], max_chars)
         return self._bins_to_chunks(
             domain, [text[:first], *(chunk.content for chunk in rest)], rest[0].strategy
@@ -534,32 +626,52 @@ class BinaryChunker:
                 # Expand oversized segment into sub-windows
                 safe_segments.extend(self._raw_sliding_windows(seg, max_chars))
 
-        # Greedily pack segments into bins
+        # Greedily pack segments into bins. A bin's length counts the line
+        # breaks that join its parts and the overlap carried into it, so no
+        # bin is past ``max_chars``.
+        overlap = self._overlap_within(max_chars)
         bins: list[str] = []
         current_parts: list[str] = []
         current_len = 0
 
         for seg in safe_segments:
-            if current_len + len(seg) > max_chars and current_parts:
+            grown = current_len + (1 if current_parts else 0) + len(seg)
+            if grown > max_chars and current_parts:
                 bins.append("\n".join(current_parts))
-                # Carry the last `_overlap_chars` characters of the bin we just
-                # closed as overlap — not just the last segment, so the upper
-                # context survives bin transitions.
-                if self._overlap_chars:
-                    closed_bin = bins[-1]
-                    tail = closed_bin[-self._overlap_chars :]
-                else:
-                    tail = ""
+                # Carry the end of the bin just closed as overlap — not just the
+                # last segment, so the upper context survives bin transitions —
+                # as much of it as fits beside the segment that opens the next.
+                take = min(overlap, max_chars - len(seg) - 1)
+                tail = bins[-1][-take:] if take > 0 else ""
                 current_parts = [tail, seg] if tail else [seg]
-                current_len = len(tail) + len(seg)
+                current_len = len(tail) + 1 + len(seg) if tail else len(seg)
             else:
                 current_parts.append(seg)
-                current_len += len(seg)
+                current_len = grown
 
         if current_parts:
             bins.append("\n".join(current_parts))
 
         return self._bins_to_chunks(domain, bins, strategy)
+
+    def _overlap_within(self, max_chars: int) -> int:
+        """The overlap carried between chunks of ``max_chars``, at most what a sliding step leaves.
+
+        An overlap as large as the chunk is self-contradictory: each chunk would
+        repeat the whole of the one before. It is held to what
+        :meth:`_raw_sliding_windows` already leaves (a step of a quarter of the
+        chunk), and the hold is logged.
+        """
+        allowed = max(0, max_chars - max(1, max_chars // 4))
+        if self._overlap_chars > allowed:
+            logger.warning(
+                "BinaryChunker overlap (%d) too large for max_chars (%d); held to %d.",
+                self._overlap_chars,
+                max_chars,
+                allowed,
+            )
+            return allowed
+        return self._overlap_chars
 
     def _sliding_window(self, domain: str, text: str, max_chars: int) -> list[TextChunk]:
         """Pure sliding-window split — domain-agnostic fallback."""

@@ -86,6 +86,7 @@ def _container(agent: MagicMock, *, role: str, load_chunked_return: list[TextChu
     for name in (
         "load_data_for_agent",
         "_data_source_chunks",
+        "_sources_data",
         "_sandbox_slice",
         "_legacy_role_data",
     ):

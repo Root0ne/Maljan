@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 from maljan.core.config import ChunkingConfig
 from maljan.core.container import ServiceContainer
 from maljan.core.truncation_ledger import TruncationLedger
-from maljan.loaders.binary_chunker import BinaryChunker, ChunkStrategy, TextChunk
+from maljan.loaders.binary_chunker import BinaryChunker, ChunkStrategy, TextChunk, header_chars
 
 
 def _room(chars: int | None) -> Any:
@@ -72,6 +72,7 @@ def _container(
         "load_chunked",
         "load_data_for_agent",
         "_data_source_chunks",
+        "_sources_data",
         "_sandbox_slice",
         "_legacy_role_data",
     ):
@@ -81,3 +82,9 @@ def _container(
 
 def _rows(container: Any) -> list[dict[str, Any]]:
     return list(container._truncation_ledger.snapshot()["input_split_unknown_window"])
+
+
+def _cuts(room: int, text: str, domain: str) -> list[int]:
+    """The pieces ``text`` is cut into on ``room``, each the room less its header's bound."""
+    size = room - header_chars(domain, 10 * len(text), room)
+    return [min(size, len(text) - i) for i in range(0, len(text), size)]

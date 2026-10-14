@@ -33,6 +33,8 @@ import threading
 import uuid
 import weakref
 from contextlib import suppress
+from contextvars import ContextVar
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -87,9 +89,29 @@ _ACLOSE_BUDGET = 20.0
 _CLOSE_ALL_BUDGET = 45.0
 
 
-def _with_content(chunks: list[TextChunk]) -> list[TextChunk]:
+# Whether the load running on this thread is the outermost one: an agent's
+# input is stated once, where the whole of it is known (``_note_chunking``),
+# never again by a load it is built from.
+_OUTERMOST_LOAD: ContextVar[bool] = ContextVar("maljan_outermost_chunk_load", default=True)
+
+
+def _with_content(chunks: list[TextChunk], agent_name: str = "") -> list[TextChunk]:
     """The chunks that hold something: one of nothing but whitespace is no input to loop over."""
-    return [chunk for chunk in chunks if str(getattr(chunk, "content", "") or "").strip()]
+    held = [chunk for chunk in chunks if str(getattr(chunk, "content", "") or "").strip()]
+    if len(held) < len(chunks):
+        logger.debug(
+            "%s: %d chunk(s) of nothing but whitespace left out of the input.",
+            agent_name,
+            len(chunks) - len(held),
+        )
+    return held
+
+
+def _head_alone(head: Room | None, alone: bool) -> Room | None:
+    """``head`` told whether its source is the agent's only one (``HeadRoom.alone_as``)."""
+    from maljan.loaders.binary_chunker import HeadRoom
+
+    return head.alone_as(alone) if isinstance(head, HeadRoom) else head
 
 
 def _first_pass_room(container: Any, agent_name: str, room: Room | None) -> Room | None:
@@ -100,6 +122,8 @@ def _first_pass_room(container: Any, agent_name: str, room: Room | None) -> Room
     chunking the same input again at that size is what the revision is meant
     to read, so it is used in place of the unknown-window size.
     """
+    from maljan.loaders.binary_chunker import HeadRoom
+
     store = getattr(container, "_first_pass_chunk_chars", None)
     remembered = store.get(agent_name) if isinstance(store, dict) else None
     if not isinstance(remembered, int) or isinstance(remembered, bool):
@@ -109,10 +133,13 @@ def _first_pass_room(container: Any, agent_name: str, room: Room | None) -> Room
         chars = room(text) if room is not None else None
         return remembered if chars is None else chars
 
-    return measured
+    # A head room stays one: what the node adds is still kept out of its first chunk.
+    return room.over(measured) if isinstance(room, HeadRoom) else measured
 
 
-def _note_chunking(container: Any, agent_name: str, chunks: list[TextChunk]) -> None:
+def _note_chunking(
+    container: Any, agent_name: str, chunks: list[TextChunk], head: Room | None = None
+) -> None:
     """What sized agent ``agent_name``'s chunks, kept for its revision and stated where unknown.
 
     The first chunk size sized from the agent's window is kept
@@ -120,7 +147,8 @@ def _note_chunking(container: Any, agent_name: str, chunks: list[TextChunk]) -> 
     was learned, is a row in the run summary and a log line, each with the
     remedy: the split is kept, never silent. Split means more than one chunk
     once whole sources that fit the shipped size together are joined, as the
-    analyst node joins them.
+    analyst node joins them: after it adds the sample path and the upstream
+    block to the first chunk, which ``head`` (a ``HeadRoom``) measures.
     """
     from maljan.llm.context_window import unknown_window_remedy
     from maljan.loaders.binary_chunker import (
@@ -129,6 +157,7 @@ def _note_chunking(container: Any, agent_name: str, chunks: list[TextChunk]) -> 
         SIZED_BY,
         SIZED_BY_ROOM,
         SIZED_BY_UNKNOWN_WINDOW,
+        HeadRoom,
         joined_when_it_fits,
     )
 
@@ -143,7 +172,13 @@ def _note_chunking(container: Any, agent_name: str, chunks: list[TextChunk]) -> 
     if len(chunks) < 2 or not any(f.get(SIZED_BY) == SIZED_BY_UNKNOWN_WINDOW for f in sized):
         return
     config = getattr(getattr(container, "config", None), "chunking", None)
-    count = len(joined_when_it_fits(chunks, config, None)) if config is not None else len(chunks)
+    shown = chunks
+    added = head.added_to(str(chunks[0].content)) if isinstance(head, HeadRoom) else 0
+    if added > 0:
+        # The node joins after the head carries what it adds: counted as it will be.
+        grown = str(chunks[0].content) + " " * added
+        shown = [replace(chunks[0], content=grown, char_count=len(grown)), *chunks[1:]]
+    count = len(joined_when_it_fits(shown, config, None)) if config is not None else len(chunks)
     if count < 2:
         return
     remedy = unknown_window_remedy()
@@ -1833,15 +1868,21 @@ class ServiceContainer:
         analyst's input room (``BaseAnalyst._input_room_chars``), which sizes
         a chunk where ``chunking.max_tokens_per_chunk`` is unset.
         """
-        room = _first_pass_room(self, data_type, room)
-        key = (sample_id, data_type)
-        with self._lock:
-            cached_text = self._data_cache.get(key)
-        if cached_text is not None:
-            chunks = self.loader.chunk_text(data_type, cached_text, room=room)
-        else:
-            chunks = self.loader.load_chunked(sample_id, data_type, room=room)
-        _note_chunking(self, data_type, chunks)
+        outermost = _OUTERMOST_LOAD.get()
+        token = _OUTERMOST_LOAD.set(False)
+        try:
+            room = _first_pass_room(self, data_type, room)
+            key = (sample_id, data_type)
+            with self._lock:
+                cached_text = self._data_cache.get(key)
+            if cached_text is not None:
+                chunks = self.loader.chunk_text(data_type, cached_text, room=room)
+            else:
+                chunks = self.loader.load_chunked(sample_id, data_type, room=room)
+        finally:
+            _OUTERMOST_LOAD.reset(token)
+        if outermost:
+            _note_chunking(self, data_type, chunks, room)
         return chunks
 
     def load_data_for_agent(
@@ -1876,14 +1917,39 @@ class ServiceContainer:
         """
         definition = self.config.agents.definitions.get(agent_name)
         sources = list(definition.data_sources) if definition is not None else []
-        room = _first_pass_room(self, agent_name, room)
-        if not sources:
-            chunks = self._legacy_role_data(agent_name, file_hash, sandbox_report, room, head_room)
-            _note_chunking(self, agent_name, chunks)
-            return chunks
+        outermost = _OUTERMOST_LOAD.get()
+        token = _OUTERMOST_LOAD.set(False)
+        try:
+            room = _first_pass_room(self, agent_name, room)
+            head_room = _first_pass_room(self, agent_name, head_room)
+            if not sources:
+                chunks = self._legacy_role_data(
+                    agent_name, file_hash, sandbox_report, room, head_room
+                )
+            else:
+                chunks = self._sources_data(
+                    agent_name, sources, file_hash, sandbox_report, sample_path, room, head_room
+                )
+        finally:
+            _OUTERMOST_LOAD.reset(token)
+        if outermost:
+            _note_chunking(self, agent_name, chunks, head_room)
+        return chunks
 
+    def _sources_data(
+        self,
+        agent_name: str,
+        sources: list[str],
+        file_hash: str,
+        sandbox_report: dict[str, Any] | None,
+        sample_path: str | None,
+        room: Room | None,
+        head_room: Room | None,
+    ) -> list[TextChunk]:
+        """``data_sources`` taken in order, each chunked on its own, the first at the head room."""
         head = head_room if head_room is not None else room
-        chunks = []
+        head = _head_alone(head, len(sources) == 1)
+        chunks: list[TextChunk] = []
         # A source that yields nothing but whitespace adds no chunk: beside
         # another source it would be a loop over nothing. The source after it
         # is then the head. Only an input of nothing at all keeps one such
@@ -1898,13 +1964,12 @@ class ServiceContainer:
                 sample_path,
                 room if chunks else head,
             )
-            held = _with_content(got)
+            held = _with_content(got, agent_name)
             if got and not held:
                 empty.append(got[0])
             chunks.extend(held)
         if not chunks and empty:
             chunks = empty[:1]
-        _note_chunking(self, agent_name, chunks)
         return chunks
 
     def _data_source_chunks(
@@ -1995,8 +2060,10 @@ class ServiceContainer:
         role = self.agent_role(agent_name)
         head = head_room if head_room is not None else room
         if role in PROMPT_ROLES:
-            loaded = self.load_chunked(file_hash, agent_name, room=head)
-            static_context = _with_content(loaded)
+            loaded = self.load_chunked(
+                file_hash, agent_name, room=_head_alone(head, not sandbox_report)
+            )
+            static_context = _with_content(loaded, agent_name)
             sandbox_chunks: list[TextChunk] = []
             if sandbox_report:
                 # The sandbox report is the head where the static context
@@ -2006,8 +2073,9 @@ class ServiceContainer:
                         agent_name,
                         "sandbox.full",
                         sandbox_report,
-                        room if static_context else head,
-                    )
+                        room if static_context else _head_alone(head, True),
+                    ),
+                    agent_name,
                 )
             return [*static_context, *sandbox_chunks] or loaded[:1]
         if sandbox_report:
@@ -2016,8 +2084,10 @@ class ServiceContainer:
                 "network": "sandbox.network",
                 "dynamic": "sandbox.behavior",
             }.get(role, "sandbox.full")
-            return self._sandbox_slice(agent_name, slice_name, sandbox_report, head)
-        return self.load_chunked(file_hash, agent_name, room=head)
+            return self._sandbox_slice(
+                agent_name, slice_name, sandbox_report, _head_alone(head, True)
+            )
+        return self.load_chunked(file_hash, agent_name, room=_head_alone(head, True))
 
     def _prompt_room_chars(self) -> int | None:
         """What one prompt may carry before the reply room, or ``None`` with no window learned."""

@@ -3304,12 +3304,67 @@ EARLIER_CHUNKS_HEAD = (
 )
 
 
-def earlier_chunks_block(entries: Sequence[Any]) -> str:
+# What a later chunk's list of earlier calls ends with when the prompt has no
+# room for all of them. The repeat guard holds every earlier call whatever the
+# list shows (``_prior_chunk_calls``), so an unlisted one is still answered.
+EARLIER_CALLS_LEFT_OUT = (
+    "{count} more earlier call(s) are not listed, for want of room in this prompt; an "
+    "identical call is still answered with the result its entry recorded."
+)
+
+
+def earlier_chunks_block(entries: Sequence[Any], room: int | None = None) -> str:
     """The earlier chunks' tool calls as ``tool(args) → ev_id`` lines under their head, or ``""``.
 
     Every call that ran, in the order made; a call that failed says so. A
     repeat the guard answered is left out: the entry it names is listed.
+    ``room`` is the characters the block may take beside the chunk and its
+    header in the analyst's prompt: the calls that fit are listed in order
+    and the rest counted in one line (:data:`EARLIER_CALLS_LEFT_OUT`); with
+    no room even for that, no block. ``None`` is no bound.
     """
+    lines = _earlier_call_lines(entries)
+    if not lines:
+        return ""
+    whole = "\n".join([EARLIER_CHUNKS_HEAD, *lines])
+    if room is None or len(whole) <= room:
+        return whole
+    kept: list[str] = []
+    used = len(EARLIER_CHUNKS_HEAD)
+    longest_note = len(EARLIER_CALLS_LEFT_OUT.format(count=len(lines))) + 1
+    for line in lines:
+        if used + 1 + len(line) + longest_note > room:
+            break
+        kept.append(line)
+        used += 1 + len(line)
+    if used + longest_note > room:
+        return ""
+    note = EARLIER_CALLS_LEFT_OUT.format(count=len(lines) - len(kept))
+    return "\n".join([EARLIER_CHUNKS_HEAD, *kept, note])
+
+
+def earlier_calls_room(agent: Any, header: str, content: str) -> int | None:
+    """Characters a later chunk's list of earlier calls may take, or ``None`` for no bound.
+
+    The agent's input room (``BaseAnalyst._input_room_chars``) less the chunk,
+    its header and the blank lines between them. ``None`` where no room is
+    measured, as the chunk itself is then sized at the shipped size.
+    """
+    measure = getattr(agent, "_input_room_chars", None)
+    if not callable(measure):
+        return None
+    try:
+        room = measure(content)
+    except Exception as exc:  # noqa: BLE001 — no measure is no bound, never a lost chunk
+        logger.debug("earlier calls not bounded (%s).", exc)
+        return None
+    if not isinstance(room, int) or isinstance(room, bool):
+        return None
+    return max(0, room - len(header) - len(content) - 4)
+
+
+def _earlier_call_lines(entries: Sequence[Any]) -> list[str]:
+    """One ``tool(args) → ev_id`` line per earlier call, in the order made."""
     lines: list[str] = []
     for entry in entries or ():
         tool = str(getattr(entry, "tool", "") or "")
@@ -3352,9 +3407,7 @@ def earlier_chunks_block(entries: Sequence[Any]) -> str:
 
         said = f": {excerpt_view(headline)}" if headline else ""
         lines.append(f"- {tool}({shown}) \u2192 {entry_id}{failed}{said}")
-    if not lines:
-        return ""
-    return "\n".join([EARLIER_CHUNKS_HEAD, *lines])
+    return lines
 
 
 class _PriorAnswer:
@@ -7150,8 +7203,12 @@ class BaseAnalyst(BudgetMeter, ABC):
                 continue
             entries = getattr(self, "_evidence_entries", None)
             earlier = list(entries[first_entry:]) if isinstance(entries, list) else []
-            block = earlier_chunks_block(earlier)
-            prompt_text = f"{chunk.to_prompt_header()}\n\n" + (
+            header = chunk.to_prompt_header()
+            # The chunk was sized to the room with its header kept out
+            # (``binary_chunker.header_chars``); the earlier calls take what is
+            # left, so the prompt never passes the room for them.
+            block = earlier_chunks_block(earlier, earlier_calls_room(self, header, chunk.content))
+            prompt_text = f"{header}\n\n" + (
                 f"{block}\n\n{chunk.content}" if block else chunk.content
             )
             try:

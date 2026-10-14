@@ -28,6 +28,7 @@ from typing import Any
 import pytest
 
 from maljan.agents.base_agent import (
+    EARLIER_CALLS_LEFT_OUT,
     FINAL_ANSWER_NUDGE,
     INPUT_SHORTENED_NOTICE,
     SPEND_CEILING_QUESTION,
@@ -1744,6 +1745,7 @@ PROMPTS: dict[str, str] = {
     "an analyst input shortened to its window": INPUT_SHORTENED_NOTICE.format(
         detail="the first 1,000 of 9,000 characters are shown, ending in …"
     ),
+    "a later chunk's earlier calls held to its room": EARLIER_CALLS_LEFT_OUT.format(count=7),
     "an analyst input split at the shipped size with no window learned": " ".join(
         [
             unknown_window_split_line("network", 3, 80_000, unknown_window_remedy()),

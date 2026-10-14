@@ -11,12 +11,13 @@ Every value is synthetic.
 from __future__ import annotations
 
 import json
+import logging
 import time
 
 import pytest
 
 from maljan.core.config import ChunkingConfig
-from maljan.loaders.binary_chunker import BinaryChunker, head_room
+from maljan.loaders.binary_chunker import BinaryChunker, head_room, header_chars
 from tests.unit._chunking_doubles import _container, _room
 
 
@@ -45,8 +46,10 @@ class TestNoChunkHoldsNothing:
             head_room=head_room(room, lambda _text: 30_000),
         )
 
-        assert chunks[0].char_count == 70_000
-        assert all(c.char_count <= 100_000 for c in chunks[1:])
+        text = json.dumps(report, separators=(",", ":"))
+        reserve = header_chars("agent", 10 * len(text), 100_000)
+        assert chunks[0].char_count == 70_000 - reserve
+        assert all(c.char_count <= 100_000 - reserve for c in chunks[1:])
 
     def test_an_input_of_nothing_at_all_is_still_one_chunk(self) -> None:
         container = _container(network="", sources=["sandbox.network", "sandbox.network"])
@@ -88,3 +91,12 @@ class TestNoChunkHoldsNothing:
         small = min(timed(200_000) for _ in range(3))
         large = min(timed(2_000_000) for _ in range(3))
         assert large < small * 20
+
+
+def test_a_source_of_nothing_left_out_is_said(caplog: pytest.LogCaptureFixture) -> None:
+    container = _container(network="  \n", sources=["sandbox.network", "sandbox.full"])
+    with caplog.at_level(logging.DEBUG, logger="maljan"):
+        container.load_data_for_agent(
+            "agent", file_hash="abc", sandbox_report={"rows": [1]}, room=_room(100_000)
+        )
+    assert any("whitespace left out" in r.getMessage() for r in caplog.records)

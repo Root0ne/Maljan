@@ -19,10 +19,17 @@ import pytest
 
 from maljan.core.config import ChunkingConfig
 from maljan.llm.context_window import UNKNOWN_WINDOW_CHUNK_TOKENS
-from maljan.loaders.binary_chunker import _CHARS_PER_TOKEN, BinaryChunker
+from maljan.loaders.binary_chunker import _CHARS_PER_TOKEN, BinaryChunker, header_chars
 from maljan.pipeline.nodes import _build_revision_context, _revision_input_is_absent
 
 SHIPPED = UNKNOWN_WINDOW_CHUNK_TOKENS * _CHARS_PER_TOKEN
+
+
+def _cuts(room: int, chunks: list) -> list[int]:
+    """The pieces the input is cut into on ``room``, less the header each is sent behind."""
+    length = sum(c.char_count for c in chunks)
+    size = room - header_chars(chunks[0].domain, 10 * length, room)
+    return [min(size, length - i) for i in range(0, length, size)]
 
 
 def _container(text: str, room: int | None, *, buildable: bool = True) -> tuple[Any, list]:
@@ -70,7 +77,7 @@ class TestTheRevisionContext:
 
         context = _build_revision_context(_state(), container, "triage")
 
-        assert [c.char_count for c in made[0]] == [100_000, 100_000, 50_000]
+        assert [c.char_count for c in made[0]] == _cuts(100_000, made[0])
         assert "chunks=3" in context and "the first answer" in context
 
     @pytest.mark.parametrize("buildable", [True, False])
@@ -99,7 +106,7 @@ class TestTheDataCheck:
 
         assert absent is False
         assert container.load_data_for_agent.call_args.kwargs["room"]("x") == 100_000
-        assert [c.char_count for c in made[0]] == [100_000, 100_000, 50_000]
+        assert [c.char_count for c in made[0]] == _cuts(100_000, made[0])
 
     def test_the_loader_path_is_given_the_agent_s_room(self) -> None:
         container, made = _container("D" * 150_000, 200_000)
