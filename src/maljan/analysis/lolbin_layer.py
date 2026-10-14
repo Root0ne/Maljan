@@ -21,7 +21,6 @@ and the answer is a technique id the agent may cite or ignore.
 from __future__ import annotations
 
 import re
-from typing import Any
 
 # A remote/script indicator turns an otherwise-benign LOLBin invocation into a
 # signed-proxy-execution signal (squiblydoo, scriptlet COM, HTA download, ...).
@@ -40,12 +39,6 @@ _ORDINAL_EXPORT = re.compile(r",\s*#\d+")
 _REGSVR32_TID = "T1218.010"
 _RUNDLL32_TID = "T1218.011"
 _MSHTA_TID = "T1218.005"
-
-_MAX_CMD_LEN = 160
-
-
-def _truncate(text: str, limit: int = _MAX_CMD_LEN) -> str:
-    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 def _dll_in_user_path(cmd_lower: str) -> bool:
@@ -81,18 +74,3 @@ def classify_lolbin(command_line: str) -> tuple[str, str] | None:
             return _MSHTA_TID, "mshta"
 
     return None
-
-
-def _iter_command_lines(sandbox_report: dict[str, Any]) -> list[str]:
-    from maljan.schemas.sandbox_document import place
-
-    procs = place(sandbox_report, "processes")
-    out: list[str] = []
-    if isinstance(procs, list):
-        for proc in procs:
-            if not isinstance(proc, dict):
-                continue
-            cmd = str(proc.get("command_line") or proc.get("cmd") or "").strip()
-            if cmd:
-                out.append(cmd)
-    return out

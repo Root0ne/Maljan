@@ -579,14 +579,6 @@ def _is_latin(ch: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _is_valid_ip(ip: str) -> bool:
-    try:
-        ipaddress.ip_address(ip)
-        return True
-    except ValueError:
-        return False
-
-
 def _is_emittable_ip(ip: str) -> bool:
     """True only for routable public addresses worth emitting as an IOC.
 

@@ -23,7 +23,7 @@ from app.database import get_db
 from app.deps import get_current_user
 from app.services.model_probes import NEVER_PROBED, unprobed_models
 from maljan.core.config import Settings
-from maljan.core.model_assignments import assignment_for, endpoint_for
+from maljan.core.model_assignments import assignment_chain_for, endpoint_for
 
 
 def _settings(**llm: Any) -> Settings:
@@ -76,7 +76,7 @@ class TestWhereACallWouldGo:
     def test_an_agent_with_no_override_inherits_the_global_expert_model(self) -> None:
         settings = _settings(provider="ollama", ollama={"expert_model": "qwen3.5:9b"})
 
-        assignment = assignment_for(settings, "static")
+        assignment = assignment_chain_for(settings, "static")[0]
 
         assert assignment.model == "qwen3.5:9b"
         assert assignment.endpoint == "http://localhost:11434"
@@ -94,7 +94,7 @@ class TestWhereACallWouldGo:
             },
         )
 
-        assignment = assignment_for(settings, "static")
+        assignment = assignment_chain_for(settings, "static")[0]
 
         assert assignment.provider == "openai"
         assert assignment.key == ("http://127.0.0.1:8080/v1", "qwen3-coder")
@@ -757,7 +757,7 @@ class TestOneAddressUnderBothHalves:
 
         filed = {(pair["endpoint"], pair["model"]) for pair in completions}
 
-        assert filed == {assignment_for(settings, "static").key}
+        assert filed == {assignment_chain_for(settings, "static")[0].key}
         assert all(pair["endpoint"] for pair in completions), "an empty endpoint files no row"
 
     @pytest.mark.parametrize("provider", ["anthropic", "gemini"])

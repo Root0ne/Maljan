@@ -386,12 +386,6 @@ def _checksum_byte(block: bytes) -> int:
     return sum(block[4:31]) % 251
 
 
-def read_pack_header(data: bytes) -> PackHeader:
-    """The pack header where UPX writes it, or :class:`NotRead` or :class:`Damaged` saying why."""
-    packed = _read_packed(data)
-    return _find_header(packed)
-
-
 # How many bytes of a file hold its headers for the pack header test: the DOS
 # header, the PE header and a section table of the most sections a PE has.
 _HEADER_BYTES = 0x1000 + 24 + 0xF0 + 40 * 0xFFFF

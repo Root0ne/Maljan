@@ -78,8 +78,6 @@ if TYPE_CHECKING:
 # passing.
 _IDENTITY_KINDS = ("identity", "signing")
 
-_TECHNIQUE_RE = re.compile(r"\bT\d{4}(?:\.\d{3})?\b")
-
 # Beside an address's disputed lineage facts: the sandboxes whose mark they are.
 _MARKED_BY = "marked_by"
 
@@ -570,13 +568,6 @@ def _int(value: Any) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
-
-
-def _technique_id(value: Any) -> str:
-    """The ``T1027`` out of a capa ATT&CK label, or the label if it is already one."""
-    text = str(value or "")
-    match = _TECHNIQUE_RE.search(text)
-    return match.group(0) if match else ""
 
 
 # The kinds whose answers are rules that matched the sample and name the

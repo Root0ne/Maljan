@@ -99,9 +99,8 @@ _ARGUMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,127}$")
 # servers offer the same name; a declared tool name may not hold it.
 RENAMED_TOOL_SEPARATOR = "__"
 
-# The two path wildcards; ``**N`` bounds the depth.
+# The two path wildcards, ``*`` and ``**``; ``**N`` bounds the depth.
 EVERY = "*"
-ANY_DEPTH = "**"
 _ANY_DEPTH_RE = re.compile(r"^\*\*(\d{0,4})$")
 
 

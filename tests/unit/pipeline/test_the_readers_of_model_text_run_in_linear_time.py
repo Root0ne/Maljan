@@ -20,7 +20,7 @@ from maljan.agents.base_agent import (
     _PARTIAL_ID_AT_END_RE,
     read_technique_line,
 )
-from maljan.agents.claim_headings import CLAIM_HEAD_RE, claim_heading_counts
+from maljan.agents.claim_headings import CLAIM_HEAD_RE, claim_blocks
 from maljan.agents.repeat_watch import ClaimRepeatReader
 from maljan.pipeline.claim_drops import claim_substance
 from maljan.pipeline.debate_facts import fact_atoms, ledger_count_facts, ledger_stated
@@ -70,7 +70,7 @@ LEDGER = [{"id": "ev_0001", "tool": "t", "structured": {"matches": [], "total": 
         pytest.param(lambda t: read_technique_line("T1106 " + t), id="technique line after an id"),
         pytest.param(lambda t: CLAIM_HEAD_RE.match("CLAIM " + t), id="claim heading"),
         pytest.param(lambda t: CLAIM_HEAD_RE.match("CLAIM" + " " * len(t) + "x"), id="spaces"),
-        pytest.param(lambda t: claim_heading_counts("CLAIM R1: " + t), id="heading counts"),
+        pytest.param(lambda t: claim_blocks("CLAIM R1: " + t), id="claim blocks"),
         pytest.param(lambda t: ClaimRepeatReader(None).feed("CLAIM R1: " + t), id="streaming"),
         pytest.param(
             lambda t: ledger_absence_contradictions({"body": t}, ENTRIES), id="absence sentences"

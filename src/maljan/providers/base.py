@@ -258,10 +258,6 @@ CLAIM_CITATION = (
 # provider whose tools did not attach): it says where the evidence comes from.
 STATIC_EVIDENCE_LEAD = "Analyze the deterministic static evidence you are given. "
 
-# The provider-neutral instructions a static fragment opened with before the
-# confidence discipline below was shared: the lead and what a claim cites.
-STATIC_EVIDENCE_INSTRUCTIONS = STATIC_EVIDENCE_LEAD + CLAIM_CITATION
-
 # How confident a static claim may be, whatever the provider: the cap without a
 # falsification, the two loci a High claim needs, and the idiom that is not
 # obfuscation. It is about claims, not about any tool: its one sentence about a

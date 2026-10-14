@@ -2302,8 +2302,3 @@ def roster_payload(profile: Any, definitions: Any, depth: int = 2) -> dict[str, 
         if not frontier:
             break
     return {"agents": list(agents_out.values()), "stages": stages_out}
-
-
-def emit_roster(sink: EventSink | None, payload: dict[str, Any]) -> None:
-    """The roster, once, at the start of the run."""
-    emit(sink, ROSTER, dict(payload))

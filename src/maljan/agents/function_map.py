@@ -70,11 +70,10 @@ FUNCTION_MAP_HEAD = (
 
 # The kinds of answer that tie an artefact to a function, by the tool's declared
 # kind (``core.declared_reading``; ``builtin_declarations.CONSUMER_KINDS``
-# ``function_map``): an API hash resolution, a static string decoder, an
-# emulator's recovered strings, the function index.
+# ``function_map``): an API hash resolution, a static string decoder, the
+# function index, and an emulator's recovered strings, read as every other kind.
 _HASH_KIND = "api_hash_resolution"
 _BLOB_KIND = "decoded_strings"
-_FLOSS_KIND = "emulated_strings"
 _INDEX_KIND = "function_index"
 
 

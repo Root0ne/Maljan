@@ -50,10 +50,9 @@ INTEGRITY_REASONS = (
 # takes out of a report's or a note's ``object_refs`` without removing an
 # object. Neither is a repair and neither belongs in ``INTEGRITY_REASONS`` —
 # the reasons there total to what the pass removed, and folding two other
-# kinds of loss in would break that total. They are counted here so that
+# kinds of loss in would break that total. They are counted in their own
+# fields (``indicator_cap_removed``, ``integrity_refs_trimmed``) so that
 # everything that leaves a bundle leaves under a name.
-INDICATOR_CAP_REASON = "indicator_cap"
-REFS_TRIMMED_REASON = "refs_trimmed"
 
 # Whose removals a run of the integrity pass is. The pass runs on two bundles
 # and the two do not add up to one number: the export's passes act on the

@@ -2485,18 +2485,6 @@ class ProfileDefinition(BaseModel):
             raise ValueError(problems[0].message)
         return self
 
-    def entry_node_count(self, stage: "StageDefinition") -> int:
-        """How many graph nodes a dependency of ``stage`` has to point at."""
-        return _entry_node_count(stage)
-
-    def debate_handover_error(self, stage: "StageDefinition") -> str:
-        """Why ``stage`` cannot hand over, or an empty string when it can."""
-        return _debate_handover_error(self.stages, stage)
-
-    def _reachable(self, key: str) -> set[str]:
-        """Every stage ``key`` transitively depends on."""
-        return _upstream_of(self.stages, key)
-
     def stage(self, key: str) -> StageDefinition | None:
         for candidate in self.stages:
             if candidate.key == key:
@@ -2531,8 +2519,8 @@ def _entry_node_count(stage: StageDefinition) -> int:
     return 1
 
 
-def _debate_handover_error(stages: list[StageDefinition], stage: StageDefinition) -> str:
-    """Why debate ``stage`` cannot hand over, or an empty string when it can.
+def _handover_message(stage: StageDefinition, fed_by: list[StageDefinition]) -> str:
+    """The hand-over refusal for debate ``stage`` feeding ``fed_by``, or ``""``.
 
     A debate leaves through a conditional edge, and a conditional edge has
     exactly one destination per branch. A debate that feeds two stages — or
@@ -2544,11 +2532,6 @@ def _debate_handover_error(stages: list[StageDefinition], stage: StageDefinition
     uploaded and detonated and every job under that team fails; an operator
     has to be told while they are still editing.
     """
-    return _handover_message(stage, [c for c in stages if stage.key in c.depends_on])
-
-
-def _handover_message(stage: StageDefinition, fed_by: list[StageDefinition]) -> str:
-    """The hand-over refusal for debate ``stage`` feeding ``fed_by``, or ``""``."""
     heads = sum(_entry_node_count(candidate) for candidate in fed_by)
     fed = [candidate.key for candidate in fed_by]
     if heads <= 1:
@@ -2558,20 +2541,6 @@ def _handover_message(stage: StageDefinition, fed_by: list[StageDefinition]) -> 
         f"({', '.join(fed)}); a debate hands over to exactly one stage, and not "
         "to a parallel analysis stage with more than one agent"
     )
-
-
-def _upstream_of(stages: list[StageDefinition], key: str) -> set[str]:
-    """Every stage ``key`` transitively depends on."""
-    by_key = {s.key: s for s in stages}
-    out: set[str] = set()
-    pending = list(by_key[key].depends_on) if key in by_key else []
-    while pending:
-        current = pending.pop()
-        if current in out or current not in by_key:
-            continue
-        out.add(current)
-        pending.extend(by_key[current].depends_on)
-    return out
 
 
 def _dependents_by_key(stages: list[StageDefinition]) -> dict[str, list[StageDefinition]]:
@@ -2586,11 +2555,10 @@ def _dependents_by_key(stages: list[StageDefinition]) -> dict[str, list[StageDef
 def _keys_after_an_analysis(stages: list[StageDefinition]) -> set[str]:
     """Every key with an analysis stage among what it transitively depends on.
 
-    ``_upstream_of`` asked once per stage, answered for all of them in one
-    breadth-first pass from the analysis stages along the reversed edges, so a
-    team of any size costs its stages plus its edges. The edges are read the
-    way ``_upstream_of`` reads them: a repeated key's dependencies are the
-    last declaration's, and a key counts as analysis if any stage keyed so is.
+    Answered for every stage in one breadth-first pass from the analysis
+    stages along the reversed edges, so a team of any size costs its stages
+    plus its edges. A repeated key's dependencies are the last declaration's,
+    and a key counts as analysis if any stage keyed so is.
     """
     by_key = {s.key: s for s in stages}
     reverse: dict[str, list[str]] = {}

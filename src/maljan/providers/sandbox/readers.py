@@ -348,11 +348,6 @@ def sandbox_format_named(name: str, formats: Iterable[Any]) -> Any:
     return None
 
 
-def sandbox_format_ids(declared: Iterable[ReportFormat] = ()) -> list[str]:
-    """The registry's format ids: what ``sandbox.upload.allowed_formats`` may name."""
-    return [fmt.name for fmt in sandbox_formats(declared)]
-
-
 # -- the built-in readers ---------------------------------------------------
 
 

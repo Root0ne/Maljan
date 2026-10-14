@@ -286,11 +286,6 @@ def builder_role(agent: str) -> str:
     return "judge" if agent in (JUDGE_AGENT_KEY, REPORTER_AGENT_KEY) else "expert"
 
 
-def assignment_for(settings: object, agent: str) -> ModelAssignment:
-    """What ``agent`` calls first, its own override over the global expert model."""
-    return assignment_chain_for(settings, agent)[0]
-
-
 def model_label_for(settings: object, agent: str, *, role: str = "expert") -> str:
     """The label of the model ``agent`` calls first, or ``""`` when it cannot be read."""
     try:
