@@ -112,7 +112,9 @@ Static provider 'ghidra' mirrors a sample to data/samples/.work/<sha256> and is 
 `GHIDRA_CONTAINER_SAMPLES_PATH` is retired. The migration that retired it read
 a value other than `/data/samples` once into `core.static.ghidra.sample_mount`,
 where the store held none; a worker that still has it set warns at start and
-names that setting.
+names that setting. `MALJAN_ATTCK_MAX_AGE_DAYS` is retired the same way: a
+whole number other than 7 is read once into `core.validation.attck_refresh_days`,
+which the console edits under Analysis layers → ATT&CK data.
 
 ## Rotating the JWT signing secret
 

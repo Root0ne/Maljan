@@ -314,6 +314,20 @@ and a column and edges between them. It stores nothing; its errors are the
 refusals `PATCH /settings` makes, in the same words. See
 [configuration.md](/configuration/).
 
+The ATT&CK cache is asked through the worker that holds it (admin):
+`GET /settings/attck` answers, per domain (`enterprise`, `mobile`, `ics`), the
+cached release, its date, when the file was written and how old it is, the
+next automatic check, and the last check and update with who ran them.
+`POST /settings/attck/check` compares the cache with MITRE's release index and
+downloads nothing; its `outcome` is `up_to_date`, `outdated` (each domain with
+its cached and latest release and the release date, and the next automatic
+check) or `failed` with the reason, never up to date when the index could not
+be read. `POST /settings/attck/update` queues the update and answers `202`
+with a `job_id`; `GET /settings/attck/update/{job_id}` answers `queued`,
+`running`, `done` with the result, or `unknown`. Each answers `503` when the
+worker does not answer in time. Neither takes an address: the upstream URL is
+the platform's.
+
 ## Conventions
 
 - **Pagination** — list endpoints take `page` (from 1) and `page_size` (1 to
