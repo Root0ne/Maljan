@@ -147,6 +147,23 @@ def test_migrations_run_once_before_the_api_and_the_worker(tmp_path):
     assert images == {"maljan-backend"}
 
 
+def test_every_pulled_image_names_a_version() -> None:
+    # A service compose pulls rather than builds runs the version its tag
+    # names: never ``latest`` or no tag, which move under a deployment that
+    # pulls again. A built image is this repository's own.
+    config = yaml.safe_load((ROOT / "docker" / "docker-compose.yml").read_text())
+    pulled = {
+        name: service["image"]
+        for name, service in config["services"].items()
+        if "image" in service and "build" not in service
+    }
+    assert "minio" in pulled
+    for name, image in pulled.items():
+        reference = image.rsplit("/", 1)[-1]
+        assert ":" in reference, f"{name}: {image} names no tag"
+        assert reference.split(":", 1)[1] != "latest", f"{name}: {image}"
+
+
 def _render_ghidra(tmp_path: Path, **extra: str) -> dict:
     compose_dir = tmp_path / "docker"
     compose_dir.mkdir(exist_ok=True)

@@ -299,6 +299,13 @@ judge
 report  ->  END
 ```
 
+The mediator reads each analyst's report under its heading, then, under
+`=== STRUCTURED CLAIMS (ISR) ===`, the ISR summary of every analyst whose
+report is not that summary word for word (`judge_agent.mediation_reports_text`).
+A first answer reaches the debate as its ISR summary, so a first mediation
+reads each claim once; a revised report, the analyst's own words, is read
+beside the claims in force. The block is left out when no summary is left.
+
 Agreement is measured only between analysts that produced claims. With fewer
 than two of them, or a debate stage that did not run, consensus is not
 applicable: the mediator still speaks and its words are kept, but no agreement

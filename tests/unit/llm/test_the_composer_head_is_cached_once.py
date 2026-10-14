@@ -134,6 +134,50 @@ class TestOnTheStructuredPath:
         assert order.index("introduction") < order.index("string_resolution")
 
 
+class TestTheManualPathAfterAStructuredAttempt:
+    """A structured answer that is not read is asked again on the manual path, head cached.
+
+    No section sends a tool there, so every section shares one prefix up to the
+    end of its head whatever schema its structured attempt sent: each manual
+    request carries the head as one cached block, the non-prose sections too.
+    """
+
+    def _bodies(self, monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+        def text_only(body: dict[str, Any]) -> dict[str, Any]:
+            answer = _answer(_section(body)) if _LEAD in _text_of(body) else {}
+            return message(
+                [{"type": "text", "text": json.dumps(answer)}], stop="end_turn", usage=USAGE
+            )
+
+        found = Wire(text_only)
+        install(monkeypatch, found)
+        composer = ReportComposer(llm=_model(), per_section_timeout=60)
+        with patch(
+            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=True
+        ):
+            asyncio.run(composer.compose(_report(), _isr(), facts_block=FACTS, concurrent=True))
+        return found.bodies
+
+    def test_every_manual_request_sends_the_head_as_one_cached_block(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bodies = self._bodies(monkeypatch)
+        manual = [b for b in bodies if len(b["messages"]) == 1 and not b.get("tools")]
+        assert {_section(b) for b in manual} == set(COMPOSED_SECTIONS)
+        prefixes = {_prefix(b) for b in manual}
+        assert len(prefixes) == 1 and "" not in prefixes, "one byte-identical prefix"
+
+    def test_the_structured_attempts_are_marked_as_before(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bodies = self._bodies(monkeypatch)
+        tooled = {_section(b): b for b in bodies if len(b["messages"]) == 1 and b.get("tools")}
+        assert set(tooled) == set(COMPOSED_SECTIONS)
+        for name in set(COMPOSED_SECTIONS) - set(PROSE):
+            assert isinstance(tooled[name]["messages"][0]["content"], str), name
+        assert len({_prefix(tooled[name]) for name in PROSE}) == 1
+
+
 class TestTheHeadIsCachedOnce:
     def test_every_section_sends_the_head_as_one_cached_block(self, wire: Wire) -> None:
         _compose(_model())

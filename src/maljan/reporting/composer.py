@@ -870,6 +870,9 @@ class ReportComposer:
         # their names, set per ``compose`` call (:meth:`_head_groups`).
         self._head_groups_found: dict[int, str] = {}
         self._noted_sections: set[str] = set()
+        # The sections whose manual-path requests share that head: on the
+        # manual path no section sends a tool, so every section with evidence.
+        self._manual_noted_sections: set[str] = set()
         # The sections written at once that answered before a stop, by plan
         # index, set by :meth:`_author_at_once` when the round is stopped.
         self._written_before_stop: dict[int, tuple[BaseModel | None, _SectionRecord]] = {}
@@ -1097,6 +1100,12 @@ class ReportComposer:
         # request so the provider caches it once (``SHARED_HEAD``).
         self._head_groups_found = self._head_groups(plan, report, isr_reports)
         self._noted_sections = {plan[index].section for index in self._head_groups_found}
+        # A section whose structured answer is not read is asked again on the
+        # manual path, where every section shares the head: noted there too.
+        self._manual_noted_sections = {
+            plan[index].section
+            for index in self._head_groups(plan, report, isr_reports, manual=True)
+        }
         if concurrent and spend_ceiling_set(getattr(self, "token_ledger", None)):
             # Under a spend ceiling the report calls run alone, as the meter
             # assumes (``SpendMeter.admit`` waits on its thread for calls in
@@ -1281,6 +1290,8 @@ class ReportComposer:
         plan: Sequence[_Planned],
         report: MalwareReport,
         isr_reports: dict[str, Any] | None,
+        *,
+        manual: bool = False,
     ) -> dict[int, str]:
         """The sections whose requests share one cacheable prefix, by group: ``{index: key}``.
 
@@ -1292,13 +1303,17 @@ class ReportComposer:
         subsections) share a prefix; on the manual path no section sends a
         tool, and every section shares one. A group of one shares nothing
         and is left out, so its request carries no breakpoint and pays no
-        cache write.
+        cache write. ``manual`` asks for the manual path's groups whatever
+        path the sections are first sent on: a structured answer that is not
+        read is asked again there.
         """
         llm = getattr(self, "llm", None)
         if llm is None or not _caches_once_answered(llm):
             return {}
-        structured = structured_output_supported_for_llm(llm) and not spend_ceiling_set(
-            getattr(self, "token_ledger", None)
+        structured = (
+            not manual
+            and structured_output_supported_for_llm(llm)
+            and not spend_ceiling_set(getattr(self, "token_ledger", None))
         )
         members: dict[str, list[int]] = {}
         for index, planned in enumerate(plan):
@@ -1402,24 +1417,36 @@ class ReportComposer:
         # repeat, noted on the request for a provider that caches a prefix
         # only at a breakpoint (``anthropic_history.SHARED_HEAD``); no request
         # body carries the note itself.
-        shared = (
-            len("\n\n".join(head)) + len("\n\n")
-            if head and section in (getattr(self, "_noted_sections", None) or ())
-            else 0
+        head_chars = len("\n\n".join(head)) + len("\n\n") if head else 0
+        shared = head_chars if section in (getattr(self, "_noted_sections", None) or ()) else 0
+        manual_shared = (
+            head_chars if section in (getattr(self, "_manual_noted_sections", None) or ()) else 0
         )
-        messages = [
-            SystemMessage(content=_SYSTEM),
-            HumanMessage(content=human, response_metadata={SHARED_HEAD: shared})
-            if shared
-            else HumanMessage(content=human),
-        ]
+
+        def _turns(noted: int) -> list[BaseMessage]:
+            return [
+                SystemMessage(content=_SYSTEM),
+                HumanMessage(content=human, response_metadata={SHARED_HEAD: noted})
+                if noted
+                else HumanMessage(content=human),
+            ]
+
+        messages = _turns(shared)
+        # The same turns noted for the manual path's group, when that differs.
+        manual_messages = _turns(manual_shared) if manual_shared != shared else None
         prompt_size = sum(len(str(message.content)) for message in messages)
         timeout = self._section_timeout(prompt_size)
         self._start_the_section_clock(timeout)
         wait = [timeout]
         try:
             return await self._waited(
-                self._invoke(messages, schema, section=section, validators=validators or []),
+                self._invoke(
+                    messages,
+                    schema,
+                    section=section,
+                    validators=validators or [],
+                    manual_messages=manual_messages,
+                ),
                 wait,
                 prompt_size,
                 resize=resize,
@@ -1701,7 +1728,14 @@ class ReportComposer:
         *,
         section: str = "",
         validators: list[Validator] | None = None,
+        manual_messages: list[BaseMessage] | None = None,
     ) -> BaseModel | None:
+        """One section's answer: the structured path, else the manual parse.
+
+        ``manual_messages`` are ``messages`` noted for the manual path's
+        cached head (:meth:`_head_groups` with ``manual``), sent in their
+        place once the structured path is not taken or not read.
+        """
         # Skipped outright on endpoints where structured output does not work
         # — see ``structured_output_supported``. The per-section timeout below
         # bounds the damage here, unlike the narrative round, but paying it on
@@ -1767,6 +1801,8 @@ class ReportComposer:
                 return result
         except Exception as exc:  # noqa: BLE001
             logger.debug("ReportComposer: structured path failed (%s); manual parse.", exc)
+        if manual_messages is not None:
+            messages = manual_messages
         # Manual JSON fallback for local servers returning fenced JSON, through
         # the validation loop: a section whose shape is wrong is a section
         # missing from a delivered report, and the model can usually fix it
