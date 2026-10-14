@@ -17,9 +17,9 @@ Two halves of an agent's tools live in two places on purpose:
   Ghidra is a per-sample act with a job context, and pulling it into
   resolution would make the settings probe launch a decompiler.
 
-A ``generic`` agent has no class of its own to open a provider, so an explicit
-``ToolRef(kind="provider")`` is the one way it gets provider tools, and that
-path *is* resolved here.
+A ``generic`` or ``lead`` agent has no class of its own to open a provider, so
+an explicit ``ToolRef(kind="provider")`` is the one way it gets provider tools,
+and that path *is* resolved here (``opens_provider_by_reference``).
 
 ``ToolRef(kind="sandbox")`` is the third half and the simplest: the job's
 sandbox report is already on the container, so the tools over it are closures
@@ -39,7 +39,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from maljan.core.config import AgentDefinition, ProfileDefinition, Settings, ToolRef
+from maljan.core.config import PROMPT_ROLES, AgentDefinition, ProfileDefinition, Settings, ToolRef
 from maljan.core.logger import logger
 
 if TYPE_CHECKING:
@@ -228,19 +228,34 @@ def static_provider_id_for(
     return str(global_provider or settings.static.provider)
 
 
+def opens_provider_by_reference(definition: AgentDefinition) -> bool:
+    """Whether resolution opens the agent's static provider from a ``provider`` reference.
+
+    The one gate for every role that is a prompt rather than a class
+    (``PROMPT_ROLES``: ``generic`` and ``lead``), the same roles the settings
+    validator lets carry a provider reference. The prompt's provider text, the
+    provider's tools and the mirror the worker stages all read this, so an
+    agent is never told about tools it does not get.
+    """
+    return definition.role in PROMPT_ROLES and any(
+        ref.kind == "provider" for ref in definition.tools
+    )
+
+
 def reads_static_provider(definition: AgentDefinition | None) -> bool:
     """Whether a run opens a static provider for this definition.
 
     Two ways, and only two. The ``static`` role opens its provider itself,
-    inside its own class; a ``generic`` agent opens one when its tool list
-    holds a ``provider`` reference, at resolution (``_provider_tools``). Every
-    other role reads no static provider, whatever its tool list says.
+    inside its own class; a ``generic`` or ``lead`` agent opens one when its
+    tool list holds a ``provider`` reference, at resolution
+    (``_provider_tools``). Every other role reads no static provider, whatever
+    its tool list says.
     """
     if definition is None:
         return False
     if definition.role == "static":
         return True
-    return definition.role == "generic" and any(ref.kind == "provider" for ref in definition.tools)
+    return opens_provider_by_reference(definition)
 
 
 NOT_MIRRORED_REASON = "sample not mirrored for {provider}"
@@ -249,8 +264,8 @@ NOT_MIRRORED_REASON = "sample not mirrored for {provider}"
 def pin_provider_sample(agent: Any, mirrored: Mapping[str, str] | None) -> None:
     """Hand the agent's static provider its own mirror of the sample, or clear the pin.
 
-    For an agent whose tools include its provider's (a generic agent with a
-    ``provider`` reference): the provider was opened at resolution, before the
+    For an agent whose tools include its provider's (a generic or lead agent
+    with a ``provider`` reference): the provider was opened at resolution, before the
     sample's path was known, so its own guard on the path argument — Ghidra's
     ``load_program`` override — had nothing to hold a model to. ``mirrored``
     is the job's mirror per provider id (``state["static_sample_paths"]``);
@@ -480,10 +495,7 @@ def _provider_parts(
     """
     from maljan.agents.prompt_fragments import tools_statement
 
-    if definition.role == "static" or (
-        definition.role in ("generic", "lead")
-        and any(ref.kind == "provider" for ref in definition.tools)
-    ):
+    if definition.role == "static" or opens_provider_by_reference(definition):
         from maljan.agents.static_analyst import static_provider_parts
 
         provider = container.get_static_provider(provider_id)
@@ -562,17 +574,16 @@ def _dedupe(tools: list[BaseTool]) -> list[BaseTool]:
 def _provider_tools(container: Any, definition: AgentDefinition, provider_id: str) -> list[Any]:
     """The agent's static provider's tools, for a definition that asked for them.
 
-    Gated on ``role == "generic"`` in addition to the ``AgentsConfig``
-    validator that already refuses a provider reference on a built-in role:
+    Gated on ``opens_provider_by_reference`` (a ``generic`` or ``lead``
+    definition) in addition to the ``AgentsConfig`` validator that already
+    refuses a provider reference on a built-in role:
     a built-in role opens its own provider lazily, inside its own class
     (``StaticAnalyst._initialize_mcp_client`` and friends), so resolution
     must never open one itself — spec §4. The validator is the primary
     defence; this is defence in depth for a definition that reached here by
     some other path than validated ``Settings``.
     """
-    if definition.role != "generic":
-        return []
-    if not any(ref.kind == "provider" for ref in definition.tools):
+    if not opens_provider_by_reference(definition):
         return []
     from maljan.providers.base import StaticJobContext
 
