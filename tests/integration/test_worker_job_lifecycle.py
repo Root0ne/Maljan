@@ -513,6 +513,160 @@ async def test_a_refused_job_option_fails_the_job_by_field_without_its_value(
     pipeline.assert_not_awaited()
 
 
+def _database_error(secret: str) -> Exception:
+    from sqlalchemy.exc import OperationalError
+
+    return OperationalError("SELECT 1", {}, Exception(f"password {secret} was refused"))
+
+
+def _connection_error(secret: str) -> Exception:
+    return ConnectionRefusedError(f"db:5432 refused the login {secret}")
+
+
+@pytest.mark.parametrize(
+    ("unreadable", "named"),
+    [(_database_error, "OperationalError"), (_connection_error, "ConnectionRefusedError")],
+    ids=["database", "connection"],
+)
+@pytest.mark.asyncio
+async def test_a_database_that_cannot_give_the_settings_is_named_with_its_error_class(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+    unreadable: Any,
+    named: str,
+) -> None:
+    from app.services import settings_service
+    from tests.credential_shapes import password
+
+    secret = password(14)
+
+    async def _unreadable(_db: Any) -> dict[str, Any]:
+        raise unreadable(secret)
+
+    monkeypatch.setattr(settings_service, "load_core_overrides", _unreadable)
+    job = _make_job()
+    _answer_reads(mock_db_session, _job_rows(job, _make_sample()))
+    pipeline = AsyncMock(return_value={"final_decision": "Malware"})
+
+    with patch("maljan.app.MaljanApp.arun", new=pipeline):
+        result = await run_analysis(mock_ctx, str(job.id))
+
+    assert result["status"] == "failed", result
+    assert f"could not be read from the database ({named})" in result["error"]
+    assert "once the database answers" in result["error"]
+    assert secret not in result["error"]
+    pipeline.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_settings_read_that_fails_for_another_reason_is_not_blamed_on_the_database(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Not an outage to wait out: the job fails by the error's class, the pipeline never starts."""
+    from app.services import settings_service
+
+    async def _unmergeable(_db: Any) -> dict[str, Any]:
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(settings_service, "load_core_overrides", _unmergeable)
+    job = _make_job()
+    recorded = _answer_reads(mock_db_session, _job_rows(job, _make_sample()))
+    pipeline = AsyncMock(return_value={"final_decision": "Malware"})
+
+    with patch("maljan.app.MaljanApp.arun", new=pipeline):
+        result = await run_analysis(mock_ctx, str(job.id))
+
+    assert result["status"] == "failed", result
+    assert result["error"].startswith("RecursionError (error id "), result["error"]
+    assert "database" not in result["error"]
+    pipeline.assert_not_awaited()
+    failed = [u for u in updates_in(recorded, "analysis_jobs") if u["status"] == "failed"]
+    assert len(failed) == 1 and failed[0]["error_message"].startswith("RecursionError")
+
+
+@pytest.mark.asyncio
+async def test_a_plain_settings_refusal_is_stated_by_its_class_never_its_text(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The refused value can be a stored secret; it reaches neither the job nor the log."""
+    from app.worker import analysis_worker
+    from tests.credential_shapes import password
+
+    secret = password(16)
+
+    def _refuses(overrides: Any, job_config: Any) -> Any:
+        raise ValueError(f"the value {secret} is not one this field takes")
+
+    monkeypatch.setattr(analysis_worker, "build_job_settings", _refuses)
+    job = _make_job()
+    _answer_reads(mock_db_session, _job_rows(job, _make_sample()))
+    pipeline = AsyncMock(return_value={"final_decision": "Malware"})
+
+    with (
+        patch("maljan.app.MaljanApp.arun", new=pipeline),
+        caplog.at_level(logging.INFO, logger="app.worker.analysis_worker"),
+    ):
+        result = await run_analysis(mock_ctx, str(job.id))
+
+    assert result["status"] == "failed", result
+    assert "The settings this job would run with are refused (ValueError)." in result["error"]
+    assert "did not run on defaults" in result["error"]
+    assert secret not in result["error"]
+    stated = [r for r in caplog.records if "rather than running on defaults" in r.getMessage()]
+    assert len(stated) == 1 and "ValueError" in stated[0].getMessage()
+    # ``from None``: the refusal's own text is not chained onto the failure's
+    # traceback, which the failure path logs whole.
+    assert secret not in caplog.text
+    pipeline.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_provider_with_no_role_block_is_refused_by_its_setting_with_why(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The one refusal written here from setting names keeps its sentence."""
+    from app.services import settings_service
+    from maljan.llm import registry
+    from maljan.llm.provider_base import _FACTS, LLMProvider
+
+    class _Bare(LLMProvider):
+        name = "bare"
+
+        def __init__(self, config: Any) -> None:
+            self._config = config
+
+    async def _stored(_db: Any) -> dict[str, Any]:
+        return {"llm.provider": "bare"}
+
+    registry.discover_providers()
+    registry.register_provider("bare")(_Bare)
+    monkeypatch.setattr(settings_service, "load_core_overrides", _stored)
+    job = _make_job()
+    _answer_reads(mock_db_session, _job_rows(job, _make_sample()))
+    pipeline = AsyncMock(return_value={"final_decision": "Malware"})
+    try:
+        with patch("maljan.app.MaljanApp.arun", new=pipeline):
+            result = await run_analysis(mock_ctx, str(job.id))
+    finally:
+        registry._PROVIDER_REGISTRY.pop("bare", None)
+        _FACTS.pop("bare", None)
+
+    assert result["status"] == "failed", result
+    assert result["error"].startswith(
+        "The settings this job would run with are refused: llm.provider: the bare provider "
+        "keeps no settings block"
+    ), result["error"]
+    pipeline.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_pipeline_failure_sets_failed_status(
     mock_ctx: dict[str, Any], mock_db_session: AsyncMock
@@ -807,6 +961,44 @@ async def test_an_attached_report_of_a_format_no_longer_allowed_fails_in_words(
 
     assert result["status"] == "failed", result
     assert "'cuckoo', which sandbox.upload.allowed_formats no longer accepts" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_a_provider_s_own_words_over_an_attached_report_are_stated_by_their_class(
+    mock_ctx: dict[str, Any],
+    mock_db_session: AsyncMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A plug-in provider's refusal can quote a value: the job says its class, the log no text."""
+    from maljan.providers.errors import ProviderError
+    from maljan.providers.sandbox.upload import UploadSandboxProvider
+    from tests.credential_shapes import password
+
+    secret = password(12)
+
+    def _refuses(self: Any, blob: bytes, **_: Any) -> None:
+        raise ProviderError(f"the report store refused the password '{secret}'")
+
+    job = _make_job(config={"sandbox_report_id": "0b6c6e0e-0000-4000-8000-000000000000"})
+    sample = _make_sample()
+    report_row = MagicMock()
+    report_row.id = uuid.UUID("0b6c6e0e-0000-4000-8000-000000000000")
+    report_row.sample_id = sample.id
+    report_row.storage_path = "sandbox-reports/0b/0b6c.../report.json"
+    report_row.format = "cape2"
+    report_row.sample_sha256_match = True
+
+    with (
+        patch.object(UploadSandboxProvider, "set_pending_blob", _refuses),
+        caplog.at_level(logging.INFO),
+    ):
+        result = await _run_with_attached_report(mock_ctx, mock_db_session, job, sample, report_row)
+
+    assert result["status"] == "failed", result
+    assert "could not read the attached sandbox report (ProviderError)" in result["error"]
+    assert "did not run without it" in result["error"]
+    assert secret not in result["error"]
+    assert secret not in caplog.text
 
 
 # ---------------------------------------------------------------------------
