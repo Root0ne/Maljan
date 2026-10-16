@@ -3614,6 +3614,7 @@ class JudgeAgent(BudgetMeter):
                             agent=str(self.name),
                             model=self._model_label(),
                             call=TECHNIQUE_QUESTION_CALL,
+                            announce=self._announce_fallback,
                         )
                         raw = read.raw
                         # A refused object is read from the call's own
@@ -3834,6 +3835,7 @@ class JudgeAgent(BudgetMeter):
                         agent=str(self.name),
                         model=self._model_label(),
                         call="mediation extraction",
+                        announce=self._announce_fallback,
                     )
                 finally:
                     self._spend_release(extraction_slot)

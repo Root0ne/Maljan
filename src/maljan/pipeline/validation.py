@@ -9574,6 +9574,10 @@ def _with_feedback(
     instead (a cut section answer, see ``section_cut_violation``), and with
     no answer between them the correction is asked at the end of the user
     turn before it (``with_question``).
+
+    An answer that is nothing but a tool call — the call is what was read —
+    goes back as it came, and the correction is the call's reply
+    (:func:`_answered_call`).
     """
     from langchain_core.messages import AIMessage
 
@@ -9589,6 +9593,12 @@ def _with_feedback(
     # described answer, and the correction is asked at the end of the user
     # turn before it, so the retry is never the request just answered.
     if isinstance(content, list | str) and not answer_text(content).strip():
+        if keep_answer:
+            answered = _answered_call(
+                turns, answer, feedback_text(violations, closing=closing, cards=cards)
+            )
+            if answered is not None:
+                return answered
         keep_answer = False
     if keep_answer:
         # A block list (a thinking model's answer on ``ChatAnthropic``) goes back
@@ -9603,6 +9613,62 @@ def _with_feedback(
             )
         )
     return with_question(turns, feedback_text(violations, closing=closing, cards=cards))
+
+
+def _answered_call(messages: list[Any], answer: Any, correction: str) -> list[Any] | None:
+    """The conversation, the answer as it came, and the correction as its call's reply.
+
+    An answer of a tool call and no text (on a thinking model, thinking
+    before it) is the call: its arguments are what was read, and what every
+    finding is about. Sent back whole, its thinking blocks stay valid, the
+    request only appends to the one answered, and the model reads the
+    arguments the correction names. Every provider pairs a call with its
+    reply, so the correction is that reply, marked as an error: the
+    arguments were not taken. The first call is the one read; another call
+    of the turn is answered by the provider's tool-reply completion
+    (``llm.tool_replies``). ``None`` when the answer carries no call with an
+    id to reply to.
+    """
+    from langchain_core.messages import AIMessage, ToolMessage
+
+    calls = list(answer.tool_calls) if isinstance(answer, AIMessage) else []
+    if not calls or not calls[0].get("id"):
+        return None
+    reply = ToolMessage(content=correction, tool_call_id=str(calls[0]["id"]), status="error")
+    return [*messages, answer, reply]
+
+
+def with_calls_said(turns: list[Any]) -> list[Any]:
+    """``turns`` with every tool call and tool reply said as text, for a request with no tool.
+
+    A request that offers no tool is not known to be accepted with a call in
+    its history. A retry held under an output bound goes by the plain model,
+    so the call :func:`_with_feedback` answered is said as the answer's text
+    (its arguments, as the answer that was read) and its reply as the question
+    after it: the model still reads what it wrote and what is wrong with it.
+    The call's thinking blocks are left out with it, because they were written
+    beside the tool and do not hold without it. Every other turn is sent as
+    it is, and a history with no call is the same list.
+    """
+    from langchain_core.messages import AIMessage, ToolMessage
+
+    from maljan.llm.answer_text import answer_text, structured_answer_text
+    from maljan.pipeline.turns import with_question
+
+    if not any(
+        isinstance(m, ToolMessage) or (isinstance(m, AIMessage) and m.tool_calls) for m in turns
+    ):
+        return turns
+    out: list[Any] = []
+    for message in turns:
+        if isinstance(message, ToolMessage):
+            out = with_question(out, answer_text(message.content))
+        elif isinstance(message, AIMessage) and message.tool_calls:
+            said = [answer_text(message.content).strip(), structured_answer_text(message)]
+            out.append(AIMessage(content="\n\n".join(part for part in said if part)))
+        else:
+            out.append(message)
+    return out
 
 
 def _announce_feedback(

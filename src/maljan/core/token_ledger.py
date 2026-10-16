@@ -623,13 +623,21 @@ def read_structured_reply(
     agent: str = "",
     model: str = "",
     call: str = "",
+    schema: Any = None,
+    announce: Callable[[Any], None] | None = None,
 ) -> StructuredReply:
     """:func:`structured_answer`, keeping the raw answer a failed parse leaves behind.
 
-    The raw turn is recorded on ``ledger`` either way. A parse that failed on
-    an answer that carries its raw turn is not raised: the raw turn is handed
-    back with why, so a caller can read it as text. An answer in any other
-    shape raises as :func:`structured_answer` does.
+    The raw turn is recorded on ``ledger`` either way, and handed to
+    ``announce`` (a model list's switch carried on it is said there): once
+    each, as the one place every structured answer is read. A parse that
+    failed on an answer that carries its raw turn is not raised: the raw turn
+    is handed back with why, so a caller can read it as text. An answer in any
+    other shape raises as :func:`structured_answer` does.
+
+    ``schema`` is the model class the request asked for. A parser that hands
+    back a plain dict is read through it: an object that fits is the parsed
+    answer, and one that does not is the raw turn with why, as a failed parse.
     """
     raw = answer.get("raw") if isinstance(answer, dict) and "raw" in answer else None
     try:
@@ -637,11 +645,34 @@ def read_structured_reply(
     except Exception as exc:  # noqa: BLE001 - the raw turn is read instead
         if raw is None:
             raise
+        _announced(announce, raw)
         why = f"carries an object that does not fit the schema ({type(exc).__name__})"
         return StructuredReply(None, raw, why)
+    _announced(announce, raw if raw is not None else answer)
+    validate = getattr(schema, "model_validate", None)
+    if isinstance(parsed, dict) and callable(validate):
+        try:
+            parsed = validate(parsed)
+        except Exception as exc:  # noqa: BLE001 - the raw turn is read instead
+            if raw is None:
+                raise
+            why = f"carries an object that does not fit the schema ({type(exc).__name__})"
+            return StructuredReply(None, raw, why)
     return StructuredReply(
         parsed, raw, "" if parsed is not None else "carries no object the schema reads"
     )
+
+
+def _announced(announce: Callable[[Any], None] | None, message: Any) -> None:
+    """Hand ``message`` to ``announce``; an announcement never costs the answer."""
+    if announce is None:
+        return
+    try:
+        announce(message)
+    except Exception as exc:  # noqa: BLE001 - an announcement never costs a turn
+        from maljan.core.logger import logger
+
+        logger.debug("a structured answer's model switch was not announced (%s).", exc)
 
 
 def say_structured_reply(owner: str, reply: StructuredReply) -> None:
