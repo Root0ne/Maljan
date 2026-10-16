@@ -34,12 +34,25 @@ from tests.unit.api.test_job_events_migration import _job, _upgraded
 
 
 def test_the_analysis_worker_registers_the_nightly_sweep_once() -> None:
-    from app.worker.analysis_worker import WorkerSettings
-    from app.worker.enrich_worker import EnrichmentWorkerSettings, purge_old_job_events
+    from app.worker import analysis_worker
+    from app.worker.enrich_worker import EnrichmentWorkerSettings
 
-    [job] = WorkerSettings.cron_jobs
+    sweeps = [
+        job
+        for job in analysis_worker.WorkerSettings.cron_jobs
+        if job.name == "cron:purge_old_job_events"
+        or getattr(job.coroutine, "__qualname__", "") == "purge_old_job_events"
+    ]
+    assert len(sweeps) == 1, sweeps
+    [job] = sweeps
     assert job.name == "cron:purge_old_job_events"
-    assert job.coroutine is purge_old_job_events
+    # The function the worker itself refers to, the one its start-up sweep
+    # calls too. Not compared with ``enrich_worker``'s attribute: another test
+    # reloads ``enrich_worker``, which binds a new function object there while
+    # the worker keeps the one it imported.
+    assert job.coroutine is analysis_worker.purge_old_job_events
+    assert job.coroutine.__module__ == "app.worker.enrich_worker"
+    assert job.coroutine.__qualname__ == "purge_old_job_events"
     assert (job.hour, job.minute) == (3, 17)
     # The start-up sweep is a task of the worker's own, not a queued job: it
     # never takes the analysis slot and never reaches ``after_job_end``.
